@@ -162,7 +162,8 @@ class UploadContentInspectorTest {
     void acceptsStaticPdfFormsFileReferencesAndIncrementalUpdates() throws Exception {
         byte[] ordinaryStructure = validPdf(
             "/AcroForm << /Fields [] >> /Names << /Dests << /Names [] >> >> "
-                + "/RelatedFile << /Type /Filespec /F (terms.pdf) >>");
+                + "/RelatedFile << /Type /Filespec /F (terms.pdf) >> "
+                + "/PhoneLink << /S /URI /URI (tel:+15550100) >>");
         ByteArrayOutputStream incrementalOutput = new ByteArrayOutputStream();
         try (PDDocument document = Loader.loadPDF(ordinaryStructure)) {
             document.getDocumentCatalog().setLanguage("en-US");
@@ -335,6 +336,8 @@ class UploadContentInspectorTest {
             "/AcroForm << /Fields [] /XFA [] >>",
             "/Action << /S /SubmitForm >>",
             "/Action << /S /ImportData >>",
+            "/Action << /S /URI /URI (javascript:alert) >>",
+            "/Action << /S /URI /URI (file:///tmp/payload) >>",
             "/OpenAction [3 0 R /Fit]",
             "/AA << /E << /S /Named /N /NextPage >> >>");
 
@@ -378,6 +381,8 @@ class UploadContentInspectorTest {
             "media/pixel.dat", "", true);
         byte[] implicitExternalRelationship = packageWithNestedRelationship(
             "https://example.invalid/payload", "", false);
+        byte[] disguisedOleRelationship = packageWithNestedRelationship(
+            "media/payload.dat", "", true, "oleObject");
 
         InspectedUpload accepted = inspector.inspect(
             UploadPurpose.ATTACHMENT,
@@ -390,6 +395,12 @@ class UploadContentInspectorTest {
                     "implicit-external.docx",
                     docxContentType(),
                     implicitExternalRelationship)));
+        assertThrows(UnsupportedUploadMediaTypeException.class,
+            () -> inspector.inspect(UploadPurpose.ATTACHMENT,
+                UploadSource.from(
+                    "disguised-ole.docx",
+                    docxContentType(),
+                    disguisedOleRelationship)));
     }
 
     @Test
@@ -424,6 +435,15 @@ class UploadContentInspectorTest {
             "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">"
                 + "<w:body><w:fldSimple w:instr=\"DDEAUTO payload\"/></w:body></w:document>",
             null);
+        byte[] wordInstructionAfterResult = officePackage(
+            UploadFormat.DOCX,
+            "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">"
+                + "<w:body><w:fldChar w:fldCharType=\"begin\"/>"
+                + "<w:instrText>PAGE</w:instrText>"
+                + "<w:fldChar w:fldCharType=\"separate\"/>"
+                + "<w:instrText>DDEAUTO payload</w:instrText>"
+                + "<w:fldChar w:fldCharType=\"end\"/></w:body></w:document>",
+            null);
         byte[] networkFormula = officePackage(
             UploadFormat.XLSX,
             "<x:workbook xmlns:x=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">"
@@ -452,6 +472,12 @@ class UploadContentInspectorTest {
         assertThrows(UnsupportedUploadMediaTypeException.class,
             () -> inspector.inspect(UploadPurpose.ATTACHMENT,
                 UploadSource.from("dde.docx", docxContentType(), wordDde)));
+        assertThrows(UnsupportedUploadMediaTypeException.class,
+            () -> inspector.inspect(UploadPurpose.ATTACHMENT,
+                UploadSource.from(
+                    "late-instruction.docx",
+                    docxContentType(),
+                    wordInstructionAfterResult)));
         assertThrows(UnsupportedUploadMediaTypeException.class,
             () -> inspector.inspect(UploadPurpose.ATTACHMENT,
                 UploadSource.from("network.xlsx", xlsxContentType(), networkFormula)));
@@ -759,6 +785,14 @@ class UploadContentInspectorTest {
             String target,
             String targetMode,
             boolean includeTarget) throws IOException {
+        return packageWithNestedRelationship(target, targetMode, includeTarget, "image");
+    }
+
+    private static byte[] packageWithNestedRelationship(
+            String target,
+            String targetMode,
+            boolean includeTarget,
+            String relationshipKind) throws IOException {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         try (ZipOutputStream zip = new ZipOutputStream(output, StandardCharsets.UTF_8)) {
             put(zip, "[Content_Types].xml", contentTypesXml(UploadFormat.DOCX)
@@ -773,7 +807,8 @@ class UploadContentInspectorTest {
             String relationships = "<Relationships xmlns=\""
                 + "http://schemas.openxmlformats.org/package/2006/relationships\">"
                 + "<Relationship Id=\"rIdImage\" Type=\""
-                + "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+                + "http://schemas.openxmlformats.org/officeDocument/2006/relationships/"
+                + relationshipKind
                 + "\" Target=\"" + target + "\"" + mode + "/></Relationships>";
             put(zip, "word/_rels/document.xml.rels",
                 relationships.getBytes(StandardCharsets.UTF_8));

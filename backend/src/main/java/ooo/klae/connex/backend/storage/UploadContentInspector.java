@@ -116,6 +116,10 @@ public class UploadContentInspector implements AutoCloseable {
     private static final Set<String> OOXML_HYPERLINK_RELATIONSHIPS = Set.of(
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
         "http://purl.oclc.org/ooxml/officeDocument/relationships/hyperlink");
+    private static final Set<String> ACTIVE_OOXML_RELATIONSHIP_KINDS = Set.of(
+        "activexcontrol", "activexcontrolbinary", "attachedtemplate", "control", "ctrlprop",
+        "customui", "ddelink", "embeddedobject", "embeddedpackage", "externallink",
+        "oleobject", "package", "querytable", "vbaproject");
     private static final String ODF_TEXT_NAMESPACE =
         "urn:oasis:names:tc:opendocument:xmlns:text:1.0";
     private static final Set<String> ACTIVE_XML_ELEMENTS = Set.of(
@@ -609,9 +613,48 @@ public class UploadContentInspector implements AutoCloseable {
         if (action != null && DANGEROUS_PDF_ACTIONS.contains(action.getName())) {
             throw UnsupportedUploadMediaTypeException.unsupported();
         }
+        if (COSName.URI.equals(action)
+                && !safeExternalHyperlink(dictionary.getString(COSName.URI))) {
+            throw UnsupportedUploadMediaTypeException.unsupported();
+        }
         COSName annotation = dictionary.getCOSName(COSName.SUBTYPE);
         if (annotation != null && DANGEROUS_PDF_ANNOTATIONS.contains(annotation.getName())) {
             throw UnsupportedUploadMediaTypeException.unsupported();
+        }
+    }
+
+    /**
+     * Accepts only user-activated web, email, and telephone hyperlinks. Package references that
+     * can cause automatic fetching, local-file access, or application-specific execution remain
+     * blocked.
+     */
+    private static boolean safeExternalHyperlink(String value) {
+        if (value == null) {
+            return false;
+        }
+        String normalized = value.strip();
+        String lowercase = normalized.toLowerCase(Locale.ROOT);
+        if (normalized.isEmpty()
+                || normalized.length() > 2048
+                || normalized.contains("\\")
+                || lowercase.contains("%0a")
+                || lowercase.contains("%0d")) {
+            return false;
+        }
+        try {
+            URI uri = URI.create(normalized);
+            String scheme = uri.getScheme();
+            if (scheme == null || uri.getUserInfo() != null) {
+                return false;
+            }
+            return switch (scheme.toLowerCase(Locale.ROOT)) {
+                case "http", "https" -> uri.getHost() != null && !uri.getHost().isBlank();
+                case "mailto", "tel" -> uri.getSchemeSpecificPart() != null
+                    && !uri.getSchemeSpecificPart().isBlank();
+                default -> false;
+            };
+        } catch (IllegalArgumentException exception) {
+            return false;
         }
     }
 
@@ -1546,6 +1589,9 @@ public class UploadContentInspector implements AutoCloseable {
                     || target == null) {
                 throw new SAXException("Package relationship is invalid");
             }
+            if (activeOoxmlRelationship(relationshipType)) {
+                throw new SAXException("Active package relationship is not allowed");
+            }
             if (targetMode != null && "External".equalsIgnoreCase(targetMode.trim())) {
                 if (!OOXML_HYPERLINK_RELATIONSHIPS.contains(relationshipType)
                         || !safeExternalHyperlink(target)) {
@@ -1565,6 +1611,18 @@ public class UploadContentInspector implements AutoCloseable {
             }
         }
 
+        /**
+         * Rejects relationship semantics that execute, attach templates, or embed application
+         * objects even when an attacker disguises the target behind an otherwise inert path.
+         */
+        private static boolean activeOoxmlRelationship(String relationshipType) {
+            int separator = relationshipType.lastIndexOf('/');
+            String kind = separator < 0
+                ? relationshipType
+                : relationshipType.substring(separator + 1);
+            return ACTIVE_OOXML_RELATIONSHIP_KINDS.contains(kind.toLowerCase(Locale.ROOT));
+        }
+
         private void inspectWordFieldStart(
                 String uri,
                 String element,
@@ -1581,7 +1639,9 @@ public class UploadContentInspector implements AutoCloseable {
                 return;
             }
             if ("instrtext".equals(element)) {
-                if (wordFields.isEmpty() || instructionTextDepth != 0) {
+                if (wordFields.isEmpty()
+                        || wordFields.getLast().validated()
+                        || instructionTextDepth != 0) {
                     throw new SAXException("Word field instruction is malformed");
                 }
                 instructionTextDepth = depth;
@@ -1634,32 +1694,6 @@ public class UploadContentInspector implements AutoCloseable {
                     || !SAFE_WORD_FIELD_COMMANDS.contains(
                         normalized.substring(0, commandEnd).toUpperCase(Locale.ROOT))) {
                 throw new SAXException("Active document instruction is not allowed");
-            }
-        }
-
-        /**
-         * Accepts only user-activated web and email hyperlinks. Package references that can cause
-         * automatic fetching, local-file access, or application-specific execution remain blocked.
-         */
-        private static boolean safeExternalHyperlink(String value) {
-            String normalized = value.strip();
-            if (normalized.isEmpty() || normalized.length() > 2048 || normalized.contains("\\")) {
-                return false;
-            }
-            try {
-                URI uri = URI.create(normalized);
-                String scheme = uri.getScheme();
-                if (scheme == null || uri.getUserInfo() != null) {
-                    return false;
-                }
-                return switch (scheme.toLowerCase(Locale.ROOT)) {
-                    case "http", "https" -> uri.getHost() != null && !uri.getHost().isBlank();
-                    case "mailto" -> uri.getSchemeSpecificPart() != null
-                        && !uri.getSchemeSpecificPart().isBlank();
-                    default -> false;
-                };
-            } catch (IllegalArgumentException exception) {
-                return false;
             }
         }
 
