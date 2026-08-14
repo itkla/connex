@@ -220,6 +220,7 @@ Treat GitHub as the system of record. For any tracked piece of work:
 
 - **No unjustified dependencies.** Prefer the libraries already in `package.json` / `build.gradle`. If a new dep is truly needed, call it out and say why before adding it.
 - **Audit new packages.** Whenever you install a frontend package, **always run `pnpm audit`** afterward and resolve or explicitly flag what it reports before continuing — don't introduce known-vulnerable dependencies. Check new backend (Gradle) deps for known CVEs the same way.
+- **Track vulnerability findings.** Apply the severity, ownership, deadline, evidence, escalation, and fixed-term exception rules in [`docs/VULNERABILITY_MANAGEMENT.md`](docs/VULNERABILITY_MANAGEMENT.md); a scanner alert or Dependabot pull request is not a substitute for the tracking issue.
 - **Never commit secrets.** No credentials, tokens, keys, or `.env` files in the repo — use environment/config. On the frontend, any **`NEXT_PUBLIC_`-prefixed env var ships to the browser** — never put a secret behind that prefix.
 - **Don't leak code or secrets externally.** Look things up in docs/online, but never paste Connex source, data, or secrets into web searches or third-party tools.
 - **Confirm irreversible actions.** No `git push --force`, no resetting or rewriting history on `main` or shared branches, no destructive database operations against shared/dev data — confirm with the user first.
