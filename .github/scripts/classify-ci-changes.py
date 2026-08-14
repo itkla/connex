@@ -121,6 +121,9 @@ def classify_paths(paths: list[str], event_name: str = "pull_request") -> tuple[
             reasons.append(f"unsafe or invalid changed path: {raw_path!r}")
             continue
 
+        if path.startswith("deploy/"):
+            categories["action_pins"] = True
+
         if is_documentation(path) or path in ROOT_METADATA:
             continue
 

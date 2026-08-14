@@ -71,7 +71,7 @@ shim_run() {
     backup_root="${CONNEX_BACKUP_ROOT:-/var/backups/connex}"
     defaults_dir="${CONNEX_BACKUP_DEFAULTS_DIR:-/etc/connex-backup}"
     image="${CONNEX_BACKUP_DOCKER_IMAGE:-mysql:8.4.10@sha256:c831a0f11348d402b43d77453e17d770be2eef356615a2823fe0f5a0d6c8b9af}"
-    network="${CONNEX_BACKUP_DOCKER_NETWORK:-connex_default}"
+    network="${CONNEX_BACKUP_DOCKER_NETWORK:-connex_db}"
     docker_value="${CONNEX_BACKUP_DOCKER_BIN:-docker}"
     if ! shim_validate_path "$backup_root" || ! shim_validate_path "$defaults_dir"; then
         printf 'Connex backup Docker mount paths must be safe absolute paths outside /tmp\n' >&2

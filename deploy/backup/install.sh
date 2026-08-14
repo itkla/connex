@@ -23,12 +23,31 @@ install_require_root() {
     fi
 }
 
+install_migrate_database_network() {
+    local config_file="$CONFIG_ROOT/backup.env"
+    local temporary_file
+    if ! grep -qxF 'CONNEX_BACKUP_DOCKER_NETWORK=connex_default' "$config_file"; then
+        return 0
+    fi
+    temporary_file="$(mktemp "$CONFIG_ROOT/.backup.env.XXXXXX")"
+    if ! sed \
+        's/^CONNEX_BACKUP_DOCKER_NETWORK=connex_default$/CONNEX_BACKUP_DOCKER_NETWORK=connex_db/' \
+        "$config_file" > "$temporary_file"; then
+        rm -f "$temporary_file"
+        return "$EXIT_CONFIG"
+    fi
+    chmod 0600 "$temporary_file"
+    mv "$temporary_file" "$config_file"
+    printf 'Migrated backup Docker network from connex_default to connex_db.\n'
+}
+
 install_configuration() {
     install -d -m 0700 "$CONFIG_ROOT"
     if [ ! -e "$CONFIG_ROOT/backup.env" ]; then
         install -m 0600 "$SCRIPT_DIR/backup.env.example" "$CONFIG_ROOT/backup.env"
     else
         chmod 0600 "$CONFIG_ROOT/backup.env"
+        install_migrate_database_network
     fi
     CONNEX_BACKUP_ENV_FILE="$CONFIG_ROOT/backup.env"
     export CONNEX_BACKUP_ENV_FILE

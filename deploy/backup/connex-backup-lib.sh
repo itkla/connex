@@ -189,7 +189,7 @@ backup_set_defaults() {
     : "${CONNEX_BACKUP_BINLOG_STAT:=docker exec -i $CONNEX_BACKUP_DB_CONTAINER stat -c %W:%Y}"
     : "${CONNEX_BACKUP_GZIP_LEVEL:=6}"
     : "${CONNEX_BACKUP_LOCK_DIR:=/run/connex-backup}"
-    : "${CONNEX_BACKUP_DOCKER_NETWORK:=connex_default}"
+    : "${CONNEX_BACKUP_DOCKER_NETWORK:=connex_db}"
     : "${CONNEX_BACKUP_DOCKER_IMAGE:=mysql:8.4.10@sha256:c831a0f11348d402b43d77453e17d770be2eef356615a2823fe0f5a0d6c8b9af}"
     : "${CONNEX_BACKUP_DOCKER_BINLOG_IMAGE:=}"
     : "${CONNEX_BACKUP_DOCKER_CLIENT_MODE:=exec}"

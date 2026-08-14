@@ -46,6 +46,7 @@ cp "$BACKUP_DIR/connex-backup-lib.sh" "$SANDBOX/connex-backup-lib.sh"
 strip_main "$BACKUP_DIR/connex-binlog-archive.sh" "$SANDBOX/archive-lib.sh"
 strip_main "$BACKUP_DIR/connex-backup-prune.sh" "$SANDBOX/prune-lib.sh"
 strip_main "$BACKUP_DIR/connex-restore-pitr.sh" "$SANDBOX/pitr-lib.sh"
+strip_main "$BACKUP_DIR/install.sh" "$SANDBOX/install-lib.sh"
 
 assert_status() {
     local label="$1"
@@ -131,6 +132,37 @@ write_binlog_sidecars() {
         printf 'file_created_epoch\t%s\n' "$created_epoch"
         printf 'last_event_epoch\t%s\n' "$((created_epoch + 600))"
     } > "$metadata"
+}
+
+case_installer_migrates_retired_database_network() {
+    set +e
+    # shellcheck source=deploy/backup/install.sh
+    source "$SANDBOX/install-lib.sh"
+    local config_root="$SANDBOX/install-config"
+    local config_file="$config_root/backup.env"
+    local log="$SANDBOX/install-network.log"
+    mkdir -p "$config_root"
+    CONFIG_ROOT="$config_root"
+
+    printf '%s\n' \
+        'CONNEX_BACKUP_DOCKER_NETWORK=connex_default' \
+        'CONNEX_BACKUP_DB_CONTAINER=custom-db' \
+        > "$config_file"
+    chmod 0644 "$config_file"
+    install_migrate_database_network > "$log"
+    assert_status retired_network_migrated 0 "$?" || return 1
+    assert_contains migrated_network 'CONNEX_BACKUP_DOCKER_NETWORK=connex_db' "$config_file" || return 1
+    assert_absent retired_network 'CONNEX_BACKUP_DOCKER_NETWORK=connex_default' "$config_file" || return 1
+    assert_contains unrelated_setting_preserved 'CONNEX_BACKUP_DB_CONTAINER=custom-db' "$config_file" || return 1
+    assert_contains migration_logged 'Migrated backup Docker network' "$log" || return 1
+    assert_equals migrated_mode 600 "$(stat -c '%a' "$config_file")" || return 1
+
+    printf '%s\n' 'CONNEX_BACKUP_DOCKER_NETWORK=operator_database' > "$config_file"
+    : > "$log"
+    install_migrate_database_network > "$log"
+    assert_status custom_network_preserved 0 "$?" || return 1
+    assert_contains custom_network 'CONNEX_BACKUP_DOCKER_NETWORK=operator_database' "$config_file" || return 1
+    assert_equals custom_network_silent '' "$(cat "$log")" || return 1
 }
 
 case_schema_selection() {
@@ -779,6 +811,7 @@ run_case() {
     FAILURES=$((FAILURES + 1))
 }
 
+run_case case_installer_migrates_retired_database_network
 run_case case_schema_selection
 run_case case_pitr_filtered_statements
 run_case case_pitr_coverage_gap_guard

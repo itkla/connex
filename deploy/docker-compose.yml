@@ -15,6 +15,8 @@ services:
         condition: service_healthy
       backend:
         condition: service_healthy
+    networks:
+      - edge
 
   frontend:
     image: ghcr.io/itkla/connex-frontend@sha256:${CONNEX_FRONTEND_DIGEST:?set CONNEX_FRONTEND_DIGEST to the verified 64-character digest in deploy/.env}
@@ -31,6 +33,10 @@ services:
       interval: 5s
       timeout: 3s
       retries: 30
+    networks:
+      edge: {}
+      app:
+        gw_priority: 1
 
   backend:
     image: ghcr.io/itkla/connex-backend@sha256:${CONNEX_BACKEND_DIGEST:?set CONNEX_BACKEND_DIGEST to the verified 64-character digest in deploy/.env}
@@ -53,8 +59,10 @@ services:
       timeout: 2s
       retries: 60
     networks:
-      default:
+      edge: {}
+      app:
         gw_priority: 1
+      db: {}
       ocr_internal: {}
 
   ocr:
@@ -109,6 +117,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 20
+    networks:
+      - db
 
 volumes:
   db_data:
@@ -117,6 +127,16 @@ volumes:
   caddy_config:
 
 networks:
+  edge:
+    driver: bridge
+  app:
+    driver: bridge
+  db:
+    driver: bridge
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: isolated
+      com.docker.network.bridge.gateway_mode_ipv6: isolated
   ocr_internal:
     driver: bridge
     internal: true

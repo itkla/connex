@@ -43,7 +43,11 @@ sudo CONNEX_BACKUP_ENV_FILE=/etc/connex-backup/backup.env \
 
 Air-gapped operators must mirror the configured client-tools image alongside the release images before a disaster. The official MySQL server images do not contain `mysqlbinlog`.
 
-The replay shim runs a throwaway client-tools container with the backup root mounted at the identical absolute path. `CONNEX_BACKUP_DOCKER_CLIENT_MODE=run` retains the same throwaway-container option for `mysql` and `mysqldump`; the default is `exec`. Native clients remain supported through `MYSQL`, `MYSQLDUMP`, and `MYSQLBINLOG`. Docker socket access is root-equivalent; systemd retains `ProtectSystem=strict`, `NoNewPrivileges`, and `PrivateTmp` but intentionally allows `/var/run/docker.sock`.
+The replay shim runs a throwaway client-tools container with the backup root mounted at the identical absolute path. `CONNEX_BACKUP_DOCKER_CLIENT_MODE=run` retains the same throwaway-container option for `mysql` and `mysqldump`; the default is `exec`. Run mode joins only the Compose database network, `connex_db`, so it can resolve `db` without gaining access to the edge, application, or OCR networks. When selecting run mode, set `CONNEX_BACKUP_DB_HOST`, `CONNEX_BACKUP_VERIFY_DB_HOST`, and `CONNEX_BACKUP_RESTORE_DB_HOST` to `db`; the default `localhost` values are for exec mode inside the DB container. Native clients remain supported through `MYSQL`, `MYSQLDUMP`, and `MYSQLBINLOG`. Docker socket access is root-equivalent; systemd retains `ProtectSystem=strict`, `NoNewPrivileges`, and `PrivateTmp` but intentionally allows `/var/run/docker.sock`.
+
+Rerunning `install.sh` during an upgrade preserves operator settings but migrates the exact retired
+`CONNEX_BACKUP_DOCKER_NETWORK=connex_default` default to `connex_db`. Any other configured network
+name is treated as an operator override and left unchanged.
 
 ## Commands
 
