@@ -163,6 +163,15 @@ def has_direct_child_directive(parent: str, parent_depth: int, directive: str) -
     return False
 
 
+def documented_cloudflare_expression(rule_id: str) -> str:
+    lines = EDGE_DEFENCE_PATH.read_text(encoding="utf-8").splitlines()
+    rule_index = lines.index(rule_id)
+    for line in lines[rule_index + 1:]:
+        if line:
+            return line
+    raise AssertionError(f"{rule_id} has no documented expression")
+
+
 class EdgeSecurityHeadersTest(unittest.TestCase):
     def test_site_level_headers_cover_every_edge_response(self) -> None:
         operations = direct_child_header_operations(":80 {", 0)
@@ -322,10 +331,25 @@ class EdgeSecurityHeadersTest(unittest.TestCase):
                 self.assertIn(f"`{exception_id}`", edge_defence)
         self.assertIn("`CF-CONFIG-01-COMPATIBILITY`", edge_defence)
         self.assertIn(
-            "| Definitely Automated | Allow, as required for Tunnel connectivity",
+            "| Definitely Automated | Managed Challenge after staging evidence | "
+            "Managed Challenge after staging evidence |",
             edge_defence,
         )
-        self.assertIn("| Managed Challenge after staging evidence |", edge_defence)
+        self.assertNotIn("Allow, as required for Tunnel connectivity", edge_defence)
+
+        upload_method_scope = 'http.request.method in {"POST" "PUT"} and ('
+        self.assertIn(
+            upload_method_scope,
+            documented_cloudflare_expression("CF-RL-04-UPLOADS"),
+        )
+        self.assertIn(
+            upload_method_scope,
+            documented_cloudflare_expression("CF-RL-05-API-VOLUME"),
+        )
+        self.assertIn(
+            "`GET`, `HEAD`, `DELETE`, and every other method on those path families remain",
+            edge_defence,
+        )
 
     def test_stock_caddy_rate_limit_boundary_is_explicit(self) -> None:
         self.assertNotIn("rate_limit", {line[0] for line in tokenized_caddyfile()})

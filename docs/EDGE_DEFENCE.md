@@ -254,12 +254,14 @@ Configure Super Bot Fight Mode according to the recorded origin-lock design:
 | Bot category | Cloudflare Tunnel | Restricted public origin |
 |---|---|---|
 | Verified Bots | Allow | Allow |
-| Definitely Automated | Allow, as required for Tunnel connectivity | Managed Challenge after staging evidence |
+| Definitely Automated | Managed Challenge after staging evidence | Managed Challenge after staging evidence |
 | Likely Automated | Managed Challenge | Managed Challenge |
 
-The managed WAF, rate rules, and DDoS controls remain active in both designs. The four Skip rules
-above remain mandatory because bot classification can otherwise break provider callbacks,
-WebSocket upgrades, SAML POST binding, unsubscribe links, and large multipart uploads.
+Cloudflare Tunnel's connector is outbound-only and does not require visitor requests classified as
+Definitely Automated to bypass bot mitigation. The managed WAF, rate rules, and DDoS controls
+remain active in both designs. The four Skip rules above remain mandatory because bot
+classification can otherwise break provider callbacks, WebSocket upgrades, SAML POST binding,
+unsubscribe links, and large multipart uploads.
 
 ### Rate-limiting rules
 
@@ -272,10 +274,13 @@ above. Deploy on staging first. These are coarse abuse ceilings, not user entitl
 | `CF-RL-02-ACCOUNT-LIFECYCLE` | `POST /api/auth/register`, `/api/auth/forgot-password`, `/api/auth/reset-password`, `/api/auth/verify-email/confirm`, `/api/users/me/verify-email/resend`, and `POST` paths ending in `/accept` below `/api/invites/` or `/api/invite-links/` | 20 requests / 60 seconds / IP | Block 300 seconds |
 | `CF-RL-03-AI` | `POST /api/ai/*`, `POST /api/deals/*/brief`, `POST /api/deals/*/rationale`, `POST /api/introductions/suggestions/rationale`, and `POST /api/reports/*/generate` | 60 requests / 60 seconds / IP | Block 60 seconds |
 | `CF-RL-04-UPLOADS` | Multipart/import/business-card routes listed in `CF-EX-04-UPLOADS` | 30 requests / 60 seconds / IP | Block 60 seconds |
-| `CF-RL-05-API-VOLUME` | All `/api/*` requests except `/api/ws`, `/api/delivery/webhooks/*`, `/api/delivery/unsubscribe/*`, and the dedicated upload paths | 1,200 requests / 60 seconds / IP | Block 60 seconds |
+| `CF-RL-05-API-VOLUME` | All `/api/*` requests except `/api/ws`, `/api/delivery/webhooks/*`, `/api/delivery/unsubscribe/*`, and `POST`/`PUT` requests counted by the dedicated upload rule | 1,200 requests / 60 seconds / IP | Block 60 seconds |
 
 Use these rate-rule expressions exactly. `CF-RL-04-UPLOADS` intentionally repeats the upload
-expression because its exception skips only the bot phase, not the rate phase.
+expression because its exception skips only the bot phase, not the rate phase. `CF-RL-05` excludes
+an upload path only when the method is `POST` or `PUT`, because only those requests are counted by
+`CF-RL-04`; `GET`, `HEAD`, `DELETE`, and every other method on those path families remain under the
+generic API ceiling.
 
 ```text
 CF-RL-01-AUTH-ASSERT
@@ -291,7 +296,7 @@ CF-RL-04-UPLOADS
 (http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and http.request.method in {"POST" "PUT"} and (http.request.uri.path eq "/api/attachments/upload" or (starts_with(http.request.uri.path, "/api/ai/assistant/sessions/") and ends_with(http.request.uri.path, "/attachments")) or http.request.uri.path eq "/api/users/me/profile-picture" or (starts_with(http.request.uri.path, "/api/persons/") and ends_with(http.request.uri.path, "/profile-picture")) or (starts_with(http.request.uri.path, "/api/companies/") and ends_with(http.request.uri.path, "/logo")) or starts_with(http.request.uri.path, "/api/imports/") or starts_with(http.request.uri.path, "/api/business-cards/")))
 
 CF-RL-05-API-VOLUME
-(http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and starts_with(http.request.uri.path, "/api/") and not (http.request.uri.path eq "/api/ws" or starts_with(http.request.uri.path, "/api/delivery/webhooks/") or starts_with(http.request.uri.path, "/api/delivery/unsubscribe/") or http.request.uri.path eq "/api/attachments/upload" or (starts_with(http.request.uri.path, "/api/ai/assistant/sessions/") and ends_with(http.request.uri.path, "/attachments")) or http.request.uri.path eq "/api/users/me/profile-picture" or (starts_with(http.request.uri.path, "/api/persons/") and ends_with(http.request.uri.path, "/profile-picture")) or (starts_with(http.request.uri.path, "/api/companies/") and ends_with(http.request.uri.path, "/logo")) or starts_with(http.request.uri.path, "/api/imports/") or starts_with(http.request.uri.path, "/api/business-cards/")))
+(http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and starts_with(http.request.uri.path, "/api/") and not (http.request.uri.path eq "/api/ws" or starts_with(http.request.uri.path, "/api/delivery/webhooks/") or starts_with(http.request.uri.path, "/api/delivery/unsubscribe/") or (http.request.method in {"POST" "PUT"} and (http.request.uri.path eq "/api/attachments/upload" or (starts_with(http.request.uri.path, "/api/ai/assistant/sessions/") and ends_with(http.request.uri.path, "/attachments")) or http.request.uri.path eq "/api/users/me/profile-picture" or (starts_with(http.request.uri.path, "/api/persons/") and ends_with(http.request.uri.path, "/profile-picture")) or (starts_with(http.request.uri.path, "/api/companies/") and ends_with(http.request.uri.path, "/logo")) or starts_with(http.request.uri.path, "/api/imports/") or starts_with(http.request.uri.path, "/api/business-cards/")))))
 
 ```
 
