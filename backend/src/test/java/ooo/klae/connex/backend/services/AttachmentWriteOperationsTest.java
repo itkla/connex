@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.concurrent.atomic.AtomicReference;
+import java.security.MessageDigest;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,6 +30,8 @@ import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
+import ooo.klae.connex.backend.storage.UploadContentInspector.InspectedUpload;
+import ooo.klae.connex.backend.storage.UploadPolicy.UploadFormat;
 import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
 import ooo.klae.connex.backend.storage.UploadSource;
 
@@ -127,6 +130,36 @@ class AttachmentWriteOperationsTest {
     }
 
     @Test
+    void assistantUploadStoresTheExactInspectedArtifact() {
+        User uploader = new User();
+        uploader.setId(7);
+        byte[] content = {1, 2, 3};
+        InspectedUpload upload = inspected(content);
+        StoredBinary stored = new StoredBinary(
+            "/api/attachments/content/token.jpg", "image.jpg", "image/jpeg", content.length);
+        when(aiChatMapper.sessionExists(5, 43)).thenReturn(true);
+        when(managedObjectService.storeInspectedAttachment(5, upload)).thenReturn(stored);
+        AtomicReference<Attachment> insertedAttachment = new AtomicReference<>();
+        doAnswer(invocation -> {
+            Attachment inserted = invocation.getArgument(0);
+            inserted.setId(77);
+            insertedAttachment.set(inserted);
+            return 1;
+        }).when(attachmentMapper).insert(any(Attachment.class));
+        when(attachmentMapper.getCreatedById(5, 77))
+            .thenAnswer(invocation -> insertedAttachment.get());
+
+        Attachment attachment = operations.uploadAssistantSession(5, 43, upload, uploader);
+
+        assertEquals(content.length, attachment.getSize());
+        verify(managedObjectService).storeInspectedAttachment(5, upload);
+        verify(managedObjectService, never()).storeAttachment(
+            org.mockito.ArgumentMatchers.anyInt(),
+            any(UploadPurpose.class),
+            any(UploadSource.class));
+    }
+
+    @Test
     void createRejectsMissingAuthoritativeReload() {
         Attachment attachment = attachment("company", 41, "https://example.com/file.pdf");
         attachment.setId(77);
@@ -155,6 +188,28 @@ class AttachmentWriteOperationsTest {
             .getMethod(
                 "uploadInlineImage", int.class, String.class, int.class, UploadSource.class, User.class)
             .getAnnotation(Transactional.class));
+        assertNotNull(AttachmentWriteOperations.class
+            .getMethod(
+                "uploadAssistantSession",
+                int.class,
+                int.class,
+                InspectedUpload.class,
+                User.class)
+            .getAnnotation(Transactional.class));
+    }
+
+    private static InspectedUpload inspected(byte[] content) {
+        try {
+            return new InspectedUpload(
+                "image.jpg",
+                "image/jpeg",
+                "jpg",
+                UploadFormat.JPEG,
+                content,
+                MessageDigest.getInstance("SHA-256").digest(content));
+        } catch (java.security.NoSuchAlgorithmException exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 
     private static Attachment attachment(String entityType, int entityId, String url) {

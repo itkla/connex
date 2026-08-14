@@ -47,12 +47,14 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.dto.ActiveObjectReference;
+import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
 import ooo.klae.connex.backend.storage.ObjectStorageProperties.LegacyMigrationMode;
 import ooo.klae.connex.backend.storage.UploadContentInspector.InspectedUpload;
+import ooo.klae.connex.backend.storage.UploadPolicy.UploadFormat;
 import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
 import ooo.klae.connex.backend.storage.UploadPolicy.ValidatedUpload;
 
@@ -148,6 +150,16 @@ class ManagedObjectServiceTest {
         }
     }
 
+    private static InspectedUpload inspected(byte[] content) {
+        return new InspectedUpload(
+            "legacy.pdf",
+            "application/pdf",
+            "pdf",
+            UploadFormat.PDF,
+            content,
+            sha256(content));
+    }
+
     @Test
     void storesOpaqueAttachmentReferenceAndTenantDerivedPrivateKey() throws Exception {
         byte[] bytes = "business card".getBytes(StandardCharsets.UTF_8);
@@ -173,17 +185,53 @@ class ManagedObjectServiceTest {
     }
 
     @Test
+    void storesTheAuthoritativeInspectedArtifactByteIdentically() throws Exception {
+        byte[] bytes = {9, 8, 7, 6};
+        InspectedUpload upload = inspected(bytes);
+        ArgumentCaptor<UploadSource> storedSource = ArgumentCaptor.forClass(UploadSource.class);
+        ArgumentCaptor<byte[]> checksum = ArgumentCaptor.forClass(byte[].class);
+
+        StoredBinary stored = inTransaction(
+            () -> service.storeInspectedAttachment(17, upload));
+
+        verify(objectStorage).put(
+            anyString(),
+            storedSource.capture(),
+            org.mockito.ArgumentMatchers.eq("application/pdf"),
+            checksum.capture());
+        try (InputStream input = storedSource.getValue().openStream()) {
+            assertArrayEquals(bytes, input.readAllBytes());
+        }
+        assertArrayEquals(upload.sha256(), checksum.getValue());
+        assertEquals(bytes.length, stored.size());
+    }
+
+    @Test
+    void rejectsAnInspectedArtifactAboveTheConfiguredStorageCeiling() {
+        ObjectStorageProperties limited = new ObjectStorageProperties();
+        limited.setMaxUploadBytes(3);
+        ManagedObjectService limitedService = service(limited);
+
+        assertThrows(
+            RequestBodyTooLargeException.class,
+            () -> inTransaction(
+                () -> limitedService.storeInspectedAttachment(17, inspected(new byte[] {1, 2, 3, 4}))));
+
+        verify(objectStorage, never()).put(
+            anyString(), any(UploadSource.class), anyString(), any(byte[].class));
+    }
+
+    @Test
     void migrationKeysAreStableAcrossRetriesAndDistinctAcrossRecords() {
         byte[] bytes = "legacy attachment".getBytes(StandardCharsets.UTF_8);
-        UploadSource source = UploadSource.from(
-            "legacy.pdf", "application/pdf", bytes);
+        InspectedUpload upload = inspected(bytes);
 
         StoredBinary first = inTransaction(() -> service.storeMigratedAttachment(
-            17, 23, "/attachments/person/legacy.pdf", source));
+            17, 23, "/attachments/person/legacy.pdf", upload));
         StoredBinary retry = inTransaction(() -> service.storeMigratedAttachment(
-            17, 23, "/attachments/person/legacy.pdf", source));
+            17, 23, "/attachments/person/legacy.pdf", upload));
         StoredBinary otherRecord = inTransaction(() -> service.storeMigratedAttachment(
-            17, 24, "/attachments/person/legacy.pdf", source));
+            17, 24, "/attachments/person/legacy.pdf", upload));
 
         assertEquals(first.url(), retry.url());
         assertFalse(first.url().equals(otherRecord.url()));
@@ -199,10 +247,7 @@ class ManagedObjectServiceTest {
                 17,
                 23,
                 "/attachments/person/legacy.pdf",
-                UploadSource.from(
-                    "legacy.pdf",
-                    "application/pdf",
-                    "legacy attachment".getBytes(StandardCharsets.UTF_8)));
+                inspected("legacy attachment".getBytes(StandardCharsets.UTF_8)));
 
             verify(deletionRetryQueue).prepareTenantWrite(
                 org.mockito.ArgumentMatchers.eq(17), anyString());
@@ -222,10 +267,7 @@ class ManagedObjectServiceTest {
                 17,
                 23,
                 "/attachments/person/legacy.pdf",
-                UploadSource.from(
-                    "legacy.pdf",
-                    "application/pdf",
-                    "legacy attachment".getBytes(StandardCharsets.UTF_8)));
+                inspected("legacy attachment".getBytes(StandardCharsets.UTF_8)));
             String token = stored.url().substring(stored.url().lastIndexOf('/') + 1);
 
             verify(deletionRetryQueue).prepareTenantWrite(
@@ -249,7 +291,7 @@ class ManagedObjectServiceTest {
                 17,
                 23,
                 "/attachments/person/legacy.pdf",
-                UploadSource.from("legacy.pdf", "application/pdf", bytes));
+                inspected(bytes));
 
             assertTrue(TransactionSynchronizationManager.getSynchronizations().isEmpty());
             verify(deletionRetryQueue).cancelTenantInCurrentTransaction(
@@ -273,7 +315,7 @@ class ManagedObjectServiceTest {
                 17,
                 23,
                 "/attachments/person/legacy.pdf",
-                UploadSource.from("legacy.pdf", "application/pdf", bytes));
+                inspected(bytes));
             String token = stored.url().substring(stored.url().lastIndexOf('/') + 1);
             String key = "workspaces/17/attachments/" + token;
 

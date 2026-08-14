@@ -39,7 +39,8 @@ import ooo.klae.connex.backend.storage.ImageDecodeAdmissionService.Lease;
 import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
 
 /**
- * Fully decodes bounded managed raster uploads and emits metadata-free canonical bytes.
+ * Fully decodes bounded managed raster uploads, emitting metadata-free canonical bytes at ingress
+ * and preserving exact canonical bytes during stored-image validation.
  */
 @Component
 public class ImageUploadValidator {
@@ -81,7 +82,7 @@ public class ImageUploadValidator {
     public ValidatedImage validate(UploadSource source, UploadPurpose purpose) {
         DecodedImage image = validationExecutor.validate(
             cancellation -> validate(
-                source, purpose, true, properties.getMaxUploadBytes(), cancellation),
+                source, purpose, true, properties.getMaxUploadBytes(), true, cancellation),
             UnsupportedUploadMediaTypeException::unsupported);
         return new ValidatedImage(image.content(), image.contentType(), image.extension());
     }
@@ -98,6 +99,33 @@ public class ImageUploadValidator {
                 UploadPurpose.ASSISTANT_CONTEXT,
                 false,
                 AiInputImage.MAX_BYTES,
+                true,
+                cancellation),
+            UnsupportedUploadMediaTypeException::unsupported);
+        if (image.width() > AiInputImage.MAX_DIMENSION
+                || image.height() > AiInputImage.MAX_DIMENSION) {
+            throw new BadRequestException("Uploaded image dimensions exceed the AI input limit");
+        }
+        return new ValidatedAiImage(image.content(), image.width(), image.height());
+    }
+
+    /**
+     * Fully decodes a stored canonical AI image without changing its authoritative bytes.
+     *
+     * @param source stored canonical JPEG source
+     * @return exact stored bytes and decoded dimensions
+     */
+    public ValidatedAiImage validateStoredForAi(UploadSource source) {
+        if (source.contentLength() <= 0 || source.contentLength() > AiInputImage.MAX_BYTES) {
+            throw new BadRequestException("Assistant image attachment length is invalid");
+        }
+        DecodedImage image = validationExecutor.validate(
+            cancellation -> validate(
+                source,
+                UploadPurpose.ASSISTANT_CONTEXT,
+                false,
+                AiInputImage.MAX_BYTES,
+                false,
                 cancellation),
             UnsupportedUploadMediaTypeException::unsupported);
         if (image.width() > AiInputImage.MAX_DIMENSION
@@ -112,6 +140,7 @@ public class ImageUploadValidator {
             UploadPurpose purpose,
             boolean preserveAlpha,
             long maxOutputBytes,
+            boolean canonicalize,
             Cancellation cancellation) {
         uploadPolicy.validate(purpose, source);
         try (Lease lease = decodeAdmission.tryAcquire().orElseThrow(
@@ -119,7 +148,14 @@ public class ImageUploadValidator {
             byte[] bytes = read(source);
             ImageFormat format = detect(bytes);
             validateDeclaredContentType(source.contentType(), format.contentType());
-            return decode(bytes, format, lease, preserveAlpha, maxOutputBytes, cancellation);
+            return decode(
+                bytes,
+                format,
+                lease,
+                preserveAlpha,
+                maxOutputBytes,
+                canonicalize,
+                cancellation);
         }
     }
 
@@ -177,6 +213,7 @@ public class ImageUploadValidator {
             Lease lease,
             boolean preserveAlpha,
             long maxOutputBytes,
+            boolean canonicalize,
             Cancellation cancellation) {
         try (ImageInputStream input = ImageIO.createImageInputStream(new ByteArrayInputStream(bytes))) {
             if (input == null) {
@@ -217,6 +254,13 @@ public class ImageUploadValidator {
                 BufferedImage decoded = reader.read(0);
                 if (decoded == null || decoded.getWidth() != width || decoded.getHeight() != height) {
                     throw malformed();
+                }
+                if (!canonicalize) {
+                    if (format != ImageFormat.JPEG || orientation != Orientation.NORMAL) {
+                        throw malformed();
+                    }
+                    return new DecodedImage(
+                        bytes, format.contentType(), "jpg", width, height);
                 }
                 boolean canonicalAlpha = preserveAlpha && alpha;
                 BufferedImage normalized = normalize(decoded, orientation, canonicalAlpha);

@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
+import ooo.klae.connex.backend.storage.UploadContentInspector.InspectedUpload;
 import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
 import ooo.klae.connex.backend.storage.UploadSource;
 
@@ -73,17 +74,13 @@ public class AttachmentWriteOperations {
     /** Stores a managed assistant attachment after the caller has locked and authorized its session. */
     @Transactional
     public Attachment uploadAssistantSession(
-            int workspaceId, int sessionId, UploadSource source, User uploader) {
+            int workspaceId, int sessionId, InspectedUpload upload, User uploader) {
         if (!aiChatMapper.sessionExists(workspaceId, sessionId)) {
             throw new ResourceNotFoundException("Attachment target was not found");
         }
-        return storeAndPersist(
-            workspaceId,
-            "ai_chat_session",
-            sessionId,
-            source,
-            uploader,
-            UploadPurpose.ASSISTANT_CONTEXT);
+        StoredBinary stored = managedObjectService.storeInspectedAttachment(workspaceId, upload);
+        return persistStored(
+            workspaceId, "ai_chat_session", sessionId, uploader, stored);
     }
 
     private Attachment storeAndPersist(
@@ -94,6 +91,15 @@ public class AttachmentWriteOperations {
             User uploader,
             UploadPurpose purpose) {
         StoredBinary stored = managedObjectService.storeAttachment(workspaceId, purpose, source);
+        return persistStored(workspaceId, entityType, entityId, uploader, stored);
+    }
+
+    private Attachment persistStored(
+            int workspaceId,
+            String entityType,
+            int entityId,
+            User uploader,
+            StoredBinary stored) {
         Attachment attachment = new Attachment();
         attachment.setWorkspaceId(workspaceId);
         attachment.setEntityType(entityType);

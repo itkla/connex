@@ -1,34 +1,46 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.awt.Color;
+import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
 
+import javax.imageio.ImageIO;
+
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.ai.businesscard.BusinessCardAiExtractionService;
+import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
-import ooo.klae.connex.backend.businesscard.BusinessCardBinaryStore;
 import ooo.klae.connex.backend.businesscard.BusinessCardExtractor;
 import ooo.klae.connex.backend.businesscard.BusinessCardImageValidator;
 import ooo.klae.connex.backend.businesscard.BusinessCardOcrClient;
@@ -49,9 +61,13 @@ import ooo.klae.connex.backend.dto.BusinessCardScanResponse.FieldCandidate;
 import ooo.klae.connex.backend.dto.BusinessCardScanResponse.Fields;
 import ooo.klae.connex.backend.dto.DuplicatePreflightResponse;
 import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
+import ooo.klae.connex.backend.mappers.AttachmentMapper;
+import ooo.klae.connex.backend.storage.ManagedObjectService;
+import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
 
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
+    private static final Path OBJECT_ROOT = temporaryRoot();
 
     @Autowired private BusinessCardService service;
     @Autowired private PersonService personService;
@@ -59,11 +75,12 @@ class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
     @Autowired private ScoringService scoringService;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private BusinessCardProperties properties;
-    @MockitoBean private BusinessCardImageValidator imageValidator;
+    @Autowired private BusinessCardImageValidator imageValidator;
+    @Autowired private AttachmentMapper attachmentMapper;
+    @Autowired private ManagedObjectService managedObjectService;
     @MockitoBean private BusinessCardOcrClient ocrClient;
     @MockitoBean private BusinessCardExtractor extractor;
     @MockitoBean private BusinessCardAiExtractionService aiExtractionService;
-    @MockitoBean private BusinessCardBinaryStore binaryStore;
     @MockitoBean private CapabilityEntitlement capabilityEntitlement;
     @MockitoBean private BusinessCardRateLimiter rateLimiter;
     @MockitoBean private AuditService auditService;
@@ -73,6 +90,24 @@ class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
     private String idempotencyKey;
     private Integer persistedPersonId;
     private Integer persistedTagId;
+    private String persistedAttachmentUrl;
+
+    @DynamicPropertySource
+    static void storageProperties(DynamicPropertyRegistry registry) {
+        registry.add("connex.object-storage.filesystem-root", OBJECT_ROOT::toString);
+    }
+
+    @AfterAll
+    static void removeTemporaryStorage() throws IOException {
+        if (!Files.exists(OBJECT_ROOT)) {
+            return;
+        }
+        try (var paths = Files.walk(OBJECT_ROOT)) {
+            for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(path);
+            }
+        }
+    }
 
     @BeforeEach
     void enableScanning() {
@@ -83,6 +118,10 @@ class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
     @AfterEach
     void cleanUpCommittedFixtures() {
         properties.setEnabled(scanningWasEnabled);
+        if (workspace != null && persistedAttachmentUrl != null) {
+            managedObjectService.deleteAttachmentAfterCommit(
+                workspace.getId(), persistedAttachmentUrl);
+        }
         if (workspace != null && idempotencyKey != null) {
             jdbcTemplate.update(
                 "DELETE FROM business_card_import_request "
@@ -134,22 +173,13 @@ class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
 
     @Test
     void persistedBusinessCardThreeCycleReplayKeepsCanonicalPersonAndProvenance() throws Exception {
-        byte[] content = {1, 2, 3};
+        byte[] content = png();
         MockMultipartFile image = new MockMultipartFile(
-            "image", "card.jpg", "image/jpeg", content);
-        ValidatedBusinessCardImage validated = new ValidatedBusinessCardImage(
-            content, "image/jpeg", "jpg", 120, 70);
-        AtomicInteger storedCards = new AtomicInteger();
-        String storedCardPrefix = "replay-" + unique();
-        when(imageValidator.validate(image)).thenReturn(validated);
+            "image", "card.png", "image/png", content);
+        ValidatedBusinessCardImage validated = imageValidator.validate(image);
+        assertFalse(java.util.Arrays.equals(content, validated.content()));
         when(ocrClient.isReady()).thenReturn(true);
         when(ocrClient.isReadyForScan()).thenReturn(true);
-        when(binaryStore.isReady()).thenReturn(true);
-        when(binaryStore.store(anyInt(), anyString(), anyString(), any(byte[].class)))
-            .thenAnswer(invocation -> new BusinessCardBinaryStore.StoredBusinessCard(
-                "/api/attachments/content/" + storedCardPrefix + "-"
-                    + storedCards.incrementAndGet(),
-                content.length));
         when(capabilityEntitlement.isEntitled(any())).thenReturn(true);
 
         String name = "Persisted OCR replay";
@@ -167,7 +197,7 @@ class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
                 new FieldCandidate("Engineer", 0.99, ExtractionOrigin.OCR)),
             new CompanyCandidate(null, null, null, null),
             List.of());
-        when(ocrClient.recognize(validated)).thenReturn(ocrLines);
+        when(ocrClient.recognize(any(ValidatedBusinessCardImage.class))).thenReturn(ocrLines);
         when(extractor.extract(ocrLines)).thenReturn(scanDraft);
         BusinessCardScanResponse firstScan = service.scan(image);
         PersonDuplicatePreflightRequest duplicateRequest = duplicateRequest(firstScan);
@@ -184,6 +214,14 @@ class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
             new BusinessCardPersonAction.Create(),
             new BusinessCardCompanyAction.None(),
             idempotencyKey);
+        persistedAttachmentUrl = first.attachment().getUrl();
+        Attachment storedCard = attachmentMapper.getById(
+            workspace.getId(), first.attachment().getId());
+        try (ManagedContent storedContent = managedObjectService.openAttachment(
+                workspace.getId(), storedCard)) {
+            assertEquals(validated.content().length, storedContent.contentLength());
+            assertArrayEquals(validated.content(), storedContent.inputStream().readAllBytes());
+        }
         int personId = first.contact().getId();
         persistedPersonId = personId;
         Tag tag = newTag();
@@ -268,10 +306,34 @@ class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
         assertNotNull(first.attachment());
         assertNotNull(second.attachment());
         assertNotNull(third.attachment());
-        verify(ocrClient, times(3)).recognize(validated);
+        verify(ocrClient, times(3)).recognize(any(ValidatedBusinessCardImage.class));
         verify(extractor, times(3)).extract(ocrLines);
-        verify(binaryStore).store(
-            anyInt(), anyString(), anyString(), any(byte[].class));
+    }
+
+    private static byte[] png() throws IOException {
+        BufferedImage image = new BufferedImage(120, 70, BufferedImage.TYPE_INT_RGB);
+        Graphics2D graphics = image.createGraphics();
+        try {
+            graphics.setColor(Color.WHITE);
+            graphics.fillRect(0, 0, image.getWidth(), image.getHeight());
+            graphics.setColor(Color.BLACK);
+            graphics.drawString("Connex business card", 8, 24);
+            graphics.setColor(Color.BLUE);
+            graphics.fillRect(8, 36, 96, 18);
+        } finally {
+            graphics.dispose();
+        }
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ImageIO.write(image, "png", output);
+        return output.toByteArray();
+    }
+
+    private static Path temporaryRoot() {
+        try {
+            return Files.createTempDirectory("connex-business-card-storage-");
+        } catch (IOException exception) {
+            throw new ExceptionInInitializerError(exception);
+        }
     }
 
     private static PersonDuplicatePreflightRequest duplicateRequest(

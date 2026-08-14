@@ -24,11 +24,13 @@ public interface BusinessCardBinaryStore {
      *
      * @param workspaceId resolved workspace identifier
      * @param fileName safe display filename
-     * @param contentType verified raster media type
-     * @param content validated image bytes
+     * @param image authoritative validated image artifact
      * @return durable attachment metadata
      */
-    StoredBusinessCard store(int workspaceId, String fileName, String contentType, byte[] content);
+    StoredBusinessCard store(
+            int workspaceId,
+            String fileName,
+            ValidatedBusinessCardImage image);
 
     /**
      * Durable metadata returned after an object write.

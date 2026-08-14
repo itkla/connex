@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.storage;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -95,6 +96,20 @@ class ImageUploadValidatorTest {
         assertFalse(decoded.getColorModel().hasAlpha());
         assertTrue(image.content().length <= 3_500_000);
         assertEquals("image/jpeg", image.toInputImage().contentType());
+    }
+
+    @Test
+    void storedAiValidationPreservesTheCanonicalBytes() throws IOException {
+        byte[] pngBytes = image("png", BufferedImage.TYPE_INT_ARGB, 10, 20);
+        ValidatedAiImage canonical = validator.validateForAi(
+            source("diagram.png", "image/png", pngBytes));
+
+        ValidatedAiImage stored = validator.validateStoredForAi(
+            source("diagram.jpg", "image/jpeg", canonical.content()));
+
+        assertArrayEquals(canonical.content(), stored.content());
+        assertEquals(canonical.width(), stored.width());
+        assertEquals(canonical.height(), stored.height());
     }
 
     @Test

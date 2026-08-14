@@ -13,7 +13,6 @@ import ooo.klae.connex.backend.storage.ImageUploadValidator.ValidatedImage;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredMigratedImage;
 import ooo.klae.connex.backend.storage.UploadContentInspector.InspectedUpload;
-import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
 
 /**
  * Validates, copies, verifies, and atomically rewrites one legacy upload reference.
@@ -36,8 +35,8 @@ public class LegacyUploadMigrationTransaction {
      */
     public long validateAttachment(LegacyUploadRecord record, ResolvedLegacyUpload resolved) {
         int workspaceId = workspaceId(record);
-        InspectedUpload upload = uploadContentInspector.inspect(
-            UploadPurpose.ATTACHMENT, attachmentSource(record, resolved));
+        InspectedUpload upload = uploadContentInspector.inspectLegacyAttachment(
+            attachmentSource(record, resolved));
         managedObjectService.validateMigratedAttachmentTarget(
             workspaceId,
             record.getId(),
@@ -111,13 +110,14 @@ public class LegacyUploadMigrationTransaction {
     @Transactional
     public void migrateAttachment(LegacyUploadRecord record, ResolvedLegacyUpload resolved) {
         int workspaceId = workspaceId(record);
-        byte[] content = resolved.content();
+        InspectedUpload upload = uploadContentInspector.inspectLegacyAttachment(
+            attachmentSource(record, resolved));
         StoredBinary stored = managedObjectService.storeMigratedAttachment(
             workspaceId,
             record.getId(),
             record.getUrl(),
-            attachmentSource(record, resolved));
-        managedObjectService.verifyAttachment(workspaceId, stored.url(), content);
+            upload);
+        managedObjectService.verifyAttachment(workspaceId, stored.url(), upload.content());
         int updated = tenantMapper.updateAttachment(
             workspaceId,
             record.getId(),

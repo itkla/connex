@@ -277,7 +277,7 @@ public class BusinessCardService {
         requireBinaryStorageReady();
         String fileName = "business-card." + validated.extension();
         BusinessCardBinaryStore.StoredBusinessCard stored = binaryStore.store(
-                workspaceId, fileName, validated.contentType(), content);
+                workspaceId, fileName, validated);
         requireStored(stored, content.length);
         ResolvedPerson resolvedPerson = resolvePerson(reviewed, requestId);
         Person person = resolvedPerson.person();

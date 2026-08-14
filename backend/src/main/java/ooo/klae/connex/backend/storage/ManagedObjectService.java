@@ -32,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import ooo.klae.connex.backend.beans.Attachment;
+import ooo.klae.connex.backend.businesscard.ValidatedBusinessCardImage;
 import ooo.klae.connex.backend.dto.ActiveObjectReference;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -190,13 +191,60 @@ public class ManagedObjectService implements ApplicationRunner {
             UploadPurpose purpose,
             UploadSource source) {
         InspectedUpload upload = uploadContentInspector.inspect(purpose, source);
+        return storeInspectedAttachment(workspaceId, upload);
+    }
+
+    /**
+     * Stores the exact immutable artifact returned by the upload inspector.
+     *
+     * @param workspaceId owning workspace
+     * @param upload authoritative inspected artifact
+     * @return managed attachment metadata derived from the same artifact
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public StoredBinary storeInspectedAttachment(int workspaceId, InspectedUpload upload) {
+        Objects.requireNonNull(upload, "upload");
+        uploadPolicy.validateLength(upload.contentLength());
+        byte[] content = upload.content();
+        byte[] checksum = upload.sha256();
+        if (!MessageDigest.isEqual(checksum, sha256Digest().digest(content))) {
+            throw new IllegalArgumentException("Inspected upload digest is invalid");
+        }
         UploadSource inspectedSource = upload.source();
         String token = token(upload.extension());
         String key = attachmentKey(workspaceId, token);
         String url = ATTACHMENT_URL_PREFIX + token;
-        storeTenant(workspaceId, key, inspectedSource, upload.contentType(), upload.sha256());
+        storeTenant(workspaceId, key, inspectedSource, upload.contentType(), checksum);
         return new StoredBinary(
             url, upload.fileName(), upload.contentType(), upload.contentLength());
+    }
+
+    /**
+     * Stores a business-card validator artifact byte-identically without generic re-encoding.
+     *
+     * @param workspaceId owning workspace
+     * @param fileName safe display filename
+     * @param image authoritative business-card validator artifact
+     * @return managed attachment metadata derived from the same artifact
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public StoredBinary storeValidatedBusinessCardImage(
+            int workspaceId,
+            String fileName,
+            ValidatedBusinessCardImage image) {
+        Objects.requireNonNull(image, "image");
+        byte[] content = image.content();
+        UploadSource source = UploadSource.from(fileName, image.contentType(), content);
+        UploadPolicy.ValidatedUpload metadata = uploadPolicy.validate(
+            UploadPurpose.BUSINESS_CARD_IMAGE, source);
+        if (!metadata.extension().equals(image.extension())) {
+            throw new IllegalArgumentException("Validated business-card image metadata is invalid");
+        }
+        String token = token(metadata.extension());
+        String key = attachmentKey(workspaceId, token);
+        String url = ATTACHMENT_URL_PREFIX + token;
+        storeTenant(workspaceId, key, source, metadata.contentType());
+        return new StoredBinary(url, metadata.fileName(), metadata.contentType(), content.length);
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
@@ -265,15 +313,21 @@ public class ManagedObjectService implements ApplicationRunner {
             int workspaceId,
             int attachmentId,
             String legacyUrl,
-            UploadSource source) {
-        InspectedUpload upload = uploadContentInspector.inspect(UploadPurpose.ATTACHMENT, source);
+            InspectedUpload upload) {
+        Objects.requireNonNull(upload, "upload");
+        uploadPolicy.validateLength(upload.contentLength());
+        byte[] content = upload.content();
+        byte[] checksum = upload.sha256();
+        if (!MessageDigest.isEqual(checksum, sha256Digest().digest(content))) {
+            throw new IllegalArgumentException("Inspected upload digest is invalid");
+        }
         UploadSource inspectedSource = upload.source();
         String objectToken = migrationToken(
             "attachment", workspaceId, attachmentId, legacyUrl, upload.extension());
         String key = attachmentKey(workspaceId, objectToken);
         String url = ATTACHMENT_URL_PREFIX + objectToken;
         storeTenantDeterministic(
-            workspaceId, key, inspectedSource, upload.contentType(), upload.sha256());
+            workspaceId, key, inspectedSource, upload.contentType(), checksum);
         return new StoredBinary(
             url, upload.fileName(), upload.contentType(), upload.contentLength());
     }

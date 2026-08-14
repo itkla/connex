@@ -23,6 +23,7 @@ import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
+import ooo.klae.connex.backend.storage.UploadContentInspector.InspectedUpload;
 import ooo.klae.connex.backend.storage.UploadSource;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -73,7 +74,7 @@ public class AiChatAttachmentService {
         if (attachmentCount >= AiChatAttachmentPolicy.MAX_ATTACHMENTS) {
             throw new ConflictException("Assistant sessions accept at most ten attachments");
         }
-        UploadSource prepared = attachmentPolicy.prepare(source);
+        InspectedUpload prepared = attachmentPolicy.prepare(source);
         Attachment attachment = attachmentWriteOperations.uploadAssistantSession(
                 workspaceId,
                 sessionId,

@@ -15,7 +15,6 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.storage.ImageUploadValidator;
-import ooo.klae.connex.backend.storage.ImageUploadValidator.ValidatedAiImage;
 import ooo.klae.connex.backend.storage.UploadContentInspector;
 import ooo.klae.connex.backend.storage.UploadContentInspector.InspectedUpload;
 import ooo.klae.connex.backend.storage.UploadPolicy;
@@ -36,8 +35,8 @@ public class AiChatAttachmentPolicy {
     private final UploadContentInspector uploadContentInspector;
     private final ImageUploadValidator imageUploadValidator;
 
-    /** Validates and canonicalizes one upload before managed-object storage. */
-    public UploadSource prepare(UploadSource source) {
+    /** Validates and canonicalizes one authoritative artifact before managed-object storage. */
+    public InspectedUpload prepare(UploadSource source) {
         ValidatedUpload generic = uploadPolicy.validate(UploadPurpose.ASSISTANT_CONTEXT, source);
         boolean imageUpload = switch (generic.format()) {
             case JPEG, PNG, WEBP -> true;
@@ -48,15 +47,10 @@ public class AiChatAttachmentPolicy {
         }
         InspectedUpload inspected = uploadContentInspector.inspect(
             UploadPurpose.ASSISTANT_CONTEXT, source);
-        UploadSource inspectedSource = inspected.source();
-        if (imageUpload) {
-            ValidatedAiImage image = imageUploadValidator.validateForAi(inspectedSource);
-            String fileName = replaceExtension(inspected.fileName(), "jpg");
-            return UploadSource.from(fileName, "image/jpeg", image.content());
+        if (!imageUpload) {
+            decodeText(inspected.content());
         }
-        byte[] bytes = inspected.content();
-        decodeText(bytes);
-        return UploadSource.from(inspected.fileName(), inspected.contentType(), bytes);
+        return inspected;
     }
 
     /** Reads and strictly decodes one bounded stored text attachment. */
@@ -87,7 +81,7 @@ public class AiChatAttachmentPolicy {
             if (bytes.length != expected || input.read() != -1) {
                 throw new BadRequestException("Assistant image attachment length is invalid");
             }
-            return imageUploadValidator.validateForAi(
+            return imageUploadValidator.validateStoredForAi(
                     UploadSource.from(fileName, "image/jpeg", bytes)).toInputImage();
         } catch (IOException exception) {
             throw new ServiceUnavailableException("Assistant attachment could not be read");
@@ -104,12 +98,6 @@ public class AiChatAttachmentPolicy {
         } catch (CharacterCodingException exception) {
             throw new BadRequestException("Assistant text attachments must be valid UTF-8");
         }
-    }
-
-    private static String replaceExtension(String fileName, String extension) {
-        int dot = fileName.lastIndexOf('.');
-        String base = dot <= 0 ? fileName : fileName.substring(0, dot);
-        return base + "." + extension;
     }
 
 }

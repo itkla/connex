@@ -31,6 +31,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -61,6 +62,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.exceptions.UnsupportedUploadMediaTypeException;
+import ooo.klae.connex.backend.storage.ImageUploadValidator.ValidatedAiImage;
 import ooo.klae.connex.backend.storage.ImageUploadValidator.ValidatedImage;
 import ooo.klae.connex.backend.storage.UploadPolicy.UploadFormat;
 import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
@@ -76,6 +78,10 @@ import tools.jackson.databind.ObjectMapper;
  * limited to 512 entries, 64 MiB expanded content, a 100:1 compression ratio, and 4 MiB per XML
  * part. XML DTDs and external entities are disabled. Parser error, timeout, ambiguous structure,
  * active content, and any exceeded bound all fail closed.
+ *
+ * <p>The returned {@link InspectedUpload} is authoritative: stored bytes, length, digest, response
+ * metadata, migration verification, and downstream provider input must all derive from that exact
+ * artifact rather than the original source.
  */
 @Component
 public class UploadContentInspector implements AutoCloseable {
@@ -182,9 +188,23 @@ public class UploadContentInspector implements AutoCloseable {
      * @return immutable verified metadata, content, and digest
      */
     public InspectedUpload inspect(UploadPurpose purpose, UploadSource source) {
+        return runInspection(() -> inspectNow(purpose, source));
+    }
+
+    /**
+     * Infers and verifies a legacy attachment without trusting historical declared media type.
+     *
+     * @param source bounded legacy content and best available historical filename
+     * @return immutable verified metadata, content, and digest
+     */
+    public InspectedUpload inspectLegacyAttachment(UploadSource source) {
+        return runInspection(() -> inspectLegacyNow(source));
+    }
+
+    private InspectedUpload runInspection(Supplier<InspectedUpload> inspection) {
         Future<InspectedUpload> future;
         try {
-            future = executor.submit(() -> inspectNow(purpose, source));
+            future = executor.submit(inspection::get);
         } catch (RuntimeException exception) {
             throw new ServiceUnavailableException("Upload validation is busy; retry shortly");
         }
@@ -214,6 +234,7 @@ public class UploadContentInspector implements AutoCloseable {
         byte[] content = readExact(source, deadline);
         InspectedContent inspected = inspectContent(
             purpose, metadata.format(), content, metadata, deadline);
+        uploadPolicy.validateLength(inspected.content().length);
         return new InspectedUpload(
             inspected.fileName(),
             inspected.contentType(),
@@ -221,6 +242,107 @@ public class UploadContentInspector implements AutoCloseable {
             inspected.format(),
             inspected.content(),
             sha256(inspected.content()));
+    }
+
+    private InspectedUpload inspectLegacyNow(UploadSource source) {
+        uploadPolicy.validateLength(source.contentLength());
+        Deadline deadline = new Deadline(System.nanoTime(), timeout);
+        byte[] content = readExact(source, deadline);
+        UploadFormat format = inferLegacyFormat(source.fileName(), content, deadline);
+        ValidatedUpload metadata = uploadPolicy.validateLegacyAttachment(source, format);
+        InspectedContent inspected = inspectContent(
+            UploadPurpose.ATTACHMENT, format, content, metadata, deadline);
+        uploadPolicy.validateLength(inspected.content().length);
+        return new InspectedUpload(
+            inspected.fileName(),
+            inspected.contentType(),
+            inspected.extension(),
+            inspected.format(),
+            inspected.content(),
+            sha256(inspected.content()));
+    }
+
+    private static UploadFormat inferLegacyFormat(
+            String fileName,
+            byte[] content,
+            Deadline deadline) {
+        deadline.check();
+        if (content.length >= 3
+                && unsigned(content[0]) == 0xff
+                && unsigned(content[1]) == 0xd8
+                && unsigned(content[2]) == 0xff) {
+            return UploadFormat.JPEG;
+        }
+        if (startsWith(content, PNG_SIGNATURE)) {
+            return UploadFormat.PNG;
+        }
+        if (content.length >= 6
+                && (asciiEquals(content, 0, "GIF87a") || asciiEquals(content, 0, "GIF89a"))) {
+            return UploadFormat.GIF;
+        }
+        if (content.length >= 12
+                && asciiEquals(content, 0, "RIFF")
+                && asciiEquals(content, 8, "WEBP")) {
+            return UploadFormat.WEBP;
+        }
+        if (asciiEquals(content, 0, "%PDF-")) {
+            return UploadFormat.PDF;
+        }
+        if (content.length >= 4
+                && littleEndianUnsignedInt(content, 0) == 0x04034b50L) {
+            return inferLegacyPackageFormat(content, deadline);
+        }
+        String normalized = fileName == null ? "" : fileName.toLowerCase(Locale.ROOT);
+        if (normalized.endsWith(".csv")) {
+            return UploadFormat.CSV;
+        }
+        if (normalized.endsWith(".txt")) {
+            return UploadFormat.TEXT;
+        }
+        throw UnsupportedUploadMediaTypeException.unsupported();
+    }
+
+    private static UploadFormat inferLegacyPackageFormat(byte[] content, Deadline deadline) {
+        ArchiveDirectory directory = readArchiveDirectory(content, deadline);
+        Set<String> names = directory.entries().keySet();
+        List<UploadFormat> ooxml = new ArrayList<>();
+        if (names.contains("word/document.xml")) {
+            ooxml.add(UploadFormat.DOCX);
+        }
+        if (names.contains("xl/workbook.xml")) {
+            ooxml.add(UploadFormat.XLSX);
+        }
+        if (names.contains("ppt/presentation.xml")) {
+            ooxml.add(UploadFormat.PPTX);
+        }
+        if (ooxml.size() == 1) {
+            return ooxml.getFirst();
+        }
+        if (!ooxml.isEmpty()) {
+            throw UnsupportedUploadMediaTypeException.unsupported();
+        }
+        ArchiveEntry mimeType = directory.entries().get("mimetype");
+        if (mimeType == null || mimeType.method() != ZipEntry.STORED) {
+            throw UnsupportedUploadMediaTypeException.unsupported();
+        }
+        String value = storedArchiveEntry(content, mimeType);
+        return switch (value) {
+            case "application/vnd.oasis.opendocument.text" -> UploadFormat.ODT;
+            case "application/vnd.oasis.opendocument.spreadsheet" -> UploadFormat.ODS;
+            case "application/vnd.oasis.opendocument.presentation" -> UploadFormat.ODP;
+            default -> throw UnsupportedUploadMediaTypeException.unsupported();
+        };
+    }
+
+    private static String storedArchiveEntry(byte[] content, ArchiveEntry entry) {
+        int offset = Math.toIntExact(entry.localOffset());
+        int nameLength = littleEndianUnsignedShort(content, offset + 26);
+        int extraLength = littleEndianUnsignedShort(content, offset + 28);
+        int dataOffset = Math.toIntExact(Math.addExact(
+            entry.localOffset(), Math.addExact(30L, nameLength + (long) extraLength)));
+        int dataLength = Math.toIntExact(entry.uncompressedSize());
+        int dataEnd = addBounded(dataOffset, dataLength, content.length);
+        return new String(content, dataOffset, dataEnd - dataOffset, StandardCharsets.US_ASCII);
     }
 
     private InspectedContent inspectContent(
@@ -272,6 +394,18 @@ public class UploadContentInspector implements AutoCloseable {
             default -> throw UnsupportedUploadMediaTypeException.unsupported();
         }
         try {
+            if (purpose == UploadPurpose.ASSISTANT_CONTEXT) {
+                ValidatedAiImage image = imageUploadValidator.validateForAi(
+                    UploadSource.from(metadata.fileName(), metadata.contentType(), content));
+                byte[] canonical = image.content();
+                deadline.check();
+                return new InspectedContent(
+                    replaceExtension(metadata.fileName(), "jpg"),
+                    "image/jpeg",
+                    "jpg",
+                    UploadFormat.JPEG,
+                    canonical);
+            }
             ValidatedImage image = imageUploadValidator.validate(
                 UploadSource.from(metadata.fileName(), metadata.contentType(), content), purpose);
             UploadFormat canonicalFormat = switch (image.extension()) {
@@ -286,7 +420,12 @@ public class UploadContentInspector implements AutoCloseable {
                 image.extension(),
                 canonicalFormat,
                 image.content());
-        } catch (ServiceUnavailableException exception) {
+        } catch (BadRequestException exception) {
+            if (purpose == UploadPurpose.ASSISTANT_CONTEXT) {
+                throw exception;
+            }
+            throw UnsupportedUploadMediaTypeException.unsupported();
+        } catch (RequestBodyTooLargeException | ServiceUnavailableException exception) {
             throw exception;
         } catch (RuntimeException exception) {
             throw UnsupportedUploadMediaTypeException.unsupported();

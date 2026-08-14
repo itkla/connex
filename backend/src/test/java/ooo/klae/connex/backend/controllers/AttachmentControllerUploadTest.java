@@ -20,6 +20,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
+import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
 import ooo.klae.connex.backend.exceptions.UnsupportedUploadMediaTypeException;
 import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.services.AttachmentService;
@@ -66,5 +67,23 @@ class AttachmentControllerUploadTest {
 
         verify(attachmentService).uploadInlineImage(
             eq("person"), eq(42), any(UploadSource.class), same(user));
+    }
+
+    @Test
+    void canonicalImageExpansionReturnsPayloadTooLarge() throws Exception {
+        User user = new User();
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(attachmentService.uploadInlineImage(
+                eq("person"), eq(42), any(UploadSource.class), same(user)))
+            .thenThrow(new RequestBodyTooLargeException(1024));
+        MockMultipartFile image = new MockMultipartFile(
+            "file", "portrait.jpg", "image/jpeg", new byte[] {1, 2, 3});
+
+        mockMvc.perform(multipart("/api/attachments/upload-image")
+                .file(image)
+                .param("entityType", "person")
+                .param("entityId", "42"))
+            .andExpect(status().isPayloadTooLarge())
+            .andExpect(content().string("Request body is too large"));
     }
 }

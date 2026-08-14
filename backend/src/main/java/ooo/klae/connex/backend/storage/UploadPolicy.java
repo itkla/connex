@@ -55,6 +55,19 @@ public class UploadPolicy {
         return new ValidatedUpload(fileName, contentType, extension, format);
     }
 
+    ValidatedUpload validateLegacyAttachment(UploadSource source, UploadFormat format) {
+        validateLength(source.contentLength());
+        if (!FORMATS_BY_PURPOSE.get(UploadPurpose.ATTACHMENT).contains(format)) {
+            throw UnsupportedUploadMediaTypeException.unsupported();
+        }
+        String fileName = replaceExtension(safeFileName(source.fileName()), format.canonicalExtension());
+        return new ValidatedUpload(
+            fileName,
+            format.canonicalContentType(),
+            format.canonicalExtension(),
+            format);
+    }
+
     public void validateLength(long length) {
         if (length <= 0) {
             throw new BadRequestException("Uploaded file must not be empty");
@@ -147,6 +160,12 @@ public class UploadPolicy {
         return extension;
     }
 
+    private static String replaceExtension(String fileName, String extension) {
+        int dot = fileName.lastIndexOf('.');
+        String base = dot <= 0 ? fileName : fileName.substring(0, dot);
+        return base + "." + extension;
+    }
+
     private static Map<UploadPurpose, Set<UploadFormat>> formatsByPurpose() {
         Set<UploadFormat> rasterImages = EnumSet.of(
             UploadFormat.JPEG,
@@ -196,31 +215,56 @@ public class UploadPolicy {
 
     /** Closed set of inert business formats admitted by at least one upload purpose. */
     public enum UploadFormat {
-        JPEG(Set.of("jpg", "jpeg"), Set.of("image/jpeg", "image/jpg")),
-        PNG(Set.of("png"), Set.of("image/png")),
-        GIF(Set.of("gif"), Set.of("image/gif")),
-        WEBP(Set.of("webp"), Set.of("image/webp")),
-        PDF(Set.of("pdf"), Set.of("application/pdf")),
-        DOCX(Set.of("docx"), Set.of(
+        JPEG("jpg", "image/jpeg", Set.of("jpg", "jpeg"), Set.of("image/jpeg", "image/jpg")),
+        PNG("png", "image/png", Set.of("png"), Set.of("image/png")),
+        GIF("gif", "image/gif", Set.of("gif"), Set.of("image/gif")),
+        WEBP("webp", "image/webp", Set.of("webp"), Set.of("image/webp")),
+        PDF("pdf", "application/pdf", Set.of("pdf"), Set.of("application/pdf")),
+        DOCX("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", Set.of("docx"), Set.of(
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document")),
-        XLSX(Set.of("xlsx"), Set.of(
+        XLSX("xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", Set.of("xlsx"), Set.of(
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")),
-        PPTX(Set.of("pptx"), Set.of(
+        PPTX(
+            "pptx",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            Set.of("pptx"), Set.of(
             "application/vnd.openxmlformats-officedocument.presentationml.presentation")),
-        ODT(Set.of("odt"), Set.of("application/vnd.oasis.opendocument.text")),
-        ODS(Set.of("ods"), Set.of("application/vnd.oasis.opendocument.spreadsheet")),
-        ODP(Set.of("odp"), Set.of("application/vnd.oasis.opendocument.presentation")),
-        TEXT(Set.of("txt"), Set.of("text/plain")),
-        CSV(Set.of("csv"), Set.of("text/csv")),
-        MARKDOWN(Set.of("md", "markdown"), Set.of("text/markdown")),
-        JSON(Set.of("json"), Set.of("application/json"));
+        ODT(
+            "odt", "application/vnd.oasis.opendocument.text",
+            Set.of("odt"), Set.of("application/vnd.oasis.opendocument.text")),
+        ODS(
+            "ods", "application/vnd.oasis.opendocument.spreadsheet",
+            Set.of("ods"), Set.of("application/vnd.oasis.opendocument.spreadsheet")),
+        ODP(
+            "odp", "application/vnd.oasis.opendocument.presentation",
+            Set.of("odp"), Set.of("application/vnd.oasis.opendocument.presentation")),
+        TEXT("txt", "text/plain", Set.of("txt"), Set.of("text/plain")),
+        CSV("csv", "text/csv", Set.of("csv"), Set.of("text/csv")),
+        MARKDOWN("md", "text/markdown", Set.of("md", "markdown"), Set.of("text/markdown")),
+        JSON("json", "application/json", Set.of("json"), Set.of("application/json"));
 
+        private final String canonicalExtension;
+        private final String canonicalContentType;
         private final Set<String> extensions;
         private final Set<String> contentTypes;
 
-        UploadFormat(Set<String> extensions, Set<String> contentTypes) {
+        UploadFormat(
+                String canonicalExtension,
+                String canonicalContentType,
+                Set<String> extensions,
+                Set<String> contentTypes) {
+            this.canonicalExtension = canonicalExtension;
+            this.canonicalContentType = canonicalContentType;
             this.extensions = extensions;
             this.contentTypes = contentTypes;
+        }
+
+        public String canonicalExtension() {
+            return canonicalExtension;
+        }
+
+        public String canonicalContentType() {
+            return canonicalContentType;
         }
 
         public Set<String> extensions() {
