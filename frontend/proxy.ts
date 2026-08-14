@@ -16,6 +16,7 @@ const ALWAYS_ACCESSIBLE_AUTH_PATHS = new Set([
     '/auth/forgot-password',
     '/auth/reset-password',
     '/auth/confirm-email',
+    '/auth/verify-email',
 ]);
 
 function createNonce(): string {
@@ -98,13 +99,8 @@ export function proxy(request: NextRequest) {
         return next();
     }
 
-    // Accepting an invite needs a session but no workspace (invite-only users have none yet).
-    if (pathname.startsWith('/invite/') || pathname.startsWith('/invite-link/')) {
-        if (!hasSession) {
-            const loginUrl = new URL('/auth/login', request.url);
-            loginUrl.searchParams.set('redirect', pathname + search);
-            return redirect(loginUrl);
-        }
+    if (pathname === '/invite' || pathname.startsWith('/invite/') ||
+        pathname === '/invite-link' || pathname.startsWith('/invite-link/')) {
         return next();
     }
 

@@ -42,6 +42,7 @@
     "invalidTitle": "招待は利用できません",
     "invalidBody": "この招待は期限切れか、すでに使用されています。",
     "mismatchBody": "この招待は {email} 宛てですが、{current} としてログインしています。",
+    "switchAccount": "別のアカウントでログイン",
     "backToApp": "ダッシュボードへ",
     "roleOwner": "オーナー",
     "roleAdmin": "管理者",

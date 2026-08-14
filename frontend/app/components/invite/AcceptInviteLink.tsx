@@ -8,14 +8,15 @@ import { acceptInviteLink, WorkspaceSelectionUnavailableError } from "@/app/lib/
 import { toastError } from "@/app/lib/toast";
 import { Button } from "@/components/ui/button";
 
-export default function AcceptInviteLink({ token }: { token: string }) {
+/** Accepts the shareable invite represented by the exact flow identity shown in its preview. */
+export default function AcceptInviteLink({ flowId }: { flowId: string }) {
     const t = useTranslations("InviteLinkAccept");
     const [busy, setBusy] = useState(false);
 
     const accept = async () => {
         setBusy(true);
         try {
-            await acceptInviteLink(token);
+            await acceptInviteLink(flowId);
             window.location.replace("/dashboard");
         } catch (err) {
             if (err instanceof WorkspaceSelectionUnavailableError) {

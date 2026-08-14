@@ -451,13 +451,13 @@ describe("authoritative workspace selection adoption", () => {
     it.each([
         {
             label: "emailed invite",
-            path: "/api/invites/invite-token/accept",
-            request: () => acceptInvite("invite-token"),
+            path: "/api/invites/accept",
+            request: () => acceptInvite("a".repeat(64)),
         },
         {
             label: "shareable invite link",
-            path: "/api/invite-links/link-token/accept",
-            request: () => acceptInviteLink("link-token"),
+            path: "/api/invite-links/accept",
+            request: () => acceptInviteLink("b".repeat(64)),
         },
     ])("recovers an unreadable $label acceptance body", async ({ path: acceptancePath, request }) => {
         const accepted = workspaceFixture(22, "Accepted workspace");

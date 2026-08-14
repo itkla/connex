@@ -5,9 +5,9 @@ import ooo.klae.connex.backend.beans.User;
 /**
  * Delivers a password reset link to a user. The raw token is passed here only —
  * it is never persisted — and callers must treat it as a bearer secret.
- * The default {@link LoggingPasswordResetEmailService} logs the link for local
- * development; a real SMTP/provider implementation replaces it by defining a bean
- * of this type and enabling {@code connex.password-reset.email-enabled}.
+ * The default {@link LoggingPasswordResetEmailService} records only that delivery
+ * is unavailable; real delivery requires {@code connex.password-reset.email-enabled}
+ * and a usable instance SMTP transport.
  */
 public interface PasswordResetEmailService {
 

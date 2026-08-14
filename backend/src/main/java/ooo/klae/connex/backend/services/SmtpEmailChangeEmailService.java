@@ -43,8 +43,9 @@ public class SmtpEmailChangeEmailService implements EmailChangeEmailService {
         Locale locale = LocaleSupport.resolve(user.getLocale());
         String link = UriComponentsBuilder.fromUriString(baseUrl)
                 .path("/auth/verify-email")
-                .queryParam("token", rawToken)
-                .build()
+                .fragment("token={token}")
+                .encode()
+                .buildAndExpand(rawToken)
                 .toUriString();
         String body = templateRenderer.render("email-change", locale.getLanguage(), Map.of(
                 "displayName", user.getDisplayName(),

@@ -49,7 +49,7 @@ class SmtpPasswordResetEmailServiceTest {
         assertTrue(message.htmlBody().contains("パスワードをリセット"));
         assertTrue(message.htmlBody().contains("佐藤 &lt;管理者&gt;"));
         assertTrue(message.htmlBody().contains(
-                "href=\"https://app.example.com/auth/reset-password?token=reset-token\""));
+                "href=\"https://app.example.com/auth/reset-password#token=reset-token\""));
         assertFalse(message.htmlBody().contains("{{"));
     }
 

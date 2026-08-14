@@ -26,6 +26,8 @@ import ooo.klae.connex.backend.ai.AiGenerationAdapterService;
 import ooo.klae.connex.backend.ai.AiGenerationService;
 import ooo.klae.connex.backend.businesscard.BusinessCardRateLimiter;
 import ooo.klae.connex.backend.capability.CapabilityEntitlement;
+import ooo.klae.connex.backend.config.LogoutAuditHandler;
+import ooo.klae.connex.backend.config.OneTimeLinkFlowCookie;
 import ooo.klae.connex.backend.config.RequestBodySizeProperties;
 import ooo.klae.connex.backend.config.SecurityConfig;
 import ooo.klae.connex.backend.dto.BusinessCardAvailabilityResponse;
@@ -37,6 +39,7 @@ import ooo.klae.connex.backend.services.BusinessCardService;
 import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.IntroductionService;
+import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.WarmPathService;
@@ -49,6 +52,7 @@ import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 import ooo.klae.connex.backend.tenant.WorkspaceRequestResolver;
+import ooo.klae.connex.backend.util.ClientIpResolver;
 
 @WebMvcTest(
     controllers = {
@@ -94,6 +98,10 @@ class AiGenerationEndpointSecurityTest {
     @MockitoBean private TenantContext tenantContext;
     @MockitoBean private WorkspaceCookie workspaceCookie;
     @MockitoBean private WorkspaceRequestResolver workspaceRequestResolver;
+    @MockitoBean private OneTimeLinkFlowCookie oneTimeLinkFlowCookie;
+    @MockitoBean private LogoutAuditHandler logoutAuditHandler;
+    @MockitoBean private LoginRateLimiter loginRateLimiter;
+    @MockitoBean private ClientIpResolver clientIpResolver;
 
     @Test
     void providerGeneratingEndpointsRejectGetAndRequireCsrfForPost() throws Exception {

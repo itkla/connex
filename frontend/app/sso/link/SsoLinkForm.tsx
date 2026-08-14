@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import {
     ArrowLeftIcon,
@@ -14,7 +14,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { LoaderCircle } from "lucide-react";
 
-import { ApiError, confirmSsoLink } from "@/app/lib/api";
+import { ApiError, confirmSsoLink, validateSsoLink } from "@/app/lib/api";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
 
@@ -23,20 +23,38 @@ type Status = "ready" | "invalid";
 /**
  * Confirms an SSO account link by proving ownership of the existing password account once.
  * Reached only via the backend redirect after an IdP login whose verified email collides
- * with a password account; the single-use token travels in the query string and the user
- * re-enters their password here. On success the backend links the identity and establishes
- * a session, so the user is routed straight into the app.
+ * with a password account. The backend installs a purpose-bound HttpOnly flow before redirecting
+ * to this token-free page; the user re-enters their password here. On success the backend links
+ * the identity and establishes a session, so the user is routed straight into the app.
  */
-export function SsoLinkForm({ token }: { token: string | null }) {
+export function SsoLinkForm() {
     const router = useRouter();
     const tForm = useTranslations("AuthForm");
     const t = useTranslations("SsoLink");
 
-    const [status, setStatus] = useState<Status>(token ? "ready" : "invalid");
+    const [status, setStatus] = useState<Status>("ready");
     const [password, setPassword] = useState("");
     const [showPassword, setShowPassword] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [fieldError, setFieldError] = useState<string | null>(null);
+
+    useEffect(() => {
+        let active = true;
+        validateSsoLink()
+            .then((result) => {
+                if (active && !result.valid) {
+                    setStatus("invalid");
+                }
+            })
+            .catch(() => {
+                if (active) {
+                    setStatus("invalid");
+                }
+            });
+        return () => {
+            active = false;
+        };
+    }, []);
 
     function routeAfterLink() {
         const hasWorkspace = /(?:^|;\s*)connex_workspace=/.test(document.cookie);
@@ -46,13 +64,10 @@ export function SsoLinkForm({ token }: { token: string | null }) {
 
     async function onSubmit(e: React.SubmitEvent<HTMLFormElement>) {
         e.preventDefault();
-        if (!token) {
-            return;
-        }
         setFieldError(null);
         setSubmitting(true);
         try {
-            await confirmSsoLink(token, password);
+            await confirmSsoLink(password);
             toastSuccess(t("successMessage"));
             routeAfterLink();
         } catch (err) {

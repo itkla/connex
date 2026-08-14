@@ -37,8 +37,10 @@ public class InviteEmailService {
     public void sendInvite(int workspaceId, String workspaceName, String toEmail,
             String inviterName, String role, String token) {
         String acceptUrl = UriComponentsBuilder.fromUriString(mailProperties.getAppBaseUrl())
-                .path("/invite/" + token)
-                .build()
+                .path("/invite")
+                .fragment("token={token}")
+                .encode()
+                .buildAndExpand(token)
                 .toUriString();
         String body = templateRenderer.render("invite", "en", Map.of(
                 "workspaceName", workspaceName == null ? "a workspace" : workspaceName,

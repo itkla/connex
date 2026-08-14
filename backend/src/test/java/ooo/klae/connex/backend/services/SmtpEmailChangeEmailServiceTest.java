@@ -50,7 +50,7 @@ class SmtpEmailChangeEmailServiceTest {
         assertTrue(message.htmlBody().contains("佐藤 &lt;管理者&gt;"));
         assertTrue(message.htmlBody().contains("new+test@example.com"));
         assertTrue(message.htmlBody().contains(
-                "href=\"https://app.example.com/auth/verify-email?token=change-token\""));
+                "href=\"https://app.example.com/auth/verify-email#token=change-token\""));
         assertFalse(message.htmlBody().contains("{{"));
     }
 

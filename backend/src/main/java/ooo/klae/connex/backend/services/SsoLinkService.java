@@ -1,9 +1,5 @@
 package ooo.klae.connex.backend.services;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.SecureRandom;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -29,24 +25,22 @@ import ooo.klae.connex.backend.mappers.SsoLinkChallengeMapper;
 import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
+import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /**
  * Drives the SSO account-linking flow: when a verified IdP email collides with an
  * existing password account, the account is never auto-linked. Instead a single-use
  * challenge is minted ({@link #createChallenge}) and the user must re-enter their
- * password once ({@link #confirm}) to prove ownership before the federated identity
- * is written and a session is established. Only the SHA-256 hash of the raw token is
- * persisted; the raw token leaves only in the redirect to the linking screen, mirroring
- * {@link PasswordResetService}. The confirm path is an online password oracle, so it is
+ * password once ({@link #confirmByHash}) to prove ownership before the federated identity
+ * is written and a session is established. Only the SHA-256 hash of the raw challenge is
+ * persisted; the raw challenge is exchanged directly into the browser's purpose-bound flow and
+ * never enters a redirect URL. The confirm path is an online password oracle, so it is
  * IP-rate-limited and never establishes a session on any failure path.
  */
 @Service
 @Transactional
 @RequiredArgsConstructor
 public class SsoLinkService {
-
-    private static final SecureRandom RANDOM = new SecureRandom();
-    private static final int TOKEN_BYTES = 32;
 
     private final SsoLinkChallengeMapper ssoLinkChallengeMapper;
     private final FederatedIdentityMapper federatedIdentityMapper;
@@ -63,9 +57,10 @@ public class SsoLinkService {
     /**
      * Mints a single-use linking challenge for a link-required outcome, invalidating any
      * prior outstanding challenges for the same account. Stores only the token hash; the
-     * returned raw token travels in the redirect to the linking screen and is never stored.
+     * returned raw token is immediately exchanged for a server-side browser flow and is never
+     * stored or placed in the redirect URL.
      * @param request the link-required resolution carrying the account and IdP identity
-     * @return the raw, unhashed token to place in the linking redirect
+     * @return the raw, unhashed token for immediate in-handler exchange
      */
     public String createChallenge(SsoLoginResult.LinkRequired request) {
         User user = userMapper.getUserByIdForShare(request.existingUserId());
@@ -84,9 +79,9 @@ public class SsoLinkService {
             request.orgId());
         ssoLinkChallengeMapper.invalidateForUser(request.existingUserId());
 
-        String rawToken = generateToken();
+        String rawToken = OneTimeTokenDigest.generate();
         SsoLinkChallenge challenge = new SsoLinkChallenge();
-        challenge.setTokenHash(hashToken(rawToken));
+        challenge.setTokenHash(OneTimeTokenDigest.sha256(rawToken));
         challenge.setUserId(request.existingUserId());
         challenge.setProvider(request.provider());
         challenge.setIssuer(request.issuer());
@@ -116,13 +111,25 @@ public class SsoLinkService {
      */
     public User confirm(String rawToken, String password, ResolvedClientIp clientIp,
             HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
+        String tokenHash = rawToken == null ? null : OneTimeTokenDigest.sha256(rawToken);
+        return confirmByHash(tokenHash, password, clientIp, httpRequest, httpResponse);
+    }
+
+    /** @return whether the purpose-bound source digest names an active linking challenge */
+    public boolean validateChallengeHash(String tokenHash) {
+        return tokenHash != null && ssoLinkChallengeMapper.findByTokenHash(tokenHash) != null;
+    }
+
+    /** Confirms account ownership through a purpose-bound browser-flow source digest. */
+    public User confirmByHash(String tokenHash, String password, ResolvedClientIp clientIp,
+            HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
         long now = System.currentTimeMillis();
         if (loginRateLimiter.isBlockedForClient(clientIp, null, now)) {
             throw new TooManyRequestsException("Too many attempts. Please try again later.");
         }
 
-        SsoLinkChallenge challenge = rawToken == null ? null
-                : ssoLinkChallengeMapper.findByTokenHash(hashToken(rawToken));
+        SsoLinkChallenge challenge = tokenHash == null ? null
+                : ssoLinkChallengeMapper.findByTokenHash(tokenHash);
         if (challenge == null) {
             throw new ResourceNotFoundException("This link is invalid or has expired");
         }
@@ -236,32 +243,4 @@ public class SsoLinkService {
                 user.getDisplayName() + " logged in after social link", federationContext(challenge));
     }
 
-    /**
-     * Generates a 256-bit URL-safe random token.
-     * @return the raw token
-     */
-    private static String generateToken() {
-        byte[] bytes = new byte[TOKEN_BYTES];
-        RANDOM.nextBytes(bytes);
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-    }
-
-    /**
-     * Computes the SHA-256 hex digest used to store and look up a token.
-     * @param rawToken the unhashed token
-     * @return the lowercase hex digest
-     */
-    private static String hashToken(String rawToken) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(rawToken.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder(hash.length * 2);
-            for (byte b : hash) {
-                sb.append(String.format("%02x", b));
-            }
-            return sb.toString();
-        } catch (Exception e) {
-            throw new IllegalStateException("SHA-256 unavailable", e);
-        }
-    }
 }

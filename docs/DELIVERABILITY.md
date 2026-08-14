@@ -224,8 +224,21 @@ Five consequences worth planning around:
 **`connex.mail.enabled=true` alone does not start sending account mail.** It wires the default sender
 and lets invites be emailed. Password reset, email-change verification, and registration
 verification each have their own flag and **all three default to false** — until you set them, those
-flows use the logging fallback that only writes the link to the log. Enabling the transport and
-expecting reset mail to start flowing is a routine misdiagnosis.
+flows record only that delivery was unavailable. They never write a usable bearer link to a log.
+Enabling the transport and expecting reset mail to start flowing is a routine misdiagnosis.
+
+**There is no log-based or manual bearer-retrieval fallback.** On a mail-disabled or air-gapped
+deployment, configure a reachable instance SMTP relay and set `connex.mail.enabled=true`. Then set
+`connex.password-reset.email-enabled=true` for resets,
+`connex.email-change.email-enabled=true` for email changes, or both
+`connex.registration-verification.enabled=true` and its `.email-enabled=true` for registration
+verification. Before enabling each flow, set its link origin to the canonical public origin:
+`CONNEX_PASSWORD_RESET_BASE_URL=https://<host>`,
+`CONNEX_EMAIL_CHANGE_BASE_URL=https://<host>`, and
+`CONNEX_REGISTRATION_VERIFICATION_BASE_URL=https://<host>`, respectively. Then have the user issue a
+fresh request. An internal relay is appropriate for an air-gapped network. Until that transport
+exists, leave registration verification disabled and do not initiate email changes; Connex has no
+supported procedure that exports those credentials to an operator.
 
 **Account-level mail always leaves as the instance identity.** The three `sendInstance` flows ignore
 workspace overrides entirely. If `connex.mail.*` is unconfigured, they have no sender at all, no
@@ -563,7 +576,7 @@ will not catch the resolution failure above.
 | Outbound mail continues after setting `connex.mail.enabled=false` | Not an instance-wide kill switch — workspaces with their own enabled SMTP never consult it | Also set `connex.mail.managed=true`; only the pair stops workspace mail ([§3](#3-what-mail-connex-sends)) |
 | A user reports mail never arrived and saw no error in the UI | `sendForWorkspace`/`sendInstance` are `@Async` and swallow failures — nothing surfaces to the browser | Grep for `Failed to send email to` and `Email to {} not sent`; alert on both. The message is gone; there is no retry |
 | Reset / verification mail never sends although `connex.mail.enabled=true` | Each flow has its own flag, all defaulting false | Set `connex.password-reset.email-enabled`, `connex.email-change.email-enabled`, and/or `connex.registration-verification.enabled` + `.email-enabled` |
-| Reset links appear in the backend log instead of being mailed | Same cause — the logging fallback is the default when a flow's `email-enabled` is false | As above |
+| A reset or verification request logs that delivery is unavailable, but no link appears | The flow's `email-enabled` flag is false, or the instance transport is unusable. Connex intentionally never logs the bearer | Configure a reachable instance SMTP relay, enable the relevant account-mail flag, and issue a fresh request; there is no log-based retrieval path |
 | The **Email** settings tab is missing; `/settings/email` redirects to Members | `connex.mail.managed=true`; workspace overrides are disabled instance-wide | Expected. Configure `connex.mail.*` instead, or unset `managed` — note `on-prem` forbids `managed` outright |
 | Startup fails with `connex.deployment.profile=on-prem forbids: connex.mail.managed=true` | Managed mail on a customer-run install | Unset `CONNEX_MAIL_MANAGED`; configure your own relay ([DEPLOYMENT_EDITIONS.md](DEPLOYMENT_EDITIONS.md)) |
 | Campaign unsubscribe link in the email body is unclickable | `connex.delivery.public-base-url` is unset, so the URL is emitted as the relative path `/api/delivery/unsubscribe/{token}` | Set it to the instance's absolute public base URL before sending any campaign |

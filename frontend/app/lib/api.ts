@@ -352,10 +352,7 @@ function isMutating(method?: string): boolean {
 const CSRF_RETRY_EXEMPT_MUTATION_PATHS = new Set([
     "/api/auth/login",
     "/api/auth/register",
-    "/api/auth/logout",
     "/api/auth/forgot-password",
-    "/api/auth/reset-password",
-    "/api/auth/sso/link/confirm",
     "/api/auth/webauthn/authenticate",
 ]);
 
@@ -1291,22 +1288,50 @@ export function requestPasswordReset(payload: Types.ForgotPasswordPayload) {
 }
 
 /**
- * Checks whether a password reset token is still valid (unconsumed and unexpired).
- *
- * @param token - The raw reset token from the link
- * @returns A promise resolving to the validation result
+ * Exchanges the fragment-only bearer for a purpose-bound HttpOnly browser flow and accepts only
+ * the backend's token-free redirect response.
+ * @param path purpose-specific exchange endpoint
+ * @param token raw fragment bearer
  */
-export function validateResetToken(token: string, init: RequestInit = {}) {
-    return getJson<Types.ResetTokenValidation>(
-        `/api/auth/reset-password/validate?token=${encodeURIComponent(token)}`,
-        init,
-    );
+async function exchangeOneTimeLink(path: string, token: string): Promise<void> {
+    const send = async (forceRefresh: boolean) => fetch(`${API_BASE}${path}`, {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        redirect: "manual",
+        headers: {
+            "Content-Type": "application/json",
+            ...await csrfHeader(forceRefresh),
+        },
+        body: JSON.stringify({ token }),
+    });
+    let response = await send(false);
+    if (response.status === 403) {
+        response = await send(true);
+    }
+    if (response.status === 303 || response.type === "opaqueredirect") {
+        return;
+    }
+    if (!response.ok) {
+        throw await getApiError(response);
+    }
+    throw new ApiError("Link exchange did not redirect", 502);
+}
+
+/** Exchanges a password-reset fragment bearer for its token-free flow session. */
+export function exchangePasswordResetToken(token: string) {
+    return exchangeOneTimeLink("/api/auth/reset-password/exchange", token);
+}
+
+/** Checks whether the token-free password-reset flow remains redeemable. */
+export function validateResetToken(init: RequestInit = {}) {
+    return getJson<Types.ResetTokenValidation>("/api/auth/reset-password/validate", init);
 }
 
 /**
  * Sets a new password using a valid reset token.
  *
- * @param payload - The reset token and the new password
+ * @param payload - The new password for the active reset flow
  * @returns A promise resolving to the confirmation message
  * @throws ApiError with fieldErrors when the password fails policy or the token is invalid
  */
@@ -1315,24 +1340,23 @@ export function resetPassword(payload: Types.ResetPasswordPayload) {
 }
 
 /**
- * Checks whether a registration email-verification token is still valid.
- * @param token - The raw token from the verification link
- * @returns A promise resolving to the validation result
+ * Exchanges a registration-verification fragment bearer for its token-free flow session.
  */
-export function validateEmailVerificationToken(token: string, init: RequestInit = {}) {
-    return getJson<Types.ResetTokenValidation>(
-        `/api/auth/verify-email/validate?token=${encodeURIComponent(token)}`,
-        init,
-    );
+export function exchangeEmailVerificationToken(token: string) {
+    return exchangeOneTimeLink("/api/auth/verify-email/exchange", token);
+}
+
+/** Checks whether the token-free registration-verification flow remains redeemable. */
+export function validateEmailVerificationToken(init: RequestInit = {}) {
+    return getJson<Types.ResetTokenValidation>("/api/auth/verify-email/validate", init);
 }
 
 /**
  * Marks the account behind a valid verification token as email-verified.
- * @param token - The raw token from the verification link
  * @returns A promise resolving to the confirmation message
  */
-export function confirmEmailVerification(token: string) {
-    return postJson<Types.AuthResponse>("/api/auth/verify-email/confirm", { token });
+export function confirmEmailVerification() {
+    return postJson<Types.AuthResponse>("/api/auth/verify-email/confirm", {});
 }
 
 /**
@@ -1348,24 +1372,23 @@ export function requestEmailChange(payload: Types.EmailChangePayload) {
 }
 
 /**
- * Checks whether an email-change token is still valid (unconsumed and unexpired).
- * @param token - The raw token from the confirmation link
- * @returns A promise resolving to the validation result
+ * Exchanges an email-change fragment bearer for its token-free flow session.
  */
-export function validateEmailChangeToken(token: string, init: RequestInit = {}) {
-    return getJson<Types.ResetTokenValidation>(
-        `/api/auth/email-change/validate?token=${encodeURIComponent(token)}`,
-        init,
-    );
+export function exchangeEmailChangeToken(token: string) {
+    return exchangeOneTimeLink("/api/auth/email-change/exchange", token);
+}
+
+/** Checks whether the token-free email-change flow remains redeemable. */
+export function validateEmailChangeToken(init: RequestInit = {}) {
+    return getJson<Types.ResetTokenValidation>("/api/auth/email-change/validate", init);
 }
 
 /**
  * Applies a pending email change behind a valid confirmation token.
- * @param token - The raw token from the confirmation link
  * @returns A promise resolving to the confirmation message
  */
-export function confirmEmailChange(token: string) {
-    return postJson<Types.AuthResponse>("/api/auth/email-change/confirm", { token });
+export function confirmEmailChange() {
+    return postJson<Types.AuthResponse>("/api/auth/email-change/confirm", {});
 }
 
 export function getPasskeys(init: RequestInit = {}) {
@@ -1631,10 +1654,15 @@ export function saveSsoConfig(workspaceId: number, request: Types.SsoConnectionR
     return putJson<Types.SsoConnectionDto>(`/api/auth/sso/config?workspaceId=${workspaceId}`, request);
 }
 
-export function confirmSsoLink(token: string, password: string) {
+export function confirmSsoLink(password: string) {
     return withClientRequestIdentityReset(
-        () => postJson<Types.AuthResponse>("/api/auth/sso/link/confirm", { token, password }),
+        () => postJson<Types.AuthResponse>("/api/auth/sso/link/confirm", { password }),
     );
+}
+
+/** Checks whether the token-free SSO-link flow remains redeemable. */
+export function validateSsoLink() {
+    return getJson<Types.ResetTokenValidation>("/api/auth/sso/link/validate", { cache: "no-store" });
 }
 
 /**
@@ -5478,14 +5506,18 @@ export function revokeWorkspaceInvite(workspaceId: number, inviteId: number) {
     return deleteJson<void>(`/api/workspaces/${workspaceId}/invites/${inviteId}`);
 }
 
-export function getInvitePreview(token: string, init: RequestInit = {}) {
-    return getJson<Types.InvitePreview>(`/api/invites/${token}`, { cache: "no-store", ...init });
+export function exchangeInviteToken(token: string) {
+    return exchangeOneTimeLink("/api/invites/exchange", token);
 }
 
-export function acceptInvite(token: string) {
+export function getInvitePreview(init: RequestInit = {}) {
+    return getJson<Types.InvitePreview>("/api/invites", { cache: "no-store", ...init });
+}
+
+export function acceptInvite(flowId: string) {
     return withClientRequestIdentityReset(
         () => recoverWorkspaceSelectionResponse(
-            () => postWorkspaceSelectionJson<Types.Workspace>(`/api/invites/${token}/accept`, {}),
+            () => postWorkspaceSelectionJson<Types.Workspace>("/api/invites/accept", { flowId }),
             activeWorkspaceFromSelection,
         ),
         "workspace",
@@ -5507,14 +5539,18 @@ export function revokeWorkspaceInviteLink(workspaceId: number, linkId: number) {
     return deleteJson<void>(`/api/workspaces/${workspaceId}/invite-links/${linkId}`);
 }
 
-export function getInviteLinkPreview(token: string, init: RequestInit = {}) {
-    return getJson<Types.InviteLinkPreview>(`/api/invite-links/${token}`, { cache: "no-store", ...init });
+export function exchangeInviteLinkToken(token: string) {
+    return exchangeOneTimeLink("/api/invite-links/exchange", token);
 }
 
-export function acceptInviteLink(token: string) {
+export function getInviteLinkPreview(init: RequestInit = {}) {
+    return getJson<Types.InviteLinkPreview>("/api/invite-links", { cache: "no-store", ...init });
+}
+
+export function acceptInviteLink(flowId: string) {
     return withClientRequestIdentityReset(
         () => recoverWorkspaceSelectionResponse(
-            () => postWorkspaceSelectionJson<Types.Workspace>(`/api/invite-links/${token}/accept`, {}),
+            () => postWorkspaceSelectionJson<Types.Workspace>("/api/invite-links/accept", { flowId }),
             activeWorkspaceFromSelection,
         ),
         "workspace",

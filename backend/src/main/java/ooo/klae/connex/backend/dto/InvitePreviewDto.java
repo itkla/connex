@@ -10,6 +10,7 @@ import lombok.NoArgsConstructor;
 @Data
 @NoArgsConstructor
 public class InvitePreviewDto {
+    private String flowId;
     private int workspaceId;
     private String workspaceName;
     private String email;
