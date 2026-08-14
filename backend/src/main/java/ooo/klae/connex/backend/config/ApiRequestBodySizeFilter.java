@@ -53,7 +53,7 @@ public class ApiRequestBodySizeFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         long limitBytes = limitFor(request);
         if (request.getContentLengthLong() > limitBytes) {
-            reject(response);
+            reject(response, HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
             return;
         }
         BufferedRequestWrapper bufferedRequest = null;
@@ -61,7 +61,7 @@ public class ApiRequestBodySizeFilter extends OncePerRequestFilter {
             boolean unknownLength = request.getContentLengthLong() < 0
                 || request.getHeader("Transfer-Encoding") != null;
             if (unknownLength && usesContainerBodyParsing(request)) {
-                reject(response);
+                reject(response, HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
                 return;
             }
             HttpServletRequest boundedRequest;
@@ -74,15 +74,15 @@ public class ApiRequestBodySizeFilter extends OncePerRequestFilter {
             chain.doFilter(boundedRequest, response);
         } catch (MalformedFormBodyException ex) {
             if (!response.isCommitted()) {
-                response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+                reject(response, HttpServletResponse.SC_BAD_REQUEST);
             }
         } catch (RequestBodyTooLargeException ex) {
             if (!response.isCommitted()) {
-                reject(response);
+                reject(response, HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
             }
         } catch (ServletException ex) {
             if (hasRequestBodyTooLargeCause(ex) && !response.isCommitted()) {
-                reject(response);
+                reject(response, HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
                 return;
             }
             throw ex;
@@ -93,8 +93,9 @@ public class ApiRequestBodySizeFilter extends OncePerRequestFilter {
         }
     }
 
-    private static void reject(HttpServletResponse response) {
-        response.setStatus(HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
+    private static void reject(HttpServletResponse response, int status) {
+        SecurityResponseHeaders.apply(response);
+        response.setStatus(status);
     }
 
     private long limitFor(HttpServletRequest request) {

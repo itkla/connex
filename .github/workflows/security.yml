@@ -74,6 +74,8 @@ jobs:
         run: python .github/scripts/test_codeql_alerts.py
       - name: Regression-test security workflow gates
         run: python .github/scripts/test_security_workflow.py
+      - name: Regression-test edge security headers
+        run: python .github/scripts/test_edge_security_headers.py
       - name: Regression-test release delivery invariants
         run: python .github/scripts/test_release_workflow.py
       - name: Regression-test release artifact verification

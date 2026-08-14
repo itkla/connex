@@ -1640,7 +1640,7 @@ export function confirmSsoLink(token: string, password: string) {
 /**
  * The backend entry point a browser must fully navigate to (not fetch) to begin an
  * SP-initiated SSO login. OIDC starts under the proxied {@code /api} prefix; SAML uses
- * Spring's {@code /saml2} authenticate endpoint (rewritten to the backend in next.config).
+ * Spring's {@code /saml2} authenticate endpoint (proxied to the backend by the frontend runtime).
  * @param registrationId the {@code org-<id>} registration from discovery
  * @param protocol the connection protocol
  * @returns the absolute path to navigate the browser to

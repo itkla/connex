@@ -273,6 +273,115 @@ jobs:
             | jq -e '.businessCardScanning == true' > /dev/null
           curl -sf -o /dev/null -w '%{http_code}\n' http://localhost:18099/auth/login | grep -qx 200
 
+          EDGE_HEADERS_FILE=$(mktemp)
+          LOGIN_HTML_FILE=$(mktemp)
+          trap 'rm -f "$EDGE_HEADERS_FILE" "$LOGIN_HTML_FILE"' EXIT
+
+          require_edge_header_once() {
+            local expected="$1"
+            local field="${expected%%:*}"
+            local counts
+            counts=$(awk -v expected="$expected" -v field="$field" '
+              {
+                line = $0
+                sub(/\r$/, "", line)
+                separator = index(line, ":")
+                if (separator > 0 && tolower(substr(line, 1, separator - 1)) == tolower(field)) {
+                  field_count++
+                  if (tolower(line) == tolower(expected)) exact_count++
+                }
+              }
+              END { print field_count + 0, exact_count + 0 }
+            ' "$EDGE_HEADERS_FILE")
+            if [ "$counts" != "1 1" ]; then
+              echo "::error::expected exactly one edge response header: $expected"
+              sed -n '1,40p' "$EDGE_HEADERS_FILE"
+              exit 1
+            fi
+          }
+
+          # nosniff only helps when the declared Content-Type is already correct; a mislabelled
+          # script would make the browser refuse it, so CHK-040 requires asserting the type too.
+          require_edge_content_type() {
+            local expected="$1"
+            if ! grep -qiE "^content-type: *${expected}([;[:space:]]|$)" "$EDGE_HEADERS_FILE"; then
+              echo "::error::expected Content-Type $expected"
+              sed -n '1,40p' "$EDGE_HEADERS_FILE"
+              exit 1
+            fi
+          }
+
+          probe_edge_headers() {
+            local url="$1"
+            local expected_status="$2"
+            local expected_csp="$3"
+            local expected_content_type="${4:-}"
+            local status
+            : > "$EDGE_HEADERS_FILE"
+            status=$(curl -sS -D "$EDGE_HEADERS_FILE" -o /dev/null -w '%{http_code}' "$url")
+            if [ "$status" != "$expected_status" ]; then
+              echo "::error::$url returned $status, expected $expected_status"
+              exit 1
+            fi
+            require_edge_header_once 'X-Content-Type-Options: nosniff'
+            require_edge_header_once 'Referrer-Policy: strict-origin-when-cross-origin'
+            require_edge_header_once 'X-Frame-Options: DENY'
+            require_edge_header_once "Content-Security-Policy: $expected_csp"
+            if [ -n "$expected_content_type" ]; then
+              require_edge_content_type "$expected_content_type"
+            fi
+          }
+
+          probe_edge_headers \
+            http://localhost:18099/api/version \
+            200 \
+            "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" \
+            'application/json'
+          probe_edge_headers \
+            http://localhost:18099/auth/login \
+            200 \
+            "frame-ancestors 'none'" \
+            'text/html'
+          probe_edge_headers \
+            http://localhost:18099/does-not-exist \
+            404 \
+            "frame-ancestors 'none'"
+          probe_edge_headers \
+            http://localhost:18099/attachments/x \
+            404 \
+            "default-src 'none'; sandbox; frame-ancestors 'none'"
+          require_edge_header_once 'Content-Disposition: attachment'
+
+          curl -sf http://localhost:18099/auth/login -o "$LOGIN_HTML_FILE"
+          STATIC_ASSET=$(python3 - "$LOGIN_HTML_FILE" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          html = Path(sys.argv[1]).read_text(encoding="utf-8")
+          match = re.search(r'''(?:src|href)=["'](/_next/static/[^"']+\.(?:css|js))''', html)
+          if match is None:
+              raise SystemExit("login page did not reference a Next.js static asset")
+          print(match.group(1))
+          PY
+          )
+          case "$STATIC_ASSET" in
+            *.css) STATIC_ASSET_TYPE='text/css' ;;
+            *) STATIC_ASSET_TYPE='(text|application)/javascript' ;;
+          esac
+          probe_edge_headers \
+            "http://localhost:18099$STATIC_ASSET" \
+            200 \
+            "frame-ancestors 'none'" \
+            "$STATIC_ASSET_TYPE"
+
+          docker compose --env-file .env --env-file source-build.env \
+            -f docker-compose.yml -f docker-compose.build.yml stop frontend
+          probe_edge_headers \
+            http://localhost:18099/auth/login \
+            502 \
+            "frame-ancestors 'none'"
+
       - name: Tear down
         if: always()
         working-directory: deploy

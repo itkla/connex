@@ -44,6 +44,11 @@ class ApiRequestBodySizeFilterTest {
         filter.doFilter(request, response, chain);
 
         assertEquals(413, response.getStatus());
+        assertEquals("nosniff", response.getHeader("X-Content-Type-Options"));
+        assertEquals("strict-origin-when-cross-origin", response.getHeader("Referrer-Policy"));
+        assertEquals("DENY", response.getHeader("X-Frame-Options"));
+        assertEquals(SecurityResponseHeaders.CONTENT_SECURITY_POLICY,
+            response.getHeader("Content-Security-Policy"));
         assertNull(chain.getRequest());
     }
 

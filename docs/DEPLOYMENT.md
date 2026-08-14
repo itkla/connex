@@ -14,6 +14,17 @@ A single [Caddy](../deploy/Caddyfile) ingress fronts everything on one origin:
 Single-origin means cookies, WebAuthn (RP = the serving host), and realtime all work without a
 browser-facing backend URL. Internally the frontend still talks to `backend:8080` directly.
 
+The site-level edge header contract applies to every response, including frontend HTML and static
+assets, downloads, backend JSON, and Caddy-generated error responses. Caddy normalizes
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, and
+`X-Frame-Options: DENY`. It supplies `Content-Security-Policy: frame-ancestors 'none'` only when an
+upstream did not already set CSP, preserving the backend's stricter API policy without emitting a
+second value. Next.js carries the same browser-facing defaults for local, standalone, and non-Caddy
+deployments; its later attachment rule retains `default-src 'none'; sandbox; frame-ancestors 'none'`
+and `Content-Disposition: attachment`. Connex currently has no frame-embedded workflow. Any future
+framing exception must name each allowed origin explicitly in the shared policy and this runbook;
+wildcard framing exceptions are forbidden.
+
 ```
 browser ──▶ caddy :80 ─┬─ /api/*, /saml2/*  ─▶ backend:8080 ───▶ db:3306
                        └─ everything else    ─▶ frontend:3000
