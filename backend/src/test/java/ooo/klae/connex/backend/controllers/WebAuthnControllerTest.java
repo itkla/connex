@@ -11,6 +11,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -20,6 +21,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -35,12 +37,16 @@ import org.springframework.security.web.webauthn.registration.PublicKeyCredentia
 import ooo.klae.connex.backend.config.RequestBodySizeProperties;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.PasskeyRegistrationOptionsRequest;
+import ooo.klae.connex.backend.dto.PasskeyRecoveryRequest;
 import ooo.klae.connex.backend.dto.RenamePasskeyRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
+import ooo.klae.connex.backend.exceptions.LastPasskeyRemovalForbiddenException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
+import ooo.klae.connex.backend.services.MfaRecoveryService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
@@ -62,6 +68,7 @@ class WebAuthnControllerTest {
     private final SsoConnectionService ssoConnectionService = mock(SsoConnectionService.class);
     private final SessionSecurityService sessionSecurityService = mock(SessionSecurityService.class);
     private final AuditService auditService = mock(AuditService.class);
+    private final MfaRecoveryService mfaRecoveryService = mock(MfaRecoveryService.class);
     private final WebAuthnController controller = new WebAuthnController(
         webAuthnService,
         authService,
@@ -72,7 +79,8 @@ class WebAuthnControllerTest {
         clientIpResolver,
         ssoConnectionService,
         sessionSecurityService,
-        auditService);
+        auditService,
+        mfaRecoveryService);
 
     @AfterEach
     void clearSecurityContext() {
@@ -227,8 +235,6 @@ class WebAuthnControllerTest {
 
         verify(sessionSecurityService).requireRecentAuthentication(7);
         verify(webAuthnService).rename(7, "credential-id", "Work key");
-        verify(auditService).record(eq("auth.passkey.rename"), eq("user"), eq(7), eq("User 7"),
-            eq("Passkey renamed"), any());
     }
 
     @Test
@@ -240,8 +246,22 @@ class WebAuthnControllerTest {
 
         verify(sessionSecurityService).requireRecentAuthentication(7);
         verify(webAuthnService).delete(7, "credential-id");
-        verify(auditService).record(eq("auth.passkey.delete"), eq("user"), eq(7), eq("User 7"),
-            eq("Passkey removed"), any());
+    }
+
+    @Test
+    void deleteCredentialAuditsRefusalToRemovePrivilegedLastCredential() {
+        User user = user(7);
+        when(authService.getCurrentUser()).thenReturn(user);
+        org.mockito.Mockito.doThrow(new LastPasskeyRemovalForbiddenException())
+                .when(webAuthnService).delete(7, "credential-id");
+
+        assertThrows(LastPasskeyRemovalForbiddenException.class,
+                () -> controller.deleteCredential("credential-id"));
+
+        verify(auditService).recordFailureScoped(
+                eq("auth.passkey.delete_denied"), eq("user"), eq(7), isNull(), isNull(),
+                eq("User 7"), eq("Last passkey removal refused for privileged account"),
+                eq("last_credential"));
     }
 
     @Test
@@ -326,8 +346,9 @@ class WebAuthnControllerTest {
             () -> controller.stepUpVerify("{}", request, response));
 
         verify(sessionSecurityService, never()).markStepUp(any(), anyInt());
-        verify(auditService).recordFailure(eq("auth.step_up.passkey"), eq("user"), eq(7), eq("User 7"),
-            eq("Passkey step-up missing challenge"), isNull());
+        verify(auditService).recordStrictFailureIndependentScoped(
+                eq("auth.step_up.passkey"), eq("user"), eq(7), isNull(), isNull(), eq("User 7"),
+                eq("Failed passkey step-up attempt"), eq("missing_challenge"));
     }
 
     @Test
@@ -345,8 +366,9 @@ class WebAuthnControllerTest {
 
         assertThrows(BadCredentialsException.class, () -> stepUpController.stepUpVerify("{}", request, response));
 
-        verify(auditService).recordFailure(eq("auth.step_up.passkey"), eq("user"), eq(7), eq("User 7"),
-            eq("Failed passkey step-up attempt"), eq("bad step-up"));
+        verify(auditService).recordStrictFailureIndependentScoped(
+                eq("auth.step_up.passkey"), eq("user"), eq(7), isNull(), isNull(), eq("User 7"),
+                eq("Failed passkey step-up attempt"), eq("verification_failed"));
     }
 
     @Test
@@ -368,10 +390,76 @@ class WebAuthnControllerTest {
         Map<String, String> result = stepUpController.stepUpVerify("{}", request, response);
 
         verify(webAuthnService).finishStepUp(any(), eq(options), eq(assertion));
-        verify(sessionSecurityService).markStepUp(request, 7);
-        verify(auditService).record(eq("auth.step_up.passkey"), eq("user"), eq(7), eq("User 7"),
-            eq("Passkey step-up completed"), isNull());
+        InOrder grantOrder = inOrder(auditService, sessionSecurityService);
+        grantOrder.verify(auditService).recordStrictIndependentScoped(
+                eq("auth.step_up.passkey"), eq("user"), eq(7), isNull(), isNull(), eq("User 7"),
+                eq("Passkey step-up completed"), isNull());
+        grantOrder.verify(sessionSecurityService).markStepUp(request, 7);
         assertEquals("Recent authentication refreshed", result.get("message"));
+    }
+
+    @Test
+    void recoveryDenialIsDurablyAuditedWithoutProofMaterial() {
+        User user = user(7);
+        PasskeyRecoveryRequest recovery = new PasskeyRecoveryRequest();
+        recovery.setCurrentPassword("sensitive-current-password");
+        recovery.setRecoveryToken("sensitive-operator-token");
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        when(authService.getCurrentUser()).thenReturn(user);
+        doThrow(new ForbiddenException("MFA recovery authorization is invalid or expired"))
+                .when(mfaRecoveryService).recover(recovery, request);
+
+        assertThrows(ForbiddenException.class,
+                () -> controller.recoverCredentials(recovery, request));
+
+        verify(auditService).recordStrictFailureIndependentScoped(
+                eq("auth.mfa.recovery.denied"), eq("user"), eq(7), isNull(), isNull(), eq("User 7"),
+                eq("Passkey recovery denied"), eq("proof_rejected"));
+        assertFalse(recovery.toString().contains("sensitive-current-password"));
+        assertFalse(recovery.toString().contains("sensitive-operator-token"));
+    }
+
+    @Test
+    void stepUpAuditFailureCannotGrantRecentAuthentication() {
+        User user = user(7);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        PublicKeyCredentialRequestOptions options = mock(PublicKeyCredentialRequestOptions.class);
+        PublicKeyCredential<AuthenticatorAssertionResponse> assertion = mock();
+        WebAuthnJsonMapper mapper = mock(WebAuthnJsonMapper.class);
+        WebAuthnController stepUpController = controller(mapper);
+        when(requestOptions.load(request)).thenReturn(options);
+        when(mapper.read(eq("{}"), org.mockito.ArgumentMatchers.<TypeReference<PublicKeyCredential<AuthenticatorAssertionResponse>>>any()))
+                .thenReturn(assertion);
+        when(authService.getCurrentUser()).thenReturn(user);
+        doThrow(new IllegalStateException("audit unavailable"))
+                .when(auditService).recordStrictIndependentScoped(
+                        eq("auth.step_up.passkey"), eq("user"), eq(7), isNull(), isNull(),
+                        eq("User 7"), eq("Passkey step-up completed"), isNull());
+
+        assertThrows(IllegalStateException.class,
+                () -> stepUpController.stepUpVerify("{}", request, response));
+
+        verify(sessionSecurityService, never()).markStepUp(any(), anyInt());
+    }
+
+    @Test
+    void blankRecoveryProofDenialIsDurablyAudited() {
+        User user = user(7);
+        PasskeyRecoveryRequest recovery = new PasskeyRecoveryRequest();
+        recovery.setCurrentPassword("current-password");
+        recovery.setRecoveryToken(" ");
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        when(authService.getCurrentUser()).thenReturn(user);
+        doThrow(new ForbiddenException("MFA recovery authorization is invalid or expired"))
+                .when(mfaRecoveryService).recover(recovery, request);
+
+        assertThrows(ForbiddenException.class,
+                () -> controller.recoverCredentials(recovery, request));
+
+        verify(auditService).recordStrictFailureIndependentScoped(
+                eq("auth.mfa.recovery.denied"), eq("user"), eq(7), isNull(), isNull(), eq("User 7"),
+                eq("Passkey recovery denied"), eq("proof_rejected"));
     }
 
     @Test
@@ -395,9 +483,38 @@ class WebAuthnControllerTest {
         loginController.authenticateVerify("{}", request, response);
 
         verify(authService).establishAuthenticatedSession(user, request, response);
-        verify(sessionSecurityService).markStepUp(request, 7);
-        verify(auditService).record(eq("auth.login.passkey"), eq("user"), eq(7), eq("User 7"),
-            eq("User 7 logged in with passkey"), isNull());
+        InOrder grantOrder = inOrder(auditService, sessionSecurityService);
+        grantOrder.verify(auditService).recordStrictIndependentScoped(
+                eq("auth.login.passkey"), eq("user"), eq(7), isNull(), isNull(), eq("User 7"),
+                eq("User 7 logged in with passkey"), isNull());
+        grantOrder.verify(sessionSecurityService).markStepUp(request, 7);
+    }
+
+    @Test
+    void passkeyLoginAuditFailureCannotGrantWebAuthnStepUp() {
+        User user = user(7);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        PublicKeyCredentialRequestOptions options = mock(PublicKeyCredentialRequestOptions.class);
+        PublicKeyCredential<AuthenticatorAssertionResponse> assertion = mock();
+        WebAuthnJsonMapper mapper = mock(WebAuthnJsonMapper.class);
+        WebAuthnController loginController = controller(mapper);
+        when(clientIpResolver.resolve(request)).thenReturn("127.0.0.1");
+        when(requestOptions.load(request)).thenReturn(options);
+        when(mapper.read(eq("{}"), org.mockito.ArgumentMatchers.<TypeReference<PublicKeyCredential<AuthenticatorAssertionResponse>>>any()))
+                .thenReturn(assertion);
+        when(webAuthnService.finishLogin(options, assertion)).thenReturn(user);
+        when(ssoConnectionService.isSsoEnforcedForUser(7)).thenReturn(false);
+        when(authService.establishAuthenticatedSession(user, request, response)).thenReturn(user);
+        doThrow(new IllegalStateException("audit unavailable"))
+                .when(auditService).recordStrictIndependentScoped(
+                        eq("auth.login.passkey"), eq("user"), eq(7), isNull(), isNull(),
+                        eq("User 7"), eq("User 7 logged in with passkey"), isNull());
+
+        assertThrows(IllegalStateException.class,
+                () -> loginController.authenticateVerify("{}", request, response));
+
+        verify(sessionSecurityService, never()).markStepUp(any(), anyInt());
     }
 
     private WebAuthnController controller(WebAuthnJsonMapper mapper) {
@@ -411,7 +528,8 @@ class WebAuthnControllerTest {
             clientIpResolver,
             ssoConnectionService,
             sessionSecurityService,
-            auditService);
+            auditService,
+            mfaRecoveryService);
     }
 
     private static User user(int id) {

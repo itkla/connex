@@ -26,6 +26,7 @@ const CAPABILITIES: InstanceCapabilities = {
     businessCardScanning: false,
     businessCardImport: false,
     campaignDelivery: false,
+    privilegedMfaEnforced: true,
 };
 
 const WORKSPACE_POLICY: WorkspaceCapturePolicy = {

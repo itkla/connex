@@ -57,12 +57,15 @@ import ooo.klae.connex.backend.observability.CorrelationIdFilter;
 import ooo.klae.connex.backend.observability.MetricsScrapeTokenFilter;
 import ooo.klae.connex.backend.sso.DbRelyingPartyRegistrationRepository;
 import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
-import ooo.klae.connex.backend.services.SessionSecurityService;
+import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
+import ooo.klae.connex.backend.services.PrivilegedAccountService;
+import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 import ooo.klae.connex.backend.tenant.WorkspaceRequestResolver;
 import ooo.klae.connex.backend.util.ClientIpResolver;
+import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
 /**
  * Spring Security configuration.
@@ -152,6 +155,10 @@ public class SecurityConfig {
             DbRelyingPartyRegistrationRepository dbRelyingPartyRegistrationRepository,
             SsoAuthenticationSuccessHandler ssoAuthenticationSuccessHandler,
             SessionSecurityService sessionSecurityService,
+            PrivilegedMfaProperties privilegedMfaProperties,
+            PrivilegedAccountService privilegedAccountService,
+            WebAuthnService webAuthnService,
+            AuditService auditService,
             BusinessCardRateLimiter businessCardRateLimiter,
             CapabilityEntitlement capabilityEntitlement,
             WorkspaceRequestResolver workspaceRequestResolver,
@@ -177,6 +184,14 @@ public class SecurityConfig {
             new OneTimeLinkExchangeAdmissionFilter(loginRateLimiter, clientIpResolver),
             CsrfFilter.class);
         http.addFilterBefore(new MetricsScrapeTokenFilter(metricsScrapeToken), AuthorizationFilter.class);
+        http.addFilterAfter(
+            new PrivilegedMfaEnforcementFilter(
+                privilegedMfaProperties,
+                privilegedAccountService,
+                webAuthnService,
+                sessionSecurityService,
+                auditService),
+            AuthorizationFilter.class);
         http.cors(withDefaults());
         if (csrfEnabled) {
             // Session-stored token (default repo), echoed by the SPA in a header it fetches from

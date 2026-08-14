@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.webauthn;
 
+import java.security.MessageDigest;
 import java.util.List;
 
 import org.springframework.security.authentication.BadCredentialsException;
@@ -25,11 +26,14 @@ import org.springframework.transaction.annotation.Transactional;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.PasskeyDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.LastPasskeyRemovalForbiddenException;
 import ooo.klae.connex.backend.exceptions.PasskeyEnrollmentRequiredException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WebauthnCredentialMapper;
 import ooo.klae.connex.backend.mappers.WebauthnUserEntityMapper;
+import ooo.klae.connex.backend.services.AuditService;
+import ooo.klae.connex.backend.services.PrivilegedAccountService;
 
 import lombok.RequiredArgsConstructor;
 
@@ -50,6 +54,8 @@ public class WebAuthnService {
     private final WebauthnUserEntityMapper userEntityMapper;
     private final WebauthnCredentialMapper credentialMapper;
     private final UserMapper userMapper;
+    private final PrivilegedAccountService privilegedAccountService;
+    private final AuditService auditService;
 
     /**
      * Issues registration options for the authenticated user, first ensuring a stable user handle
@@ -86,6 +92,12 @@ public class WebAuthnService {
         CredentialRecord record = rpOperations.registerCredential(
             new ImmutableRelyingPartyRegistrationRequest(options, new RelyingPartyPublicKey(credential, label)));
         userCredentials.save(record);
+        User user = userMapper.getUserById(expectedUserId);
+        if (user == null) {
+            throw new BadCredentialsException("Passkey registration is not bound to the current account");
+        }
+        auditService.recordStrict("auth.passkey.register", "user", expectedUserId, user.getDisplayName(),
+                "Passkey registered", auditService.singleChange("label", null, label));
         return record;
     }
 
@@ -181,6 +193,9 @@ public class WebAuthnService {
     public String rename(int callerUserId, String credentialId, String label) {
         WebauthnCredentialRow row = requireOwned(callerUserId, credentialId);
         credentialMapper.updateLabel(row.getCredentialId(), label);
+        User user = requireUser(callerUserId);
+        auditService.recordStrict("auth.passkey.rename", "user", callerUserId, user.getDisplayName(),
+                "Passkey renamed", auditService.singleChange("label", row.getLabel(), label));
         return row.getLabel();
     }
 
@@ -191,9 +206,56 @@ public class WebAuthnService {
      */
     @Transactional
     public String delete(int callerUserId, String credentialId) {
-        WebauthnCredentialRow row = requireOwned(callerUserId, credentialId);
+        if (userMapper.lockById(callerUserId) == null) {
+            throw new ResourceNotFoundException("Passkey not found");
+        }
+        WebauthnUserEntityRow entity = userEntityMapper.findByUserId(callerUserId);
+        if (entity == null) {
+            throw new ResourceNotFoundException("Passkey not found");
+        }
+        List<WebauthnCredentialRow> credentials =
+                credentialMapper.findByUserEntityUserIdForUpdate(entity.getId());
+        WebauthnCredentialRow row = credentials.stream()
+                .filter(candidate -> MessageDigest.isEqual(
+                        candidate.getCredentialId(), Bytes.fromBase64(credentialId).getBytes()))
+                .findFirst()
+                .orElseThrow(() -> new ResourceNotFoundException("Passkey not found"));
+        if (credentials.size() == 1 && privilegedAccountService.isPrivileged(callerUserId)) {
+            throw new LastPasskeyRemovalForbiddenException();
+        }
         userCredentials.delete(Bytes.fromBase64(credentialId));
+        User user = requireUser(callerUserId);
+        auditService.recordStrict("auth.passkey.delete", "user", callerUserId, user.getDisplayName(),
+                "Passkey removed", auditService.singleChange("label", row.getLabel(), null));
         return row.getLabel();
+    }
+
+    /**
+     * Removes every credential after the controller has verified the account and operator recovery
+     * proofs. The account row and credential rows serialize recovery with concurrent promotion,
+     * enrollment, and removal.
+     *
+     * @param callerUserId recovering account
+     * @return number of credentials removed
+     */
+    @Transactional
+    public int recover(int callerUserId) {
+        if (userMapper.lockById(callerUserId) == null) {
+            throw new ResourceNotFoundException("Not authenticated");
+        }
+        WebauthnUserEntityRow entity = userEntityMapper.findByUserId(callerUserId);
+        if (entity == null) {
+            throw new BadRequestException("No passkey is enrolled");
+        }
+        List<WebauthnCredentialRow> credentials =
+                credentialMapper.findByUserEntityUserIdForUpdate(entity.getId());
+        if (credentials.isEmpty()) {
+            throw new BadRequestException("No passkey is enrolled");
+        }
+        for (WebauthnCredentialRow credential : credentials) {
+            userCredentials.delete(new Bytes(credential.getCredentialId()));
+        }
+        return credentials.size();
     }
 
     private void ensureUserEntity(User user) {
@@ -218,6 +280,14 @@ public class WebAuthnService {
             throw new ResourceNotFoundException("Passkey not found");
         }
         return row;
+    }
+
+    private User requireUser(int userId) {
+        User user = userMapper.getUserById(userId);
+        if (user == null) {
+            throw new ResourceNotFoundException("Not authenticated");
+        }
+        return user;
     }
 
     private PasskeyDto toDto(WebauthnCredentialRow row) {

@@ -92,6 +92,7 @@ const DISABLED_CAPABILITIES = {
     businessCardScanning: false,
     businessCardImport: false,
     campaignDelivery: false,
+    privilegedMfaEnforced: true,
 } satisfies InstanceCapabilities;
 
 const READ_ONLY_ACCESS = {

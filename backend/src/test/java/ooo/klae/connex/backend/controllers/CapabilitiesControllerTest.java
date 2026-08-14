@@ -18,17 +18,20 @@ import org.springframework.web.context.request.RequestContextHolder;
 
 import ooo.klae.connex.backend.capability.Capability;
 import ooo.klae.connex.backend.capability.CapabilityRegistry;
+import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 
 @ExtendWith(MockitoExtension.class)
 class CapabilitiesControllerTest {
 
     @Mock private CapabilityRegistry capabilityRegistry;
+    @Mock private PrivilegedMfaProperties privilegedMfaProperties;
 
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.standaloneSetup(new CapabilitiesController(capabilityRegistry)).build();
+        mockMvc = MockMvcBuilders.standaloneSetup(
+                new CapabilitiesController(capabilityRegistry, privilegedMfaProperties)).build();
     }
 
     @AfterEach
@@ -49,6 +52,7 @@ class CapabilitiesControllerTest {
         when(capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_SCANNING)).thenReturn(true);
         when(capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_IMPORT)).thenReturn(true);
         when(capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)).thenReturn(true);
+        when(privilegedMfaProperties.isEnforced()).thenReturn(true);
 
         mockMvc.perform(get("/api/capabilities"))
                 .andExpect(status().isOk())
@@ -62,7 +66,8 @@ class CapabilitiesControllerTest {
                 .andExpect(jsonPath("$.mailManaged").value(false))
                 .andExpect(jsonPath("$.businessCardScanning").value(true))
                 .andExpect(jsonPath("$.businessCardImport").value(true))
-                .andExpect(jsonPath("$.campaignDelivery").value(true));
+                .andExpect(jsonPath("$.campaignDelivery").value(true))
+                .andExpect(jsonPath("$.privilegedMfaEnforced").value(true));
     }
 
     @Test

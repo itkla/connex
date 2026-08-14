@@ -31,14 +31,17 @@ import ooo.klae.connex.backend.dto.PasskeyDto;
 import ooo.klae.connex.backend.dto.PasskeyRegistrationOptionsRequest;
 import ooo.klae.connex.backend.dto.PasskeyRegistrationRequirementsDto;
 import ooo.klae.connex.backend.dto.RenamePasskeyRequest;
+import ooo.klae.connex.backend.dto.PasskeyRecoveryRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.LastPasskeyRemovalForbiddenException;
 import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
 import ooo.klae.connex.backend.exceptions.SsoEnforcedException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
+import ooo.klae.connex.backend.services.MfaRecoveryService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
@@ -81,6 +84,7 @@ public class WebAuthnController {
     private final SsoConnectionService ssoConnectionService;
     private final SessionSecurityService sessionSecurityService;
     private final AuditService auditService;
+    private final MfaRecoveryService mfaRecoveryService;
 
     /**
      * Reports whether the current account must confirm its password for first-passkey enrollment.
@@ -129,8 +133,7 @@ public class WebAuthnController {
             authorizePasskeyRegistrationVerify(user, req);
             PublicKeyCredential<AuthenticatorAttestationResponse> credential = json.read(body, ATTESTATION_TYPE);
             CredentialRecord record = webAuthnService.finishRegistration(user.getId(), options, credential, label);
-            auditService.record("auth.passkey.register", "user", user.getId(), user.getDisplayName(),
-                    "Passkey registered", auditService.singleChange("label", null, label));
+            sessionSecurityService.markStepUp(req, user.getId());
             return Map.of("credentialId", record.getCredentialId().toBase64UrlString());
         } catch (RequestBodyTooLargeException ex) {
             throw ex;
@@ -202,9 +205,16 @@ public class WebAuthnController {
             throw new SsoEnforcedException();
         }
         User authenticatedUser = authService.establishAuthenticatedSession(user, req, res);
+        auditService.recordStrictIndependentScoped(
+                "auth.login.passkey",
+                "user",
+                authenticatedUser.getId(),
+                null,
+                null,
+                authenticatedUser.getDisplayName(),
+                authenticatedUser.getDisplayName() + " logged in with passkey",
+                null);
         sessionSecurityService.markStepUp(req, authenticatedUser.getId());
-        auditService.record("auth.login.passkey", "user", authenticatedUser.getId(), authenticatedUser.getDisplayName(),
-                authenticatedUser.getDisplayName() + " logged in with passkey", null);
         return Map.of("message", "You are now logged in");
     }
 
@@ -228,8 +238,7 @@ public class WebAuthnController {
         User user = authService.getCurrentUser();
         PublicKeyCredentialRequestOptions options = requestOptions.load(req);
         if (options == null) {
-            auditService.recordFailure("auth.step_up.passkey", "user", user.getId(), user.getDisplayName(),
-                    "Passkey step-up missing challenge", null);
+            recordStepUpFailure(user, "missing_challenge");
             throw new BadCredentialsException("No passkey step-up in progress");
         }
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
@@ -237,17 +246,24 @@ public class WebAuthnController {
             PublicKeyCredential<AuthenticatorAssertionResponse> assertion = json.read(body, ASSERTION_TYPE);
             webAuthnService.finishStepUp(auth, options, assertion);
         } catch (RequestBodyTooLargeException ex) {
+            recordStepUpFailure(user, "request_too_large");
             throw ex;
         } catch (RuntimeException ex) {
-            auditService.recordFailure("auth.step_up.passkey", "user", user.getId(), user.getDisplayName(),
-                    "Failed passkey step-up attempt", ex.getMessage());
+            recordStepUpFailure(user, "verification_failed");
             throw new BadCredentialsException("Passkey step-up failed");
         } finally {
             requestOptions.save(req, res, null);
         }
+        auditService.recordStrictIndependentScoped(
+                "auth.step_up.passkey",
+                "user",
+                user.getId(),
+                null,
+                null,
+                user.getDisplayName(),
+                "Passkey step-up completed",
+                null);
         sessionSecurityService.markStepUp(req, user.getId());
-        auditService.record("auth.step_up.passkey", "user", user.getId(), user.getDisplayName(),
-                "Passkey step-up completed", null);
         return Map.of("message", "Recent authentication refreshed");
     }
 
@@ -268,9 +284,7 @@ public class WebAuthnController {
         User user = authService.getCurrentUser();
         int userId = user.getId();
         sessionSecurityService.requireRecentAuthentication(userId);
-        String previousLabel = webAuthnService.rename(userId, credentialId, request.getLabel());
-        auditService.record("auth.passkey.rename", "user", userId, user.getDisplayName(),
-                "Passkey renamed", auditService.singleChange("label", previousLabel, request.getLabel()));
+        webAuthnService.rename(userId, credentialId, request.getLabel());
         return Map.of("message", "Passkey renamed");
     }
 
@@ -282,10 +296,54 @@ public class WebAuthnController {
         User user = authService.getCurrentUser();
         int userId = user.getId();
         sessionSecurityService.requireRecentAuthentication(userId);
-        String previousLabel = webAuthnService.delete(userId, credentialId);
-        auditService.record("auth.passkey.delete", "user", userId, user.getDisplayName(),
-                "Passkey removed", auditService.singleChange("label", previousLabel, null));
+        try {
+            webAuthnService.delete(userId, credentialId);
+        } catch (LastPasskeyRemovalForbiddenException exception) {
+            auditService.recordFailureScoped(
+                    "auth.passkey.delete_denied", "user", userId, null, null,
+                    user.getDisplayName(), "Last passkey removal refused for privileged account",
+                    "last_credential");
+            throw exception;
+        }
         return Map.of("message", "Passkey removed");
+    }
+
+    /**
+     * Removes inaccessible passkeys after same-account proof and a short-lived operator recovery
+     * authorization. The caller remains confined until a replacement passkey is enrolled.
+     */
+    @PostMapping("/recover")
+    public Map<String, String> recoverCredentials(
+            @Valid @RequestBody PasskeyRecoveryRequest request,
+            HttpServletRequest httpRequest) {
+        User user = authService.getCurrentUser();
+        try {
+            mfaRecoveryService.recover(request, httpRequest);
+        } catch (RuntimeException exception) {
+            auditService.recordStrictFailureIndependentScoped(
+                    "auth.mfa.recovery.denied",
+                    "user",
+                    user.getId(),
+                    null,
+                    null,
+                    user.getDisplayName(),
+                    "Passkey recovery denied",
+                    "proof_rejected");
+            throw exception;
+        }
+        return Map.of("message", "Passkeys removed; enroll a replacement passkey to continue");
+    }
+
+    private void recordStepUpFailure(User user, String reason) {
+        auditService.recordStrictFailureIndependentScoped(
+                "auth.step_up.passkey",
+                "user",
+                user.getId(),
+                null,
+                null,
+                user.getDisplayName(),
+                "Failed passkey step-up attempt",
+                reason);
     }
 
     private boolean authorizePasskeyRegistrationOptions(User user, PasskeyRegistrationOptionsRequest request,

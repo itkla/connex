@@ -301,6 +301,8 @@ class EncryptionGuardrailArchTest {
         "ooo/klae/connex/backend/dto/LoginDto.java#password",
         "ooo/klae/connex/backend/dto/MailConfigRequest.java#password",
         "ooo/klae/connex/backend/dto/OneTimeLinkExchangeRequest.java#token",
+        "ooo/klae/connex/backend/dto/PasskeyRecoveryRequest.java#currentPassword",
+        "ooo/klae/connex/backend/dto/PasskeyRecoveryRequest.java#recoveryToken",
         "ooo/klae/connex/backend/dto/PasskeyRegistrationOptionsRequest.java#currentPassword",
         "ooo/klae/connex/backend/dto/ProviderCaptureReviewRequest.java#duplicateReviewToken",
         "ooo/klae/connex/backend/dto/RecordCommentCreateRequest.java#clientToken",

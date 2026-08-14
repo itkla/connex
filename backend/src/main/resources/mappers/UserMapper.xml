@@ -138,6 +138,38 @@
     FROM app_user WHERE email = #{email}
   </select>
 
+  <select id="isPrivilegedAccount" resultType="boolean">
+    SELECT EXISTS (
+      SELECT 1
+      FROM org_member om
+      JOIN organization o ON o.id = om.org_id AND o.lifecycle_state = 'active'
+      WHERE om.user_id = #{id}
+      UNION ALL
+      SELECT 1
+      FROM workspace_member wm
+      JOIN workspace w ON w.id = wm.workspace_id AND w.lifecycle_state = 'active'
+      JOIN organization o ON o.id = w.org_id AND o.lifecycle_state = 'active'
+      WHERE wm.user_id = #{id}
+        AND wm.status = 'active'
+        AND wm.role_id IS NULL
+        AND wm.role IN ('admin', 'owner')
+      UNION ALL
+      SELECT 1
+      FROM workspace_member wm
+      JOIN workspace w ON w.id = wm.workspace_id AND w.lifecycle_state = 'active'
+      JOIN organization o ON o.id = w.org_id AND o.lifecycle_state = 'active'
+      JOIN workspace_role_permission wrp ON wrp.workspace_role_id = wm.role_id
+      WHERE wm.user_id = #{id}
+        AND wm.status = 'active'
+        AND wrp.permission IN (
+          'AUDIT_READ', 'CAMPAIGN_MANAGE', 'CAMPAIGN_SEND', 'CONSENT_MANAGE',
+          'CUSTOM_FIELD_MANAGE', 'DOCUMENT_MANAGE', 'MEMBER_MANAGE', 'PIPELINE_MANAGE',
+          'PRODUCT_MANAGE', 'ROLE_MANAGE', 'RULE_MANAGE', 'SHARE_MANAGE',
+          'TAG_MANAGE', 'WORKSPACE_SETTINGS'
+        )
+    )
+  </select>
+
   <select id="countUsers" resultType="int">
     SELECT COUNT(*) FROM app_user WHERE username != '__connex_system__'
   </select>

@@ -358,6 +358,7 @@ const CSRF_RETRY_EXEMPT_MUTATION_PATHS = new Set([
 
 const RECENT_AUTHENTICATION_REQUIRED_CODE = "RECENT_AUTHENTICATION_REQUIRED";
 export const PASSKEY_ENROLLMENT_REQUIRED_CODE = "PASSKEY_ENROLLMENT_REQUIRED";
+export const PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE = "PRIVILEGED_MFA_ENROLLMENT_REQUIRED";
 export const PASSKEY_STEP_UP_CANCELED_CODE = "PASSKEY_STEP_UP_CANCELED";
 export const PASSKEY_STEP_UP_FAILED_CODE = "PASSKEY_STEP_UP_FAILED";
 const PASSKEY_STEP_UP_PATHS = new Set([
@@ -408,7 +409,7 @@ async function requestJson<T>(
     };
 
     let res = await sendWithCsrfRetry();
-    if (await shouldRetryAfterPasskeyStepUp(path, res, mutating)) {
+    if (await shouldRetryAfterPasskeyStepUp(path, res)) {
         if (stepUpGeneration === passkeyStepUpGeneration) {
             await performPasskeyStepUp();
         }
@@ -416,7 +417,7 @@ async function requestJson<T>(
     }
 
     if (!res.ok) {
-        throw await getApiError(res);
+        throw await getAuthenticatedApiError(res);
     }
 
     try {
@@ -530,22 +531,22 @@ async function requestMultipart<T>(
         return response;
     };
     let response = await sendWithCsrfRetry();
-    if (await shouldRetryAfterPasskeyStepUp(path, response, true)) {
+    if (await shouldRetryAfterPasskeyStepUp(path, response)) {
         if (stepUpGeneration === passkeyStepUpGeneration) {
             await performPasskeyStepUp();
         }
         response = await sendWithCsrfRetry();
     }
     if (!response.ok) {
-        throw await getApiError(response);
+        throw await getAuthenticatedApiError(response);
     }
     const text = await response.text();
     return text ? JSON.parse(text) as T : undefined as T;
 }
 
-async function shouldRetryAfterPasskeyStepUp(path: string, res: Response, mutating: boolean): Promise<boolean> {
+async function shouldRetryAfterPasskeyStepUp(path: string, res: Response): Promise<boolean> {
     const pathname = path.split("?")[0];
-    if (!mutating || res.status !== 403 || typeof window === "undefined" || PASSKEY_STEP_UP_PATHS.has(pathname)) {
+    if (res.status !== 403 || typeof window === "undefined" || PASSKEY_STEP_UP_PATHS.has(pathname)) {
         return false;
     }
     const text = await res.clone().text().catch(() => "");
@@ -1136,6 +1137,14 @@ async function getApiError(res: Response): Promise<ApiError> {
     }
 }
 
+async function getAuthenticatedApiError(res: Response): Promise<ApiError> {
+    const error = await getApiError(res);
+    if (error.code === PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE && typeof window !== "undefined") {
+        window.location.assign("/account/security?mfa=enroll");
+    }
+    return error;
+}
+
 /**
  * Calls a public, unauthenticated endpoint without the workspace header, CSRF token, or credentials
  * the tenant-scoped helpers attach. Used for links a recipient opens with no Connex session.
@@ -1477,6 +1486,7 @@ export const DEFAULT_CAPABILITIES: Types.InstanceCapabilities = {
     businessCardScanning: false,
     businessCardImport: false,
     campaignDelivery: false,
+    privilegedMfaEnforced: true,
 };
 
 export function getProviderConnections(init: RequestInit = {}) {
@@ -2171,8 +2181,12 @@ export async function downloadCsv(path: string, filename: string, init: RequestI
     if (await shouldRetryWithFreshCsrf(path, res, mutating)) {
         res = await send(await csrfHeader(true));
     }
+    if (await shouldRetryAfterPasskeyStepUp(path, res)) {
+        await performPasskeyStepUp();
+        res = await send(mutating ? await csrfHeader() : {});
+    }
     if (!res.ok) {
-        throw await getApiError(res);
+        throw await getAuthenticatedApiError(res);
     }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -4983,7 +4997,7 @@ export async function uploadAiChatAttachment(
     if (await shouldRetryWithFreshCsrf(path, response, true)) {
         response = await send(true);
     }
-    if (!response.ok) throw await getApiError(response);
+    if (!response.ok) throw await getAuthenticatedApiError(response);
     const text = await response.text();
     if (!text) throw new TypeError('Assistant attachment response was empty');
     const attachment: unknown = JSON.parse(text);
@@ -5445,8 +5459,12 @@ async function fetchReportCsv(path: string, init: RequestInit): Promise<Blob> {
         if (await shouldRetryWithFreshCsrf(path, res, mutating)) {
             res = await send(await csrfHeader(true));
         }
+        if (await shouldRetryAfterPasskeyStepUp(path, res)) {
+            await performPasskeyStepUp();
+            res = await send(mutating ? await csrfHeader() : {});
+        }
         if (!res.ok) {
-            throw await getApiError(res);
+            throw await getAuthenticatedApiError(res);
         }
         return res.blob();
     });

@@ -236,6 +236,25 @@ public class AuditService {
     }
 
     /**
+     * Records a failed event in its own transaction with explicit scope and propagates persistence
+     * failures.
+     * @param action action name
+     * @param entityType audited entity type
+     * @param entityId audited entity id
+     * @param workspaceId explicit workspace scope, or null
+     * @param orgId explicit organization scope, or null
+     * @param targetLabel target descriptor
+     * @param summary summary text
+     * @param reason fixed sanitized failure classification
+     */
+    public void recordStrictFailureIndependentScoped(String action, String entityType, Integer entityId,
+            Integer workspaceId, Integer orgId, String targetLabel, String summary, String reason) {
+        Object context = reason == null ? null : Map.of("error", truncate(reason, ERROR_MAX));
+        writeUnchecked(action, entityType, entityId, targetLabel, OUTCOME_FAILURE, summary, null,
+                context, true, true, workspaceId, orgId);
+    }
+
+    /**
      * Records a single failed audit event. Never throws.
      * @param action
      * @param entityType

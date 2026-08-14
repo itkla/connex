@@ -1,0 +1,5 @@
+connex:
+  security:
+    privileged-mfa:
+      enforced: false
+      change-actor: automated-test-suite

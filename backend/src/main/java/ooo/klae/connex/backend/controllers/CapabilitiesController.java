@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.RestController;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.capability.Capability;
 import ooo.klae.connex.backend.capability.CapabilityRegistry;
+import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 
 /**
  * Public instance-level product capability endpoint.
@@ -17,6 +18,7 @@ import ooo.klae.connex.backend.capability.CapabilityRegistry;
 public class CapabilitiesController {
 
     private final CapabilityRegistry capabilityRegistry;
+    private final PrivilegedMfaProperties privilegedMfaProperties;
 
     /**
      * Returns the instance capabilities available to the current client.
@@ -39,7 +41,8 @@ public class CapabilitiesController {
                 capabilityRegistry.isAvailable(Capability.MANAGED_MAIL),
                 capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_SCANNING),
                 capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_IMPORT),
-                capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY));
+                capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY),
+                privilegedMfaProperties.isEnforced());
     }
 
     /**
@@ -53,6 +56,7 @@ public class CapabilitiesController {
      * @param businessCardScanning whether local OCR and durable card retention are ready
      * @param businessCardImport whether reviewed source-image import and retention are ready
      * @param campaignDelivery whether native email campaign delivery is available
+     * @param privilegedMfaEnforced whether privileged accounts are subject to mandatory MFA
      */
     public record CapabilitiesResponse(
             boolean sso,
@@ -62,7 +66,8 @@ public class CapabilitiesController {
             boolean mailManaged,
             boolean businessCardScanning,
             boolean businessCardImport,
-            boolean campaignDelivery) {
+            boolean campaignDelivery,
+            boolean privilegedMfaEnforced) {
     }
 
     /**

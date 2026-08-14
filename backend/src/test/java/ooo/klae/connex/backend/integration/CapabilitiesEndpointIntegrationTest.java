@@ -21,7 +21,10 @@ import org.springframework.web.context.WebApplicationContext;
 
 import ooo.klae.connex.backend.beans.User;
 
-@SpringBootTest(properties = "connex.mail.managed=true")
+@SpringBootTest(properties = {
+    "connex.mail.managed=true",
+    "connex.security.privileged-mfa.enforced=true"
+})
 class CapabilitiesEndpointIntegrationTest {
 
     @Autowired private WebApplicationContext context;
@@ -45,7 +48,8 @@ class CapabilitiesEndpointIntegrationTest {
                 .andExpect(jsonPath("$.socialLogin.google").value(false))
                 .andExpect(jsonPath("$.socialLogin.microsoft").value(false))
                 .andExpect(jsonPath("$.businessCardScanning").isBoolean())
-                .andExpect(jsonPath("$.businessCardImport").isBoolean());
+                .andExpect(jsonPath("$.businessCardImport").isBoolean())
+                .andExpect(jsonPath("$.privilegedMfaEnforced").value(true));
     }
 
     @Test
