@@ -129,9 +129,8 @@ connex:
     metrics:
         scrape-token: ${CONNEX_METRICS_SCRAPE_TOKEN:}
     security:
-        # CSRF protection for state-changing requests. The SPA fetches the token from
-        # GET /api/auth/csrf and echoes it in the X-XSRF-TOKEN header. Kill-switch for cutover.
-        csrf-enabled: ${CONNEX_SECURITY_CSRF_ENABLED:true}
+        # CSRF protection for state-changing requests is unconditional and has no switch.
+        # The SPA fetches the token from GET /api/auth/csrf and echoes it in X-XSRF-TOKEN.
         # Comma-separated trusted sanitizing-proxy IPs / CIDR ranges. X-Forwarded-For is
         # honored only when the direct peer matches one of these and contains exactly one
         # IP literal. Empty (the default) means the header is never trusted. Configure only

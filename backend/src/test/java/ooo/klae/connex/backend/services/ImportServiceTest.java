@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -10,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeout;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doReturn;
@@ -2725,5 +2727,54 @@ class ImportServiceTest extends AbstractServiceTest {
 
     private int rowCount(String sql, Object... args) {
         return jdbcTemplate.queryForObject(sql, Integer.class, args);
+    }
+
+    @Test
+    void personImportAcceptsOnlyAddressShapedEmails() {
+        ImportPreviewResult preview = importService.previewPersons(req(
+            List.of(map("Name", "name"), map("Email", "email")),
+            List.of(
+                Map.of("Name", "Shaped " + unique(), "Email", "person@example.co.jp"),
+                Map.of("Name", "No dot " + unique(), "Email", "person@example"),
+                Map.of("Name", "Spaced " + unique(), "Email", "person name@example.com"),
+                Map.of("Name", "Doubled " + unique(), "Email", "person@@example.com"),
+                Map.of("Name", "Trailing dot " + unique(), "Email", "person@example.")),
+            "fill_empty"));
+
+        assertEquals(4, preview.getInvalid());
+        assertNull(preview.getRows().getFirst().getErrors());
+        for (int index = 1; index < 5; index++) {
+            assertTrue(preview.getRows().get(index).getErrors().getFirst().contains("Invalid email"));
+        }
+    }
+
+    @Test
+    void personImportSlugsCustomFieldLabelsWithoutSurroundingSeparators() {
+        String label = "  --Region Code--  ";
+        ImportRequest request = req(
+            List.of(map("Name", "name"), new ColumnMapping("Region", null, true, "text", label)),
+            List.of(Map.of("Name", "Slug probe " + unique(), "Region", "APAC")),
+            "fill_empty");
+
+        ImportResult result = reviewAndCommitPersons(request);
+
+        assertEquals(1, result.getCreated());
+        assertEquals("region_code", jdbcTemplate.queryForObject(
+            "SELECT field_key FROM custom_field_definition WHERE workspace_id = ? AND label = ?",
+            String.class, workspace.getId(), label.trim()));
+    }
+
+    @Test
+    void personImportPreviewSlugsHostileCustomFieldLabelsInLinearTime() {
+        ImportRequest request = req(
+            List.of(map("Name", "name"),
+                new ColumnMapping("Region", null, true, "text", "Region" + "-".repeat(200_000) + "Code")),
+            List.of(Map.of("Name", "Hostile slug " + unique(), "Region", "APAC")),
+            "fill_empty");
+
+        ImportPreviewResult preview = assertTimeout(Duration.ofSeconds(20),
+            () -> importService.previewPersons(request));
+
+        assertEquals(1, preview.getRows().size());
     }
 }

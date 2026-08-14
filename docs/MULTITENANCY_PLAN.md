@@ -463,7 +463,8 @@ still must be validated server-side).
 > handler; the SPA fetches it from `GET /api/auth/csrf` and echoes `X-XSRF-TOKEN` on mutations
 > (`requestJson` caches it and refresh-retries once on 403). Chosen over the cookie double-submit because
 > dev runs the SPA and API on different origins, where JS cannot read the API's cookie. The `/api/auth/**`
-> handshake is exempt. Kill-switch: `connex.security.csrf-enabled`. Login now rotates the session id
+> handshake is exempt. The former `connex.security.csrf-enabled` kill-switch was removed on
+> 2026-08-14 (#1296); CSRF protection is now unconditional. Login now rotates the session id
 > (fixation defense, #79). DB creds + `HttpOnly`/`SameSite`/`Secure` session cookies landed earlier (#88).
 
 - **Login** (`AuthService.login`, after `:110`): seed `session.activeWorkspaceId` from the user's

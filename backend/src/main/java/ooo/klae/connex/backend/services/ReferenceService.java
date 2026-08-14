@@ -85,8 +85,8 @@ public class ReferenceService {
     private static final Pattern NOTE_TOKEN = Pattern.compile(
         "\\[([^\\]]+)\\]\\(note" + REFERENCE_SEPARATOR + "(\\d+)\\)");
     private static final Pattern NOTE_REFERENCE_DEFINITION = Pattern.compile(
-        "(?im)^[ \\t]{0,3}\\[(?:\\\\.|[^\\]\\\\])+\\]:[ \\t]*"
-            + "(?:\\r?\\n[ \\t]+)?<?note:(\\d+)>?(?:[ \\t]+.*)?$");
+        "(?im)^[ \\t]{0,3}+\\[(?:\\\\.|[^\\]\\\\])++\\]:[ \\t]*+"
+            + "(?:\\r?\\n[ \\t]++)?<?note:(\\d+)>?(?:[ \\t].*)?$");
 
     /**
      * Reader-scoped prose and structured references after private-note targets are removed.
@@ -463,6 +463,20 @@ public class ReferenceService {
         return redacted;
     }
 
+    /**
+     * Collects every note target an untrusted body reaches, through inline destinations and through
+     * {@code NOTE_REFERENCE_DEFINITION} link-reference definitions.
+     *
+     * <p>Every repetition in that pattern is possessive so a hostile body cannot drive backtracking,
+     * and each is unambiguous in context, so refusing to give characters back does not change what
+     * it matches: no label alternative can consume a bare {@code ]}, and no indent run can be
+     * followed by a space or tab that the next required token would accept. Its trailing
+     * description is {@code [ \t].*} rather than {@code [ \t]+.*} because {@code .} already covers
+     * further spaces and tabs.
+     *
+     * @param content the raw reader-visible body
+     * @return the referenced note ids and whether any target was unparseable
+     */
     private static MarkdownNoteTargets markdownNoteTargets(String content) {
         if (content == null || content.isBlank()) {
             return new MarkdownNoteTargets(List.of(), false);
