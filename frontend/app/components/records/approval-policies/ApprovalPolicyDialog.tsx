@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { Loader2Icon } from 'lucide-react';
 
@@ -24,9 +24,20 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { createApprovalPolicy, updateApprovalPolicy } from '@/app/lib/api';
+import { createApprovalPolicy, getActiveWorkspaceMembers, updateApprovalPolicy } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import type { ApprovalPolicy, DocumentType } from '@/app/lib/types';
+import type {
+    ApprovalChainMode,
+    ApprovalPolicy,
+    ApprovalPolicyStep,
+    DocumentType,
+    SeparationOfDuties,
+    WorkspaceMember,
+} from '@/app/lib/types';
+import ApprovalChainEditor, {
+    availableApprovers,
+    type ChainStepDraft,
+} from './ApprovalChainEditor';
 
 type Props = {
     open: boolean;
@@ -48,6 +59,22 @@ type Draft = {
     currency: string;
     minTotal: string;
     minDiscountPercent: string;
+    mode: ApprovalChainMode;
+    separationOfDuties: SeparationOfDuties;
+    steps: ChainStepDraft[];
+};
+
+const toStepDraft = (step: ApprovalPolicyStep, index: number): ChainStepDraft => {
+    const anyApprover = step.approvers.some((approver) => approver.approverKind === 'any_approver');
+    return {
+        key: `saved-${step.id ?? index}`,
+        name: step.name ?? '',
+        requiredCount: step.requiredCount,
+        kind: anyApprover ? 'any_approver' : 'user',
+        userIds: anyApprover
+            ? []
+            : step.approvers.flatMap((approver) => (approver.userId == null ? [] : [approver.userId])),
+    };
 };
 
 const toDraft = (policy: ApprovalPolicy | null): Draft => ({
@@ -57,28 +84,62 @@ const toDraft = (policy: ApprovalPolicy | null): Draft => ({
     currency: policy?.currency ?? '',
     minTotal: policy?.minTotal != null ? String(policy.minTotal) : '',
     minDiscountPercent: policy?.minDiscountPercent != null ? String(policy.minDiscountPercent) : '',
+    mode: policy?.mode ?? 'sequential',
+    separationOfDuties: policy?.separationOfDuties ?? 'strict',
+    steps: (policy?.steps ?? []).map(toStepDraft),
+});
+
+const toStepPayload = (step: ChainStepDraft): ApprovalPolicyStep => ({
+    name: step.name.trim() === '' ? null : step.name.trim(),
+    requiredCount: step.requiredCount,
+    approvers:
+        step.kind === 'any_approver'
+            ? [{ approverKind: 'any_approver' }]
+            : step.userIds.map((userId) => ({ approverKind: 'user' as const, userId })),
 });
 
 /**
- * Create/edit dialog for a document approval policy. A policy needs a currency whenever a total
- * threshold is set (thresholds are never compared across currencies); the server revalidates.
+ * Create/edit dialog for a document approval policy: when approval is required, and the approver
+ * chain that must clear it. A policy needs a currency whenever a total threshold is set
+ * (thresholds are never compared across currencies); the server revalidates everything.
  */
 export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSaved }: Props) {
     const t = useTranslations('ApprovalPolicyDialog');
     const [draft, setDraft] = useState<Draft>(() => toDraft(policy));
     const [saving, setSaving] = useState(false);
     const [wasOpen, setWasOpen] = useState(open);
+    const [members, setMembers] = useState<WorkspaceMember[]>([]);
 
     if (open !== wasOpen) {
         setWasOpen(open);
         if (open) setDraft(toDraft(policy));
     }
 
+    useEffect(() => {
+        if (!open) return;
+        let cancelled = false;
+        getActiveWorkspaceMembers()
+            .then((all) => {
+                if (!cancelled) setMembers(all.filter((member) => member.status !== 'pending'));
+            })
+            .catch(() => {
+                if (!cancelled) setMembers([]);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [open]);
+
     const set = <K extends keyof Draft>(key: K, value: Draft[K]) =>
         setDraft((prev) => ({ ...prev, [key]: value }));
 
     const minTotalNeedsCurrency = draft.minTotal.trim() !== '' && draft.currency.trim() === '';
-    const canSave = draft.name.trim() !== '' && !minTotalNeedsCurrency && !saving;
+    const chainIsValid = draft.steps.every(
+        (step) =>
+            (step.kind === 'any_approver' || step.userIds.length > 0)
+            && step.requiredCount <= availableApprovers(step),
+    );
+    const canSave = draft.name.trim() !== '' && !minTotalNeedsCurrency && chainIsValid && !saving;
 
     const save = async () => {
         if (!canSave) return;
@@ -91,6 +152,9 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
                 currency: draft.currency.trim() === '' ? null : draft.currency.trim().toUpperCase(),
                 minTotal: draft.minTotal.trim() === '' ? null : Number(draft.minTotal),
                 minDiscountPercent: draft.minDiscountPercent.trim() === '' ? null : Number(draft.minDiscountPercent),
+                mode: draft.mode,
+                separationOfDuties: draft.separationOfDuties,
+                steps: draft.steps.map(toStepPayload),
             };
             const saved = policy
                 ? await updateApprovalPolicy(policy.id, payload)
@@ -112,7 +176,7 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
                     <DialogTitle>{policy ? t('editTitle') : t('newTitle')}</DialogTitle>
                     <DialogDescription>{t('description')}</DialogDescription>
                 </DialogHeader>
-                <div className="space-y-4">
+                <div className="max-h-[60dvh] space-y-4 overflow-y-auto pr-1">
                     <div className="space-y-2">
                         <Label htmlFor="policy-name">{t('nameLabel')}</Label>
                         <Input
@@ -184,6 +248,22 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
                     ) : (
                         <p className="text-xs text-muted-foreground">{t('thresholdHint')}</p>
                     )}
+                    <div className="space-y-3 border-t border-border pt-4">
+                        <div className="space-y-1">
+                            <p className="text-sm font-medium">{t('chainTitle')}</p>
+                            <p className="text-xs text-muted-foreground">{t('chainHint')}</p>
+                        </div>
+                        <ApprovalChainEditor
+                            mode={draft.mode}
+                            onModeChange={(mode) => set('mode', mode)}
+                            separationOfDuties={draft.separationOfDuties}
+                            onSeparationOfDutiesChange={(value) => set('separationOfDuties', value)}
+                            steps={draft.steps}
+                            onStepsChange={(steps) => set('steps', steps)}
+                            members={members}
+                            disabled={saving}
+                        />
+                    </div>
                     <div className="flex items-center justify-between rounded-xl border border-border px-3 py-2.5">
                         <Label htmlFor="policy-active" className="cursor-pointer">{t('activeLabel')}</Label>
                         <Switch

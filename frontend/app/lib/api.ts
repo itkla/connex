@@ -3569,9 +3569,11 @@ export function decideDocumentApproval(
     documentId: number,
     decision: 'approved' | 'rejected',
     comment?: string | null,
+    stepId?: number | null,
 ) {
     return postJson<Types.DocumentApproval>(
-        `/api/deals/${dealId}/documents/${documentId}/approval/decision`, { decision, comment: comment ?? null });
+        `/api/deals/${dealId}/documents/${documentId}/approval/decision`,
+        { decision, comment: comment ?? null, stepId: stepId ?? null });
 }
 
 export function cancelDocumentApproval(dealId: number, documentId: number) {

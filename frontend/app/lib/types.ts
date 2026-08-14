@@ -1518,18 +1518,71 @@ export type DocumentClientStatus = 'draft' | 'final' | 'superseded';
 
 export type DocumentApprovalStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
-/** One approval request on a generated document, with its decision once made. */
+/** How an approval chain runs: one step at a time, or every step at once. */
+export type ApprovalChainMode = 'sequential' | 'parallel';
+
+/**
+ * Who may not decide an approval: `strict` blocks both the requester and the document's author,
+ * `requester` blocks only the requester, `off` blocks neither.
+ */
+export type SeparationOfDuties = 'strict' | 'requester' | 'off';
+
+/** Whether a step is decided by named members or by anyone who can approve documents. */
+export type ApprovalApproverKind = 'user' | 'any_approver';
+
+export type ApprovalStepStatus = 'pending' | 'active' | 'approved' | 'rejected' | 'cancelled';
+
+export type ApprovalStepApprover = {
+    approverKind: ApprovalApproverKind;
+    userId?: number | null;
+};
+
+/** One approver's decision within an approval chain. */
+export type DocumentApprovalDecision = {
+    id: number;
+    stepId: number;
+    decision: 'approved' | 'rejected';
+    decidedBy: number;
+    comment?: string | null;
+    decidedAt: string;
+};
+
+/** One frozen step of an approval chain, with the approvals collected so far. */
+export type DocumentApprovalStep = {
+    id: number;
+    stepOrder: number;
+    name?: string | null;
+    requiredCount: number;
+    approvedCount: number;
+    status: ApprovalStepStatus;
+    decidedAt?: string | null;
+    approvers: ApprovalStepApprover[];
+    decisions: DocumentApprovalDecision[];
+};
+
+/** One approval request on a generated document, with its chain and terminal decision. */
 export type DocumentApproval = {
     id: number;
     documentId: number;
     policyId?: number | null;
     status: DocumentApprovalStatus;
+    mode: ApprovalChainMode;
+    separationOfDuties: SeparationOfDuties;
     requestedBy?: number | null;
     requestComment?: string | null;
     decidedBy?: number | null;
     decisionComment?: string | null;
     decidedAt?: string | null;
     createdAt: string;
+    steps: DocumentApprovalStep[];
+};
+
+/** One step of a policy's approver chain; order follows the array position. */
+export type ApprovalPolicyStep = {
+    id?: number;
+    name?: string | null;
+    requiredCount: number;
+    approvers: ApprovalStepApprover[];
 };
 
 /** Declares when a generated document requires internal approval before finalization. */
@@ -1541,6 +1594,9 @@ export type ApprovalPolicy = {
     currency?: string | null;
     minTotal?: number | null;
     minDiscountPercent?: number | null;
+    mode: ApprovalChainMode;
+    separationOfDuties: SeparationOfDuties;
+    steps: ApprovalPolicyStep[];
     createdAt: string;
     updatedAt: string;
 };
@@ -1552,6 +1608,9 @@ export type CreateApprovalPolicyPayload = {
     currency?: string | null;
     minTotal?: number | null;
     minDiscountPercent?: number | null;
+    mode?: ApprovalChainMode;
+    separationOfDuties?: SeparationOfDuties;
+    steps?: ApprovalPolicyStep[];
 };
 
 /**

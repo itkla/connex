@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -14,6 +15,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.ApprovalPolicy;
+import ooo.klae.connex.backend.beans.ApprovalPolicyStep;
+import ooo.klae.connex.backend.beans.ApprovalStepApprover;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DocumentTemplate;
@@ -24,6 +27,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.DealDocumentDto;
 import ooo.klae.connex.backend.dto.DealLineItemRequest;
 import ooo.klae.connex.backend.dto.DocumentApprovalDto;
+import ooo.klae.connex.backend.dto.DocumentApprovalStepDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -66,6 +70,41 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         r.setProductId(product.getId());
         r.setQuantity(new BigDecimal(quantity));
         lineItemService.create(deal.getId(), r);
+    }
+
+    private ApprovalPolicyStep step(int requiredCount, String name, User... approvers) {
+        ApprovalPolicyStep step = new ApprovalPolicyStep();
+        step.setName(name);
+        step.setRequiredCount(requiredCount);
+        step.setApprovers(approvers.length == 0 ? List.of(anyApprover())
+            : java.util.Arrays.stream(approvers).map(this::namedApprover).toList());
+        return step;
+    }
+
+    private ApprovalStepApprover anyApprover() {
+        ApprovalStepApprover approver = new ApprovalStepApprover();
+        approver.setApproverKind("any_approver");
+        return approver;
+    }
+
+    private ApprovalStepApprover namedApprover(User user) {
+        ApprovalStepApprover approver = new ApprovalStepApprover();
+        approver.setApproverKind("user");
+        approver.setUserId(user.getId());
+        return approver;
+    }
+
+    private ApprovalPolicy chainPolicy(String mode, ApprovalPolicyStep... steps) {
+        ApprovalPolicy policy = new ApprovalPolicy();
+        policy.setName("Chain policy " + unique());
+        policy.setActive(true);
+        policy.setMode(mode);
+        policy.setSteps(List.of(steps));
+        return policyService.create(policy);
+    }
+
+    private DocumentApprovalStepDto stepOf(DocumentApprovalDto approval, int order) {
+        return approval.steps().stream().filter(s -> s.stepOrder() == order).findFirst().orElseThrow();
     }
 
     private ApprovalPolicy jpyTotalPolicy(String minTotal) {
@@ -118,7 +157,7 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
 
         approvalService.requestApproval(deal.getId(), doc.id(), null);
         authenticateAs(approver(), workspace.getId());
-        DocumentApprovalDto decided = approvalService.decide(deal.getId(), doc.id(), "approved", "looks good");
+        DocumentApprovalDto decided = approvalService.decide(deal.getId(), doc.id(), "approved", "looks good", null);
         assertEquals("approved", decided.status());
         assertEquals("looks good", decided.decisionComment());
         assertNotNull(decided.decidedAt());
@@ -135,7 +174,7 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         approvalService.requestApproval(deal.getId(), doc.id(), null);
 
         assertThrows(ForbiddenException.class,
-            () -> approvalService.decide(deal.getId(), doc.id(), "approved", null));
+            () -> approvalService.decide(deal.getId(), doc.id(), "approved", null, null));
         assertEquals("pending_approval", documentService.getOne(deal.getId(), doc.id()).status());
         assertEquals("pending", documentService.getOne(deal.getId(), doc.id()).latestApproval().status());
     }
@@ -147,7 +186,7 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         approvalService.requestApproval(deal.getId(), doc.id(), null);
 
         assertThrows(ForbiddenException.class,
-            () -> approvalService.decide(deal.getId(), doc.id(), "rejected", null));
+            () -> approvalService.decide(deal.getId(), doc.id(), "rejected", null, null));
         assertEquals("pending_approval", documentService.getOne(deal.getId(), doc.id()).status());
         assertEquals("pending", documentService.getOne(deal.getId(), doc.id()).latestApproval().status());
     }
@@ -162,7 +201,7 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
 
         authenticateAs(currentUser, workspace.getId());
         assertThrows(ForbiddenException.class,
-            () -> approvalService.decide(deal.getId(), doc.id(), "approved", null));
+            () -> approvalService.decide(deal.getId(), doc.id(), "approved", null, null));
         assertEquals("pending_approval", documentService.getOne(deal.getId(), doc.id()).status());
         assertEquals("pending", documentService.getOne(deal.getId(), doc.id()).latestApproval().status());
     }
@@ -179,7 +218,7 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
 
         authenticateAs(currentUser, workspace.getId());
         assertThrows(ForbiddenException.class,
-            () -> approvalService.decide(deal.getId(), doc.id(), "approved", null));
+            () -> approvalService.decide(deal.getId(), doc.id(), "approved", null, null));
         assertEquals("pending_approval", documentService.getOne(deal.getId(), doc.id()).status());
         assertEquals("pending", documentService.getOne(deal.getId(), doc.id()).latestApproval().status());
     }
@@ -195,7 +234,7 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         authenticateAs(approver(), workspace.getId());
 
         assertThrows(ForbiddenException.class,
-            () -> approvalService.decide(deal.getId(), doc.id(), "approved", null));
+            () -> approvalService.decide(deal.getId(), doc.id(), "approved", null, null));
         assertEquals("pending_approval", documentService.getOne(deal.getId(), doc.id()).status());
         assertEquals("pending", documentService.getOne(deal.getId(), doc.id()).latestApproval().status());
     }
@@ -209,7 +248,7 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         approvalService.requestApproval(deal.getId(), doc.id(), null);
 
         authenticateAs(approver(), workspace.getId());
-        DocumentApprovalDto rejected = approvalService.decide(deal.getId(), doc.id(), "rejected", "too steep");
+        DocumentApprovalDto rejected = approvalService.decide(deal.getId(), doc.id(), "rejected", "too steep", null);
         assertEquals("rejected", rejected.status());
 
         DealDocumentDto reread = documentService.getOne(deal.getId(), doc.id());
@@ -300,7 +339,7 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         assertEquals("cancelled", superseded.latestApproval().status());
 
         assertThrows(BadRequestException.class,
-            () -> approvalService.decide(deal.getId(), doc.id(), "approved", null));
+            () -> approvalService.decide(deal.getId(), doc.id(), "approved", null, null));
     }
 
     @Test
@@ -330,7 +369,7 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         User member = newUser();
         authenticateAs(member, workspace.getId());
         assertThrows(ForbiddenException.class,
-            () -> approvalService.decide(deal.getId(), doc.id(), "approved", null));
+            () -> approvalService.decide(deal.getId(), doc.id(), "approved", null, null));
     }
 
     @Test
@@ -343,7 +382,7 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         assertThrows(ResourceNotFoundException.class,
             () -> approvalService.getForDocument(other.getId(), doc.id()));
         assertThrows(ResourceNotFoundException.class,
-            () -> approvalService.decide(other.getId(), doc.id(), "approved", null));
+            () -> approvalService.decide(other.getId(), doc.id(), "approved", null, null));
         assertThrows(ResourceNotFoundException.class,
             () -> approvalService.cancel(other.getId(), doc.id()));
     }
@@ -356,7 +395,7 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         DealDocumentDto first = generate(deal);
         approvalService.requestApproval(deal.getId(), first.id(), null);
         authenticateAs(approver(), workspace.getId());
-        approvalService.decide(deal.getId(), first.id(), "approved", null);
+        approvalService.decide(deal.getId(), first.id(), "approved", null, null);
 
         authenticateAs(currentUser, workspace.getId());
         DealDocumentDto second = generate(deal);
@@ -378,12 +417,255 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
 
         DocumentApprovalDto approval = approvalService.requestApproval(deal.getId(), doc.id(), null);
         assertNotNull(notificationMapper.findByDedupe(workspace.getId(), approver.getId(),
-            "document.approval_request:" + approval.id() + ":" + approver.getId()));
+            "document.approval_request:" + approval.id() + ":"
+                + approval.steps().getFirst().id() + ":" + approver.getId()));
 
         authenticateAs(approver, workspace.getId());
-        approvalService.decide(deal.getId(), doc.id(), "approved", null);
+        approvalService.decide(deal.getId(), doc.id(), "approved", null, null);
         assertNotNull(notificationMapper.findByDedupe(workspace.getId(), currentUser.getId(),
             "document.approval_decision:" + approval.id() + ":" + currentUser.getId()));
+    }
+
+    @Test
+    void voluntaryRequestFreezesOneImplicitAnyApproverStep() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+
+        DocumentApprovalDto approval = approvalService.requestApproval(deal.getId(), doc.id(), null);
+
+        assertEquals(1, approval.steps().size());
+        DocumentApprovalStepDto only = approval.steps().getFirst();
+        assertEquals("active", only.status());
+        assertEquals(1, only.requiredCount());
+        assertEquals("any_approver", only.approvers().getFirst().getApproverKind());
+        assertEquals("sequential", approval.mode());
+        assertEquals("strict", approval.separationOfDuties());
+    }
+
+    @Test
+    void sequentialChainOpensOneStepAtATime() {
+        User first = approver();
+        User second = approver();
+        chainPolicy("sequential", step(1, "Manager", first), step(1, "Finance", second));
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+
+        DocumentApprovalDto requested = approvalService.requestApproval(deal.getId(), doc.id(), null);
+        assertEquals("active", stepOf(requested, 1).status());
+        assertEquals("pending", stepOf(requested, 2).status());
+
+        authenticateAs(second, workspace.getId());
+        assertThrows(ForbiddenException.class,
+            () -> approvalService.decide(deal.getId(), doc.id(), "approved", null, null));
+
+        authenticateAs(first, workspace.getId());
+        DocumentApprovalDto afterFirst = approvalService.decide(deal.getId(), doc.id(), "approved", null, null);
+        assertEquals("pending", afterFirst.status());
+        assertEquals("approved", stepOf(afterFirst, 1).status());
+        assertEquals("active", stepOf(afterFirst, 2).status());
+        assertEquals("pending_approval", documentService.getOne(deal.getId(), doc.id()).status());
+
+        authenticateAs(second, workspace.getId());
+        DocumentApprovalDto afterSecond = approvalService.decide(deal.getId(), doc.id(), "approved", null, null);
+        assertEquals("approved", afterSecond.status());
+        assertEquals("approved", documentService.getOne(deal.getId(), doc.id()).status());
+    }
+
+    @Test
+    void parallelChainOpensEveryStepAndCompletesInAnyOrder() {
+        User first = approver();
+        User second = approver();
+        chainPolicy("parallel", step(1, "Legal", first), step(1, "Finance", second));
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+
+        DocumentApprovalDto requested = approvalService.requestApproval(deal.getId(), doc.id(), null);
+        assertEquals("active", stepOf(requested, 1).status());
+        assertEquals("active", stepOf(requested, 2).status());
+
+        authenticateAs(second, workspace.getId());
+        DocumentApprovalDto afterSecond = approvalService.decide(deal.getId(), doc.id(), "approved", null, null);
+        assertEquals("pending", afterSecond.status());
+        assertEquals("approved", stepOf(afterSecond, 2).status());
+
+        authenticateAs(first, workspace.getId());
+        DocumentApprovalDto afterFirst = approvalService.decide(deal.getId(), doc.id(), "approved", null, null);
+        assertEquals("approved", afterFirst.status());
+        assertEquals("approved", documentService.getOne(deal.getId(), doc.id()).status());
+    }
+
+    @Test
+    void quorumNeedsDistinctApproversAndRefusesADoubleVote() {
+        User first = approver();
+        User second = approver();
+        chainPolicy("sequential", step(2, "Two of us", first, second));
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        approvalService.requestApproval(deal.getId(), doc.id(), null);
+
+        authenticateAs(first, workspace.getId());
+        DocumentApprovalDto afterFirst = approvalService.decide(deal.getId(), doc.id(), "approved", null, null);
+        assertEquals("pending", afterFirst.status());
+        assertEquals(1, stepOf(afterFirst, 1).approvedCount());
+        assertThrows(ForbiddenException.class,
+            () -> approvalService.decide(deal.getId(), doc.id(), "approved", null, null));
+
+        authenticateAs(second, workspace.getId());
+        DocumentApprovalDto afterSecond = approvalService.decide(deal.getId(), doc.id(), "approved", null, null);
+        assertEquals("approved", afterSecond.status());
+        assertEquals(2, stepOf(afterSecond, 1).approvedCount());
+    }
+
+    @Test
+    void rejectionCancelsTheRemainingChain() {
+        User first = approver();
+        User second = approver();
+        chainPolicy("parallel", step(1, "Legal", first), step(1, "Finance", second));
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        approvalService.requestApproval(deal.getId(), doc.id(), null);
+
+        authenticateAs(first, workspace.getId());
+        DocumentApprovalDto rejected = approvalService.decide(deal.getId(), doc.id(), "rejected", "no", null);
+
+        assertEquals("rejected", rejected.status());
+        assertEquals("rejected", stepOf(rejected, 1).status());
+        assertEquals("cancelled", stepOf(rejected, 2).status());
+        assertEquals("draft", documentService.getOne(deal.getId(), doc.id()).status());
+    }
+
+    @Test
+    void aNamedStepRefusesAnUnassignedApprover() {
+        User assigned = approver();
+        User other = approver();
+        chainPolicy("sequential", step(1, "Manager", assigned));
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        approvalService.requestApproval(deal.getId(), doc.id(), null);
+
+        authenticateAs(other, workspace.getId());
+        assertThrows(ForbiddenException.class,
+            () -> approvalService.decide(deal.getId(), doc.id(), "approved", null, null));
+        assertEquals("pending_approval", documentService.getOne(deal.getId(), doc.id()).status());
+
+        authenticateAs(assigned, workspace.getId());
+        assertEquals("approved",
+            approvalService.decide(deal.getId(), doc.id(), "approved", null, null).status());
+    }
+
+    @Test
+    void stepIdTargetsAnExactStepAndRefusesAClosedOne() {
+        User first = approver();
+        User second = approver();
+        chainPolicy("sequential", step(1, "Manager", first), step(1, "Finance", second));
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(deal.getId(), doc.id(), null);
+        int firstStepId = stepOf(requested, 1).id();
+        int secondStepId = stepOf(requested, 2).id();
+
+        authenticateAs(second, workspace.getId());
+        assertThrows(BadRequestException.class,
+            () -> approvalService.decide(deal.getId(), doc.id(), "approved", null, secondStepId));
+
+        authenticateAs(first, workspace.getId());
+        DocumentApprovalDto afterFirst = approvalService.decide(
+            deal.getId(), doc.id(), "approved", null, firstStepId);
+        assertEquals("approved", stepOf(afterFirst, 1).status());
+        assertThrows(BadRequestException.class,
+            () -> approvalService.decide(deal.getId(), doc.id(), "approved", null, firstStepId));
+    }
+
+    @Test
+    void separationOfDutiesOffLetsTheRequesterApprove() {
+        ApprovalPolicy policy = new ApprovalPolicy();
+        policy.setName("Self serve " + unique());
+        policy.setActive(true);
+        policy.setSeparationOfDuties("off");
+        policy.setSteps(List.of(step(1, "Anyone")));
+        policyService.create(policy);
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+
+        DocumentApprovalDto requested = approvalService.requestApproval(deal.getId(), doc.id(), null);
+        assertEquals("off", requested.separationOfDuties());
+        assertEquals("approved",
+            approvalService.decide(deal.getId(), doc.id(), "approved", null, null).status());
+        assertEquals("approved", documentService.getOne(deal.getId(), doc.id()).status());
+    }
+
+    @Test
+    void separationOfDutiesRequesterStillBlocksTheRequesterButAdmitsTheAuthor() {
+        ApprovalPolicy policy = new ApprovalPolicy();
+        policy.setName("Requester only " + unique());
+        policy.setActive(true);
+        policy.setSeparationOfDuties("requester");
+        policy.setSteps(List.of(step(1, "Anyone")));
+        policyService.create(policy);
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        User requester = approver();
+        authenticateAs(requester, workspace.getId());
+        approvalService.requestApproval(deal.getId(), doc.id(), null);
+
+        assertThrows(ForbiddenException.class,
+            () -> approvalService.decide(deal.getId(), doc.id(), "approved", null, null));
+
+        authenticateAs(currentUser, workspace.getId());
+        assertEquals("approved",
+            approvalService.decide(deal.getId(), doc.id(), "approved", null, null).status());
+    }
+
+    @Test
+    void editingThePolicyDoesNotRewriteAnInFlightChain() {
+        User first = approver();
+        User second = approver();
+        ApprovalPolicy policy = chainPolicy("sequential", step(1, "Manager", first));
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(deal.getId(), doc.id(), null);
+        assertEquals(1, requested.steps().size());
+
+        ApprovalPolicy edited = new ApprovalPolicy();
+        edited.setName(policy.getName());
+        edited.setActive(true);
+        edited.setMode("sequential");
+        edited.setSteps(List.of(step(1, "Manager", first), step(1, "Finance", second)));
+        policyService.update(policy.getId(), edited);
+
+        DocumentApprovalDto reread = approvalService.getForDocument(deal.getId(), doc.id()).getFirst();
+        assertEquals(1, reread.steps().size());
+        authenticateAs(first, workspace.getId());
+        assertEquals("approved",
+            approvalService.decide(deal.getId(), doc.id(), "approved", null, null).status());
+    }
+
+    @Test
+    void aStepNamingOnlyPeopleWhoCannotDecideIsRefusedAtRequestTime() {
+        chainPolicy("sequential", step(1, "Self review", currentUser));
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+
+        assertThrows(BadRequestException.class,
+            () -> approvalService.requestApproval(deal.getId(), doc.id(), null));
+        assertEquals("draft", documentService.getOne(deal.getId(), doc.id()).status());
+    }
+
+    @Test
+    void anApprovalFrozenByAnOlderBinaryStillDecides() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        DocumentApprovalDto approval = approvalService.requestApproval(deal.getId(), doc.id(), null);
+        jdbcTemplate.update("DELETE FROM document_approval_step WHERE workspace_id = ? AND approval_id = ?",
+            workspace.getId(), approval.id());
+
+        authenticateAs(approver(), workspace.getId());
+        DocumentApprovalDto decided = approvalService.decide(deal.getId(), doc.id(), "approved", null, null);
+
+        assertEquals("approved", decided.status());
+        assertEquals(1, decided.steps().size());
+        assertEquals("approved", decided.steps().getFirst().status());
+        assertEquals("approved", documentService.getOne(deal.getId(), doc.id()).status());
     }
 
     @Test
@@ -395,7 +677,7 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         DocumentApprovalDto approval = approvalService.requestApproval(deal.getId(), doc.id(), null);
         assertNull(approval.policyId());
         authenticateAs(approver(), workspace.getId());
-        approvalService.decide(deal.getId(), doc.id(), "approved", null);
+        approvalService.decide(deal.getId(), doc.id(), "approved", null, null);
         authenticateAs(currentUser, workspace.getId());
         assertEquals("final", documentService.updateStatus(deal.getId(), doc.id(), "final").status());
     }

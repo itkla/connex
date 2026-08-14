@@ -494,6 +494,14 @@
         "createTemplate": "テンプレートを作成",
         "emptyTitle": "ドキュメントがありません",
         "emptyBody": "テンプレートから見積書・提案書・注文書・契約書を生成します。明細と合計はその時点で確定されます。",
-        "pdf": "PDF"
+        "pdf": "PDF",
+        "chainStep": "ステップ{number}",
+        "chainProgress": "{approved}/{required}",
+        "chainParallel": "全ステップ同時",
+        "chainStatus_pending": "待機中",
+        "chainStatus_active": "受付中",
+        "chainStatus_approved": "承認済み",
+        "chainStatus_rejected": "却下",
+        "chainStatus_cancelled": "取消済み"
     }
 }

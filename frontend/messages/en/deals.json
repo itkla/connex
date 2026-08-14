@@ -494,6 +494,14 @@
         "createTemplate": "Create a template",
         "emptyTitle": "No documents yet",
         "emptyBody": "Generate a quote, proposal, order form, or contract from a template. Line items and totals are captured at that moment.",
-        "pdf": "PDF"
+        "pdf": "PDF",
+        "chainStep": "Step {number}",
+        "chainProgress": "{approved}/{required}",
+        "chainParallel": "all steps at once",
+        "chainStatus_pending": "waiting",
+        "chainStatus_active": "open",
+        "chainStatus_approved": "approved",
+        "chainStatus_rejected": "rejected",
+        "chainStatus_cancelled": "cancelled"
     }
 }

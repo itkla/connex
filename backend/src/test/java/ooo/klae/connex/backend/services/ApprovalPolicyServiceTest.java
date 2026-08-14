@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -11,6 +12,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.ApprovalPolicy;
+import ooo.klae.connex.backend.beans.ApprovalPolicyStep;
+import ooo.klae.connex.backend.beans.ApprovalStepApprover;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DocumentTemplate;
@@ -153,6 +156,95 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
         p.setActive(false);
         policyService.update(p.getId(), p);
         assertFalse(quote(deal).requiresApproval());
+    }
+
+    private ApprovalStepApprover anyApprover() {
+        ApprovalStepApprover approver = new ApprovalStepApprover();
+        approver.setApproverKind("any_approver");
+        return approver;
+    }
+
+    private ApprovalStepApprover namedApprover(int userId) {
+        ApprovalStepApprover approver = new ApprovalStepApprover();
+        approver.setApproverKind("user");
+        approver.setUserId(userId);
+        return approver;
+    }
+
+    private ApprovalPolicyStep step(int requiredCount, String name, ApprovalStepApprover... approvers) {
+        ApprovalPolicyStep step = new ApprovalPolicyStep();
+        step.setName(name);
+        step.setRequiredCount(requiredCount);
+        step.setApprovers(List.of(approvers));
+        return step;
+    }
+
+    private ApprovalPolicy chained(String mode, ApprovalPolicyStep... steps) {
+        ApprovalPolicy policy = new ApprovalPolicy();
+        policy.setName("Chained " + unique());
+        policy.setActive(true);
+        policy.setMode(mode);
+        policy.setSteps(List.of(steps));
+        return policy;
+    }
+
+    private User admin() {
+        User admin = newUser();
+        workspaceMapper.updateMemberRole(workspace.getId(), admin.getId(), "admin");
+        return admin;
+    }
+
+    @Test
+    void chainRoundTripsAndIsReplacedWholesaleOnUpdate() {
+        User one = admin();
+        User two = admin();
+        ApprovalPolicy saved = policyService.create(chained("parallel",
+            step(2, "Managers", namedApprover(one.getId()), namedApprover(two.getId())),
+            step(1, "Finance", anyApprover())));
+
+        assertEquals("parallel", saved.getMode());
+        assertEquals("strict", saved.getSeparationOfDuties());
+        assertEquals(2, saved.getSteps().size());
+        assertEquals(1, saved.getSteps().get(0).getStepOrder());
+        assertEquals(2, saved.getSteps().get(0).getRequiredCount());
+        assertEquals(2, saved.getSteps().get(0).getApprovers().size());
+        assertEquals("any_approver", saved.getSteps().get(1).getApprovers().getFirst().getApproverKind());
+
+        ApprovalPolicy replacement = chained("sequential", step(1, "Only", namedApprover(one.getId())));
+        replacement.setName(saved.getName());
+        ApprovalPolicy updated = policyService.update(saved.getId(), replacement);
+
+        assertEquals(1, updated.getSteps().size());
+        assertEquals("Only", updated.getSteps().getFirst().getName());
+        assertEquals("sequential", updated.getMode());
+    }
+
+    @Test
+    void aQuorumLargerThanItsApproversIsRefused() {
+        User one = admin();
+        assertThrows(BadRequestException.class,
+            () -> policyService.create(chained("sequential", step(2, "Two", namedApprover(one.getId())))));
+    }
+
+    @Test
+    void anApproverWhoCannotApproveDocumentsIsRefused() {
+        User member = newUser();
+        assertThrows(BadRequestException.class,
+            () -> policyService.create(chained("sequential", step(1, "Member", namedApprover(member.getId())))));
+    }
+
+    @Test
+    void mixingAnyApproverWithNamedApproversIsRefused() {
+        User one = admin();
+        assertThrows(BadRequestException.class, () -> policyService.create(chained("sequential",
+            step(1, "Mixed", anyApprover(), namedApprover(one.getId())))));
+    }
+
+    @Test
+    void listingTheSameApproverTwiceOnAStepIsRefused() {
+        User one = admin();
+        assertThrows(BadRequestException.class, () -> policyService.create(chained("sequential",
+            step(1, "Duplicated", namedApprover(one.getId()), namedApprover(one.getId())))));
     }
 
     @Test

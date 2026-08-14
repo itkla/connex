@@ -4,9 +4,12 @@ import java.util.List;
 
 import org.apache.ibatis.annotations.Param;
 
+import ooo.klae.connex.backend.beans.ApprovalStepApprover;
 import ooo.klae.connex.backend.beans.DocumentApproval;
+import ooo.klae.connex.backend.beans.DocumentApprovalDecision;
+import ooo.klae.connex.backend.beans.DocumentApprovalStep;
 
-/** Mapper for {@code document_approval}; every statement is workspace-scoped. */
+/** Mapper for {@code document_approval} and its frozen chain; every statement is workspace-scoped. */
 public interface DocumentApprovalMapper {
     List<DocumentApproval> getByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     List<DocumentApproval> getByDocumentId(@Param("workspaceId") int workspaceId, @Param("documentId") int documentId);
@@ -15,4 +18,16 @@ public interface DocumentApprovalMapper {
     int insert(DocumentApproval approval);
     int decide(@Param("workspaceId") int workspaceId, @Param("id") int id, @Param("status") String status,
         @Param("decidedBy") Integer decidedBy, @Param("decisionComment") String decisionComment);
+
+    List<DocumentApprovalStep> getStepsByApprovalIds(@Param("workspaceId") int workspaceId,
+        @Param("approvalIds") List<Integer> approvalIds);
+    List<DocumentApprovalDecision> getDecisionsByApprovalIds(@Param("workspaceId") int workspaceId,
+        @Param("approvalIds") List<Integer> approvalIds);
+    int insertStep(DocumentApprovalStep step);
+    int insertStepApprover(ApprovalStepApprover approver);
+    int insertDecision(DocumentApprovalDecision decision);
+    int updateStepStatus(@Param("workspaceId") int workspaceId, @Param("id") int id,
+        @Param("status") String status, @Param("expectedStatus") String expectedStatus);
+    int cancelOpenSteps(@Param("workspaceId") int workspaceId, @Param("approvalId") int approvalId);
+    int countStepApprovals(@Param("workspaceId") int workspaceId, @Param("stepId") int stepId);
 }

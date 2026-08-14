@@ -4,24 +4,57 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.DocumentApprovalMapper">
 
   <resultMap id="DocumentApprovalResult" type="DocumentApproval">
-    <id     property="id"              column="id"/>
-    <result property="workspaceId"     column="workspace_id"/>
-    <result property="dealId"          column="deal_id"/>
-    <result property="documentId"      column="document_id"/>
-    <result property="policyId"        column="policy_id"/>
-    <result property="status"          column="status"/>
-    <result property="requestedBy"     column="requested_by"/>
-    <result property="requestComment"  column="request_comment"/>
-    <result property="decidedBy"       column="decided_by"/>
-    <result property="decisionComment" column="decision_comment"/>
-    <result property="decidedAt"       column="decided_at"/>
-    <result property="createdAt"       column="created_at"/>
-    <result property="updatedAt"       column="updated_at"/>
+    <id     property="id"                 column="id"/>
+    <result property="workspaceId"        column="workspace_id"/>
+    <result property="dealId"             column="deal_id"/>
+    <result property="documentId"         column="document_id"/>
+    <result property="policyId"           column="policy_id"/>
+    <result property="status"             column="status"/>
+    <result property="mode"               column="mode"/>
+    <result property="separationOfDuties" column="separation_of_duties"/>
+    <result property="requestedBy"        column="requested_by"/>
+    <result property="requestComment"     column="request_comment"/>
+    <result property="decidedBy"          column="decided_by"/>
+    <result property="decisionComment"    column="decision_comment"/>
+    <result property="decidedAt"          column="decided_at"/>
+    <result property="createdAt"          column="created_at"/>
+    <result property="updatedAt"          column="updated_at"/>
+  </resultMap>
+
+  <resultMap id="DocumentApprovalStepResult" type="DocumentApprovalStep">
+    <id     property="id"            column="id"/>
+    <result property="workspaceId"   column="workspace_id"/>
+    <result property="approvalId"    column="approval_id"/>
+    <result property="stepOrder"     column="step_order"/>
+    <result property="name"          column="name"/>
+    <result property="requiredCount" column="required_count"/>
+    <result property="status"        column="status"/>
+    <result property="decidedAt"     column="decided_at"/>
+    <result property="createdAt"     column="created_at"/>
+    <result property="updatedAt"     column="updated_at"/>
+    <collection property="approvers" ofType="ApprovalStepApprover" notNullColumn="approver_id">
+      <id     property="id"           column="approver_id"/>
+      <result property="workspaceId"  column="approver_workspace_id"/>
+      <result property="stepId"       column="approver_step_id"/>
+      <result property="approverKind" column="approver_kind"/>
+      <result property="userId"       column="approver_user_id"/>
+    </collection>
+  </resultMap>
+
+  <resultMap id="DocumentApprovalDecisionResult" type="DocumentApprovalDecision">
+    <id     property="id"          column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="approvalId"  column="approval_id"/>
+    <result property="stepId"      column="step_id"/>
+    <result property="decision"    column="decision"/>
+    <result property="decidedBy"   column="decided_by"/>
+    <result property="comment"     column="comment"/>
+    <result property="decidedAt"   column="decided_at"/>
   </resultMap>
 
   <sql id="cols">
-    id, workspace_id, deal_id, document_id, policy_id, status, requested_by, request_comment,
-    decided_by, decision_comment, decided_at, created_at, updated_at
+    id, workspace_id, deal_id, document_id, policy_id, status, mode, separation_of_duties,
+    requested_by, request_comment, decided_by, decision_comment, decided_at, created_at, updated_at
   </sql>
 
   <select id="getByDealId" resultMap="DocumentApprovalResult">
@@ -50,9 +83,11 @@
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO document_approval (
-      workspace_id, deal_id, document_id, policy_id, status, requested_by, request_comment
+      workspace_id, deal_id, document_id, policy_id, status, mode, separation_of_duties,
+      requested_by, request_comment
     ) VALUES (
-      #{workspaceId}, #{dealId}, #{documentId}, #{policyId}, #{status}, #{requestedBy}, #{requestComment}
+      #{workspaceId}, #{dealId}, #{documentId}, #{policyId}, #{status}, #{mode},
+      #{separationOfDuties}, #{requestedBy}, #{requestComment}
     )
   </insert>
 
@@ -64,4 +99,69 @@
       decided_at = CURRENT_TIMESTAMP
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'pending'
   </update>
+
+  <select id="getStepsByApprovalIds" resultMap="DocumentApprovalStepResult">
+    SELECT s.id, s.workspace_id, s.approval_id, s.step_order, s.name, s.required_count, s.status,
+           s.decided_at, s.created_at, s.updated_at,
+           a.id AS approver_id, a.workspace_id AS approver_workspace_id, a.step_id AS approver_step_id,
+           a.approver_kind, a.user_id AS approver_user_id
+    FROM document_approval_step s
+    LEFT JOIN document_approval_step_approver a
+      ON a.workspace_id = s.workspace_id AND a.step_id = s.id
+    WHERE s.workspace_id = #{workspaceId}
+      AND s.approval_id IN
+      <foreach collection="approvalIds" item="approvalId" open="(" separator="," close=")">#{approvalId}</foreach>
+    ORDER BY s.approval_id, s.step_order, s.id, a.id
+  </select>
+
+  <select id="getDecisionsByApprovalIds" resultMap="DocumentApprovalDecisionResult">
+    SELECT id, workspace_id, approval_id, step_id, decision, decided_by, comment, decided_at
+    FROM document_approval_decision
+    WHERE workspace_id = #{workspaceId}
+      AND approval_id IN
+      <foreach collection="approvalIds" item="approvalId" open="(" separator="," close=")">#{approvalId}</foreach>
+    ORDER BY approval_id, step_id, id
+  </select>
+
+  <insert id="insertStep" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO document_approval_step (
+      workspace_id, approval_id, step_order, name, required_count, status
+    ) VALUES (
+      #{workspaceId}, #{approvalId}, #{stepOrder}, #{name}, #{requiredCount}, #{status}
+    )
+  </insert>
+
+  <insert id="insertStepApprover" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO document_approval_step_approver (workspace_id, step_id, approver_kind, user_id)
+    VALUES (#{workspaceId}, #{stepId}, #{approverKind}, #{userId})
+  </insert>
+
+  <insert id="insertDecision" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO document_approval_decision (
+      workspace_id, approval_id, step_id, decision, decided_by, comment
+    ) VALUES (
+      #{workspaceId}, #{approvalId}, #{stepId}, #{decision}, #{decidedBy}, #{comment}
+    )
+  </insert>
+
+  <update id="updateStepStatus">
+    UPDATE document_approval_step SET
+      status = #{status},
+      decided_at = CASE WHEN #{status} IN ('approved', 'rejected', 'cancelled')
+                        THEN CURRENT_TIMESTAMP ELSE NULL END
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = #{expectedStatus}
+  </update>
+
+  <update id="cancelOpenSteps">
+    UPDATE document_approval_step SET
+      status = 'cancelled',
+      decided_at = CURRENT_TIMESTAMP
+    WHERE workspace_id = #{workspaceId} AND approval_id = #{approvalId}
+      AND status IN ('pending', 'active')
+  </update>
+
+  <select id="countStepApprovals" resultType="int">
+    SELECT COUNT(*) FROM document_approval_decision
+    WHERE workspace_id = #{workspaceId} AND step_id = #{stepId} AND decision = 'approved'
+  </select>
 </mapper>
