@@ -3,6 +3,18 @@
 }
 
 :80 {
+	header {
+		# Prevent browsers from interpreting assets as a different media type than the declared Content-Type.
+		>X-Content-Type-Options nosniff
+		# Keep paths, queries, and tokens out of cross-origin referrers while preserving same-origin diagnostics.
+		>Referrer-Policy strict-origin-when-cross-origin
+		# Retain legacy clickjacking protection alongside CSP frame-ancestors for older clients.
+		>X-Frame-Options DENY
+		# Deferred sets above replace upstream values after proxying so identical headers never duplicate.
+		# Default only when absent so the backend's stricter API CSP is preserved without duplicate values.
+		?Content-Security-Policy "frame-ancestors 'none'"
+	}
+
 	handle /api/* {
 		reverse_proxy backend:8080
 	}
@@ -13,5 +25,16 @@
 
 	handle {
 		reverse_proxy frontend:3000
+	}
+
+	# Normal response handlers stop when proxying fails, so apply the same contract in Caddy's error route.
+	handle_errors {
+		header {
+			X-Content-Type-Options nosniff
+			Referrer-Policy strict-origin-when-cross-origin
+			X-Frame-Options DENY
+			Content-Security-Policy "frame-ancestors 'none'"
+		}
+		respond "{err.status_code} {err.status_text}"
 	}
 }

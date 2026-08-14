@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 import createNextIntlPlugin from "next-intl/plugin";
 
+import {
+  FRAME_ANCESTORS_DIRECTIVE,
+  FRONTEND_SECURITY_HEADERS,
+} from "./security-headers";
+
 const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
 
 const nextConfig: NextConfig = {
@@ -27,11 +32,18 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        source: "/:path*",
+        headers: FRONTEND_SECURITY_HEADERS,
+      },
+      {
         source: "/attachments/:path*",
         headers: [
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Content-Disposition", value: "attachment" },
-          { key: "Content-Security-Policy", value: "default-src 'none'; sandbox; frame-ancestors 'none'" },
+          {
+            key: "Content-Security-Policy",
+            value: ["default-src 'none'", "sandbox", FRAME_ANCESTORS_DIRECTIVE].join("; "),
+          },
         ],
       },
     ];

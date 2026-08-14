@@ -170,6 +170,8 @@ def classify_paths(paths: list[str], event_name: str = "pull_request") -> tuple[
         if path.startswith("deploy/"):
             categories["compose"] = True
             categories["profile_boot"] = True
+            if path == "deploy/Caddyfile":
+                categories["action_pins"] = True
             continue
 
         force_full(categories)

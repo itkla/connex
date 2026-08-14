@@ -86,6 +86,12 @@ class CiChangeClassificationTest(unittest.TestCase):
         self.assertTrue(categories["profile_boot"])
         self.assertFalse(categories["backend"])
 
+    def test_caddyfile_change_adds_the_edge_header_regression(self) -> None:
+        categories = self.classify("deploy/Caddyfile")
+        self.assertTrue(categories["compose"])
+        self.assertTrue(categories["profile_boot"])
+        self.assertTrue(categories["action_pins"])
+
     def test_ci_policy_change_forces_every_category(self) -> None:
         categories = self.classify(".github/workflows/ci.yml")
         self.assertTrue(all(categories.values()))
