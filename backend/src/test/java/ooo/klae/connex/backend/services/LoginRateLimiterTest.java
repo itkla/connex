@@ -80,7 +80,7 @@ class LoginRateLimiterTest {
 
     @Test
     void throttlesSanitizedPrivateClientWithoutThrottlingPrivateDirectPeer() {
-        LoginRateLimiter limiter = new LoginRateLimiter(1, 100, 900);
+        LoginRateLimiter limiter = new LoginRateLimiter(1, 100, 5000, 900);
         long now = 1_000L;
         ResolvedClientIp privateClient = new ResolvedClientIp("172.20.5.10", true);
         ResolvedClientIp privateProxy = new ResolvedClientIp("172.18.0.4", false);
@@ -106,8 +106,8 @@ class LoginRateLimiterTest {
         LoginRateLimiter limiter = new LoginRateLimiter(1, 100, 5000, 900);
         long now = 1_000L;
 
-        assertTrue(limiter.tryAcquireOneTimeLinkExchange("203.0.113.8", now));
-        assertFalse(limiter.tryAcquireOneTimeLinkExchange("203.0.113.8", now));
+        assertTrue(limiter.tryAcquireOneTimeLinkExchange(new ResolvedClientIp("203.0.113.8", false), now));
+        assertFalse(limiter.tryAcquireOneTimeLinkExchange(new ResolvedClientIp("203.0.113.8", false), now));
         assertFalse(limiter.isBlocked("203.0.113.8", "alice", now));
     }
 
@@ -116,8 +116,8 @@ class LoginRateLimiterTest {
         LoginRateLimiter limiter = new LoginRateLimiter(1, 100, 2, 900);
         long now = 1_000L;
 
-        assertTrue(limiter.tryAcquireOneTimeLinkExchange("10.0.0.5", now));
+        assertTrue(limiter.tryAcquireOneTimeLinkExchange(new ResolvedClientIp("10.0.0.5", false), now));
         assertTrue(limiter.tryAcquireOneTimeLinkExchange(null, now));
-        assertFalse(limiter.tryAcquireOneTimeLinkExchange(" ", now));
+        assertFalse(limiter.tryAcquireOneTimeLinkExchange(new ResolvedClientIp(" ", false), now));
     }
 }

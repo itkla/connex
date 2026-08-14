@@ -11,6 +11,7 @@ import org.springframework.mock.web.MockHttpServletResponse;
 
 import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.util.ClientIpResolver;
+import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
 
 class OneTimeLinkExchangeAdmissionFilterTest {
 
@@ -20,8 +21,8 @@ class OneTimeLinkExchangeAdmissionFilterTest {
         ClientIpResolver clientIpResolver = mock(ClientIpResolver.class);
         OneTimeLinkExchangeAdmissionFilter filter =
             new OneTimeLinkExchangeAdmissionFilter(rateLimiter, clientIpResolver);
-        when(clientIpResolver.resolve(org.mockito.ArgumentMatchers.any()))
-            .thenReturn("203.0.113.9");
+        when(clientIpResolver.resolveWithProvenance(org.mockito.ArgumentMatchers.any()))
+            .thenReturn(new ResolvedClientIp("203.0.113.9", false));
 
         MockHttpServletResponse firstResponse = invoke(filter, "/api/invites/exchange");
         MockHttpServletResponse secondResponse = invoke(filter, "/api/invites/exchange");
@@ -36,8 +37,8 @@ class OneTimeLinkExchangeAdmissionFilterTest {
         ClientIpResolver clientIpResolver = mock(ClientIpResolver.class);
         OneTimeLinkExchangeAdmissionFilter filter =
             new OneTimeLinkExchangeAdmissionFilter(rateLimiter, clientIpResolver);
-        when(clientIpResolver.resolve(org.mockito.ArgumentMatchers.any()))
-            .thenReturn("172.20.0.4");
+        when(clientIpResolver.resolveWithProvenance(org.mockito.ArgumentMatchers.any()))
+            .thenReturn(new ResolvedClientIp("172.20.0.4", false));
 
         MockHttpServletResponse firstResponse = invoke(filter, "/api/invites/exchange");
         MockHttpServletResponse secondResponse = invoke(filter, "/api/invites/exchange");

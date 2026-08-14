@@ -105,12 +105,14 @@ public class LoginRateLimiter {
      * Private proxy and unresolved sources use a separately sized instance circuit breaker, so a
      * missing trusted-proxy configuration cannot turn the ordinary per-client cap into a trivial
      * service-wide lockout.
-     * @param ip resolved client IP
+     * @param clientIp resolved client IP and its forwarding provenance
      * @param nowMillis current epoch time in milliseconds
      * @return true while the applicable per-client or shared-source bucket remains within its cap
      */
-    public boolean tryAcquireOneTimeLinkExchange(String ip, long nowMillis) {
-        boolean attributable = isThrottleableIp(ip);
+    public boolean tryAcquireOneTimeLinkExchange(ResolvedClientIp clientIp, long nowMillis) {
+        String ip = clientIp == null ? null : clientIp.address();
+        boolean attributable = clientIp != null
+            && isThrottleableIp(ip, clientIp.forwardedByTrustedProxy());
         String key = attributable ? exchangeIpKey(ip) : "link-shared-source";
         int limit = attributable ? maxPerIp : maxLinkExchangesPerSharedSource;
         Window window = windows.compute(key, (ignored, existing) -> {

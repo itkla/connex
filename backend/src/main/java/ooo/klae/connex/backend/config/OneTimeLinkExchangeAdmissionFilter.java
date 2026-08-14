@@ -40,7 +40,7 @@ public class OneTimeLinkExchangeAdmissionFilter extends OncePerRequestFilter {
             FilterChain filterChain) throws ServletException, IOException {
         if (isExchange(request)
                 && !rateLimiter.tryAcquireOneTimeLinkExchange(
-                    clientIpResolver.resolve(request), System.currentTimeMillis())) {
+                    clientIpResolver.resolveWithProvenance(request), System.currentTimeMillis())) {
             response.sendError(HttpStatus.TOO_MANY_REQUESTS.value(),
                 "Too many attempts. Please try again later.");
             return;
