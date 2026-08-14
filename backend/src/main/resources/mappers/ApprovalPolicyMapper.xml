@@ -12,13 +12,33 @@
     <result property="currency"           column="currency"/>
     <result property="minTotal"           column="min_total"/>
     <result property="minDiscountPercent" column="min_discount_percent"/>
+    <result property="mode"               column="mode"/>
+    <result property="separationOfDuties" column="separation_of_duties"/>
     <result property="createdAt"          column="created_at"/>
     <result property="updatedAt"          column="updated_at"/>
   </resultMap>
 
+  <resultMap id="ApprovalPolicyStepResult" type="ApprovalPolicyStep">
+    <id     property="id"            column="id"/>
+    <result property="workspaceId"   column="workspace_id"/>
+    <result property="policyId"      column="policy_id"/>
+    <result property="stepOrder"     column="step_order"/>
+    <result property="name"          column="name"/>
+    <result property="requiredCount" column="required_count"/>
+    <result property="createdAt"     column="created_at"/>
+    <result property="updatedAt"     column="updated_at"/>
+    <collection property="approvers" ofType="ApprovalStepApprover" notNullColumn="approver_id">
+      <id     property="id"            column="approver_id"/>
+      <result property="workspaceId"   column="approver_workspace_id"/>
+      <result property="stepId"        column="approver_step_id"/>
+      <result property="approverKind"  column="approver_kind"/>
+      <result property="userId"        column="approver_user_id"/>
+    </collection>
+  </resultMap>
+
   <sql id="cols">
     id, workspace_id, name, active, document_type, currency, min_total, min_discount_percent,
-    created_at, updated_at
+    mode, separation_of_duties, created_at, updated_at
   </sql>
 
   <select id="getAll" resultMap="ApprovalPolicyResult">
@@ -40,9 +60,11 @@
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO approval_policy (
-      workspace_id, name, active, document_type, currency, min_total, min_discount_percent
+      workspace_id, name, active, document_type, currency, min_total, min_discount_percent,
+      mode, separation_of_duties
     ) VALUES (
-      #{workspaceId}, #{name}, #{active}, #{documentType}, #{currency}, #{minTotal}, #{minDiscountPercent}
+      #{workspaceId}, #{name}, #{active}, #{documentType}, #{currency}, #{minTotal},
+      #{minDiscountPercent}, #{mode}, #{separationOfDuties}
     )
   </insert>
 
@@ -53,11 +75,42 @@
       document_type = #{documentType},
       currency = #{currency},
       min_total = #{minTotal},
-      min_discount_percent = #{minDiscountPercent}
+      min_discount_percent = #{minDiscountPercent},
+      mode = #{mode},
+      separation_of_duties = #{separationOfDuties}
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
   <delete id="delete">
     DELETE FROM approval_policy WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </delete>
+
+  <select id="getStepsByPolicyIds" resultMap="ApprovalPolicyStepResult">
+    SELECT s.id, s.workspace_id, s.policy_id, s.step_order, s.name, s.required_count,
+           s.created_at, s.updated_at,
+           a.id AS approver_id, a.workspace_id AS approver_workspace_id, a.step_id AS approver_step_id,
+           a.approver_kind, a.user_id AS approver_user_id
+    FROM approval_policy_step s
+    LEFT JOIN approval_policy_step_approver a
+      ON a.workspace_id = s.workspace_id AND a.step_id = s.id
+    WHERE s.workspace_id = #{workspaceId}
+      AND s.policy_id IN
+      <foreach collection="policyIds" item="policyId" open="(" separator="," close=")">#{policyId}</foreach>
+    ORDER BY s.policy_id, s.step_order, s.id, a.id
+  </select>
+
+  <insert id="insertStep" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO approval_policy_step (workspace_id, policy_id, step_order, name, required_count)
+    VALUES (#{workspaceId}, #{policyId}, #{stepOrder}, #{name}, #{requiredCount})
+  </insert>
+
+  <insert id="insertStepApprover" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO approval_policy_step_approver (workspace_id, step_id, approver_kind, user_id)
+    VALUES (#{workspaceId}, #{stepId}, #{approverKind}, #{userId})
+  </insert>
+
+  <delete id="deleteStepsByPolicyId">
+    DELETE FROM approval_policy_step
+    WHERE workspace_id = #{workspaceId} AND policy_id = #{policyId}
   </delete>
 </mapper>

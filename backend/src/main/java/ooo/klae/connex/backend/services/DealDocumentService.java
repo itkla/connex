@@ -80,7 +80,8 @@ public class DealDocumentService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireDeal(workspaceId, dealId);
         List<ApprovalPolicy> policies = policyService.activePolicies(workspaceId);
-        Map<Integer, DocumentApproval> latest = approvalMapper.getByDealId(workspaceId, dealId).stream()
+        Map<Integer, DocumentApproval> latest = approvalService
+            .withChain(workspaceId, approvalMapper.getByDealId(workspaceId, dealId)).stream()
             .collect(Collectors.toMap(DocumentApproval::getDocumentId, Function.identity(), (a, b) -> a));
         return documentMapper.getByDealId(workspaceId, dealId).stream()
             .map(document -> toDto(document, policies, latest.get(document.getId())))
@@ -338,7 +339,11 @@ public class DealDocumentService {
 
     private DealDocumentDto enrichWith(int workspaceId, DealDocument document, List<ApprovalPolicy> policies) {
         List<DocumentApproval> approvals = approvalMapper.getByDocumentId(workspaceId, document.getId());
-        return toDto(document, policies, approvals.isEmpty() ? null : approvals.getFirst());
+        if (approvals.isEmpty()) {
+            return toDto(document, policies, null);
+        }
+        DocumentApproval latest = approvals.getFirst();
+        return toDto(document, policies, approvalService.withChain(workspaceId, List.of(latest)).getFirst());
     }
 
     private DealDocumentDto toDto(DealDocument d, List<ApprovalPolicy> policies, DocumentApproval latestApproval) {

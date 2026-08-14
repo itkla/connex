@@ -38,7 +38,8 @@ public class DocumentApprovalController {
     @PostMapping("/decision")
     public DocumentApprovalDto decide(@PathVariable int dealId, @PathVariable int documentId,
             @Valid @RequestBody ApprovalDecisionRequest body) {
-        return approvalService.decide(dealId, documentId, body.getDecision(), body.getComment());
+        return approvalService.decide(dealId, documentId, body.getDecision(), body.getComment(),
+            body.getStepId());
     }
 
     @PostMapping("/cancel")

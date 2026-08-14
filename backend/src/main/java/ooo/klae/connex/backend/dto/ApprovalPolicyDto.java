@@ -1,7 +1,10 @@
 package ooo.klae.connex.backend.dto;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
@@ -43,6 +46,17 @@ public class ApprovalPolicyDto {
     @Digits(integer = 3, fraction = 3)
     private BigDecimal minDiscountPercent;
 
+    @Pattern(regexp = "sequential|parallel", message = "mode must be sequential or parallel")
+    private String mode;
+
+    @Pattern(regexp = "strict|requester|off",
+        message = "separationOfDuties must be strict, requester, or off")
+    private String separationOfDuties;
+
+    @Valid
+    @Size(max = 10, message = "a policy may not have more than 10 approval steps")
+    private List<ApprovalPolicyStepDto> steps = new ArrayList<>();
+
     private String createdAt;
     private String updatedAt;
 
@@ -56,6 +70,9 @@ public class ApprovalPolicyDto {
         dto.currency = p.getCurrency();
         dto.minTotal = p.getMinTotal();
         dto.minDiscountPercent = p.getMinDiscountPercent();
+        dto.mode = p.getMode();
+        dto.separationOfDuties = p.getSeparationOfDuties();
+        dto.steps = p.getSteps().stream().map(ApprovalPolicyStepDto::from).toList();
         dto.createdAt = p.getCreatedAt();
         dto.updatedAt = p.getUpdatedAt();
         return dto;
@@ -70,6 +87,10 @@ public class ApprovalPolicyDto {
         p.setCurrency(currency == null || currency.isBlank() ? null : currency);
         p.setMinTotal(minTotal);
         p.setMinDiscountPercent(minDiscountPercent);
+        p.setMode(mode == null || mode.isBlank() ? "sequential" : mode);
+        p.setSeparationOfDuties(
+            separationOfDuties == null || separationOfDuties.isBlank() ? "strict" : separationOfDuties);
+        p.setSteps(steps.stream().map(ApprovalPolicyStepDto::toBean).toList());
         return p;
     }
 }

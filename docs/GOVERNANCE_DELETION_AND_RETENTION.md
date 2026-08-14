@@ -6,16 +6,40 @@ approval, or report-snapshot code.
 
 ## Approvals cannot be self-decided
 
-A pending document approval may not be decided by the person who **requested** it *or* by the person
-who **authored** the document. Both bindings are required: without the author check, an author could
-have any colleague with `DEAL_UPDATE` submit the document for approval and then approve it
-themselves.
+By default a pending document approval may not be decided by the person who **requested** it *or* by
+the person who **authored** the document. Both bindings are required: without the author check, an
+author could have any colleague with `DEAL_UPDATE` submit the document for approval and then approve
+it themselves.
 
-The check fails closed — a null actor, a null requester, or a document with no recorded author is
-never decidable. Two escape hatches remain for such legacy rows: the requester can always cancel
-their own request, and a workspace admin/owner can cancel a request whose requester is unknown.
-Superseding a document still cancels its in-flight approval, including when the superseder is a
-different member; that path is not a decision and is intentionally unaffected.
+This is the `strict` setting of an approval policy's **separation of duties**, and it is the default
+for every policy and for voluntary requests with no matching policy. A workspace may relax it per
+policy to `requester` (only the requester is blocked) or `off` (no restriction); the rule in force is
+frozen onto the request when approval is asked for, so relaxing a policy later never unblocks an
+approval that is already in flight.
+
+Under `strict` and `requester` the check fails closed — a null actor or a null requester is never
+decidable, and `strict` additionally refuses a document with no recorded author. Two escape hatches
+remain for such legacy rows: the requester can always cancel their own request, and a workspace
+admin/owner can cancel a request whose requester is unknown. Superseding a document still cancels its
+in-flight approval, including when the superseder is a different member; that path is not a decision
+and is intentionally unaffected.
+
+## Approver chains
+
+An approval policy may declare an ordered chain of steps instead of a single approval. Each step has
+a quorum (`requiredCount`) and a set of approvers — either named workspace members or *anyone holding
+`DOCUMENT_APPROVE`*. A `sequential` chain opens one step at a time; a `parallel` chain opens all of
+them at once. A step passes when it holds that many **distinct** approvals, and the document only
+becomes approvable once every step has passed.
+
+A single rejection at any step terminates the whole request, cancels the remaining steps, and returns
+the document to `draft`. Deciding still requires `DOCUMENT_APPROVE` — being named on a step never
+grants it — and the permission is re-checked after the document row is locked, not only at entry.
+
+The whole chain is **snapshotted onto the request**: editing or deleting the policy afterwards cannot
+add, remove, or re-target the steps of an approval that is already pending. A policy with no steps,
+and a voluntary request with no matching policy, both behave exactly like the original single-approver
+flow: one approval from anyone who can approve documents.
 
 ## Creator-or-admin deletion
 

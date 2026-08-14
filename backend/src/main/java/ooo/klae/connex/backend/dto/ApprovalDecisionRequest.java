@@ -7,7 +7,10 @@ import jakarta.validation.constraints.Size;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/** Request body deciding a pending document approval. */
+/**
+ * Request body deciding a pending document approval. {@code stepId} targets one step of the
+ * approval chain; when omitted the server picks the caller's lowest-order eligible active step.
+ */
 @Data
 @NoArgsConstructor
 public class ApprovalDecisionRequest {
@@ -18,4 +21,6 @@ public class ApprovalDecisionRequest {
 
     @Size(max = 1000)
     private String comment;
+
+    private Integer stepId;
 }

@@ -242,6 +242,9 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("campaign_audience", 80));
         raw.add(direct("campaign_message", 90));
         raw.add(direct("campaign", 100, nullify("parent_campaign_id")));
+        raw.add(direct("document_approval_decision", 104));
+        raw.add(direct("document_approval_step_approver", 106));
+        raw.add(direct("document_approval_step", 108));
         raw.add(direct("document_approval", 110));
         raw.add(direct("deal_document", 120));
         raw.add(direct("deal_line_item", 130));
@@ -301,6 +304,8 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("ai_chat_session", 465));
         raw.add(direct("ai_workspace_governance", 466));
         raw.add(direct("ai_output_cache", 470));
+        raw.add(direct("approval_policy_step_approver", 476));
+        raw.add(direct("approval_policy_step", 478));
         raw.add(direct("approval_policy", 480));
         raw.add(direct("business_card_import_request", 490));
         raw.add(direct("connector_config", 500));
