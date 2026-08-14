@@ -5,7 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -45,7 +45,7 @@ class ManagedObjectRollbackIntegrationTest {
     }
 
     @Test
-    void rollbackPreservesThePrecommittedCleanupTombstone() {
+    void rollbackPreservesThePrecommittedCleanupTombstone() throws IOException {
         Workspace workspace = workspaceMapper.getDefaultWorkspace();
         if (workspace == null) {
             workspace = new Workspace();
@@ -56,6 +56,7 @@ class ManagedObjectRollbackIntegrationTest {
         assertTrue(workspace.getId() > 0);
         int workspaceId = workspace.getId();
         AtomicReference<String> key = new AtomicReference<>();
+        byte[] validPdf = fixture("chromium-hyperlink.pdf");
 
         try {
             assertThrows(IntentionalRollback.class, () -> tenantWorkScope.inWorkspace(
@@ -65,7 +66,7 @@ class ManagedObjectRollbackIntegrationTest {
                         workspaceId,
                         "rollback.pdf",
                         "application/pdf",
-                        "%PDF-1.4\nrollback".getBytes(StandardCharsets.UTF_8));
+                        validPdf);
                     String token = stored.url().substring(stored.url().lastIndexOf('/') + 1);
                     key.set("workspaces/" + workspaceId + "/attachments/" + token);
                     throw new IntentionalRollback();
@@ -89,6 +90,16 @@ class ManagedObjectRollbackIntegrationTest {
                         deletionQueueMapper.deleteByKey(workspaceId, key.get()));
                 });
             }
+        }
+    }
+
+    private static byte[] fixture(String name) throws IOException {
+        try (InputStream input = ManagedObjectRollbackIntegrationTest.class
+                .getResourceAsStream("/fixtures/" + name)) {
+            if (input == null) {
+                throw new IOException("Missing fixture: " + name);
+            }
+            return input.readAllBytes();
         }
     }
 
