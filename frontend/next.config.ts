@@ -8,6 +8,20 @@ import {
 
 const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
 
+/**
+ * Ceiling for request bodies proxied to the backend through Next's rewrites.
+ *
+ * Next buffers a proxied request body and truncates past its default 10 MiB, which silently
+ * corrupts the larger payloads the backend deliberately accepts — `CONNEX_IMPORT_MAX_BODY_BYTES`
+ * defaults to 64 MiB for CSV import and `CONNEX_UPLOAD_MAX_BODY_BYTES` to 27 MiB for attachments.
+ * This must stay at or above the largest backend limit; the backend remains the enforcing boundary
+ * and rejects anything beyond its own per-endpoint ceiling.
+ *
+ * Production fronts Next with Caddy, which routes `/api/*` straight to the backend, so this governs
+ * local development and any deployment without that edge.
+ */
+const BACKEND_IMPORT_MAX_BODY_BYTES = 67_108_864;
+
 const nextConfig: NextConfig = {
   output: "standalone",
   outputFileTracingIncludes: {
@@ -17,6 +31,9 @@ const nextConfig: NextConfig = {
     ],
   },
   distDir: process.env.NEXT_DIST_DIR ?? ".next",
+  experimental: {
+    proxyClientMaxBodySize: BACKEND_IMPORT_MAX_BODY_BYTES,
+  },
   async rewrites() {
     return [
       {
