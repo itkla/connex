@@ -79,23 +79,27 @@ mechanics remain in the [internal operations runbook](INTERNAL_OPERATIONS_RUNBOO
 
 The single designated destination for every security or personal-information escalation is
 **privacy@connexcrm.jp**. Do not use a personal inbox, ordinary support channel, or public issue
-tracker. The targets below are elapsed time from receipt and measure first acknowledgement, not
-resolution.
+tracker. Hunter Nakagawa is the only operator and monitors the contact point on a best-effort basis;
+there is no 24/7 coverage. The goals below are targets, not guarantees, and measure elapsed time from
+receipt to first acknowledgement rather than resolution.
 
-| Escalation | Required subject prefix | Acknowledgement target |
+| Escalation | Required subject prefix | Best-effort acknowledgement target |
 |---|---|---|
 | Suspected vulnerability | `[VULNERABILITY]` | Within 24 hours |
-| Active or suspected security/personal-data incident | `[ACTIVE INCIDENT]` | Within 1 hour, 24/7 |
+| Active or suspected security/personal-data incident | `[ACTIVE INCIDENT]` | Within 1 hour |
 | Risk-exception request | `[RISK EXCEPTION]` | Within 48 hours |
 
-This document designates the route and targets; it does not prove mailbox delivery, monitoring,
-administrative recovery, or matching publication on the legal pages. That operational evidence and
-publication remain onboarding blockers tracked in [#249].
+Mailbox delivery, external receipt, monitoring/alerting, administrative recovery, and response-time
+performance are not yet verified. A 24/7 or on-call claim must not be activated until a successful
+external delivery and receipt test, tested alerts to responders, a named rota with coverage and
+handoff rules, and measured acknowledgement times are recorded. [#249] tracks that operational
+evidence; [#1286] tracks matching publication on the public legal pages. Until those checks pass, the
+address is designated but not operationally verified.
 
 A risk-exception request must identify the affected control and scope, business reason, proposed
 expiry, accountable implementer, and compensating controls. Only the named Security Owner can approve
-it. A credible active-incident report then follows the one-hour internal escalation and response
-process in the breach-response runbook.
+it. A credible active-incident report then follows the breach-response runbook, where the one-hour
+internal escalation goal is also a best-effort target rather than a 24/7 commitment.
 
 ### Review and handover
 
@@ -168,3 +172,4 @@ Tracked under the security roadmap [#87] and the APPI pathway [#224]. Key open i
 [#223]: https://github.com/itkla/connex/issues/223
 [#224]: https://github.com/itkla/connex/issues/224
 [#249]: https://github.com/itkla/connex/issues/249
+[#1286]: https://github.com/itkla/connex/issues/1286
