@@ -43,11 +43,12 @@ Workspace creation is disabled on this instance            # allow-self-service-
 off, the frontend sees an empty workspace list and redirects the new account to `/onboarding`, which
 offers exactly two moves: create a workspace (which will `403` on this posture) or paste an invite
 link. **The invite is the real path.** The paste box accepts either shape — an emailed invite URL
-(`/invite/{token}`), a shareable link (`/invite-link/{token}`, exactly what Settings → Members
-copies), or a bare token of either kind — and routes each to the page that can redeem it. Junk that
-cannot be a token — a bare word, a link to some other page — is refused in the box with a message
-rather than navigated somewhere that can only report the invite as missing. A token-shaped value
-that is not a live invite still lands on the redemption page and is reported there as unavailable.
+(`/invite#token=<token>`), a shareable link (`/invite-link#token=<token>`, exactly what Settings →
+Members copies), or a bare token of either kind — and routes each to the page that can redeem it.
+Junk that cannot be a token — a bare word, a link to some other page — is refused in the box with a
+message rather than navigated somewhere that can only report the invite as missing. A token-shaped
+value that is not a live invite still lands on the redemption page and is reported there as
+unavailable.
 
 **This does not vary by deployment profile in code.** Neither flag appears in
 `FORBIDDEN_KEYS_BY_PROFILE`, so no profile forces either value. It varies only by **env template**:
@@ -407,9 +408,10 @@ The workspace must exist first (see provisioning above). Then choose the path th
 instance's mail posture.
 
 **Before choosing a path, check that the tester can even get an account.** Redeeming an invite is
-**not** a registration path: both `/invite/{token}` and `/invite-link/{token}` redirect an anonymous
-visitor to **`/auth/login`** (never to `/auth/register`), and the accept endpoints act on the
-signed-in user. So the tester must already have an account and be signed in when they open the link.
+**not** a registration path: both `/invite#token=<token>` and `/invite-link#token=<token>` require
+an existing signed-in user, and the accept endpoints act on that account. An anonymous visitor
+cannot complete either flow and is not registered automatically, so the tester must create or
+receive an account, sign in, and only then open the link.
 
 | Instance posture | How the tester gets an account |
 |---|---|
@@ -454,16 +456,21 @@ DELETE /api/workspaces/{workspaceId}/invite-links/{linkId}
   an invite link at all. See "Step-up requires a passkey" above.
 - `expiresInDays` defaults to **14** when omitted or non-positive. The role is capped to `member` or
   `admin`; a link can never grant owner.
-- The tester redeems at `/invite-link/{token}` — `GET /api/invite-links/{token}` previews,
-  `POST /api/invite-links/{token}/accept` joins and sets the active-workspace cookie. Redemption
-  makes them **`active` immediately**; there is no separate acceptance step to chase.
-  **Deliver the whole URL** (`https://<host>/invite-link/{token}`) and tell them to open it. A
-  tester who lands on `/onboarding` first can paste that same URL into its join box.
-- Emailed invites use the parallel `/invite/{token}` route and are built from
-  `connex.mail.app-base-url`, **never** from a request header. If that base URL is wrong, every
-  emailed invite link is wrong. Their expiry is **14 days, hardcoded in the mapper SQL** — no
-  property overrides it — and unlike a shareable link each one is **single-use and bound to the
-  invited address**: a different signed-in user gets
+- **Deliver the whole shareable URL** (`https://<host>/invite-link#token=<token>`) and tell the tester
+  to open it. On first load the frontend removes the fragment and sends it to
+  `POST /api/invite-links/exchange`; the backend sets the purpose-bound HttpOnly flow cookie and
+  redirects to token-free `/invite-link`. The page then previews with `GET /api/invite-links` and
+  submits the preview's `flowId` to `POST /api/invite-links/accept`, which joins the tester, sets the
+  active-workspace cookie, and makes them **`active` immediately**. There is no separate acceptance
+  step to chase. A tester who lands on `/onboarding` first can paste that same fragment URL into its
+  join box.
+- Emailed invites use the parallel `https://<host>/invite#token=<token>` shape and are built from
+  `connex.mail.app-base-url`, **never** from a request header. Their page exchanges through
+  `POST /api/invites/exchange`, previews through `GET /api/invites`, and submits the preview's
+  `flowId` to `POST /api/invites/accept`. If the base URL is wrong, every emailed invite link is
+  wrong. Their expiry is **14 days, hardcoded in the mapper SQL** — no property overrides it — and
+  unlike a shareable link each one is **single-use and bound to the invited address**: a different
+  signed-in user gets
   `This invite was sent to a different email address`, and a second redemption gets
   `This invite is no longer available`.
 - **Tokens never reach the logs** — there is no request/access logging of paths in the backend at

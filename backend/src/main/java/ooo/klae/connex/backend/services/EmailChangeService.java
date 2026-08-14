@@ -1,10 +1,5 @@
 package ooo.klae.connex.backend.services;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.SecureRandom;
-import java.util.Base64;
-
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -19,6 +14,7 @@ import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.EmailChangeTokenMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /**
  * Drives the verified account email-change flow. Changing an account email is a
@@ -32,9 +28,6 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 @Service
 @RequiredArgsConstructor
 public class EmailChangeService {
-
-    private static final SecureRandom RANDOM = new SecureRandom();
-    private static final int TOKEN_BYTES = 32;
 
     private final UserMapper userMapper;
     private final EmailChangeTokenMapper emailChangeTokenMapper;
@@ -79,8 +72,9 @@ public class EmailChangeService {
 
         emailChangeTokenMapper.invalidateForUser(user.getId());
 
-        String rawToken = generateToken();
-        emailChangeTokenMapper.insert(user.getId(), newEmail, hashToken(rawToken), requestIp, tokenExpiryMinutes);
+        String rawToken = OneTimeTokenDigest.generate();
+        emailChangeTokenMapper.insert(
+            user.getId(), newEmail, OneTimeTokenDigest.sha256(rawToken), requestIp, tokenExpiryMinutes);
         emailChangeEmailService.sendVerificationEmail(user, newEmail, rawToken);
 
         auditService.record("user.email_change_requested", "user", user.getId(), user.getDisplayName(),
@@ -96,7 +90,35 @@ public class EmailChangeService {
         if (rawToken == null || rawToken.isBlank()) {
             return false;
         }
-        return emailChangeTokenMapper.existsRedeemableByHash(hashToken(rawToken));
+        return emailChangeTokenMapper.existsRedeemableByHash(OneTimeTokenDigest.sha256(rawToken));
+    }
+
+    /**
+     * Claims the raw token for one browser and server-session lineage.
+     * @param rawToken raw fragment bearer
+     * @param exchangeOwnerHash one-way owner of the browser and server-session exchange
+     * @return persisted source-token digest
+     */
+    @Transactional
+    public String exchangeToken(String rawToken, String exchangeOwnerHash) {
+        String tokenHash = rawToken == null || rawToken.isBlank()
+            ? null
+            : OneTimeTokenDigest.sha256(rawToken);
+        if (tokenHash == null || exchangeOwnerHash == null || exchangeOwnerHash.isBlank()) {
+            throw invalidLink();
+        }
+        int claimed = emailChangeTokenMapper.claimExchange(tokenHash, exchangeOwnerHash);
+        if (claimed != 1
+                && !emailChangeTokenMapper.isExchangeOwnedBy(tokenHash, exchangeOwnerHash)) {
+            throw invalidLink();
+        }
+        return tokenHash;
+    }
+
+    /** @return whether an exchanged source digest is still redeemable */
+    public boolean validateExchangedTokenHash(String tokenHash) {
+        return tokenHash != null
+            && emailChangeTokenMapper.existsExchangedRedeemableByHash(tokenHash);
     }
 
     /**
@@ -107,20 +129,26 @@ public class EmailChangeService {
      */
     @Transactional
     public void confirmChange(String rawToken) {
-        String tokenHash = rawToken == null ? null : hashToken(rawToken);
+        String tokenHash = rawToken == null ? null : OneTimeTokenDigest.sha256(rawToken);
+        confirmChangeByHash(exchangeToken(rawToken, programmaticExchangeOwner(tokenHash)));
+    }
+
+    /** Applies an email change through a purpose-bound browser-flow source digest. */
+    @Transactional
+    public void confirmChangeByHash(String tokenHash) {
         EmailChangeToken token = tokenHash == null ? null
-                : emailChangeTokenMapper.findRedeemableByHash(tokenHash);
+                : emailChangeTokenMapper.findExchangedRedeemableByHash(tokenHash);
         if (token == null) {
-            throw new BadRequestException("This verification link is invalid or has expired");
+            throw invalidLink();
         }
 
         if (emailChangeTokenMapper.markConsumed(tokenHash) == 0) {
-            throw new BadRequestException("This verification link is invalid or has expired");
+            throw invalidLink();
         }
 
         User user = userMapper.getUserById(token.getUserId());
         if (user == null) {
-            throw new BadRequestException("This verification link is invalid or has expired");
+            throw invalidLink();
         }
 
         User existing = userMapper.getUserByEmail(token.getNewEmail());
@@ -142,23 +170,11 @@ public class EmailChangeService {
         return email == null ? "" : email.trim().toLowerCase();
     }
 
-    private static String generateToken() {
-        byte[] bytes = new byte[TOKEN_BYTES];
-        RANDOM.nextBytes(bytes);
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    private static BadRequestException invalidLink() {
+        return new BadRequestException("This verification link is invalid or has expired");
     }
 
-    private static String hashToken(String rawToken) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(rawToken.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder(hash.length * 2);
-            for (byte b : hash) {
-                sb.append(String.format("%02x", b));
-            }
-            return sb.toString();
-        } catch (Exception e) {
-            throw new IllegalStateException("SHA-256 unavailable", e);
-        }
+    private static String programmaticExchangeOwner(String tokenHash) {
+        return tokenHash == null ? "" : OneTimeTokenDigest.sha256("email-change:" + tokenHash);
     }
 }

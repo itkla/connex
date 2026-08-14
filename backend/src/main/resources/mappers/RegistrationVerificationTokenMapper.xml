@@ -16,10 +16,36 @@
     )
   </select>
 
-  <select id="findRedeemableByHash" resultType="RegistrationVerificationToken">
-    SELECT id, user_id, token_hash, expires_at, consumed_at, requested_ip, created_at
+  <update id="claimExchange">
+    UPDATE registration_verification_token
+    SET exchanged_at = COALESCE(exchanged_at, UTC_TIMESTAMP()),
+        exchange_owner_hash = COALESCE(exchange_owner_hash, #{exchangeOwnerHash})
+    WHERE token_hash = #{tokenHash}
+      AND (exchanged_at IS NULL OR exchange_owner_hash = #{exchangeOwnerHash})
+      AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
+  </update>
+
+  <select id="isExchangeOwnedBy" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM registration_verification_token
+      WHERE token_hash = #{tokenHash} AND exchange_owner_hash = #{exchangeOwnerHash}
+        AND exchanged_at IS NOT NULL AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
+    )
+  </select>
+
+  <select id="existsExchangedRedeemableByHash" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM registration_verification_token
+      WHERE token_hash = #{tokenHash} AND exchanged_at IS NOT NULL
+        AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
+    )
+  </select>
+
+  <select id="findExchangedRedeemableByHash" resultType="RegistrationVerificationToken">
+    SELECT id, user_id, token_hash, expires_at, exchanged_at, consumed_at, requested_ip, created_at
     FROM registration_verification_token
-    WHERE token_hash = #{tokenHash} AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
+    WHERE token_hash = #{tokenHash} AND exchanged_at IS NOT NULL
+      AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
   </select>
 
   <select id="countRecentByUser" resultType="int">
@@ -31,7 +57,8 @@
   <update id="markConsumed">
     UPDATE registration_verification_token
     SET consumed_at = UTC_TIMESTAMP()
-    WHERE token_hash = #{tokenHash} AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
+    WHERE token_hash = #{tokenHash} AND exchanged_at IS NOT NULL
+      AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
   </update>
 
   <update id="invalidateForUser">

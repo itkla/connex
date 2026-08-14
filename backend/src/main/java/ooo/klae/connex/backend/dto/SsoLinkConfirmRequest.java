@@ -7,18 +7,14 @@ import lombok.NoArgsConstructor;
 import lombok.ToString;
 
 /**
- * Payload for confirming an SSO account link: the raw challenge token from the
- * linking redirect and the account's current password, verified once to prove
- * ownership. Both fields are excluded from {@code toString} so they never surface
- * in logs.
+ * Payload for confirming an SSO account link with the account's current password. The challenge
+ * lives in the purpose-bound HttpOnly flow session and the password is excluded from
+ * {@code toString}.
  */
 @Data
 @NoArgsConstructor
-@ToString(exclude = {"token", "password"})
+@ToString(exclude = "password")
 public class SsoLinkConfirmRequest {
-
-    @NotBlank
-    private String token;
 
     @NotBlank
     @Size(max = 255)

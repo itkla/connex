@@ -11,7 +11,13 @@ import {
 } from "@heroicons/react/24/outline";
 import { LoaderCircle } from "lucide-react";
 
-import { ApiError, confirmEmailChange, validateEmailChangeToken } from "@/app/lib/api";
+import {
+    ApiError,
+    confirmEmailChange,
+    exchangeEmailChangeToken,
+    validateEmailChangeToken,
+} from "@/app/lib/api";
+import { takeOneTimeLinkToken } from "@/app/lib/oneTimeLink";
 import { toastError } from "@/app/lib/toast";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
 
@@ -22,19 +28,23 @@ type Status = "validating" | "invalid" | "ready" | "success";
  * confirm with an explicit action (so link prefetchers can't auto-apply the change),
  * and reports success or an invalid/expired link.
  */
-export function VerifyEmailForm({ token }: { token: string | null }) {
+export function VerifyEmailForm() {
     const tForm = useTranslations("AuthForm");
     const t = useTranslations("AuthVerifyEmail");
 
-    const [status, setStatus] = useState<Status>(token ? "validating" : "invalid");
+    const [status, setStatus] = useState<Status>("validating");
     const [submitting, setSubmitting] = useState(false);
 
     useEffect(() => {
-        if (!token) {
-            return;
-        }
         let active = true;
-        validateEmailChangeToken(token)
+        const token = takeOneTimeLinkToken();
+        const establishFlow = token
+            ? exchangeEmailChangeToken(token).then(() => {
+                window.location.replace("/auth/verify-email");
+                return { valid: true };
+            })
+            : validateEmailChangeToken();
+        establishFlow
             .then((result) => {
                 if (active) {
                     setStatus(result.valid ? "ready" : "invalid");
@@ -48,15 +58,12 @@ export function VerifyEmailForm({ token }: { token: string | null }) {
         return () => {
             active = false;
         };
-    }, [token]);
+    }, []);
 
     async function onConfirm() {
-        if (!token) {
-            return;
-        }
         setSubmitting(true);
         try {
-            await confirmEmailChange(token);
+            await confirmEmailChange();
             setStatus("success");
         } catch (err) {
             if (err instanceof ApiError && err.status === 400) {

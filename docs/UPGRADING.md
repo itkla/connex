@@ -48,6 +48,19 @@ migration-discipline part of #87 §9 / #102).
 - The control/tenant **plane split** (`db/migration/{control,tenant}`) and version monotonicity are
   additionally enforced by the migration arch tests.
 
+### V170 one-time-link security cutover
+
+`V170__one_time_link_sessions.sql` is intentionally not rolling-deploy compatible. It backfills
+SHA-256 digests for the legacy raw workspace-invite bearers and then drops the raw `token` columns
+and their indexes in the same migration. An older backend process still reading or writing those
+columns will fail after V170 applies.
+
+Treat the release containing V170 as a coordinated restart: close ingress, stop every old backend
+replica, then start the new backend so Flyway can apply V170 with no old binary still serving. Do
+not run old and new backend versions concurrently across this migration. The standard Compose
+runbook below already quiesces all writers and starts one backend with ingress closed; custom
+multi-replica deployments must enforce the same all-replicas-down boundary before migration.
+
 ## On-prem upgrade runbook
 
 1. **Preflight legacy media before any recreate** — if the installed version predates private object
@@ -149,7 +162,16 @@ migration-discipline part of #87 §9 / #102).
    ```
 
    Reopen upstream ingress or writers only after that smoke succeeds.
-10. **On pre-ingress failure** — keep Caddy and upstream ingress closed and stop the target application
+10. **Replace one-time links issued before V170** — the V170 security cutover intentionally provides
+   no compatibility shim for links created by the previous version. After the target deployment is
+   healthy, re-issue every outstanding emailed workspace invite and revoke and regenerate every
+   outstanding shareable invite link. These are the material operator workload: emailed workspace
+   invites remain outstanding for 14 days, while shareable invite links default to 14 days and
+   unlimited uses. Registration-verification links remain valid for 24 hours in the previous version;
+   affected registrants must request a fresh verification email. Password-reset links last only 30
+   minutes, so there is effectively no outstanding population to migrate and no operator action is
+   needed; a user with a rare in-flight reset must request a fresh link.
+11. **On pre-ingress failure** — keep Caddy and upstream ingress closed and stop the target application
    containers. Remove the target deployment directory, re-verify and extract the exact prior signed
    deploy archive, restore the prior mode-0600 `.env` byte-for-byte, and confirm both recorded hashes.
    Use that restored Compose bundle when you **restore the complete database, object, and legacy-media

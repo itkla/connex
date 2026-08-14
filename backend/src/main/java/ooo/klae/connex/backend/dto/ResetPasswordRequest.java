@@ -9,11 +9,8 @@ import lombok.ToString;
 
 @Data
 @NoArgsConstructor
-@ToString(exclude = {"token", "newPassword"})
+@ToString(exclude = "newPassword")
 public class ResetPasswordRequest {
-
-    @NotBlank
-    private String token;
 
     @NotBlank
     @Size(min = 8, max = 255)

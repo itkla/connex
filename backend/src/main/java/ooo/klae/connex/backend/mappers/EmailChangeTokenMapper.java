@@ -16,7 +16,15 @@ public interface EmailChangeTokenMapper {
 
     boolean existsRedeemableByHash(String tokenHash);
 
-    EmailChangeToken findRedeemableByHash(String tokenHash);
+    int claimExchange(@Param("tokenHash") String tokenHash,
+        @Param("exchangeOwnerHash") String exchangeOwnerHash);
+
+    boolean isExchangeOwnedBy(@Param("tokenHash") String tokenHash,
+        @Param("exchangeOwnerHash") String exchangeOwnerHash);
+
+    boolean existsExchangedRedeemableByHash(String tokenHash);
+
+    EmailChangeToken findExchangedRedeemableByHash(String tokenHash);
 
     int countRecentByUser(@Param("userId") int userId, @Param("withinSeconds") int withinSeconds);
 

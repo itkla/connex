@@ -58,9 +58,11 @@ import ooo.klae.connex.backend.observability.MetricsScrapeTokenFilter;
 import ooo.klae.connex.backend.sso.DbRelyingPartyRegistrationRepository;
 import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
 import ooo.klae.connex.backend.services.SessionSecurityService;
+import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 import ooo.klae.connex.backend.tenant.WorkspaceRequestResolver;
+import ooo.klae.connex.backend.util.ClientIpResolver;
 
 /**
  * Spring Security configuration.
@@ -155,6 +157,10 @@ public class SecurityConfig {
             WorkspaceRequestResolver workspaceRequestResolver,
             WorkspaceService workspaceService,
             WorkspaceCookie workspaceCookie,
+            OneTimeLinkFlowCookie oneTimeLinkFlowCookie,
+            LogoutAuditHandler logoutAuditHandler,
+            LoginRateLimiter loginRateLimiter,
+            ClientIpResolver clientIpResolver,
             @Value("${connex.security.csrf-enabled:true}") boolean csrfEnabled,
             @Value("${connex.metrics.scrape-token:}") String metricsScrapeToken,
             @Value("${connex.sso.enabled:false}") boolean ssoEnabled) throws Exception {
@@ -167,6 +173,9 @@ public class SecurityConfig {
                 workspaceRequestResolver,
                 workspaceService),
             CsrfFilter.class);
+        http.addFilterAfter(
+            new OneTimeLinkExchangeAdmissionFilter(loginRateLimiter, clientIpResolver),
+            CsrfFilter.class);
         http.addFilterBefore(new MetricsScrapeTokenFilter(metricsScrapeToken), AuthorizationFilter.class);
         http.cors(withDefaults());
         if (csrfEnabled) {
@@ -176,14 +185,11 @@ public class SecurityConfig {
             http.csrf(csrf -> {
                 csrf.csrfTokenRequestHandler(new HeaderOnlyCsrfTokenRequestHandler())
                     .ignoringRequestMatchers(
-                        "/api/auth/login", "/api/auth/register", "/api/auth/logout",
-                        "/api/auth/forgot-password", "/api/auth/reset-password",
+                        "/api/auth/login", "/api/auth/register",
+                        "/api/auth/forgot-password",
                         "/api/auth/webauthn/authenticate/**",
                         "/api/delivery/unsubscribe/**",
                         "/api/delivery/webhooks/**");
-                if (oauthEnabled) {
-                    csrf.ignoringRequestMatchers("/api/auth/sso/link/confirm");
-                }
                 if (ssoEnabled) {
                     csrf.ignoringRequestMatchers("/api/login/saml2/sso/**");
                 }
@@ -204,6 +210,8 @@ public class SecurityConfig {
                     .requestMatchers("/api/delivery/webhooks/**").permitAll()
                     .requestMatchers("/api/auth/webauthn/authenticate/**").permitAll()
                     .requestMatchers("/api/auth/webauthn/**").authenticated()
+                    .requestMatchers(HttpMethod.POST, "/api/invites/exchange").permitAll()
+                    .requestMatchers(HttpMethod.POST, "/api/invite-links/exchange").permitAll()
                     .requestMatchers("/api/auth/**").permitAll();
                 if (oauthEnabled) {
                     auth.requestMatchers("/api/oauth2/authorization/**").permitAll()
@@ -235,11 +243,13 @@ public class SecurityConfig {
             )
             .logout(logout -> logout
                 .logoutUrl("/api/auth/logout")
+                .addLogoutHandler(logoutAuditHandler)
                 .invalidateHttpSession(true)
                 .clearAuthentication(true)
                 .deleteCookies("JSESSIONID")
                 .logoutSuccessHandler((req, res, auth) -> {
                     workspaceCookie.clear(res);
+                    oneTimeLinkFlowCookie.clearBrowserBinding(res);
                     res.setStatus(200);
                 })
             )

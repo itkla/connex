@@ -1,26 +1,35 @@
 package ooo.klae.connex.backend.controllers;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
 
+import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.config.OneTimeLinkFlowCookie;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.InvitePreviewDto;
+import ooo.klae.connex.backend.dto.InviteFlowAcceptRequest;
+import ooo.klae.connex.backend.dto.OneTimeLinkExchangeRequest;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.InviteService;
-import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.services.OneTimeLinkFlowService;
+import ooo.klae.connex.backend.services.OneTimeLinkFlowService.IssuedGrant;
+import ooo.klae.connex.backend.services.OneTimeLinkFlowService.Purpose;
+import ooo.klae.connex.backend.services.OneTimeLinkFlowService.ResolvedFlow;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 
 /**
- * Token-addressed invite endpoints used by the accept screen. Preview is open to
- * any authenticated user holding the token; accepting joins the workspace and
- * pins it as active.
+ * Token-free invite endpoints used after the raw fragment bearer has been exchanged for a
+ * purpose-bound browser flow. Preview and acceptance require both that flow and an authenticated
+ * recipient; successful acceptance joins the workspace and pins it as active.
  */
 @RestController
 @RequestMapping("/api/invites")
@@ -28,20 +37,52 @@ import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 public class InviteController {
     private final InviteService inviteService;
     private final AuthService authService;
-    private final WorkspaceService workspaceService;
     private final WorkspaceCookie workspaceCookie;
+    private final OneTimeLinkFlowService oneTimeLinkFlowService;
+    private final OneTimeLinkFlowCookie oneTimeLinkFlowCookie;
 
-    @GetMapping("/{token}")
-    public InvitePreviewDto preview(@PathVariable String token) {
-        return inviteService.previewInvite(token);
+    @PostMapping("/exchange")
+    public void exchange(
+            @Valid @RequestBody OneTimeLinkExchangeRequest dto,
+            HttpServletRequest request,
+            HttpServletResponse response) {
+        String exchangeOwnerHash = oneTimeLinkFlowService.exchangeOwnerHash(request);
+        String tokenHash = inviteService.exchangeToken(dto.getToken(), exchangeOwnerHash);
+        IssuedGrant grant = oneTimeLinkFlowService.issue(
+            request, Purpose.WORKSPACE_INVITE, tokenHash);
+        oneTimeLinkFlowCookie.set(
+            response, Purpose.WORKSPACE_INVITE, grant.value(), grant.lifetime());
+        response.setStatus(HttpServletResponse.SC_SEE_OTHER);
+        response.setHeader("Location", "/invite");
     }
 
-    @PostMapping("/{token}/accept")
-    public WorkspaceMembershipDto accept(@PathVariable String token, HttpServletResponse response) {
+    @GetMapping
+    public InvitePreviewDto preview(
+            @CookieValue(name = OneTimeLinkFlowCookie.WORKSPACE_INVITE, required = false) String grant,
+            HttpServletRequest request) {
+        ResolvedFlow flow = oneTimeLinkFlowService.requireFlow(
+            request, Purpose.WORKSPACE_INVITE, grant);
+        InvitePreviewDto preview = inviteService.previewInviteByHash(flow.sourceTokenHash());
+        preview.setFlowId(flow.flowId());
+        return preview;
+    }
+
+    @PostMapping("/accept")
+    public WorkspaceMembershipDto accept(
+            @Valid @RequestBody InviteFlowAcceptRequest dto,
+            @CookieValue(name = OneTimeLinkFlowCookie.WORKSPACE_INVITE, required = false) String grant,
+            HttpServletRequest request,
+            HttpServletResponse response) {
         User user = authService.getCurrentUser();
-        WorkspaceMembershipDto membership = inviteService.acceptInvite(token, user);
-        workspaceService.rememberActive(user.getId(), membership.getId());
+        WorkspaceMembershipDto membership = oneTimeLinkFlowService.consumeBound(
+            request,
+            Purpose.WORKSPACE_INVITE,
+            grant,
+            dto.getFlowId(),
+            (tokenHash, completion) -> inviteService.acceptInviteByHash(
+                tokenHash, user, completion));
         workspaceCookie.set(response, membership.getId());
+        oneTimeLinkFlowCookie.clear(response, Purpose.WORKSPACE_INVITE);
         return membership;
     }
 }

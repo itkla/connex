@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.OneTimeLinkFlowMapper">
+
+  <update id="clearExpiredClaim">
+    UPDATE one_time_link_flow
+    SET consume_claim_hash = NULL,
+        consume_claimed_at = NULL
+    WHERE grant_hash = #{grantHash}
+      AND exchange_owner_hash = #{exchangeOwnerHash}
+      AND purpose = #{purpose}
+      AND expires_at &lt;= UTC_TIMESTAMP()
+      AND consume_claim_hash IS NOT NULL
+  </update>
+
+  <insert id="upsert">
+    INSERT INTO one_time_link_flow (
+      grant_hash,
+      exchange_owner_hash,
+      purpose,
+      source_token_hash,
+      expires_at
+    ) VALUES (
+      #{grantHash},
+      #{exchangeOwnerHash},
+      #{purpose},
+      #{sourceTokenHash},
+      DATE_ADD(UTC_TIMESTAMP(), INTERVAL #{lifetimeSeconds} SECOND)
+    )
+    ON DUPLICATE KEY UPDATE
+      expires_at = IF(consume_claim_hash IS NULL, VALUES(expires_at), expires_at)
+  </insert>
+
+  <select id="findValidSourceTokenHash" resultType="string">
+    SELECT source_token_hash
+    FROM one_time_link_flow
+    WHERE grant_hash = #{grantHash}
+      AND exchange_owner_hash = #{exchangeOwnerHash}
+      AND purpose = #{purpose}
+      AND expires_at > UTC_TIMESTAMP()
+  </select>
+
+  <update id="claim">
+    UPDATE one_time_link_flow
+    SET consume_claim_hash = #{claimHash},
+        consume_claimed_at = UTC_TIMESTAMP()
+    WHERE grant_hash = #{grantHash}
+      AND exchange_owner_hash = #{exchangeOwnerHash}
+      AND purpose = #{purpose}
+      AND expires_at > UTC_TIMESTAMP()
+      AND consume_claim_hash IS NULL
+  </update>
+
+  <select id="findClaimedSourceTokenHash" resultType="string">
+    SELECT source_token_hash
+    FROM one_time_link_flow
+    WHERE grant_hash = #{grantHash}
+      AND consume_claim_hash = #{claimHash}
+  </select>
+
+  <update id="release">
+    UPDATE one_time_link_flow
+    SET consume_claim_hash = NULL,
+        consume_claimed_at = NULL
+    WHERE grant_hash = #{grantHash}
+      AND consume_claim_hash = #{claimHash}
+  </update>
+
+  <delete id="complete">
+    DELETE FROM one_time_link_flow
+    WHERE grant_hash = #{grantHash}
+      AND consume_claim_hash = #{claimHash}
+  </delete>
+
+  <delete id="deleteExpired">
+    DELETE FROM one_time_link_flow
+    WHERE expires_at &lt;= UTC_TIMESTAMP()
+      AND (
+        consume_claim_hash IS NULL
+        OR consume_claimed_at &lt; DATE_SUB(
+          UTC_TIMESTAMP(), INTERVAL #{abandonedClaimSeconds} SECOND)
+      )
+  </delete>
+</mapper>

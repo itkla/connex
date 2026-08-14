@@ -47,6 +47,18 @@ throwaway client containers discover and join only the running Compose project's
 network. Compose one-off backend migration and maintenance commands inherit the backend service's
 networks and therefore retain DB access.
 
+The published profile pins Caddy to `CONNEX_CADDY_IP` inside `CONNEX_EDGE_SUBNET` and configures
+that exact address as `CONNEX_SECURITY_TRUSTED_PROXIES`. This lets the backend accept Caddy's
+normalized client address without trusting another edge-network peer. Caddy, in turn, trusts only
+the exact TLS-terminating proxy CIDRs in `CONNEX_CADDY_TRUSTED_PROXIES`, parses forwarded chains
+right-to-left, and replaces the backend-facing `X-Forwarded-For` value with that validated address.
+Fill the production template's `REPLACE_WITH_EXACT_TLS_PROXY_CIDRS` with the address or CIDRs of the
+proxy that connects directly to Caddy; never use all private ranges. A direct-HTTP evaluation keeps
+the loopback-only default. If the default edge subnet conflicts with an operator network, change
+the subnet and Caddy address together and keep the backend trusted-proxy value equal to that one
+Caddy address. Without correct hop configuration, public link exchanges can fall back to the
+high-capacity instance circuit breaker instead of the ordinary per-client throttle.
+
 New services must join the minimum network set required for their documented traffic. Do not use
 the implicit `default` network, attach an edge or auxiliary service to `db` or `ocr_internal`, or
 publish an internal service port to the host. A service that needs a new cross-tier path requires a

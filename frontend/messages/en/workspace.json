@@ -42,6 +42,7 @@
     "invalidTitle": "Invitation unavailable",
     "invalidBody": "This invitation has expired or has already been used.",
     "mismatchBody": "This invitation was sent to {email}, but you're signed in as {current}.",
+    "switchAccount": "Sign in with another account",
     "backToApp": "Go to dashboard",
     "roleOwner": "an owner",
     "roleAdmin": "an admin",

@@ -144,10 +144,10 @@ describe('authenticated surfaces keep the backend-unreachable guard', () => {
         }
     });
 
-    it('leaves the invite pages on the result resolver, since they decide on the visitor', () => {
-        for (const page of ['app/invite/[token]/page.tsx', 'app/invite-link/[token]/page.tsx']) {
-            expect(source(page)).toContain('getCurrentUserResultFromCookie');
-            expect(source(page)).toContain('WorkspaceUnavailablePage');
+    it('keeps invite fragments in client-only token-free entry pages', () => {
+        for (const page of ['app/invite/page.tsx', 'app/invite-link/page.tsx']) {
+            expect(source(page)).toContain('takeOneTimeLinkToken');
+            expect(source(page)).toContain('PermissionsUnavailable');
             expect(source(page)).not.toContain('getPublicPageUserFromCookie');
         }
     });

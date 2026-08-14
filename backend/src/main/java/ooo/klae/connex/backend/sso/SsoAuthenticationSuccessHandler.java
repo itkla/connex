@@ -1,8 +1,6 @@
 package ooo.klae.connex.backend.sso;
 
 import java.io.IOException;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +28,11 @@ import ooo.klae.connex.backend.services.SocialLoginService;
 import ooo.klae.connex.backend.services.SsoLinkService;
 import ooo.klae.connex.backend.services.SsoLoginResult;
 import ooo.klae.connex.backend.services.SsoLoginService;
+import ooo.klae.connex.backend.services.OneTimeLinkFlowService;
+import ooo.klae.connex.backend.services.OneTimeLinkFlowService.IssuedGrant;
+import ooo.klae.connex.backend.services.OneTimeLinkFlowService.Purpose;
+import ooo.klae.connex.backend.config.OneTimeLinkFlowCookie;
+import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /**
  * Completes an SSO login once the IdP has authenticated the user, over both OIDC and SAML.
@@ -38,8 +41,8 @@ import ooo.klae.connex.backend.services.SsoLoginService;
  * {@link Saml2AssertionAuthentication} (SAML), then delegates the account resolution to
  * {@link SsoLoginService}. A resolved user is signed in through the shared session ceremony
  * ({@link AuthService#establishAuthenticatedSession}) and sent to the app; a link-required outcome
- * is bounced to the linking screen without a session. Every redirect targets the trusted frontend
- * origin, never a request-supplied URL.
+ * receives a purpose-bound, unauthenticated flow session before reaching the token-free linking
+ * screen. Every redirect targets the trusted frontend origin, never a request-supplied URL.
  */
 @Component
 @RequiredArgsConstructor
@@ -66,6 +69,8 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
     private final MailProperties mailProperties;
     private final SsoConnectionMapper ssoConnectionMapper;
     private final WorkspaceMapper workspaceMapper;
+    private final OneTimeLinkFlowService oneTimeLinkFlowService;
+    private final OneTimeLinkFlowCookie oneTimeLinkFlowCookie;
 
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
@@ -182,9 +187,18 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
                 response.sendRedirect(frontendBase + (hasWorkspace ? "/dashboard" : "/onboarding"));
             }
             case SsoLoginResult.LinkRequired linkRequired -> {
+                authService.prepareUnauthenticatedLinkFlow(request, response);
                 String linkToken = ssoLinkService.createChallenge(linkRequired);
-                response.sendRedirect(frontendBase + "/sso/link?token="
-                        + URLEncoder.encode(linkToken, StandardCharsets.UTF_8));
+                String browserBinding = oneTimeLinkFlowCookie.ensureBrowserBinding(request, response);
+                oneTimeLinkFlowService.establishBrowserBinding(request, browserBinding);
+                IssuedGrant grant = oneTimeLinkFlowService.issue(
+                    request,
+                    browserBinding,
+                    Purpose.SSO_LINK,
+                    OneTimeTokenDigest.sha256(linkToken));
+                oneTimeLinkFlowCookie.set(
+                    response, Purpose.SSO_LINK, grant.value(), grant.lifetime());
+                response.sendRedirect(frontendBase + "/sso/link");
             }
         }
     }

@@ -3,9 +3,9 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="ooo.klae.connex.backend.mappers.InviteLinkMapper">
 
-  <insert id="insert">
-    INSERT INTO workspace_invite_link (workspace_id, token, role, expires_at, max_uses, created_by_id)
-    VALUES (#{workspaceId}, #{token}, #{role},
+  <insert id="insertHashed">
+    INSERT INTO workspace_invite_link (workspace_id, token_hash, role, expires_at, max_uses, created_by_id)
+    VALUES (#{workspaceId}, #{tokenHash}, #{role},
       <choose>
         <when test="expiresInDays != null">DATE_ADD(UTC_TIMESTAMP(), INTERVAL #{expiresInDays} DAY)</when>
         <otherwise>NULL</otherwise>
@@ -13,25 +13,25 @@
       #{maxUses}, #{createdById})
   </insert>
 
-  <select id="findByToken" resultType="WorkspaceInviteLink">
-    SELECT id, workspace_id, token, role, expires_at, max_uses, used_count, revoked,
+  <select id="findByTokenHash" resultType="WorkspaceInviteLink">
+    SELECT id, workspace_id, token_hash, role, expires_at, max_uses, used_count, revoked,
            created_by_id, created_at, updated_at
     FROM workspace_invite_link
-    WHERE token = #{token}
+    WHERE token_hash = #{tokenHash}
   </select>
 
-  <select id="findPreviewByToken" resultType="ooo.klae.connex.backend.dto.InviteLinkPreviewDto">
+  <select id="findPreviewByTokenHash" resultType="ooo.klae.connex.backend.dto.InviteLinkPreviewDto">
     SELECT l.workspace_id AS workspaceId, w.name AS workspaceName, l.role,
            (l.revoked = 0
             AND (l.expires_at IS NULL OR l.expires_at &gt; UTC_TIMESTAMP())
             AND (l.max_uses IS NULL OR l.used_count &lt; l.max_uses)) AS valid
     FROM workspace_invite_link l
     JOIN workspace w ON w.id = l.workspace_id
-    WHERE l.token = #{token}
+    WHERE l.token_hash = #{tokenHash}
   </select>
 
   <select id="findActiveByWorkspace" resultType="ooo.klae.connex.backend.dto.InviteLinkDto">
-    SELECT l.id, l.token, l.role, l.expires_at AS expiresAt, l.max_uses AS maxUses,
+    SELECT l.id, l.role, l.expires_at AS expiresAt, l.max_uses AS maxUses,
            l.used_count AS usedCount, l.revoked,
            u.display_name AS createdByLabel, l.created_at AS createdAt
     FROM workspace_invite_link l

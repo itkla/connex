@@ -5,10 +5,8 @@ import EditDocumentTemplatePage from "@/app/(app)/library/documents/[id]/page";
 import FilesLibraryPage from "@/app/(app)/library/files/page";
 import DealsPage from "@/app/(app)/records/deals/page";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
-import AcceptInviteLink from "@/app/components/invite/AcceptInviteLink";
 import TemplateBuilder from "@/app/components/library/documents/TemplateBuilder";
 import FilesBrowser from "@/app/components/library/files/FilesBrowser";
-import InviteLinkPage from "@/app/invite-link/[token]/page";
 
 const { redirectMock } = vi.hoisted(() => ({
     redirectMock: vi.fn((destination: string): never => {
@@ -164,40 +162,6 @@ describe("a dynamic detail route distinguishes an expired session from unavailab
         const rendered = await EditDocumentTemplatePage({ params: Promise.resolve({ id: "7" }) });
 
         expect(isValidElement(rendered) ? rendered.type : null).toBe(TemplateBuilder);
-        expect(redirectMock).not.toHaveBeenCalled();
-    });
-});
-
-describe("an invite entry route preserves its signed-out return target", () => {
-    it("redirects a 401 with the existing encoded return target", async () => {
-        stubRouteReads(401);
-
-        await expect(InviteLinkPage({ params: Promise.resolve({ token: "return-token" }) }))
-            .rejects.toThrow("redirect:/auth/login?redirect=%2Finvite-link%2Freturn-token");
-        expect(redirectMock).toHaveBeenCalledWith(
-            "/auth/login?redirect=%2Finvite-link%2Freturn-token",
-        );
-    });
-
-    it("renders the retryable unavailable state for a 503", async () => {
-        stubRouteReads(503);
-
-        const rendered = await InviteLinkPage({
-            params: Promise.resolve({ token: "return-token" }),
-        });
-
-        expect(isValidElement(rendered) ? rendered.type : null).toBe(WorkspaceUnavailablePage);
-        expect(redirectMock).not.toHaveBeenCalled();
-    });
-
-    it("renders the normal invite view for an authenticated user", async () => {
-        stubRouteReads("authenticated");
-
-        const rendered = await InviteLinkPage({
-            params: Promise.resolve({ token: "return-token" }),
-        });
-
-        expect(findByType(rendered, AcceptInviteLink)).not.toBeNull();
         expect(redirectMock).not.toHaveBeenCalled();
     });
 });
