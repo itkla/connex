@@ -641,6 +641,34 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void aStepNamingOnlyPeopleWhoCannotDecideIsRefusedAtRequestTime() {
+        chainPolicy("sequential", step(1, "Self review", currentUser));
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+
+        assertThrows(BadRequestException.class,
+            () -> approvalService.requestApproval(deal.getId(), doc.id(), null));
+        assertEquals("draft", documentService.getOne(deal.getId(), doc.id()).status());
+    }
+
+    @Test
+    void anApprovalFrozenByAnOlderBinaryStillDecides() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        DocumentApprovalDto approval = approvalService.requestApproval(deal.getId(), doc.id(), null);
+        jdbcTemplate.update("DELETE FROM document_approval_step WHERE workspace_id = ? AND approval_id = ?",
+            workspace.getId(), approval.id());
+
+        authenticateAs(approver(), workspace.getId());
+        DocumentApprovalDto decided = approvalService.decide(deal.getId(), doc.id(), "approved", null, null);
+
+        assertEquals("approved", decided.status());
+        assertEquals(1, decided.steps().size());
+        assertEquals("approved", decided.steps().getFirst().status());
+        assertEquals("approved", documentService.getOne(deal.getId(), doc.id()).status());
+    }
+
+    @Test
     void voluntaryRequestWithoutPolicyCarriesNoPolicyId() {
         Deal deal = jpyDeal();
         DealDocumentDto doc = generate(deal);

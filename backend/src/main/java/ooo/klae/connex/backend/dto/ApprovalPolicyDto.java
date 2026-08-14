@@ -90,7 +90,7 @@ public class ApprovalPolicyDto {
         p.setMode(mode == null || mode.isBlank() ? "sequential" : mode);
         p.setSeparationOfDuties(
             separationOfDuties == null || separationOfDuties.isBlank() ? "strict" : separationOfDuties);
-        p.setSteps(steps.stream().map(ApprovalPolicyStepDto::toBean).toList());
+        p.setSteps(steps == null ? List.of() : steps.stream().map(ApprovalPolicyStepDto::toBean).toList());
         return p;
     }
 }

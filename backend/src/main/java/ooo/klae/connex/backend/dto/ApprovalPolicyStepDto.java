@@ -50,7 +50,8 @@ public class ApprovalPolicyStepDto {
         ApprovalPolicyStep step = new ApprovalPolicyStep();
         step.setName(name == null || name.isBlank() ? null : name.trim());
         step.setRequiredCount(requiredCount);
-        step.setApprovers(approvers.stream().map(ApprovalStepApproverDto::toBean).toList());
+        step.setApprovers(approvers == null ? List.of()
+            : approvers.stream().map(ApprovalStepApproverDto::toBean).toList());
         return step;
     }
 }

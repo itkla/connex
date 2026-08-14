@@ -542,6 +542,41 @@ public class WorkspaceService {
         return builtInPermissions(role);
     }
 
+    /**
+     * A member's effective permissions read from exclusively locked authorization rows: the active
+     * workspace root (shared), the exact membership, and the custom role with its permission set.
+     * Callers that must not act on a stale permission snapshot — an approval decision, for example —
+     * use this instead of {@link #permissionsFor(int, int)} so a concurrent removal, role change, or
+     * permission revocation serializes against them. Must run inside a transaction, and must be
+     * acquired before any tenant record lock so it keeps the repository's membership → record order.
+     * Returns an empty set when the member is not currently authorized at all.
+     */
+    public Set<Permission> lockedPermissionsFor(int workspaceId, int userId) {
+        if (systemActor.is(userId)) {
+            return systemActor.permissions();
+        }
+        if (userMapper.isAccountDeletionReserved(userId)) {
+            return EnumSet.noneOf(Permission.class);
+        }
+        if (workspaceMapper.lockActiveWorkspaceForShare(workspaceId) == null) {
+            return EnumSet.noneOf(Permission.class);
+        }
+        WorkspaceMember membership = workspaceMapper.lockAuthorizationMembership(workspaceId, userId);
+        if (!isExactMembership(membership, workspaceId, userId)
+                || !"active".equals(membership.getStatus())) {
+            return EnumSet.noneOf(Permission.class);
+        }
+        if (membership.getRoleId() == null) {
+            Role role = Role.of(membership.getRole());
+            return role == null ? EnumSet.noneOf(Permission.class) : builtInPermissions(role);
+        }
+        int roleId = membership.getRoleId();
+        if (roleMapper.lockRole(workspaceId, roleId) == null) {
+            return EnumSet.noneOf(Permission.class);
+        }
+        return parsePermissions(roleMapper.lockPermissions(workspaceId, roleId));
+    }
+
     /** Returns the current member's effective permissions in the active workspace. */
     public Set<Permission> getCurrentPermissions() {
         return permissionsFor(getCurrentWorkspaceId(), currentUser().getId());

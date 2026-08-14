@@ -68,7 +68,8 @@ CREATE TABLE document_approval_step (
     CONSTRAINT chk_document_approval_step_status CHECK (status IN ('pending', 'active', 'approved', 'rejected', 'cancelled')),
     CONSTRAINT chk_document_approval_step_required CHECK (required_count >= 1),
     UNIQUE KEY uq_document_approval_step_order (workspace_id, approval_id, step_order),
-    UNIQUE KEY uq_document_approval_step_workspace_id (workspace_id, id)
+    UNIQUE KEY uq_document_approval_step_workspace_id (workspace_id, id),
+    UNIQUE KEY uq_document_approval_step_owner (workspace_id, approval_id, id)
 ) DEFAULT CHARSET=utf8mb4 COMMENT='Frozen chain step of one approval request';
 
 CREATE TABLE document_approval_step_approver (
@@ -96,8 +97,8 @@ CREATE TABLE document_approval_decision (
     decided_by   INT NOT NULL COMMENT 'Deciding user; validated against workspace membership in the service layer',
     comment      VARCHAR(1000) NULL,
     decided_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_document_approval_decision_step FOREIGN KEY (workspace_id, step_id)
-        REFERENCES document_approval_step(workspace_id, id) ON DELETE CASCADE,
+    CONSTRAINT fk_document_approval_decision_step FOREIGN KEY (workspace_id, approval_id, step_id)
+        REFERENCES document_approval_step(workspace_id, approval_id, id) ON DELETE CASCADE,
     CONSTRAINT chk_document_approval_decision CHECK (decision IN ('approved', 'rejected')),
     UNIQUE KEY uq_document_approval_decision_approver (workspace_id, step_id, decided_by),
     INDEX idx_document_approval_decision_approval (workspace_id, approval_id, id)
@@ -124,3 +125,25 @@ SELECT a.workspace_id, a.id, s.id, a.status, a.decided_by, a.decision_comment, C
 FROM document_approval a
 JOIN document_approval_step s ON s.workspace_id = a.workspace_id AND s.approval_id = a.id
 WHERE a.status IN ('approved', 'rejected') AND a.decided_by IS NOT NULL;
+
+-- Database fence for the rolling-deployment window: a binary that predates this migration decides an
+-- approval by updating document_approval alone, which would bypass named approvers, quorum, and step
+-- order on a chained request. Refuse that transition in the database. The chained runtime always marks
+-- the final step approved before it approves the request, so this never fires on a legitimate write.
+-- Rejection and cancellation stay unfenced: both are terminal outcomes that need no chain agreement.
+DELIMITER //
+CREATE TRIGGER trg_document_approval_chain_fence
+BEFORE UPDATE ON document_approval
+FOR EACH ROW
+BEGIN
+    IF NEW.status = 'approved' AND OLD.status <> 'approved'
+            AND EXISTS (
+                SELECT 1 FROM document_approval_step s
+                WHERE s.workspace_id = NEW.workspace_id
+                  AND s.approval_id = NEW.id
+                  AND s.status <> 'approved') THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'document_approval cannot be approved while chain steps are unapproved';
+    END IF;
+END//
+DELIMITER ;

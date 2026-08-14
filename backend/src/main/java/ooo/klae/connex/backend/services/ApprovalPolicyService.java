@@ -289,6 +289,15 @@ public class ApprovalPolicyService {
         return policyMapper.getStepsByPolicyIds(workspaceId, List.of(policyId));
     }
 
+    /**
+     * One consistent read of a policy and its chain, or {@code null} when the policy no longer
+     * exists. Header and steps come from a single statement so an approval can never freeze one
+     * policy revision's mode against another revision's steps.
+     */
+    ApprovalPolicy snapshot(int workspaceId, int policyId) {
+        return policyMapper.getWithStepsById(workspaceId, policyId);
+    }
+
     private ApprovalPolicy require(int workspaceId, int id) {
         ApprovalPolicy policy = policyMapper.getById(workspaceId, id);
         if (policy == null) throw new ResourceNotFoundException("Approval policy not found with id: " + id);

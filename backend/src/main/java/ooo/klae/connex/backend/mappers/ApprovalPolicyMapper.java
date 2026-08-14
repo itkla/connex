@@ -17,6 +17,7 @@ public interface ApprovalPolicyMapper {
     int update(ApprovalPolicy policy);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
+    ApprovalPolicy getWithStepsById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<ApprovalPolicyStep> getStepsByPolicyIds(@Param("workspaceId") int workspaceId,
         @Param("policyIds") List<Integer> policyIds);
     int insertStep(ApprovalPolicyStep step);

@@ -122,8 +122,10 @@ public class DocumentApprovalService {
         if (approvalMapper.findPending(workspaceId, documentId) != null) {
             throw new BadRequestException("An approval is already pending for this document");
         }
-        ApprovalPolicy policy = policyService.firstMatch(
+        ApprovalPolicy matched = policyService.firstMatch(
             policyService.activePolicies(workspaceId), document, parseContent(document));
+        ApprovalPolicy policy = matched == null ? null
+            : policyService.snapshot(workspaceId, matched.getId());
         User actor = userMapper.getUserById(workspaceService.getCurrentUserId());
 
         DocumentApproval approval = new DocumentApproval();
@@ -137,6 +139,9 @@ public class DocumentApprovalService {
             ? "strict" : policy.getSeparationOfDuties());
         approval.setRequestedBy(actor == null ? null : actor.getId());
         approval.setRequestComment(blankToNull(comment));
+
+        ApproverPool pool = approverPool(workspaceId);
+        requireChainIsSatisfiable(policy, approval, document, pool);
         approvalMapper.insert(approval);
         List<DocumentApprovalStep> opened = freezeChain(workspaceId, approval, policy);
         documentMapper.updateStatus(workspaceId, documentId, "pending_approval");
@@ -144,8 +149,62 @@ public class DocumentApprovalService {
         auditService.record("document_approval.request", "deal", dealId, deal.getName(),
             "Requested approval for " + document.getType() + " v" + document.getVersion()
                 + (policy == null ? "" : " under policy " + policy.getName()), null);
-        notifyStepApprovers(workspaceId, deal, document, approval, opened, actor);
+        notifyStepApprovers(workspaceId, deal, document, approval, opened, actor, pool);
         return DocumentApprovalDto.from(requireApproval(workspaceId, approval.getId()));
+    }
+
+    /**
+     * Every workspace member paired with whether they may approve documents today, resolved once per
+     * request so neither chain validation nor the notification fan-out re-reads permissions per step.
+     */
+    private ApproverPool approverPool(int workspaceId) {
+        List<User> members = workspaceService.getMembers(workspaceId);
+        Set<Integer> approvers = members.stream()
+            .map(User::getId)
+            .filter(memberId -> workspaceService.permissionsFor(workspaceId, memberId)
+                .contains(Permission.DOCUMENT_APPROVE))
+            .collect(Collectors.toCollection(LinkedHashSet::new));
+        return new ApproverPool(members, approvers);
+    }
+
+    /**
+     * Refuses a request that this particular actor could never get past. Separation of duties
+     * removes the requester and the document's author from the pool for this request only, so a step
+     * whose named approvers are exactly those people is a dead end the requester can see and fix now
+     * — unlike a step open to any approver, whose pool legitimately changes as people join, and
+     * which is therefore left alone.
+     */
+    private void requireChainIsSatisfiable(ApprovalPolicy policy, DocumentApproval approval,
+            DealDocument document, ApproverPool pool) {
+        if ("off".equals(approval.getSeparationOfDuties()) || policy == null) {
+            return;
+        }
+        Set<Integer> blocked = new LinkedHashSet<>();
+        if (approval.getRequestedBy() != null) {
+            blocked.add(approval.getRequestedBy());
+        }
+        if ("strict".equals(approval.getSeparationOfDuties()) && document.getCreatedBy() != null) {
+            blocked.add(document.getCreatedBy());
+        }
+        for (ApprovalPolicyStep step : policy.getSteps()) {
+            List<Integer> named = step.getApprovers().stream()
+                .filter(approver -> !ANY_APPROVER.equals(approver.getApproverKind()))
+                .map(ApprovalStepApprover::getUserId)
+                .filter(userId -> userId != null)
+                .toList();
+            if (!named.isEmpty() && blocked.containsAll(named)) {
+                throw new BadRequestException("Step \""
+                    + (step.getName() == null || step.getName().isBlank() ? "unnamed" : step.getName())
+                    + "\" is approved only by people who cannot decide this document");
+            }
+        }
+        if (pool.approvers().isEmpty()) {
+            throw new BadRequestException("Nobody in this workspace can approve documents yet");
+        }
+    }
+
+    /** The workspace's members and the subset of them that may approve documents. */
+    private record ApproverPool(List<User> members, Set<Integer> approvers) {
     }
 
     /**
@@ -159,17 +218,18 @@ public class DocumentApprovalService {
             Integer stepId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = requireDeal(workspaceId, dealId);
-        DealDocument document = lockDocument(workspaceId, dealId, documentId);
-        DocumentApproval approval = approvalMapper.findPending(workspaceId, documentId);
-        if (approval == null || !"pending_approval".equals(document.getStatus())) {
-            throw new BadRequestException("No pending approval on this document");
-        }
         User actor = userMapper.getUserById(workspaceService.getCurrentUserId());
         if (actor == null) {
             throw new ForbiddenException("Only a workspace member can decide an approval");
         }
-        if (!workspaceService.permissionsFor(workspaceId, actor.getId()).contains(Permission.DOCUMENT_APPROVE)) {
+        if (!workspaceService.lockedPermissionsFor(workspaceId, actor.getId())
+                .contains(Permission.DOCUMENT_APPROVE)) {
             throw new ForbiddenException("You cannot approve documents in this workspace");
+        }
+        DealDocument document = lockDocument(workspaceId, dealId, documentId);
+        DocumentApproval approval = approvalMapper.findPending(workspaceId, documentId);
+        if (approval == null || !"pending_approval".equals(document.getStatus())) {
+            throw new BadRequestException("No pending approval on this document");
         }
         requireSeparationOfDuties(approval, document, actor);
         List<DocumentApprovalStep> steps = chainOf(workspaceId, approval);
@@ -185,32 +245,37 @@ public class DocumentApprovalService {
         approvalMapper.insertDecision(recorded);
 
         boolean approved = APPROVED.equals(decision);
-        if (approved) {
-            advanceAfterApproval(workspaceId, deal, document, approval, steps, step, actor, comment);
-        } else {
+        String outcome = approved
+            ? advanceAfterApproval(workspaceId, deal, document, approval, steps, step, actor, comment)
+            : PENDING;
+        if (!approved) {
             approvalMapper.updateStepStatus(workspaceId, step.getId(), REJECTED, ACTIVE);
             approvalMapper.cancelOpenSteps(workspaceId, approval.getId());
             approvalMapper.decide(workspaceId, approval.getId(), REJECTED, actor.getId(), blankToNull(comment));
             documentMapper.updateStatus(workspaceId, documentId, "draft");
             notifyDecided(workspaceId, document, approval, REJECTED, actor);
+            outcome = REJECTED;
         }
 
+        String subject = document.getType() + " v" + document.getVersion() + " at step " + step.getStepOrder();
         auditService.record("document_approval.decide", "deal", dealId, deal.getName(),
-            (approved ? "Approved " : "Rejected ") + document.getType() + " v" + document.getVersion()
-                + " at step " + step.getStepOrder(),
-            auditService.singleChange("status", PENDING, decision));
+            PENDING.equals(outcome)
+                ? "Recorded an approval for " + subject + ", which is still awaiting other approvers"
+                : (approved ? "Approved " : "Rejected ") + subject,
+            PENDING.equals(outcome) ? null : auditService.singleChange("status", PENDING, outcome));
         return DocumentApprovalDto.from(requireApproval(workspaceId, approval.getId()));
     }
 
     /**
      * Marks the step passed once it holds its quorum, then opens the next sequential step or
-     * completes the request when every step has passed.
+     * completes the request when every step has passed. Returns the request's resulting status, so
+     * an approval that only advances one step is never audited as approving the document.
      */
-    private void advanceAfterApproval(int workspaceId, Deal deal, DealDocument document,
+    private String advanceAfterApproval(int workspaceId, Deal deal, DealDocument document,
             DocumentApproval approval, List<DocumentApprovalStep> steps, DocumentApprovalStep step,
             User actor, String comment) {
         if (approvalMapper.countStepApprovals(workspaceId, step.getId()) < step.getRequiredCount()) {
-            return;
+            return PENDING;
         }
         approvalMapper.updateStepStatus(workspaceId, step.getId(), APPROVED, ACTIVE);
         step.setStatus(APPROVED);
@@ -220,16 +285,18 @@ public class DocumentApprovalService {
         if (next != null) {
             approvalMapper.updateStepStatus(workspaceId, next.getId(), ACTIVE, PENDING);
             next.setStatus(ACTIVE);
-            notifyStepApprovers(workspaceId, deal, document, approval, List.of(next), actor);
-            return;
+            notifyStepApprovers(workspaceId, deal, document, approval, List.of(next), actor,
+                approverPool(workspaceId));
+            return PENDING;
         }
         boolean complete = steps.stream().allMatch(candidate -> APPROVED.equals(candidate.getStatus()));
         if (!complete) {
-            return;
+            return PENDING;
         }
         approvalMapper.decide(workspaceId, approval.getId(), APPROVED, actor.getId(), blankToNull(comment));
         documentMapper.updateStatus(workspaceId, document.getId(), APPROVED);
         notifyDecided(workspaceId, document, approval, APPROVED, actor);
+        return APPROVED;
     }
 
     /**
@@ -347,8 +414,17 @@ public class DocumentApprovalService {
         return approver;
     }
 
+    /**
+     * The frozen chain of a pending approval. A request created by a binary older than the chain
+     * runtime carries no steps; rather than refusing every decision on it, freeze the one implicit
+     * step it always meant — a single approval from anyone who can approve documents.
+     */
     private List<DocumentApprovalStep> chainOf(int workspaceId, DocumentApproval approval) {
-        return withChain(workspaceId, List.of(approval)).getFirst().getSteps();
+        List<DocumentApprovalStep> steps = withChain(workspaceId, List.of(approval)).getFirst().getSteps();
+        if (!steps.isEmpty()) {
+            return steps;
+        }
+        return List.of(insertStep(workspaceId, approval, 1, null, 1, ACTIVE, List.of(anyApprover())));
     }
 
     /**
@@ -403,11 +479,10 @@ public class DocumentApprovalService {
      * Members who lost {@link Permission#DOCUMENT_APPROVE} since the chain was frozen are skipped.
      */
     private void notifyStepApprovers(int workspaceId, Deal deal, DealDocument document,
-            DocumentApproval approval, List<DocumentApprovalStep> steps, User actor) {
+            DocumentApproval approval, List<DocumentApprovalStep> steps, User actor, ApproverPool pool) {
         String triggeredAt = LocalDateTime.now(ZoneOffset.UTC).format(TS);
-        List<User> members = workspaceService.getMembers(workspaceId);
         for (DocumentApprovalStep step : steps) {
-            for (User member : recipientsFor(workspaceId, members, step)) {
+            for (User member : recipientsFor(pool, step)) {
                 if (actor != null && member.getId() == actor.getId()) {
                     continue;
                 }
@@ -442,17 +517,16 @@ public class DocumentApprovalService {
         }
     }
 
-    private Set<User> recipientsFor(int workspaceId, List<User> members, DocumentApprovalStep step) {
+    private Set<User> recipientsFor(ApproverPool pool, DocumentApprovalStep step) {
         boolean anyApprover = step.getApprovers().stream()
             .anyMatch(approver -> ANY_APPROVER.equals(approver.getApproverKind()));
         Set<Integer> named = step.getApprovers().stream()
             .map(ApprovalStepApprover::getUserId)
             .filter(userId -> userId != null)
             .collect(Collectors.toSet());
-        return members.stream()
+        return pool.members().stream()
             .filter(member -> anyApprover || named.contains(member.getId()))
-            .filter(member -> workspaceService.permissionsFor(workspaceId, member.getId())
-                .contains(Permission.DOCUMENT_APPROVE))
+            .filter(member -> pool.approvers().contains(member.getId()))
             .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 

@@ -41,6 +41,26 @@ add, remove, or re-target the steps of an approval that is already pending. A po
 and a voluntary request with no matching policy, both behave exactly like the original single-approver
 flow: one approval from anyone who can approve documents.
 
+Two guards keep a chain from becoming a trap:
+
+- Saving a policy is refused when a step could never reach its quorum — an unknown approver, an
+  approver who cannot hold `DOCUMENT_APPROVE`, a step mixing "anyone" with named members, a repeated
+  approver, or a quorum larger than the approvers who could satisfy it.
+- Requesting approval is refused when a step's named approvers are exactly the people separation of
+  duties excludes for that request. A step open to *anyone* is deliberately not refused: its pool
+  legitimately grows as people join the workspace, and the requester can always cancel.
+
+`document_approval` also carries a database trigger that refuses to mark a request approved while any
+of its steps is unapproved. That fences the rolling-deployment window, in which a node running a
+binary from before chains existed would otherwise approve a chained request by writing the request row
+alone. Rejection and cancellation are terminal outcomes and stay unfenced. A request frozen by such an
+older binary carries no steps at all; the chained runtime freezes the one implicit step it always
+meant rather than refusing to decide it.
+
+Deciding re-reads the actor's permissions from **exclusively locked** membership and role rows, taken
+before the document row lock so the order stays membership → record. A concurrent removal or role
+change therefore serializes against the decision instead of racing it.
+
 ## Creator-or-admin deletion
 
 `DeletionPolicy.requireDeletable(creatorUserId)` gates deletion of **report definitions, report
