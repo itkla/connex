@@ -189,7 +189,7 @@ class DeploymentNetworkTest(unittest.TestCase):
         compose = resolve_compose_model(COMPOSE_PATH, http_port=None)
         self.assertEqual("80", compose["services"]["caddy"]["ports"][0]["published"])
 
-    def test_caddy_hsts_is_explicitly_enabled_only_for_connex_operated_production(self) -> None:
+    def test_caddy_hsts_defaults_off_and_requires_an_explicit_override(self) -> None:
         default_model = resolve_compose_model(COMPOSE_PATH)
         enabled_model = resolve_compose_model(
             COMPOSE_PATH,
@@ -208,9 +208,12 @@ class DeploymentNetworkTest(unittest.TestCase):
                 "CONNEX_CADDY_HSTS_ENABLED"
             ],
         )
-        self.assertIn("CONNEX_CADDY_HSTS_ENABLED=true", SILO_ENV_PATH.read_text())
-        self.assertIn("CONNEX_CADDY_HSTS_ENABLED=false", EVAL_ENV_PATH.read_text())
-        self.assertIn("CONNEX_CADDY_HSTS_ENABLED=false", ONPREM_ENV_PATH.read_text())
+        for profile_path in (EVAL_ENV_PATH, SILO_ENV_PATH, ONPREM_ENV_PATH):
+            with self.subTest(profile=profile_path.name):
+                self.assertIn(
+                    "CONNEX_CADDY_HSTS_ENABLED=false",
+                    profile_path.read_text(encoding="utf-8"),
+                )
 
     def test_forwarded_client_ip_trust_is_explicit_per_real_deployment_profile(self) -> None:
         expected_backend_proxies = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"

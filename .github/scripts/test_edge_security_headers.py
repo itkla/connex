@@ -330,6 +330,11 @@ class EdgeSecurityHeadersTest(unittest.TestCase):
             with self.subTest(exception_id=exception_id):
                 self.assertIn(f"`{exception_id}`", edge_defence)
         self.assertIn("`CF-CONFIG-01-COMPATIBILITY`", edge_defence)
+        self.assertIn("`CF-REDIRECT-01-PRODUCTION-HTTPS`", edge_defence)
+        self.assertIn("`CF-REDIRECT-02-PREVIEW-HTTPS`", edge_defence)
+        self.assertIn("Request URL `http://connexcrm.jp/*`", edge_defence)
+        self.assertIn("Request URL `http://preview.connexcrm.jp/*`", edge_defence)
+        self.assertIn("only after both hostnames pass", edge_defence)
         self.assertIn(
             "| Definitely Automated | Managed Challenge after staging evidence | "
             "Managed Challenge after staging evidence |",

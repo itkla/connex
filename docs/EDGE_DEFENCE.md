@@ -93,12 +93,14 @@ ingress; a deployment that cannot meet them needs a reviewed timeout change rath
 exception. Caddy and Cloudflare WebSocket keepalive behavior must be monitored separately.
 
 Caddy adds `Strict-Transport-Security: max-age=31536000; includeSubDomains` to normal and error
-responses only when `CONNEX_CADDY_HSTS_ENABLED=true`. The shared SaaS origin configuration must set
-this variable after the HTTPS validation and redirect gates below. The Connex-operated silo template
-sets it, while on-prem and eval templates default it off because those editions may intentionally use
-plain HTTP on a private network. An HTTPS-enabled on-prem operator may opt in only after validating
-every hostname covered by `includeSubDomains`. Never enable it merely to compensate for a missing
-HTTP-to-HTTPS redirect.
+responses only when `CONNEX_CADDY_HSTS_ENABLED=true`. The authoritative shared SaaS origin profile
+must set that exact variable to `true`, but only after both hostnames pass the HTTPS and redirect
+gates below. Shared SaaS infrastructure is account-managed and has no distributable `.env` template
+in this repository; this runbook is its reviewable configuration record. Silo, on-prem, and eval
+templates default the variable off because they may intentionally use plain HTTP on a private
+network. An HTTPS-enabled silo or on-prem operator may opt in only after validating every hostname
+covered by `includeSubDomains`. Never enable it merely to compensate for a missing HTTP-to-HTTPS
+redirect.
 
 Validate every Caddy edit against the deployment's pinned digest and actual non-secret Caddy
 environment from the repository root before deploy:
@@ -192,11 +194,12 @@ owner must reproduce in the dashboard for both SaaS hosts and export for review 
 - Proxy `connexcrm.jp` and `preview.connexcrm.jp`; use Full (strict) TLS. Enable WebSockets. Do not
   enable HSTS yet: first validate Cloudflare-to-origin certificate authentication and every
   compatibility flow over HTTPS.
-- After HTTPS validation succeeds, enable **Always Use HTTPS** for an edge `301` redirect and prove
-  each hostname redirects `http://` to the same `https://` hostname without accepting a login form
-  over HTTP. Enable Cloudflare edge HSTS only after that redirect proof, with a one-year max age and
-  `includeSubDomains`; leave preload disabled. Inventory and validate every subdomain before enabling
-  `includeSubDomains`, because HSTS rollback cannot recover a hostname that lacks working HTTPS.
+- After each hostname passes HTTPS validation, deploy its hostname-scoped Single Redirect rule below
+  and prove `http://` returns `308` to the same `https://` hostname without rendering a login form.
+  Do not use the zone-wide **Always Use HTTPS** toggle while either hostname remains unvalidated.
+- Enable Cloudflare's zone-wide HSTS only after both hostnames pass HTTPS and redirect validation,
+  with a one-year max age and `includeSubDomains`; leave preload disabled. Inventory and validate
+  every subdomain first, because HSTS rollback cannot recover a hostname that lacks working HTTPS.
 - Leave HTTP DDoS protection at the Cloudflare managed defaults. Deploy the Cloudflare Managed
   Ruleset and Cloudflare OWASP Core Ruleset with their documented defaults. Start new or materially
   changed managed rules in observation where the plan supports it, review 24 hours of staging
@@ -210,6 +213,15 @@ owner must reproduce in the dashboard for both SaaS hosts and export for review 
 
 Cloudflare expressions below are restricted to the two intended hosts. Preserve this order and
 enable Skip logging except where the table explicitly requires it disabled.
+
+Create these two hostname-scoped Single Redirect rules before the WAF rules. Keep each as a draft
+until its named hostname passes HTTPS validation, then deploy it before public traffic. Use `308` so
+non-GET methods are not silently rewritten, and preserve the path and query string:
+
+- `CF-REDIRECT-01-PRODUCTION-HTTPS`: Request URL `http://connexcrm.jp/*`; target URL
+  `https://connexcrm.jp/${1}`; status `308`; preserve query string.
+- `CF-REDIRECT-02-PREVIEW-HTTPS`: Request URL `http://preview.connexcrm.jp/*`; target URL
+  `https://preview.connexcrm.jp/${1}`; status `308`; preserve query string.
 
 | ID | Expression | Action and purpose |
 |---|---|---|
@@ -376,14 +388,17 @@ them.
 3. Implement and prove one origin-lock design. From a non-Cloudflare network, the origin address
    must time out or reject TLS; from Cloudflare, the authenticated request must succeed.
 4. Apply the policy to `preview.connexcrm.jp`. Validate its HTTPS certificate and every compatibility
-   path, enable Always Use HTTPS, prove the HTTP redirect, then enable edge HSTS and set
-   `CONNEX_CADDY_HSTS_ENABLED=true` on any shipped-Caddy origin. Export the resulting settings/rules
-   and attach them to the change record. Run the compatibility and abuse tests below, then observe
-   for 24 hours.
+   path, deploy `CF-REDIRECT-02-PREVIEW-HTTPS`, and prove the HTTP redirect. Keep zone HSTS disabled.
+   Export the resulting settings/rules and attach them to the change record. Run the compatibility
+   and abuse tests below, then observe for 24 hours.
 5. Independently review every block/challenge, tune only with evidence, and obtain Security Owner
-   role approval. Proxy `connexcrm.jp`; repeat the HTTPS, redirect, HSTS, and compatibility tests in
+   role approval. Proxy `connexcrm.jp`, validate HTTPS and every compatibility path, deploy
+   `CF-REDIRECT-01-PRODUCTION-HTTPS`, and prove its HTTP redirect. Keep zone HSTS disabled until both
+   hostname results are attached to the change record.
+6. After both hostname gates pass, set `CONNEX_CADDY_HSTS_ENABLED=true` in the shared SaaS origin
+   profile and enable Cloudflare zone HSTS. Repeat HTTPS, redirect, and HSTS probes on both hosts in
    that order, then retain the sanitized evidence.
-6. The independent Security reviewer, not the implementer, moves SEC-92 from `NG`/In Review only
+7. The independent Security reviewer, not the implementer, moves SEC-92 from `NG`/In Review only
    after reproducing the evidence in the public environment.
 
 Post-cutover tests, using staging-only accounts/files and provider test fixtures, are:
@@ -458,5 +473,7 @@ retrospectively within one business day.
 - [Cloudflare Security Events](https://developers.cloudflare.com/waf/analytics/security-events/)
 - [Cloudflare Logpush availability](https://developers.cloudflare.com/logs/logpush/)
 - [Cloudflare WebSockets](https://developers.cloudflare.com/network/websockets/)
+- [Cloudflare Single Redirects](https://developers.cloudflare.com/rules/url-forwarding/single-redirects/)
+- [Cloudflare HSTS](https://developers.cloudflare.com/ssl/edge-certificates/additional-options/http-strict-transport-security/)
 - [Cloudflare Tunnel troubleshooting](https://developers.cloudflare.com/cloudflare-one/troubleshooting/tunnel/)
 - [Cloudflare origin protection](https://developers.cloudflare.com/fundamentals/security/protect-your-origin-server/)
