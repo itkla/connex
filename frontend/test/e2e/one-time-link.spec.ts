@@ -1,12 +1,8 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 test.use({ storageState: { cookies: [], origins: [] } });
 
-test("password reset removes its fragment bearer before exchange navigation", async ({ page }) => {
-    const rawToken = "browser_only_reset_bearer_123456789";
-    const requestedUrls: string[] = [];
-    page.on("request", (request) => requestedUrls.push(request.url()));
-
+async function mockCsrf(page: Page) {
     await page.route("**/api/auth/csrf", async (route) => {
         await route.fulfill({
             status: 200,
@@ -19,6 +15,14 @@ test("password reset removes its fragment bearer before exchange navigation", as
             }),
         });
     });
+}
+
+test("password reset removes its fragment bearer before exchange navigation", async ({ page }) => {
+    const rawToken = "browser_only_reset_bearer_123456789";
+    const requestedUrls: string[] = [];
+    page.on("request", (request) => requestedUrls.push(request.url()));
+
+    await mockCsrf(page);
     await page.route("**/api/auth/reset-password/exchange", async (route) => {
         expect(route.request().postDataJSON()).toEqual({ token: rawToken });
         await route.fulfill({
@@ -49,18 +53,7 @@ test("workspace invite removes its fragment bearer before rendering the preview"
     const requestedUrls: string[] = [];
     page.on("request", (request) => requestedUrls.push(request.url()));
 
-    await page.route("**/api/auth/csrf", async (route) => {
-        await route.fulfill({
-            status: 200,
-            contentType: "application/json",
-            body: JSON.stringify({
-                token: "csrf-token",
-                headerName: "X-CSRF-TOKEN",
-                parameterName: "_csrf",
-                requestIdentity: null,
-            }),
-        });
-    });
+    await mockCsrf(page);
     await page.route("**/api/invites/exchange", async (route) => {
         expect(route.request().postDataJSON()).toEqual({ token: rawToken });
         await route.fulfill({
@@ -105,6 +98,7 @@ test("email change remains reachable with a session and removes its fragment bea
     const rawToken = "browser_only_email_change_bearer_123456789";
     const requestedUrls: string[] = [];
     page.on("request", (request) => requestedUrls.push(request.url()));
+    await mockCsrf(page);
     await context.addCookies([
         {
             name: "JSESSIONID",
