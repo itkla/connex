@@ -63,6 +63,11 @@ OCR_DEPENDENCY_FILES = {
     "ocr/uv.lock",
 }
 
+SECURITY_REGRESSION_DOCUMENTS = {
+    "docs/DEPLOYMENT.md",
+    "docs/UPGRADING.md",
+}
+
 
 def empty_categories() -> dict[str, bool]:
     return {category: False for category in CATEGORIES}
@@ -122,6 +127,9 @@ def classify_paths(paths: list[str], event_name: str = "pull_request") -> tuple[
             continue
 
         if path.startswith("deploy/"):
+            categories["action_pins"] = True
+
+        if path in SECURITY_REGRESSION_DOCUMENTS:
             categories["action_pins"] = True
 
         if is_documentation(path) or path in ROOT_METADATA:

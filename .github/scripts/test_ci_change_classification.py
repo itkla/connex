@@ -99,6 +99,13 @@ class CiChangeClassificationTest(unittest.TestCase):
         self.assertTrue(categories["action_pins"])
         self.assertFalse(categories["backup"])
 
+    def test_network_runbooks_run_security_regressions(self) -> None:
+        for path in ("docs/DEPLOYMENT.md", "docs/UPGRADING.md"):
+            with self.subTest(path=path):
+                categories = self.classify(path)
+                self.assertTrue(categories["action_pins"])
+                self.assertFalse(categories["compose"])
+
     def test_ci_policy_change_forces_every_category(self) -> None:
         categories = self.classify(".github/workflows/ci.yml")
         self.assertTrue(all(categories.values()))

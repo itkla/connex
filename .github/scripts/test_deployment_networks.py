@@ -1,22 +1,73 @@
+import json
+import os
+import subprocess
 import unittest
 from pathlib import Path
-
-import yaml
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).parents[2]
 COMPOSE_PATH = ROOT / "deploy" / "docker-compose.yml"
+BUILD_COMPOSE_PATH = ROOT / "deploy" / "docker-compose.build.yml"
 BACKUP_ENV_PATH = ROOT / "deploy" / "backup" / "backup.env.example"
 BACKUP_LIB_PATH = ROOT / "deploy" / "backup" / "connex-backup-lib.sh"
 DOCKER_CLIENT_LIB_PATH = ROOT / "deploy" / "backup" / "shims" / "docker-client-lib.sh"
 BACKUP_INSTALL_PATH = ROOT / "deploy" / "backup" / "install.sh"
 DEPLOYMENT_DOC_PATH = ROOT / "docs" / "DEPLOYMENT.md"
+UPGRADING_DOC_PATH = ROOT / "docs" / "UPGRADING.md"
+DIGEST = "0" * 64
+
+
+def resolve_compose_model(
+    *compose_files: Path,
+    profiles: tuple[str, ...] = (),
+    http_port: str | None = "18080",
+) -> dict[str, object]:
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "CONNEX_BACKEND_DIGEST": DIGEST,
+            "CONNEX_FRONTEND_DIGEST": DIGEST,
+            "CONNEX_OCR_DIGEST": DIGEST,
+            "CONNEX_DB_PASSWORD": "network-test",
+            "CONNEX_DB_ROOT_PASSWORD": "network-root-test",
+            "CONNEX_OCR_SERVICE_TOKEN": "0" * 32,
+            "COMPOSE_PROFILES": "",
+        }
+    )
+    if http_port is None:
+        environment.pop("CONNEX_HTTP_PORT", None)
+    else:
+        environment["CONNEX_HTTP_PORT"] = http_port
+    command = ["docker", "compose", "--env-file", os.devnull]
+    for profile in profiles:
+        command.extend(("--profile", profile))
+    for compose_file in compose_files:
+        command.extend(("-f", str(compose_file)))
+    command.extend(("config", "--no-env-resolution", "--format", "json"))
+    completed = subprocess.run(
+        command,
+        cwd=ROOT,
+        env=environment,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    return json.loads(completed.stdout)
 
 
 class DeploymentNetworkTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.compose = yaml.safe_load(COMPOSE_PATH.read_text(encoding="utf-8"))
+        cls.compose_models = {
+            "published": resolve_compose_model(COMPOSE_PATH),
+            "published-ocr": resolve_compose_model(COMPOSE_PATH, profiles=("ocr",)),
+            "source-build": resolve_compose_model(COMPOSE_PATH, BUILD_COMPOSE_PATH),
+            "source-build-ocr": resolve_compose_model(
+                COMPOSE_PATH, BUILD_COMPOSE_PATH, profiles=("ocr",)
+            ),
+        }
 
     def test_services_join_only_required_networks(self) -> None:
         expected_networks = {
@@ -27,55 +78,79 @@ class DeploymentNetworkTest(unittest.TestCase):
             "db": {"db"},
         }
 
-        services = self.compose["services"]
-        self.assertEqual(set(expected_networks), set(services))
-        for service_name, expected in expected_networks.items():
-            with self.subTest(service=service_name):
-                self.assertEqual(expected, set(services[service_name]["networks"]))
+        for model_name, compose in self.compose_models.items():
+            services = compose["services"]
+            model_expected_networks = expected_networks.copy()
+            if not model_name.endswith("-ocr"):
+                del model_expected_networks["ocr"]
+            with self.subTest(model=model_name):
+                self.assertEqual(set(model_expected_networks), set(services))
+            for service_name, expected in model_expected_networks.items():
+                with self.subTest(model=model_name, service=service_name):
+                    self.assertEqual(expected, set(services[service_name]["networks"]))
+
+    def test_profile_selection_ignores_ambient_compose_profiles(self) -> None:
+        with patch.dict(os.environ, {"COMPOSE_PROFILES": "ocr"}):
+            compose = resolve_compose_model(COMPOSE_PATH)
+        self.assertNotIn("ocr", compose["services"])
 
     def test_internal_networks_are_gateway_isolated(self) -> None:
-        networks = self.compose["networks"]
-        self.assertEqual({"edge", "app", "db", "ocr_internal"}, set(networks))
-
-        for network_name in ("db", "ocr_internal"):
-            with self.subTest(network=network_name):
-                network = networks[network_name]
-                self.assertIs(network["internal"], True)
-                self.assertEqual(
-                    "isolated",
-                    network["driver_opts"][
-                        "com.docker.network.bridge.gateway_mode_ipv4"
-                    ],
-                )
-                self.assertEqual(
-                    "isolated",
-                    network["driver_opts"][
-                        "com.docker.network.bridge.gateway_mode_ipv6"
-                    ],
-                )
+        for model_name, compose in self.compose_models.items():
+            networks = compose["networks"]
+            with self.subTest(model=model_name):
+                self.assertEqual({"edge", "app", "db", "ocr_internal"}, set(networks))
+                self.assertFalse(networks["app"].get("internal", False))
+            for network_name in ("db", "ocr_internal"):
+                with self.subTest(model=model_name, network=network_name):
+                    network = networks[network_name]
+                    self.assertIs(network["internal"], True)
+                    self.assertEqual(
+                        "isolated",
+                        network["driver_opts"][
+                            "com.docker.network.bridge.gateway_mode_ipv4"
+                        ],
+                    )
+                    self.assertEqual(
+                        "isolated",
+                        network["driver_opts"][
+                            "com.docker.network.bridge.gateway_mode_ipv6"
+                        ],
+                    )
 
     def test_application_network_is_the_default_gateway(self) -> None:
-        services = self.compose["services"]
-        self.assertEqual(1, services["frontend"]["networks"]["app"]["gw_priority"])
-        self.assertEqual(1, services["backend"]["networks"]["app"]["gw_priority"])
+        for model_name, compose in self.compose_models.items():
+            services = compose["services"]
+            with self.subTest(model=model_name, service="frontend"):
+                self.assertEqual(1, services["frontend"]["networks"]["app"]["gw_priority"])
+            with self.subTest(model=model_name, service="backend"):
+                self.assertEqual(1, services["backend"]["networks"]["app"]["gw_priority"])
 
     def test_only_caddy_publishes_a_host_port(self) -> None:
-        services = self.compose["services"]
-        self.assertEqual(["${CONNEX_HTTP_PORT:-80}:80"], services["caddy"]["ports"])
-        for service_name, service in services.items():
-            if service_name != "caddy":
-                with self.subTest(service=service_name):
-                    self.assertNotIn("ports", service)
+        for model_name, compose in self.compose_models.items():
+            services = compose["services"]
+            caddy_ports = services["caddy"].get("ports", [])
+            with self.subTest(model=model_name, service="caddy"):
+                self.assertEqual(1, len(caddy_ports))
+                self.assertEqual(80, caddy_ports[0]["target"])
+                self.assertEqual("18080", caddy_ports[0]["published"])
+            for service_name, service in services.items():
+                if service_name != "caddy":
+                    with self.subTest(model=model_name, service=service_name):
+                        self.assertEqual([], service.get("ports", []))
+
+    def test_caddy_host_port_defaults_to_80(self) -> None:
+        compose = resolve_compose_model(COMPOSE_PATH, http_port=None)
+        self.assertEqual("80", compose["services"]["caddy"]["ports"][0]["published"])
 
     def test_backup_run_mode_uses_only_the_database_network(self) -> None:
-        expected = "CONNEX_BACKUP_DOCKER_NETWORK=connex_db"
+        expected = "CONNEX_BACKUP_DOCKER_NETWORK=auto"
         self.assertIn(expected, BACKUP_ENV_PATH.read_text(encoding="utf-8").splitlines())
         self.assertIn(
-            "${CONNEX_BACKUP_DOCKER_NETWORK:=connex_db}",
+            "${CONNEX_BACKUP_DOCKER_NETWORK:=auto}",
             BACKUP_LIB_PATH.read_text(encoding="utf-8"),
         )
         self.assertIn(
-            "${CONNEX_BACKUP_DOCKER_NETWORK:-connex_db}",
+            "shim_discover_database_network",
             DOCKER_CLIENT_LIB_PATH.read_text(encoding="utf-8"),
         )
         self.assertIn(
@@ -89,6 +164,13 @@ class DeploymentNetworkTest(unittest.TestCase):
         one_off_backend = "docker compose run --rm --no-deps"
         self.assertIn(recreate, deployment_doc)
         self.assertLess(deployment_doc.index(recreate), deployment_doc.index(one_off_backend))
+
+    def test_upgrade_runbook_refreshes_backup_tools_before_data_plane(self) -> None:
+        upgrading_doc = UPGRADING_DOC_PATH.read_text(encoding="utf-8")
+        installer = "sudo ./backup/install.sh"
+        data_plane = "docker compose up -d --wait --wait-timeout 300 db ocr backend"
+        self.assertIn(installer, upgrading_doc)
+        self.assertLess(upgrading_doc.index(installer), upgrading_doc.index(data_plane))
 
 
 if __name__ == "__main__":
