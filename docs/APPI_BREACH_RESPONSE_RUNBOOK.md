@@ -1,9 +1,9 @@
 # Connex — Personal-Data Breach Response Runbook (APPI Art. 26)
 
-> **Status:** Process deliverable for the APPI compliance pathway ([#224]) — issue [#223]. Connex now has an org-scoped incident register and audit-scope helper; alerting hooks remain future work.
+> **Status:** Process deliverable for the APPI compliance pathway ([#224]) — issue [#223]. Connex now has an org-scoped incident register and audit-scope helper; alerting hooks remain future work, and no standing on-call or verified 24/7 intake exists.
 > **Not legal advice.** The thresholds, deadlines, and entrustee construction below are framework reasoning and must be confirmed with Japanese counsel and, where relevant, each customer's Data Processing Agreement (DPA, [#93]). When this runbook and a signed DPA disagree, **the DPA governs** for that customer.
 >
-> **Owner:** {{SECURITY_OWNER}} · **Last reviewed:** {{DATE}} · Review at least every 6 months and after every incident.
+> **Owner:** Hunter Nakagawa, Founder · **Last reviewed:** 2026-08-13 · **Next review:** 2027-02-13 · Review at least every 6 months and after every incident.
 
 ---
 
@@ -60,13 +60,19 @@ Connex does not usually file with the PPC for customer data — but must move fa
 
 | Role | Who | Responsibility |
 |---|---|---|
-| **Incident Lead** | {{SECURITY_OWNER}} | Owns the incident end-to-end; makes the reportable-situation call with counsel; single source of truth. |
-| **Technical Responder** | On-call engineer | Contains, scopes affected data, preserves forensics. |
+| **Incident Lead** | Hunter Nakagawa, Founder | Owns the incident end-to-end; makes the reportable-situation call with counsel; single source of truth. |
+| **Technical Responder** | Hunter Nakagawa or an engineer assigned for the incident; no standing on-call rota | Contains, scopes affected data, preserves forensics. |
 | **Customer Liaison** | {{CUSTOMER_LIAISON}} | Notifies affected customers; coordinates their PPC/individual notifications per DPA. |
 | **Legal/Counsel** | {{COUNSEL_CONTACT}} | Confirms triggers, deadlines, report wording. |
 | **Comms** | {{COMMS_CONTACT}} | Public statement / inquiry line if individual notice is by substitute measure. |
 
-**Data-protection contact point** (published per Art. 32 — see disclosure page, [#219]): {{PRIVACY_CONTACT_EMAIL}}.
+**Designated data-protection contact point** (for publication per Art. 32 — see disclosure page, [#219]): privacy@connexcrm.jp. Named ownership, acknowledgement targets, and the pending operational-verification caveat are defined in [SECURITY.md](SECURITY.md).
+
+**Coverage limitation.** Hunter Nakagawa monitors the contact point as a single operator on a
+best-effort basis. There is no 24/7 coverage, standing rota, or verified mailbox alert path. A 24/7
+or on-call claim may be activated only after the external receipt test, tested responder alerts,
+named coverage rota, and measured acknowledgement evidence required by [SECURITY.md](SECURITY.md)
+are recorded in [#249].
 
 ---
 
@@ -75,7 +81,8 @@ Connex does not usually file with the PPC for customer data — but must move fa
 ### 5.1 Detect & declare (target: immediate)
 - **Trigger:** report from monitoring, a customer, a researcher, or staff.
 - **Action:** the receiver opens an incident record in `/api/orgs/{orgId}/appi-incidents`, assigns an Incident Lead, starts a timestamped timeline. Set a provisional severity.
-- **Escalation:** notify the Incident Lead within 1 hour of any credible report, 24/7.
+- **Escalation target:** notify the Incident Lead within 1 hour of receiving any credible report on
+  a best-effort basis. This is not a 24/7 commitment.
 
 ### 5.2 Contain (target: within hours)
 - **Action:** stop ongoing loss — revoke compromised sessions/credentials, disable affected accounts, block the source, take the exposed surface offline if needed. Do **not** wipe evidence (see 5.4).
@@ -131,16 +138,16 @@ Subject: [Connex Security] Personal-data incident affecting your organization �
 We are notifying you of a personal-data incident affecting data your organization
 handles in Connex, under our Data Processing Agreement.
 
-- What happened: {{brief factual description}}
-- When: detected {{timestamp JST}}; estimated window {{start–end}}
-- Data involved: {{categories; whether special-care PI may be included}}
-- Scope for your organization: {{workspaces / approx. affected individuals}}
-- Status: {{contained / ongoing}}; steps taken: {{containment actions}}
+- What happened: [brief factual description]
+- When: detected [timestamp JST]; estimated window [start–end]
+- Data involved: [categories; whether special-care PI may be included]
+- Scope for your organization: [workspaces / approx. affected individuals]
+- Status: [contained / ongoing]; steps taken: [containment actions]
 - What we need from you / what you may need to do: as the handling operator you may
   have APPI Art. 26 obligations to report to the PPC (速報 within ~3–5 days, 確報 within
   30/60 days) and to notify affected individuals. We can provide the affected-subject
   list and forensic detail to support this.
-- Your contact for this incident: {{INCIDENT_LEAD}} — {{PRIVACY_CONTACT_EMAIL}}
+- Your contact for this incident: Hunter Nakagawa, Founder — privacy@connexcrm.jp
 
 This is a preliminary notice; we will follow up as the investigation progresses.
 ```
@@ -164,3 +171,4 @@ This is a preliminary notice; we will follow up as the investigation progresses.
 [#105]: https://github.com/itkla/connex/issues/105
 [#87]: https://github.com/itkla/connex/issues/87
 [#80]: https://github.com/itkla/connex/issues/80
+[#249]: https://github.com/itkla/connex/issues/249

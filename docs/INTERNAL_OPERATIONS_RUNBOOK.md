@@ -6,10 +6,12 @@
 > **Access and encryption claims** must come from [ENCRYPTION_GUARANTEE_MATRIX.md](ENCRYPTION_GUARANTEE_MATRIX.md);
 > do not paraphrase them from here.
 >
-> **Owner:** {{SECURITY_OWNER}} · **Last reviewed:** {{DATE}} · Review at least every 6 months and
-> after any change to provisioning, teardown, or the fail-closed startup set.
+> **Owner:** Hunter Nakagawa, Founder · **Last reviewed:** 2026-08-13 · **Next review:** 2027-02-13 ·
+> Review at least every 6 months and after any change to provisioning, teardown, or the fail-closed
+> startup set.
 
-Related: [DEPLOYMENT.md](DEPLOYMENT.md) for the operator deployment runbook,
+Related: [SECURITY.md](SECURITY.md) for named security/privacy ownership and escalation,
+[DEPLOYMENT.md](DEPLOYMENT.md) for the operator deployment runbook,
 [DEPLOYMENT_EDITIONS.md](DEPLOYMENT_EDITIONS.md) for profile semantics,
 [CONTROLLED_PARTNER_ADMISSION.md](CONTROLLED_PARTNER_ADMISSION.md) for the per-engagement checklist
 that consumes this document.

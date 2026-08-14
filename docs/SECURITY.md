@@ -3,7 +3,7 @@
 > **Purpose.** One document serving two audiences: the **enterprise security-posture artifact** buyers ask for during procurement, and the **APPI 安全管理措置 (security control measures) disclosure** referenced from our public [Data Disclosure page](../frontend/app/disclosure) (APPI Art. 32). Issue [#104].
 > **Status: living document.** It describes the architecture as it actually stands today and marks in-progress items with their tracking issue. It is deliberately honest about what has **not** landed yet — do not read an in-progress item as a shipped control.
 > **Not legal advice.** Confirm the APPI framing and any customer commitments with counsel and the signed DPA ([APPI_DPA_TEMPLATE.md](APPI_DPA_TEMPLATE.md), [#93]).
-> **Owner:** {{SECURITY_OWNER}} · **Last reviewed:** 2026-07-09
+> **Owner:** Hunter Nakagawa, Founder · **Last reviewed:** 2026-08-13 · **Next review:** 2027-02-13
 
 ---
 
@@ -25,7 +25,7 @@ APPI groups these into four categories plus external-environment. This is our cu
 
 ### 2.2 Human (人的)
 - Staff access on least-privilege; confidentiality obligations. Supervision of employees per APPI Art. 24.
-- *To formalize during onboarding:* documented access-grant/revoke process and periodic access review ({{SECURITY_OWNER}}).
+- *To formalize during onboarding:* documented access-grant/revoke process and periodic access review (Hunter Nakagawa, Founder).
 
 ### 2.3 Physical (物理的)
 - No first-party data centers. Personal data is stored on managed cloud infrastructure (target: AWS `ap-northeast-1`, Japan) inheriting the provider's physical-security controls. Subprocessor list in the DPA.
@@ -57,9 +57,99 @@ Cloud infrastructure (AWS, `ap-northeast-1`) and, only when a customer enables i
 
 Japan (`ap-northeast-1`). Any change is treated as a cross-border transfer and reflected here and in the Data Disclosure page before it takes effect.
 
-## 6. How to reach us / report a vulnerability
+## 6. Security ownership, accountability, and escalation
 
-Security & personal-information contact: {{PRIVACY_CONTACT_EMAIL}}. Please report suspected vulnerabilities or personal-data incidents here; we triage per the breach-response runbook.
+**Named roles.** Hunter Nakagawa, Founder is the Security Owner, Privacy Owner, and Incident Lead. He
+currently holds every accountability below; there is no deputy and no separation of duties for these
+decisions today.
+
+| Area | Accountable owner | Responsibility boundary |
+|---|---|---|
+| Security incidents | Hunter Nakagawa, Founder | Declares and leads incidents, prioritizes containment, owns the authoritative timeline, and approves reportability and notification decisions. Technical responders execute containment and forensics; counsel advises on legal duties. |
+| Vulnerability intake and triage | Hunter Nakagawa, Founder | Owns intake at the designated channel, acknowledges reports, validates and assigns severity, and routes remediation to an owner. |
+| Risk and exception approval | Hunter Nakagawa, Founder | Is the sole approver. Each decision must record its scope, rationale, expiry, compensating controls, and review date; there is no separate approval authority today. |
+| Periodic review | Hunter Nakagawa, Founder | Reviews this ownership record and the linked security runbooks, verifies that the published contact and access-recovery paths work, and records the outcome and next review date. |
+| Customer-facing security communication | Hunter Nakagawa, Founder | Is accountable for the timing, scope, accuracy, and authorization of security notices. Execution by a Customer Liaison remains unassigned and is tracked in [#249]. |
+
+Operational incident execution follows the
+[APPI breach-response runbook](APPI_BREACH_RESPONSE_RUNBOOK.md); access, deployment, and teardown
+mechanics remain in the [internal operations runbook](INTERNAL_OPERATIONS_RUNBOOK.md).
+
+### Single escalation destination
+
+The single designated destination for every security or personal-information escalation is
+**privacy@connexcrm.jp**. Do not use a personal inbox, ordinary support channel, or public issue
+tracker. Hunter Nakagawa is the only operator and monitors the contact point on a best-effort basis;
+there is no 24/7 coverage. The goals below are targets, not guarantees, and measure elapsed time from
+receipt to first acknowledgement rather than resolution.
+
+| Escalation | Required subject prefix | Best-effort acknowledgement target |
+|---|---|---|
+| Suspected vulnerability | `[VULNERABILITY]` | Within 24 hours |
+| Active or suspected security/personal-data incident | `[ACTIVE INCIDENT]` | Within 1 hour |
+| Risk-exception request | `[RISK EXCEPTION]` | Within 48 hours |
+
+Mailbox delivery, external receipt, monitoring/alerting, administrative recovery, and response-time
+performance are not yet verified. A 24/7 or on-call claim must not be activated until a successful
+external delivery and receipt test, tested alerts to responders, a named rota with coverage and
+handoff rules, and measured acknowledgement times are recorded. [#249] tracks that operational
+evidence; [#1286] tracks matching publication on the public legal pages. Until those checks pass, the
+address is designated but not operationally verified.
+
+A risk-exception request must identify the affected control and scope, business reason, proposed
+expiry, accountable implementer, and compensating controls. Only the named Security Owner can approve
+it. A credible active-incident report then follows the breach-response runbook, where the one-hour
+internal escalation goal is also a best-effort target rather than a 24/7 commitment.
+
+### Review and handover
+
+Review this ownership record at least every 6 months. The next scheduled review is **2027-02-13**.
+Review it sooner after any security or personal-data incident; change to the named owner, role, or
+published address; actual or expected owner unavailability; or material change to company structure,
+legal duties, critical providers, the domain registrar/DNS, credential recovery, or the customer
+notification process.
+
+For a planned departure or role change, name the successor and complete the handover before the
+change takes effect. No independent party is currently documented to detect an unplanned loss of
+Hunter Nakagawa's availability, appoint a successor, or access the account, key, provider, and
+registrar recovery paths. Emergency succession is therefore not executable today, and no 24-hour
+appointment or handover deadline is claimed. [#249] tracks naming and testing that appointment
+authority and custody recipient. This document must name the actor, detection path, and achievable
+deadline before emergency succession can be treated as operational.
+
+A planned handover, and any future emergency handover once those prerequisites exist, must transfer
+and verify:
+
+- company account and credential custody, including recovery contacts and MFA/passkey recovery;
+- encryption, signing, secret-store, audit-integrity, and backup key-material custody and rotation
+  records through the approved secret-management path, never in the handover record itself;
+- administrative access and recovery for hosting, cloud, source control, CI/CD, database, monitoring,
+  email, other critical providers, and the domain registrar/DNS;
+- the Security Owner, Privacy Owner, and Incident Lead designations in this document, the linked
+  runbooks, and operational contact lists; and
+- administration, monitoring, recovery, and a successful receipt test for the published
+  **privacy@connexcrm.jp** address.
+
+Record the non-secret transfer status, access-test results, outgoing-owner revocations, required
+rotations, and unresolved gaps in the CHK-001 control issue [#1230]. Never record credentials or key
+material in GitHub.
+
+### Time-bounded risk acceptance: no deputy
+
+No deputy is designated. This creates a single point of accountability and availability that may
+delay triage, incident decisions, exception approval, or customer communication if Hunter Nakagawa
+is unavailable. Hunter Nakagawa is both risk owner and approver; this absence of independent approval
+is part of the accepted limitation.
+
+Existing compensating measures are limited to the named owner, one designated contact route,
+best-effort acknowledgement targets, the breach-response runbook, and scheduled and off-cycle review.
+There is no human redundancy, independently verified mailbox operation, emergency appointment
+authority, or verified recovery custodian today. The acceptance is dated **2026-08-13** and expires on
+**2027-02-13** unless formally renewed or closed earlier.
+
+[#249] tracks only the deferred deputy decision and Customer Liaison, Legal/Counsel, and Comms roles;
+mailbox delivery, monitoring, administrative recovery, receipt-test, and response-time evidence; any
+future 24/7 rota and alerts; and the missing emergency appointment authority and custody recipient.
 
 ---
 
@@ -90,3 +180,6 @@ Tracked under the security roadmap [#87] and the APPI pathway [#224]. Key open i
 [#222]: https://github.com/itkla/connex/issues/222
 [#223]: https://github.com/itkla/connex/issues/223
 [#224]: https://github.com/itkla/connex/issues/224
+[#249]: https://github.com/itkla/connex/issues/249
+[#1230]: https://github.com/itkla/connex/issues/1230
+[#1286]: https://github.com/itkla/connex/issues/1286
