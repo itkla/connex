@@ -17,6 +17,9 @@ DEPLOYMENT_DOC_PATH = ROOT / "docs" / "DEPLOYMENT.md"
 UPGRADING_DOC_PATH = ROOT / "docs" / "UPGRADING.md"
 DEPLOY_ENV_PATH = ROOT / "deploy" / ".env"
 LOCAL_DEV_COMPOSE_PATH = ROOT / "backend" / "docker-compose.yml"
+EVAL_ENV_PATH = ROOT / "deploy" / "eval.env.example"
+SILO_ENV_PATH = ROOT / "deploy" / "silo.env.example"
+ONPREM_ENV_PATH = ROOT / "deploy" / "onprem.env.example"
 DIGEST = "0" * 64
 
 
@@ -58,6 +61,7 @@ def resolve_compose_model(
             "CONNEX_OCR_SERVICE_TOKEN": "0" * 32,
             "CONNEX_DB_USERNAME": "network-test-user",
             "CONNEX_CADDY_ADDITIONAL_TRUSTED_PROXIES": "",
+            "CONNEX_CADDY_HSTS_ENABLED": "false",
             "CONNEX_SECURITY_TRUSTED_PROXIES": (
                 "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
             ),
@@ -186,6 +190,29 @@ class DeploymentNetworkTest(unittest.TestCase):
     def test_caddy_host_port_defaults_to_80(self) -> None:
         compose = resolve_compose_model(COMPOSE_PATH, http_port=None)
         self.assertEqual("80", compose["services"]["caddy"]["ports"][0]["published"])
+
+    def test_caddy_hsts_is_explicitly_enabled_only_for_connex_operated_production(self) -> None:
+        default_model = resolve_compose_model(COMPOSE_PATH)
+        enabled_model = resolve_compose_model(
+            COMPOSE_PATH,
+            environment_overrides={"CONNEX_CADDY_HSTS_ENABLED": "true"},
+        )
+
+        self.assertEqual(
+            "false",
+            default_model["services"]["caddy"]["environment"][
+                "CONNEX_CADDY_HSTS_ENABLED"
+            ],
+        )
+        self.assertEqual(
+            "true",
+            enabled_model["services"]["caddy"]["environment"][
+                "CONNEX_CADDY_HSTS_ENABLED"
+            ],
+        )
+        self.assertIn("CONNEX_CADDY_HSTS_ENABLED=true", SILO_ENV_PATH.read_text())
+        self.assertIn("CONNEX_CADDY_HSTS_ENABLED=false", EVAL_ENV_PATH.read_text())
+        self.assertIn("CONNEX_CADDY_HSTS_ENABLED=false", ONPREM_ENV_PATH.read_text())
 
     def test_forwarded_client_ip_chain_is_trusted_only_between_private_peers(self) -> None:
         expected_backend_proxies = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"

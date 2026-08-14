@@ -24,6 +24,9 @@
 }
 
 :80 {
+	@hsts expression {$CONNEX_CADDY_HSTS_ENABLED:false} == true
+	header @hsts >Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
 	header {
 		# Prevent browsers from interpreting assets as a different media type than the declared Content-Type.
 		>X-Content-Type-Options nosniff
@@ -114,6 +117,7 @@
 
 	# Normal response handlers stop when proxying fails, so apply the same contract in Caddy's error route.
 	handle_errors {
+		header @hsts >Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		header {
 			X-Content-Type-Options nosniff
 			Referrer-Policy strict-origin-when-cross-origin

@@ -8,6 +8,7 @@ EDGE_DEFENCE_PATH = Path(__file__).parents[2] / "docs" / "EDGE_DEFENCE.md"
 SECURITY_HEADER_FIELDS = (
     "Content-Security-Policy",
     "Referrer-Policy",
+    "Strict-Transport-Security",
     "X-Content-Type-Options",
     "X-Frame-Options",
 )
@@ -37,10 +38,16 @@ CLOUDFLARE_PROXY_RANGES = (
 )
 
 
-def tokenized_caddyfile() -> list[list[str]]:
+def tokenized_caddyfile(hsts_enabled: bool | None = None) -> list[list[str]]:
+    caddyfile = CADDYFILE_PATH.read_text(encoding="utf-8")
+    if hsts_enabled is not None:
+        caddyfile = caddyfile.replace(
+            "{$CONNEX_CADDY_HSTS_ENABLED:false}",
+            str(hsts_enabled).lower(),
+        )
     return [
         tokens
-        for raw_line in CADDYFILE_PATH.read_text(encoding="utf-8").splitlines()
+        for raw_line in caddyfile.splitlines()
         if (tokens := shlex.split(raw_line, comments=True, posix=True))
     ]
 
@@ -199,6 +206,21 @@ class EdgeSecurityHeadersTest(unittest.TestCase):
             security_header_mentions(),
             "security headers must appear only in the site and error-handler contract blocks",
         )
+
+    def test_hsts_is_present_only_when_explicitly_enabled(self) -> None:
+        hsts_header = [
+            "header",
+            "@hsts",
+            ">Strict-Transport-Security",
+            "max-age=31536000; includeSubDomains",
+        ]
+        disabled_lines = tokenized_caddyfile(hsts_enabled=False)
+        enabled_lines = tokenized_caddyfile(hsts_enabled=True)
+
+        self.assertIn(["@hsts", "expression", "false", "==", "true"], disabled_lines)
+        self.assertIn(["@hsts", "expression", "true", "==", "true"], enabled_lines)
+        self.assertEqual(2, disabled_lines.count(hsts_header))
+        self.assertEqual(2, enabled_lines.count(hsts_header))
 
     def test_server_bounds_headers_and_slow_requests(self) -> None:
         lines = tokenized_caddyfile()

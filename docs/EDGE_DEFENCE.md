@@ -92,6 +92,14 @@ upload at least about 92 KiB/s. Validate those minimum rates on every supported 
 ingress; a deployment that cannot meet them needs a reviewed timeout change rather than an implicit
 exception. Caddy and Cloudflare WebSocket keepalive behavior must be monitored separately.
 
+Caddy adds `Strict-Transport-Security: max-age=31536000; includeSubDomains` to normal and error
+responses only when `CONNEX_CADDY_HSTS_ENABLED=true`. The shared SaaS origin configuration must set
+this variable after the HTTPS validation and redirect gates below. The Connex-operated silo template
+sets it, while on-prem and eval templates default it off because those editions may intentionally use
+plain HTTP on a private network. An HTTPS-enabled on-prem operator may opt in only after validating
+every hostname covered by `includeSubDomains`. Never enable it merely to compensate for a missing
+HTTP-to-HTTPS redirect.
+
 Validate every Caddy edit against the deployment's pinned digest and actual non-secret Caddy
 environment from the repository root before deploy:
 
@@ -173,7 +181,14 @@ owner must reproduce in the dashboard for both SaaS hosts and export for review 
 - Select Business or a contract with equivalent features; confirm all five rate rules are available
   before DNS cutover. Set the zone maximum upload size to at least 100 MB so the 64 MiB import
   contract survives. Do not create an unproxied upload hostname.
-- Proxy `connexcrm.jp` and `preview.connexcrm.jp`; use Full (strict) TLS. Enable WebSockets.
+- Proxy `connexcrm.jp` and `preview.connexcrm.jp`; use Full (strict) TLS. Enable WebSockets. Do not
+  enable HSTS yet: first validate Cloudflare-to-origin certificate authentication and every
+  compatibility flow over HTTPS.
+- After HTTPS validation succeeds, enable **Always Use HTTPS** for an edge `301` redirect and prove
+  each hostname redirects `http://` to the same `https://` hostname without accepting a login form
+  over HTTP. Enable Cloudflare edge HSTS only after that redirect proof, with a one-year max age and
+  `includeSubDomains`; leave preload disabled. Inventory and validate every subdomain before enabling
+  `includeSubDomains`, because HSTS rollback cannot recover a hostname that lacks working HTTPS.
 - Leave HTTP DDoS protection at the Cloudflare managed defaults. Deploy the Cloudflare Managed
   Ruleset and Cloudflare OWASP Core Ruleset with their documented defaults. Start new or materially
   changed managed rules in observation where the plan supports it, review 24 hours of staging
@@ -344,18 +359,24 @@ them.
 1. Complete procurement, privacy/subprocessor, plan, account-RBAC, MFA, and break-glass review.
 2. Add the zone without changing authoritative DNS yet. Configure Full (strict), WebSockets,
    managed rules, cache exclusions, the compatibility configuration rule, ordered exceptions, bot
-   settings, and all five rate rules.
+   settings, and all five rate rules. Keep edge HSTS disabled.
 3. Implement and prove one origin-lock design. From a non-Cloudflare network, the origin address
    must time out or reject TLS; from Cloudflare, the authenticated request must succeed.
-4. Apply the policy to `preview.connexcrm.jp`. Export the resulting settings/rules and attach them
-   to the change record. Run the compatibility and abuse tests below, then observe for 24 hours.
+4. Apply the policy to `preview.connexcrm.jp`. Validate its HTTPS certificate and every compatibility
+   path, enable Always Use HTTPS, prove the HTTP redirect, then enable edge HSTS and set
+   `CONNEX_CADDY_HSTS_ENABLED=true` on any shipped-Caddy origin. Export the resulting settings/rules
+   and attach them to the change record. Run the compatibility and abuse tests below, then observe
+   for 24 hours.
 5. Independently review every block/challenge, tune only with evidence, and obtain Security Owner
-   role approval. Proxy `connexcrm.jp`, repeat the tests, and retain the sanitized evidence.
+   role approval. Proxy `connexcrm.jp`; repeat the HTTPS, redirect, HSTS, and compatibility tests in
+   that order, then retain the sanitized evidence.
 6. The independent Security reviewer, not the implementer, moves SEC-92 from `NG`/In Review only
    after reproducing the evidence in the public environment.
 
 Post-cutover tests, using staging-only accounts/files and provider test fixtures, are:
 
+- confirm `http://` returns only an edge redirect to the matching `https://` URL, and the HTTPS
+  response contains exactly one `Strict-Transport-Security` header with the approved value;
 - confirm normal login, password reset, registration policy, passkey assertion, invite acceptance,
   tenant/host selection, and session/workspace cookie persistence;
 - cross `CF-RL-01` and one non-auth threshold and observe `429`/Block in the restricted native
