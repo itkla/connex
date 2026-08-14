@@ -136,10 +136,10 @@ whether CSRF is configured — it is — but whether these GETs mutate state.
 CodeQL's own cited "state-changing action" locations show the call graph is imprecise: 29 of the 38
 results hit the SARIF cap of 100 related locations, reaching unrelated subsystems such as
 `CampaignDispatchService`, `ProviderCaptureWorker` and `AiChatTurnPersistenceService` from handlers
-like `SearchController.search`. A further 8 cite only `AuditIntegrityService:76/94/95` — the audit
+like `SearchController.search`. A further 7 cite only `AuditIntegrityService:76/94/95` — the audit
 chain-hash write that every authenticated request performs, including reads.
 
-Two results cite exactly one specific write, and both were verified by hand:
+The remaining 2 results cite exactly one specific write, and both were verified by hand:
 
 - `AiAssistantController.getTurn` reaches `AiChatTurnPersistenceService.expireIfStale`, an
   idempotent lazy transition of an already-past-cutoff turn to `TIMED_OUT`.
