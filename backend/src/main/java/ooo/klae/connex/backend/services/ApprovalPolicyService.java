@@ -247,9 +247,22 @@ public class ApprovalPolicyService {
         return step.getName() == null || step.getName().isBlank() ? "unnamed" : step.getName();
     }
 
+    /**
+     * A bounded canonical projection of the chain for the audit description. The audit field diff
+     * covers scalar policy columns only, so without this a change to a step's quorum or approvers
+     * would be indistinguishable from any other update in the history.
+     */
     private String chainSummary(ApprovalPolicy policy) {
-        return policy.getSteps().isEmpty() ? ""
-            : " with a " + policy.getMode() + " chain of " + policy.getSteps().size() + " step(s)";
+        if (policy.getSteps().isEmpty()) {
+            return " with no approver chain";
+        }
+        String steps = policy.getSteps().stream().map(step -> stepLabel(step) + "×" + step.getRequiredCount()
+            + "(" + step.getApprovers().stream()
+                .map(approver -> ANY_APPROVER.equals(approver.getApproverKind())
+                    ? ANY_APPROVER : String.valueOf(approver.getUserId()))
+                .collect(Collectors.joining(",")) + ")")
+            .collect(Collectors.joining("; "));
+        return " with a " + policy.getMode() + " chain [" + steps + "]";
     }
 
     private void insertSteps(int workspaceId, int policyId, List<ApprovalPolicyStep> steps) {

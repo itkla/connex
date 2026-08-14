@@ -170,9 +170,9 @@ public class DocumentApprovalService {
     /**
      * Refuses a request that this particular actor could never get past. Separation of duties
      * removes the requester and the document's author from the pool for this request only, so a step
-     * whose named approvers are exactly those people is a dead end the requester can see and fix now
-     * — unlike a step open to any approver, whose pool legitimately changes as people join, and
-     * which is therefore left alone.
+     * whose remaining named approvers can no longer reach its quorum is a dead end the requester can
+     * see and fix now. A step open to any approver is deliberately left alone: its pool legitimately
+     * grows as people join the workspace.
      */
     private void requireChainIsSatisfiable(ApprovalPolicy policy, DocumentApproval approval,
             DealDocument document, ApproverPool pool) {
@@ -192,10 +192,11 @@ public class DocumentApprovalService {
                 .map(ApprovalStepApprover::getUserId)
                 .filter(userId -> userId != null)
                 .toList();
-            if (!named.isEmpty() && blocked.containsAll(named)) {
+            long remaining = named.stream().filter(userId -> !blocked.contains(userId)).count();
+            if (!named.isEmpty() && remaining < step.getRequiredCount()) {
                 throw new BadRequestException("Step \""
                     + (step.getName() == null || step.getName().isBlank() ? "unnamed" : step.getName())
-                    + "\" is approved only by people who cannot decide this document");
+                    + "\" has too few named approvers who can decide this document");
             }
         }
         if (pool.approvers().isEmpty()) {

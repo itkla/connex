@@ -43,6 +43,7 @@ export default function DocumentApprovalChain({ approval, activeStepId }: Props)
                     <span className="tabular-nums">
                         {t('chainProgress', { approved: step.approvedCount, required: step.requiredCount })}
                     </span>
+                    <span className="text-muted-foreground">{t(`chainStatus_${step.status}`)}</span>
                 </span>
             ))}
             {approval.mode === 'parallel' ? (

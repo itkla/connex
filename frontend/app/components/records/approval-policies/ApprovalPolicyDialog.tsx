@@ -64,9 +64,10 @@ type Draft = {
     steps: ChainStepDraft[];
 };
 
-const toStepDraft = (step: ApprovalPolicyStep): ChainStepDraft => {
+const toStepDraft = (step: ApprovalPolicyStep, index: number): ChainStepDraft => {
     const anyApprover = step.approvers.some((approver) => approver.approverKind === 'any_approver');
     return {
+        key: `saved-${step.id ?? index}`,
         name: step.name ?? '',
         requiredCount: step.requiredCount,
         kind: anyApprover ? 'any_approver' : 'user',
@@ -136,7 +137,7 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
     const chainIsValid = draft.steps.every(
         (step) =>
             (step.kind === 'any_approver' || step.userIds.length > 0)
-            && step.requiredCount <= availableApprovers(step, members),
+            && step.requiredCount <= availableApprovers(step),
     );
     const canSave = draft.name.trim() !== '' && !minTotalNeedsCurrency && chainIsValid && !saving;
 

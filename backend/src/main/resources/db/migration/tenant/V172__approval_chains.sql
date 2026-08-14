@@ -128,8 +128,10 @@ WHERE a.status IN ('approved', 'rejected') AND a.decided_by IS NOT NULL;
 
 -- Database fence for the rolling-deployment window: a binary that predates this migration decides an
 -- approval by updating document_approval alone, which would bypass named approvers, quorum, and step
--- order on a chained request. Refuse that transition in the database. The chained runtime always marks
--- the final step approved before it approves the request, so this never fires on a legitimate write.
+-- order on a chained request. Refuse that transition in the database, including the empty-chain case:
+-- an approval frozen by such a binary carries no steps at all, and approving it would otherwise pass
+-- vacuously. The chained runtime always freezes at least one step and marks the final step approved
+-- before it approves the request, so this never fires on a legitimate write.
 -- Rejection and cancellation stay unfenced: both are terminal outcomes that need no chain agreement.
 DELIMITER //
 CREATE TRIGGER trg_document_approval_chain_fence
@@ -137,11 +139,15 @@ BEFORE UPDATE ON document_approval
 FOR EACH ROW
 BEGIN
     IF NEW.status = 'approved' AND OLD.status <> 'approved'
-            AND EXISTS (
-                SELECT 1 FROM document_approval_step s
-                WHERE s.workspace_id = NEW.workspace_id
-                  AND s.approval_id = NEW.id
-                  AND s.status <> 'approved') THEN
+            AND (NOT EXISTS (
+                    SELECT 1 FROM document_approval_step s
+                    WHERE s.workspace_id = NEW.workspace_id
+                      AND s.approval_id = NEW.id)
+                OR EXISTS (
+                    SELECT 1 FROM document_approval_step s
+                    WHERE s.workspace_id = NEW.workspace_id
+                      AND s.approval_id = NEW.id
+                      AND s.status <> 'approved')) THEN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'document_approval cannot be approved while chain steps are unapproved';
     END IF;

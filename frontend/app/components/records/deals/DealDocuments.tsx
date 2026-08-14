@@ -221,12 +221,15 @@ export default function DealDocuments({
                 return null;
             }
         }
-        return approval.steps
-            .filter((step) => step.status === 'active')
-            .filter((step) => step.approvers.some(
-                (approver) => approver.approverKind === 'any_approver' || approver.userId === currentUserId))
-            .filter((step) => !step.decisions.some((decision) => decision.decidedBy === currentUserId))
-            .sort((a, b) => a.stepOrder - b.stepOrder)[0] ?? null;
+        let candidate: DocumentApprovalStep | null = null;
+        for (const step of approval.steps) {
+            if (step.status !== 'active') continue;
+            if (!step.approvers.some(
+                (approver) => approver.approverKind === 'any_approver' || approver.userId === currentUserId)) continue;
+            if (step.decisions.some((decision) => decision.decidedBy === currentUserId)) continue;
+            if (candidate === null || step.stepOrder < candidate.stepOrder) candidate = step;
+        }
+        return candidate;
     };
 
     const canFinalize = (doc: DealDocument) =>

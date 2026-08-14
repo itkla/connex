@@ -1,7 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { CheckIcon, PlusIcon, XIcon } from 'lucide-react';
+import { CheckIcon, PlusIcon, XMarkIcon } from '@heroicons/react/24/outline';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,8 +21,12 @@ import type {
     WorkspaceMember,
 } from '@/app/lib/types';
 
-/** One step being edited. `userIds` is only meaningful while `kind` is `user`. */
+/**
+ * One step being edited. `userIds` is only meaningful while `kind` is `user`, and `key` is a stable
+ * client-side identity so reordering or removing a step never re-keys the rows around it.
+ */
 export type ChainStepDraft = {
+    key: string;
     name: string;
     requiredCount: number;
     kind: ApprovalApproverKind;
@@ -41,17 +45,25 @@ type Props = {
 };
 
 const MAX_STEPS = 10;
+const MAX_QUORUM = 20;
+
+let nextStepKey = 0;
 
 export const newChainStep = (): ChainStepDraft => ({
+    key: `new-${nextStepKey++}`,
     name: '',
     requiredCount: 1,
     kind: 'any_approver',
     userIds: [],
 });
 
-/** The approvals a step can collect today, which is also the largest quorum it may require. */
-export const availableApprovers = (step: ChainStepDraft, members: WorkspaceMember[]) =>
-    step.kind === 'any_approver' ? members.length : step.userIds.length;
+/**
+ * The largest quorum a step may require. A step naming specific members is capped by how many are
+ * selected; a step open to anyone is capped only by the server's maximum, because the client cannot
+ * see which members actually hold the approve permission and must not guess from the member count.
+ */
+export const availableApprovers = (step: ChainStepDraft) =>
+    step.kind === 'any_approver' ? MAX_QUORUM : step.userIds.length;
 
 /**
  * Editor for a policy's approver chain: run order, separation of duties, and the ordered steps
@@ -122,10 +134,10 @@ export default function ApprovalChainEditor({
             ) : null}
 
             {steps.map((step, index) => {
-                const available = availableApprovers(step, members);
+                const available = availableApprovers(step);
                 const quorumTooHigh = step.requiredCount > available;
                 return (
-                    <div key={index} className="space-y-3 rounded-xl border border-border p-3">
+                    <div key={step.key} className="space-y-3 rounded-xl border border-border p-3">
                         <div className="flex items-center justify-between gap-2">
                             <span className="text-xs font-medium text-muted-foreground">
                                 {t('stepNumber', { number: index + 1 })}
@@ -137,7 +149,7 @@ export default function ApprovalChainEditor({
                                 disabled={disabled}
                                 onClick={() => onStepsChange(steps.filter((_, i) => i !== index))}
                             >
-                                <XIcon className="size-4" />
+                                <XMarkIcon className="size-4" />
                             </Button>
                         </div>
                         <div className="grid grid-cols-[1fr_auto] gap-3">
@@ -158,10 +170,12 @@ export default function ApprovalChainEditor({
                                     id={`step-quorum-${index}`}
                                     type="number"
                                     min={1}
-                                    max={20}
+                                    max={MAX_QUORUM}
                                     value={step.requiredCount}
                                     onChange={(e) =>
-                                        updateStep(index, { requiredCount: Math.max(1, Number(e.target.value) || 1) })
+                                        updateStep(index, {
+                                            requiredCount: Math.min(MAX_QUORUM, Math.max(1, Number(e.target.value) || 1)),
+                                        })
                                     }
                                     disabled={disabled}
                                     aria-invalid={quorumTooHigh || undefined}

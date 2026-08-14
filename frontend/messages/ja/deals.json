@@ -497,6 +497,11 @@
         "pdf": "PDF",
         "chainStep": "ステップ{number}",
         "chainProgress": "{approved}/{required}",
-        "chainParallel": "全ステップ同時"
+        "chainParallel": "全ステップ同時",
+        "chainStatus_pending": "待機中",
+        "chainStatus_active": "受付中",
+        "chainStatus_approved": "承認済み",
+        "chainStatus_rejected": "却下",
+        "chainStatus_cancelled": "取消済み"
     }
 }

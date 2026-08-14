@@ -34,7 +34,8 @@ becomes approvable once every step has passed.
 
 A single rejection at any step terminates the whole request, cancels the remaining steps, and returns
 the document to `draft`. Deciding still requires `DOCUMENT_APPROVE` — being named on a step never
-grants it — and the permission is re-checked after the document row is locked, not only at entry.
+grants it — and the permission is re-read from locked authorization rows rather than trusted from the
+entry-point snapshot (see the lock order below).
 
 The whole chain is **snapshotted onto the request**: editing or deleting the policy afterwards cannot
 add, remove, or re-target the steps of an approval that is already pending. A policy with no steps,

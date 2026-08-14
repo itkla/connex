@@ -7,6 +7,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 import lombok.Data;
@@ -34,7 +35,8 @@ public class ApprovalPolicyStepDto {
     @Valid
     @NotEmpty(message = "each step needs at least one approver")
     @Size(max = 20, message = "a step may not have more than 20 approvers")
-    private List<ApprovalStepApproverDto> approvers = new ArrayList<>();
+    private List<@NotNull(message = "approvers must not contain empty entries") ApprovalStepApproverDto>
+        approvers = new ArrayList<>();
 
     public static ApprovalPolicyStepDto from(ApprovalPolicyStep step) {
         if (step == null) return null;

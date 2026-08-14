@@ -9,6 +9,7 @@ import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
@@ -55,7 +56,8 @@ public class ApprovalPolicyDto {
 
     @Valid
     @Size(max = 10, message = "a policy may not have more than 10 approval steps")
-    private List<ApprovalPolicyStepDto> steps = new ArrayList<>();
+    private List<@NotNull(message = "steps must not contain empty entries") ApprovalPolicyStepDto> steps =
+        new ArrayList<>();
 
     private String createdAt;
     private String updatedAt;
