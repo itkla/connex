@@ -132,6 +132,6 @@ export function proxy(request: NextRequest) {
 
 export const config = {
     matcher: [
-        '/((?!api(?:/|$)|saml2(?:/|$)|_next/static(?:/|$)|_next/image(?:/|$)|favicon\\.ico$|sitemap\\.xml$|robots\\.txt$).*)',
+        '/((?!api(?:/|$)|saml2(?:/|$)|attachments(?:/|$)|_next/static(?:/|$)|_next/image(?:/|$)|favicon\\.ico$|sitemap\\.xml$|robots\\.txt$).*)',
     ],
 };
