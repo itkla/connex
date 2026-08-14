@@ -35,6 +35,7 @@ public interface UserMapper {
     User getUserByIdForShare(int id);
     Integer lockById(int id);
     Integer lockByIdForShare(int id);
+    List<Integer> lockAssignedCustomRoleIds(int id);
     boolean isAccountDeletionReserved(int id);
     boolean isAccountDeletionReservationOwner(
         @Param("id") int id, @Param("owner") String owner);

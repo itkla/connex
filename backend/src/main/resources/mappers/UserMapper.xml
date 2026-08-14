@@ -78,6 +78,15 @@
     SELECT id FROM app_user WHERE id = #{id} FOR SHARE
   </select>
 
+  <select id="lockAssignedCustomRoleIds" resultType="java.lang.Integer">
+    SELECT wr.id
+    FROM workspace_member wm
+    JOIN workspace_role wr ON wr.id = wm.role_id AND wr.workspace_id = wm.workspace_id
+    WHERE wm.user_id = #{id}
+    ORDER BY wr.id
+    FOR SHARE
+  </select>
+
   <select id="isAccountDeletionReserved" resultType="boolean">
     SELECT COALESCE(
       account_deletion_reservation_until &gt; UTC_TIMESTAMP(6),

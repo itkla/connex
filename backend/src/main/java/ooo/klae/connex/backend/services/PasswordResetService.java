@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.session.SessionInformation;
 import org.springframework.security.core.session.SessionRegistry;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
@@ -137,7 +138,7 @@ public class PasswordResetService {
      * @param rawToken the unhashed token from the reset link
      * @param newPassword the already policy-validated new password
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void resetPassword(String rawToken, String newPassword) {
         String tokenHash = rawToken == null ? null : OneTimeTokenDigest.sha256(rawToken);
         resetPasswordByHash(
@@ -145,7 +146,7 @@ public class PasswordResetService {
     }
 
     /** Applies a new password through a purpose-bound browser-flow source digest. */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void resetPasswordByHash(String tokenHash, String newPassword) {
         PasswordResetToken token = tokenHash == null ? null
                 : passwordResetTokenMapper.findExchangedRedeemableByHash(tokenHash);
@@ -153,6 +154,10 @@ public class PasswordResetService {
             throw invalidLink();
         }
 
+        if (userMapper.lockById(token.getUserId()) == null) {
+            throw invalidLink();
+        }
+        userMapper.lockAssignedCustomRoleIds(token.getUserId());
         User user = userMapper.getUserById(token.getUserId());
         if (user == null) {
             throw invalidLink();
