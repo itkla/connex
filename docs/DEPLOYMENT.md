@@ -40,8 +40,9 @@ network contains only backend and MySQL; and the internal, gateway-isolated `ocr
 contains only backend and OCR. MySQL has no published host port. The multi-homed frontend and
 backend pin `app` as their default egress gateway, so attaching the internal DB and OCR networks
 cannot redirect outbound traffic. Backup tools normally execute inside the DB container; optional
-throwaway client containers join only `connex_db`. Compose one-off backend migration and
-maintenance commands inherit the backend service's networks and therefore retain DB access.
+throwaway client containers discover and join only the running Compose project's physical `db`
+network. Compose one-off backend migration and maintenance commands inherit the backend service's
+networks and therefore retain DB access.
 
 New services must join the minimum network set required for their documented traffic. Do not use
 the implicit `default` network, attach an edge or auxiliary service to `db` or `ocr_internal`, or

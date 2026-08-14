@@ -26,19 +26,19 @@ install_require_root() {
 install_migrate_database_network() {
     local config_file="$CONFIG_ROOT/backup.env"
     local temporary_file
-    if ! grep -qxF 'CONNEX_BACKUP_DOCKER_NETWORK=connex_default' "$config_file"; then
+    if ! grep -Eq '^CONNEX_BACKUP_DOCKER_NETWORK=[a-z0-9][a-z0-9_-]*_default$' "$config_file"; then
         return 0
     fi
     temporary_file="$(mktemp "$CONFIG_ROOT/.backup.env.XXXXXX")"
-    if ! sed \
-        's/^CONNEX_BACKUP_DOCKER_NETWORK=connex_default$/CONNEX_BACKUP_DOCKER_NETWORK=connex_db/' \
+    if ! sed -E \
+        's/^CONNEX_BACKUP_DOCKER_NETWORK=[a-z0-9][a-z0-9_-]*_default$/CONNEX_BACKUP_DOCKER_NETWORK=auto/' \
         "$config_file" > "$temporary_file"; then
         rm -f "$temporary_file"
         return "$EXIT_CONFIG"
     fi
     chmod 0600 "$temporary_file"
     mv "$temporary_file" "$config_file"
-    printf 'Migrated backup Docker network from connex_default to connex_db.\n'
+    printf 'Migrated legacy backup Docker network to automatic Compose db-network discovery.\n'
 }
 
 install_configuration() {

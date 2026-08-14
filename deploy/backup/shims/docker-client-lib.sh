@@ -60,6 +60,86 @@ shim_validate_path() {
     [[ "$path" == /* && "$path" != / && "$path" != /tmp && "$path" != /tmp/* ]]
 }
 
+shim_discover_database_network() {
+    local docker_value container network_output network_id network_name logical_network
+    local -a docker_command=()
+    local -a database_networks=()
+    docker_value="${CONNEX_BACKUP_DOCKER_BIN:-docker}"
+    container="${CONNEX_BACKUP_DB_CONTAINER:-connex-db-1}"
+    read -r -a docker_command <<< "$docker_value"
+    if [ "${#docker_command[@]}" -eq 0 ] || [ -z "$container" ]; then
+        printf 'Connex backup cannot discover the database network: Docker command or DB container is empty\n' >&2
+        return 64
+    fi
+    if ! network_output="$("${docker_command[@]}" inspect --format '{{range .NetworkSettings.Networks}}{{println .NetworkID}}{{end}}' "$container" 2>/dev/null)"; then
+        printf 'Connex backup cannot inspect DB container %s to discover its Compose database network\n' "$container" >&2
+        return 64
+    fi
+    while IFS= read -r network_id; do
+        if [ -z "$network_id" ]; then
+            continue
+        fi
+        if ! network_name="$("${docker_command[@]}" network inspect --format '{{.Name}}' "$network_id" 2>/dev/null)" ||
+            ! logical_network="$("${docker_command[@]}" network inspect --format '{{index .Labels "com.docker.compose.network"}}' "$network_id" 2>/dev/null)"; then
+            printf 'Connex backup cannot inspect Docker network %s attached to DB container %s\n' "$network_id" "$container" >&2
+            return 64
+        fi
+        if [ "$logical_network" = db ]; then
+            database_networks+=("$network_name")
+        fi
+    done <<< "$network_output"
+    if [ "${#database_networks[@]}" -ne 1 ]; then
+        printf 'Connex backup expected exactly one Compose db network on container %s, found %s\n' "$container" "${#database_networks[@]}" >&2
+        return 64
+    fi
+    printf '%s\n' "${database_networks[0]}"
+}
+
+shim_arguments_target_compose_database() {
+    local argument expect_host=false
+    for argument in "$@"; do
+        if [ "$expect_host" = true ]; then
+            [ "$argument" = db ] && return 0
+            expect_host=false
+        fi
+        case "$argument" in
+            --host=db|-hdb)
+                return 0
+                ;;
+            --host|-h)
+                expect_host=true
+                ;;
+        esac
+    done
+    return 1
+}
+
+shim_resolve_database_network() {
+    local configured_network docker_value discovered_network
+    local -a docker_command=()
+    configured_network="${CONNEX_BACKUP_DOCKER_NETWORK:-auto}"
+    case "$configured_network" in
+        ""|auto|*_default)
+            shim_discover_database_network
+            return
+            ;;
+    esac
+    docker_value="${CONNEX_BACKUP_DOCKER_BIN:-docker}"
+    read -r -a docker_command <<< "$docker_value"
+    if [ "${#docker_command[@]}" -eq 0 ] || ! "${docker_command[@]}" network inspect "$configured_network" >/dev/null 2>&1; then
+        printf 'Configured Connex backup Docker network does not exist: %s; set CONNEX_BACKUP_DOCKER_NETWORK=auto to discover the current Compose db network\n' "$configured_network" >&2
+        return 64
+    fi
+    if shim_arguments_target_compose_database "$@"; then
+        discovered_network="$(shim_discover_database_network)" || return 64
+        if [ "$configured_network" != "$discovered_network" ]; then
+            printf 'Configured Connex backup Docker network %s does not match DB container network %s; set CONNEX_BACKUP_DOCKER_NETWORK=auto\n' "$configured_network" "$discovered_network" >&2
+            return 64
+        fi
+    fi
+    printf '%s\n' "$configured_network"
+}
+
 shim_run() {
     local tool="$1"
     shift
@@ -71,7 +151,6 @@ shim_run() {
     backup_root="${CONNEX_BACKUP_ROOT:-/var/backups/connex}"
     defaults_dir="${CONNEX_BACKUP_DEFAULTS_DIR:-/etc/connex-backup}"
     image="${CONNEX_BACKUP_DOCKER_IMAGE:-mysql:8.4.10@sha256:c831a0f11348d402b43d77453e17d770be2eef356615a2823fe0f5a0d6c8b9af}"
-    network="${CONNEX_BACKUP_DOCKER_NETWORK:-connex_db}"
     docker_value="${CONNEX_BACKUP_DOCKER_BIN:-docker}"
     if ! shim_validate_path "$backup_root" || ! shim_validate_path "$defaults_dir"; then
         printf 'Connex backup Docker mount paths must be safe absolute paths outside /tmp\n' >&2
@@ -81,6 +160,7 @@ shim_run() {
     if [ "${#docker_command[@]}" -eq 0 ]; then
         return 64
     fi
+    network="$(shim_resolve_database_network "$@")" || return 64
     docker_args=(run --rm -i --user "$(id -u):$(id -g)" --network "$network" -e TZ=UTC -v "$backup_root:$backup_root" -v "$defaults_dir:$defaults_dir:ro")
     if [ -n "${CONNEX_BACKUP_DOCKER_MOUNTS:-}" ]; then
         read -r -a mount_values <<< "$CONNEX_BACKUP_DOCKER_MOUNTS"
