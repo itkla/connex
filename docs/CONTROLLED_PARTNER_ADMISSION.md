@@ -272,9 +272,11 @@ a string like `SOCIAL_LOGIN_GOOGLE`, so grepping for the table's row names finds
 - [ ] Named partner users invited. If `connex.mail.enabled=false`, use **shareable invite links**
       (Settings → Members) and deliver them out of band — the invite email is asynchronous and
       swallows its own failures, so its absence is silent (a missing SMTP configuration is only a
-      `WARN`). **Deliver the full `https://<host>/invite-link/{token}` URL and tell them to open
-      it** — the `/onboarding` "paste an invite link" box cannot parse a shareable link and sends
-      them to a not-found page.
+      `WARN`). **Deliver the full `https://<host>/invite-link#token=<token>` URL and tell them to
+      open it.** The browser exchanges the fragment with `POST /api/invite-links/exchange`, reloads
+      the token-free `/invite-link` page, previews with `GET /api/invite-links`, and accepts with
+      `POST /api/invite-links/accept`. The `/onboarding` "paste an invite link" box accepts this
+      fragment URL and routes it to the same flow.
 - [ ] **Beware the silent `pending`:** emailing an invite to an address that **already has a Connex
       account** sends no email at all and creates a `pending` member instead. Chase those people
       directly; the roster cannot distinguish them from someone ignoring an email.
