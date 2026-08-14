@@ -22,7 +22,7 @@ APPI groups these into four categories plus external-environment. This is our cu
 - **Append-only audit log.** `audit_log` (Flyway `V1`, workspace-scoped since `V10`) records `action`, `entity_type`/`entity_id`, `actor_id`, `ip_address`, `user_agent`, hashed `session_id`, `request_id`, field-level `changes`, and `created_at`. Row `UPDATE`/`DELETE` are blocked by DB triggers; writes are insert-only. Surfaced to admins in-app.
 - **Incident response.** Documented breach-response runbook (APPI Art. 26): [APPI_BREACH_RESPONSE_RUNBOOK.md](APPI_BREACH_RESPONSE_RUNBOOK.md), [#223].
 - **Vulnerability remediation.** Findings across application code, dependencies, images, infrastructure, GitHub Actions, and third-party services follow the severity-adjusted deadlines, emergency release path, ownership, and fixed-term exception rules in [VULNERABILITY_MANAGEMENT.md](VULNERABILITY_MANAGEMENT.md).
-- **Static analysis.** Pull requests, `main`, merge queues, and weekly scans run fail-closed GitHub CodeQL analysis for backend Java and frontend TypeScript with Critical/High and error-severity PR findings blocked as documented in [STATIC_ANALYSIS.md](STATIC_ANALYSIS.md).
+- **Static analysis.** Pull requests, `main`, merge groups, and weekly scans run fail-closed GitHub CodeQL analysis for backend Java and frontend TypeScript. Critical/High and error-severity findings fail the selected workflow job, but the check is not yet required by `main` branch protection and therefore does not itself prevent merge; current enforcement and self-modification limitations are documented in [STATIC_ANALYSIS.md](STATIC_ANALYSIS.md).
 - *In progress:* audit tamper-evidence (hash-chain / external sink) — [#91]; organization-scope re-verification — [#97].
 
 ### 2.2 Human (人的)
@@ -84,6 +84,11 @@ The single designated destination for every security or personal-information esc
 tracker. Hunter Nakagawa is the only operator and monitors the contact point on a best-effort basis;
 there is no 24/7 coverage. The goals below are targets, not guarantees, and measure elapsed time from
 receipt to first acknowledgement rather than resolution.
+
+For vulnerability remediation, acknowledgement is the precise custody record defined in
+[VULNERABILITY_MANAGEMENT.md](VULNERABILITY_MANAGEMENT.md#clock-start). The targets below bound the
+pre-clock response target; remediation deadlines begin at that recorded acknowledgement, not at
+mailbox delivery or automated detection.
 
 | Escalation | Required subject prefix | Best-effort acknowledgement target |
 |---|---|---|

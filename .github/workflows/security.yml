@@ -196,20 +196,32 @@ jobs:
         with:
           category: /language:java-kotlin
           wait-for-processing: true
-      - name: Block new Critical, High, or error-severity alerts
-        if: github.event_name == 'pull_request'
+      - name: Block Critical, High, or error-severity alerts
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
+          ANALYSIS_CATEGORY: /language:java-kotlin
+          ANALYSIS_REF: ${{ github.ref }}
+          EVENT_NAME: ${{ github.event_name }}
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           alerts_file="$RUNNER_TEMP/codeql-backend-alerts.json"
-          gh api --paginate --slurp \
+          case "$EVENT_NAME" in
+            pull_request) scope_arguments=(-f "pr=$PR_NUMBER") ;;
+            merge_group) scope_arguments=(-f "ref=$ANALYSIS_REF") ;;
+            *) echo "::error::Unsupported CodeQL gate event: $EVENT_NAME"; exit 1 ;;
+          esac
+          gh api --method GET --paginate --slurp \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2026-03-10" \
-            "repos/$GITHUB_REPOSITORY/code-scanning/alerts?tool_name=CodeQL&state=open&pr=$PR_NUMBER&per_page=100" \
+            -f tool_name=CodeQL \
+            -f state=open \
+            -f per_page=100 \
+            "${scope_arguments[@]}" \
+            "repos/$GITHUB_REPOSITORY/code-scanning/alerts" \
             > "$alerts_file"
-          python3 .github/scripts/check-codeql-alerts.py "$alerts_file"
+          python3 .github/scripts/check-codeql-alerts.py "$alerts_file" "$ANALYSIS_CATEGORY"
 
   frontend-sast:
     name: Frontend SAST (CodeQL)
@@ -238,20 +250,32 @@ jobs:
         with:
           category: /language:javascript-typescript
           wait-for-processing: true
-      - name: Block new Critical, High, or error-severity alerts
-        if: github.event_name == 'pull_request'
+      - name: Block Critical, High, or error-severity alerts
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
+          ANALYSIS_CATEGORY: /language:javascript-typescript
+          ANALYSIS_REF: ${{ github.ref }}
+          EVENT_NAME: ${{ github.event_name }}
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           alerts_file="$RUNNER_TEMP/codeql-frontend-alerts.json"
-          gh api --paginate --slurp \
+          case "$EVENT_NAME" in
+            pull_request) scope_arguments=(-f "pr=$PR_NUMBER") ;;
+            merge_group) scope_arguments=(-f "ref=$ANALYSIS_REF") ;;
+            *) echo "::error::Unsupported CodeQL gate event: $EVENT_NAME"; exit 1 ;;
+          esac
+          gh api --method GET --paginate --slurp \
             -H "Accept: application/vnd.github+json" \
             -H "X-GitHub-Api-Version: 2026-03-10" \
-            "repos/$GITHUB_REPOSITORY/code-scanning/alerts?tool_name=CodeQL&state=open&pr=$PR_NUMBER&per_page=100" \
+            -f tool_name=CodeQL \
+            -f state=open \
+            -f per_page=100 \
+            "${scope_arguments[@]}" \
+            "repos/$GITHUB_REPOSITORY/code-scanning/alerts" \
             > "$alerts_file"
-          python3 .github/scripts/check-codeql-alerts.py "$alerts_file"
+          python3 .github/scripts/check-codeql-alerts.py "$alerts_file" "$ANALYSIS_CATEGORY"
 
   dependency-review:
     name: Dependency review (PR)

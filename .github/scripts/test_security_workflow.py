@@ -79,12 +79,25 @@ class SecurityWorkflowTest(unittest.TestCase):
                 self.assertIs(True, analyze["with"]["wait-for-processing"])
                 self.assertEqual(f"/language:{language}", analyze["with"]["category"])
                 gate = self.named_step(
-                    job_name, "Block new Critical, High, or error-severity alerts"
+                    job_name, "Block Critical, High, or error-severity alerts"
                 )
-                self.assertEqual("github.event_name == 'pull_request'", gate["if"])
-                self.assertIn("state=open&pr=$PR_NUMBER", gate["run"])
+                self.assertEqual(
+                    "github.event_name == 'pull_request' || "
+                    "github.event_name == 'merge_group'",
+                    gate["if"],
+                )
+                self.assertIn('-f "pr=$PR_NUMBER"', gate["run"])
+                self.assertIn('-f "ref=$ANALYSIS_REF"', gate["run"])
+                self.assertIn("--method GET --paginate --slurp", gate["run"])
                 self.assertIn("--paginate --slurp", gate["run"])
-                self.assertIn("check-codeql-alerts.py", gate["run"])
+                self.assertIn("Unsupported CodeQL gate event", gate["run"])
+                self.assertIn(
+                    'check-codeql-alerts.py "$alerts_file" "$ANALYSIS_CATEGORY"',
+                    gate["run"],
+                )
+                self.assertEqual(f"/language:{language}", gate["env"]["ANALYSIS_CATEGORY"])
+                self.assertEqual("${{ github.ref }}", gate["env"]["ANALYSIS_REF"])
+                self.assertEqual("${{ github.event_name }}", gate["env"]["EVENT_NAME"])
 
     def test_required_job_rejects_selected_skipped_scans(self) -> None:
         required = self.job("required")

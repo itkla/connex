@@ -8,6 +8,8 @@ from pathlib import Path
 
 
 SCRIPT = Path(__file__).with_name("check-codeql-alerts.py")
+BACKEND_CATEGORY = "/language:java-kotlin"
+FRONTEND_CATEGORY = "/language:javascript-typescript"
 SPEC = importlib.util.spec_from_file_location("check_codeql_alerts", SCRIPT)
 if SPEC is None or SPEC.loader is None:
     raise RuntimeError("Could not load the CodeQL alert checker")
@@ -20,6 +22,7 @@ def alert(
     severity: str,
     security_severity: str | None,
     state: str = "open",
+    category: str = FRONTEND_CATEGORY,
 ) -> dict[str, object]:
     return {
         "number": number,
@@ -30,6 +33,7 @@ def alert(
             "severity": severity,
             "security_severity_level": security_severity,
         },
+        "most_recent_instance": {"category": category},
     }
 
 
@@ -44,7 +48,7 @@ class CodeqlAlertCheckerTest(unittest.TestCase):
 
     def run_checker(self, path: Path) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [sys.executable, str(SCRIPT), str(path)],
+            [sys.executable, str(SCRIPT), str(path), FRONTEND_CATEGORY],
             check=False,
             capture_output=True,
             text=True,
@@ -52,7 +56,7 @@ class CodeqlAlertCheckerTest(unittest.TestCase):
 
     def test_empty_paginated_response_passes(self) -> None:
         alerts = CHECKER.load_alerts(self.write_pages([[]]))
-        self.assertEqual([], CHECKER.blocking_alerts(alerts))
+        self.assertEqual([], CHECKER.blocking_alerts(alerts, FRONTEND_CATEGORY))
 
     def test_medium_and_low_non_error_alerts_do_not_block(self) -> None:
         alerts = CHECKER.load_alerts(
@@ -60,7 +64,7 @@ class CodeqlAlertCheckerTest(unittest.TestCase):
                 [[alert(1, "warning", "medium")], [alert(2, "note", "low")]]
             )
         )
-        self.assertEqual([], CHECKER.blocking_alerts(alerts))
+        self.assertEqual([], CHECKER.blocking_alerts(alerts, FRONTEND_CATEGORY))
 
     def test_critical_high_and_generic_error_alerts_block(self) -> None:
         alerts = CHECKER.load_alerts(
@@ -80,21 +84,35 @@ class CodeqlAlertCheckerTest(unittest.TestCase):
                 (2, "rule/2", "high", alerts[1]["html_url"]),
                 (3, "rule/3", "error", alerts[2]["html_url"]),
             ],
-            CHECKER.blocking_alerts(alerts),
+            CHECKER.blocking_alerts(alerts, FRONTEND_CATEGORY),
         )
+
+    def test_alerts_from_another_analysis_category_do_not_block(self) -> None:
+        alerts = CHECKER.load_alerts(
+            self.write_pages([[alert(4, "error", "critical", category=BACKEND_CATEGORY)]])
+        )
+        self.assertEqual([], CHECKER.blocking_alerts(alerts, FRONTEND_CATEGORY))
 
     def test_malformed_or_non_open_results_fail_closed(self) -> None:
         with self.assertRaisesRegex(ValueError, "page 1"):
             CHECKER.load_alerts(self.write_pages([{"not": "a page"}]))
         with self.assertRaisesRegex(ValueError, "was not open"):
-            CHECKER.blocking_alerts([alert(4, "error", "high", state="dismissed")])
+            CHECKER.blocking_alerts(
+                [alert(5, "error", "high", state="dismissed")], FRONTEND_CATEGORY
+            )
         with self.assertRaisesRegex(ValueError, "unknown security severity"):
-            CHECKER.blocking_alerts([alert(5, "warning", "future")])
+            CHECKER.blocking_alerts(
+                [alert(6, "warning", "future")], FRONTEND_CATEGORY
+            )
+        with self.assertRaisesRegex(ValueError, "analysis category"):
+            invalid_category = alert(7, "warning", "low")
+            invalid_category["most_recent_instance"] = {"category": ""}
+            CHECKER.blocking_alerts([invalid_category], FRONTEND_CATEGORY)
 
     def test_cli_exit_codes_are_fail_closed(self) -> None:
         passing = self.run_checker(self.write_pages([[]]))
         blocking = self.run_checker(
-            self.write_pages([[alert(6, "warning", "critical")]])
+            self.write_pages([[alert(8, "warning", "critical")]])
         )
         malformed = self.run_checker(self.write_pages({"not": "paginated"}))
 
