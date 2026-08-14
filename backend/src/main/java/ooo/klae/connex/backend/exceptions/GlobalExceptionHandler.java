@@ -72,6 +72,23 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ex.getMessage());
     }
 
+    @ExceptionHandler(BreachedPasswordException.class)
+    public ResponseEntity<Map<String, String>> breachedPassword(BreachedPasswordException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(
+                "code", BreachedPasswordException.CODE,
+                "message", BreachedPasswordException.MESSAGE,
+                ex.getField(), BreachedPasswordException.MESSAGE));
+    }
+
+    @ExceptionHandler(BreachedPasswordCheckUnavailableException.class)
+    public ResponseEntity<Map<String, String>> breachedPasswordCheckUnavailable(
+            BreachedPasswordCheckUnavailableException ex) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of(
+                "code", BreachedPasswordCheckUnavailableException.CODE,
+                "message", BreachedPasswordCheckUnavailableException.MESSAGE,
+                ex.getField(), BreachedPasswordCheckUnavailableException.MESSAGE));
+    }
+
     @ExceptionHandler(UnsupportedBusinessCardMediaTypeException.class)
     public ResponseEntity<String> unsupportedBusinessCardMediaType(
             UnsupportedBusinessCardMediaTypeException ex) {

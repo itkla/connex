@@ -5,7 +5,6 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.session.SessionInformation;
 import org.springframework.security.core.session.SessionRegistry;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,6 +16,8 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.SsoEnforcedException;
 import ooo.klae.connex.backend.mappers.PasswordResetTokenMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.password.PasswordCredentialService;
+import ooo.klae.connex.backend.password.PasswordScreeningFlow;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /**
@@ -31,7 +32,7 @@ public class PasswordResetService {
 
     private final UserMapper userMapper;
     private final PasswordResetTokenMapper passwordResetTokenMapper;
-    private final PasswordEncoder passwordEncoder;
+    private final PasswordCredentialService passwordCredentialService;
     private final PasswordResetEmailService passwordResetEmailService;
     private final PasswordResetRateLimiter rateLimiter;
     private final AuditService auditService;
@@ -152,10 +153,6 @@ public class PasswordResetService {
             throw invalidLink();
         }
 
-        if (passwordResetTokenMapper.markConsumed(tokenHash) == 0) {
-            throw invalidLink();
-        }
-
         User user = userMapper.getUserById(token.getUserId());
         if (user == null) {
             throw invalidLink();
@@ -164,7 +161,13 @@ public class PasswordResetService {
             throw new SsoEnforcedException();
         }
 
-        userMapper.updatePasswordHash(user.getId(), passwordEncoder.encode(newPassword));
+        String passwordHash = passwordCredentialService.encode(
+                newPassword, PasswordScreeningFlow.SELF_SERVICE_RESET, user.getId());
+        if (passwordResetTokenMapper.markConsumed(tokenHash) == 0) {
+            throw new BadRequestException("This reset link is invalid or has expired");
+        }
+
+        userMapper.updatePasswordHash(user.getId(), passwordHash);
         passwordResetTokenMapper.invalidateForUser(user.getId());
         expireSessions(user);
 

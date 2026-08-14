@@ -26,6 +26,8 @@ import { useFieldErrors } from "@/app/hooks/useFieldErrors";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
 
 type Status = "validating" | "invalid" | "ready";
+const BREACHED_PASSWORD_CODE = "BREACHED_PASSWORD";
+const BREACHED_PASSWORD_CHECK_UNAVAILABLE_CODE = "BREACHED_PASSWORD_CHECK_UNAVAILABLE";
 
 /** Runs the fragment exchange and renders the existing token-free password-reset form. */
 export function ResetPasswordForm() {
@@ -39,7 +41,7 @@ export function ResetPasswordForm() {
     const [showPassword, setShowPassword] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [mismatch, setMismatch] = useState(false);
-    const { fieldErrors, reset, clearError, captureFieldErrors } = useFieldErrors();
+    const { fieldErrors, setFieldErrors, reset, clearError, captureFieldErrors } = useFieldErrors();
 
     useEffect(() => {
         let active = true;
@@ -85,7 +87,15 @@ export function ResetPasswordForm() {
             router.push("/auth/login");
         } catch (err) {
             if (err instanceof ApiError) {
-                const captured = captureFieldErrors(err);
+                const passwordMessage = err.code === BREACHED_PASSWORD_CODE
+                    ? t("breachedPassword")
+                    : err.code === BREACHED_PASSWORD_CHECK_UNAVAILABLE_CODE
+                        ? t("passwordScreeningUnavailable")
+                        : null;
+                if (passwordMessage) {
+                    setFieldErrors({ newPassword: passwordMessage });
+                }
+                const captured = passwordMessage != null || captureFieldErrors(err);
                 if (err.status === 400 && !captured) {
                     setStatus("invalid");
                     return;

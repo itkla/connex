@@ -12,6 +12,8 @@ import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -508,7 +510,7 @@ class ReportIntegrationTest {
     @MockitoBean private AiReportNarrativeService aiReportNarrativeService;
     @MockitoBean private AiGenerationService aiGenerationService;
     @MockitoBean private AiRestrictionEpoch aiRestrictionEpoch;
-    @MockitoBean private Clock clock;
+    @MockitoSpyBean private Clock clock;
     @MockitoBean private MailService mailService;
     @MockitoBean private OrganizationWorkspaceScopeControlAccess workspaceScopeControlAccess;
     @MockitoSpyBean private PersonEdgeMapper personEdgeMapper;
@@ -521,11 +523,12 @@ class ReportIntegrationTest {
                 new OrganizationWorkspaceScopeControlOperations(workspaceMapper);
         when(workspaceScopeControlAccess.getForWorkspace(anyInt())).thenAnswer(invocation ->
                 scopeOperations.getForWorkspace(invocation.getArgument(0, Integer.class)));
-        when(clock.instant()).thenReturn(FIXED_NOW);
-        when(clock.millis()).thenReturn(FIXED_NOW.toEpochMilli());
-        when(clock.getZone()).thenReturn(ZoneOffset.UTC);
-        when(clock.withZone(any(ZoneId.class))).thenAnswer(invocation ->
-                Clock.fixed(FIXED_NOW, invocation.getArgument(0, ZoneId.class)));
+        doReturn(FIXED_NOW).when(clock).instant();
+        doReturn(FIXED_NOW.toEpochMilli()).when(clock).millis();
+        doReturn(ZoneOffset.UTC).when(clock).getZone();
+        doAnswer(invocation ->
+                Clock.fixed(FIXED_NOW, invocation.getArgument(0, ZoneId.class)))
+                .when(clock).withZone(any(ZoneId.class));
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(springSecurityFilterChain)
                 .build();

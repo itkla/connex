@@ -18,6 +18,7 @@ import org.springframework.security.authentication.BadCredentialsException;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.RegisterDto;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
+import ooo.klae.connex.backend.exceptions.BreachedPasswordException;
 
 /**
  * Registration conflicts must surface a single generic, field-less error so an unauthenticated
@@ -68,6 +69,36 @@ class AuthServiceTest extends AbstractServiceTest {
 
         assertTrue(userMapper.getUserById(user.getId()).isEmailVerified(),
             "with verification off, self-serve accounts are verified so enabling it later never gates them");
+    }
+
+    @Test
+    void selfServiceRegistration_rejectsKnownBreachedPassword() {
+        RegisterDto request = registration("breached_" + unique(), unique() + "@example.com");
+        request.setPassword("Password1!");
+
+        BreachedPasswordException exception = assertThrows(BreachedPasswordException.class,
+                () -> authService.registerSelfService(request, "1.2.3.4"));
+
+        assertEquals("password", exception.getField());
+        assertFalse(exception.getMessage().contains(request.getPassword()));
+    }
+
+    @Test
+    void administratorRegistration_rejectsKnownBreachedPassword() {
+        RegisterDto request = registration("admin_breached_" + unique(), unique() + "@example.com");
+        request.setPassword("Password1!");
+
+        assertThrows(BreachedPasswordException.class,
+                () -> authService.register(request, true));
+    }
+
+    @Test
+    void bootstrapOwnerProvisioning_rejectsKnownBreachedPassword() {
+        RegisterDto request = registration("bootstrap_breached_" + unique(), unique() + "@example.com");
+        request.setPassword("Password1!");
+
+        assertThrows(BreachedPasswordException.class,
+                () -> authService.provisionBootstrapOwner(request));
     }
 
     @Test
@@ -143,6 +174,22 @@ class AuthServiceTest extends AbstractServiceTest {
         assertNull(request.getSession(false).getAttribute("pending-passkey-options"));
         assertTrue(response.getHeaders("Set-Cookie").stream()
             .anyMatch(header -> header.startsWith("connex_workspace=;") && header.contains("Max-Age=0")));
+    }
+
+    @Test
+    void federatedSessionCeremonyDoesNotCreatePasskeyStepUp() {
+        User passwordless = passwordlessUser();
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        authService.establishAuthenticatedSession(passwordless, request, response);
+
+        assertEquals(passwordless.getId(), request.getSession(false).getAttribute(
+                SessionSecurityService.AUTHENTICATED_USER_ATTR));
+        assertNull(request.getSession(false).getAttribute(
+                SessionSecurityService.WEBAUTHN_STEP_UP_USER_ATTR));
+        assertNull(request.getSession(false).getAttribute(
+                SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR));
     }
 
     private User passwordlessUser() {

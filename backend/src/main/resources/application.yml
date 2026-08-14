@@ -147,6 +147,10 @@ connex:
             recovery-token-sha256: ${CONNEX_PRIVILEGED_MFA_RECOVERY_TOKEN_SHA256:}
             recovery-expires-at: ${CONNEX_PRIVILEGED_MFA_RECOVERY_EXPIRES_AT:}
             recovery-actor: ${CONNEX_PRIVILEGED_MFA_RECOVERY_ACTOR:}
+        breached-passwords:
+            source: ${CONNEX_BREACHED_PASSWORD_SOURCE:REMOTE}
+            offline-file: ${CONNEX_BREACHED_PASSWORD_OFFLINE_FILE:}
+            offline-sha256: ${CONNEX_BREACHED_PASSWORD_OFFLINE_SHA256:}
     workspace-cookie:
         same-site: ${CONNEX_WORKSPACE_COOKIE_SAME_SITE:Lax}
         secure: ${CONNEX_WORKSPACE_COOKIE_SECURE:true}

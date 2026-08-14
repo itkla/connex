@@ -18,6 +18,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.BreachedPasswordException;
 import ooo.klae.connex.backend.mappers.PasswordResetTokenMapper;
 
 /**
@@ -90,6 +91,19 @@ class PasswordResetServiceTest extends AbstractServiceTest {
         passwordResetService.resetPassword(token, NEW_PASSWORD);
 
         assertThrows(BadRequestException.class, () -> passwordResetService.resetPassword(token, "Another1!"));
+    }
+
+    @Test
+    void resetPassword_breachedValueIsRejectedWithoutConsumingToken() {
+        User user = newUser();
+        passwordResetService.requestReset(user.getEmail(), unique());
+        String token = email.lastToken;
+
+        BreachedPasswordException exception = assertThrows(BreachedPasswordException.class,
+                () -> passwordResetService.resetPassword(token, "Password1!"));
+
+        assertEquals("newPassword", exception.getField());
+        assertTrue(passwordResetService.validateToken(token));
     }
 
     @Test

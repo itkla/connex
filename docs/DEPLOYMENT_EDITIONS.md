@@ -5,7 +5,9 @@ silo, and a customer-run on-prem installation is the **deployment profile** sele
 not the build. `CONNEX_DEPLOYMENT_PROFILE` (`connex.deployment.profile`) is that selector.
 
 Related: [DEPLOYMENT.md](DEPLOYMENT.md) for the operator runbook, [SECURITY.md](SECURITY.md) for the
-posture rationale, [STAGING_DEPLOY.md](STAGING_DEPLOY.md) for the staging instance.
+posture rationale, [STAGING_DEPLOY.md](STAGING_DEPLOY.md) for the staging instance, and
+[BREACHED_PASSWORD_SCREENING.md](BREACHED_PASSWORD_SCREENING.md) for remote and offline password
+screening.
 
 ## The profiles
 
@@ -100,6 +102,10 @@ instance therefore cannot reach a state where the two disagree.
 when the profile permits it *and* entitlement permits it *and* rollout permits it *and* the
 operator has configured it. `CAMPAIGN_DELIVERY` being allowed on every profile does not mean any
 given instance has campaign delivery turned on.
+
+Password breach screening is not an edition capability and cannot be disabled. Every edition uses
+the remote HIBP k-anonymity source by default. A restricted-egress on-prem or silo operator selects
+the verified offline source explicitly; the availability policy remains the same across editions.
 
 The effective matrix for the running instance is logged once at startup:
 

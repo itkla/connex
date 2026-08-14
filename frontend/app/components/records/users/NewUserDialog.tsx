@@ -38,6 +38,8 @@ import { toastError, toastSuccess } from "@/app/lib/toast";
 import { type RegisterPayload } from "@/app/lib/types";
 
 const EMPTY: RegisterPayload = { displayName: "", username: "", email: "", password: "" };
+const BREACHED_PASSWORD_CODE = "BREACHED_PASSWORD";
+const BREACHED_PASSWORD_CHECK_UNAVAILABLE_CODE = "BREACHED_PASSWORD_CHECK_UNAVAILABLE";
 
 type FieldIcon = ComponentType<SVGProps<SVGSVGElement>>;
 
@@ -136,8 +138,16 @@ export default function NewUserDialog() {
             if (handlePasskeyStepUpError(err)) {
                 return;
             }
-            if (err instanceof ApiError && err.fieldErrors) {
-                const fieldErrors = err.fieldErrors;
+            if (err instanceof ApiError && (
+                    err.fieldErrors
+                    || err.code === BREACHED_PASSWORD_CODE
+                    || err.code === BREACHED_PASSWORD_CHECK_UNAVAILABLE_CODE
+                )) {
+                const fieldErrors = err.code === BREACHED_PASSWORD_CODE
+                    ? { password: t("breachedPassword") }
+                    : err.code === BREACHED_PASSWORD_CHECK_UNAVAILABLE_CODE
+                        ? { password: t("passwordScreeningUnavailable") }
+                        : err.fieldErrors ?? {};
                 setErrors(fieldErrors);
                 const k = Object.keys(fieldErrors)[0];
                 if (k) requestAnimationFrame(() => document.getElementById(k)?.focus());
