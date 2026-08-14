@@ -113,13 +113,21 @@ python3 .github/scripts/test_deployment_networks.py
 ### Real client IP chain
 
 Caddy accepts `CF-Connecting-IP` and `X-Forwarded-For` only when the direct peer is in Cloudflare's
-published IPv4/IPv6 ranges or the deployment's explicit additional-proxy list, and parses forwarded
-hops in strict right-to-left order. An unlisted direct caller cannot reset a throttle by supplying
-either header. Before proxying, Caddy overwrites `X-Forwarded-For` with its single resolved
-`{client_ip}` value and removes `CF-Connecting-IP`; the backend therefore never has to reinterpret
-a Cloudflare hop chain. The Compose backend port is unpublished, trusts forwarded IPs only from
-private Compose peers, and `ClientIpResolver` uses that sanitized value for login/passkey throttling
-and audit attribution.
+published IPv4/IPv6 ranges or the deployment's explicit additional-proxy list, and parses that
+external chain in strict right-to-left order. An unlisted direct caller cannot reset a throttle by
+supplying either header. Before proxying, Caddy overwrites `X-Forwarded-For` with its single resolved
+`{client_ip}` value and removes `CF-Connecting-IP`; the backend therefore never reinterprets a
+Cloudflare chain. `ClientIpResolver` accepts exactly one IP literal from a configured sanitizing
+peer and returns it without checking whether that client value is also in a trusted range. This is
+intentional: `172.20.5.10` may be a real on-prem client behind a private Caddy container and must not
+collapse to Caddy's address for login/passkey throttling or audit attribution.
+
+The Compose backend port must remain unpublished. The silo and on-prem profiles trust all RFC 1918
+socket peers because Docker assigns service addresses dynamically, not from a pinned subnet; that
+range is used only to decide whether the immediate peer may supply the one sanitized value. Eval
+leaves `CONNEX_SECURITY_TRUSTED_PROXIES` empty. Publishing the backend port or allowing an
+unsanitized private peer to reach it would make the broad private-peer trust unsafe and is not a
+supported topology.
 
 An operator who puts another proxy between Caddy and Cloudflare may add only that proxy's exact
 egress CIDR to `CONNEX_CADDY_ADDITIONAL_TRUSTED_PROXIES` and must restrict the listener so no other

@@ -62,9 +62,7 @@ def resolve_compose_model(
             "CONNEX_DB_USERNAME": "network-test-user",
             "CONNEX_CADDY_ADDITIONAL_TRUSTED_PROXIES": "",
             "CONNEX_CADDY_HSTS_ENABLED": "false",
-            "CONNEX_SECURITY_TRUSTED_PROXIES": (
-                "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
-            ),
+            "CONNEX_SECURITY_TRUSTED_PROXIES": "",
             "CONNEX_API_MAX_BODY_BYTES": "10485760",
             "CONNEX_IMPORT_MAX_BODY_BYTES": "67108864",
             "CONNEX_UPLOAD_MAX_BODY_BYTES": "28311552",
@@ -214,13 +212,13 @@ class DeploymentNetworkTest(unittest.TestCase):
         self.assertIn("CONNEX_CADDY_HSTS_ENABLED=false", EVAL_ENV_PATH.read_text())
         self.assertIn("CONNEX_CADDY_HSTS_ENABLED=false", ONPREM_ENV_PATH.read_text())
 
-    def test_forwarded_client_ip_chain_is_trusted_only_between_private_peers(self) -> None:
+    def test_forwarded_client_ip_trust_is_explicit_per_real_deployment_profile(self) -> None:
         expected_backend_proxies = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
         for model_name, compose in self.compose_models.items():
             services = compose["services"]
             with self.subTest(model=model_name, service="backend"):
                 self.assertEqual(
-                    expected_backend_proxies,
+                    "",
                     services["backend"]["environment"]["CONNEX_SECURITY_TRUSTED_PROXIES"],
                 )
             with self.subTest(model=model_name, service="caddy"):
@@ -230,6 +228,28 @@ class DeploymentNetworkTest(unittest.TestCase):
                         "CONNEX_CADDY_ADDITIONAL_TRUSTED_PROXIES"
                     ],
                 )
+        configured = resolve_compose_model(
+            COMPOSE_PATH,
+            environment_overrides={
+                "CONNEX_SECURITY_TRUSTED_PROXIES": expected_backend_proxies
+            },
+        )
+        self.assertEqual(
+            expected_backend_proxies,
+            configured["services"]["backend"]["environment"][
+                "CONNEX_SECURITY_TRUSTED_PROXIES"
+            ],
+        )
+        for profile_path in (SILO_ENV_PATH, ONPREM_ENV_PATH):
+            with self.subTest(profile=profile_path.name):
+                self.assertIn(
+                    f"CONNEX_SECURITY_TRUSTED_PROXIES={expected_backend_proxies}",
+                    profile_path.read_text(encoding="utf-8"),
+                )
+        self.assertIn(
+            "CONNEX_SECURITY_TRUSTED_PROXIES=\n",
+            EVAL_ENV_PATH.read_text(encoding="utf-8"),
+        )
 
     def test_caddy_request_limits_share_backend_environment_contracts(self) -> None:
         expected_limits = {

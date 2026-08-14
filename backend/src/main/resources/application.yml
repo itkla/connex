@@ -132,15 +132,11 @@ connex:
         # CSRF protection for state-changing requests. The SPA fetches the token from
         # GET /api/auth/csrf and echoes it in the X-XSRF-TOKEN header. Kill-switch for cutover.
         csrf-enabled: ${CONNEX_SECURITY_CSRF_ENABLED:true}
-        # Comma-separated trusted reverse-proxy IPs / CIDR ranges. X-Forwarded-For is
-        # only honored when the direct peer matches one of these; empty (the default)
-        # means the header is never trusted, so a client cannot spoof its source IP for
-        # rate-limiting or audit attribution. IMPORTANT: set this to your proxy/CDN/tunnel
-        # egress ranges in any proxied deployment — otherwise every request appears to come
-        # from the proxy's own address and per-IP attribution is worthless. (The login
-        # per-IP throttle already self-disables when the resolved IP is loopback/private,
-        # so a mis-config degrades to per-username throttling rather than a global lockout,
-        # but per-IP protection and accurate audit IPs both require this to be set.)
+        # Comma-separated trusted sanitizing-proxy IPs / CIDR ranges. X-Forwarded-For is
+        # honored only when the direct peer matches one of these and contains exactly one
+        # IP literal. Empty (the default) means the header is never trusted. Configure only
+        # peers that overwrite inbound forwarding headers; otherwise forged source IPs can
+        # bypass per-IP throttles and corrupt audit attribution.
         trusted-proxies: ${CONNEX_SECURITY_TRUSTED_PROXIES:}
         session:
             absolute-timeout: ${CONNEX_SESSION_ABSOLUTE_TIMEOUT:12h}
