@@ -204,16 +204,16 @@ public class WebAuthnController {
                     user.getDisplayName(), "Passkey login refused; SSO enforced", null);
             throw new SsoEnforcedException();
         }
-        User authenticatedUser = authService.establishAuthenticatedSession(user, req, res);
         auditService.recordStrictIndependentScoped(
                 "auth.login.passkey",
                 "user",
-                authenticatedUser.getId(),
+                user.getId(),
                 null,
                 null,
-                authenticatedUser.getDisplayName(),
-                authenticatedUser.getDisplayName() + " logged in with passkey",
+                user.getDisplayName(),
+                user.getDisplayName() + " logged in with passkey",
                 null);
+        User authenticatedUser = authService.establishAuthenticatedSession(user, req, res);
         sessionSecurityService.markStepUp(req, authenticatedUser.getId());
         return Map.of("message", "You are now logged in");
     }

@@ -482,11 +482,11 @@ class WebAuthnControllerTest {
 
         loginController.authenticateVerify("{}", request, response);
 
-        verify(authService).establishAuthenticatedSession(user, request, response);
-        InOrder grantOrder = inOrder(auditService, sessionSecurityService);
+        InOrder grantOrder = inOrder(auditService, authService, sessionSecurityService);
         grantOrder.verify(auditService).recordStrictIndependentScoped(
                 eq("auth.login.passkey"), eq("user"), eq(7), isNull(), isNull(), eq("User 7"),
                 eq("User 7 logged in with passkey"), isNull());
+        grantOrder.verify(authService).establishAuthenticatedSession(user, request, response);
         grantOrder.verify(sessionSecurityService).markStepUp(request, 7);
     }
 
@@ -515,6 +515,7 @@ class WebAuthnControllerTest {
         assertThrows(IllegalStateException.class,
                 () -> loginController.authenticateVerify("{}", request, response));
 
+        verify(authService, never()).establishAuthenticatedSession(any(), any(), any());
         verify(sessionSecurityService, never()).markStepUp(any(), anyInt());
     }
 
