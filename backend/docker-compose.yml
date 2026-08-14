@@ -43,8 +43,8 @@ services:
       MYSQL_PASSWORD: ${CONNEX_DB_PASSWORD:?Set CONNEX_DB_PASSWORD in backend/.env}
       TZ: Asia/Tokyo
     ports:
-      - 3306:3306
-      - 33060:33060
+      - 127.0.0.1:3306:3306
+      - 127.0.0.1:33060:33060
 
   adminer:
     image: adminer:5.4.2@sha256:983261ecc40a4aaf11e25aeda8ef821f5a43a9f024b3967c81cbcc0e6ce43ba3
