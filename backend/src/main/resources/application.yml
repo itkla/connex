@@ -132,15 +132,11 @@ connex:
         # CSRF protection for state-changing requests. The SPA fetches the token from
         # GET /api/auth/csrf and echoes it in the X-XSRF-TOKEN header. Kill-switch for cutover.
         csrf-enabled: ${CONNEX_SECURITY_CSRF_ENABLED:true}
-        # Comma-separated trusted reverse-proxy IPs / CIDR ranges. X-Forwarded-For is
-        # only honored when the direct peer matches one of these; empty (the default)
-        # means the header is never trusted, so a client cannot spoof its source IP for
-        # rate-limiting or audit attribution. IMPORTANT: set this to your proxy/CDN/tunnel
-        # egress ranges in any proxied deployment — otherwise every request appears to come
-        # from the proxy's own address and per-IP attribution is worthless. (The login
-        # per-IP throttle already self-disables when the resolved IP is loopback/private,
-        # so a mis-config degrades to per-username throttling rather than a global lockout,
-        # but per-IP protection and accurate audit IPs both require this to be set.)
+        # Comma-separated trusted sanitizing-proxy IPs / CIDR ranges. X-Forwarded-For is
+        # honored only when the direct peer matches one of these and contains exactly one
+        # IP literal. Empty (the default) means the header is never trusted. Configure only
+        # peers that overwrite inbound forwarding headers; otherwise forged source IPs can
+        # bypass per-IP throttles and corrupt audit attribution.
         trusted-proxies: ${CONNEX_SECURITY_TRUSTED_PROXIES:}
         session:
             absolute-timeout: ${CONNEX_SESSION_ABSOLUTE_TIMEOUT:12h}
@@ -218,12 +214,14 @@ connex:
         idempotency-cleanup-delay: ${CONNEX_BUSINESS_CARD_IDEMPOTENCY_CLEANUP_DELAY:1m}
         idempotency-cleanup-per-workspace-batch-size: ${CONNEX_BUSINESS_CARD_IDEMPOTENCY_CLEANUP_PER_WORKSPACE_BATCH_SIZE:100}
     login:
-        # Fixed-window failed-attempt throttle on POST /api/auth/login. Once either the
-        # per-IP or per-username failure cap is hit within the window, further attempts are
-        # rejected until the window elapses. In-memory / single-JVM, matching the session model.
+        # Fixed-window failed-attempt throttle for password, passkey, and SSO link authentication.
+        # Once either the per-IP or per-username failure cap is hit within the window, further
+        # attempts are rejected until the window elapses. In-memory / single-JVM, matching the
+        # session model.
         # The per-username cap is a deliberate temporary lockout that bounds targeted brute
         # force; it self-heals after window-seconds and a successful login clears the bucket.
-        # The per-IP cap only engages for a real public client IP (see trusted-proxies above).
+        # The per-IP cap engages for public addresses and private clients supplied by a trusted
+        # sanitizing proxy, but not for a direct private peer that may front the whole deployment.
         max-failures-per-ip: ${CONNEX_LOGIN_MAX_FAILURES_PER_IP:50}
         max-failures-per-user: ${CONNEX_LOGIN_MAX_FAILURES_PER_USER:10}
         window-seconds: ${CONNEX_LOGIN_WINDOW_SECONDS:900}

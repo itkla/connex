@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
+
 /**
  * Verifies the failed-login throttle: it blocks past the per-IP and per-username caps,
  * isolates by key, clears the username bucket on success, resets after the window, and
@@ -74,6 +76,20 @@ class LoginRateLimiterTest {
         }
         assertFalse(limiter.isBlocked("10.0.0.5", "bystander", now),
             "a private proxy address must not per-IP-lock the whole instance");
+    }
+
+    @Test
+    void throttlesSanitizedPrivateClientWithoutThrottlingPrivateDirectPeer() {
+        LoginRateLimiter limiter = new LoginRateLimiter(1, 100, 900);
+        long now = 1_000L;
+        ResolvedClientIp privateClient = new ResolvedClientIp("172.20.5.10", true);
+        ResolvedClientIp privateProxy = new ResolvedClientIp("172.18.0.4", false);
+
+        limiter.recordFailureForClient(privateClient, "alice", now);
+        limiter.recordFailureForClient(privateProxy, "bob", now);
+
+        assertTrue(limiter.isBlockedForClient(privateClient, "bystander", now));
+        assertFalse(limiter.isBlockedForClient(privateProxy, "bystander", now));
     }
 
     @Test

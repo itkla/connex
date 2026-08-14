@@ -44,6 +44,7 @@ import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
+import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
 import ooo.klae.connex.backend.webauthn.WebAuthnJsonMapper;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
 import tools.jackson.core.type.TypeReference;
@@ -247,13 +248,14 @@ class WebAuthnControllerTest {
     void authenticateVerify_preservesRequestBodyTooLargeWithoutRecordingLoginFailure() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         MockHttpServletResponse response = new MockHttpServletResponse();
-        when(clientIpResolver.resolve(request)).thenReturn("127.0.0.1");
+        ResolvedClientIp clientIp = new ResolvedClientIp("127.0.0.1", false);
+        when(clientIpResolver.resolveWithProvenance(request)).thenReturn(clientIp);
         when(requestOptions.load(request)).thenReturn(mock(PublicKeyCredentialRequestOptions.class));
 
         assertThrows(RequestBodyTooLargeException.class,
             () -> controller.authenticateVerify("{}", request, response));
 
-        verify(loginRateLimiter, never()).recordFailure(any(), any(), anyLong());
+        verify(loginRateLimiter, never()).recordFailureForClient(any(), any(), anyLong());
     }
 
     @Test
@@ -263,14 +265,15 @@ class WebAuthnControllerTest {
         PublicKeyCredentialRequestOptions options = mock(PublicKeyCredentialRequestOptions.class);
         WebAuthnJsonMapper mapper = mock(WebAuthnJsonMapper.class);
         WebAuthnController loginController = controller(mapper);
-        when(clientIpResolver.resolve(request)).thenReturn("127.0.0.1");
+        ResolvedClientIp clientIp = new ResolvedClientIp("127.0.0.1", false);
+        when(clientIpResolver.resolveWithProvenance(request)).thenReturn(clientIp);
         when(requestOptions.load(request)).thenReturn(options);
         when(mapper.read(eq("{}"), org.mockito.ArgumentMatchers.<TypeReference<PublicKeyCredential<AuthenticatorAssertionResponse>>>any()))
             .thenThrow(new BadCredentialsException("bad assertion"));
 
         assertThrows(BadCredentialsException.class, () -> loginController.authenticateVerify("{}", request, response));
 
-        verify(loginRateLimiter).recordFailure(eq("127.0.0.1"), isNull(), anyLong());
+        verify(loginRateLimiter).recordFailureForClient(eq(clientIp), isNull(), anyLong());
         verify(auditService).recordFailure(eq("auth.login.passkey"), eq("user"), isNull(), eq("127.0.0.1"),
             eq("Failed passkey login attempt"), eq("bad assertion"));
     }
@@ -279,7 +282,8 @@ class WebAuthnControllerTest {
     void authenticateVerifyAuditsMissingPasskeyChallenge() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         MockHttpServletResponse response = new MockHttpServletResponse();
-        when(clientIpResolver.resolve(request)).thenReturn("127.0.0.1");
+        when(clientIpResolver.resolveWithProvenance(request))
+            .thenReturn(new ResolvedClientIp("127.0.0.1", false));
 
         assertThrows(BadCredentialsException.class, () -> controller.authenticateVerify("{}", request, response));
 
@@ -296,7 +300,8 @@ class WebAuthnControllerTest {
         PublicKeyCredential<AuthenticatorAssertionResponse> assertion = mock();
         WebAuthnJsonMapper mapper = mock(WebAuthnJsonMapper.class);
         WebAuthnController loginController = controller(mapper);
-        when(clientIpResolver.resolve(request)).thenReturn("127.0.0.1");
+        when(clientIpResolver.resolveWithProvenance(request))
+            .thenReturn(new ResolvedClientIp("127.0.0.1", false));
         when(requestOptions.load(request)).thenReturn(options);
         when(mapper.read(eq("{}"), org.mockito.ArgumentMatchers.<TypeReference<PublicKeyCredential<AuthenticatorAssertionResponse>>>any()))
             .thenReturn(assertion);
@@ -378,7 +383,8 @@ class WebAuthnControllerTest {
         PublicKeyCredential<AuthenticatorAssertionResponse> assertion = mock();
         WebAuthnJsonMapper mapper = mock(WebAuthnJsonMapper.class);
         WebAuthnController loginController = controller(mapper);
-        when(clientIpResolver.resolve(request)).thenReturn("127.0.0.1");
+        when(clientIpResolver.resolveWithProvenance(request))
+            .thenReturn(new ResolvedClientIp("127.0.0.1", false));
         when(requestOptions.load(request)).thenReturn(options);
         when(mapper.read(eq("{}"), org.mockito.ArgumentMatchers.<TypeReference<PublicKeyCredential<AuthenticatorAssertionResponse>>>any()))
             .thenReturn(assertion);

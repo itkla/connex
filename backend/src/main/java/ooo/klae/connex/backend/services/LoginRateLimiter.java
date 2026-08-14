@@ -1,13 +1,14 @@
 package ooo.klae.connex.backend.services;
 
 import java.net.InetAddress;
-import java.net.UnknownHostException;
 import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+
+import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
 
 /**
  * In-memory fixed-window throttle for failed login attempts, keyed independently by
@@ -46,6 +47,20 @@ public class LoginRateLimiter {
     }
 
     /**
+     * Applies per-IP throttling using resolver provenance so a sanitized private client remains
+     * distinct while a direct private proxy address cannot lock out the whole deployment.
+     *
+     * @param clientIp the resolved client address and proxy provenance
+     * @param username the attempted username
+     * @param nowMillis the current epoch time in milliseconds
+     * @return true when the IP or username has too many recent failed attempts
+     */
+    public boolean isBlockedForClient(ResolvedClientIp clientIp, String username, long nowMillis) {
+        return countWithin(ipKey(clientIp), nowMillis) >= maxPerIp
+                || countWithin(userKey(username), nowMillis) >= maxPerUser;
+    }
+
+    /**
      * Records one failed attempt against both the IP and username buckets.
      * @param ip the requesting client IP
      * @param username the attempted username
@@ -53,6 +68,19 @@ public class LoginRateLimiter {
      */
     public void recordFailure(String ip, String username, long nowMillis) {
         increment(ipKey(ip), nowMillis);
+        increment(userKey(username), nowMillis);
+    }
+
+    /**
+     * Records one failed attempt using resolver provenance for the IP bucket.
+     *
+     * @param clientIp the resolved client address and proxy provenance
+     * @param username the attempted username
+     * @param nowMillis the current epoch time in milliseconds
+     */
+    public void recordFailureForClient(
+            ResolvedClientIp clientIp, String username, long nowMillis) {
+        increment(ipKey(clientIp), nowMillis);
         increment(userKey(username), nowMillis);
     }
 
@@ -102,27 +130,38 @@ public class LoginRateLimiter {
     }
 
     private static String ipKey(String ip) {
-        return isThrottleableIp(ip) ? "ip:" + ip : null;
+        return isThrottleableIp(ip, false) ? "ip:" + ip : null;
+    }
+
+    private static String ipKey(ResolvedClientIp clientIp) {
+        if (clientIp == null) {
+            return null;
+        }
+        String address = clientIp.address();
+        return isThrottleableIp(address, clientIp.forwardedByTrustedProxy())
+                ? "ip:" + address
+                : null;
     }
 
     /**
-     * Whether a per-IP failure bucket is meaningful for this address. A loopback/private
-     * address means the resolver could not determine a real public client IP — typically an
-     * un-configured reverse proxy or tunnel whose single address fronts every client — so
-     * throttling on it would lock out the whole instance. In that case per-IP throttling is
-     * skipped and only the per-username bucket applies. Configure
-     * {@code connex.security.trusted-proxies} so the resolver yields the real public client IP.
+     * Whether a per-IP failure bucket is meaningful for this address. A direct loopback/private
+     * address can be a proxy peer fronting every client, so it is skipped. A private address from
+     * a trusted sanitizing proxy is a real on-prem client and remains eligible. Loopback,
+     * unspecified, and multicast values are never eligible regardless of provenance.
      */
-    private static boolean isThrottleableIp(String ip) {
+    private static boolean isThrottleableIp(String ip, boolean forwardedByTrustedProxy) {
         if (ip == null || ip.isBlank()) {
             return false;
         }
         try {
-            InetAddress address = InetAddress.getByName(ip);
-            return !(address.isLoopbackAddress() || address.isAnyLocalAddress()
-                    || address.isSiteLocalAddress() || address.isLinkLocalAddress()
-                    || address.isMulticastAddress());
-        } catch (UnknownHostException e) {
+            InetAddress address = InetAddress.ofLiteral(ip);
+            if (address.isLoopbackAddress() || address.isAnyLocalAddress()
+                    || address.isMulticastAddress()) {
+                return false;
+            }
+            return forwardedByTrustedProxy
+                    || !(address.isSiteLocalAddress() || address.isLinkLocalAddress());
+        } catch (IllegalArgumentException e) {
             return false;
         }
     }

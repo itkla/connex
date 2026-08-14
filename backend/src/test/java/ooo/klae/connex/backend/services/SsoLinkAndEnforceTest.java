@@ -32,6 +32,7 @@ import ooo.klae.connex.backend.mappers.FederatedIdentityMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
 import ooo.klae.connex.backend.mappers.SsoLinkChallengeMapper;
+import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
 
 /**
  * Exercises the SSO account-linking challenge (password-confirm-once) and the enforce-SSO
@@ -67,7 +68,7 @@ class SsoLinkAndEnforceTest extends AbstractServiceTest {
         User user = userWithPassword("Correct1!");
         String token = ssoLinkService.createChallenge(linkRequired(user.getId(), "sub-a"));
 
-        User signedIn = ssoLinkService.confirm(token, "Correct1!", "203.0.113.10",
+        User signedIn = ssoLinkService.confirm(token, "Correct1!", clientIp("203.0.113.10"),
                 new MockHttpServletRequest(), new MockHttpServletResponse());
 
         assertEquals(user.getId(), signedIn.getId());
@@ -85,7 +86,7 @@ class SsoLinkAndEnforceTest extends AbstractServiceTest {
                 "enterprise SSO link-login must be visible in the org audit trail");
 
         assertThrows(ResourceNotFoundException.class, () ->
-                ssoLinkService.confirm(token, "Correct1!", "203.0.113.10",
+                ssoLinkService.confirm(token, "Correct1!", clientIp("203.0.113.10"),
                         new MockHttpServletRequest(), new MockHttpServletResponse()),
                 "a consumed single-use challenge must not be redeemable a second time");
     }
@@ -96,13 +97,13 @@ class SsoLinkAndEnforceTest extends AbstractServiceTest {
         String token = ssoLinkService.createChallenge(linkRequired(user.getId(), "sub-b"));
 
         assertThrows(BadCredentialsException.class, () ->
-                ssoLinkService.confirm(token, "Wrong9!Aa", "203.0.113.11",
+                ssoLinkService.confirm(token, "Wrong9!Aa", clientIp("203.0.113.11"),
                         new MockHttpServletRequest(), new MockHttpServletResponse()));
 
         assertNull(federatedIdentityMapper.findByProviderIssuerSubject(PROVIDER, ISSUER, "sub-b"),
                 "a wrong password must not link any identity");
 
-        User recovered = ssoLinkService.confirm(token, "Correct1!", "203.0.113.12",
+        User recovered = ssoLinkService.confirm(token, "Correct1!", clientIp("203.0.113.12"),
                 new MockHttpServletRequest(), new MockHttpServletResponse());
         assertEquals(user.getId(), recovered.getId(),
                 "a wrong password must leave the challenge redeemable for a later correct attempt");
@@ -122,7 +123,7 @@ class SsoLinkAndEnforceTest extends AbstractServiceTest {
         ssoLinkChallengeMapper.insert(expired, -1);
 
         assertThrows(ResourceNotFoundException.class, () ->
-                ssoLinkService.confirm(rawToken, "Correct1!", "203.0.113.13",
+                ssoLinkService.confirm(rawToken, "Correct1!", clientIp("203.0.113.13"),
                         new MockHttpServletRequest(), new MockHttpServletResponse()));
         assertNull(federatedIdentityMapper.findByProviderIssuerSubject(PROVIDER, ISSUER, "sub-c"),
                 "an expired challenge must link nothing");
@@ -169,7 +170,7 @@ class SsoLinkAndEnforceTest extends AbstractServiceTest {
             () -> ssoLinkService.confirm(
                 token,
                 "Correct1!",
-                "203.0.113.14",
+                clientIp("203.0.113.14"),
                 request,
                 new MockHttpServletResponse()));
 
@@ -204,6 +205,10 @@ class SsoLinkAndEnforceTest extends AbstractServiceTest {
 
     private SsoLoginResult.LinkRequired linkRequired(int userId, String subject) {
         return new SsoLoginResult.LinkRequired(userId, PROVIDER, ISSUER, subject, orgId);
+    }
+
+    private static ResolvedClientIp clientIp(String address) {
+        return new ResolvedClientIp(address, false);
     }
 
     private User userWithPassword(String rawPassword) {
