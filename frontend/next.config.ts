@@ -8,6 +8,10 @@ import {
 
 const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
 
+const BACKEND_IMPORT_MAX_BODY_BYTES = 67_108_864;
+
+const isDevelopment = process.env.NODE_ENV === "development";
+
 const nextConfig: NextConfig = {
   output: "standalone",
   outputFileTracingIncludes: {
@@ -17,6 +21,9 @@ const nextConfig: NextConfig = {
     ],
   },
   distDir: process.env.NEXT_DIST_DIR ?? ".next",
+  ...(isDevelopment
+    ? { experimental: { proxyClientMaxBodySize: BACKEND_IMPORT_MAX_BODY_BYTES } }
+    : {}),
   async rewrites() {
     return [
       {
