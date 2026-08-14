@@ -419,14 +419,14 @@ connex:
     password-reset:
         # Forgot-password flow. token-expiry-minutes bounds how long a reset link is
         # valid; email-enabled=true sends real reset mail over the connex.mail.* transport
-        # (configure that too), while false keeps the dev fallback that only logs the link.
+        # (configure that too), while false records only that delivery was unavailable.
+        # Raw reset credentials are never logged; mail-disabled deployments must use a
+        # reachable instance SMTP relay and request a fresh reset.
         # base-url is the frontend origin used to build the reset link (never derived from a
         # request header). request-window-seconds / max-requests cap how many reset links one
         # account can request in that window.
         token-expiry-minutes: ${CONNEX_PASSWORD_RESET_TOKEN_EXPIRY_MINUTES:30}
         email-enabled: ${CONNEX_PASSWORD_RESET_EMAIL_ENABLED:false}
-        # Dev-only: log the raw reset link. Never enable where logs are accessible.
-        log-link: ${CONNEX_PASSWORD_RESET_LOG_LINK:false}
         base-url: ${CONNEX_PASSWORD_RESET_BASE_URL:http://localhost:3000}
         # Per-account request throttle (enumeration-safe branch is also covered by the per-IP cap).
         request-window-seconds: ${CONNEX_PASSWORD_RESET_REQUEST_WINDOW_SECONDS:900}
@@ -441,14 +441,14 @@ connex:
         # Verified account email-change flow. A change is applied only after the
         # recipient redeems a single-use token sent to the new address; email-enabled=true
         # sends real verification mail over the connex.mail.* transport (configure that too),
-        # while false keeps the dev fallback that only logs the link. base-url is the frontend
-        # origin used to build the verification link (never derived from a request header).
+        # while false records only that delivery was unavailable. Raw verification credentials
+        # are never logged; configure a reachable instance SMTP relay before requesting a change.
+        # base-url is the frontend origin used to build the verification link (never derived
+        # from a request header).
         # request-window-seconds / max-requests cap how many changes one account can request
         # in that window; the raw token is never stored (only its SHA-256 hash).
         token-expiry-minutes: ${CONNEX_EMAIL_CHANGE_TOKEN_EXPIRY_MINUTES:30}
         email-enabled: ${CONNEX_EMAIL_CHANGE_EMAIL_ENABLED:false}
-        # Dev-only: log the raw verification link. Never enable where logs are accessible.
-        log-link: ${CONNEX_EMAIL_CHANGE_LOG_LINK:false}
         base-url: ${CONNEX_EMAIL_CHANGE_BASE_URL:http://localhost:3000}
         request-window-seconds: ${CONNEX_EMAIL_CHANGE_REQUEST_WINDOW_SECONDS:900}
         max-requests: ${CONNEX_EMAIL_CHANGE_MAX_REQUESTS:5}
@@ -462,13 +462,13 @@ connex:
         # so the workspace domain allow-list can no longer be satisfied by an unverified (spoofable)
         # registration address. Off by default (fully non-breaking): no tokens are issued and the
         # redeem gate does not apply. email-enabled=true sends real mail over connex.mail.*; false
-        # keeps the dev fallback that only logs the link. base-url is the frontend origin used to
-        # build the link (never derived from a request header).
+        # records only that delivery was unavailable. Raw verification credentials are never
+        # logged; leave enabled=false until a reachable instance SMTP relay is configured.
+        # base-url is the frontend origin used to build the link (never derived from a request
+        # header).
         enabled: ${CONNEX_REGISTRATION_VERIFICATION_ENABLED:false}
         token-expiry-minutes: ${CONNEX_REGISTRATION_VERIFICATION_TOKEN_EXPIRY_MINUTES:1440}
         email-enabled: ${CONNEX_REGISTRATION_VERIFICATION_EMAIL_ENABLED:false}
-        # Dev-only: log the raw verification link. Never enable where logs are accessible.
-        log-link: ${CONNEX_REGISTRATION_VERIFICATION_LOG_LINK:false}
         base-url: ${CONNEX_REGISTRATION_VERIFICATION_BASE_URL:http://localhost:3000}
         request-window-seconds: ${CONNEX_REGISTRATION_VERIFICATION_REQUEST_WINDOW_SECONDS:900}
         max-requests: ${CONNEX_REGISTRATION_VERIFICATION_MAX_REQUESTS:5}

@@ -5,9 +5,9 @@ import ooo.klae.connex.backend.beans.User;
 /**
  * Delivers an email-change verification link to a pending new address. The raw
  * token is passed here only — it is never persisted — and callers must treat it
- * as a bearer secret. The default {@link LoggingEmailChangeEmailService} logs the
- * link for local development; a real SMTP/provider implementation replaces it by
- * defining a bean of this type and enabling {@code connex.email-change.email-enabled}.
+ * as a bearer secret. The default {@link LoggingEmailChangeEmailService} records
+ * only that delivery is unavailable; real delivery requires
+ * {@code connex.email-change.email-enabled} and a usable instance SMTP transport.
  */
 public interface EmailChangeEmailService {
 

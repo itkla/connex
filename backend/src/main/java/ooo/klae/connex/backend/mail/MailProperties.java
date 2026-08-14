@@ -11,7 +11,7 @@ import lombok.ToString;
  * account-level mail (password reset, email change) and the fallback for any
  * workspace that has not configured its own SMTP. Bound from {@code connex.mail.*}
  * / {@code CONNEX_MAIL_*}. When {@link #isEnabled()} is false no transport is
- * built and delivery falls back to the logging seams.
+ * built and delivery is safely skipped without exposing message credentials.
  */
 @Data
 @ToString(exclude = { "password", "secretKey" })
