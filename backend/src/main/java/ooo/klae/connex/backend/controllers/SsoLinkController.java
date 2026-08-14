@@ -58,7 +58,7 @@ public class SsoLinkController {
             tokenHash -> ssoLinkService.confirmByHash(
                 tokenHash,
                 request.getPassword(),
-                clientIpResolver.resolve(httpRequest),
+                clientIpResolver.resolveWithProvenance(httpRequest),
                 httpRequest,
                 httpResponse));
         oneTimeLinkFlowCookie.clear(httpResponse, Purpose.SSO_LINK);

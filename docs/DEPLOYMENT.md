@@ -3,6 +3,9 @@
 The [`deploy/`](../deploy) bundle turns the released [container images](RELEASE.md) into a
 running, single-origin deployment. The **same bundle** serves a Connex-operated **silo** and a
 customer-operated **on-prem** install — only the profile and secrets differ (issue #499, epic #502).
+Public exposure also requires the adopt-or-accept decision, origin lock-down, real-client-IP chain,
+and validation procedures in [EDGE_DEFENCE.md](EDGE_DEFENCE.md); the bundle does not claim that a
+managed WAF or customer firewall has been configured outside the repository.
 
 ## Topology
 

@@ -25,6 +25,7 @@ import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 import ooo.klae.connex.backend.util.ClientIpResolver;
+import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -145,9 +146,9 @@ public class AuthService {
      * @return
      */
     public User login(LoginDto request, HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
-        String clientIp = clientIpResolver.resolve(httpRequest);
+        ResolvedClientIp clientIp = clientIpResolver.resolveWithProvenance(httpRequest);
         long now = System.currentTimeMillis();
-        if (loginRateLimiter.isBlocked(clientIp, request.getUsername(), now)) {
+        if (loginRateLimiter.isBlockedForClient(clientIp, request.getUsername(), now)) {
             auditService.recordFailure("auth.login_throttled", "user", null, request.getUsername(),
                     "Login attempts throttled for " + request.getUsername(), null);
             throw new TooManyRequestsException("Too many login attempts. Please try again later.");
@@ -156,7 +157,7 @@ public class AuthService {
                 ? userMapper.getUserByEmail(request.getUsername())
                 : userMapper.getUserByUsername(request.getUsername());
         if (candidate != null && ssoConnectionService.isSsoEnforcedForUser(candidate.getId())) {
-            loginRateLimiter.recordFailure(clientIp, request.getUsername(), now);
+            loginRateLimiter.recordFailureForClient(clientIp, request.getUsername(), now);
             auditService.recordFailure("auth.login_sso_enforced", "user", candidate.getId(), request.getUsername(),
                     "Password login refused; SSO enforced for " + request.getUsername(), null);
             throw new SsoEnforcedException();
@@ -167,7 +168,7 @@ public class AuthService {
                 new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword())
             );
         } catch (AuthenticationException e) {
-            loginRateLimiter.recordFailure(clientIp, request.getUsername(), now);
+            loginRateLimiter.recordFailureForClient(clientIp, request.getUsername(), now);
             auditService.recordFailure("auth.login", "user", null, request.getUsername(),
                     "Failed login attempt for " + request.getUsername(), e.getMessage());
             throw e;
@@ -239,17 +240,28 @@ public class AuthService {
     }
 
     public void requireCurrentPassword(int userId, String password, String clientIp) {
+        requireCurrentPassword(userId, password, new ResolvedClientIp(clientIp, false));
+    }
+
+    /**
+     * Confirms the current password with provenance-aware per-client throttling.
+     *
+     * @param userId the account whose password is being confirmed
+     * @param password the submitted current password
+     * @param clientIp the resolved client address and trusted-proxy provenance
+     */
+    public void requireCurrentPassword(int userId, String password, ResolvedClientIp clientIp) {
         User user = userMapper.getUserById(userId);
         if (user == null) {
             throw new BadCredentialsException("Incorrect password");
         }
         long now = System.currentTimeMillis();
         String username = user.getUsername();
-        if (loginRateLimiter.isBlocked(clientIp, username, now)) {
+        if (loginRateLimiter.isBlockedForClient(clientIp, username, now)) {
             throw new TooManyRequestsException("Too many login attempts. Please try again later.");
         }
         if (password == null || user.getPassword() == null || !passwordEncoder.matches(password, user.getPassword())) {
-            loginRateLimiter.recordFailure(clientIp, username, now);
+            loginRateLimiter.recordFailureForClient(clientIp, username, now);
             throw new BadCredentialsException("Incorrect password");
         }
         loginRateLimiter.recordSuccess(username);
@@ -273,7 +285,7 @@ public class AuthService {
             sessionSecurityService.requireFreshAuthenticatedSession(httpRequest, userId);
             return;
         }
-        requireCurrentPassword(userId, password, clientIpResolver.resolve(httpRequest));
+        requireCurrentPassword(userId, password, clientIpResolver.resolveWithProvenance(httpRequest));
     }
 
     /**

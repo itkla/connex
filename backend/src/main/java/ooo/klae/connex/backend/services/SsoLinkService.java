@@ -24,6 +24,7 @@ import ooo.klae.connex.backend.mappers.FederatedIdentityMapper;
 import ooo.klae.connex.backend.mappers.SsoLinkChallengeMapper;
 import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /**
@@ -99,7 +100,7 @@ public class SsoLinkService {
      * limiter failure and is a 401 that leaves the challenge redeemable.
      * @param rawToken the raw token from the linking redirect
      * @param password the account's current password, to prove ownership
-     * @param clientIp the resolved client IP, for rate limiting
+     * @param clientIp the resolved client IP and trusted-proxy provenance, for rate limiting
      * @param httpRequest the current request
      * @param httpResponse the current response
      * @return the now-linked, signed-in user
@@ -108,7 +109,7 @@ public class SsoLinkService {
      * @throws ForbiddenException when the challenged organization is being removed
      * @throws BadCredentialsException when the account has no password or the password is wrong
      */
-    public User confirm(String rawToken, String password, String clientIp,
+    public User confirm(String rawToken, String password, ResolvedClientIp clientIp,
             HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
         String tokenHash = rawToken == null ? null : OneTimeTokenDigest.sha256(rawToken);
         return confirmByHash(tokenHash, password, clientIp, httpRequest, httpResponse);
@@ -120,10 +121,10 @@ public class SsoLinkService {
     }
 
     /** Confirms account ownership through a purpose-bound browser-flow source digest. */
-    public User confirmByHash(String tokenHash, String password, String clientIp,
+    public User confirmByHash(String tokenHash, String password, ResolvedClientIp clientIp,
             HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
         long now = System.currentTimeMillis();
-        if (loginRateLimiter.isBlocked(clientIp, null, now)) {
+        if (loginRateLimiter.isBlockedForClient(clientIp, null, now)) {
             throw new TooManyRequestsException("Too many attempts. Please try again later.");
         }
 
@@ -144,11 +145,11 @@ public class SsoLinkService {
             throw new ResourceNotFoundException("This link is invalid or has expired");
         }
         String username = user.getUsername();
-        if (loginRateLimiter.isBlocked(clientIp, username, now)) {
+        if (loginRateLimiter.isBlockedForClient(clientIp, username, now)) {
             throw new TooManyRequestsException("Too many attempts. Please try again later.");
         }
         if (user.getPassword() == null || !passwordEncoder.matches(password, user.getPassword())) {
-            loginRateLimiter.recordFailure(clientIp, username, now);
+            loginRateLimiter.recordFailureForClient(clientIp, username, now);
             throw new BadCredentialsException("Incorrect password");
         }
 
