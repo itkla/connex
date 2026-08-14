@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
+import static org.junit.jupiter.api.Assertions.assertTimeout;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doReturn;
@@ -2742,7 +2742,7 @@ class ImportServiceTest extends AbstractServiceTest {
             "fill_empty"));
 
         assertEquals(4, preview.getInvalid());
-        assertTrue(preview.getRows().getFirst().getErrors().isEmpty());
+        assertNull(preview.getRows().getFirst().getErrors());
         for (int index = 1; index < 5; index++) {
             assertTrue(preview.getRows().get(index).getErrors().getFirst().contains("Invalid email"));
         }
@@ -2768,11 +2768,11 @@ class ImportServiceTest extends AbstractServiceTest {
     void personImportPreviewSlugsHostileCustomFieldLabelsInLinearTime() {
         ImportRequest request = req(
             List.of(map("Name", "name"),
-                new ColumnMapping("Region", null, true, "text", "Region" + "-".repeat(60_000) + "Code")),
+                new ColumnMapping("Region", null, true, "text", "Region" + "-".repeat(200_000) + "Code")),
             List.of(Map.of("Name", "Hostile slug " + unique(), "Region", "APAC")),
             "fill_empty");
 
-        ImportPreviewResult preview = assertTimeoutPreemptively(Duration.ofSeconds(20),
+        ImportPreviewResult preview = assertTimeout(Duration.ofSeconds(20),
             () -> importService.previewPersons(request));
 
         assertEquals(1, preview.getRows().size());
