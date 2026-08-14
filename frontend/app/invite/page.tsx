@@ -54,8 +54,7 @@ export default function InvitePage() {
                 }
             }
 
-            const user = await me();
-            const preview = await getInvitePreview();
+            const [user, preview] = await Promise.all([me(), getInvitePreview()]);
             if (active) {
                 setState(preview.valid
                     ? { status: "ready", preview, user }
