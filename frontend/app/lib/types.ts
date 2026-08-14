@@ -800,7 +800,6 @@ export type ForgotPasswordPayload = {
 };
 
 export type ResetPasswordPayload = {
-    token: string;
     newPassword: string;
 };
 
@@ -4013,7 +4012,7 @@ export type WorkspaceInvite = {
     email: string;
     role: WorkspaceRole;
     status: string;
-    token: string;
+    token?: string | null;
     invitedByLabel: string | null;
     expiresAt: string;
     createdAt: string;
@@ -4042,7 +4041,7 @@ export type InvitePreview = {
 
 export type WorkspaceInviteLink = {
     id: number;
-    token: string;
+    token?: string | null;
     role: WorkspaceRole;
     expiresAt: string;
     maxUses: number | null;

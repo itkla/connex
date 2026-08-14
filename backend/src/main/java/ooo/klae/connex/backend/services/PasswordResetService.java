@@ -1,9 +1,5 @@
 package ooo.klae.connex.backend.services;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.SecureRandom;
-import java.util.Base64;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -21,6 +17,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.SsoEnforcedException;
 import ooo.klae.connex.backend.mappers.PasswordResetTokenMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /**
  * Drives the forgot-password flow: issuing single-use reset tokens, validating
@@ -31,9 +28,6 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 @Service
 @RequiredArgsConstructor
 public class PasswordResetService {
-
-    private static final SecureRandom RANDOM = new SecureRandom();
-    private static final int TOKEN_BYTES = 32;
 
     private final UserMapper userMapper;
     private final PasswordResetTokenMapper passwordResetTokenMapper;
@@ -85,8 +79,9 @@ public class PasswordResetService {
 
         passwordResetTokenMapper.invalidateForUser(user.getId());
 
-        String rawToken = generateToken();
-        passwordResetTokenMapper.insert(user.getId(), hashToken(rawToken), requestIp, tokenExpiryMinutes);
+        String rawToken = OneTimeTokenDigest.generate();
+        passwordResetTokenMapper.insert(
+            user.getId(), OneTimeTokenDigest.sha256(rawToken), requestIp, tokenExpiryMinutes);
         passwordResetEmailService.sendResetEmail(user, rawToken);
 
         auditService.record("auth.password_reset_requested", "user", user.getId(), user.getDisplayName(),
@@ -102,7 +97,29 @@ public class PasswordResetService {
         if (rawToken == null || rawToken.isBlank()) {
             return false;
         }
-        return passwordResetTokenMapper.existsRedeemableByHash(hashToken(rawToken));
+        return passwordResetTokenMapper.existsRedeemableByHash(OneTimeTokenDigest.sha256(rawToken));
+    }
+
+    /**
+     * Atomically claims the raw emailed token for its one browser exchange.
+     * @param rawToken token carried in the fragment-to-body bootstrap request
+     * @return persisted source-token digest for the purpose-bound flow session
+     */
+    @Transactional
+    public String exchangeToken(String rawToken) {
+        String tokenHash = rawToken == null || rawToken.isBlank()
+            ? null
+            : OneTimeTokenDigest.sha256(rawToken);
+        if (tokenHash == null || passwordResetTokenMapper.claimExchange(tokenHash) != 1) {
+            throw invalidLink();
+        }
+        return tokenHash;
+    }
+
+    /** @return whether an exchanged source digest is still redeemable */
+    public boolean validateExchangedTokenHash(String tokenHash) {
+        return tokenHash != null
+            && passwordResetTokenMapper.existsExchangedRedeemableByHash(tokenHash);
     }
 
     /**
@@ -114,20 +131,25 @@ public class PasswordResetService {
      */
     @Transactional
     public void resetPassword(String rawToken, String newPassword) {
-        String tokenHash = rawToken == null ? null : hashToken(rawToken);
+        resetPasswordByHash(exchangeToken(rawToken), newPassword);
+    }
+
+    /** Applies a new password through a purpose-bound flow-session source digest. */
+    @Transactional
+    public void resetPasswordByHash(String tokenHash, String newPassword) {
         PasswordResetToken token = tokenHash == null ? null
-                : passwordResetTokenMapper.findRedeemableByHash(tokenHash);
+                : passwordResetTokenMapper.findExchangedRedeemableByHash(tokenHash);
         if (token == null) {
-            throw new BadRequestException("This reset link is invalid or has expired");
+            throw invalidLink();
         }
 
         if (passwordResetTokenMapper.markConsumed(tokenHash) == 0) {
-            throw new BadRequestException("This reset link is invalid or has expired");
+            throw invalidLink();
         }
 
         User user = userMapper.getUserById(token.getUserId());
         if (user == null) {
-            throw new BadRequestException("This reset link is invalid or has expired");
+            throw invalidLink();
         }
         if (ssoConnectionService.isSsoEnforcedForUser(user.getId())) {
             throw new SsoEnforcedException();
@@ -154,32 +176,7 @@ public class PasswordResetService {
         }
     }
 
-    /**
-     * Generates a 256-bit URL-safe random token.
-     * @return the raw token
-     */
-    private static String generateToken() {
-        byte[] bytes = new byte[TOKEN_BYTES];
-        RANDOM.nextBytes(bytes);
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-    }
-
-    /**
-     * Computes the SHA-256 hex digest used to store and look up a token.
-     * @param rawToken the unhashed token
-     * @return the lowercase hex digest
-     */
-    private static String hashToken(String rawToken) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(rawToken.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder(hash.length * 2);
-            for (byte b : hash) {
-                sb.append(String.format("%02x", b));
-            }
-            return sb.toString();
-        } catch (Exception e) {
-            throw new IllegalStateException("SHA-256 unavailable", e);
-        }
+    private static BadRequestException invalidLink() {
+        return new BadRequestException("This reset link is invalid or has expired");
     }
 }

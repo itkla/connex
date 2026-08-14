@@ -3,31 +3,41 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="ooo.klae.connex.backend.mappers.InviteMapper">
 
-  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO workspace_invite (workspace_id, email, role, token, status, invited_by_id, expires_at)
-    VALUES (#{workspaceId}, #{email}, #{role}, #{token}, 'pending', #{invitedById},
+  <insert id="insertHashed" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO workspace_invite (workspace_id, email, role, token_hash, status, invited_by_id, expires_at)
+    VALUES (#{workspaceId}, #{email}, #{role}, #{tokenHash}, 'pending', #{invitedById},
             DATE_ADD(UTC_TIMESTAMP(), INTERVAL 14 DAY))
   </insert>
 
-  <select id="findByToken" resultType="WorkspaceInvite">
-    SELECT id, workspace_id, email, role, token, status, invited_by_id, accepted_by_id,
-           expires_at, accepted_at, created_at, updated_at
+  <select id="findByTokenHash" resultType="WorkspaceInvite">
+    SELECT id, workspace_id, email, role, token_hash, status, invited_by_id, accepted_by_id,
+           expires_at, exchanged_at, accepted_at, created_at, updated_at
     FROM workspace_invite
-    WHERE token = #{token}
+    WHERE token_hash = #{tokenHash}
   </select>
 
-  <select id="findPreviewByToken" resultType="ooo.klae.connex.backend.dto.InvitePreviewDto">
+  <select id="findPreviewByTokenHashUnclaimed" resultType="ooo.klae.connex.backend.dto.InvitePreviewDto">
     SELECT i.workspace_id AS workspaceId, w.name AS workspaceName, i.email, i.role, i.status,
            u.display_name AS invitedByLabel,
            (i.status = 'pending' AND i.expires_at > UTC_TIMESTAMP()) AS valid
     FROM workspace_invite i
     JOIN workspace w ON w.id = i.workspace_id
     LEFT JOIN app_user u ON u.id = i.invited_by_id
-    WHERE i.token = #{token}
+    WHERE i.token_hash = #{tokenHash}
+  </select>
+
+  <select id="findPreviewByTokenHash" resultType="ooo.klae.connex.backend.dto.InvitePreviewDto">
+    SELECT i.workspace_id AS workspaceId, w.name AS workspaceName, i.email, i.role, i.status,
+           u.display_name AS invitedByLabel,
+           (i.status = 'pending' AND i.expires_at > UTC_TIMESTAMP()) AS valid
+    FROM workspace_invite i
+    JOIN workspace w ON w.id = i.workspace_id
+    LEFT JOIN app_user u ON u.id = i.invited_by_id
+    WHERE i.token_hash = #{tokenHash} AND i.exchanged_at IS NOT NULL
   </select>
 
   <select id="findPendingByWorkspace" resultType="ooo.klae.connex.backend.dto.InviteDto">
-    SELECT i.id, i.email, i.role, i.status, i.token,
+    SELECT i.id, i.email, i.role, i.status,
            i.expires_at AS expiresAt, i.created_at AS createdAt,
            u.display_name AS invitedByLabel
     FROM workspace_invite i
@@ -36,18 +46,45 @@
     ORDER BY i.created_at DESC, i.id DESC
   </select>
 
-  <select id="isRedeemable" resultType="boolean">
+  <update id="claimExchangeByHash">
+    UPDATE workspace_invite
+    SET exchanged_at = UTC_TIMESTAMP()
+    WHERE token_hash = #{tokenHash} AND exchanged_at IS NULL
+      AND status = 'pending' AND expires_at > UTC_TIMESTAMP()
+  </update>
+
+  <select id="isRedeemableByHash" resultType="boolean">
     SELECT EXISTS(
       SELECT 1 FROM workspace_invite
-      WHERE token = #{token} AND status = 'pending' AND expires_at > UTC_TIMESTAMP()
+      WHERE token_hash = #{tokenHash}
+        AND status = 'pending' AND expires_at > UTC_TIMESTAMP()
     )
   </select>
 
-  <update id="claimAcceptance">
+  <select id="isExchangedRedeemable" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM workspace_invite
+      WHERE token_hash = #{tokenHash} AND exchanged_at IS NOT NULL
+        AND status = 'pending' AND expires_at > UTC_TIMESTAMP()
+    )
+  </select>
+
+  <update id="claimAcceptanceByUnclaimedHash">
     UPDATE workspace_invite
     SET status = 'accepted', accepted_by_id = #{userId}, accepted_at = UTC_TIMESTAMP()
     WHERE id = #{id}
-      AND token = #{token}
+      AND token_hash = #{tokenHash}
+      AND workspace_id = #{workspaceId}
+      AND status = 'pending'
+      AND expires_at &gt; UTC_TIMESTAMP()
+  </update>
+
+  <update id="claimAcceptanceByHash">
+    UPDATE workspace_invite
+    SET status = 'accepted', accepted_by_id = #{userId}, accepted_at = UTC_TIMESTAMP()
+    WHERE id = #{id}
+      AND token_hash = #{tokenHash}
+      AND exchanged_at IS NOT NULL
       AND workspace_id = #{workspaceId}
       AND status = 'pending'
       AND expires_at &gt; UTC_TIMESTAMP()

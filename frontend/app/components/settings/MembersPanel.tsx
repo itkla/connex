@@ -255,7 +255,7 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
 
     const copyInviteLink = useCallback(
         async (token: string, silent = false) => {
-            const link = `${window.location.origin}/invite/${token}`;
+            const link = `${window.location.origin}/invite#token=${token}`;
             try {
                 await navigator.clipboard.writeText(link);
                 if (!silent) toastSuccess(t("linkCopied"));
@@ -280,7 +280,9 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
             } else if (result.invite) {
                 const invite = result.invite;
                 setInvites((prev) => [invite, ...prev.filter((i) => i.email !== invite.email)]);
-                await copyInviteLink(invite.token, true);
+                if (invite.token) {
+                    await copyInviteLink(invite.token, true);
+                }
                 toastSuccess(t("inviteCreated"));
             } else {
                 toastError(t("inviteFailed"));
@@ -312,7 +314,8 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
 
     const copyShareLink = useCallback(
         async (link: WorkspaceInviteLink) => {
-            const url = `${window.location.origin}/invite-link/${link.token}`;
+            if (!link.token) return;
+            const url = `${window.location.origin}/invite-link#token=${link.token}`;
             try {
                 await navigator.clipboard.writeText(url);
                 setCopiedLinkId(link.id);
@@ -659,12 +662,18 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                                                                     </button>
                                                                 </DropdownMenuTrigger>
                                                                 <DropdownMenuContent align="end" className="w-44">
-                                                                    <DropdownMenuItem
-                                                                        onSelect={() => copyInviteLink(invite.token)}
-                                                                    >
-                                                                        <LinkIcon className="size-4" />
-                                                                        {t("copyLink")}
-                                                                    </DropdownMenuItem>
+                                                                    {invite.token ? (
+                                                                        <DropdownMenuItem
+                                                                            onSelect={() => {
+                                                                                if (invite.token) {
+                                                                                    void copyInviteLink(invite.token);
+                                                                                }
+                                                                            }}
+                                                                        >
+                                                                            <LinkIcon className="size-4" />
+                                                                            {t("copyLink")}
+                                                                        </DropdownMenuItem>
+                                                                    ) : null}
                                                                     <DropdownMenuItem
                                                                         variant="destructive"
                                                                         onSelect={() => revoke(invite.id)}
@@ -778,6 +787,7 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                                                             size="sm"
                                                             onClick={() => copyShareLink(link)}
                                                             aria-label={t("copyLink")}
+                                                            disabled={!link.token}
                                                         >
                                                             {copied ? (
                                                                 <CheckIcon className="size-4" />

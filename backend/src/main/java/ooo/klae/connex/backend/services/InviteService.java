@@ -1,10 +1,9 @@
 package ooo.klae.connex.backend.services;
 
-import java.security.SecureRandom;
-import java.util.Base64;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
@@ -23,6 +22,7 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /**
  * The two workspace onboarding flows: email-token invites (create / list /
@@ -32,9 +32,6 @@ import ooo.klae.connex.backend.tenant.Permission;
 @Service
 @RequiredArgsConstructor
 public class InviteService {
-
-    private static final SecureRandom RANDOM = new SecureRandom();
-    private static final int TOKEN_BYTES = 32;
 
     private final InviteMapper inviteMapper;
     private final WorkspaceMapper workspaceMapper;
@@ -89,9 +86,10 @@ public class InviteService {
         invite.setWorkspaceId(workspaceId);
         invite.setEmail(email);
         invite.setRole(role);
-        invite.setToken(generateToken());
+        invite.setToken(OneTimeTokenDigest.generate());
+        invite.setTokenHash(OneTimeTokenDigest.sha256(invite.getToken()));
         invite.setInvitedById(actor.getId());
-        inviteMapper.insert(invite);
+        inviteMapper.insertHashed(invite);
 
         auditService.record("workspace.invite", "workspace", workspaceId, email,
                 "Invited " + email + " as " + role, null);
@@ -99,13 +97,13 @@ public class InviteService {
         inviteEmailService.sendInvite(workspaceId, workspaceNameFor(actor, workspaceId), email,
                 actor.getDisplayName(), role, invite.getToken());
 
-        WorkspaceInvite saved = inviteMapper.findByToken(invite.getToken());
+        WorkspaceInvite saved = inviteMapper.findByTokenHash(invite.getTokenHash());
         InviteDto dto = new InviteDto();
         dto.setId(saved.getId());
         dto.setEmail(saved.getEmail());
         dto.setRole(saved.getRole());
         dto.setStatus(saved.getStatus());
-        dto.setToken(saved.getToken());
+        dto.setToken(invite.getToken());
         dto.setExpiresAt(saved.getExpiresAt());
         dto.setCreatedAt(saved.getCreatedAt());
         dto.setInvitedByLabel(actor.getDisplayName());
@@ -138,6 +136,31 @@ public class InviteService {
         return preview;
     }
 
+    /**
+     * Atomically claims a raw email-invite bearer for its one browser exchange.
+     * @param rawToken token carried only in the fragment-to-body bootstrap request
+     * @return source-token digest stored in the purpose-bound flow session
+     */
+    @Transactional
+    public String exchangeToken(String rawToken) {
+        String tokenHash = rawToken == null || rawToken.isBlank()
+            ? null
+            : OneTimeTokenDigest.sha256(rawToken);
+        if (tokenHash == null || inviteMapper.claimExchangeByHash(tokenHash) != 1) {
+            throw invalidLink();
+        }
+        return tokenHash;
+    }
+
+    /** Looks up an exchanged invite by its server-side source digest. */
+    public InvitePreviewDto previewInviteByHash(String tokenHash) {
+        InvitePreviewDto preview = inviteMapper.findPreviewByTokenHash(tokenHash);
+        if (preview == null || !preview.isValid()) {
+            throw invalidLink();
+        }
+        return preview;
+    }
+
     /** Redeems an invite for the authenticated user whose email it targets. */
     public WorkspaceMembershipDto acceptInvite(String token, User user) {
         WorkspaceInvite target = inviteMapper.findByToken(token);
@@ -147,6 +170,26 @@ public class InviteService {
         return freshMembershipTransaction.execute(
             target.getWorkspaceId(),
             () -> acceptInviteInWorkspace(token, user));
+    }
+
+    /** Redeems an exchanged invite without restoring its raw bearer to an API path or body. */
+    public WorkspaceMembershipDto acceptInviteByHash(String tokenHash, User user) {
+        WorkspaceInvite target = inviteMapper.findByTokenHash(tokenHash);
+        if (target == null || !inviteMapper.isExchangedRedeemable(tokenHash)) {
+            throw invalidLink();
+        }
+        return freshMembershipTransaction.execute(
+            target.getWorkspaceId(),
+            () -> acceptInviteByHashInWorkspace(tokenHash, user));
+    }
+
+    private WorkspaceMembershipDto acceptInviteByHashInWorkspace(String tokenHash, User user) {
+        WorkspaceInvite invite = inviteMapper.findByTokenHash(tokenHash);
+        if (invite == null || !"pending".equals(invite.getStatus())
+                || !inviteMapper.isExchangedRedeemable(tokenHash)) {
+            throw invalidLink();
+        }
+        return acceptResolvedInvite(invite, user, tokenHash, true);
     }
 
     private WorkspaceMembershipDto acceptInviteInWorkspace(String token, User user) {
@@ -164,6 +207,11 @@ public class InviteService {
             throw new ForbiddenException("This invite was sent to a different email address");
         }
 
+        return acceptResolvedInvite(invite, user, token, false);
+    }
+
+    private WorkspaceMembershipDto acceptResolvedInvite(
+            WorkspaceInvite invite, User user, String credential, boolean exchanged) {
         int workspaceId = invite.getWorkspaceId();
         int orgId = requireOrgDomainAllowed(workspaceId, user.getEmail());
         User lockedUser = userMapper.getUserByIdForShare(user.getId());
@@ -176,8 +224,12 @@ public class InviteService {
         if (workspaceMapper.lockWorkspaceForShare(workspaceId) == null) {
             throw new ResourceNotFoundException("Workspace not found: " + workspaceId);
         }
-        if (inviteMapper.claimAcceptance(
-                invite.getId(), token, workspaceId, lockedUser.getId()) != 1) {
+        int claimed = exchanged
+            ? inviteMapper.claimAcceptanceByHash(
+                invite.getId(), credential, workspaceId, lockedUser.getId())
+            : inviteMapper.claimAcceptance(
+                invite.getId(), credential, workspaceId, lockedUser.getId());
+        if (claimed != 1) {
             throw new BadRequestException("This invite is no longer available");
         }
         WorkspaceMember membership =
@@ -266,9 +318,7 @@ public class InviteService {
         return normalized;
     }
 
-    private static String generateToken() {
-        byte[] bytes = new byte[TOKEN_BYTES];
-        RANDOM.nextBytes(bytes);
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    private static BadRequestException invalidLink() {
+        return new BadRequestException("This invite is invalid or has expired");
     }
 }

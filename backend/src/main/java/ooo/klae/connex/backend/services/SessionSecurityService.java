@@ -47,6 +47,23 @@ public class SessionSecurityService {
         replaceRequestIdentity(session, userId);
     }
 
+    /** Clears all account-bound session stamps while preserving unrelated anonymous flow state. */
+    public void clearAuthenticationState(HttpServletRequest request) {
+        HttpSession session = request.getSession(false);
+        if (session == null) {
+            return;
+        }
+        session.removeAttribute(AUTHENTICATED_AT_ATTR);
+        session.removeAttribute(AUTHENTICATED_USER_ATTR);
+        session.removeAttribute(WEBAUTHN_STEP_UP_AT_ATTR);
+        session.removeAttribute(WEBAUTHN_STEP_UP_USER_ATTR);
+        session.removeAttribute(REQUEST_IDENTITY_ATTR);
+        session.removeAttribute(REQUEST_IDENTITY_SESSION_ATTR);
+        session.removeAttribute(REQUEST_IDENTITY_USER_ATTR);
+        session.removeAttribute(FIRST_PASSKEY_BOOTSTRAP_AT_ATTR);
+        session.removeAttribute(FIRST_PASSKEY_BOOTSTRAP_USER_ATTR);
+    }
+
     /**
      * Returns an opaque identity for the current authenticated principal and session generation.
      * The value is replaced on every authentication ceremony and never contains a user or session

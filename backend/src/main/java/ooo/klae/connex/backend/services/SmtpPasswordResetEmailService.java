@@ -45,8 +45,9 @@ public class SmtpPasswordResetEmailService implements PasswordResetEmailService 
         Locale locale = LocaleSupport.resolve(user.getLocale());
         String link = UriComponentsBuilder.fromUriString(baseUrl)
                 .path("/auth/reset-password")
-                .queryParam("token", rawToken)
-                .build()
+                .fragment("token={token}")
+                .encode()
+                .buildAndExpand(rawToken)
                 .toUriString();
         String body = templateRenderer.render("password-reset", locale.getLanguage(), Map.of(
                 "displayName", user.getDisplayName(),

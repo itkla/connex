@@ -14,6 +14,7 @@ public class WorkspaceInvite {
     private String email;
     private String role;
     private String token;
+    private String tokenHash;
     private String status;
     private Integer invitedById;
     private Integer acceptedById;

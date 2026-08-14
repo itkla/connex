@@ -38,8 +38,9 @@ public class SmtpRegistrationVerificationEmailService implements RegistrationVer
     public void sendVerificationEmail(User user, String rawToken) {
         String link = UriComponentsBuilder.fromUriString(baseUrl)
                 .path("/auth/confirm-email")
-                .queryParam("token", rawToken)
-                .build()
+                .fragment("token={token}")
+                .encode()
+                .buildAndExpand(rawToken)
                 .toUriString();
         String body = templateRenderer.render("verify-email", "en", Map.of(
                 "displayName", user.getDisplayName(),

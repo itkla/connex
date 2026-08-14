@@ -178,13 +178,10 @@ public class SecurityConfig {
                 csrf.csrfTokenRequestHandler(new HeaderOnlyCsrfTokenRequestHandler())
                     .ignoringRequestMatchers(
                         "/api/auth/login", "/api/auth/register", "/api/auth/logout",
-                        "/api/auth/forgot-password", "/api/auth/reset-password",
+                        "/api/auth/forgot-password",
                         "/api/auth/webauthn/authenticate/**",
                         "/api/delivery/unsubscribe/**",
                         "/api/delivery/webhooks/**");
-                if (oauthEnabled) {
-                    csrf.ignoringRequestMatchers("/api/auth/sso/link/confirm");
-                }
                 if (ssoEnabled) {
                     csrf.ignoringRequestMatchers("/api/login/saml2/sso/**");
                 }
@@ -205,6 +202,8 @@ public class SecurityConfig {
                     .requestMatchers("/api/delivery/webhooks/**").permitAll()
                     .requestMatchers("/api/auth/webauthn/authenticate/**").permitAll()
                     .requestMatchers("/api/auth/webauthn/**").authenticated()
+                    .requestMatchers(HttpMethod.POST, "/api/invites/exchange").permitAll()
+                    .requestMatchers(HttpMethod.POST, "/api/invite-links/exchange").permitAll()
                     .requestMatchers("/api/auth/**").permitAll();
                 if (oauthEnabled) {
                     auth.requestMatchers("/api/oauth2/authorization/**").permitAll()

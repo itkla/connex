@@ -50,6 +50,7 @@ public class AuthService {
     private final RegistrationVerificationService registrationVerificationService;
     private final SsoConnectionService ssoConnectionService;
     private final SessionSecurityService sessionSecurityService;
+    private final OneTimeLinkFlowService oneTimeLinkFlowService;
     private final WorkspaceCookie workspaceCookie;
     private final SecurityContextRepository securityContextRepository = new HttpSessionSecurityContextRepository();
 
@@ -199,7 +200,7 @@ public class AuthService {
         if (existingSession != null) {
             Object boundUserId = existingSession.getAttribute(SessionSecurityService.AUTHENTICATED_USER_ATTR);
             if (boundUserId instanceof Number number && number.intValue() != refreshedUser.getId()) {
-                existingSession.invalidate();
+                oneTimeLinkFlowService.replaceSessionPreservingFlows(httpRequest);
                 SecurityContextHolder.clearContext();
             } else {
                 httpRequest.changeSessionId();
@@ -224,6 +225,17 @@ public class AuthService {
             workspaceCookie.clear(httpResponse);
         }
         return refreshedUser;
+    }
+
+    /** Replaces upstream or existing principal state while retaining only active link flows. */
+    public void prepareUnauthenticatedLinkFlow(
+            HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
+        oneTimeLinkFlowService.replaceSessionPreservingFlows(httpRequest);
+        SecurityContext context = SecurityContextHolder.createEmptyContext();
+        SecurityContextHolder.setContext(context);
+        securityContextRepository.saveContext(context, httpRequest, httpResponse);
+        sessionSecurityService.clearAuthenticationState(httpRequest);
+        workspaceCookie.clear(httpResponse);
     }
 
     public void requireCurrentPassword(int userId, String password, String clientIp) {

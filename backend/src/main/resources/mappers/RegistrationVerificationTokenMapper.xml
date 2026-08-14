@@ -16,10 +16,26 @@
     )
   </select>
 
-  <select id="findRedeemableByHash" resultType="RegistrationVerificationToken">
-    SELECT id, user_id, token_hash, expires_at, consumed_at, requested_ip, created_at
+  <update id="claimExchange">
+    UPDATE registration_verification_token
+    SET exchanged_at = UTC_TIMESTAMP()
+    WHERE token_hash = #{tokenHash} AND exchanged_at IS NULL
+      AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
+  </update>
+
+  <select id="existsExchangedRedeemableByHash" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM registration_verification_token
+      WHERE token_hash = #{tokenHash} AND exchanged_at IS NOT NULL
+        AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
+    )
+  </select>
+
+  <select id="findExchangedRedeemableByHash" resultType="RegistrationVerificationToken">
+    SELECT id, user_id, token_hash, expires_at, exchanged_at, consumed_at, requested_ip, created_at
     FROM registration_verification_token
-    WHERE token_hash = #{tokenHash} AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
+    WHERE token_hash = #{tokenHash} AND exchanged_at IS NOT NULL
+      AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
   </select>
 
   <select id="countRecentByUser" resultType="int">
@@ -31,7 +47,8 @@
   <update id="markConsumed">
     UPDATE registration_verification_token
     SET consumed_at = UTC_TIMESTAMP()
-    WHERE token_hash = #{tokenHash} AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
+    WHERE token_hash = #{tokenHash} AND exchanged_at IS NOT NULL
+      AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
   </update>
 
   <update id="invalidateForUser">

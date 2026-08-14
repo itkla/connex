@@ -14,6 +14,7 @@ public class WorkspaceInviteLink {
     private int id;
     private int workspaceId;
     private String token;
+    private String tokenHash;
     private String role;
     private String expiresAt;
     private Integer maxUses;

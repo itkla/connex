@@ -5,19 +5,24 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.CookieValue;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.CsrfBootstrapDto;
 import ooo.klae.connex.backend.dto.ForgotPasswordRequest;
 import ooo.klae.connex.backend.dto.LoginDto;
+import ooo.klae.connex.backend.dto.OneTimeLinkExchangeRequest;
 import ooo.klae.connex.backend.dto.RegisterDto;
 import ooo.klae.connex.backend.dto.ResetPasswordRequest;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.PasswordResetService;
+import ooo.klae.connex.backend.services.OneTimeLinkFlowService;
+import ooo.klae.connex.backend.services.OneTimeLinkFlowService.IssuedGrant;
+import ooo.klae.connex.backend.services.OneTimeLinkFlowService.Purpose;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
+import ooo.klae.connex.backend.config.OneTimeLinkFlowCookie;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -41,6 +46,8 @@ public class AuthController {
     private final PasswordResetService passwordResetService;
     private final ClientIpResolver clientIpResolver;
     private final SessionSecurityService sessionSecurityService;
+    private final OneTimeLinkFlowService oneTimeLinkFlowService;
+    private final OneTimeLinkFlowCookie oneTimeLinkFlowCookie;
 
     /**
      * POST endpoint for user registration.
@@ -92,13 +99,27 @@ public class AuthController {
         return Map.of("message", "If an account exists for that email, a reset link has been sent");
     }
 
-    /**
-     * Reports whether a reset token is still valid, so the reset page can show a
-     * rejection state before prompting for a new password.
-     */
+    /** Exchanges a raw reset bearer for a short-lived, purpose-bound browser session. */
+    @PostMapping("/reset-password/exchange")
+    public void exchangeResetToken(
+            @Valid @RequestBody OneTimeLinkExchangeRequest request,
+            HttpServletRequest httpRequest,
+            HttpServletResponse response) {
+        String tokenHash = passwordResetService.exchangeToken(request.getToken());
+        IssuedGrant grant = oneTimeLinkFlowService.issue(
+            httpRequest, Purpose.PASSWORD_RESET, tokenHash);
+        oneTimeLinkFlowCookie.set(response, Purpose.PASSWORD_RESET, grant.value(), grant.lifetime());
+        response.setStatus(HttpServletResponse.SC_SEE_OTHER);
+        response.setHeader("Location", "/auth/reset-password");
+    }
+
+    /** Reports whether the token-free reset flow is still redeemable. */
     @GetMapping("/reset-password/validate")
-    public Map<String, Boolean> validateResetToken(@RequestParam("token") String token) {
-        return Map.of("valid", passwordResetService.validateToken(token));
+    public Map<String, Boolean> validateResetToken(
+            @CookieValue(name = OneTimeLinkFlowCookie.PASSWORD_RESET, required = false) String grant,
+            HttpServletRequest request) {
+        String tokenHash = oneTimeLinkFlowService.require(request, Purpose.PASSWORD_RESET, grant);
+        return Map.of("valid", passwordResetService.validateExchangedTokenHash(tokenHash));
     }
 
     /**
@@ -106,8 +127,18 @@ public class AuthController {
      * The password policy is enforced by {@code ResetPasswordRequest}.
      */
     @PostMapping("/reset-password")
-    public Map<String, String> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
-        passwordResetService.resetPassword(request.getToken(), request.getNewPassword());
-        return Map.of("message", "Your password has been reset");
+    public Map<String, String> resetPassword(
+            @Valid @RequestBody ResetPasswordRequest request,
+            @CookieValue(name = OneTimeLinkFlowCookie.PASSWORD_RESET, required = false) String grant,
+            HttpServletRequest httpRequest,
+            HttpServletResponse response) {
+        String tokenHash = oneTimeLinkFlowService.consume(
+            httpRequest, Purpose.PASSWORD_RESET, grant);
+        try {
+            passwordResetService.resetPasswordByHash(tokenHash, request.getNewPassword());
+            return Map.of("message", "Your password has been reset");
+        } finally {
+            oneTimeLinkFlowCookie.clear(response, Purpose.PASSWORD_RESET);
+        }
     }
 }

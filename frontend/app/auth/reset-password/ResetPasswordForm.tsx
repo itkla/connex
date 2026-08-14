@@ -13,19 +13,27 @@ import {
 } from "@heroicons/react/24/outline";
 import { LoaderCircle } from "lucide-react";
 
-import { ApiError, logout, resetPassword, validateResetToken } from "@/app/lib/api";
+import {
+    ApiError,
+    exchangePasswordResetToken,
+    logout,
+    resetPassword,
+    validateResetToken,
+} from "@/app/lib/api";
+import { takeOneTimeLinkToken } from "@/app/lib/oneTimeLink";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { useFieldErrors } from "@/app/hooks/useFieldErrors";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
 
 type Status = "validating" | "invalid" | "ready";
 
-export function ResetPasswordForm({ token }: { token: string | null }) {
+/** Runs the fragment exchange and renders the existing token-free password-reset form. */
+export function ResetPasswordForm() {
     const router = useRouter();
     const tForm = useTranslations("AuthForm");
     const t = useTranslations("AuthResetPassword");
 
-    const [status, setStatus] = useState<Status>(token ? "validating" : "invalid");
+    const [status, setStatus] = useState<Status>("validating");
     const [password, setPassword] = useState("");
     const [confirm, setConfirm] = useState("");
     const [showPassword, setShowPassword] = useState(false);
@@ -34,12 +42,15 @@ export function ResetPasswordForm({ token }: { token: string | null }) {
     const { fieldErrors, reset, clearError, captureFieldErrors } = useFieldErrors();
 
     useEffect(() => {
-        if (!token) {
-            return;
-        }
-
         let active = true;
-        validateResetToken(token)
+        const token = takeOneTimeLinkToken();
+        const establishFlow = token
+            ? exchangePasswordResetToken(token).then(() => {
+                window.location.replace("/auth/reset-password");
+                return { valid: true };
+            })
+            : validateResetToken();
+        establishFlow
             .then((result) => {
                 if (active) {
                     setStatus(result.valid ? "ready" : "invalid");
@@ -54,14 +65,10 @@ export function ResetPasswordForm({ token }: { token: string | null }) {
         return () => {
             active = false;
         };
-    }, [token]);
+    }, []);
 
     async function onSubmit(e: React.SubmitEvent<HTMLFormElement>) {
         e.preventDefault();
-        if (!token) {
-            return;
-        }
-
         if (password !== confirm) {
             setMismatch(true);
             return;
@@ -72,10 +79,8 @@ export function ResetPasswordForm({ token }: { token: string | null }) {
         setSubmitting(true);
 
         try {
-            await resetPassword({ token, newPassword: password });
+            await resetPassword({ newPassword: password });
             toastSuccess(t("successMessage"));
-            // The reset kills any live session; clear the stale cookie so the login
-            // guard doesn't bounce a previously-signed-in user to a broken dashboard.
             await logout().catch(() => undefined);
             router.push("/auth/login");
         } catch (err) {

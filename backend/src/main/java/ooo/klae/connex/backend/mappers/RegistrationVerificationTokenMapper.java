@@ -15,7 +15,11 @@ public interface RegistrationVerificationTokenMapper {
 
     boolean existsRedeemableByHash(String tokenHash);
 
-    RegistrationVerificationToken findRedeemableByHash(String tokenHash);
+    int claimExchange(String tokenHash);
+
+    boolean existsExchangedRedeemableByHash(String tokenHash);
+
+    RegistrationVerificationToken findExchangedRedeemableByHash(String tokenHash);
 
     int countRecentByUser(@Param("userId") int userId, @Param("withinSeconds") int withinSeconds);
 

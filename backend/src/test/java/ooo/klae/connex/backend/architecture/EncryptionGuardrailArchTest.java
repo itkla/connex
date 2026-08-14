@@ -298,19 +298,16 @@ class EncryptionGuardrailArchTest {
         "ooo/klae/connex/backend/dto/DealDuplicatePreflightRequest.java#reviewToken",
         "ooo/klae/connex/backend/dto/DeliveryProviderConfigRequest.java#apiKey",
         "ooo/klae/connex/backend/dto/EmailChangeRequestDto.java#currentPassword",
-        "ooo/klae/connex/backend/dto/EmailChangeConfirmDto.java#token",
         "ooo/klae/connex/backend/dto/LoginDto.java#password",
         "ooo/klae/connex/backend/dto/MailConfigRequest.java#password",
+        "ooo/klae/connex/backend/dto/OneTimeLinkExchangeRequest.java#token",
         "ooo/klae/connex/backend/dto/PasskeyRegistrationOptionsRequest.java#currentPassword",
         "ooo/klae/connex/backend/dto/ProviderCaptureReviewRequest.java#duplicateReviewToken",
         "ooo/klae/connex/backend/dto/RecordCommentCreateRequest.java#clientToken",
         "ooo/klae/connex/backend/dto/RecordCommentCreateThreadRequest.java#clientToken",
         "ooo/klae/connex/backend/dto/RegisterDto.java#password",
-        "ooo/klae/connex/backend/dto/RegistrationVerificationConfirmDto.java#token",
-        "ooo/klae/connex/backend/dto/ResetPasswordRequest.java#token",
         "ooo/klae/connex/backend/dto/ResetPasswordRequest.java#newPassword",
         "ooo/klae/connex/backend/dto/SsoConnectionRequest.java#oidcClientSecret",
-        "ooo/klae/connex/backend/dto/SsoLinkConfirmRequest.java#token",
         "ooo/klae/connex/backend/dto/SsoLinkConfirmRequest.java#password",
         "ooo/klae/connex/backend/dto/WorkflowManualConfirmRequest.java#scopeToken");
 
@@ -329,25 +326,7 @@ class EncryptionGuardrailArchTest {
         "ooo/klae/connex/backend/dto/SsoConnectionDto.java#hasClientSecret",
         "ooo/klae/connex/backend/dto/WorkflowManualPreparationDto.java#scopeToken");
 
-    private static final Map<String, ApprovedSecretSink> APPROVED_SECRET_SINKS = Map.of(
-        "ooo/klae/connex/backend/services/LoggingEmailChangeEmailService.java#link",
-        new ApprovedSecretSink(
-            "log.info(\"Email-change verification link for userId {} (dev link logging enabled): {}\", "
-                + "user.getId(), link);",
-            Pattern.compile("\\.path\\(\"/auth/verify-email\"\\).*"
-                + "\\.queryParam\\(\"token\",\\s*rawToken\\)", Pattern.DOTALL)),
-        "ooo/klae/connex/backend/services/LoggingPasswordResetEmailService.java#link",
-        new ApprovedSecretSink(
-            "log.info(\"Password reset link for userId {} (dev link logging enabled): {}\", "
-                + "user.getId(), link);",
-            Pattern.compile("\\.path\\(\"/auth/reset-password\"\\).*"
-                + "\\.queryParam\\(\"token\",\\s*rawToken\\)", Pattern.DOTALL)),
-        "ooo/klae/connex/backend/services/LoggingRegistrationVerificationEmailService.java#link",
-        new ApprovedSecretSink(
-            "log.info(\"Registration verification link for userId {} (dev link logging enabled): {}\", "
-                + "user.getId(), link);",
-            Pattern.compile("\\.path\\(\"/auth/confirm-email\"\\).*"
-                + "\\.queryParam\\(\"token\",\\s*rawToken\\)", Pattern.DOTALL)));
+    private static final Map<String, ApprovedSecretSink> APPROVED_SECRET_SINKS = Map.of();
 
     private static final Set<String> CORE_CRM_TABLES = Set.of(
         "person",
@@ -720,7 +699,7 @@ class EncryptionGuardrailArchTest {
         assertTrue(auditViolations.getFirst().contains("apiToken"));
         List<String> sinkViolations = secretAccessorSinkViolations(fixtureRoot,
             List.of(sinks, approvedSink, disguisedSink, extendedSink));
-        assertEquals(16, sinkViolations.size());
+        assertEquals(17, sinkViolations.size());
         assertTrue(sinkViolations.stream().anyMatch(value -> value.contains("passwordCopy")));
         assertTrue(sinkViolations.stream().anyMatch(value -> value.contains("transformed")));
         assertTrue(sinkViolations.stream().anyMatch(value -> value.contains("branchValue")));
@@ -728,7 +707,7 @@ class EncryptionGuardrailArchTest {
         assertTrue(sinkViolations.stream().anyMatch(value -> value.contains("logger::info")));
         assertTrue(sinkViolations.stream().anyMatch(value -> value.contains("IllegalArgumentException(decrypted)")));
         assertTrue(sinkViolations.stream().anyMatch(value -> value.contains("credential\", stored")));
-        assertTrue(sinkViolations.stream().noneMatch(value -> value.contains("LoggingPasswordResetEmailService")));
+        assertTrue(sinkViolations.stream().anyMatch(value -> value.contains("LoggingPasswordResetEmailService")));
         assertTrue(sinkViolations.stream().anyMatch(value -> value.contains("LoggingEmailChangeEmailService")));
         assertTrue(sinkViolations.stream()
             .anyMatch(value -> value.contains("LoggingRegistrationVerificationEmailService")));

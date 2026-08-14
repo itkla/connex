@@ -15,7 +15,11 @@ public interface PasswordResetTokenMapper {
 
     boolean existsRedeemableByHash(String tokenHash);
 
-    PasswordResetToken findRedeemableByHash(String tokenHash);
+    int claimExchange(String tokenHash);
+
+    boolean existsExchangedRedeemableByHash(String tokenHash);
+
+    PasswordResetToken findExchangedRedeemableByHash(String tokenHash);
 
     int countRecentByUser(@Param("userId") int userId, @Param("withinSeconds") int withinSeconds);
 

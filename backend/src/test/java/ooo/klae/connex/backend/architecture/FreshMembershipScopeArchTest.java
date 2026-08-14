@@ -65,18 +65,20 @@ class FreshMembershipScopeArchTest {
             "ooo.klae.connex.backend.controllers.WorkspaceController",
             "invite",
             List.of("int", "CreateInviteRequest"))),
-        new EntryPoint("InviteService", "acceptInvite", 2), Set.of(new CallSite(
+        new EntryPoint("InviteService", "acceptInvite", 2), Set.of(),
+        new EntryPoint("InviteService", "acceptInviteByHash", 2), Set.of(new CallSite(
             "ooo.klae.connex.backend.controllers.InviteController",
             "accept",
-            List.of("String", "HttpServletResponse"))),
+            List.of("String", "HttpServletRequest", "HttpServletResponse"))),
         new EntryPoint("InviteService", "addExistingMember", 4), Set.of(new CallSite(
             "ooo.klae.connex.backend.controllers.WorkspaceController",
             "addMember",
             List.of("int", "AddMemberRequest"))),
-        new EntryPoint("InviteLinkService", "redeemLink", 2), Set.of(new CallSite(
+        new EntryPoint("InviteLinkService", "redeemLink", 2), Set.of(),
+        new EntryPoint("InviteLinkService", "redeemLinkByHash", 2), Set.of(new CallSite(
             "ooo.klae.connex.backend.controllers.InviteLinkController",
             "accept",
-            List.of("String", "HttpServletResponse"))),
+            List.of("String", "HttpServletRequest", "HttpServletResponse"))),
         new EntryPoint("SsoLoginService", "resolve", 7), Set.of(
             new CallSite(
                 "ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler",
@@ -106,11 +108,19 @@ class FreshMembershipScopeArchTest {
                 List.of("String", "User")),
             new CallSite(
                 "ooo.klae.connex.backend.services.InviteService",
+                "acceptInviteByHash",
+                List.of("String", "User")),
+            new CallSite(
+                "ooo.klae.connex.backend.services.InviteService",
                 "addExistingMember",
                 List.of("int", "int", "String", "String")),
             new CallSite(
                 "ooo.klae.connex.backend.services.InviteLinkService",
                 "redeemLink",
+                List.of("String", "User")),
+            new CallSite(
+                "ooo.klae.connex.backend.services.InviteLinkService",
+                "redeemLinkByHash",
                 List.of("String", "User")),
             new CallSite(
                 "ooo.klae.connex.backend.services.SsoLoginService",
