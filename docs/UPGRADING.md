@@ -162,7 +162,16 @@ multi-replica deployments must enforce the same all-replicas-down boundary befor
    ```
 
    Reopen upstream ingress or writers only after that smoke succeeds.
-10. **On pre-ingress failure** — keep Caddy and upstream ingress closed and stop the target application
+10. **Replace one-time links issued before V170** — the V170 security cutover intentionally provides
+   no compatibility shim for links created by the previous version. After the target deployment is
+   healthy, re-issue every outstanding emailed workspace invite and revoke and regenerate every
+   outstanding shareable invite link. These are the material operator workload: emailed workspace
+   invites remain outstanding for 14 days, while shareable invite links default to 14 days and
+   unlimited uses. Registration-verification links remain valid for 24 hours in the previous version;
+   affected registrants must request a fresh verification email. Password-reset links last only 30
+   minutes, so there is effectively no outstanding population to migrate and no operator action is
+   needed; a user with a rare in-flight reset must request a fresh link.
+11. **On pre-ingress failure** — keep Caddy and upstream ingress closed and stop the target application
    containers. Remove the target deployment directory, re-verify and extract the exact prior signed
    deploy archive, restore the prior mode-0600 `.env` byte-for-byte, and confirm both recorded hashes.
    Use that restored Compose bundle when you **restore the complete database, object, and legacy-media
