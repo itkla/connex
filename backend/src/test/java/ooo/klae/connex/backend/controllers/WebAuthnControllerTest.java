@@ -499,7 +499,8 @@ class WebAuthnControllerTest {
         PublicKeyCredential<AuthenticatorAssertionResponse> assertion = mock();
         WebAuthnJsonMapper mapper = mock(WebAuthnJsonMapper.class);
         WebAuthnController loginController = controller(mapper);
-        when(clientIpResolver.resolve(request)).thenReturn("127.0.0.1");
+        when(clientIpResolver.resolveWithProvenance(request))
+                .thenReturn(new ResolvedClientIp("127.0.0.1", false));
         when(requestOptions.load(request)).thenReturn(options);
         when(mapper.read(eq("{}"), org.mockito.ArgumentMatchers.<TypeReference<PublicKeyCredential<AuthenticatorAssertionResponse>>>any()))
                 .thenReturn(assertion);

@@ -29,5 +29,9 @@ regexes = [
   '''SMS_API_KEY = "sms_api_key_secret_1234"''',
   '''WEBHOOK_SECRET = "whsec_abcdef0123456789"''',
   '''MDC_KEY, "abcd1234efgh"''',
-  '''local token='ASNFZ4mrze8BI0VniavN7wEjRWeJq83v''''
+  '''local token='ASNFZ4mrze8BI0VniavN7wEjRWeJq83v'''',
+  '''PASSWORD_SHA1 = "5BAA61E4C9B93F3F0682250B6CF8331B7EE68FD8"''',
+  '''PASSWORD_SUFFIX = "1E4C9B93F3F0682250B6CF8331B7EE68FD8"''',
+  '''connex\.security\.breached-passwords\.offline-sha256=[0-9a-f]{1,64}''',
+  '''CONNEX_BREACHED_PASSWORD_OFFLINE_SHA256=REPLACE_WITH_64_HEX_CHARACTERS'''
 ]
