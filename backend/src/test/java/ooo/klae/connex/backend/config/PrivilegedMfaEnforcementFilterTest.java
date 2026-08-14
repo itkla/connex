@@ -11,10 +11,14 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.io.IOException;
+import java.util.List;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -151,6 +155,34 @@ class PrivilegedMfaEnforcementFilterTest {
         assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp("/api/reports/4/export.csv"));
         assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp(
                 "/api/reports/4/snapshots/8/export.csv"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("matrixSuffixedExportPaths")
+    void matrixSuffixedExportPathsStillRequirePasskeyStepUp(String path) throws Exception {
+        when(webAuthnService.hasPasskey(7)).thenReturn(true);
+        when(sessionSecurityService.hasFreshRecentAuthentication(isNull(), eq(7))).thenReturn(false);
+
+        MockHttpServletResponse response = execute("GET", path);
+
+        assertEquals(403, response.getStatus());
+        assertTrue(response.getContentAsString().contains("RECENT_AUTHENTICATION_REQUIRED"));
+        verify(filterChain, never()).doFilter(any(), any());
+    }
+
+    private static Stream<String> matrixSuffixedExportPaths() {
+        List<String> paths = List.of(
+                "/api/exports/deals",
+                "/api/audit/export",
+                "/api/orgs/2/audit/export",
+                "/api/campaigns/3/exports",
+                "/api/campaigns/3/exports/9",
+                "/api/reports/4/export.csv",
+                "/api/reports/4/snapshots/8/export.csv");
+        return paths.stream().flatMap(path -> Stream.of(
+                path + ";x",
+                path + "%3Bx",
+                path + "%253Bx"));
     }
 
     private MockHttpServletResponse execute(String method, String path) throws ServletException, IOException {

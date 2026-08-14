@@ -118,7 +118,7 @@ public class WebAuthnService {
      */
     public PublicKeyCredentialRequestOptions createStepUpOptions(Authentication auth) {
         User user = (User) auth.getPrincipal();
-        if (listForUser(user.getId()).isEmpty()) {
+        if (!hasPasskey(user.getId())) {
             throw new PasskeyEnrollmentRequiredException();
         }
         return rpOperations.createCredentialRequestOptions(
@@ -180,7 +180,7 @@ public class WebAuthnService {
     }
 
     public boolean hasPasskey(int userId) {
-        return !listForUser(userId).isEmpty();
+        return credentialMapper.existsByUserId(userId);
     }
 
     /**

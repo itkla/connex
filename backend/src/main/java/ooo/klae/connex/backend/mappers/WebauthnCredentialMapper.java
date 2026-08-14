@@ -11,6 +11,8 @@ import ooo.klae.connex.backend.webauthn.WebauthnCredentialRow;
  * SQL is defined in {@code resources/mappers/WebauthnCredentialMapper.xml}.
  */
 public interface WebauthnCredentialMapper {
+    /** Returns whether the account currently owns at least one enrolled credential. */
+    boolean existsByUserId(int userId);
     WebauthnCredentialRow findByCredentialId(byte[] credentialId);
     List<WebauthnCredentialRow> findByUserEntityUserId(String userEntityUserId);
     List<WebauthnCredentialRow> findByUserEntityUserIdForUpdate(String userEntityUserId);

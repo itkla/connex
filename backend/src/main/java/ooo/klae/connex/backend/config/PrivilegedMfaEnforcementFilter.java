@@ -43,6 +43,7 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
     private static final Pattern CAMPAIGN_EXPORT = Pattern.compile("/api/campaigns/\\d+/exports(?:/\\d+)?");
     private static final Pattern REPORT_EXPORT = Pattern.compile(
             "/api/reports/\\d+/(?:export\\.csv|snapshots/\\d+/export\\.csv)");
+    private static final Pattern PATH_PARAMETER_MARKER = Pattern.compile("(?i)(?:;|%(?:25)*3b)");
 
     private final PrivilegedMfaProperties properties;
     private final PrivilegedAccountService privilegedAccountService;
@@ -71,7 +72,7 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
-        String path = request.getRequestURI();
+        String path = stripPathParameters(request.getRequestURI());
         if (privilegedAccountService.isPrivileged(user.getId())
                 && !webAuthnService.hasPasskey(user.getId())
                 && !isEnrollmentPath(request.getMethod(), path)) {
@@ -108,6 +109,27 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
                 || ORG_AUDIT_EXPORT.matcher(path).matches()
                 || CAMPAIGN_EXPORT.matcher(path).matches()
                 || REPORT_EXPORT.matcher(path).matches();
+    }
+
+    static String stripPathParameters(String path) {
+        java.util.regex.Matcher marker = PATH_PARAMETER_MARKER.matcher(path);
+        if (!marker.find()) {
+            return path;
+        }
+        StringBuilder normalized = new StringBuilder(path.length());
+        int segmentStart = 0;
+        do {
+            normalized.append(path, segmentStart, marker.start());
+            int nextSegment = path.indexOf('/', marker.end());
+            if (nextSegment < 0) {
+                return normalized.toString();
+            }
+            normalized.append('/');
+            segmentStart = nextSegment + 1;
+            marker.region(segmentStart, path.length());
+        } while (marker.find());
+        normalized.append(path, segmentStart, path.length());
+        return normalized.toString();
     }
 
     private static boolean isEnrollmentPath(String method, String path) {

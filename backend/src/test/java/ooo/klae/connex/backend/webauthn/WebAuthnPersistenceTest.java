@@ -6,6 +6,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -25,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.WebauthnCredentialMapper;
 import ooo.klae.connex.backend.mappers.WebauthnUserEntityMapper;
 
 /**
@@ -37,6 +39,7 @@ import ooo.klae.connex.backend.mappers.WebauthnUserEntityMapper;
 class WebAuthnPersistenceTest {
 
     @Autowired UserMapper userMapper;
+    @Autowired WebauthnCredentialMapper credentialMapper;
     @Autowired WebauthnUserEntityMapper userEntityMapper;
     @Autowired UserCredentialRepository userCredentials;
     @Autowired PublicKeyCredentialUserEntityRepository userEntities;
@@ -130,6 +133,24 @@ class WebAuthnPersistenceTest {
         userCredentials.delete(credentialId);
 
         assertNull(userCredentials.findByCredentialId(credentialId));
+    }
+
+    @Test
+    void credentialExistenceTracksCurrentEnrollmentWithoutLoadingCredentialMaterial() {
+        User user = insertUser();
+        Bytes handle = Bytes.random();
+        insertUserEntity(handle, user);
+        Bytes credentialId = Bytes.random();
+
+        assertFalse(credentialMapper.existsByUserId(user.getId()));
+
+        userCredentials.save(newRecord(credentialId, handle, 0));
+
+        assertTrue(credentialMapper.existsByUserId(user.getId()));
+
+        userCredentials.delete(credentialId);
+
+        assertFalse(credentialMapper.existsByUserId(user.getId()));
     }
 
     private CredentialRecord newRecord(Bytes credentialId, Bytes handle, long count) {

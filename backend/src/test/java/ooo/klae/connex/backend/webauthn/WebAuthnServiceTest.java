@@ -31,6 +31,25 @@ import java.util.List;
 class WebAuthnServiceTest {
 
     @Test
+    void passkeyPresenceUsesExistenceQueryWithoutLoadingCredentialMaterial() {
+        WebauthnCredentialMapper credentialMapper = mock(WebauthnCredentialMapper.class);
+        WebAuthnService service = new WebAuthnService(
+                mock(WebAuthnRelyingPartyOperations.class),
+                mock(UserCredentialRepository.class),
+                mock(WebauthnUserEntityMapper.class),
+                credentialMapper,
+                mock(UserMapper.class),
+                mock(PrivilegedAccountService.class),
+                mock(AuditService.class));
+        when(credentialMapper.existsByUserId(7)).thenReturn(true);
+
+        org.junit.jupiter.api.Assertions.assertTrue(service.hasPasskey(7));
+
+        verify(credentialMapper).existsByUserId(7);
+        verify(credentialMapper, never()).findByUserEntityUserId(any());
+    }
+
+    @Test
     void finishRegistrationRejectsOptionsIssuedForAnotherAccount() {
         WebAuthnRelyingPartyOperations relyingParty = mock(WebAuthnRelyingPartyOperations.class);
         UserCredentialRepository credentials = mock(UserCredentialRepository.class);
