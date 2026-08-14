@@ -110,9 +110,15 @@ legal duties, critical providers, the domain registrar/DNS, credential recovery,
 notification process.
 
 For a planned departure or role change, name the successor and complete the handover before the
-change takes effect. For an unplanned loss of availability, Connex must appoint a successor within
-24 hours of becoming aware and complete or reconstruct the handover within 24 hours of appointment.
-The handover must transfer and verify:
+change takes effect. No independent party is currently documented to detect an unplanned loss of
+Hunter Nakagawa's availability, appoint a successor, or access the account, key, provider, and
+registrar recovery paths. Emergency succession is therefore not executable today, and no 24-hour
+appointment or handover deadline is claimed. [#249] tracks naming and testing that appointment
+authority and custody recipient. This document must name the actor, detection path, and achievable
+deadline before emergency succession can be treated as operational.
+
+A planned handover, and any future emergency handover once those prerequisites exist, must transfer
+and verify:
 
 - company account and credential custody, including recovery contacts and MFA/passkey recovery;
 - encryption, signing, secret-store, audit-integrity, and backup key-material custody and rotation
@@ -124,8 +130,9 @@ The handover must transfer and verify:
 - administration, monitoring, recovery, and a successful receipt test for the published
   **privacy@connexcrm.jp** address.
 
-Record the transfer, access tests, outgoing-owner revocations, required rotations, and unresolved
-gaps in the security tracker without recording credentials or key material.
+Record the non-secret transfer status, access-test results, outgoing-owner revocations, required
+rotations, and unresolved gaps in the CHK-001 control issue [#1230]. Never record credentials or key
+material in GitHub.
 
 ### Time-bounded risk acceptance: no deputy
 
@@ -134,13 +141,15 @@ delay triage, incident decisions, exception approval, or customer communication 
 is unavailable. Hunter Nakagawa is both risk owner and approver; this absence of independent approval
 is part of the accepted limitation.
 
-The required compensating measures are to keep the role address under company-controlled
-administration and recovery, apply the acknowledgement targets and breach-response runbook, maintain
-account/key/provider/registrar custody records, and use the handover and off-cycle review triggers in
-this section. They reduce ambiguity and preserve recovery paths but do not provide human redundancy.
-The acceptance is dated **2026-08-13** and expires on **2027-02-13** unless formally renewed or closed
-earlier. Naming a deputy and filling the remaining Customer Liaison, Legal/Counsel, and Comms roles,
-together with evidence that the compensating measures operate, remain tracked in [#249].
+Existing compensating measures are limited to the named owner, one designated contact route,
+best-effort acknowledgement targets, the breach-response runbook, and scheduled and off-cycle review.
+There is no human redundancy, independently verified mailbox operation, emergency appointment
+authority, or verified recovery custodian today. The acceptance is dated **2026-08-13** and expires on
+**2027-02-13** unless formally renewed or closed earlier.
+
+[#249] tracks only the deferred deputy decision and Customer Liaison, Legal/Counsel, and Comms roles;
+mailbox delivery, monitoring, administrative recovery, receipt-test, and response-time evidence; any
+future 24/7 rota and alerts; and the missing emergency appointment authority and custody recipient.
 
 ---
 
@@ -172,4 +181,5 @@ Tracked under the security roadmap [#87] and the APPI pathway [#224]. Key open i
 [#223]: https://github.com/itkla/connex/issues/223
 [#224]: https://github.com/itkla/connex/issues/224
 [#249]: https://github.com/itkla/connex/issues/249
+[#1230]: https://github.com/itkla/connex/issues/1230
 [#1286]: https://github.com/itkla/connex/issues/1286
