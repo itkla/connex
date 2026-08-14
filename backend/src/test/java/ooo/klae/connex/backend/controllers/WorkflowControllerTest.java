@@ -45,6 +45,8 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import ooo.klae.connex.backend.businesscard.BusinessCardRateLimiter;
 import ooo.klae.connex.backend.capability.CapabilityEntitlement;
+import ooo.klae.connex.backend.config.LogoutAuditHandler;
+import ooo.klae.connex.backend.config.OneTimeLinkFlowCookie;
 import ooo.klae.connex.backend.config.RequestBodySizeProperties;
 import ooo.klae.connex.backend.config.SecurityConfig;
 import ooo.klae.connex.backend.dto.WorkflowCanvas;
@@ -68,6 +70,7 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
 import ooo.klae.connex.backend.observability.ErrorReporter;
+import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.WorkflowRunReadService;
 import ooo.klae.connex.backend.services.WorkflowRunOperationService;
@@ -83,6 +86,7 @@ import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 import ooo.klae.connex.backend.tenant.WorkspaceRequestResolver;
+import ooo.klae.connex.backend.util.ClientIpResolver;
 
 @WebMvcTest(
     controllers = {WorkflowController.class, WorkflowRunController.class},
@@ -120,6 +124,10 @@ class WorkflowControllerTest {
     @MockitoBean private WorkspaceCookie workspaceCookie;
     @MockitoBean private ErrorReporter errorReporter;
     @MockitoBean private WorkspaceRequestResolver workspaceRequestResolver;
+    @MockitoBean private OneTimeLinkFlowCookie oneTimeLinkFlowCookie;
+    @MockitoBean private LogoutAuditHandler logoutAuditHandler;
+    @MockitoBean private LoginRateLimiter loginRateLimiter;
+    @MockitoBean private ClientIpResolver clientIpResolver;
 
     @Test
     @WithMockUser
