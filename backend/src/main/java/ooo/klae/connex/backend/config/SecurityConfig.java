@@ -155,6 +155,7 @@ public class SecurityConfig {
             WorkspaceRequestResolver workspaceRequestResolver,
             WorkspaceService workspaceService,
             WorkspaceCookie workspaceCookie,
+            LogoutAuditHandler logoutAuditHandler,
             @Value("${connex.security.csrf-enabled:true}") boolean csrfEnabled,
             @Value("${connex.metrics.scrape-token:}") String metricsScrapeToken,
             @Value("${connex.sso.enabled:false}") boolean ssoEnabled) throws Exception {
@@ -235,6 +236,7 @@ public class SecurityConfig {
             )
             .logout(logout -> logout
                 .logoutUrl("/api/auth/logout")
+                .addLogoutHandler(logoutAuditHandler)
                 .invalidateHttpSession(true)
                 .clearAuthentication(true)
                 .deleteCookies("JSESSIONID")
