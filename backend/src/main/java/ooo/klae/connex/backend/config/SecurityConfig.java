@@ -26,7 +26,6 @@ import ooo.klae.connex.backend.sso.CompositeClientRegistrationRepository;
 import ooo.klae.connex.backend.sso.SocialLoginClientRegistrations;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpMethod;
@@ -144,6 +143,17 @@ public class SecurityConfig {
             : new SessionRegistryImpl();
     }
 
+    /**
+     * Builds the application filter chain.
+     *
+     * <p>CSRF protection is unconditional and has no configuration switch. The token is
+     * session-stored in the default repository and echoed by the SPA in a header it fetches from
+     * {@code GET /api/auth/csrf}; a plain (non-XOR) handler keeps that token stable so the client
+     * can cache it. Only the pre-session auth handshake, the token-authenticated delivery routes
+     * and, when SSO is enabled, the SAML assertion consumer are exempt.
+     *
+     * @return the configured filter chain
+     */
     @Bean
     SecurityFilterChain chain(HttpSecurity http,
             SessionRegistry sessionRegistry,
@@ -161,7 +171,6 @@ public class SecurityConfig {
             LogoutAuditHandler logoutAuditHandler,
             LoginRateLimiter loginRateLimiter,
             ClientIpResolver clientIpResolver,
-            @Value("${connex.security.csrf-enabled:true}") boolean csrfEnabled,
             @Value("${connex.metrics.scrape-token:}") String metricsScrapeToken,
             @Value("${connex.sso.enabled:false}") boolean ssoEnabled) throws Exception {
         boolean oauthEnabled = ssoEnabled || socialLoginClientRegistrations.anyEnabled();
@@ -178,25 +187,18 @@ public class SecurityConfig {
             CsrfFilter.class);
         http.addFilterBefore(new MetricsScrapeTokenFilter(metricsScrapeToken), AuthorizationFilter.class);
         http.cors(withDefaults());
-        if (csrfEnabled) {
-            // Session-stored token (default repo), echoed by the SPA in a header it fetches from
-            // GET /api/auth/csrf. A plain (non-XOR) handler keeps the token stable so the client can
-            // cache it. The auth handshake is exempt since there is no session to protect pre-login.
-            http.csrf(csrf -> {
-                csrf.csrfTokenRequestHandler(new HeaderOnlyCsrfTokenRequestHandler())
-                    .ignoringRequestMatchers(
-                        "/api/auth/login", "/api/auth/register",
-                        "/api/auth/forgot-password",
-                        "/api/auth/webauthn/authenticate/**",
-                        "/api/delivery/unsubscribe/**",
-                        "/api/delivery/webhooks/**");
-                if (ssoEnabled) {
-                    csrf.ignoringRequestMatchers("/api/login/saml2/sso/**");
-                }
-            });
-        } else {
-            http.csrf(AbstractHttpConfigurer::disable);
-        }
+        http.csrf(csrf -> {
+            csrf.csrfTokenRequestHandler(new HeaderOnlyCsrfTokenRequestHandler())
+                .ignoringRequestMatchers(
+                    "/api/auth/login", "/api/auth/register",
+                    "/api/auth/forgot-password",
+                    "/api/auth/webauthn/authenticate/**",
+                    "/api/delivery/unsubscribe/**",
+                    "/api/delivery/webhooks/**");
+            if (ssoEnabled) {
+                csrf.ignoringRequestMatchers("/api/login/saml2/sso/**");
+            }
+        });
         http
             .authorizeHttpRequests(auth -> {
                 auth.requestMatchers(HttpMethod.GET, "/api/health/ready").permitAll()

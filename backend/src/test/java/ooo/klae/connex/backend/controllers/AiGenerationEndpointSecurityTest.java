@@ -66,8 +66,8 @@ import ooo.klae.connex.backend.util.ClientIpResolver;
         classes = GlobalExceptionHandler.class
     ),
     properties = {
-        "connex.security.csrf-enabled=true",
-        "connex.sso.enabled=false"
+        "connex.sso.enabled=false",
+        "connex.security.csrf-enabled=false"
     }
 )
 @Import({ SecurityConfig.class, AiGenerationEndpointSecurityTest.MapperTestConfig.class })
@@ -154,6 +154,14 @@ class AiGenerationEndpointSecurityTest {
                 .andExpect(status().isOk());
 
         verify(businessCardService).availability();
+    }
+
+    @Test
+    void theRemovedCsrfKillSwitchPropertyCannotDisableProtection() throws Exception {
+        mockMvc.perform(post("/api/deals/17/brief"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/deals/17/brief").with(csrf().asHeader()))
+                .andExpect(status().isAccepted());
     }
 
     private void assertPostWithCsrfOnly(String path) throws Exception {

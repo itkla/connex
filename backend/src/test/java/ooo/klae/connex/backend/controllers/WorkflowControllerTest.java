@@ -91,7 +91,6 @@ import ooo.klae.connex.backend.util.ClientIpResolver;
 @WebMvcTest(
     controllers = {WorkflowController.class, WorkflowRunController.class},
     properties = {
-        "connex.security.csrf-enabled=true",
         "connex.sso.enabled=false",
         "connex.request-limits.workflow-max-body-bytes=512"
     }

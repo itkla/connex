@@ -67,7 +67,6 @@ import ooo.klae.connex.backend.util.ClientIpResolver;
 @WebMvcTest(
     controllers = DealController.class,
     properties = {
-        "connex.security.csrf-enabled=true",
         "connex.sso.enabled=false"
     }
 )
