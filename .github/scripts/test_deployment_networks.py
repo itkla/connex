@@ -15,8 +15,30 @@ DOCKER_CLIENT_LIB_PATH = ROOT / "deploy" / "backup" / "shims" / "docker-client-l
 BACKUP_INSTALL_PATH = ROOT / "deploy" / "backup" / "install.sh"
 DEPLOYMENT_DOC_PATH = ROOT / "docs" / "DEPLOYMENT.md"
 UPGRADING_DOC_PATH = ROOT / "docs" / "UPGRADING.md"
+DEPLOY_ENV_PATH = ROOT / "deploy" / ".env"
 LOCAL_DEV_COMPOSE_PATH = ROOT / "backend" / "docker-compose.yml"
 DIGEST = "0" * 64
+
+
+class _DeployEnvFile:
+    """Provides the gitignored deploy/.env that the bundle's env_file directive requires.
+
+    A fresh checkout has no deploy/.env, so `docker compose config` refuses to resolve the
+    model. Creating it only when absent keeps a developer's real file untouched.
+    """
+
+    def __init__(self) -> None:
+        self._created = False
+
+    def __enter__(self) -> "_DeployEnvFile":
+        if not DEPLOY_ENV_PATH.exists():
+            DEPLOY_ENV_PATH.write_text("", encoding="utf-8")
+            self._created = True
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        if self._created:
+            DEPLOY_ENV_PATH.unlink(missing_ok=True)
 
 
 def resolve_compose_model(
@@ -46,16 +68,22 @@ def resolve_compose_model(
         command.extend(("--profile", profile))
     for compose_file in compose_files:
         command.extend(("-f", str(compose_file)))
-    command.extend(("config", "--no-env-resolution", "--format", "json"))
-    completed = subprocess.run(
-        command,
-        cwd=ROOT,
-        env=environment,
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    command.extend(("config", "--format", "json"))
+    with _DeployEnvFile():
+        completed = subprocess.run(
+            command,
+            cwd=ROOT,
+            env=environment,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    if completed.returncode != 0:
+        raise AssertionError(
+            "docker compose config failed for "
+            f"{' '.join(str(path) for path in compose_files)}: {completed.stderr.strip()}"
+        )
     return json.loads(completed.stdout)
 
 
