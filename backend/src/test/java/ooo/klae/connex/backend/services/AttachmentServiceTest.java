@@ -127,11 +127,11 @@ class AttachmentServiceTest extends AbstractServiceTest {
         Attachment uploaded = attachmentService.upload(
             "company",
             company.getId(),
-            UploadSource.from("report.pdf", "application/pdf", bytes),
+            UploadSource.from("report.txt", "text/plain", bytes),
             currentUser);
 
-        assertEquals("report.pdf", uploaded.getFileName());
-        assertEquals("application/pdf", uploaded.getContentType());
+        assertEquals("report.txt", uploaded.getFileName());
+        assertEquals("text/plain", uploaded.getContentType());
         assertEquals(bytes.length, uploaded.getSize());
         assertEquals(company.getId(), uploaded.getEntityId());
         try (ManagedContent content = attachmentService.getManagedContent(
@@ -147,7 +147,7 @@ class AttachmentServiceTest extends AbstractServiceTest {
         Attachment first = attachmentService.upload(
             "company",
             company.getId(),
-            UploadSource.from("report.pdf", "application/pdf", bytes),
+            UploadSource.from("report.txt", "text/plain", bytes),
             currentUser);
         Attachment second = new Attachment();
         second.setWorkspaceId(workspace.getId());
@@ -182,17 +182,17 @@ class AttachmentServiceTest extends AbstractServiceTest {
             company.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), false));
         assertEquals(1, shareMapper.sharePerson(
             person.getId(), ownerWorkspace.getId(), workspace.getId(), currentUser.getId(), false));
-        byte[] bytes = { 1, 2, 3 };
+        byte[] bytes = "shared attachment".getBytes(StandardCharsets.UTF_8);
 
         Attachment companyAttachment = attachmentService.upload(
             "company",
             company.getId(),
-            UploadSource.from("company.pdf", "application/pdf", bytes),
+            UploadSource.from("company.txt", "text/plain", bytes),
             currentUser);
         Attachment personAttachment = attachmentService.upload(
             "person",
             person.getId(),
-            UploadSource.from("person.pdf", "application/pdf", bytes),
+            UploadSource.from("person.txt", "text/plain", bytes),
             currentUser);
 
         assertEquals(company.getId(), companyAttachment.getEntityId());

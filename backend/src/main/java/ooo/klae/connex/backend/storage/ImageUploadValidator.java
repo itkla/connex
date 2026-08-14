@@ -24,6 +24,7 @@ import javax.imageio.metadata.IIOMetadata;
 import javax.imageio.metadata.IIOMetadataFormatImpl;
 import javax.imageio.stream.ImageInputStream;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.Node;
@@ -33,6 +34,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.exceptions.UnsupportedUploadMediaTypeException;
+import ooo.klae.connex.backend.storage.BoundedImageValidationExecutor.Cancellation;
 import ooo.klae.connex.backend.storage.ImageDecodeAdmissionService.Lease;
 import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
 
@@ -50,19 +52,37 @@ public class ImageUploadValidator {
     private final ObjectStorageProperties properties;
     private final UploadPolicy uploadPolicy;
     private final ImageDecodeAdmissionService decodeAdmission;
+    private final BoundedImageValidationExecutor validationExecutor;
 
+    @Autowired
     public ImageUploadValidator(
             ObjectStorageProperties properties,
             UploadPolicy uploadPolicy,
-            ImageDecodeAdmissionService decodeAdmission) {
+            ImageDecodeAdmissionService decodeAdmission,
+            BoundedImageValidationExecutor validationExecutor) {
         this.properties = properties;
         this.uploadPolicy = uploadPolicy;
         this.decodeAdmission = decodeAdmission;
+        this.validationExecutor = validationExecutor;
         ImageIO.setUseCache(false);
     }
 
     public ValidatedImage validate(UploadSource source) {
-        DecodedImage image = validate(source, true, properties.getMaxUploadBytes());
+        return validate(source, UploadPurpose.PROFILE_IMAGE);
+    }
+
+    /**
+     * Fully decodes and canonicalizes a raster admitted for the supplied server-selected purpose.
+     *
+     * @param source repeatable upload source
+     * @param purpose server-selected upload purpose
+     * @return metadata-free canonical image bytes
+     */
+    public ValidatedImage validate(UploadSource source, UploadPurpose purpose) {
+        DecodedImage image = validationExecutor.validate(
+            cancellation -> validate(
+                source, purpose, true, properties.getMaxUploadBytes(), cancellation),
+            UnsupportedUploadMediaTypeException::unsupported);
         return new ValidatedImage(image.content(), image.contentType(), image.extension());
     }
 
@@ -72,7 +92,14 @@ public class ImageUploadValidator {
      * @return metadata-free JPEG bytes and decoded dimensions
      */
     public ValidatedAiImage validateForAi(UploadSource source) {
-        DecodedImage image = validate(source, false, AiInputImage.MAX_BYTES);
+        DecodedImage image = validationExecutor.validate(
+            cancellation -> validate(
+                source,
+                UploadPurpose.ASSISTANT_CONTEXT,
+                false,
+                AiInputImage.MAX_BYTES,
+                cancellation),
+            UnsupportedUploadMediaTypeException::unsupported);
         if (image.width() > AiInputImage.MAX_DIMENSION
                 || image.height() > AiInputImage.MAX_DIMENSION) {
             throw new BadRequestException("Uploaded image dimensions exceed the AI input limit");
@@ -80,14 +107,19 @@ public class ImageUploadValidator {
         return new ValidatedAiImage(image.content(), image.width(), image.height());
     }
 
-    private DecodedImage validate(UploadSource source, boolean preserveAlpha, long maxOutputBytes) {
-        uploadPolicy.validate(UploadPurpose.PROFILE_IMAGE, source);
+    private DecodedImage validate(
+            UploadSource source,
+            UploadPurpose purpose,
+            boolean preserveAlpha,
+            long maxOutputBytes,
+            Cancellation cancellation) {
+        uploadPolicy.validate(purpose, source);
         try (Lease lease = decodeAdmission.tryAcquire().orElseThrow(
                 () -> new ServiceUnavailableException("Image validation is busy; retry shortly"))) {
             byte[] bytes = read(source);
             ImageFormat format = detect(bytes);
             validateDeclaredContentType(source.contentType(), format.contentType());
-            return decode(bytes, format, lease, preserveAlpha, maxOutputBytes);
+            return decode(bytes, format, lease, preserveAlpha, maxOutputBytes, cancellation);
         }
     }
 
@@ -117,7 +149,10 @@ public class ImageUploadValidator {
         if (bytes.length >= 12 && ascii(bytes, 0, "RIFF") && ascii(bytes, 8, "WEBP")) {
             return ImageFormat.WEBP;
         }
-        throw new UnsupportedUploadMediaTypeException("Only JPEG, PNG, or WebP images are allowed");
+        if (bytes.length >= 6 && (ascii(bytes, 0, "GIF87a") || ascii(bytes, 0, "GIF89a"))) {
+            return ImageFormat.GIF;
+        }
+        throw new UnsupportedUploadMediaTypeException("Only JPEG, PNG, GIF, or WebP images are allowed");
     }
 
     private static void validateDeclaredContentType(String declared, String detected) {
@@ -141,7 +176,8 @@ public class ImageUploadValidator {
             ImageFormat format,
             Lease lease,
             boolean preserveAlpha,
-            long maxOutputBytes) {
+            long maxOutputBytes,
+            Cancellation cancellation) {
         try (ImageInputStream input = ImageIO.createImageInputStream(new ByteArrayInputStream(bytes))) {
             if (input == null) {
                 throw malformed();
@@ -152,6 +188,8 @@ public class ImageUploadValidator {
             }
             ImageReader reader = readers.next();
             try {
+                cancellation.register(reader::abort);
+                requireActive(cancellation);
                 boolean ignoreMetadata = format != ImageFormat.JPEG;
                 reader.setInput(input, false, ignoreMetadata);
                 int width = reader.getWidth(0);
@@ -175,13 +213,15 @@ public class ImageUploadValidator {
                 if (!lease.tryReserve(workingBytes)) {
                     throw new ServiceUnavailableException("Image validation is busy; retry shortly");
                 }
+                requireActive(cancellation);
                 BufferedImage decoded = reader.read(0);
                 if (decoded == null || decoded.getWidth() != width || decoded.getHeight() != height) {
                     throw malformed();
                 }
                 boolean canonicalAlpha = preserveAlpha && alpha;
                 BufferedImage normalized = normalize(decoded, orientation, canonicalAlpha);
-                EncodedImage encoded = encode(normalized, canonicalAlpha, maxOutputBytes);
+                EncodedImage encoded = encode(
+                    normalized, canonicalAlpha, maxOutputBytes, cancellation);
                 return new DecodedImage(
                     encoded.content(), encoded.contentType(), encoded.extension(),
                     normalized.getWidth(), normalized.getHeight());
@@ -268,7 +308,8 @@ public class ImageUploadValidator {
     private EncodedImage encode(
             BufferedImage image,
             boolean alpha,
-            long maxOutputBytes) throws IOException {
+            long maxOutputBytes,
+            Cancellation cancellation) throws IOException {
         String format = alpha ? "png" : "jpeg";
         Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName(format);
         if (!writers.hasNext()) {
@@ -277,6 +318,8 @@ public class ImageUploadValidator {
         ImageWriter writer = writers.next();
         try (CappedImageOutputStream output =
                 new CappedImageOutputStream(maxOutputBytes)) {
+            cancellation.register(writer::abort);
+            requireActive(cancellation);
             writer.setOutput(output);
             ImageWriteParam parameters = writer.getDefaultWriteParam();
             if (!alpha && parameters.canWriteCompressed()) {
@@ -348,9 +391,16 @@ public class ImageUploadValidator {
         return new BadRequestException("Uploaded image could not be safely decoded");
     }
 
+    private static void requireActive(Cancellation cancellation) {
+        if (cancellation.cancelled()) {
+            throw UnsupportedUploadMediaTypeException.unsupported();
+        }
+    }
+
     private enum ImageFormat {
         JPEG("image/jpeg"),
         PNG("image/png"),
+        GIF("image/gif"),
         WEBP("image/webp");
 
         private final String contentType;

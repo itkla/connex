@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import javax.imageio.ImageIO;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -38,16 +39,24 @@ class ImageUploadValidatorTest {
 
     private ObjectStorageProperties properties;
     private ImageUploadValidator validator;
+    private BoundedImageValidationExecutor validationExecutor;
 
     @BeforeEach
     void setUp() {
         properties = new ObjectStorageProperties();
         properties.setMaxUploadBytes(1_000_000);
         properties.setMaxImagePixels(1_000_000);
+        validationExecutor = new BoundedImageValidationExecutor();
         validator = new ImageUploadValidator(
             properties,
             new UploadPolicy(properties),
-            new ImageDecodeAdmissionService(properties));
+            new ImageDecodeAdmissionService(properties),
+            validationExecutor);
+    }
+
+    @AfterEach
+    void tearDown() {
+        validationExecutor.close();
     }
 
     @Test
@@ -164,7 +173,8 @@ class ImageUploadValidatorTest {
         validator = new ImageUploadValidator(
             properties,
             new UploadPolicy(properties),
-            new ImageDecodeAdmissionService(properties));
+            new ImageDecodeAdmissionService(properties),
+            validationExecutor);
         CountDownLatch firstOpened = new CountDownLatch(1);
         CountDownLatch releaseFirst = new CountDownLatch(1);
         UploadSource blocking = new UploadSource("first.png", "image/png", png.length, () -> {

@@ -8,6 +8,7 @@ import static org.mockito.Mockito.mock;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -16,19 +17,32 @@ import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
 import ooo.klae.connex.backend.exceptions.UnsupportedUploadMediaTypeException;
 import ooo.klae.connex.backend.storage.ImageUploadValidator;
 import ooo.klae.connex.backend.storage.ObjectStorageProperties;
+import ooo.klae.connex.backend.storage.UploadContentInspector;
 import ooo.klae.connex.backend.storage.UploadPolicy;
 import ooo.klae.connex.backend.storage.UploadSource;
+import tools.jackson.databind.ObjectMapper;
 
 class AiChatAttachmentPolicyTest {
     private AiChatAttachmentPolicy policy;
+    private UploadContentInspector inspector;
 
     @BeforeEach
     void setUp() {
         ObjectStorageProperties properties = new ObjectStorageProperties();
         properties.setMaxUploadBytes(25L * 1024L * 1024L);
+        UploadPolicy uploadPolicy = new UploadPolicy(properties);
+        ImageUploadValidator imageUploadValidator = mock(ImageUploadValidator.class);
+        inspector = new UploadContentInspector(
+            uploadPolicy, imageUploadValidator, new ObjectMapper());
         policy = new AiChatAttachmentPolicy(
-                new UploadPolicy(properties),
-                mock(ImageUploadValidator.class));
+                uploadPolicy,
+                inspector,
+                imageUploadValidator);
+    }
+
+    @AfterEach
+    void tearDown() {
+        inspector.close();
     }
 
     @Test
@@ -66,7 +80,7 @@ class AiChatAttachmentPolicyTest {
     void rejectsMalformedUtf8AtUploadAndStoredReadBoundaries() {
         byte[] malformed = {(byte) 0xc3, 0x28};
 
-        assertThrows(BadRequestException.class, () -> policy.prepare(
+        assertThrows(UnsupportedUploadMediaTypeException.class, () -> policy.prepare(
                 UploadSource.from("notes.md", "text/markdown", malformed)));
         assertThrows(BadRequestException.class, () -> policy.readText(
                 new ByteArrayInputStream(malformed), malformed.length));

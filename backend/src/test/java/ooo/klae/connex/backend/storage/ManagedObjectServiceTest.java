@@ -18,6 +18,8 @@ import static org.mockito.Mockito.when;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.awt.image.BufferedImage;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -33,6 +35,7 @@ import java.util.function.Supplier;
 import javax.imageio.ImageIO;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -49,6 +52,9 @@ import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
 import ooo.klae.connex.backend.storage.ObjectStorageProperties.LegacyMigrationMode;
+import ooo.klae.connex.backend.storage.UploadContentInspector.InspectedUpload;
+import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
+import ooo.klae.connex.backend.storage.UploadPolicy.ValidatedUpload;
 
 @ExtendWith(MockitoExtension.class)
 class ManagedObjectServiceTest {
@@ -59,6 +65,7 @@ class ManagedObjectServiceTest {
 
     private ObjectStorageProperties properties;
     private ManagedObjectService service;
+    private BoundedImageValidationExecutor imageValidationExecutor;
     private final MutableNanoTime readinessNanoTime = new MutableNanoTime();
     private final Queue<Runnable> readinessTasks = new ArrayDeque<>();
     private Runnable readinessSnapshotPublicationHook = () -> {};
@@ -66,6 +73,7 @@ class ManagedObjectServiceTest {
     @BeforeEach
     void setUp() {
         properties = new ObjectStorageProperties();
+        imageValidationExecutor = new BoundedImageValidationExecutor();
         AtomicInteger tombstoneIds = new AtomicInteger(1);
         org.mockito.Mockito.lenient()
             .when(deletionRetryQueue.prepareTenantWrite(anyInt(), anyString()))
@@ -78,16 +86,24 @@ class ManagedObjectServiceTest {
         service = service(properties);
     }
 
+    @AfterEach
+    void tearDown() {
+        imageValidationExecutor.close();
+    }
+
     private ManagedObjectService service(ObjectStorageProperties configuredProperties) {
         UploadPolicy uploadPolicy = new UploadPolicy(configuredProperties);
+        UploadContentInspector uploadContentInspector = passthroughInspector(uploadPolicy);
         ImageUploadValidator imageValidator = new ImageUploadValidator(
             configuredProperties,
             uploadPolicy,
-            new ImageDecodeAdmissionService(configuredProperties));
+            new ImageDecodeAdmissionService(configuredProperties),
+            imageValidationExecutor);
         return new ManagedObjectService(
             objectStorage,
             deletionRetryQueue,
             uploadPolicy,
+            uploadContentInspector,
             imageValidator,
             configuredProperties,
             quotaService,
@@ -97,6 +113,39 @@ class ManagedObjectServiceTest {
             readinessNanoTime,
             task -> readinessTasks.add(task),
             () -> readinessSnapshotPublicationHook.run());
+    }
+
+    private static UploadContentInspector passthroughInspector(UploadPolicy uploadPolicy) {
+        UploadContentInspector inspector = org.mockito.Mockito.mock(UploadContentInspector.class);
+        org.mockito.Mockito.lenient()
+            .when(inspector.inspect(any(UploadPurpose.class), any(UploadSource.class)))
+            .thenAnswer(invocation -> {
+                UploadPurpose purpose = invocation.getArgument(0, UploadPurpose.class);
+                UploadSource source = invocation.getArgument(1, UploadSource.class);
+                ValidatedUpload metadata = uploadPolicy.validate(purpose, source);
+                byte[] content;
+                try (InputStream input = source.openStream()) {
+                    content = input.readAllBytes();
+                } catch (IOException exception) {
+                    throw new ServiceUnavailableException("Uploaded file could not be read");
+                }
+                return new InspectedUpload(
+                    metadata.fileName(),
+                    metadata.contentType(),
+                    metadata.extension(),
+                    metadata.format(),
+                    content,
+                    sha256(content));
+            });
+        return inspector;
+    }
+
+    private static byte[] sha256(byte[] content) {
+        try {
+            return MessageDigest.getInstance("SHA-256").digest(content);
+        } catch (java.security.NoSuchAlgorithmException exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 
     @Test

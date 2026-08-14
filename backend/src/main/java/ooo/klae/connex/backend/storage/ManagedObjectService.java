@@ -38,7 +38,7 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.storage.ImageUploadValidator.ValidatedImage;
 import ooo.klae.connex.backend.storage.ObjectStorageProperties.LegacyMigrationMode;
-import ooo.klae.connex.backend.storage.UploadPolicy.ValidatedUpload;
+import ooo.klae.connex.backend.storage.UploadContentInspector.InspectedUpload;
 import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
 
 /**
@@ -55,6 +55,7 @@ public class ManagedObjectService implements ApplicationRunner {
     private final ObjectStorage objectStorage;
     private final ObjectDeletionRetryQueue deletionRetryQueue;
     private final UploadPolicy uploadPolicy;
+    private final UploadContentInspector uploadContentInspector;
     private final ImageUploadValidator imageUploadValidator;
     private final ObjectStorageProperties properties;
     private final WorkspaceObjectStorageQuotaService quotaService;
@@ -74,6 +75,7 @@ public class ManagedObjectService implements ApplicationRunner {
             ObjectStorage objectStorage,
             ObjectDeletionRetryQueue deletionRetryQueue,
             UploadPolicy uploadPolicy,
+            UploadContentInspector uploadContentInspector,
             ImageUploadValidator imageUploadValidator,
             ObjectStorageProperties properties,
             WorkspaceObjectStorageQuotaService quotaService,
@@ -84,6 +86,7 @@ public class ManagedObjectService implements ApplicationRunner {
             objectStorage,
             deletionRetryQueue,
             uploadPolicy,
+            uploadContentInspector,
             imageUploadValidator,
             properties,
             quotaService,
@@ -99,6 +102,7 @@ public class ManagedObjectService implements ApplicationRunner {
             ObjectStorage objectStorage,
             ObjectDeletionRetryQueue deletionRetryQueue,
             UploadPolicy uploadPolicy,
+            UploadContentInspector uploadContentInspector,
             ImageUploadValidator imageUploadValidator,
             ObjectStorageProperties properties,
             WorkspaceObjectStorageQuotaService quotaService,
@@ -111,6 +115,7 @@ public class ManagedObjectService implements ApplicationRunner {
         this.objectStorage = objectStorage;
         this.deletionRetryQueue = deletionRetryQueue;
         this.uploadPolicy = uploadPolicy;
+        this.uploadContentInspector = uploadContentInspector;
         this.imageUploadValidator = imageUploadValidator;
         this.properties = properties;
         this.quotaService = quotaService;
@@ -184,12 +189,14 @@ public class ManagedObjectService implements ApplicationRunner {
             int workspaceId,
             UploadPurpose purpose,
             UploadSource source) {
-        ValidatedUpload upload = uploadPolicy.validate(purpose, source);
+        InspectedUpload upload = uploadContentInspector.inspect(purpose, source);
+        UploadSource inspectedSource = upload.source();
         String token = token(upload.extension());
         String key = attachmentKey(workspaceId, token);
         String url = ATTACHMENT_URL_PREFIX + token;
-        storeTenant(workspaceId, key, source, upload.contentType());
-        return new StoredBinary(url, upload.fileName(), upload.contentType(), source.contentLength());
+        storeTenant(workspaceId, key, inspectedSource, upload.contentType(), upload.sha256());
+        return new StoredBinary(
+            url, upload.fileName(), upload.contentType(), upload.contentLength());
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
@@ -259,14 +266,16 @@ public class ManagedObjectService implements ApplicationRunner {
             int attachmentId,
             String legacyUrl,
             UploadSource source) {
-        ValidatedUpload upload = uploadPolicy.validate(UploadPurpose.ATTACHMENT, source);
+        InspectedUpload upload = uploadContentInspector.inspect(UploadPurpose.ATTACHMENT, source);
+        UploadSource inspectedSource = upload.source();
         String objectToken = migrationToken(
             "attachment", workspaceId, attachmentId, legacyUrl, upload.extension());
         String key = attachmentKey(workspaceId, objectToken);
         String url = ATTACHMENT_URL_PREFIX + objectToken;
-        storeTenantDeterministic(workspaceId, key, source, upload.contentType());
+        storeTenantDeterministic(
+            workspaceId, key, inspectedSource, upload.contentType(), upload.sha256());
         return new StoredBinary(
-            url, upload.fileName(), upload.contentType(), source.contentLength());
+            url, upload.fileName(), upload.contentType(), upload.contentLength());
     }
 
     StoredMigratedImage storeMigratedPersonImage(
@@ -518,7 +527,15 @@ public class ManagedObjectService implements ApplicationRunner {
     }
 
     private void storeTenant(int workspaceId, String key, UploadSource source, String contentType) {
-        byte[] checksum = sha256(source);
+        storeTenant(workspaceId, key, source, contentType, sha256(source));
+    }
+
+    private void storeTenant(
+            int workspaceId,
+            String key,
+            UploadSource source,
+            String contentType,
+            byte[] checksum) {
         requireTransactionSynchronization();
         writeAdmissionService.admit(() -> {
             deletionRetryQueue.requireTenantWriteAllowed(workspaceId);
@@ -549,7 +566,15 @@ public class ManagedObjectService implements ApplicationRunner {
             String key,
             UploadSource source,
             String contentType) {
-        byte[] checksum = sha256(source);
+        storeTenantDeterministic(workspaceId, key, source, contentType, sha256(source));
+    }
+
+    private void storeTenantDeterministic(
+            int workspaceId,
+            String key,
+            UploadSource source,
+            String contentType,
+            byte[] checksum) {
         requireTransactionSynchronization();
         writeAdmissionService.admit(() -> {
             deletionRetryQueue.requireTenantWriteAllowed(workspaceId);

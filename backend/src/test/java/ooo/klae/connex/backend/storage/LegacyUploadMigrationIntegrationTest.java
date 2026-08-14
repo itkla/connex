@@ -83,7 +83,7 @@ class LegacyUploadMigrationIntegrationTest {
     void migratesAndVerifiesTenantAndControlMediaWhileRetainingSources() throws Exception {
         Files.createDirectories(LEGACY_ROOT.resolve("attachments/person"));
         Files.createDirectories(LEGACY_ROOT.resolve("profile-pictures"));
-        byte[] attachmentBytes = "%PDF-1.4\nlegacy fixture".getBytes(StandardCharsets.UTF_8);
+        byte[] attachmentBytes = "legacy fixture".getBytes(StandardCharsets.UTF_8);
         byte[] imageBytes = png();
         Workspace workspace = workspaceMapper.getDefaultWorkspace();
         if (workspace == null) {
@@ -168,9 +168,9 @@ class LegacyUploadMigrationIntegrationTest {
         attachment.setWorkspaceId(workspaceId);
         attachment.setEntityType("person");
         attachment.setEntityId(1);
-        attachment.setFileName("legacy.pdf");
-        attachment.setUrl("/attachments/person/person-1-1700000000000-legacy.pdf");
-        attachment.setContentType("application/pdf");
+        attachment.setFileName("legacy.txt");
+        attachment.setUrl("/attachments/person/person-1-1700000000000-legacy.txt");
+        attachment.setContentType("text/plain");
         attachment.setSize(1L);
         attachment.setUploadedBy(user);
         attachmentMapper.insert(attachment);
@@ -181,8 +181,8 @@ class LegacyUploadMigrationIntegrationTest {
         LegacyUploadRecord record = new LegacyUploadRecord();
         record.setId(id);
         record.setWorkspaceId(workspaceId);
-        record.setFileName("legacy.pdf");
-        record.setContentType("application/pdf");
+        record.setFileName("legacy.txt");
+        record.setContentType("text/plain");
         record.setUrl(url);
         return record;
     }

@@ -26,7 +26,7 @@ class LegacyUploadMigrationTransactionTest {
     @Mock private LegacyTenantUploadMigrationMapper tenantMapper;
     @Mock private LegacyControlUploadMigrationMapper controlMapper;
     @Mock private ManagedObjectService managedObjectService;
-    @Mock private UploadPolicy uploadPolicy;
+    @Mock private UploadContentInspector uploadContentInspector;
     @Mock private ImageUploadValidator imageUploadValidator;
 
     private LegacyUploadMigrationTransaction migration;
@@ -37,7 +37,7 @@ class LegacyUploadMigrationTransactionTest {
             tenantMapper,
             controlMapper,
             managedObjectService,
-            uploadPolicy,
+            uploadContentInspector,
             imageUploadValidator);
     }
 

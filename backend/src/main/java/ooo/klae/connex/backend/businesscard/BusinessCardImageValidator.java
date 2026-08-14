@@ -21,6 +21,7 @@ import javax.imageio.metadata.IIOMetadata;
 import javax.imageio.metadata.IIOMetadataFormatImpl;
 import javax.imageio.stream.ImageInputStream;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 import org.w3c.dom.NamedNodeMap;
@@ -32,6 +33,8 @@ import ooo.klae.connex.backend.exceptions.UnsupportedBusinessCardMediaTypeExcept
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.storage.ImageDecodeAdmissionService;
 import ooo.klae.connex.backend.storage.ImageDecodeAdmissionService.Lease;
+import ooo.klae.connex.backend.storage.BoundedImageValidationExecutor;
+import ooo.klae.connex.backend.storage.BoundedImageValidationExecutor.Cancellation;
 import ooo.klae.connex.backend.storage.CappedImageOutputStream;
 import ooo.klae.connex.backend.storage.CappedImageOutputStream.LimitExceededException;
 import ooo.klae.connex.backend.storage.UploadPolicy;
@@ -52,14 +55,18 @@ public class BusinessCardImageValidator {
     private final BusinessCardProperties properties;
     private final ImageDecodeAdmissionService decodeAdmission;
     private final UploadPolicy uploadPolicy;
+    private final BoundedImageValidationExecutor validationExecutor;
 
+    @Autowired
     public BusinessCardImageValidator(
             BusinessCardProperties properties,
             ImageDecodeAdmissionService decodeAdmission,
-            UploadPolicy uploadPolicy) {
+            UploadPolicy uploadPolicy,
+            BoundedImageValidationExecutor validationExecutor) {
         this.properties = properties;
         this.decodeAdmission = decodeAdmission;
         this.uploadPolicy = uploadPolicy;
+        this.validationExecutor = validationExecutor;
         ImageIO.setUseCache(false);
     }
 
@@ -70,13 +77,25 @@ public class BusinessCardImageValidator {
      * @return validated immutable metadata and sanitized bytes
      */
     public ValidatedBusinessCardImage validate(MultipartFile image) {
+        return validationExecutor.validate(
+            cancellation -> validateWithinDeadline(image, cancellation),
+            () -> new UnprocessableBusinessCardException(
+                "Business-card image could not be safely processed"));
+    }
+
+    private ValidatedBusinessCardImage validateWithinDeadline(
+            MultipartFile image,
+            Cancellation cancellation) {
         try (Lease lease = decodeAdmission.tryAcquire().orElseThrow(
                 () -> new TooManyRequestsException("Image processing is busy; retry shortly"))) {
-            return validateAcquired(image, lease);
+            return validateAcquired(image, lease, cancellation);
         }
     }
 
-    private ValidatedBusinessCardImage validateAcquired(MultipartFile image, Lease lease) {
+    private ValidatedBusinessCardImage validateAcquired(
+            MultipartFile image,
+            Lease lease,
+            Cancellation cancellation) {
         if (image == null || image.isEmpty()) {
             throw new UnprocessableBusinessCardException("Business-card image is empty");
         }
@@ -90,7 +109,7 @@ public class BusinessCardImageValidator {
         }
         ImageFormat format = detect(content);
         validateDeclaredType(image.getContentType(), format.contentType());
-        return decode(content, format, lease);
+        return decode(content, format, lease, cancellation);
     }
 
     private static byte[] read(MultipartFile image) {
@@ -134,7 +153,11 @@ public class BusinessCardImageValidator {
         }
     }
 
-    private ValidatedBusinessCardImage decode(byte[] content, ImageFormat format, Lease lease) {
+    private ValidatedBusinessCardImage decode(
+            byte[] content,
+            ImageFormat format,
+            Lease lease,
+            Cancellation cancellation) {
         try (ImageInputStream input = ImageIO.createImageInputStream(new ByteArrayInputStream(content))) {
             if (input == null) {
                 throw unprocessable();
@@ -145,6 +168,8 @@ public class BusinessCardImageValidator {
             }
             ImageReader reader = readers.next();
             try {
+                cancellation.register(reader::abort);
+                requireActive(cancellation);
                 boolean ignoreMetadata = format != ImageFormat.JPEG;
                 reader.setInput(input, false, ignoreMetadata);
                 int width = reader.getWidth(0);
@@ -169,13 +194,14 @@ public class BusinessCardImageValidator {
                 if (!lease.tryReserve(workingBytes)) {
                     throw new TooManyRequestsException("Image processing is busy; retry shortly");
                 }
+                requireActive(cancellation);
                 BufferedImage decoded = reader.read(0);
                 if (decoded == null || decoded.getWidth() != width || decoded.getHeight() != height) {
                     throw unprocessable();
                 }
                 BufferedImage normalized = normalize(decoded, orientation);
                 validateDimensions(normalized.getWidth(), normalized.getHeight());
-                byte[] encoded = encode(normalized);
+                byte[] encoded = encode(normalized, cancellation);
                 return new ValidatedBusinessCardImage(
                         encoded, "image/jpeg", "jpg", normalized.getWidth(), normalized.getHeight());
             } finally {
@@ -253,7 +279,7 @@ public class BusinessCardImageValidator {
         }
     }
 
-    private byte[] encode(BufferedImage image) throws IOException {
+    private byte[] encode(BufferedImage image, Cancellation cancellation) throws IOException {
         Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("jpeg");
         if (!writers.hasNext()) {
             throw unprocessable();
@@ -261,6 +287,8 @@ public class BusinessCardImageValidator {
         ImageWriter writer = writers.next();
         try (CappedImageOutputStream output =
                 new CappedImageOutputStream(properties.getMaxImageBytes())) {
+            cancellation.register(writer::abort);
+            requireActive(cancellation);
             writer.setOutput(output);
             ImageWriteParam parameters = writer.getDefaultWriteParam();
             if (parameters.canWriteCompressed()) {
@@ -344,6 +372,13 @@ public class BusinessCardImageValidator {
 
     private static UnprocessableBusinessCardException unprocessable() {
         return new UnprocessableBusinessCardException("Business-card image could not be safely decoded");
+    }
+
+    private static void requireActive(Cancellation cancellation) {
+        if (cancellation.cancelled()) {
+            throw new UnprocessableBusinessCardException(
+                "Business-card image could not be safely processed");
+        }
     }
 
     private enum ImageFormat {

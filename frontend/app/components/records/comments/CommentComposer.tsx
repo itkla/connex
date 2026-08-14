@@ -7,7 +7,10 @@ import { ImagePlus, LoaderCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { DRAFT_VERSIONS, readDraft, type DraftKeyParts } from '@/app/lib/formDrafts';
 import { useFormDraft } from '@/app/hooks/useFormDraft';
-import { isManagedImageFile, MANAGED_IMAGE_ACCEPT } from '@/app/lib/managed-image';
+import {
+    INLINE_MANAGED_IMAGE_ACCEPT,
+    isInlineManagedImageFile,
+} from '@/app/lib/managed-image';
 import { toastError } from '@/app/lib/toast';
 import {
     appendCommentImage,
@@ -133,7 +136,7 @@ export default function CommentComposer({
     const attachFiles = async (files: Iterable<File>) => {
         if (!onAttachImage) return;
         for (const file of files) {
-            if (!(await isManagedImageFile(file))) {
+            if (!(await isInlineManagedImageFile(file))) {
                 toastError(t('imageUnsupportedType'));
                 continue;
             }
@@ -211,7 +214,7 @@ export default function CommentComposer({
                                     <input
                                         ref={fileInputRef}
                                         type="file"
-                                        accept={MANAGED_IMAGE_ACCEPT}
+                                        accept={INLINE_MANAGED_IMAGE_ACCEPT}
                                         multiple
                                         className="hidden"
                                         onChange={(event) => {
