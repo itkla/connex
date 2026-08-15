@@ -13,8 +13,11 @@ import ooo.klae.connex.backend.beans.Product;
 public interface ProductMapper {
     List<Product> getFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query);
     Product getById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    List<Product> findBySkus(@Param("workspaceId") int workspaceId, @Param("skus") List<String> skus);
+    Product getByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     int insert(Product product);
+    int insertBatch(List<Product> products);
     int update(Product product);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
 }

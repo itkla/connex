@@ -44,6 +44,23 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
+  <!-- Catalog-import SKU lookup. Deliberately NOT binary-collated (unlike getFiltered): the
+       classification must agree with uq_product_workspace_sku, or a preview would report "new"
+       for a SKU the unique index then rejects on insert. -->
+  <select id="findBySkus" resultMap="ProductResult">
+    SELECT <include refid="cols"/> FROM product
+    WHERE workspace_id = #{workspaceId}
+      AND sku IN
+      <foreach collection="skus" item="sku" open="(" separator="," close=")">#{sku}</foreach>
+    ORDER BY id
+  </select>
+
+  <select id="getByIdForUpdate" resultMap="ProductResult">
+    SELECT <include refid="cols"/> FROM product
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
   <select id="exists" resultType="boolean">
     SELECT EXISTS(SELECT 1 FROM product WHERE workspace_id = #{workspaceId} AND id = #{id})
   </select>
@@ -56,6 +73,20 @@
       #{workspaceId}, #{sku}, #{name}, #{description}, #{active}, #{unit}, #{unitPrice}, #{currency},
       #{taxRate}, #{billingFrequency}, #{effectiveStart}, #{effectiveEnd}
     )
+  </insert>
+
+  <!-- Explicit jdbcType on every nullable column: MyBatis cannot infer a type for a null bound
+       inside a <foreach>, so an all-null batch column would otherwise fail at bind time. -->
+  <insert id="insertBatch" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO product (
+      workspace_id, sku, name, description, active, unit, unit_price, currency,
+      tax_rate, billing_frequency, effective_start, effective_end
+    ) VALUES
+    <foreach collection="list" item="p" separator=",">
+      (#{p.workspaceId}, #{p.sku}, #{p.name}, #{p.description,jdbcType=VARCHAR}, #{p.active},
+       #{p.unit,jdbcType=VARCHAR}, #{p.unitPrice}, #{p.currency}, #{p.taxRate,jdbcType=DECIMAL},
+       #{p.billingFrequency}, #{p.effectiveStart,jdbcType=DATE}, #{p.effectiveEnd,jdbcType=DATE})
+    </foreach>
   </insert>
 
   <update id="update">
