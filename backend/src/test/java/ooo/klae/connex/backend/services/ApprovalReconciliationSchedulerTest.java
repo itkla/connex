@@ -2,9 +2,11 @@ package ooo.klae.connex.backend.services;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -13,9 +15,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
 import org.springframework.transaction.annotation.Transactional;
-
-import ooo.klae.connex.backend.beans.DocumentApproval;
 
 class ApprovalReconciliationSchedulerTest {
 
@@ -45,11 +46,32 @@ class ApprovalReconciliationSchedulerTest {
     void tenantScopeIsInstalledBeforeTheTerminationTransactionOpens()
             throws ReflectiveOperationException {
         Method reconcile = ApprovalReconciliationScheduler.class.getMethod("reconcile");
-        Method terminate = DocumentApprovalService.class.getDeclaredMethod(
-            "terminateIfUnsatisfiable", int.class, DocumentApproval.class);
 
         assertNull(ApprovalReconciliationScheduler.class.getAnnotation(Transactional.class));
         assertNull(reconcile.getAnnotation(Transactional.class));
-        assertNotNull(terminate.getAnnotation(Transactional.class));
+        assertNotNull(ApprovalReconciliationScheduler.class
+            .getDeclaredField("transactionTemplate"));
+    }
+
+    /**
+     * The termination methods are package-private so they stay off the RBAC-guarded surface, which
+     * also means Spring's proxy-based transaction management would ignore {@code @Transactional} on
+     * them. Asserting through Spring's own attribute source keeps that fact from being rediscovered
+     * as a missing document lock in production: the scheduler, not the annotation, owns the
+     * transaction.
+     */
+    @Test
+    void terminationMethodsCannotRelyOnProxiedTransactionAdvice()
+            throws ReflectiveOperationException {
+        AnnotationTransactionAttributeSource source = new AnnotationTransactionAttributeSource();
+        for (String name : new String[] {"terminateIfUnsatisfiable", "invalidateForPolicyChange"}) {
+            Method method = java.util.Arrays.stream(
+                    DocumentApprovalService.class.getDeclaredMethods())
+                .filter(candidate -> candidate.getName().equals(name))
+                .findFirst()
+                .orElseThrow();
+            assertFalse(Modifier.isPublic(method.getModifiers()));
+            assertNull(source.getTransactionAttribute(method, DocumentApprovalService.class));
+        }
     }
 }

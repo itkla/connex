@@ -7,6 +7,7 @@ import {
     CheckCircleIcon,
     ChevronDownIcon,
     ClockIcon,
+    ExclamationTriangleIcon,
     MinusCircleIcon,
     XCircleIcon,
 } from '@heroicons/react/24/outline';
@@ -26,6 +27,7 @@ const STEP_ICON = {
     approved: CheckCircleIcon,
     rejected: XCircleIcon,
     cancelled: MinusCircleIcon,
+    unsatisfiable: ExclamationTriangleIcon,
 } satisfies Record<ApprovalStepStatus, typeof ClockIcon>;
 
 const STEP_TONE: Record<ApprovalStepStatus, string> = {
@@ -34,6 +36,7 @@ const STEP_TONE: Record<ApprovalStepStatus, string> = {
     approved: 'text-chart-won',
     rejected: 'text-destructive',
     cancelled: 'text-muted-foreground',
+    unsatisfiable: 'text-destructive',
 };
 
 /**
@@ -54,6 +57,7 @@ export default function DocumentApprovalChain({ approval, activeStepId }: Props)
         ?? ordered[0];
     const label = (step: DocumentApprovalStep) =>
         step.name?.trim() || t('chainStep', { number: step.stepOrder });
+    const blocked = approval.status === 'pending' && !approval.satisfiable;
 
     return (
         <div className="mt-1.5">
@@ -80,6 +84,12 @@ export default function DocumentApprovalChain({ approval, activeStepId }: Props)
                             required: current.requiredCount,
                         })}
                 </span>
+                {blocked && (
+                    <ExclamationTriangleIcon
+                        className="size-3.5 shrink-0 text-destructive"
+                        aria-hidden="true"
+                    />
+                )}
                 <ChevronDownIcon
                     className={cn(
                         'size-3',
@@ -89,6 +99,12 @@ export default function DocumentApprovalChain({ approval, activeStepId }: Props)
                     aria-hidden="true"
                 />
             </button>
+
+            {blocked && (
+                <p className="mt-1 text-xs text-destructive">
+                    {approval.blockedReason?.trim() || t('chainBlocked')}
+                </p>
+            )}
 
             <AnimatePresence initial={false}>
                 {expanded && (
@@ -100,26 +116,39 @@ export default function DocumentApprovalChain({ approval, activeStepId }: Props)
                         className="mt-1.5 flex flex-col gap-1"
                     >
                         {ordered.map((step) => {
-                            const Icon = STEP_ICON[step.status];
+                            const open = step.status === 'active' || step.status === 'pending';
+                            const stuck = open && !step.satisfiable;
+                            const Icon = stuck ? ExclamationTriangleIcon : STEP_ICON[step.status];
                             return (
-                                <li
-                                    key={step.id}
-                                    className="flex items-center gap-1.5 text-xs text-muted-foreground"
-                                >
-                                    <Icon
-                                        className={cn('size-3.5 shrink-0', STEP_TONE[step.status])}
-                                        aria-hidden="true"
-                                    />
-                                    <span className={cn(step.id === activeStepId && 'text-foreground')}>
-                                        {label(step)}
-                                    </span>
-                                    <span className="tabular-nums">
-                                        {t('chainProgress', {
-                                            approved: step.approvedCount,
-                                            required: step.requiredCount,
-                                        })}
-                                    </span>
-                                    <span className="sr-only">{t(`chainStatus_${step.status}`)}</span>
+                                <li key={step.id} className="text-xs text-muted-foreground">
+                                    <div className="flex items-center gap-1.5">
+                                        <Icon
+                                            className={cn(
+                                                'size-3.5 shrink-0',
+                                                stuck ? 'text-destructive' : STEP_TONE[step.status],
+                                            )}
+                                            aria-hidden="true"
+                                        />
+                                        <span className={cn(step.id === activeStepId && 'text-foreground')}>
+                                            {label(step)}
+                                        </span>
+                                        <span className="tabular-nums">
+                                            {t('chainProgress', {
+                                                approved: step.approvedCount,
+                                                required: step.requiredCount,
+                                            })}
+                                        </span>
+                                        <span className="sr-only">
+                                            {stuck
+                                                ? t('chainStatus_unsatisfiable')
+                                                : t(`chainStatus_${step.status}`)}
+                                        </span>
+                                    </div>
+                                    {stuck && (
+                                        <p className="ml-5 text-destructive">
+                                            {step.unsatisfiableReason?.trim() || t('chainBlocked')}
+                                        </p>
+                                    )}
                                 </li>
                             );
                         })}

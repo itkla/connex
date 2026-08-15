@@ -14,6 +14,7 @@ import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -483,9 +484,16 @@ public class DocumentApprovalService {
         return toDto(workspaceId, requireApproval(workspaceId, approval.getId()), document);
     }
 
-    /** Terminates one still-pending request after a confirmed tightening policy edit. */
-    @Transactional
+    /**
+     * Terminates one still-pending request after a confirmed tightening policy edit.
+     *
+     * <p>The caller must already hold a transaction. This method is package-private so it stays off
+     * the RBAC-guarded surface, and Spring's proxy-based transaction management only advises public
+     * methods, so an annotation here would be silently ignored and the document row lock would not
+     * survive the write.
+     */
     void invalidateForPolicyChange(int workspaceId, DocumentApproval approval, String detail) {
+        requireActiveTransaction();
         DealDocument document = lockDocument(
             workspaceId, approval.getDealId(), approval.getDocumentId());
         DocumentApproval current = approvalMapper.getById(workspaceId, approval.getId());
@@ -513,9 +521,14 @@ public class DocumentApprovalService {
             "policy_invalidated", detail, true);
     }
 
-    /** Terminates one pending request when its frozen chain can no longer reach quorum. */
-    @Transactional
+    /**
+     * Terminates one pending request when its frozen chain can no longer reach quorum.
+     *
+     * <p>The caller must already hold a transaction, for the reason given on
+     * {@link #invalidateForPolicyChange}.
+     */
     boolean terminateIfUnsatisfiable(int workspaceId, DocumentApproval approval) {
+        requireActiveTransaction();
         DealDocument document = lockDocument(
             workspaceId, approval.getDealId(), approval.getDocumentId());
         DocumentApproval current = approvalMapper.getById(workspaceId, approval.getId());
@@ -874,6 +887,13 @@ public class DocumentApprovalService {
             throw new ResourceNotFoundException("Document not found with id: " + documentId);
         }
         return document;
+    }
+
+    private void requireActiveTransaction() {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException(
+                "Approval termination requires the caller to hold a transaction");
+        }
     }
 
     private DealDocument lockDocument(int workspaceId, int dealId, int documentId) {

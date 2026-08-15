@@ -36,7 +36,7 @@ public class JobRunRecorder {
     public static final String WORKFLOW_RUNTIME = "workflow_runtime";
     public static final String RELATIONSHIP_SIGNAL_RECONCILIATION =
         "relationship_signal_reconciliation";
-    public static final String APPROVAL_RECONCILIATION = "approval-reconciliation";
+    public static final String APPROVAL_RECONCILIATION = "approval_reconciliation";
 
     private static final Logger log = LoggerFactory.getLogger(JobRunRecorder.class);
     /**

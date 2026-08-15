@@ -3592,6 +3592,15 @@ export function deleteApprovalPolicy(id: number, init: RequestInit = {}) {
     return deleteJson<void[]>(`/api/approval-policies/${id}`, init);
 }
 
+/**
+ * Previews what saving `payload` over policy `id` would do to approvals already pending under it.
+ * Read-only: the server runs the same classification the save enforces, so the disclosed count
+ * matches what a confirmed write invalidates.
+ */
+export function previewApprovalPolicyImpact(id: number, payload: Types.UpdateApprovalPolicyPayload) {
+    return postJson<Types.ApprovalPolicyImpact>(`/api/approval-policies/${id}/impact`, payload);
+}
+
 export function requestDocumentApproval(dealId: number, documentId: number, comment?: string | null) {
     return postJson<Types.DocumentApproval>(
         `/api/deals/${dealId}/documents/${documentId}/approval`, { comment: comment ?? null });

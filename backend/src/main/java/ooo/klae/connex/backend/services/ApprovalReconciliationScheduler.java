@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
 
@@ -23,7 +24,16 @@ import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunDetail;
 import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunStatus;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
-/** Reconciles pending approvals whose frozen chains can no longer reach quorum. */
+/**
+ * Reconciles pending approvals whose frozen chains can no longer reach quorum.
+ *
+ * <p>The tenant and system-actor scope is installed before any transaction opens, because
+ * {@code TenantWorkScope} refuses to re-pin the catalog once a transaction holds a connection. Each
+ * termination then runs in its own {@link TransactionTemplate} transaction: the termination method
+ * is package-private so it stays outside the RBAC-guarded surface, and Spring's proxy-based
+ * transaction management only advises public methods, so the caller must own the transaction for
+ * the document row lock to be held across the whole write.
+ */
 @Component
 @RequiredArgsConstructor
 @ConditionalOnProperty(
@@ -41,6 +51,7 @@ public class ApprovalReconciliationScheduler {
     private final AutomationExecutor automationExecutor;
     private final SystemActor systemActor;
     private final JobRunRecorder jobRunRecorder;
+    private final TransactionTemplate transactionTemplate;
     private final Map<Integer, Integer> cursors = new ConcurrentHashMap<>();
 
     @Value("${connex.approvals.reconciliation-batch-size:200}")
@@ -133,7 +144,8 @@ public class ApprovalReconciliationScheduler {
         int failedCount = 0;
         for (DocumentApproval approval : approvals) {
             try {
-                approvalService.terminateIfUnsatisfiable(workspaceId, approval);
+                transactionTemplate.executeWithoutResult(
+                    status -> approvalService.terminateIfUnsatisfiable(workspaceId, approval));
             } catch (RuntimeException exception) {
                 failedCount++;
                 log.warn("Approval reconciliation failed for workspace {} approval {}: {}",

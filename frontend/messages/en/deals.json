@@ -503,6 +503,18 @@
         "chainStatus_rejected": "rejected",
         "chainStatus_cancelled": "cancelled",
         "chainSummary": "Step {step} of {total} · {name} · {approved} of {required} approvals",
-        "chainSummaryParallel": "{done} of {total} steps approved, all at once"
+        "chainSummaryParallel": "{done} of {total} steps approved, all at once",
+        "chainStatus_unsatisfiable": "cannot be completed",
+        "chainBlocked": "This step can no longer reach its quorum. It will be closed automatically unless approvers regain access.",
+        "status_invalidated": "Invalidated",
+        "status_unsatisfiable": "Cannot be completed",
+        "outcome_quorum": "Approved by every step",
+        "outcome_rejected": "Rejected",
+        "outcome_superseded": "Cancelled by a newer version",
+        "outcome_cancelled_by_requester": "Cancelled by the requester",
+        "outcome_cancelled_by_admin": "Cancelled by an administrator",
+        "outcome_policy_invalidated": "Ended because the policy was tightened",
+        "outcome_unsatisfiable": "Ended because no approver could complete it",
+        "outcome_cancelled_legacy": "Cancelled"
     }
 }

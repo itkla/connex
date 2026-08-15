@@ -503,6 +503,18 @@
         "chainStatus_rejected": "却下",
         "chainStatus_cancelled": "取消済み",
         "chainSummary": "ステップ{step}/{total}・{name}・承認{approved}/{required}",
-        "chainSummaryParallel": "{total}ステップ中{done}件承認済み（全ステップ同時）"
+        "chainSummaryParallel": "{total}ステップ中{done}件承認済み（全ステップ同時）",
+        "chainStatus_unsatisfiable": "完了できません",
+        "chainBlocked": "このステップは必要な承認数に到達できなくなりました。承認者の権限が戻らない限り、自動的に終了します。",
+        "status_invalidated": "無効",
+        "status_unsatisfiable": "完了不可",
+        "outcome_quorum": "すべてのステップで承認済み",
+        "outcome_rejected": "却下",
+        "outcome_superseded": "新しいバージョンにより取り消し",
+        "outcome_cancelled_by_requester": "申請者が取り消し",
+        "outcome_cancelled_by_admin": "管理者が取り消し",
+        "outcome_policy_invalidated": "ポリシーの厳格化により終了",
+        "outcome_unsatisfiable": "承認可能な担当者がいないため終了",
+        "outcome_cancelled_legacy": "取り消し"
     }
 }

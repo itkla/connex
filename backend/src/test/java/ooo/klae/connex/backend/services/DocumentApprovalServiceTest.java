@@ -1,10 +1,12 @@
 package ooo.klae.connex.backend.services;
 
 import java.math.BigDecimal;
+import java.sql.SQLException;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -12,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.ApprovalPolicy;
@@ -767,10 +769,13 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         DocumentApprovalDto requested = approvalService.requestApproval(
             deal.getId(), document.id(), null);
 
-        assertThrows(DataIntegrityViolationException.class, () -> jdbcTemplate.update(
+        DataAccessException refused = assertThrows(DataAccessException.class, () -> jdbcTemplate.update(
             "UPDATE document_approval SET status = 'approved', outcome_reason = 'quorum', "
                 + "decided_at = CURRENT_TIMESTAMP WHERE workspace_id = ? AND id = ?",
             workspace.getId(), requested.id()));
+        SQLException cause = assertInstanceOf(SQLException.class, refused.getCause());
+        assertEquals("45000", cause.getSQLState());
+        assertTrue(cause.getMessage().contains("chain steps are unapproved"));
     }
 
     @Test
