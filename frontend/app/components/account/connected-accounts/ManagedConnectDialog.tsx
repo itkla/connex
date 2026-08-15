@@ -100,6 +100,7 @@ export default function ManagedConnectDialog({
     const [phase, setPhase] = useState<ManagedConnectPhase>({ kind: 'intro' });
     const [copied, setCopied] = useState<CopyField | null>(null);
     const [now, setNow] = useState(() => Date.now());
+    const [cancelFailed, setCancelFailed] = useState(false);
     const copyTimeout = useRef(0);
 
     const pairing = phase.kind === 'pairing' ? phase : null;
@@ -113,11 +114,7 @@ export default function ManagedConnectDialog({
     useEffect(() => {
         if (pairingExpiresAt === null) return;
         const ticker = window.setInterval(() => {
-            const tick = Date.now();
-            setNow(tick);
-            if (managedPairingRemainingMs(pairingExpiresAt, tick) <= 0) {
-                setPhase({ kind: 'failed', failure: 'expired' });
-            }
+            setNow(Date.now());
         }, 1000);
         return () => window.clearInterval(ticker);
     }, [pairingExpiresAt]);
@@ -197,10 +194,14 @@ export default function ManagedConnectDialog({
 
     const close = (nextOpen: boolean) => {
         if (nextOpen) return;
-        if (phase.kind === 'pairing') {
-            void cancelManagedPairing(provider).catch(() => undefined);
+        if (phase.kind !== 'pairing') {
+            onOpenChange(false);
+            return;
         }
-        onOpenChange(false);
+        setCancelFailed(false);
+        void cancelManagedPairing(provider)
+            .then(() => onOpenChange(false))
+            .catch(() => setCancelFailed(true));
     };
 
     const busy = phase.kind === 'starting';
@@ -371,6 +372,11 @@ export default function ManagedConnectDialog({
                 </div>
 
                 <ResponsiveDialogFooter className="border-t border-border px-4 py-4 sm:border-0 sm:px-0 sm:py-0">
+                    {cancelFailed ? (
+                        <p className="text-sm text-destructive" role="alert">
+                            {t('cancelFailed')}
+                        </p>
+                    ) : null}
                     {phase.kind === 'completed' ? (
                         <Button type="button" onClick={() => close(false)}>
                             {t('done')}

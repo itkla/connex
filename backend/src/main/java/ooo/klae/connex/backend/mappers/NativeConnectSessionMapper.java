@@ -41,6 +41,9 @@ public interface NativeConnectSessionMapper {
         @Param("id") int id,
         @Param("expectedStatus") String expectedStatus,
         @Param("errorCode") String errorCode);
+    List<NativeConnectSession> findTerminalForUserAndProvider(
+        @Param("userId") int userId, @Param("provider") String provider);
+    int deleteTerminalById(@Param("id") int id);
     List<NativeConnectSession> findExpiredBefore(
         @Param("cutoff") LocalDateTime cutoff, @Param("limit") int limit);
     int deleteExpired(

@@ -34,7 +34,11 @@ public class NativeConnectSessionPersistence {
     private final ProviderCredentialPersistence credentialPersistence;
     private final Clock clock;
 
-    /** Supersedes the user's active provider session and inserts a fresh pending session. */
+    /**
+     * Supersedes the user's active provider session and inserts a fresh pending session. Terminal
+     * sessions for the same user and provider are reclaimed here rather than waiting for the
+     * scheduled cleanup, so repeated pairing attempts cannot grow the control plane without bound.
+     */
     @Transactional
     public boolean create(
             int userId,
@@ -48,6 +52,11 @@ public class NativeConnectSessionPersistence {
             userId, provider, "superseded") > 0;
         if (previous != null && ACTIVE_STATUSES.contains(previous.getStatus())) {
             deleteVerifier(previous);
+        }
+        for (NativeConnectSession terminal
+                : sessionMapper.findTerminalForUserAndProvider(userId, provider)) {
+            deleteVerifier(terminal);
+            sessionMapper.deleteTerminalById(terminal.getId());
         }
         NativeConnectSession session = new NativeConnectSession();
         session.setUserId(userId);

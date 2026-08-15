@@ -166,10 +166,12 @@ function openBrowser(authorizeUrl) {
     if (process.platform === 'darwin') {
       child = spawn('open', [authorizeUrl], { detached: true, stdio: 'ignore' });
     } else if (process.platform === 'win32') {
-      const safeUrl = authorizeUrl.replaceAll('"', '%22');
+      // Deliberately not cmd.exe: it expands %VAR% even inside quotes, and every authorize URL
+      // carries percent-encoded fields (redirect_uri=http%3A%2F%2F...), which cmd would mangle.
+      // rundll32 receives the URL as a single argv entry, with no shell parsing.
       child = spawn(
-        'cmd.exe',
-        ['/d', '/s', '/c', `start "" "${safeUrl}"`],
+        'rundll32.exe',
+        ['url.dll,FileProtocolHandler', authorizeUrl],
         { detached: true, stdio: 'ignore', windowsHide: true },
       );
     } else {

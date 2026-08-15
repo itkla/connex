@@ -125,6 +125,20 @@
     WHERE id = #{id} AND status = #{expectedStatus}
   </update>
 
+  <select id="findTerminalForUserAndProvider" resultMap="NativeConnectSessionResult">
+    SELECT <include refid="cols"/>
+    FROM provider_native_connect_session
+    WHERE user_id = #{userId}
+      AND provider = #{provider}
+      AND status IN ('completed', 'failed')
+    FOR UPDATE
+  </select>
+
+  <delete id="deleteTerminalById">
+    DELETE FROM provider_native_connect_session
+    WHERE id = #{id} AND status IN ('completed', 'failed')
+  </delete>
+
   <select id="findExpiredBefore" resultMap="NativeConnectSessionResult">
     SELECT <include refid="cols"/>
     FROM provider_native_connect_session
