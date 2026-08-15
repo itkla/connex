@@ -78,6 +78,12 @@ cannot supply.
 Disposition: **false positive**, dismissed to unblock the required gate. Flagged here for independent
 re-review because it was triaged by the same author as the change.
 
+The rule re-raised as alert #79 against the same handler once the code moved, and was dismissed on the
+same basis. Expect a new alert number whenever this handler changes shape: the heuristic reads the
+locking read and transaction open as a state change, so it will keep firing on a route that is
+necessarily CSRF-exempt. Re-check that the handler still records nothing before dismissing the next
+one — that property, not the alert count, is what matters.
+
 ## Remediated
 
 ### `java/spring-disabled-csrf-protection` — #10
