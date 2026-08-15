@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Set;
 
 import org.springframework.stereotype.Component;
@@ -11,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.NativeConnectSession;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.connectedaccounts.ProviderAccountIdentityResolver.ProviderAccountIdentity;
 import ooo.klae.connex.backend.connectedaccounts.ProviderCredentialPersistence;
 import ooo.klae.connex.backend.connectedaccounts.ProviderTokenResponse;
@@ -60,12 +62,18 @@ public class NativeConnectSessionPersistence {
     /** Returns the current user's latest provider session, expiring it atomically when due. */
     @Transactional
     public NativeConnectPoll poll(int userId, String provider) {
-        requireUser(userId);
+        requireReadableUser(userId);
         NativeConnectSession session =
-            sessionMapper.getLatestByUserAndProviderForUpdate(userId, provider);
+            sessionMapper.getLatestByUserAndProvider(userId, provider);
         boolean expiredTransition = false;
         if (session != null && ACTIVE_STATUSES.contains(session.getStatus()) && expired(session)) {
-            if (sessionMapper.fail(session.getId(), session.getStatus(), "expired") == 1) {
+            requireUser(userId);
+            session = sessionMapper.getLatestByUserAndProviderForUpdate(userId, provider);
+            if (session != null
+                    && ACTIVE_STATUSES.contains(session.getStatus())
+                    && expired(session)
+                    && sessionMapper.fail(
+                        session.getId(), session.getStatus(), "expired") == 1) {
                 deleteVerifier(session);
                 session.setStatus("failed");
                 session.setErrorCode("expired");
@@ -191,6 +199,30 @@ public class NativeConnectSessionPersistence {
         }
     }
 
+    /** Finds a bounded batch of sessions beyond the expired-session retention grace. */
+    public List<NativeConnectSession> findExpiredBefore(
+            LocalDateTime cutoff, int limit) {
+        return sessionMapper.findExpiredBefore(cutoff, limit);
+    }
+
+    /** Deletes one still-expired session after its verifier secret is removed. */
+    @Transactional
+    public boolean deleteExpired(
+            int sessionId, int userId, LocalDateTime cutoff) {
+        if (userMapper.lockByIdForShare(userId) == null) {
+            return false;
+        }
+        NativeConnectSession session = sessionMapper.getByIdForUpdate(sessionId);
+        if (session == null
+                || session.getUserId() != userId
+                || session.getExpiresAt() == null
+                || session.getExpiresAt().isAfter(cutoff)) {
+            return false;
+        }
+        deleteVerifier(session);
+        return sessionMapper.deleteExpired(sessionId, cutoff) == 1;
+    }
+
     private void requirePendingPairing(NativeConnectSession session) {
         if (session == null) {
             throw invalidPairingCode();
@@ -235,6 +267,16 @@ public class NativeConnectSessionPersistence {
 
     private void requireUser(int userId) {
         if (userMapper.lockById(userId) == null) {
+            throw new ResourceNotFoundException("User not found: " + userId);
+        }
+        if (userMapper.isAccountDeletionReserved(userId)) {
+            throw new ConflictException("Account deletion is in progress");
+        }
+    }
+
+    private void requireReadableUser(int userId) {
+        User user = userMapper.getUserById(userId);
+        if (user == null) {
             throw new ResourceNotFoundException("User not found: " + userId);
         }
         if (userMapper.isAccountDeletionReserved(userId)) {

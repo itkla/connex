@@ -1,5 +1,8 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.time.LocalDateTime;
+import java.util.List;
+
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.NativeConnectSession;
@@ -10,6 +13,7 @@ public interface NativeConnectSessionMapper {
         @Param("userId") int userId, @Param("provider") String provider);
     NativeConnectSession getLatestByUserAndProviderForUpdate(
         @Param("userId") int userId, @Param("provider") String provider);
+    NativeConnectSession getByIdForUpdate(@Param("id") int id);
     NativeConnectSession getByPairingCodeHash(@Param("pairingCodeHash") byte[] pairingCodeHash);
     NativeConnectSession getByPairingCodeHashForUpdate(
         @Param("pairingCodeHash") byte[] pairingCodeHash);
@@ -37,4 +41,8 @@ public interface NativeConnectSessionMapper {
         @Param("id") int id,
         @Param("expectedStatus") String expectedStatus,
         @Param("errorCode") String errorCode);
+    List<NativeConnectSession> findExpiredBefore(
+        @Param("cutoff") LocalDateTime cutoff, @Param("limit") int limit);
+    int deleteExpired(
+        @Param("id") int id, @Param("cutoff") LocalDateTime cutoff);
 }

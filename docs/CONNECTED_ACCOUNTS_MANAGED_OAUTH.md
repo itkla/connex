@@ -70,11 +70,12 @@ sequenceDiagram
     User->>Browser: Connect account
     Browser->>Instance: POST /native/{provider}/pairing (session + step-up re-auth)
     Instance-->>Browser: pairingCode, expiresAt, instanceBaseUrl, helperCommand
-    User->>Helper: Run helper with pairing code
+    User->>Helper: Run helper and enter pairing code on stdin
     Helper->>Helper: Bind loopback port, form redirectUri http://127.0.0.1:{port}/callback
     Helper->>Instance: POST /native/prepare {pairingCode, redirectUri}
     Instance->>Instance: Validate loopback redirectUri, mint PKCE verifier/challenge + state
-    Instance-->>Helper: authorizeUrl, handoffTicket, expiresAt
+    Instance-->>Helper: authorizeUrl, handoffTicket, accountLabel, expiresAt
+    Helper->>User: Show destination Connex account and require confirmation
     Helper->>Browser: Open authorizeUrl
     Browser->>Google: Consent to read-only mail, calendar, OpenID identity
     Google-->>Helper: Redirect to loopback with code + state
@@ -96,7 +97,7 @@ Base path `/api/account/connections/native`.
 | `GET /{provider}/pairing` | Browser | Session | Returns `status` (`none`, `pending`, `prepared`, `exchanging`, `completed`, `failed`), `errorCode`, `expiresAt` |
 | `DELETE /{provider}/pairing` | Browser | Session | Cancels the pairing so a stale code cannot be claimed |
 | `GET /helper` | Browser | Session | Serves the helper script (`text/plain`) for download |
-| `POST /prepare` | Local helper | None — the pairing code is the bearer | Claims the code, validates the redirect URI, returns `authorizeUrl` + single-use `handoffTicket` |
+| `POST /prepare` | Local helper | None — the pairing code is the bearer | Claims the code, validates the redirect URI, returns `authorizeUrl`, the pairing owner's `accountLabel`, and a single-use `handoffTicket` |
 | `POST /complete` | Local helper | None — the handoff ticket is the bearer | Submits `code` + `state`; the instance performs the token exchange |
 
 Failures answer with `{ "error": "<machine_code>" }`. The account screen renders each code as a
@@ -127,21 +128,24 @@ deliberately given the least useful secret in the exchange.
 
 | Threat | What the attacker gains | What stops it | Residual risk |
 | --- | --- | --- | --- |
-| A malicious local process races the helper for the loopback port, or wins the bind first | The authorization `code` and `state` | The code is single-use, PKCE-bound, and worthless without the verifier (never leaves the backend) and the handoff ticket (issued only to the process that claimed the pairing code). A hostile binder that never claimed the code cannot call `complete` | A hostile process on the same machine can deny service by holding the port; the honest helper fails and the user retries |
-| Pairing-code theft (shoulder-surfing, a screenshot, a pasted support ticket) | The ability to call `prepare` | The code is short-lived (10 minutes), single-use, cancellable from the browser, and constrained to loopback redirects — so the consent screen and the callback both land on the thief's own machine, not the victim's mailbox. The exchange still binds to the pairing owner's user id, so a completed connection is stored for that user, not the thief | A thief who also controls the victim's Google session could complete a connection the victim did not intend; the victim sees an unexpected connection and can disconnect. Treat pairing codes as short-lived secrets |
+| A malicious local process races the helper callback or wins the loopback bind first | The authorization `code` and `state` | The helper returns `404` unless callback `state` matches the value in its provider URL, without consuming the callback. The code is also single-use, PKCE-bound, and worthless without the backend-held verifier and handoff ticket | A hostile process can still deny service by holding the port. A process that can also learn the exact provider URL/state can race a matching callback, so same-user local compromise remains outside the protocol boundary |
+| Pairing-code theft (shoulder-surfing, a screenshot, a pasted support ticket, or use of the discouraged `--pairing-code` argument) | The ability to call `prepare` for the pairing owner's Connex account | The default helper reads the code from stdin rather than exposing it in process arguments. The code is short-lived (10 minutes), single-use, cancellable, and constrained to loopback redirects. The prepare response names the destination Connex account and the helper requires confirmation before provider consent | Storing under the pairing owner prevents a thief from pulling the owner's mailbox into the thief's Connex account, but does not prevent a malicious code holder from attaching an attacker-controlled mailbox to the owner's account. Treat pairing codes as short-lived secrets |
+| A pairing owner sends their helper command and code to another person | An attempt to attach that person's mailbox to the pairing owner's Connex account | Before opening the provider, the helper prints the pairing owner's email, display name, or user id and accepts only an explicit `y`/`yes` confirmation | A person who ignores the account label or uses `--yes` can still be phished. The protocol cannot make an informed user heed the warning |
 | Handoff-ticket theft | The ability to submit a code once | The ticket is single-use, expires with the pairing, and is bound to that pairing and its redirect URI | Requires already having compromised the helper's process memory or transport |
 | Replay of a consumed pairing code or ticket | Nothing | Both are one-shot: claiming a code moves the pairing to `prepared`, and completing consumes the ticket. Replays are refused (`state` or `superseded`) | — |
-| A forged or cross-user callback (submitting a code obtained for a different user or client) | Attempted binding of the attacker's mailbox to the victim's account, or vice versa | The pairing owns the user identity; `state` must match the value the backend minted for that pairing; the exchange runs against the pairing's own verifier and stores the bundle under the pairing's user | — |
-| `state` tampering | Nothing | Mismatch fails closed with `state`; the pairing is terminated rather than retried silently | — |
+| A forged or cross-user callback (submitting a code obtained for a different user or client) | Attempted binding of a different mailbox to the pairing owner's account | `state` must match the value the backend minted for that pairing, the exchange uses that pairing's verifier, and the helper makes the destination account explicit before consent | The destination remains the pairing owner by design. A user who ignores the label or passes `--yes` can still consent a mailbox into somebody else's pairing |
+| `state` tampering | Nothing | The shipped helper returns `404` without consuming a wrong-state callback. A mismatch submitted directly to the backend still fails closed and terminates the claimed handoff | A local process that learns the exact expected state can still submit a matching denial callback |
 | A hostile `redirectUri` at `prepare` | Redirecting the provider response to an attacker host | The loopback-only rules above; anything else is `invalid_redirect_uri` | — |
 | A network attacker between helper and instance | Pairing code, ticket, and authorization code in transit | The helper talks to the instance over the operator's own transport. **Serve the instance over HTTPS.** On a plain-HTTP install, everything on that hop is exposed to anyone on the path | Real, and the operator owns it. Loopback traffic between the browser, the helper, and the provider redirect stays on the machine |
 | A hostile helper binary (user ran something that is not the shipped script) | The authorization code, plus whatever else that process can do on the machine | Nothing in this protocol — the user has already run attacker code as themselves | Explicitly outside the trust boundary. Download the helper from `GET /helper` on the instance you are connecting to |
-| A stale pairing left open | A window in which a code is still claimable | Expiry (10 minutes), explicit `DELETE` on cancel or dialog close, and supersession when a new pairing starts | — |
+| A stale pairing left open | A window in which a code is still claimable | Expiry (10 minutes), explicit `DELETE` on cancel or dialog close, and supersession when a new pairing starts. Expired session rows and retained verifier secrets are reaped after a one-day recovery grace | — |
 | An administrator wanting another user's mailbox | — | The credential is user-scoped, encrypted, and never rendered; administrators can restrict what is allowed but cannot assume a user's grant | An administrator can still remove a user or purge captured workspace data — see [CONNECTED_CAPTURE.md](CONNECTED_CAPTURE.md) |
 
-Two properties do the heavy lifting and are worth restating: **the PKCE verifier never leaves the
-backend**, and **the redirect can only ever be loopback**. Together they mean the local half of the
-flow can be observed or hijacked without yielding a usable connection.
+Two properties do the heavy lifting against authorization-code interception: **the PKCE verifier
+never leaves the backend**, and **the redirect can only ever be loopback**. Together they prevent a
+local process that did not claim the pairing from redeeming an intercepted provider code. They do
+not make the pairing code safe to share; the destination-account label and confirmation address
+that separate social-engineering risk.
 
 ## Vendor-disconnection guarantee
 
@@ -349,17 +353,32 @@ cannot finish.
 
 1. Account → **Connected accounts** → **Connect** on the provider (a passkey step-up is required).
 2. Copy the pairing code and download the helper from the dialog.
-3. Run it on the same machine, with Node.js 18 or newer:
+3. Run it on the same machine, with Node.js 18 or newer. The pairing code is prompted for on stdin so
+   it does not normally appear in `ps` or `/proc/<pid>/cmdline`:
 
    ```bash
-   node connex-connect.mjs --instance https://connex.example.com --pairing-code ABCD-EFGH
+   node connex-connect.mjs --instance https://connex.example.com
    ```
 
-4. Approve the consent screen the helper opens. The dialog polls every ~2 seconds and reports
+4. Enter the pairing code, verify that the printed Connex account label is your own account, and
+   answer `y` or `yes`. Any other answer exits without opening the provider.
+5. Approve the consent screen the helper opens. The dialog polls every ~2 seconds and reports
    completion; the code expires after 10 minutes and can be cancelled at any time.
 
 The helper needs outbound access to the instance and to the provider, and permission to bind a
 loopback port. It is a plain script — read it before running it.
+
+For controlled non-interactive use, provide the pairing code on stdin from the automation's secret
+source and pass `--yes`:
+
+```bash
+printf '%s\n' "$PAIRING_CODE" |
+  node connex-connect.mjs --instance https://connex.example.com --yes
+```
+
+`--yes` skips only the destination-account confirmation and therefore preserves the phishing risk
+that the prompt is designed to reduce. The compatibility form `--pairing-code <code>` still works,
+but is explicitly discouraged because local processes may read command-line arguments.
 
 ### Diagnosing failure codes
 
@@ -367,7 +386,7 @@ loopback port. It is a plain script — read it before running it.
 | --- | --- | --- |
 | `managed_identity_unavailable` | No managed client id is configured in this build | Expected today (#868). Use Custom/BYO credentials |
 | `invalid_redirect_uri` | The helper proposed a non-loopback or malformed callback | Ensure the user runs the helper downloaded from `GET /helper` on this instance; a modified or third-party helper is refused by design |
-| `state` | The callback's `state` did not match the pairing, or the pairing had already moved on | Have the user start again. Repeated occurrences on one machine warrant looking at what else is binding that port |
+| `state` | A matching callback reached the backend but its `state` did not match the pairing, or the pairing had already moved on | Have the user start again. The shipped helper rejects wrong-state callbacks locally; repeated backend occurrences warrant checking whether the helper or local machine was modified or compromised |
 | `denied` | The user declined at the provider, or organization policy blocked the app | Check Workspace/Entra app access control (above) |
 | `exchange` | The provider rejected the token exchange | Check client id/secret validity, system clock skew, and egress to the token host |
 | `no_offline_access` | No refresh token was granted | The user must approve every requested permission; on Microsoft confirm `offline_access` is consented |

@@ -13,6 +13,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.function.Supplier;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -20,6 +22,7 @@ import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.NativeConnectSession;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountMode;
 import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountProviders;
 import ooo.klae.connex.backend.connectedaccounts.ProviderAccountIdentityResolver;
@@ -31,6 +34,7 @@ import ooo.klae.connex.backend.connectedaccounts.capture.ProviderCaptureConnecti
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mail.MailProperties;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.WorkspaceService;
@@ -40,6 +44,7 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 @Service
 @RequiredArgsConstructor
 public class NativeConnectService {
+    private static final Logger log = LoggerFactory.getLogger(NativeConnectService.class);
     private static final Duration SESSION_TTL = Duration.ofMinutes(10);
     private static final String HELPER_RESOURCE =
         "connectedaccounts/connex-connect.mjs";
@@ -55,6 +60,7 @@ public class NativeConnectService {
     private final AuditService auditService;
     private final MailProperties mailProperties;
     private final TenantWorkScope tenantWorkScope;
+    private final UserMapper userMapper;
     private final Clock clock;
 
     /** Creates a step-up-gated, ten-minute pairing credential for the current user. */
@@ -82,8 +88,7 @@ public class NativeConnectService {
             pairingCode,
             expiresAt,
             instanceBaseUrl,
-            "node connex-connect.mjs --instance " + instanceBaseUrl
-                + " --pairing-code " + pairingCode);
+            "node connex-connect.mjs --instance " + instanceBaseUrl);
     }
 
     /** Returns only the current user's latest pairing state for the requested provider. */
@@ -154,6 +159,7 @@ public class NativeConnectService {
         return new NativePrepareResponse(
             authorizeUrl,
             handoffTicket,
+            accountLabel(prepared.getUserId()),
             instant(prepared.getExpiresAt()));
     }
 
@@ -186,6 +192,7 @@ public class NativeConnectService {
         } catch (RuntimeException exception) {
             throw failClaim(session, "pkce_verifier_unavailable");
         }
+        boolean created;
         try {
             ProviderTokenResponse tokens = tokenClient.exchange(
                 providers.tokenUri(session.getProvider()),
@@ -199,18 +206,9 @@ public class NativeConnectService {
             String grantedScopes = tokens.scope() == null
                 ? providers.scopes(session.getProvider())
                 : tokens.scope();
-            boolean created = tenantWorkScope.unrouted(
+            created = tenantWorkScope.unrouted(
                 () -> sessionPersistence.storeConnectionAndComplete(
                     session, tokens, identity, grantedScopes));
-            captureConnectionStateService.reconcile(
-                session.getUserId(), session.getProvider());
-            auditSuccess(
-                "user.connection.connect",
-                session.getUserId(),
-                session.getProvider(),
-                (created ? "Connected a managed " : "Reconnected a managed ")
-                    + session.getProvider() + " account");
-            return new NativeCompleteResponse("connected");
         } catch (ProviderTokenException exception) {
             throw failClaim(session, exception.getCode());
         } catch (ConflictException exception) {
@@ -218,6 +216,14 @@ public class NativeConnectService {
         } catch (RuntimeException exception) {
             throw failClaim(session, "connection_failed");
         }
+        reconcileAfterConnectionCommit(session);
+        auditSuccess(
+            "user.connection.connect",
+            session.getUserId(),
+            session.getProvider(),
+            (created ? "Connected a managed " : "Reconnected a managed ")
+                + session.getProvider() + " account");
+        return new NativeCompleteResponse("connected");
     }
 
     /** Reads the bundled zero-dependency helper script served to authenticated users. */
@@ -259,6 +265,31 @@ public class NativeConnectService {
             throw new NativeConnectException(
                 "managed_identity_unavailable",
                 "The Connex-managed identity for " + provider + " is unavailable in this build");
+        }
+    }
+
+    private String accountLabel(int userId) {
+        User user = tenantWorkScope.unrouted(() -> userMapper.getUserById(userId));
+        if (user != null && user.getEmail() != null && !user.getEmail().isBlank()) {
+            return user.getEmail();
+        }
+        if (user != null
+                && user.getDisplayName() != null
+                && !user.getDisplayName().isBlank()) {
+            return user.getDisplayName();
+        }
+        return "user #" + userId;
+    }
+
+    private void reconcileAfterConnectionCommit(NativeConnectSession session) {
+        try {
+            captureConnectionStateService.reconcile(
+                session.getUserId(), session.getProvider());
+        } catch (RuntimeException exception) {
+            log.warn(
+                "Provider capture reconciliation failed after managed connection commit for {}: {}",
+                session.getProvider(),
+                exception.getClass().getSimpleName());
         }
     }
 

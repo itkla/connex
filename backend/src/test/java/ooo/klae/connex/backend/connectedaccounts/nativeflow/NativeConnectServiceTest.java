@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -69,6 +70,7 @@ class NativeConnectServiceTest {
     @Autowired private MailProperties mailProperties;
     @Autowired private NativeConnectSessionMapper nativeSessionMapper;
     @Autowired private NativeConnectPkceSecretCipher pkceSecretCipher;
+    @Autowired private NativeConnectSessionCleanup nativeConnectSessionCleanup;
     @Autowired private ProviderConnectionMapper connectionMapper;
     @Autowired private UserProviderSecretCipher tokenCipher;
     @Autowired private UserMapper userMapper;
@@ -150,6 +152,81 @@ class NativeConnectServiceTest {
             nativeConnectService.pairingStatus(PROVIDER);
         assertEquals("completed", status.status());
         assertNull(status.errorCode());
+    }
+
+    @Test
+    void prepareIdentifiesThePairingOwnerAndKeepsTheCodeOutOfArgv() {
+        NativePairingResponse emailPairing = nativeConnectService.createPairing(PROVIDER);
+        assertEquals(
+            "node connex-connect.mjs --instance " + emailPairing.instanceBaseUrl(),
+            emailPairing.helperCommand());
+        assertFalse(emailPairing.helperCommand().contains(emailPairing.pairingCode()));
+        assertEquals(firstUser.getEmail(), prepare(emailPairing).accountLabel());
+
+        userMapper.updateEmail(firstUser.getId(), "");
+        authenticate(firstUser);
+        NativePrepareResponse displayNamePrepared = prepare(
+            nativeConnectService.createPairing(PROVIDER));
+        assertEquals(firstUser.getDisplayName(), displayNamePrepared.accountLabel());
+
+        jdbcTemplate.update(
+            "UPDATE app_user SET display_name = '' WHERE id = ?", firstUser.getId());
+        authenticate(firstUser);
+        NativePrepareResponse idPrepared = prepare(
+            nativeConnectService.createPairing(PROVIDER));
+        assertEquals("user #" + firstUser.getId(), idPrepared.accountLabel());
+    }
+
+    @Test
+    void reconcileFailureAfterCredentialCommitStillReturnsSuccessAndAuditsConnection() {
+        stubTokens("reconcile-code", "issuer", "subject", "reconcile@example.test");
+        doThrow(new IllegalStateException("transient read failure"))
+            .when(captureConnectionStateService)
+            .reconcile(firstUser.getId(), PROVIDER);
+        NativePrepareResponse prepared = prepare(
+            nativeConnectService.createPairing(PROVIDER));
+
+        NativeCompleteResponse completed = complete(
+            prepared,
+            "reconcile-code",
+            queryParameter(prepared.authorizeUrl(), "state"));
+
+        assertEquals("connected", completed.status());
+        assertNotNull(connection(firstUser));
+        assertEquals("completed", latest(firstUser).getStatus());
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log "
+                + "WHERE action = 'user.connection.connect' "
+                + "AND entity_type = 'user' AND entity_id = ?",
+            Integer.class,
+            firstUser.getId()));
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log "
+                + "WHERE action = 'user.connection.connect_failed' "
+                + "AND entity_type = 'user' AND entity_id = ?",
+            Integer.class,
+            firstUser.getId()));
+    }
+
+    @Test
+    void expiredSessionCleanupDeletesVerifierAndSessionAfterGrace() {
+        prepare(nativeConnectService.createPairing(PROVIDER));
+        NativeConnectSession session = latest(firstUser);
+        String verifierRef = session.getVerifierRef();
+        assertNotNull(verifierRef);
+        jdbcTemplate.update(
+            "UPDATE provider_native_connect_session "
+                + "SET expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 2 DAY) "
+                + "WHERE id = ?",
+            session.getId());
+
+        nativeConnectSessionCleanup.purgeExpired();
+
+        assertNull(nativeSessionMapper.getLatestByUserAndProvider(
+            firstUser.getId(), PROVIDER));
+        assertThrows(
+            RuntimeException.class,
+            () -> pkceSecretCipher.read(PROVIDER, firstUser.getId(), verifierRef));
     }
 
     @Test

@@ -4,6 +4,7 @@
 
 import { spawn } from 'node:child_process';
 import http from 'node:http';
+import { createInterface } from 'node:readline/promises';
 
 const TIMEOUT_MILLIS = 10 * 60 * 1000;
 const AUTHORIZE_HOSTS = new Set([
@@ -21,6 +22,7 @@ let activeServer;
 function argumentsFrom(commandLine) {
   let instance;
   let pairingCode;
+  let yes = false;
   for (let index = 0; index < commandLine.length; index += 1) {
     const argument = commandLine[index];
     if (argument === '--instance' && index + 1 < commandLine.length) {
@@ -29,12 +31,14 @@ function argumentsFrom(commandLine) {
     } else if (argument === '--pairing-code' && index + 1 < commandLine.length) {
       pairingCode = commandLine[index + 1];
       index += 1;
+    } else if (argument === '--yes') {
+      yes = true;
     } else {
-      throw new Error('Usage: node connex-connect.mjs --instance <url> --pairing-code <code>');
+      throw new Error('Usage: node connex-connect.mjs --instance <url> [--pairing-code <code>] [--yes]');
     }
   }
-  if (!instance || !pairingCode) {
-    throw new Error('Usage: node connex-connect.mjs --instance <url> --pairing-code <code>');
+  if (!instance) {
+    throw new Error('Usage: node connex-connect.mjs --instance <url> [--pairing-code <code>] [--yes]');
   }
   const instanceUrl = new URL(instance);
   const secureTransport = instanceUrl.protocol === 'https:'
@@ -48,7 +52,7 @@ function argumentsFrom(commandLine) {
       || instanceUrl.hash) {
     throw new Error('Instance must be an HTTPS origin, or an HTTP loopback origin for local use');
   }
-  return { instanceUrl, pairingCode };
+  return { instanceUrl, pairingCode, yes };
 }
 
 function endpoint(instanceUrl, path) {
@@ -84,6 +88,7 @@ function callbackServer() {
     rejectCallback = reject;
   });
   let handled = false;
+  let expectedState;
   const server = http.createServer((request, response) => {
     const requestTarget = request.url ?? '';
     const exactCallbackTarget = requestTarget === '/callback'
@@ -101,6 +106,12 @@ function callbackServer() {
       response.end('Bad request');
       return;
     }
+    const state = requestUrl.searchParams.get('state');
+    if (expectedState === undefined || state !== expectedState) {
+      response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      response.end('Not found');
+      return;
+    }
     if (handled) {
       response.writeHead(409, { 'Content-Type': 'text/plain; charset=utf-8' });
       response.end('Authorization callback already received');
@@ -113,7 +124,6 @@ function callbackServer() {
     });
     response.end('<!doctype html><html><head><meta charset="utf-8"><title>Authorization received</title></head><body><p>Authorization received. You can close this tab.</p></body></html>');
     const code = requestUrl.searchParams.get('code');
-    const state = requestUrl.searchParams.get('state');
     if (requestUrl.searchParams.has('error') || !code || !state) {
       rejectCallback(new Error('Provider authorization was not completed'));
       return;
@@ -121,7 +131,13 @@ function callbackServer() {
     acceptCallback({ code, state });
   });
   server.on('error', () => rejectCallback(new Error('Could not start the loopback callback server')));
-  return { server, callback };
+  return {
+    server,
+    callback,
+    expectState(state) {
+      expectedState = state;
+    },
+  };
 }
 
 function listen(server) {
@@ -167,27 +183,66 @@ function openBrowser(authorizeUrl) {
 }
 
 async function run(signal) {
-  const { instanceUrl, pairingCode } = argumentsFrom(process.argv.slice(2));
-  const { server, callback } = callbackServer();
-  activeServer = server;
-  await listen(server);
-  const address = server.address();
-  if (!address || typeof address === 'string') {
-    throw new Error('Could not determine the loopback callback port');
-  }
-  const redirectUri = `http://127.0.0.1:${address.port}/callback`;
-  const prepared = await postJson(
-    endpoint(instanceUrl, '/api/account/connections/native/prepare'),
-    { pairingCode, redirectUri },
-    signal,
-  );
-  if (typeof prepared.authorizeUrl !== 'string'
-      || typeof prepared.handoffTicket !== 'string') {
-    throw new Error('The local Connex instance returned an invalid prepare response');
-  }
-  const authorizeUrl = new URL(prepared.authorizeUrl);
-  if (authorizeUrl.protocol !== 'https:' || !AUTHORIZE_HOSTS.has(authorizeUrl.hostname)) {
-    throw new Error('The local Connex instance returned an unexpected provider authorization URL');
+  const { instanceUrl, pairingCode: argumentPairingCode, yes } =
+    argumentsFrom(process.argv.slice(2));
+  const terminal = !argumentPairingCode || !yes
+    ? createInterface({ input: process.stdin, output: process.stdout })
+    : undefined;
+  const callbackHandler = callbackServer();
+  const { server, callback } = callbackHandler;
+  let prepared;
+  let authorizeUrl;
+  try {
+    const pairingCode = argumentPairingCode
+      ?? (await terminal.question('Pairing code: ', { signal })).trim();
+    if (!pairingCode) {
+      throw new Error('Pairing code is required');
+    }
+    activeServer = server;
+    await listen(server);
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Could not determine the loopback callback port');
+    }
+    const redirectUri = `http://127.0.0.1:${address.port}/callback`;
+    prepared = await postJson(
+      endpoint(instanceUrl, '/api/account/connections/native/prepare'),
+      { pairingCode, redirectUri },
+      signal,
+    );
+    if (typeof prepared.authorizeUrl !== 'string'
+        || typeof prepared.handoffTicket !== 'string'
+        || typeof prepared.accountLabel !== 'string') {
+      throw new Error('The local Connex instance returned an invalid prepare response');
+    }
+    authorizeUrl = new URL(prepared.authorizeUrl);
+    if (authorizeUrl.protocol !== 'https:' || !AUTHORIZE_HOSTS.has(authorizeUrl.hostname)) {
+      throw new Error('The local Connex instance returned an unexpected provider authorization URL');
+    }
+    const expectedState = authorizeUrl.searchParams.get('state');
+    if (!expectedState) {
+      throw new Error('The local Connex instance returned an invalid provider authorization URL');
+    }
+    callbackHandler.expectState(expectedState);
+    const accountLabel = prepared.accountLabel
+      .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!accountLabel) {
+      throw new Error('The local Connex instance returned an invalid account label');
+    }
+    console.log(`This will connect a mailbox to the Connex account: ${accountLabel}`);
+    console.log('If that is not your own account, press Ctrl-C now.');
+    if (!yes) {
+      const answer = (await terminal.question('Continue? [y/N] ', { signal }))
+        .trim()
+        .toLowerCase();
+      if (answer !== 'y' && answer !== 'yes') {
+        throw new Error('Authorization cancelled');
+      }
+    }
+  } finally {
+    terminal?.close();
   }
   console.log('Open this authorization URL if a browser does not open automatically:');
   console.log(authorizeUrl.toString());

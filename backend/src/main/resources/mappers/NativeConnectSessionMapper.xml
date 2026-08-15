@@ -41,6 +41,13 @@
     FOR UPDATE
   </select>
 
+  <select id="getByIdForUpdate" resultMap="NativeConnectSessionResult">
+    SELECT <include refid="cols"/>
+    FROM provider_native_connect_session
+    WHERE id = #{id}
+    FOR UPDATE
+  </select>
+
   <select id="getByPairingCodeHash" resultMap="NativeConnectSessionResult">
     SELECT <include refid="cols"/>
     FROM provider_native_connect_session
@@ -117,4 +124,18 @@
     SET status = 'failed', error_code = #{errorCode}
     WHERE id = #{id} AND status = #{expectedStatus}
   </update>
+
+  <select id="findExpiredBefore" resultMap="NativeConnectSessionResult">
+    SELECT <include refid="cols"/>
+    FROM provider_native_connect_session
+    WHERE expires_at &lt;= #{cutoff}
+    ORDER BY expires_at, id
+    LIMIT #{limit}
+  </select>
+
+  <delete id="deleteExpired">
+    DELETE FROM provider_native_connect_session
+    WHERE id = #{id}
+      AND expires_at &lt;= #{cutoff}
+  </delete>
 </mapper>
