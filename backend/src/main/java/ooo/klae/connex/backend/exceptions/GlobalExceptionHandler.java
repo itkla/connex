@@ -28,6 +28,7 @@ import tools.jackson.core.exc.StreamConstraintsException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.connectedaccounts.nativeflow.NativeConnectException;
 import ooo.klae.connex.backend.observability.CorrelationIds;
 import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.services.SupportBundleService;
@@ -70,6 +71,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BadRequestException.class)
     public ResponseEntity<String> badRequest(BadRequestException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ex.getMessage());
+    }
+
+    @ExceptionHandler(NativeConnectException.class)
+    public ResponseEntity<Map<String, String>> nativeConnect(NativeConnectException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+            .body(Map.of("error", ex.getCode()));
     }
 
     @ExceptionHandler(UnsupportedBusinessCardMediaTypeException.class)

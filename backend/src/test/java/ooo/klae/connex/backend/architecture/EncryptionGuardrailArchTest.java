@@ -259,21 +259,24 @@ class EncryptionGuardrailArchTest {
         Map.entry("ooo/klae/connex/backend/sso/SsoSecretCipher.java#AesGcm", 3),
         Map.entry("ooo/klae/connex/backend/sso/SsoSecretCipher.java#SecretStore", 2),
         Map.entry("ooo/klae/connex/backend/connectedaccounts/UserProviderSecretCipher.java#SecretStore", 1),
+        Map.entry("ooo/klae/connex/backend/connectedaccounts/nativeflow/NativeConnectPkceSecretCipher.java#SecretStore", 1),
         Map.entry("ooo/klae/connex/backend/connectedaccounts/ProviderConnectionLifecyclePersistence.java#UserProviderSecretCipher", 1),
         Map.entry("ooo/klae/connex/backend/connectedaccounts/ProviderConnectionLifecycleService.java#UserProviderSecretCipher", 1),
         Map.entry("ooo/klae/connex/backend/connectedaccounts/ProviderCredentialPersistence.java#UserProviderSecretCipher", 1),
         Map.entry("ooo/klae/connex/backend/connectedaccounts/ProviderCredentialService.java#UserProviderSecretCipher", 1));
 
-    private static final Map<String, Integer> APPROVED_SECRET_PURPOSE_REFERENCES = Map.of(
-        "ooo/klae/connex/backend/ai/AiProviderSecretCipher.java#ORG_AI_PROVIDER_CREDENTIAL", 3,
-        "ooo/klae/connex/backend/delivery/ConnectorSecretCipher.java#WORKSPACE_CONNECTOR_CREDENTIAL", 3,
-        "ooo/klae/connex/backend/delivery/DeliveryProviderSecretCipher.java#WORKSPACE_DELIVERY_PROVIDER_CREDENTIAL", 3,
-        "ooo/klae/connex/backend/delivery/DeliveryProviderSecretCipher.java#WORKSPACE_DELIVERY_WEBHOOK_SECRET", 3,
-        "ooo/klae/connex/backend/mail/SecretCipher.java#WORKSPACE_SMTP_PASSWORD", 3,
-        "ooo/klae/connex/backend/sso/SsoSecretCipher.java#ORG_SSO_OIDC_CLIENT_SECRET", 3,
-        "ooo/klae/connex/backend/sso/SsoSecretCipher.java#ORG_SSO_SAML_SP_PRIVATE_KEY", 3,
-        "ooo/klae/connex/backend/connectedaccounts/UserProviderSecretCipher.java#USER_PROVIDER_GOOGLE_TOKEN", 1,
-        "ooo/klae/connex/backend/connectedaccounts/UserProviderSecretCipher.java#USER_PROVIDER_MICROSOFT_TOKEN", 1);
+    private static final Map<String, Integer> APPROVED_SECRET_PURPOSE_REFERENCES = Map.ofEntries(
+        Map.entry("ooo/klae/connex/backend/ai/AiProviderSecretCipher.java#ORG_AI_PROVIDER_CREDENTIAL", 3),
+        Map.entry("ooo/klae/connex/backend/delivery/ConnectorSecretCipher.java#WORKSPACE_CONNECTOR_CREDENTIAL", 3),
+        Map.entry("ooo/klae/connex/backend/delivery/DeliveryProviderSecretCipher.java#WORKSPACE_DELIVERY_PROVIDER_CREDENTIAL", 3),
+        Map.entry("ooo/klae/connex/backend/delivery/DeliveryProviderSecretCipher.java#WORKSPACE_DELIVERY_WEBHOOK_SECRET", 3),
+        Map.entry("ooo/klae/connex/backend/mail/SecretCipher.java#WORKSPACE_SMTP_PASSWORD", 3),
+        Map.entry("ooo/klae/connex/backend/sso/SsoSecretCipher.java#ORG_SSO_OIDC_CLIENT_SECRET", 3),
+        Map.entry("ooo/klae/connex/backend/sso/SsoSecretCipher.java#ORG_SSO_SAML_SP_PRIVATE_KEY", 3),
+        Map.entry("ooo/klae/connex/backend/connectedaccounts/UserProviderSecretCipher.java#USER_PROVIDER_GOOGLE_TOKEN", 1),
+        Map.entry("ooo/klae/connex/backend/connectedaccounts/UserProviderSecretCipher.java#USER_PROVIDER_MICROSOFT_TOKEN", 1),
+        Map.entry("ooo/klae/connex/backend/connectedaccounts/nativeflow/NativeConnectPkceSecretCipher.java#USER_PROVIDER_PKCE_VERIFIER", 1),
+        Map.entry("ooo/klae/connex/backend/connectedaccounts/nativeflow/NativeConnectPkceSecretCipher.java#USER_PROVIDER_MICROSOFT_PKCE_VERIFIER", 1));
 
     private static final Set<String> APPROVED_SECRET_PURPOSES = Set.of(
         "WORKSPACE_SMTP_PASSWORD",
@@ -284,7 +287,9 @@ class EncryptionGuardrailArchTest {
         "ORG_SSO_SAML_SP_PRIVATE_KEY",
         "ORG_AI_PROVIDER_CREDENTIAL",
         "USER_PROVIDER_GOOGLE_TOKEN",
-        "USER_PROVIDER_MICROSOFT_TOKEN");
+        "USER_PROVIDER_MICROSOFT_TOKEN",
+        "USER_PROVIDER_PKCE_VERIFIER",
+        "USER_PROVIDER_MICROSOFT_PKCE_VERIFIER");
 
     private static final Set<String> APPROVED_SECRET_INPUT_FIELDS = Set.of(
         "ooo/klae/connex/backend/dto/AiProviderConfigRequest.java#secretAccessKey",

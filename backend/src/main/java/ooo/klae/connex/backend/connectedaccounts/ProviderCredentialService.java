@@ -151,12 +151,14 @@ public class ProviderCredentialService {
     }
 
     private Map<String, String> refreshForm(String provider, String refreshToken) {
-        ConnectedAccountProperties.Provider client = providers.client(provider);
         Map<String, String> form = new LinkedHashMap<>();
         form.put("grant_type", "refresh_token");
         form.put("refresh_token", refreshToken);
-        form.put("client_id", client.getClientId());
-        form.put("client_secret", client.getClientSecret());
+        form.put("client_id", providers.effectiveClientId(provider));
+        String clientSecret = providers.effectiveClientSecret(provider);
+        if (clientSecret != null && !clientSecret.isBlank()) {
+            form.put("client_secret", clientSecret);
+        }
         if (ConnectedAccountProviders.MICROSOFT.equals(provider)) {
             form.put("scope", providers.scopes(provider));
         }

@@ -55,6 +55,7 @@ public final class TablePlaneRegistry {
         "notification_quiet_hours",
         "notification_preference",
         "notification_recipient_state",
+        "provider_native_connect_session",
         "object_storage_backend_identity",
         "one_time_link_flow",
         "org_allowed_domain",

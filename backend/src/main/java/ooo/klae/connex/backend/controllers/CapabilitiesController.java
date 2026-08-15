@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.controllers;
 
+import java.util.Locale;
+
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -7,6 +9,7 @@ import org.springframework.web.bind.annotation.RestController;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.capability.Capability;
 import ooo.klae.connex.backend.capability.CapabilityRegistry;
+import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountProviders;
 
 /**
  * Public instance-level product capability endpoint.
@@ -17,6 +20,7 @@ import ooo.klae.connex.backend.capability.CapabilityRegistry;
 public class CapabilitiesController {
 
     private final CapabilityRegistry capabilityRegistry;
+    private final ConnectedAccountProviders connectedAccountProviders;
 
     /**
      * Returns the instance capabilities available to the current client.
@@ -33,6 +37,9 @@ public class CapabilitiesController {
                 new ConnectedAccounts(
                         capabilityRegistry.isAvailable(Capability.CONNECTED_ACCOUNTS_GOOGLE),
                         capabilityRegistry.isAvailable(Capability.CONNECTED_ACCOUNTS_MICROSOFT)),
+                new ConnectedAccountModes(
+                        modeOf(ConnectedAccountProviders.GOOGLE),
+                        modeOf(ConnectedAccountProviders.MICROSOFT)),
                 new ConnectedCapture(
                         capabilityRegistry.isAvailable(Capability.CONNECTED_CAPTURE_GOOGLE),
                         capabilityRegistry.isAvailable(Capability.CONNECTED_CAPTURE_MICROSOFT)),
@@ -42,12 +49,17 @@ public class CapabilitiesController {
                 capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY));
     }
 
+    private String modeOf(String provider) {
+        return connectedAccountProviders.mode(provider).name().toLowerCase(Locale.ROOT);
+    }
+
     /**
      * Instance capability response.
      *
      * @param sso whether organization SSO is available
      * @param socialLogin available social-login providers
      * @param connectedAccounts available connected-account providers
+     * @param connectedAccountModes which OAuth client identity each connected-account provider uses
      * @param connectedCapture authorized capture providers
      * @param mailManaged whether instance-managed mail is enabled
      * @param businessCardScanning whether local OCR and durable card retention are ready
@@ -58,6 +70,7 @@ public class CapabilitiesController {
             boolean sso,
             SocialLogin socialLogin,
             ConnectedAccounts connectedAccounts,
+            ConnectedAccountModes connectedAccountModes,
             ConnectedCapture connectedCapture,
             boolean mailManaged,
             boolean businessCardScanning,
@@ -81,6 +94,17 @@ public class CapabilitiesController {
      * @param microsoft whether Microsoft connected accounts are available
      */
     public record ConnectedAccounts(boolean google, boolean microsoft) {
+    }
+
+    /**
+     * Which OAuth client identity each connected-account provider uses on this instance:
+     * {@code managed} for the Connex-owned installed-application identity, {@code custom} for
+     * operator-supplied credentials.
+     *
+     * @param google the Google connected-account credential mode
+     * @param microsoft the Microsoft connected-account credential mode
+     */
+    public record ConnectedAccountModes(String google, String microsoft) {
     }
 
     /**

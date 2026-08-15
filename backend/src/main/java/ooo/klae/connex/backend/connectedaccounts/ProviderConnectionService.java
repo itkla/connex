@@ -18,10 +18,8 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
-
 import ooo.klae.connex.backend.beans.ProviderConnection;
+import ooo.klae.connex.backend.connectedaccounts.ProviderAccountIdentityResolver.ProviderAccountIdentity;
 import ooo.klae.connex.backend.connectedaccounts.capture.ProviderCaptureConnectionStateService;
 import ooo.klae.connex.backend.dto.ProviderConnectionDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -65,9 +63,9 @@ public class ProviderConnectionService {
     private final SessionSecurityService sessionSecurityService;
     private final AuditService auditService;
     private final MailProperties mailProperties;
-    private final ObjectMapper objectMapper;
     private final TenantWorkScope tenantWorkScope;
     private final ProviderCaptureConnectionStateService captureConnectionStateService;
+    private final ProviderAccountIdentityResolver accountIdentityResolver;
 
     /** The current user's connections, masked for display. */
     public List<ProviderConnectionDto> getForCurrentUser() {
@@ -146,7 +144,7 @@ public class ProviderConnectionService {
         boolean created = tenantWorkScope.unrouted(
             () -> {
                 ProviderAccountIdentity identity =
-                    accountIdentityFromIdToken(provider, tokens.idToken());
+                    accountIdentityResolver.resolve(provider, tokens.idToken());
                 return credentialPersistence.storeConnection(
                     userId,
                     provider,
@@ -203,73 +201,13 @@ public class ProviderConnectionService {
     }
 
     private Map<String, String> exchangeForm(String provider, String code) {
-        ConnectedAccountProperties.Provider client = providers.client(provider);
         Map<String, String> form = new LinkedHashMap<>();
         form.put("grant_type", "authorization_code");
         form.put("code", code);
-        form.put("client_id", client.getClientId());
-        form.put("client_secret", client.getClientSecret());
+        form.put("client_id", providers.effectiveClientId(provider));
+        form.put("client_secret", providers.effectiveClientSecret(provider));
         form.put("redirect_uri", redirectUri(provider));
         return form;
-    }
-
-    /**
-     * Extracts the account email from the id token for display. The token was received directly
-     * from the provider's token endpoint over TLS in the same exchange, so decoding its payload
-     * without signature verification is acceptable for non-authorizing display metadata — it is
-     * never used to authenticate or link accounts.
-     */
-    private ProviderAccountIdentity accountIdentityFromIdToken(
-            String provider, String idToken) {
-        if (idToken == null || idToken.isBlank()) {
-            throw new ProviderTokenException(
-                "identity_missing", "Provider token response omitted the account identity");
-        }
-        try {
-            String[] parts = idToken.split("\\.", -1);
-            if (parts.length < 2) {
-                throw new ProviderTokenException(
-                    "identity_malformed", "Provider account identity is malformed");
-            }
-            JsonNode claims = objectMapper.readTree(
-                new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8));
-            String audience = textClaim(claims, "aud");
-            if (!providers.client(provider).getClientId().equals(audience)) {
-                throw new ProviderTokenException(
-                    "identity_audience_mismatch",
-                    "Provider account identity was issued for a different client");
-            }
-            String subject = textClaim(claims, "sub");
-            String issuer = textClaim(claims, "iss");
-            if (subject == null || issuer == null) {
-                throw new ProviderTokenException(
-                    "identity_missing", "Provider account identity is incomplete");
-            }
-            String accountId = provider + ":" + issuer + ":" + subject;
-            String email = null;
-            for (String claim : List.of("email", "preferred_username", "upn")) {
-                if (claims.hasNonNull(claim)
-                        && claims.get(claim).isString()
-                        && !claims.get(claim).asString().isBlank()) {
-                    email = claims.get(claim).asString();
-                    break;
-                }
-            }
-            return new ProviderAccountIdentity(accountId, email);
-        } catch (ProviderTokenException exception) {
-            throw exception;
-        } catch (RuntimeException e) {
-            throw new ProviderTokenException(
-                "identity_malformed", "Provider account identity is malformed", e);
-        }
-    }
-
-    private static String textClaim(JsonNode claims, String field) {
-        return claims.hasNonNull(field)
-                && claims.get(field).isString()
-                && !claims.get(field).asString().isBlank()
-            ? claims.get(field).asString()
-            : null;
     }
 
     private boolean consumePendingState(String provider, String state) {
@@ -307,6 +245,10 @@ public class ProviderConnectionService {
 
     private void requireEnabled(String provider) {
         requireSupported(provider);
+        if (providers.mode(provider) == ConnectedAccountMode.MANAGED) {
+            throw new BadRequestException(
+                "This instance uses the Connex-managed connection flow for " + provider);
+        }
         if (!providers.isEnabled(provider)) {
             throw new BadRequestException("This provider is not available on this instance");
         }
@@ -344,6 +286,4 @@ public class ProviderConnectionService {
         }
     }
 
-    private record ProviderAccountIdentity(String accountId, String email) {
-    }
 }
