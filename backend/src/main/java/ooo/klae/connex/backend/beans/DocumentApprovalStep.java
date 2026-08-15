@@ -10,7 +10,7 @@ import lombok.NoArgsConstructor;
  * One step of the chain frozen onto an approval request. The snapshot is taken when approval is
  * requested, so editing or deleting the policy afterwards cannot change an in-flight request.
  * Status is {@code pending} until the step opens, {@code active} while it collects decisions, then
- * {@code approved}, {@code rejected}, or {@code cancelled}.
+ * {@code approved}, {@code rejected}, {@code cancelled}, or {@code unsatisfiable}.
  */
 @Data
 @NoArgsConstructor

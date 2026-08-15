@@ -2,13 +2,19 @@ package ooo.klae.connex.backend.services;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
@@ -16,13 +22,23 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.ApprovalPolicy;
 import ooo.klae.connex.backend.beans.ApprovalPolicyStep;
 import ooo.klae.connex.backend.beans.ApprovalStepApprover;
+import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealDocument;
+import ooo.klae.connex.backend.beans.DocumentApproval;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.ApprovalImpactItemDto;
+import ooo.klae.connex.backend.dto.ApprovalPolicyImpactDto;
 import ooo.klae.connex.backend.dto.DealLineItemDto;
 import ooo.klae.connex.backend.dto.DocumentContent;
+import ooo.klae.connex.backend.exceptions.ApprovalImpactConfirmationRequiredException;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ApprovalPolicyMapper;
+import ooo.klae.connex.backend.mappers.DealDocumentMapper;
+import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.DocumentApprovalMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
@@ -42,8 +58,13 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 @RequiredArgsConstructor
 public class ApprovalPolicyService {
     private final ApprovalPolicyMapper policyMapper;
+    private final DocumentApprovalMapper approvalMapper;
+    private final DealMapper dealMapper;
+    private final DealDocumentMapper documentMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
+    private final ObjectProvider<DocumentApprovalService> documentApprovalService;
+    private final ApprovalPolicyChangeClassifier changeClassifier = new ApprovalPolicyChangeClassifier();
 
     private static final Set<String> AUDIT_FIELDS = Set.of(
         "name", "active", "documentType", "currency", "minTotal", "minDiscountPercent",
@@ -58,6 +79,7 @@ public class ApprovalPolicyService {
     @Transactional
     @RequirePermission(Permission.DOCUMENT_MANAGE)
     public ApprovalPolicy create(ApprovalPolicy policy) {
+        policy.getSteps().forEach(step -> step.setId(0));
         normalize(policy);
         validate(policy);
         policy.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
@@ -70,18 +92,37 @@ public class ApprovalPolicyService {
         return saved;
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DOCUMENT_MANAGE)
-    public ApprovalPolicy update(int id, ApprovalPolicy policy) {
+    public ApprovalPolicy update(int id, ApprovalPolicy policy, boolean confirmInvalidation) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = workspaceService.getCurrentUserId();
+        if (!workspaceService.lockedPermissionsFor(workspaceId, actorId)
+                .contains(Permission.DOCUMENT_MANAGE)) {
+            throw new ForbiddenException("You cannot manage document approval policies in this workspace");
+        }
+        ApprovalPolicy before = requireForUpdate(workspaceId, id);
         normalize(policy);
         validate(policy);
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        ApprovalPolicy before = require(workspaceId, id);
+        validateStepIdentities(before, policy);
         policy.setId(id);
         policy.setWorkspaceId(workspaceId);
+        PolicyChangeClass changeClass = classify(before, policy);
+        int pendingApprovalCount = changeClass == PolicyChangeClass.TIGHTEN
+            ? approvalMapper.countPendingByPolicyId(workspaceId, id) : 0;
+        if (pendingApprovalCount > 0 && !confirmInvalidation) {
+            throw new ApprovalImpactConfirmationRequiredException(pendingApprovalCount);
+        }
         policyMapper.update(policy);
         policyMapper.deleteStepsByPolicyId(workspaceId, id);
         insertSteps(workspaceId, id, policy.getSteps());
+        if (changeClass == PolicyChangeClass.TIGHTEN) {
+            String detail = "Approval policy \"" + before.getName() + "\" was tightened";
+            for (DocumentApproval approval : approvalMapper.findPendingByPolicyId(workspaceId, id)) {
+                documentApprovalService.getObject()
+                    .invalidateForPolicyChange(workspaceId, approval, detail);
+            }
+        }
         ApprovalPolicy after = require(workspaceId, id);
         auditService.record("approval_policy.update", "approval_policy", id, after.getName(),
             "Updated approval policy " + after.getName() + chainSummary(after),
@@ -89,6 +130,58 @@ public class ApprovalPolicyService {
         return after;
     }
 
+    /** Previews the pending approvals associated with a proposed policy edit without taking locks. */
+    @Transactional(readOnly = true)
+    @RequirePermission(Permission.DOCUMENT_MANAGE)
+    public ApprovalPolicyImpactDto impact(int id, ApprovalPolicy proposed) {
+        normalize(proposed);
+        validate(proposed);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        ApprovalPolicy before = require(workspaceId, id);
+        validateStepIdentities(before, proposed);
+        proposed.setId(id);
+        proposed.setWorkspaceId(workspaceId);
+        PolicyChangeClass changeClass = classify(before, proposed);
+        int pendingApprovalCount = approvalMapper.countPendingByPolicyId(workspaceId, id);
+        Map<Integer, String> requesterNames = new HashMap<>();
+        workspaceService.getMembers(workspaceId).forEach(member ->
+            requesterNames.put(member.getId(), member.getDisplayName()));
+        List<ApprovalImpactItemDto> affected = approvalMapper.findPendingByPolicyId(workspaceId, id).stream()
+            .limit(20)
+            .map(approval -> impactItem(workspaceId, approval, requesterNames))
+            .filter(Objects::nonNull)
+            .toList();
+        return new ApprovalPolicyImpactDto(changeClass.name(), pendingApprovalCount,
+            effectOf(changeClass, pendingApprovalCount), affected);
+    }
+
+    /** Classifies a normalized proposed policy against the persisted frozen policy shape. */
+    PolicyChangeClass classify(ApprovalPolicy before, ApprovalPolicy after) {
+        return changeClassifier.classify(before, after);
+    }
+
+    private ApprovalImpactItemDto impactItem(int workspaceId, DocumentApproval approval,
+            Map<Integer, String> requesterNames) {
+        Deal deal = dealMapper.getDealById(workspaceId, approval.getDealId());
+        DealDocument document = documentMapper.getById(workspaceId, approval.getDocumentId());
+        if (deal == null || document == null) {
+            return null;
+        }
+        return new ApprovalImpactItemDto(deal.getId(), deal.getName(), document.getId(),
+            document.getTitle(), document.getVersion(),
+            requesterNames.get(approval.getRequestedBy()), approval.getCreatedAt());
+    }
+
+    private String effectOf(PolicyChangeClass changeClass, int pendingApprovalCount) {
+        return switch (changeClass) {
+            case TIGHTEN -> pendingApprovalCount == 0
+                ? "no_pending_approvals" : "invalidate_pending_approvals";
+            case LOOSEN, RETARGET -> "frozen_approvals_unchanged";
+            case NONE -> "no_change";
+        };
+    }
+
+    @Transactional
     @RequirePermission(Permission.DOCUMENT_MANAGE)
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -101,6 +194,25 @@ public class ApprovalPolicyService {
     /** Active policies for a workspace, fetched once so callers can evaluate many documents. */
     public List<ApprovalPolicy> activePolicies(int workspaceId) {
         return policyMapper.getActive(workspaceId);
+    }
+
+    /** Locks and returns the current active policy snapshots before a document request is locked. */
+    List<ApprovalPolicy> activePoliciesForRequest(int workspaceId) {
+        List<ApprovalPolicy> current = new ArrayList<>(policyMapper.getAllForUpdate(workspaceId));
+        if (current.isEmpty()) {
+            return current;
+        }
+        Map<Integer, List<ApprovalPolicyStep>> stepsByPolicy =
+            policyMapper.getStepsByPolicyIdsForUpdate(workspaceId,
+                    current.stream().map(ApprovalPolicy::getId).toList()).stream()
+                .collect(Collectors.groupingBy(ApprovalPolicyStep::getPolicyId));
+        current.forEach(policy ->
+            policy.setSteps(stepsByPolicy.getOrDefault(policy.getId(), List.of())));
+        return current.stream()
+            .filter(ApprovalPolicy::isActive)
+            .sorted(Comparator.comparing(ApprovalPolicy::getName)
+                .thenComparingInt(ApprovalPolicy::getId))
+            .toList();
     }
 
     /**
@@ -192,6 +304,22 @@ public class ApprovalPolicyService {
             throw new BadRequestException("currency is required when minTotal is set");
         }
         validateChain(policy);
+    }
+
+    private void validateStepIdentities(ApprovalPolicy before, ApprovalPolicy requested) {
+        Set<Integer> persistedIds = before.getSteps().stream()
+            .map(ApprovalPolicyStep::getId)
+            .collect(Collectors.toSet());
+        Set<Integer> requestedIds = new HashSet<>();
+        for (ApprovalPolicyStep step : requested.getSteps()) {
+            int stepId = step.getId();
+            if (stepId < 0) {
+                throw new BadRequestException("Approval policy step id must not be negative");
+            }
+            if (stepId > 0 && (!persistedIds.contains(stepId) || !requestedIds.add(stepId))) {
+                throw new ConflictException("Approval policy steps changed; refresh and retry");
+            }
+        }
     }
 
     /**
@@ -315,6 +443,15 @@ public class ApprovalPolicyService {
         ApprovalPolicy policy = policyMapper.getById(workspaceId, id);
         if (policy == null) throw new ResourceNotFoundException("Approval policy not found with id: " + id);
         policy.setSteps(stepsFor(workspaceId, id));
+        return policy;
+    }
+
+    private ApprovalPolicy requireForUpdate(int workspaceId, int id) {
+        ApprovalPolicy policy = policyMapper.getByIdForUpdate(workspaceId, id);
+        if (policy == null) {
+            throw new ResourceNotFoundException("Approval policy not found with id: " + id);
+        }
+        policy.setSteps(policyMapper.getStepsByPolicyIdsForUpdate(workspaceId, List.of(id)));
         return policy;
     }
 }

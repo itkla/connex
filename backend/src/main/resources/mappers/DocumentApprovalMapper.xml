@@ -10,6 +10,8 @@
     <result property="documentId"         column="document_id"/>
     <result property="policyId"           column="policy_id"/>
     <result property="status"             column="status"/>
+    <result property="outcomeReason"      column="outcome_reason"/>
+    <result property="outcomeDetail"      column="outcome_detail"/>
     <result property="mode"               column="mode"/>
     <result property="separationOfDuties" column="separation_of_duties"/>
     <result property="requestedBy"        column="requested_by"/>
@@ -54,7 +56,8 @@
 
   <sql id="cols">
     id, workspace_id, deal_id, document_id, policy_id, status, mode, separation_of_duties,
-    requested_by, request_comment, decided_by, decision_comment, decided_at, created_at, updated_at
+    outcome_reason, outcome_detail, requested_by, request_comment, decided_by, decision_comment,
+    decided_at, created_at, updated_at
   </sql>
 
   <select id="getByDealId" resultMap="DocumentApprovalResult">
@@ -81,6 +84,31 @@
     LIMIT 1
   </select>
 
+  <select id="findPendingByPolicyId" resultMap="DocumentApprovalResult">
+    SELECT <include refid="cols"/> FROM document_approval
+    WHERE workspace_id = #{workspaceId} AND policy_id = #{policyId} AND status = 'pending'
+    ORDER BY document_id, id
+  </select>
+
+  <select id="findPendingForWorkspace" resultMap="DocumentApprovalResult">
+    SELECT <include refid="cols"/> FROM document_approval
+    WHERE workspace_id = #{workspaceId} AND status = 'pending'
+    ORDER BY id
+    LIMIT #{limit}
+  </select>
+
+  <select id="findPendingForWorkspaceAfter" resultMap="DocumentApprovalResult">
+    SELECT <include refid="cols"/> FROM document_approval
+    WHERE workspace_id = #{workspaceId} AND status = 'pending' AND id &gt; #{afterId}
+    ORDER BY id
+    LIMIT #{limit}
+  </select>
+
+  <select id="countPendingByPolicyId" resultType="int">
+    SELECT COUNT(*) FROM document_approval
+    WHERE workspace_id = #{workspaceId} AND policy_id = #{policyId} AND status = 'pending'
+  </select>
+
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO document_approval (
       workspace_id, deal_id, document_id, policy_id, status, mode, separation_of_duties,
@@ -96,6 +124,8 @@
       status = #{status},
       decided_by = #{decidedBy},
       decision_comment = #{decisionComment},
+      outcome_reason = #{outcomeReason},
+      outcome_detail = #{outcomeDetail},
       decided_at = CURRENT_TIMESTAMP
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'pending'
   </update>
@@ -147,7 +177,7 @@
   <update id="updateStepStatus">
     UPDATE document_approval_step SET
       status = #{status},
-      decided_at = CASE WHEN #{status} IN ('approved', 'rejected', 'cancelled')
+      decided_at = CASE WHEN #{status} IN ('approved', 'rejected', 'cancelled', 'unsatisfiable')
                         THEN CURRENT_TIMESTAMP ELSE NULL END
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = #{expectedStatus}
   </update>

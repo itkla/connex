@@ -124,6 +124,12 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", ex.getMessage()));
     }
 
+    @ExceptionHandler(ApprovalImpactConfirmationRequiredException.class)
+    public ResponseEntity<Map<String, String>> approvalImpactConfirmationRequired(
+            ApprovalImpactConfirmationRequiredException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", ex.getMessage()));
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, String>> validation(MethodArgumentNotValidException ex) {
         Map<String, String> errors = new LinkedHashMap<>();

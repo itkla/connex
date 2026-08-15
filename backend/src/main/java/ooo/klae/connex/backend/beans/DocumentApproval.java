@@ -21,6 +21,8 @@ public class DocumentApproval {
     private int documentId;
     private Integer policyId;
     private String status;
+    private String outcomeReason;
+    private String outcomeDetail;
     private String mode;
     private String separationOfDuties;
     private Integer requestedBy;

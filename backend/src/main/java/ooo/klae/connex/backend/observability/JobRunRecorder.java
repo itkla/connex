@@ -36,6 +36,7 @@ public class JobRunRecorder {
     public static final String WORKFLOW_RUNTIME = "workflow_runtime";
     public static final String RELATIONSHIP_SIGNAL_RECONCILIATION =
         "relationship_signal_reconciliation";
+    public static final String APPROVAL_RECONCILIATION = "approval-reconciliation";
 
     private static final Logger log = LoggerFactory.getLogger(JobRunRecorder.class);
     /**
@@ -61,7 +62,8 @@ public class JobRunRecorder {
         PROVIDER_CAPTURE,
         OBJECT_DELETION_RETRY,
         WORKFLOW_RUNTIME,
-        RELATIONSHIP_SIGNAL_RECONCILIATION);
+        RELATIONSHIP_SIGNAL_RECONCILIATION,
+        APPROVAL_RECONCILIATION);
     private static final Set<String> METADATA_KEYS = Set.of(
         "phase",
         "purgedCount",

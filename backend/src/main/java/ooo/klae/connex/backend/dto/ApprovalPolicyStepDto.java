@@ -17,7 +17,8 @@ import ooo.klae.connex.backend.beans.ApprovalPolicyStep;
 
 /**
  * One step of a policy's approver chain. Step order follows the position in the submitted list, so
- * clients reorder by reordering the array rather than by sending an index.
+ * clients reorder by reordering the array rather than by sending an index. Existing steps retain
+ * their returned {@code id}; an omitted ID denotes a new step.
  */
 @Data
 @NoArgsConstructor
@@ -50,6 +51,7 @@ public class ApprovalPolicyStepDto {
 
     public ApprovalPolicyStep toBean() {
         ApprovalPolicyStep step = new ApprovalPolicyStep();
+        if (id != null) step.setId(id);
         step.setName(name == null || name.isBlank() ? null : name.trim());
         step.setRequiredCount(requiredCount);
         step.setApprovers(approvers == null ? List.of()
