@@ -2,6 +2,8 @@
 
 Connected capture is a read-only, polling-based intake path for a user's primary Google or Microsoft calendar and Inbox/Sent mail. It is an internal preview capability until the release gates in [#868](https://github.com/itkla/connex/issues/868) authorize broader use.
 
+How the underlying account connection is authorized — the Connex-managed OAuth identity, the custom/bring-your-own alternative, the local-helper pairing flow, its threat model, and the vendor-disconnection guarantee — is documented separately in [CONNECTED_ACCOUNTS_MANAGED_OAUTH.md](CONNECTED_ACCOUNTS_MANAGED_OAUTH.md).
+
 ## Authorization gates
 
 Connection code, provider ingestion, and public OAuth distribution are separate decisions.

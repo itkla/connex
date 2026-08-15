@@ -4237,6 +4237,7 @@ export type InstanceCapabilities = {
     sso: boolean;
     socialLogin: { google: boolean; microsoft: boolean };
     connectedAccounts: { google: boolean; microsoft: boolean };
+    connectedAccountModes?: ConnectedAccountModes;
     connectedCapture: { google: boolean; microsoft: boolean };
     mailManaged: boolean;
     businessCardScanning: boolean;
@@ -4245,6 +4246,41 @@ export type InstanceCapabilities = {
 };
 
 export type ConnectedAccountProvider = 'google' | 'microsoft';
+
+/**
+ * Which OAuth client identity this instance uses for a connected-account provider: the Connex-owned
+ * verified application (`managed`) or credentials the operator created themselves (`custom`).
+ */
+export type ConnectedAccountMode = 'custom' | 'managed';
+
+/** Per-provider credential mode; absent on instances that predate Connex-managed OAuth. */
+export type ConnectedAccountModes = {
+    google: ConnectedAccountMode;
+    microsoft: ConnectedAccountMode;
+};
+
+/** A pairing handle the browser shows so the user's local helper process can claim the flow. */
+export type ManagedPairingSession = {
+    pairingCode: string;
+    expiresAt: string;
+    instanceBaseUrl: string;
+    helperCommand: string;
+};
+
+export type ManagedPairingStatusValue =
+    | 'none'
+    | 'pending'
+    | 'prepared'
+    | 'exchanging'
+    | 'completed'
+    | 'failed';
+
+/** Server-side progress of one managed pairing, polled while the local helper drives the flow. */
+export type ManagedPairingStatus = {
+    status: ManagedPairingStatusValue;
+    errorCode: string | null;
+    expiresAt: string | null;
+};
 
 export type ProviderConnectionStatus =
     | 'connected'

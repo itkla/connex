@@ -25,8 +25,11 @@ class ProviderCredentialServiceTest {
             mock(ProviderConnectionMapper.class);
         ConnectedAccountProperties accountProperties =
             new ConnectedAccountProperties();
-        accountProperties.getMicrosoft().setClientId("client-id");
-        accountProperties.getMicrosoft().setClientSecret("client-secret");
+        accountProperties.getMicrosoft().setMode(ConnectedAccountMode.MANAGED);
+        accountProperties.getMicrosoft().setClientId("custom-client-id");
+        accountProperties.getMicrosoft().setClientSecret("custom-client-secret");
+        accountProperties.getManaged().getMicrosoft().setClientId("managed-client-id");
+        accountProperties.getManaged().getMicrosoft().setClientSecret("managed-client-secret");
         ConnectedAccountProviders providers =
             new ConnectedAccountProviders(accountProperties);
         UserProviderSecretCipher cipher = mock(UserProviderSecretCipher.class);
@@ -76,8 +79,8 @@ class ProviderCredentialServiceTest {
             Map.of(
                 "grant_type", "refresh_token",
                 "refresh_token", "old-refresh",
-                "client_id", "client-id",
-                "client_secret", "client-secret",
+                "client_id", "managed-client-id",
+                "client_secret", "managed-client-secret",
                 "scope", providers.scopes("microsoft")));
         verify(persistence).completeRefresh(
             eq(31), eq(4L), anyString(), eq(rotated), eq("old-refresh"));

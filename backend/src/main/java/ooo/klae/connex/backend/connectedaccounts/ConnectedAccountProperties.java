@@ -21,6 +21,7 @@ public class ConnectedAccountProperties {
 
     private Provider google = new Provider();
     private Provider microsoft = new Provider();
+    private Managed managed = new Managed();
 
     /**
      * One provider's instance-wide OAuth client for connected accounts. {@code enabled} gates
@@ -30,6 +31,22 @@ public class ConnectedAccountProperties {
     @ToString(exclude = "clientSecret")
     public static class Provider {
         private boolean enabled = false;
+        private ConnectedAccountMode mode = ConnectedAccountMode.CUSTOM;
+        private String clientId;
+        private String clientSecret;
+    }
+
+    /** Connex-managed provider application identities embedded through build configuration. */
+    @Data
+    public static class Managed {
+        private ManagedClient google = new ManagedClient();
+        private ManagedClient microsoft = new ManagedClient();
+    }
+
+    /** One Connex-managed installed-application client identity. */
+    @Data
+    @ToString(exclude = "clientSecret")
+    public static class ManagedClient {
         private String clientId;
         private String clientSecret;
     }

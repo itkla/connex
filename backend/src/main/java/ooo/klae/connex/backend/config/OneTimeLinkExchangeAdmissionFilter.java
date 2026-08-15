@@ -22,7 +22,9 @@ public class OneTimeLinkExchangeAdmissionFilter extends OncePerRequestFilter {
         "/api/auth/verify-email/exchange",
         "/api/auth/email-change/exchange",
         "/api/invites/exchange",
-        "/api/invite-links/exchange");
+        "/api/invite-links/exchange",
+        "/api/account/connections/native/prepare",
+        "/api/account/connections/native/complete");
 
     private final LoginRateLimiter rateLimiter;
     private final ClientIpResolver clientIpResolver;

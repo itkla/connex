@@ -15,7 +15,9 @@ import {
 import { useTranslations } from 'next-intl';
 
 import CaptureHealth from '@/app/components/account/connected-capture/CaptureHealth';
+import { MANAGED_OAUTH_DOC_URL } from '@/app/lib/managedConnect';
 import type {
+    ConnectedAccountMode,
     ConnectedAccountProvider,
     ProviderCaptureOverview,
     ProviderConnection,
@@ -50,10 +52,18 @@ function captureState(overview: ProviderCaptureOverview): 'ready' | 'configured'
 
 /**
  * Shows OAuth custody and capture readiness as separate states for one provider.
+ *
+ * The credential mode is named on the card because the two modes have different operator
+ * obligations: a Connex-managed provider uses the Connex-owned verified OAuth application, while a
+ * custom provider uses credentials this installation's operator created. When managed mode is
+ * selected but its application is not usable in this build, the card says so instead of offering a
+ * connect action that cannot succeed.
  */
 export default function CaptureProviderCard({
     provider,
     providerIcon,
+    mode,
+    managedUnavailable,
     connection,
     connectionEnabled,
     captureEnabled,
@@ -74,6 +84,8 @@ export default function CaptureProviderCard({
 }: {
     provider: ConnectedAccountProvider;
     providerIcon: ReactNode;
+    mode: ConnectedAccountMode;
+    managedUnavailable: boolean;
     connection: ProviderConnection | null;
     connectionEnabled: boolean;
     captureEnabled: boolean;
@@ -119,6 +131,7 @@ export default function CaptureProviderCard({
                                 {t(`status_${connection.status}`)}
                             </span>
                         ) : null}
+                        <Badge variant="outline">{t(`mode_${mode}`)}</Badge>
                     </div>
                     <p className="mt-0.5 truncate text-xs text-muted-foreground">
                         {connection
@@ -151,7 +164,7 @@ export default function CaptureProviderCard({
                                     )}
                                 </DropdownMenuItem>
                             ) : null}
-                            {connectionEnabled ? (
+                            {connectionEnabled && !managedUnavailable ? (
                                 <DropdownMenuItem onSelect={onConnect}>
                                     <ArrowPathIcon className="size-4" />
                                     {t('reconnect')}
@@ -181,13 +194,32 @@ export default function CaptureProviderCard({
                         variant="outline"
                         size="sm"
                         onClick={onConnect}
-                        disabled={!connectionEnabled || busy}
+                        disabled={!connectionEnabled || busy || managedUnavailable}
                     >
                         <LinkIcon className="size-4" />
                         {t('connect')}
                     </Button>
                 )}
             </div>
+
+            {managedUnavailable ? (
+                <div className="border-t border-border bg-muted/20 px-4 py-4 sm:px-5">
+                    <h3 className="text-sm font-medium text-foreground">
+                        {t('managedUnavailableTitle')}
+                    </h3>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                        {t('managedUnavailableBody', { provider: t(`provider_${provider}`) })}
+                    </p>
+                    <a
+                        className="mt-2 inline-block text-xs text-primary underline underline-offset-4"
+                        href={MANAGED_OAUTH_DOC_URL}
+                        target="_blank"
+                        rel="noreferrer"
+                    >
+                        {t('managedUnavailableLink')}
+                    </a>
+                </div>
+            ) : null}
 
             {captureEnabled ? (
                 <div className="border-t border-border bg-muted/20 px-4 py-4 sm:px-5">

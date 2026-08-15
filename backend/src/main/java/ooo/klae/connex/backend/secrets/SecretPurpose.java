@@ -13,7 +13,10 @@ public enum SecretPurpose {
     ORG_SSO_SAML_SP_PRIVATE_KEY("organization", "org.sso.saml_sp_private_key"),
     ORG_AI_PROVIDER_CREDENTIAL("organization", "org.ai.provider_credential"),
     USER_PROVIDER_GOOGLE_TOKEN("user", "user.provider.google_token"),
-    USER_PROVIDER_MICROSOFT_TOKEN("user", "user.provider.microsoft_token");
+    USER_PROVIDER_MICROSOFT_TOKEN("user", "user.provider.microsoft_token"),
+    USER_PROVIDER_PKCE_VERIFIER("user", "user.provider.pkce_verifier"),
+    USER_PROVIDER_MICROSOFT_PKCE_VERIFIER(
+        "user", "user.provider.microsoft_pkce_verifier");
 
     private final String scopeType;
     private final String value;

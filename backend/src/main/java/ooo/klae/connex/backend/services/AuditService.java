@@ -70,7 +70,9 @@ public class AuditService {
             "org.sso.saml_sp_private_key",
             "org.ai.provider_credential",
             "user.provider.google_token",
-            "user.provider.microsoft_token");
+            "user.provider.microsoft_token",
+            "user.provider.pkce_verifier",
+            "user.provider.microsoft_pkce_verifier");
     private static final Set<String> SECRET_ACTIONS = Set.of(
             "secret_store.secret.use",
             "secret_store.secret.use_failed",

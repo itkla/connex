@@ -7,6 +7,7 @@ import { ArrowPathIcon } from "@heroicons/react/24/outline";
 
 import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
 import WorkspaceUnavailableRetry from "@/app/components/WorkspaceUnavailableRetry";
+import ManagedConnectDialog from "@/app/components/account/connected-accounts/ManagedConnectDialog";
 import CapturePolicyDialog from "@/app/components/account/connected-capture/CapturePolicyDialog";
 import CaptureProviderCard from "@/app/components/account/connected-capture/CaptureProviderCard";
 import CapturePurgeDialog, {
@@ -39,6 +40,10 @@ import {
     parseCaptureRouteState,
     providerCaptureEnabled,
 } from "@/app/lib/connectedCapture";
+import {
+    connectedAccountMode,
+    managedIdentityUnavailable,
+} from "@/app/lib/managedConnect";
 import { checkPermission, type PermissionsStatus } from "@/app/lib/permissionState";
 import type { CapabilityAvailability } from "@/app/lib/capabilityAvailability";
 import { toastError, toastSuccess } from "@/app/lib/toast";
@@ -189,6 +194,7 @@ export default function ConnectionsPanel({
     const [reviewsReloadKey, setReviewsReloadKey] = useState(0);
     const [busyProvider, setBusyProvider] = useState<ConnectedAccountProvider | null>(null);
     const [lifecycleTarget, setLifecycleTarget] = useState<LifecycleTarget | null>(null);
+    const [managedTarget, setManagedTarget] = useState<ConnectedAccountProvider | null>(null);
     const callbackAnnounced = useRef(false);
 
     const replaceRouteState = useCallback((next: Partial<typeof routeState>) => {
@@ -344,7 +350,16 @@ export default function ConnectionsPanel({
         }
     };
 
+    const handleManagedConnected = useCallback(() => {
+        setConnectionsReloadKey((current) => current + 1);
+        setCaptureReloadKey((current) => current + 1);
+    }, []);
+
     const connect = async (provider: ConnectedAccountProvider) => {
+        if (connectedAccountMode(capabilities, provider) === "managed") {
+            setManagedTarget(provider);
+            return;
+        }
         setBusyProvider(provider);
         try {
             const { url } = await beginProviderConnection(provider);
@@ -465,6 +480,7 @@ export default function ConnectionsPanel({
         (provider) =>
             connectionEnabled(provider)
             || providerCaptureEnabled(capabilities, provider)
+            || connectedAccountMode(capabilities, provider) === "managed"
             || connectionOf(provider) != null,
     );
 
@@ -527,6 +543,8 @@ export default function ConnectionsPanel({
                                 key={provider}
                                 provider={provider}
                                 providerIcon={provider === "google" ? <GoogleMark /> : <MicrosoftMark />}
+                                mode={connectedAccountMode(capabilities, provider)}
+                                managedUnavailable={managedIdentityUnavailable(capabilities, provider)}
                                 connection={connection}
                                 connectionEnabled={
                                     connectionEnabled(provider) || captureEnabled
@@ -650,6 +668,19 @@ export default function ConnectionsPanel({
                     onDecide={decideReview}
                     onApprove={approveReview}
                     onPreflight={(request) => preflightPersonDuplicates(request)}
+                />
+            ) : null}
+
+            {managedTarget ? (
+                <ManagedConnectDialog
+                    key={managedTarget}
+                    provider={managedTarget}
+                    providerName={t(`provider_${managedTarget}`)}
+                    open
+                    onOpenChange={(open) => {
+                        if (!open) setManagedTarget(null);
+                    }}
+                    onConnected={handleManagedConnected}
                 />
             ) : null}
 

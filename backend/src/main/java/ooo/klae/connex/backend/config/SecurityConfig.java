@@ -149,8 +149,9 @@ public class SecurityConfig {
      * <p>CSRF protection is unconditional and has no configuration switch. The token is
      * session-stored in the default repository and echoed by the SPA in a header it fetches from
      * {@code GET /api/auth/csrf}; a plain (non-XOR) handler keeps that token stable so the client
-     * can cache it. Only the pre-session auth handshake, the token-authenticated delivery routes
-     * and, when SSO is enabled, the SAML assertion consumer are exempt.
+     * can cache it. Only the pre-session auth handshake, the bearer-grade native connection
+     * handoff, the token-authenticated delivery routes and, when SSO is enabled, the SAML
+     * assertion consumer are exempt.
      *
      * @return the configured filter chain
      */
@@ -193,6 +194,8 @@ public class SecurityConfig {
                     "/api/auth/login", "/api/auth/register",
                     "/api/auth/forgot-password",
                     "/api/auth/webauthn/authenticate/**",
+                    "/api/account/connections/native/prepare",
+                    "/api/account/connections/native/complete",
                     "/api/delivery/unsubscribe/**",
                     "/api/delivery/webhooks/**");
             if (ssoEnabled) {
@@ -214,6 +217,12 @@ public class SecurityConfig {
                     .requestMatchers("/api/auth/webauthn/**").authenticated()
                     .requestMatchers(HttpMethod.POST, "/api/invites/exchange").permitAll()
                     .requestMatchers(HttpMethod.POST, "/api/invite-links/exchange").permitAll()
+                    .requestMatchers(
+                        HttpMethod.POST,
+                        "/api/account/connections/native/prepare").permitAll()
+                    .requestMatchers(
+                        HttpMethod.POST,
+                        "/api/account/connections/native/complete").permitAll()
                     .requestMatchers("/api/auth/**").permitAll();
                 if (oauthEnabled) {
                     auth.requestMatchers("/api/oauth2/authorization/**").permitAll()
