@@ -6,6 +6,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.UUID;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -66,7 +67,8 @@ abstract class AbstractDocumentDeliveryServiceTest extends AbstractServiceTest {
         request.setExpiresAt(LocalDateTime.now().plusDays(7));
         request.setMessage("Please review this document");
         request.setRecipients(List.of(recipients));
-        return deliveryService.send(fixture.deal().getId(), fixture.document().id(), request);
+        return deliveryService.send(
+            fixture.deal().getId(), fixture.document().id(), request, UUID.randomUUID().toString());
     }
 
     protected SendDeliveryRecipientRequest signer(String email, int order) {

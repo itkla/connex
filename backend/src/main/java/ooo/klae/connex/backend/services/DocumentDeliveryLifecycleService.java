@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -16,18 +17,21 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.RequiredArgsConstructor;
 import tools.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealDocument;
+import ooo.klae.connex.backend.beans.DocumentApproval;
 import ooo.klae.connex.backend.beans.DocumentDelivery;
 import ooo.klae.connex.backend.beans.DocumentDeliveryArtifact;
 import ooo.klae.connex.backend.beans.DocumentDeliveryEvent;
 import ooo.klae.connex.backend.beans.DocumentDeliveryRecipient;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.mappers.DealDocumentMapper;
+import ooo.klae.connex.backend.mappers.DocumentApprovalMapper;
 import ooo.klae.connex.backend.mappers.DocumentDeliveryMapper;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.signature.InAppAcceptanceProvider;
@@ -45,6 +49,7 @@ public class DocumentDeliveryLifecycleService {
 
     private final DocumentDeliveryMapper deliveryMapper;
     private final DealDocumentMapper documentMapper;
+    private final DocumentApprovalMapper approvalMapper;
     private final ManagedObjectService managedObjectService;
     private final ActivityService activityService;
     private final AutomationExecutor automationExecutor;
@@ -61,9 +66,9 @@ public class DocumentDeliveryLifecycleService {
             Deal deal,
             DealDocument document,
             DocumentDelivery delivery,
-            LocalDateTime completedAt) {
+            LocalDateTime triggeringEventAt) {
         return complete(
-            workspaceId, deal, document, delivery, completedAt, Optional.empty());
+            workspaceId, deal, document, delivery, triggeringEventAt, Optional.empty());
     }
 
     /** Completes an envelope with provider-returned signed bytes when an adapter supplies them. */
@@ -73,29 +78,42 @@ public class DocumentDeliveryLifecycleService {
             Deal deal,
             DealDocument document,
             DocumentDelivery delivery,
-            LocalDateTime completedAt,
+            LocalDateTime triggeringEventAt,
             Optional<ProviderSignedArtifact> providerArtifact) {
+        Objects.requireNonNull(triggeringEventAt, "triggeringEventAt");
         Objects.requireNonNull(providerArtifact, "providerArtifact");
         DocumentDeliveryArtifact signedArtifact = deliveryMapper.getArtifactByKind(
             workspaceId, delivery.getId(), "signed_document");
         if (providerArtifact.isPresent()) {
             signedArtifact = stageProviderArtifact(
-                workspaceId, delivery.getId(), signedArtifact, providerArtifact.orElseThrow());
+                workspaceId,
+                delivery.getId(),
+                signedArtifact,
+                providerArtifact.orElseThrow());
         }
         if (deliveryMapper.countIncompleteSigners(workspaceId, delivery.getId()) != 0) {
             return false;
         }
+        List<DocumentDeliveryRecipient> decidedRecipients =
+            deliveryMapper.getRecipients(workspaceId, delivery.getId());
+        LocalDateTime completedAt = deterministicCompletionTime(decidedRecipients);
         if (!InAppAcceptanceProvider.KEY.equals(delivery.getProvider())
                 && signedArtifact == null) {
             return false;
         }
-        if (deliveryMapper.completeDelivery(workspaceId, delivery.getId(), completedAt) != 1) {
+        int completed = "expired".equals(delivery.getStatus())
+            ? deliveryMapper.completeExpiredDelivery(workspaceId, delivery.getId(), completedAt)
+            : deliveryMapper.completeDelivery(workspaceId, delivery.getId(), completedAt);
+        if (completed != 1) {
             return "completed".equals(delivery.getStatus());
         }
         deliveryMapper.completeViewersAndInvalidateTokens(workspaceId, delivery.getId());
         List<DocumentDeliveryRecipient> recipients =
             deliveryMapper.getRecipients(workspaceId, delivery.getId());
         if (signedArtifact == null) {
+            if (document.getContent() == null) {
+                throw new IllegalStateException("Completed document has no frozen content");
+            }
             signedArtifact = persistArtifact(
                 workspaceId,
                 delivery.getId(),
@@ -103,10 +121,23 @@ public class DocumentDeliveryLifecycleService {
                 "application/json",
                 document.getContent().getBytes(StandardCharsets.UTF_8));
         }
-        String documentSha = signedArtifact.getSha256();
-        byte[] certificate = certificateBytes(delivery, recipients, completedAt, documentSha);
+        DocumentApproval approval = approvalMapper.getByDocumentId(
+            workspaceId, document.getId()).stream().findFirst().orElse(null);
+        byte[] certificate = certificateBytes(
+            workspaceId,
+            deal,
+            document,
+            approval,
+            delivery,
+            recipients,
+            completedAt,
+            signedArtifact.getSha256());
         persistArtifact(
-            workspaceId, delivery.getId(), "certificate", "application/json", certificate);
+            workspaceId,
+            delivery.getId(),
+            "certificate",
+            "application/json",
+            certificate);
         if (documentMapper.updateStatus(workspaceId, document.getId(), "signed") != 1) {
             throw new IllegalStateException("Completed document could not be marked signed");
         }
@@ -135,13 +166,24 @@ public class DocumentDeliveryLifecycleService {
             String source,
             String externalEventId,
             LocalDateTime occurredAt) {
-        if (deliveryMapper.terminateDelivery(
-                workspaceId, delivery.getId(), status, occurredAt, reason) != 1) {
+        boolean replacingExpiry = "expired".equals(delivery.getStatus())
+            && !"expired".equals(status);
+        int terminated = replacingExpiry
+            ? deliveryMapper.replaceExpiredTermination(
+                workspaceId, delivery.getId(), status, occurredAt, reason)
+            : deliveryMapper.terminateDelivery(
+                workspaceId, delivery.getId(), status, occurredAt, reason);
+        if (terminated != 1) {
             return false;
         }
         Integer replayRecipientId = "declined".equals(status) ? decidingRecipientId : null;
-        deliveryMapper.closeOutstandingRecipients(
-            workspaceId, delivery.getId(), status, replayRecipientId);
+        if (replacingExpiry) {
+            deliveryMapper.replaceExpiredRecipients(
+                workspaceId, delivery.getId(), status, replayRecipientId);
+        } else {
+            deliveryMapper.closeOutstandingRecipients(
+                workspaceId, delivery.getId(), status, replayRecipientId);
+        }
         deliveryMapper.invalidateTokensExcept(
             workspaceId, delivery.getId(), replayRecipientId);
         appendEvent(
@@ -260,31 +302,99 @@ public class DocumentDeliveryLifecycleService {
         return artifact;
     }
 
-    private byte[] certificateBytes(
+    byte[] certificateBytes(
+            int workspaceId,
+            Deal deal,
+            DealDocument document,
+            DocumentApproval approval,
             DocumentDelivery delivery,
             List<DocumentDeliveryRecipient> recipients,
             LocalDateTime completedAt,
             String documentSha) {
         CompletionCertificate certificate = new CompletionCertificate(
+            workspaceId,
+            deal.getId(),
+            document.getId(),
+            document.getVersion(),
+            document.getType(),
+            approval == null ? null : approval.getId(),
+            approvalOutcome(approval),
+            approvalPolicyId(approval),
             delivery.getProvider(),
             delivery.getProviderEnvelopeId(),
             delivery.getId(),
             delivery.getSentAt(),
             completedAt,
             documentSha,
-            recipients.stream().map(recipient -> new CertificateRecipient(
-                recipient.getId(),
-                recipient.getName(),
-                recipient.getEmail(),
-                recipient.getRole(),
-                recipient.getStatus(),
-                recipient.getFirstViewedAt(),
-                recipient.getDecidedAt(),
-                recipient.getTypedName(),
-                recipient.getDeclineReason(),
-                recipient.getEvidenceIpHash(),
-                recipient.getEvidenceAgentHash())).toList());
+            recipients.stream()
+                .sorted(Comparator.comparingInt(DocumentDeliveryRecipient::getRecipientOrder)
+                    .thenComparingInt(DocumentDeliveryRecipient::getId))
+                .map(recipient -> new CertificateRecipient(
+                    recipient.getId(),
+                    recipient.getName(),
+                    recipient.getEmail(),
+                    recipient.getRole(),
+                    recipient.getStatus(),
+                    recipient.getFirstViewedAt(),
+                    recipient.getDecidedAt(),
+                    recipient.getTypedName(),
+                    recipient.getDeclineReason(),
+                    recipient.getEvidenceIpHash(),
+                    recipient.getEvidenceAgentHash()))
+                .toList());
         return objectMapper.writeValueAsBytes(certificate);
+    }
+
+    static LocalDateTime deterministicCompletionTime(
+            List<DocumentDeliveryRecipient> recipients) {
+        return recipients.stream()
+            .filter(recipient -> "signer".equals(recipient.getRole()))
+            .map(recipient -> {
+                if (!"completed".equals(recipient.getStatus())
+                        || recipient.getDecidedAt() == null) {
+                    throw new IllegalStateException(
+                        "Completed signer decision time is unavailable");
+                }
+                return recipient.getDecidedAt();
+            })
+            .max(LocalDateTime::compareTo)
+            .orElseThrow(() -> new IllegalStateException(
+                "Completed delivery has no signer decisions"));
+    }
+
+    private static String approvalOutcome(DocumentApproval approval) {
+        if (approval == null) {
+            return "no_approval_required";
+        }
+        return switch (approval.getStatus()) {
+            case "approved", "rejected", "cancelled" -> approval.getStatus();
+            default -> throw new IllegalStateException(
+                "Document approval is not terminal at delivery completion");
+        };
+    }
+
+    private static Integer approvalPolicyId(DocumentApproval approval) {
+        if (approval == null) {
+            return null;
+        }
+        String policyBinding = approval.getPolicyBinding();
+        if (policyBinding == null) {
+            throw new IllegalStateException("Document approval policy binding is unavailable");
+        }
+        return switch (policyBinding) {
+            case "none" -> null;
+            case "applied" -> {
+                if (approval.getPolicyIdSnapshot() == null) {
+                    throw new IllegalStateException(
+                        "Applied approval policy snapshot is unavailable");
+                }
+                yield approval.getPolicyIdSnapshot();
+            }
+            case "unknown_legacy" -> throw new IllegalStateException(
+                "Legacy approval policy binding is unavailable for certification");
+            default -> throw new IllegalStateException(
+                "Document approval policy binding is invalid");
+        };
     }
 
     private void createActivity(
@@ -397,7 +507,16 @@ public class DocumentDeliveryLifecycleService {
         }
     }
 
+    @JsonInclude(JsonInclude.Include.ALWAYS)
     private record CompletionCertificate(
+            int workspaceId,
+            int dealId,
+            int documentId,
+            int documentVersion,
+            String documentType,
+            Integer approvalRequestId,
+            String approvalOutcome,
+            Integer approvalPolicyId,
             String provider,
             String providerEnvelopeId,
             int deliveryId,
@@ -407,6 +526,7 @@ public class DocumentDeliveryLifecycleService {
             List<CertificateRecipient> recipients) {
     }
 
+    @JsonInclude(JsonInclude.Include.ALWAYS)
     private record CertificateRecipient(
             int recipientId,
             String name,

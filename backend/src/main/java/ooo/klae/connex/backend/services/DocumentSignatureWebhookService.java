@@ -1,7 +1,6 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -18,13 +17,17 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealDocument;
 import ooo.klae.connex.backend.beans.DocumentDelivery;
 import ooo.klae.connex.backend.beans.DocumentDeliveryRecipient;
+import ooo.klae.connex.backend.capability.Capability;
+import ooo.klae.connex.backend.capability.CapabilityRegistry;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.mappers.DealDocumentMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.DocumentDeliveryMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.signature.DocumentSignatureProviderRouter;
 import ooo.klae.connex.backend.signature.ProviderEvent;
+import ooo.klae.connex.backend.signature.SignatureProperties;
 
 /** Authenticates, tenant-routes, and idempotently applies provider signature callbacks. */
 @Service
@@ -34,6 +37,8 @@ public class DocumentSignatureWebhookService {
         Set.of("completed", "declined", "expired", "voided");
 
     private final DocumentSignatureProviderRouter providerRouter;
+    private final SignatureProperties signatureProperties;
+    private final CapabilityRegistry capabilityRegistry;
     private final DocumentDeliveryMapper deliveryMapper;
     private final DealDocumentMapper documentMapper;
     private final DealMapper dealMapper;
@@ -46,6 +51,7 @@ public class DocumentSignatureWebhookService {
 
     /** Applies one provider-authenticated callback, returning false for unsupported webhook keys. */
     public boolean ingest(String provider, Map<String, String> headers, byte[] body) {
+        requireAvailable();
         ProviderEvent event = providerRouter.parseWebhook(provider, headers, body)
             .orElseThrow(() -> new ResourceNotFoundException("Signature webhook was not found"));
         validate(event);
@@ -67,9 +73,15 @@ public class DocumentSignatureWebhookService {
         if (discovered == null) {
             throw new ResourceNotFoundException("Signature envelope was not found");
         }
+        Deal deal = dealMapper.getDealByIdForUpdate(workspaceId, discovered.getDealId());
         DealDocument document = documentMapper.lockById(workspaceId, discovered.getDocumentId());
         DocumentDelivery delivery = deliveryMapper.lockById(workspaceId, discovered.getId());
-        if (document == null || delivery == null || document.getId() != delivery.getDocumentId()) {
+        if (deal == null
+                || document == null
+                || delivery == null
+                || deal.getId() != document.getDealId()
+                || deal.getId() != delivery.getDealId()
+                || document.getId() != delivery.getDocumentId()) {
             throw new ResourceNotFoundException("Signature envelope was not found");
         }
         List<DocumentDeliveryRecipient> recipients =
@@ -80,10 +92,21 @@ public class DocumentSignatureWebhookService {
             return false;
         }
         DocumentDeliveryRecipient recipient = recipientFor(recipients, event.providerRecipientId());
-        LocalDateTime occurredAt = event.occurredAt() == null
-            ? LocalDateTime.now(ZoneOffset.UTC)
-            : event.occurredAt();
+        LocalDateTime occurredAt = event.occurredAt();
+        if (occurredAfterExpiry(delivery, occurredAt)) {
+            return applyAfterExpiry(
+                provider, workspaceId, deal, document, delivery, recipient, event, occurredAt);
+        }
         if (TERMINAL.contains(delivery.getStatus())) {
+            if ("expired".equals(delivery.getStatus())
+                    && ("completed".equals(event.eventType())
+                        || "declined".equals(event.eventType())
+                        || "voided".equals(event.eventType()))) {
+                boolean applied = applyLive(
+                    workspaceId, deal, document, delivery, recipient, event, occurredAt);
+                auditWebhook(provider, delivery, recipient, event, applied);
+                return applied;
+            }
             lifecycleService.appendProviderEvent(
                 workspaceId,
                 delivery.getId(),
@@ -95,14 +118,46 @@ public class DocumentSignatureWebhookService {
             auditWebhook(provider, delivery, recipient, event, true);
             return true;
         }
-        Deal deal = dealMapper.getDealById(workspaceId, delivery.getDealId());
-        if (deal == null) {
-            throw new IllegalStateException("Signature envelope has no deal");
-        }
         boolean applied = applyLive(
             workspaceId, deal, document, delivery, recipient, event, occurredAt);
         auditWebhook(provider, delivery, recipient, event, applied);
         return applied;
+    }
+
+    private boolean applyAfterExpiry(
+            String provider,
+            int workspaceId,
+            Deal deal,
+            DealDocument document,
+            DocumentDelivery delivery,
+            DocumentDeliveryRecipient recipient,
+            ProviderEvent event,
+            LocalDateTime occurredAt) {
+        if (!TERMINAL.contains(delivery.getStatus())) {
+            LocalDateTime expiredAt = Objects.requireNonNull(
+                delivery.getExpiresAt(), "expired delivery time");
+            lifecycleService.terminate(
+                workspaceId,
+                deal,
+                document,
+                delivery,
+                "expired",
+                "Delivery expired before the provider event occurred",
+                null,
+                "system",
+                null,
+                expiredAt);
+        }
+        lifecycleService.appendProviderEvent(
+            workspaceId,
+            delivery.getId(),
+            recipient == null ? null : recipient.getId(),
+            event.eventType(),
+            event.externalEventId(),
+            bounded(event.detail(), 500),
+            occurredAt);
+        auditWebhook(provider, delivery, recipient, event, true);
+        return true;
     }
 
     private void auditWebhook(
@@ -199,8 +254,11 @@ public class DocumentSignatureWebhookService {
             ProviderEvent event,
             LocalDateTime occurredAt) {
         if (!"completed".equals(recipient.getStatus())) {
+            boolean replayingBeforeExpiry = "expired".equals(delivery.getStatus())
+                && "expired".equals(recipient.getStatus());
             if (!("pending".equals(recipient.getStatus())
-                    || "viewed".equals(recipient.getStatus()))) {
+                    || "viewed".equals(recipient.getStatus())
+                    || replayingBeforeExpiry)) {
                 lifecycleService.appendProviderEvent(
                     workspaceId,
                     delivery.getId(),
@@ -211,11 +269,12 @@ public class DocumentSignatureWebhookService {
                     occurredAt);
                 return true;
             }
-            if (deliveryMapper.completeProviderRecipient(
-                    workspaceId,
-                    delivery.getId(),
-                    recipient.getId(),
-                    occurredAt) != 1) {
+            int completed = "expired".equals(delivery.getStatus())
+                ? deliveryMapper.completeExpiredProviderRecipient(
+                    workspaceId, delivery.getId(), recipient.getId(), occurredAt)
+                : deliveryMapper.completeProviderRecipient(
+                    workspaceId, delivery.getId(), recipient.getId(), occurredAt);
+            if (completed != 1) {
                 throw new IllegalStateException("Provider recipient completion could not be applied");
             }
         }
@@ -245,8 +304,11 @@ public class DocumentSignatureWebhookService {
             DocumentDeliveryRecipient recipient,
             ProviderEvent event,
             LocalDateTime occurredAt) {
+        boolean replayingBeforeExpiry = "expired".equals(delivery.getStatus())
+            && "expired".equals(recipient.getStatus());
         if (!("pending".equals(recipient.getStatus())
-                || "viewed".equals(recipient.getStatus()))) {
+                || "viewed".equals(recipient.getStatus())
+                || replayingBeforeExpiry)) {
             lifecycleService.appendProviderEvent(
                 workspaceId,
                 delivery.getId(),
@@ -258,14 +320,18 @@ public class DocumentSignatureWebhookService {
             return true;
         }
         String reason = bounded(event.detail(), 500);
-        if (deliveryMapper.declineRecipient(
+        int declined = "expired".equals(delivery.getStatus())
+            ? deliveryMapper.declineExpiredRecipient(
+                workspaceId, delivery.getId(), recipient.getId(), reason, occurredAt)
+            : deliveryMapper.declineRecipient(
                 workspaceId,
                 delivery.getId(),
                 recipient.getId(),
                 reason,
                 null,
                 null,
-                occurredAt) != 1) {
+                occurredAt);
+        if (declined != 1) {
             throw new IllegalStateException("Provider recipient decline could not be applied");
         }
         return lifecycleService.terminate(
@@ -298,16 +364,22 @@ public class DocumentSignatureWebhookService {
         return recipients;
     }
 
-    private static DocumentDeliveryRecipient recipientFor(
+    static DocumentDeliveryRecipient recipientFor(
             List<DocumentDeliveryRecipient> recipients, String providerRecipientId) {
         if (providerRecipientId == null || providerRecipientId.isBlank()) {
             return null;
         }
-        return recipients.stream()
+        List<DocumentDeliveryRecipient> matches = recipients.stream()
             .filter(recipient -> Objects.equals(
                 providerRecipientId, recipient.getProviderRecipientId()))
-            .findFirst()
-            .orElseThrow(() -> new ResourceNotFoundException("Signature recipient was not found"));
+            .toList();
+        if (matches.isEmpty()) {
+            throw new ResourceNotFoundException("Signature recipient was not found");
+        }
+        if (matches.size() != 1) {
+            throw new IllegalStateException("Signature provider recipient routing is ambiguous");
+        }
+        return matches.getFirst();
     }
 
     private static DocumentDeliveryRecipient requireRecipient(
@@ -328,6 +400,7 @@ public class DocumentSignatureWebhookService {
                     && event.providerRecipientId().length() > 255
                 || event.externalEventId().length() > 255
                 || event.eventType().length() > 32
+                || event.occurredAt() == null
                 || event.signedArtifact().isPresent()
                     && !"completed".equals(event.eventType())) {
             throw new IllegalStateException("Signature provider returned an invalid webhook event");
@@ -344,5 +417,18 @@ public class DocumentSignatureWebhookService {
         }
         String trimmed = value.trim();
         return trimmed.length() > maximum ? trimmed.substring(0, maximum) : trimmed;
+    }
+
+    private void requireAvailable() {
+        if (!signatureProperties.isEnabled()
+                || !capabilityRegistry.isAvailable(Capability.DOCUMENT_SIGNATURE)) {
+            throw new ServiceUnavailableException("Document signature delivery is unavailable");
+        }
+    }
+
+    private static boolean occurredAfterExpiry(
+            DocumentDelivery delivery, LocalDateTime occurredAt) {
+        return delivery.getExpiresAt() != null
+            && !occurredAt.isBefore(delivery.getExpiresAt());
     }
 }

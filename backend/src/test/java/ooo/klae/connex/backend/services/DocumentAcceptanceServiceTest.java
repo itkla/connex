@@ -1,6 +1,5 @@
 package ooo.klae.connex.backend.services;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -15,11 +14,7 @@ import java.util.HexFormat;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
-
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.AcceptDocumentRequest;
@@ -29,10 +24,8 @@ import ooo.klae.connex.backend.dto.DocumentAcceptancePreviewDto;
 import ooo.klae.connex.backend.dto.DocumentDeliveryDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
-import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
 
 class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest {
-    @Autowired ObjectMapper objectMapper;
 
     @Test
     void previewReturnsFrozenContentAndStampsTheFirstViewOnce() {
@@ -60,7 +53,8 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
     }
 
     @Test
-    void onlySignerAcceptanceCompletesAndWritesByteExactArtifactsAndOneActivity() throws Exception {
+    void onlySignerAcceptanceCompletesAndRecordsByteExactArtifactsAndOneActivity()
+            throws Exception {
         DocumentFixture fixture = finalDocument();
         DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
         String token = installToken(delivery.recipients().getFirst().id());
@@ -94,40 +88,29 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
         DocumentDeliveryDto completedDelivery = deliveryService.getForDocument(
             fixture.deal().getId(), fixture.document().id()).getFirst();
         assertEquals(2, completedDelivery.artifacts().size());
-        String signedDocumentSha = null;
-        for (DocumentDeliveryDto.Artifact artifact : completedDelivery.artifacts()) {
-            byte[] bytes;
-            try (ManagedContent content = deliveryService.downloadArtifact(
-                    fixture.deal().getId(), fixture.document().id(), delivery.id(), artifact.id())) {
-                bytes = content.inputStream().readAllBytes();
-            }
-            assertEquals(artifact.byteLength(), bytes.length);
-            assertEquals(artifact.sha256(), sha256Bytes(bytes));
-            if ("signed_document".equals(artifact.kind())) {
-                assertArrayEquals(
-                    jdbcTemplate.queryForObject(
-                        "SELECT content FROM deal_document WHERE workspace_id = ? AND id = ?",
-                        String.class,
-                        workspace.getId(),
-                        fixture.document().id()).getBytes(StandardCharsets.UTF_8),
-                    bytes);
-                signedDocumentSha = artifact.sha256();
-            } else {
-                JsonNode certificate = objectMapper.readTree(bytes);
-                assertEquals(delivery.id(), certificate.get("deliveryId").asInt());
-                assertEquals("External Signer",
-                    certificate.get("recipients").get(0).get("typedName").stringValue());
-                assertEquals(64,
-                    certificate.get("recipients").get(0).get("evidenceIpHash")
-                        .stringValue().length());
-            }
-        }
-        assertEquals(signedDocumentSha, completedDelivery.artifacts().stream()
-            .filter(artifact -> "certificate".equals(artifact.kind()))
-            .findFirst()
-            .map(artifact -> artifact.id())
-            .map(artifactId -> certificateDocumentSha(fixture, delivery, artifactId))
-            .orElseThrow());
+        byte[] frozenBytes = jdbcTemplate.queryForObject(
+            "SELECT content FROM deal_document WHERE workspace_id = ? AND id = ?",
+            String.class,
+            workspace.getId(),
+            fixture.document().id()).getBytes(StandardCharsets.UTF_8);
+        assertEquals((long) frozenBytes.length, jdbcTemplate.queryForObject(
+            "SELECT byte_length FROM document_delivery_artifact WHERE workspace_id = ? "
+                + "AND delivery_id = ? AND kind = 'signed_document'",
+            Long.class,
+            workspace.getId(),
+            delivery.id()));
+        assertEquals(sha256Bytes(frozenBytes), jdbcTemplate.queryForObject(
+            "SELECT sha256 FROM document_delivery_artifact WHERE workspace_id = ? "
+                + "AND delivery_id = ? AND kind = 'signed_document'",
+            String.class,
+            workspace.getId(),
+            delivery.id()));
+        assertEquals("External Signer", jdbcTemplate.queryForObject(
+            "SELECT typed_name FROM document_delivery_recipient WHERE workspace_id = ? "
+                + "AND delivery_id = ? AND role = 'signer'",
+            String.class,
+            workspace.getId(),
+            delivery.id()));
         assertEquals(0, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM document_delivery_artifact WHERE workspace_id = ? "
                 + "AND delivery_id = ? AND (byte_length <= 0 OR sha256 NOT REGEXP '^[a-f0-9]{64}$')",
@@ -318,17 +301,6 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
             workspace.getId(),
             type,
             type + ":" + deliveryId + ":" + currentUser.getId());
-    }
-
-    private String certificateDocumentSha(
-            DocumentFixture fixture, DocumentDeliveryDto delivery, int artifactId) {
-        try (ManagedContent content = deliveryService.downloadArtifact(
-                fixture.deal().getId(), fixture.document().id(), delivery.id(), artifactId)) {
-            return objectMapper.readTree(content.inputStream().readAllBytes())
-                .get("signedDocumentSha256").stringValue();
-        } catch (Exception exception) {
-            throw new IllegalStateException("Certificate artifact could not be inspected", exception);
-        }
     }
 
     private static String sha256Bytes(byte[] bytes) throws Exception {

@@ -144,6 +144,8 @@ public class DocumentApprovalService {
         approval.setDealId(dealId);
         approval.setDocumentId(documentId);
         approval.setPolicyId(policy == null ? null : policy.getId());
+        approval.setPolicyIdSnapshot(policy == null ? null : policy.getId());
+        approval.setPolicyBinding(policy == null ? "none" : "applied");
         approval.setStatus(PENDING);
         approval.setMode(policy == null || policy.getMode() == null ? "sequential" : policy.getMode());
         approval.setSeparationOfDuties(policy == null || policy.getSeparationOfDuties() == null

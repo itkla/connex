@@ -1,5 +1,9 @@
 package ooo.klae.connex.backend.services;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -20,24 +24,29 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealDocument;
+import ooo.klae.connex.backend.beans.DocumentApproval;
 import ooo.klae.connex.backend.beans.DocumentDelivery;
 import ooo.klae.connex.backend.beans.DocumentDeliveryArtifact;
 import ooo.klae.connex.backend.beans.DocumentDeliveryEvent;
 import ooo.klae.connex.backend.beans.DocumentDeliveryRecipient;
+import ooo.klae.connex.backend.beans.DocumentDeliveryRequest;
 import ooo.klae.connex.backend.capability.Capability;
 import ooo.klae.connex.backend.capability.CapabilityRegistry;
 import ooo.klae.connex.backend.dto.DocumentDeliveryDto;
 import ooo.klae.connex.backend.dto.SendDeliveryRecipientRequest;
 import ooo.klae.connex.backend.dto.SendDeliveryRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.mappers.DealDocumentMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.DocumentApprovalMapper;
 import ooo.klae.connex.backend.mappers.DocumentDeliveryMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.signature.DocumentSignatureEmailService;
+import ooo.klae.connex.backend.signature.DocumentDeliveryIdempotencyKey;
 import ooo.klae.connex.backend.signature.DocumentSignatureProvider;
 import ooo.klae.connex.backend.signature.DocumentSignatureProviderRouter;
 import ooo.klae.connex.backend.signature.InAppAcceptanceProvider;
@@ -64,6 +73,7 @@ public class DocumentDeliveryService {
     private final DocumentDeliveryMapper deliveryMapper;
     private final DealDocumentMapper documentMapper;
     private final DealMapper dealMapper;
+    private final DocumentApprovalMapper approvalMapper;
     private final PersonMapper personMapper;
     private final WorkspaceService workspaceService;
     private final CapabilityRegistry capabilityRegistry;
@@ -77,23 +87,39 @@ public class DocumentDeliveryService {
     @Transactional
     @RequirePermission(Permission.DOCUMENT_SEND)
     public DocumentDeliveryDto send(
-            int dealId, int documentId, SendDeliveryRequest request) {
+            int dealId,
+            int documentId,
+            SendDeliveryRequest request,
+            String idempotencyKey) {
         requireAvailable();
         if (request == null) {
             throw new BadRequestException("Document-delivery request is required");
         }
+        String requestId = DocumentDeliveryIdempotencyKey.canonicalize(idempotencyKey);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
         requireLockedPermission(workspaceId, actorId);
-        Deal deal = requireDeal(workspaceId, dealId);
+        Deal deal = lockDeal(workspaceId, dealId);
         DealDocument document = lockDocument(workspaceId, dealId, documentId);
-        if (!"final".equals(document.getStatus())) {
-            throw new BadRequestException("Only final documents can be sent");
+        List<NormalizedRecipient> recipients = normalizeRecipients(request.getRecipients());
+        byte[] fingerprint = sendFingerprint(dealId, documentId, request, recipients);
+        DocumentDeliveryRequest replay = claimOrReplay(
+            workspaceId,
+            requestId,
+            "send",
+            fingerprint,
+            documentId,
+            null,
+            null,
+            actorId);
+        if (replay != null) {
+            return replay(workspaceId, dealId, documentId, replay);
         }
+        requireSendableDocument(workspaceId, documentId, document, requestId);
         if (deliveryMapper.findActiveByDocument(workspaceId, documentId) != null) {
             throw new BadRequestException("This document already has a live delivery");
         }
-        List<NormalizedRecipient> recipients = normalizeRecipients(workspaceId, request.getRecipients());
+        requireRecipientPeople(workspaceId, recipients);
         DocumentSignatureProvider provider = providerRouter.adapterFor(request.getProvider());
         requireOutboundProvider(provider);
 
@@ -107,6 +133,9 @@ public class DocumentDeliveryService {
         delivery.setExpiresAt(request.getExpiresAt());
         delivery.setSentBy(actorId);
         deliveryMapper.insertDelivery(delivery);
+        if (deliveryMapper.completeRequest(workspaceId, requestId, delivery.getId()) != 1) {
+            throw new IllegalStateException("Document-delivery idempotency result was not recorded");
+        }
 
         ArrayList<DocumentDeliveryRecipient> persisted = new ArrayList<>();
         for (NormalizedRecipient normalized : recipients) {
@@ -177,7 +206,9 @@ public class DocumentDeliveryService {
     }
 
     /** Returns all delivery history for one workspace-scoped document. */
+    @RequirePermission(Permission.DOCUMENT_SEND)
     public List<DocumentDeliveryDto> getForDocument(int dealId, int documentId) {
+        requireAvailable();
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireDeal(workspaceId, dealId);
         requireDocument(workspaceId, dealId, documentId);
@@ -195,7 +226,7 @@ public class DocumentDeliveryService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
         requireLockedPermission(workspaceId, actorId);
-        Deal deal = requireDeal(workspaceId, dealId);
+        Deal deal = lockDeal(workspaceId, dealId);
         DealDocument document = lockDocument(workspaceId, dealId, documentId);
         DocumentDelivery delivery = lockDelivery(workspaceId, dealId, documentId, deliveryId);
         requireLive(delivery);
@@ -222,14 +253,32 @@ public class DocumentDeliveryService {
     @Transactional
     @RequirePermission(Permission.DOCUMENT_SEND)
     public DocumentDeliveryDto resend(
-            int dealId, int documentId, int deliveryId, int recipientId) {
+            int dealId,
+            int documentId,
+            int deliveryId,
+            int recipientId,
+            String idempotencyKey) {
         requireAvailable();
+        String requestId = DocumentDeliveryIdempotencyKey.canonicalize(idempotencyKey);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
         requireLockedPermission(workspaceId, actorId);
-        Deal deal = requireDeal(workspaceId, dealId);
+        Deal deal = lockDeal(workspaceId, dealId);
         DealDocument document = lockDocument(workspaceId, dealId, documentId);
         DocumentDelivery delivery = lockDelivery(workspaceId, dealId, documentId, deliveryId);
+        byte[] fingerprint = resendFingerprint(dealId, documentId, deliveryId, recipientId);
+        DocumentDeliveryRequest replay = claimOrReplay(
+            workspaceId,
+            requestId,
+            "resend",
+            fingerprint,
+            documentId,
+            deliveryId,
+            recipientId,
+            actorId);
+        if (replay != null) {
+            return replay(workspaceId, dealId, documentId, replay);
+        }
         requireLive(delivery);
         DocumentDeliveryRecipient recipient = deliveryMapper.lockRecipient(
             workspaceId, deliveryId, recipientId);
@@ -277,8 +326,10 @@ public class DocumentDeliveryService {
     }
 
     /** Opens one authenticated, workspace-scoped immutable artifact. */
+    @RequirePermission(Permission.DOCUMENT_SEND)
     public ManagedContent downloadArtifact(
             int dealId, int documentId, int deliveryId, int artifactId) {
+        requireAvailable();
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireDeal(workspaceId, dealId);
         requireDocument(workspaceId, dealId, documentId);
@@ -342,7 +393,7 @@ public class DocumentDeliveryService {
     }
 
     private List<NormalizedRecipient> normalizeRecipients(
-            int workspaceId, List<SendDeliveryRecipientRequest> requested) {
+            List<SendDeliveryRecipientRequest> requested) {
         if (requested == null || requested.isEmpty() || requested.size() > 20) {
             throw new BadRequestException("A delivery requires between 1 and 20 recipients");
         }
@@ -363,10 +414,6 @@ public class DocumentDeliveryService {
             if (!emails.add(email)) {
                 throw new BadRequestException("Recipient emails must be unique");
             }
-            if (candidate.personId() != null
-                    && !personMapper.exists(workspaceId, candidate.personId())) {
-                throw new ResourceNotFoundException("Recipient person was not found");
-            }
             signer |= "signer".equals(role);
             normalized.add(new NormalizedRecipient(
                 candidate.personId(),
@@ -383,7 +430,17 @@ public class DocumentDeliveryService {
         return List.copyOf(normalized);
     }
 
-    private Map<Integer, SendRecipientOutcome> validateOutcome(
+    private void requireRecipientPeople(
+            int workspaceId, List<NormalizedRecipient> recipients) {
+        for (NormalizedRecipient recipient : recipients) {
+            if (recipient.personId() != null
+                    && !personMapper.exists(workspaceId, recipient.personId())) {
+                throw new ResourceNotFoundException("Recipient person was not found");
+            }
+        }
+    }
+
+    Map<Integer, SendRecipientOutcome> validateOutcome(
             List<DocumentDeliveryRecipient> recipients, SendOutcome outcome) {
         if (outcome == null || outcome.recipients() == null) {
             throw new IllegalStateException("Document-signature provider returned no outcome");
@@ -402,10 +459,22 @@ public class DocumentDeliveryService {
             throw new IllegalStateException("Document-signature provider recipient outcome is incomplete");
         }
         HashSet<String> hashes = new HashSet<>();
+        HashSet<String> providerRecipientIds = new HashSet<>();
         for (SendRecipientOutcome recipient : indexed.values()) {
             RecipientDeliveryLink deliveryLink = requireDeliveryLink(recipient);
             if (!hashes.add(requireHash(deliveryLink.tokenHash()))) {
                 throw new IllegalStateException("Document-signature provider reused a recipient token");
+            }
+            String providerRecipientId = blankToNull(recipient.providerRecipientId());
+            if (providerRecipientId != null) {
+                if (providerRecipientId.length() > 255) {
+                    throw new IllegalStateException(
+                        "Document-signature provider recipient id is too long");
+                }
+                if (!providerRecipientIds.add(providerRecipientId)) {
+                    throw new IllegalStateException(
+                        "Document-signature provider reused a provider recipient id");
+                }
             }
             requireText(deliveryLink.url(), "Acceptance URL");
         }
@@ -477,6 +546,37 @@ public class DocumentDeliveryService {
         }
     }
 
+    /**
+     * Validates that the locked document may still be sent, releasing the idempotency claim first
+     * when it may not.
+     *
+     * <p>The claim has to be taken before these checks so a retry of a successful send replays
+     * instead of tripping over the state that very send produced. A refusal must therefore hand the
+     * key back, matching the repository's rule that a failed preview cancels its reserved proof;
+     * otherwise a caller who fixes the underlying problem could never reuse the key they retained.
+     */
+    private void requireSendableDocument(
+            int workspaceId, int documentId, DealDocument document, String requestId) {
+        try {
+            if (!"final".equals(document.getStatus())) {
+                throw new BadRequestException("Only final documents can be sent");
+            }
+            requireCertifiableApproval(workspaceId, documentId);
+        } catch (RuntimeException refusal) {
+            deliveryMapper.cancelUncompletedRequest(workspaceId, requestId);
+            throw refusal;
+        }
+    }
+
+    private void requireCertifiableApproval(int workspaceId, int documentId) {
+        DocumentApproval approval = approvalMapper.getByDocumentId(
+            workspaceId, documentId).stream().findFirst().orElse(null);
+        if (approval != null && "unknown_legacy".equals(approval.getPolicyBinding())) {
+            throw new BadRequestException(
+                "The document approval policy cannot be certified; create a new document version");
+        }
+    }
+
     private static void requireOutboundProvider(DocumentSignatureProvider provider) {
         if (!InAppAcceptanceProvider.KEY.equals(provider.key())) {
             throw new ServiceUnavailableException(
@@ -486,6 +586,14 @@ public class DocumentDeliveryService {
 
     private Deal requireDeal(int workspaceId, int dealId) {
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
+        if (deal == null) {
+            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        }
+        return deal;
+    }
+
+    private Deal lockDeal(int workspaceId, int dealId) {
+        Deal deal = dealMapper.getDealByIdForUpdate(workspaceId, dealId);
         if (deal == null) {
             throw new ResourceNotFoundException("Deal not found with id: " + dealId);
         }
@@ -598,6 +706,110 @@ public class DocumentDeliveryService {
 
     private static LocalDateTime now() {
         return LocalDateTime.now(ZoneOffset.UTC);
+    }
+
+    private DocumentDeliveryRequest claimOrReplay(
+            int workspaceId,
+            String idempotencyKey,
+            String operation,
+            byte[] fingerprint,
+            int documentId,
+            Integer deliveryId,
+            Integer recipientId,
+            int actorId) {
+        if (deliveryMapper.claimRequest(
+                workspaceId,
+                idempotencyKey,
+                operation,
+                fingerprint,
+                documentId,
+                deliveryId,
+                recipientId,
+                actorId) == 1) {
+            return null;
+        }
+        DocumentDeliveryRequest existing = deliveryMapper.getRequestForUpdate(
+            workspaceId, idempotencyKey);
+        if (existing == null
+                || existing.createdByUserId() != actorId
+                || !operation.equals(existing.operation())
+                || existing.documentId() != documentId
+                || !java.util.Objects.equals(existing.recipientId(), recipientId)
+                || !MessageDigest.isEqual(existing.requestFingerprint(), fingerprint)) {
+            throw new ConflictException(
+                "Idempotency-Key was already used for a different document-delivery request");
+        }
+        if (existing.deliveryId() == null) {
+            throw new ConflictException("Document-delivery request is still in progress");
+        }
+        return existing;
+    }
+
+    private DocumentDeliveryDto replay(
+            int workspaceId,
+            int dealId,
+            int documentId,
+            DocumentDeliveryRequest request) {
+        DocumentDelivery delivery = requireHydrated(workspaceId, request.deliveryId());
+        if (delivery.getDealId() != dealId || delivery.getDocumentId() != documentId) {
+            throw new ConflictException(
+                "Idempotency-Key result does not belong to this document");
+        }
+        return DocumentDeliveryDto.from(delivery);
+    }
+
+    private static byte[] sendFingerprint(
+            int dealId,
+            int documentId,
+            SendDeliveryRequest request,
+            List<NormalizedRecipient> recipients) {
+        MessageDigest digest = sha256Digest();
+        updateDigest(digest, "connex-document-delivery-send-v1");
+        updateDigest(digest, dealId);
+        updateDigest(digest, documentId);
+        updateDigest(digest, blankToNull(request.getProvider()));
+        updateDigest(digest, blankToNull(request.getMessage()));
+        updateDigest(digest, request.getExpiresAt() == null ? null : request.getExpiresAt().toString());
+        for (NormalizedRecipient recipient : recipients) {
+            updateDigest(digest, recipient.personId());
+            updateDigest(digest, recipient.name());
+            updateDigest(digest, recipient.email());
+            updateDigest(digest, recipient.role());
+            updateDigest(digest, recipient.recipientOrder());
+        }
+        return digest.digest();
+    }
+
+    private static byte[] resendFingerprint(
+            int dealId, int documentId, int deliveryId, int recipientId) {
+        MessageDigest digest = sha256Digest();
+        updateDigest(digest, "connex-document-delivery-resend-v1");
+        updateDigest(digest, dealId);
+        updateDigest(digest, documentId);
+        updateDigest(digest, deliveryId);
+        updateDigest(digest, recipientId);
+        return digest.digest();
+    }
+
+    private static MessageDigest sha256Digest() {
+        try {
+            return MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
+    }
+
+    private static void updateDigest(MessageDigest digest, Integer value) {
+        updateDigest(digest, value == null ? null : Integer.toString(value));
+    }
+
+    private static void updateDigest(MessageDigest digest, String value) {
+        byte[] bytes = value == null ? null : value.getBytes(StandardCharsets.UTF_8);
+        int length = bytes == null ? -1 : bytes.length;
+        digest.update(ByteBuffer.allocate(Integer.BYTES).putInt(length).array());
+        if (bytes != null) {
+            digest.update(bytes);
+        }
     }
 
     private void sendAfterCommit(

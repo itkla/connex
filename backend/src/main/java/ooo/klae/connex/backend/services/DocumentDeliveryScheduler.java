@@ -115,10 +115,14 @@ public class DocumentDeliveryScheduler {
             if (discovered == null) {
                 continue;
             }
+            Deal deal = dealMapper.getDealByIdForUpdate(
+                workspaceId, discovered.getDealId());
             DealDocument document =
                 documentMapper.lockById(workspaceId, discovered.getDocumentId());
             DocumentDelivery delivery = deliveryMapper.lockById(workspaceId, deliveryId);
-            if (document == null || delivery == null
+            if (deal == null || document == null || delivery == null
+                    || deal.getId() != document.getDealId()
+                    || deal.getId() != delivery.getDealId()
                     || !("sent".equals(delivery.getStatus())
                         || "viewed".equals(delivery.getStatus()))
                     || delivery.getExpiresAt() == null
@@ -126,10 +130,6 @@ public class DocumentDeliveryScheduler {
                 continue;
             }
             lockRecipientsAscending(workspaceId, deliveryId);
-            Deal deal = dealMapper.getDealById(workspaceId, delivery.getDealId());
-            if (deal == null) {
-                throw new IllegalStateException("Expired document delivery has no deal");
-            }
             if (lifecycleService.terminate(
                     workspaceId,
                     deal,
@@ -140,7 +140,7 @@ public class DocumentDeliveryScheduler {
                     null,
                     "system",
                     null,
-                    now)) {
+                    delivery.getExpiresAt())) {
                 expired++;
             }
         }

@@ -161,6 +161,7 @@ public final class TablePlaneRegistry {
         "document_delivery_artifact",
         "document_delivery_event",
         "document_delivery_recipient",
+        "document_delivery_request",
         "document_template",
         "product",
         "entity_reference",

@@ -9,6 +9,7 @@ import ooo.klae.connex.backend.beans.DocumentDelivery;
 import ooo.klae.connex.backend.beans.DocumentDeliveryArtifact;
 import ooo.klae.connex.backend.beans.DocumentDeliveryEvent;
 import ooo.klae.connex.backend.beans.DocumentDeliveryRecipient;
+import ooo.klae.connex.backend.beans.DocumentDeliveryRequest;
 
 /** Workspace-scoped persistence for document-delivery envelopes and their immutable children. */
 public interface DocumentDeliveryMapper {
@@ -42,6 +43,29 @@ public interface DocumentDeliveryMapper {
 
     int insertDelivery(DocumentDelivery delivery);
 
+    int claimRequest(
+            @Param("workspaceId") int workspaceId,
+            @Param("idempotencyKey") String idempotencyKey,
+            @Param("operation") String operation,
+            @Param("requestFingerprint") byte[] requestFingerprint,
+            @Param("documentId") int documentId,
+            @Param("deliveryId") Integer deliveryId,
+            @Param("recipientId") Integer recipientId,
+            @Param("createdByUserId") int createdByUserId);
+
+    int cancelUncompletedRequest(
+            @Param("workspaceId") int workspaceId,
+            @Param("idempotencyKey") String idempotencyKey);
+
+    DocumentDeliveryRequest getRequestForUpdate(
+            @Param("workspaceId") int workspaceId,
+            @Param("idempotencyKey") String idempotencyKey);
+
+    int completeRequest(
+            @Param("workspaceId") int workspaceId,
+            @Param("idempotencyKey") String idempotencyKey,
+            @Param("deliveryId") int deliveryId);
+
     int setProviderEnvelopeId(
             @Param("workspaceId") int workspaceId,
             @Param("id") int id,
@@ -56,7 +80,19 @@ public interface DocumentDeliveryMapper {
             @Param("id") int id,
             @Param("completedAt") LocalDateTime completedAt);
 
+    int completeExpiredDelivery(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("completedAt") LocalDateTime completedAt);
+
     int terminateDelivery(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("status") String status,
+            @Param("terminatedAt") LocalDateTime terminatedAt,
+            @Param("reason") String reason);
+
+    int replaceExpiredTermination(
             @Param("workspaceId") int workspaceId,
             @Param("id") int id,
             @Param("status") String status,
@@ -125,6 +161,12 @@ public interface DocumentDeliveryMapper {
             @Param("id") int id,
             @Param("decidedAt") LocalDateTime decidedAt);
 
+    int completeExpiredProviderRecipient(
+            @Param("workspaceId") int workspaceId,
+            @Param("deliveryId") int deliveryId,
+            @Param("id") int id,
+            @Param("decidedAt") LocalDateTime decidedAt);
+
     int declineRecipient(
             @Param("workspaceId") int workspaceId,
             @Param("deliveryId") int deliveryId,
@@ -134,11 +176,24 @@ public interface DocumentDeliveryMapper {
             @Param("evidenceAgentHash") String evidenceAgentHash,
             @Param("decidedAt") LocalDateTime decidedAt);
 
+    int declineExpiredRecipient(
+            @Param("workspaceId") int workspaceId,
+            @Param("deliveryId") int deliveryId,
+            @Param("id") int id,
+            @Param("reason") String reason,
+            @Param("decidedAt") LocalDateTime decidedAt);
+
     int completeViewersAndInvalidateTokens(
             @Param("workspaceId") int workspaceId,
             @Param("deliveryId") int deliveryId);
 
     int closeOutstandingRecipients(
+            @Param("workspaceId") int workspaceId,
+            @Param("deliveryId") int deliveryId,
+            @Param("status") String status,
+            @Param("exceptRecipientId") Integer exceptRecipientId);
+
+    int replaceExpiredRecipients(
             @Param("workspaceId") int workspaceId,
             @Param("deliveryId") int deliveryId,
             @Param("status") String status,

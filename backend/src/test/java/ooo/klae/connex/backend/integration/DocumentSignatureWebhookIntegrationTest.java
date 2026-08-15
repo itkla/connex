@@ -30,12 +30,19 @@ class DocumentSignatureWebhookIntegrationTest {
             .build();
     }
 
+    /**
+     * With the signature feature disabled — the default — the webhook reaches its fail-closed gate
+     * before it resolves the provider, so every provider key answers alike. That is deliberate: a
+     * disabled instance must not disclose which adapters are installed, and it matches the public
+     * acceptance endpoint below. Provider resolution, including the 404 for an unknown or
+     * webhook-less key, is exercised where the feature is enabled.
+     */
     @Test
-    void unknownAndInAppProvidersReturnNotFoundWithoutSessionOrCsrf() throws Exception {
+    void everyProviderReachesTheFailClosedGateWithoutSessionOrCsrf() throws Exception {
         mockMvc.perform(post("/api/document-signature/webhooks/unknown"))
-            .andExpect(status().isNotFound());
+            .andExpect(status().isServiceUnavailable());
         mockMvc.perform(post("/api/document-signature/webhooks/in_app"))
-            .andExpect(status().isNotFound());
+            .andExpect(status().isServiceUnavailable());
     }
 
     @Test

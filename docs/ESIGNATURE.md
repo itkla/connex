@@ -13,6 +13,12 @@ built-in roles receive that permission; custom roles receive it only when explic
 gate returns an explicit unavailable response and never pretends that a send succeeded. Deployment setup
 is described in [DEPLOYMENT.md](DEPLOYMENT.md).
 
+Send and resend require a caller-retained UUID `Idempotency-Key`. Connex claims the key in the workspace
+and binds it to the complete operation fingerprint and actor. Retrying the same request with the same key
+returns the first delivery result without minting another token or producing another event, audit, or email.
+A reused key with a different fingerprint fails closed; a different send key is still refused while the
+immutable document has a live envelope.
+
 ## Envelope and token model
 
 One `document_delivery` row binds one provider envelope to one immutable `deal_document` version. A
@@ -28,11 +34,22 @@ to the routed workspace, and revalidates the hash with a constant-time compariso
 stored hash. Void, expiry, decline, and supersede invalidate every outstanding token. Public requests are
 bounded independently per token hash and per hashed, trusted source address.
 
+The complete bearer is embedded in `/api/document-acceptance/{token}` and therefore appears in the request
+path. Cloudflare must apply the same no-log Skip rule, compatibility exception, and generic-rate exclusion
+used for other path credentials to `/api/document-acceptance/*`. The application stores only the hash,
+never writes the token or raw path to application/audit logs, uses a uniform unavailable response, and
+applies the per-token and trusted-source admission above. These controls compensate for the path shape;
+edge events or exported raw paths must never be treated as secret-free evidence.
+
 ## Evidence and artifacts
 
 The append-only `document_delivery_event` ledger records actor, recipient, system, and provider events.
 Provider callbacks carry an adapter-authenticated workspace routing handle and use a unique external event
-identifier, so replay is idempotent. Terminal envelope states never regress when a late callback arrives.
+identifier, so replay is idempotent. Every callback must carry its provider-authenticated occurrence time.
+Under the locked envelope, a terminal event that occurred before `expires_at` wins even when it arrives
+after the scheduler recorded expiry. An event at or after `expires_at` cannot revive the envelope; the
+envelope expires at `expires_at` and the later callback remains evidence. Completion time is the maximum
+persisted signer decision time, so callback arrival order cannot change it or the certificate bytes.
 
 Completion creates two immutable, tenant-owned managed objects:
 
@@ -40,7 +57,18 @@ Completion creates two immutable, tenant-owned managed objects:
   acceptance flow. Its metadata includes byte length and SHA-256.
 - `certificate` is deterministic JSON containing the envelope/provider identifiers, completion time,
   recipient identities and roles, their decisions and timestamps, typed acceptance names, domain-separated
-  HMAC-SHA256 request-evidence values, and the signed-document SHA-256.
+  HMAC-SHA256 request-evidence values, and the signed-document SHA-256. Its exact top-level fields are
+  `workspaceId`, `dealId`, `documentId`, `documentVersion`, `documentType`, `approvalRequestId`,
+  `approvalOutcome`, `approvalPolicyId`, `provider`, `providerEnvelopeId`, `deliveryId`, `sentAt`,
+  `completedAt`, `signedDocumentSha256`, and `recipients`. `approvalOutcome` is the terminal approval result
+  or `no_approval_required`; `approvalRequestId` is null only when no approval request existed, and
+  `approvalPolicyId` is null when that request had no policy. Each recipient
+  entry contains `recipientId`, `name`, `email`, `role`, `decision`, `firstViewedAt`, `decidedAt`,
+  `typedName`, `declineReason`, `evidenceIpHash`, and `evidenceAgentHash`. When a policy
+  applied, `approvalPolicyId` comes from the immutable request-time snapshot and survives later policy
+  deletion. V176 labels already-null historical policy bindings `unknown_legacy` because their exact prior
+  identifier cannot be reconstructed; send and certificate creation fail closed for those approvals, and
+  support must create and approve a new document version rather than asserting an unknown policy id.
 
 Connex renders no PDF on the server today. This is deliberate: the rejected renderer could not preserve
 CJK text correctly. A future external adapter may store a provider-returned signed PDF in the same
@@ -65,8 +93,9 @@ completion may also return authenticated signed-document bytes; JSON and PDF bot
 `signed_document` artifact slot and the certificate hashes whichever exact bytes were supplied. Connex
 stages those immutable bytes if they arrive before the last signer and keeps an external envelope live if
 all recipient decisions arrive before its signed artifact, so callback reordering cannot replace a provider
-PDF with Connex JSON. Provider network I/O must be durably orchestrated outside transactions that hold
-delivery metadata locks; the
+PDF with Connex JSON. Provider events without an occurrence time fail closed. Provider
+recipient identifiers must be unique within an envelope both at the SPI boundary and in the database.
+Provider network I/O must be durably orchestrated outside transactions that hold delivery metadata locks; the
 built-in provider is safe because it performs no network I/O and registers no webhook. This release fails
 closed when an authenticated send, resend, or void names any provider other than `in_app`. Webhook parsing
 is available to authenticated adapters now, but outbound execution for a networked adapter first requires a
@@ -75,12 +104,14 @@ durable dispatcher that records intent before egress and reconciles outcomes out
 ## Recovery and support boundary
 
 - **Outbound mail outage:** metadata commits before mail dispatch. Restore the configured transport and use
-  resend, which invalidates the old link and creates a new token.
+  resend with a new idempotency key, which invalidates the old link and creates a new token. A lost HTTP
+  response is different: retry the same send/resend with the same key to replay the original result.
 - **Lost callback:** replay the provider's authenticated event with the same external event id. Replays are
   harmless. If the provider cannot replay, support may compare provider state and apply a newly identified,
   authenticated event; direct event-table updates are unsupported.
-- **Duplicate or reordered callback:** the external-event key deduplicates replay, and terminal state is
-  monotonic. Late events can remain as evidence without reopening the envelope.
+- **Duplicate or reordered callback:** the external-event key deduplicates replay. Occurrence time, not
+  arrival time, decides whether a pre-expiry terminal event overrides scheduler expiry; completion time is
+  the maximum signer decision time. At-or-after-expiry events remain evidence without reopening the envelope.
 - **Signer mismatch:** void the live envelope, correct recipients in a new delivery, and resend. Connex does
   not rewrite a frozen recipient identity or completed certificate.
 - **Expiry or lost recipient link:** a bounded scheduler expires overdue envelopes and restores the document

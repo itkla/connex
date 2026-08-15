@@ -150,6 +150,43 @@
     )
   </insert>
 
+  <insert id="claimRequest">
+    INSERT IGNORE INTO document_delivery_request (
+      workspace_id, idempotency_key, operation, request_fingerprint, document_id,
+      delivery_id, recipient_id, created_by_user_id
+    ) VALUES (
+      #{workspaceId}, #{idempotencyKey}, #{operation}, #{requestFingerprint}, #{documentId},
+      #{deliveryId}, #{recipientId}, #{createdByUserId}
+    )
+  </insert>
+
+  <delete id="cancelUncompletedRequest">
+    DELETE FROM document_delivery_request
+    WHERE workspace_id = #{workspaceId}
+      AND idempotency_key = #{idempotencyKey}
+      AND completed_at IS NULL
+  </delete>
+
+  <select id="getRequestForUpdate" resultType="DocumentDeliveryRequest">
+    SELECT operation,
+      request_fingerprint AS requestFingerprint,
+      document_id AS documentId,
+      delivery_id AS deliveryId,
+      recipient_id AS recipientId,
+      created_by_user_id AS createdByUserId
+    FROM document_delivery_request
+    WHERE workspace_id = #{workspaceId} AND idempotency_key = #{idempotencyKey}
+    FOR UPDATE
+  </select>
+
+  <update id="completeRequest">
+    UPDATE document_delivery_request
+    SET delivery_id = #{deliveryId}, completed_at = CURRENT_TIMESTAMP
+    WHERE workspace_id = #{workspaceId}
+      AND idempotency_key = #{idempotencyKey}
+      AND delivery_id IS NULL
+  </update>
+
   <update id="setProviderEnvelopeId">
     UPDATE document_delivery SET provider_envelope_id = #{providerEnvelopeId}
     WHERE workspace_id = #{workspaceId} AND id = #{id}
@@ -166,10 +203,23 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status IN ('sent', 'viewed')
   </update>
 
+  <update id="completeExpiredDelivery">
+    UPDATE document_delivery
+    SET status = 'completed', completed_at = #{completedAt},
+        terminated_at = NULL, termination_reason = NULL
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'expired'
+  </update>
+
   <update id="terminateDelivery">
     UPDATE document_delivery
     SET status = #{status}, terminated_at = #{terminatedAt}, termination_reason = #{reason}
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status IN ('sent', 'viewed')
+  </update>
+
+  <update id="replaceExpiredTermination">
+    UPDATE document_delivery
+    SET status = #{status}, terminated_at = #{terminatedAt}, termination_reason = #{reason}
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'expired'
   </update>
 
   <insert id="insertRecipient" useGeneratedKeys="true" keyProperty="id">
@@ -260,6 +310,14 @@
       AND status IN ('pending', 'viewed')
   </update>
 
+  <update id="completeExpiredProviderRecipient">
+    UPDATE document_delivery_recipient
+    SET status = 'completed', decided_at = #{decidedAt},
+        token_hash = NULL, token_expires_at = NULL
+    WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId} AND id = #{id}
+      AND role = 'signer' AND status = 'expired'
+  </update>
+
   <update id="declineRecipient">
     UPDATE document_delivery_recipient
     SET status = 'declined', decline_reason = #{reason}, decided_at = #{decidedAt},
@@ -268,11 +326,19 @@
       AND role = 'signer' AND status IN ('pending', 'viewed')
   </update>
 
+  <update id="declineExpiredRecipient">
+    UPDATE document_delivery_recipient
+    SET status = 'declined', decline_reason = #{reason}, decided_at = #{decidedAt},
+        token_hash = NULL, token_expires_at = NULL
+    WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId} AND id = #{id}
+      AND role = 'signer' AND status = 'expired'
+  </update>
+
   <update id="completeViewersAndInvalidateTokens">
     UPDATE document_delivery_recipient
     SET status = 'completed', token_hash = NULL, token_expires_at = NULL
     WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId}
-      AND role = 'viewer' AND status IN ('pending', 'viewed')
+      AND role = 'viewer' AND status IN ('pending', 'viewed', 'expired')
   </update>
 
   <update id="closeOutstandingRecipients">
@@ -280,6 +346,16 @@
     SET status = #{status}, token_hash = NULL, token_expires_at = NULL
     WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId}
       AND status IN ('pending', 'viewed')
+      <if test="exceptRecipientId != null">
+        AND id &lt;&gt; #{exceptRecipientId}
+      </if>
+  </update>
+
+  <update id="replaceExpiredRecipients">
+    UPDATE document_delivery_recipient
+    SET status = #{status}, token_hash = NULL, token_expires_at = NULL
+    WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId}
+      AND status = 'expired'
       <if test="exceptRecipientId != null">
         AND id &lt;&gt; #{exceptRecipientId}
       </if>

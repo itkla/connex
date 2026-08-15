@@ -150,14 +150,17 @@ unchanged.
 ### Completed document-delivery evidence
 
 A completed commercial-document envelope retains its frozen `signed_document` JSON or authenticated
-provider PDF and deterministic completion `certificate` as managed tenant objects. A provider artifact
-may be staged before terminal completion to tolerate callback reordering; if that envelope later expires or
-is voided, the staged immutable object remains under the same retention and deletion lifecycle. Workspace
-export includes artifact metadata and object bytes. Tenant teardown enumerates the artifact keys, enqueues
-them through the same durable
-`object_deletion_queue` used by attachments, removes metadata in child-before-parent order, and verifies
-that no object or quota ledger residue remains. Ordinary deal deletion enqueues every delivery artifact
-before the database cascade removes its metadata.
+provider PDF and deterministic completion `certificate` as managed tenant objects. Completion,
+termination, and deal deletion use the record lock order `deal` →
+`deal_document` → `document_delivery` → recipients ascending by id. This keeps the delivery
+lifecycle aligned with the parent-root lock that deal deletion takes before cascading into documents.
+A provider artifact may be staged before terminal completion to tolerate callback reordering; if that
+envelope later expires or is voided, the staged immutable object remains under the same retention and
+deletion lifecycle. Workspace export includes artifact metadata and object bytes. Tenant teardown
+enumerates the artifact keys, enqueues them through the same durable `object_deletion_queue` used by
+attachments, removes metadata in child-before-parent order, and verifies that no object or quota ledger
+residue remains. Ordinary deal deletion enqueues every delivery artifact before the database cascade
+removes its metadata.
 
 Recipient identity, typed acceptance name, decision time, and salted request-evidence hashes are part of
 the completion record. “Erase where legally permitted” therefore means an operator must first decide

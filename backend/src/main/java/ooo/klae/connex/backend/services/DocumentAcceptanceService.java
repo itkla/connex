@@ -271,6 +271,11 @@ public class DocumentAcceptanceService {
         if (discoveredDelivery == null) {
             throw unavailable();
         }
+        Deal deal = dealMapper.getDealByIdForUpdate(
+            workspaceId, discoveredDelivery.getDealId());
+        if (deal == null) {
+            throw unavailable();
+        }
         DealDocument document =
             documentMapper.lockById(workspaceId, discoveredDelivery.getDocumentId());
         if (document == null || document.getDealId() != discoveredDelivery.getDealId()) {
@@ -290,8 +295,7 @@ public class DocumentAcceptanceService {
             .findFirst()
             .orElseThrow(DocumentAcceptanceService::unavailable);
         requireSameHash(link.tokenHash(), recipient.getTokenHash());
-        Deal deal = dealMapper.getDealById(workspaceId, delivery.getDealId());
-        if (deal == null) {
+        if (delivery.getDealId() != deal.getId()) {
             throw unavailable();
         }
         return new Aggregate(deal, document, delivery, recipient);

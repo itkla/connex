@@ -175,7 +175,7 @@ public class DealDocumentService {
         if (!lockedPermissions.contains(Permission.DEAL_UPDATE)) {
             throw new ForbiddenException("Requires the DEAL_UPDATE permission in this workspace");
         }
-        Deal deal = requireDeal(workspaceId, dealId);
+        Deal deal = lockDeal(workspaceId, dealId);
         DealDocument document = lockDocument(workspaceId, dealId, documentId);
         if (status == null || !CLIENT_TARGET_STATUSES.contains(status)) {
             throw new BadRequestException("status must be one of: draft, final, superseded");
@@ -211,7 +211,7 @@ public class DealDocumentService {
     @RequirePermission(Permission.DEAL_UPDATE)
     public void delete(int dealId, int documentId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal deal = requireDeal(workspaceId, dealId);
+        Deal deal = lockDeal(workspaceId, dealId);
         DealDocument document = lockDocument(workspaceId, dealId, documentId);
         deletionPolicy.requireDeletable(document.getCreatedBy());
         if (!"draft".equals(document.getStatus())) {
@@ -385,6 +385,14 @@ public class DealDocumentService {
     private Deal requireDeal(int workspaceId, int dealId) {
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        return deal;
+    }
+
+    private Deal lockDeal(int workspaceId, int dealId) {
+        Deal deal = dealMapper.getDealByIdForUpdate(workspaceId, dealId);
+        if (deal == null) {
+            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        }
         return deal;
     }
 

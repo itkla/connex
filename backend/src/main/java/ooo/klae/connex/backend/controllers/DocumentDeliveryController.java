@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
@@ -30,8 +31,9 @@ public class DocumentDeliveryController {
     public DocumentDeliveryDto send(
             @PathVariable int dealId,
             @PathVariable int documentId,
+            @RequestHeader("Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody SendDeliveryRequest request) {
-        return deliveryService.send(dealId, documentId, request);
+        return deliveryService.send(dealId, documentId, request, idempotencyKey);
     }
 
     @GetMapping
@@ -55,8 +57,10 @@ public class DocumentDeliveryController {
             @PathVariable int dealId,
             @PathVariable int documentId,
             @PathVariable int deliveryId,
-            @PathVariable int recipientId) {
-        return deliveryService.resend(dealId, documentId, deliveryId, recipientId);
+            @PathVariable int recipientId,
+            @RequestHeader("Idempotency-Key") String idempotencyKey) {
+        return deliveryService.resend(
+            dealId, documentId, deliveryId, recipientId, idempotencyKey);
     }
 
     @GetMapping("/{deliveryId}/artifacts/{artifactId}")
