@@ -11,7 +11,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,6 +42,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DocumentApprovalMapper;
+import ooo.klae.connex.backend.mappers.DealDocumentMapper;
 
 class DocumentApprovalServiceTest extends AbstractServiceTest {
 
@@ -50,6 +55,7 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
     @Autowired DocumentApprovalMapper approvalMapper;
     @Autowired JdbcTemplate jdbcTemplate;
     @MockitoSpyBean WorkspaceService workspaceService;
+    @MockitoSpyBean DealDocumentMapper documentMapper;
 
     private Deal jpyDeal() {
         Pipeline pipeline = newPipeline();
@@ -766,6 +772,52 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         assertEquals("unsatisfiable", stepOf(terminated, 1).status());
         assertEquals("cancelled", stepOf(terminated, 2).status());
         assertEquals("draft", documentService.getOne(deal.getId(), document.id()).status());
+    }
+
+    @Test
+    void reconciliationResolvesOnePoolAfterAuthorizationRootAndBeforeDocumentLock() {
+        User assigned = approver();
+        chainPolicy("sequential", step(1, "Manager", assigned));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        workspaceMapper.updateMemberRole(workspace.getId(), assigned.getId(), "member");
+        DocumentApproval approval = approvalMapper.getById(workspace.getId(), requested.id());
+        clearInvocations(workspaceService, documentMapper);
+
+        assertTrue(approvalService.terminateIfUnsatisfiable(workspace.getId(), approval));
+
+        org.mockito.InOrder order = inOrder(workspaceService, documentMapper);
+        order.verify(workspaceService)
+            .lockApprovalReconciliationAuthorizationRoot(workspace.getId());
+        order.verify(workspaceService).getMembers(workspace.getId());
+        order.verify(documentMapper).lockById(workspace.getId(), document.id());
+        verify(workspaceService, times(1)).getMembers(workspace.getId());
+    }
+
+    @Test
+    void grantCommittedBeforeTheAuthorizationRootIsReflectedInThePostLockPool() {
+        User assigned = approver();
+        chainPolicy("sequential", step(1, "Manager", assigned));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        workspaceMapper.updateMemberRole(workspace.getId(), assigned.getId(), "member");
+        doAnswer(invocation -> {
+            workspaceMapper.updateMemberRole(workspace.getId(), assigned.getId(), "admin");
+            return invocation.callRealMethod();
+        }).when(workspaceService)
+            .lockApprovalReconciliationAuthorizationRoot(workspace.getId());
+        DocumentApproval approval = approvalMapper.getById(workspace.getId(), requested.id());
+
+        assertFalse(approvalService.terminateIfUnsatisfiable(workspace.getId(), approval));
+
+        DocumentApproval reread = approvalMapper.getById(workspace.getId(), requested.id());
+        assertEquals("pending", reread.getStatus());
+        assertEquals("pending_approval",
+            documentService.getOne(deal.getId(), document.id()).status());
     }
 
     @Test

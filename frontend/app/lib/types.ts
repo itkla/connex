@@ -1669,6 +1669,7 @@ export type ApprovalImpactItem = {
     documentTitle: string;
     version: number;
     requestedByName: string;
+    requestedByFormerMember: boolean;
     requestedAt: string;
 };
 

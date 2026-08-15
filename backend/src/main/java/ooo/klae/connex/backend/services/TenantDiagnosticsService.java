@@ -68,6 +68,7 @@ public class TenantDiagnosticsService {
             JobRunRecorder.BUSINESS_CARD_IMPORT_CLEANUP,
             JobRunRecorder.PROVIDER_CAPTURE,
             JobRunRecorder.OBJECT_DELETION_RETRY,
+            JobRunRecorder.APPROVAL_RECONCILIATION,
             JobRunRecorder.RELATIONSHIP_SIGNAL_RECONCILIATION);
     private static final Set<String> JOB_DETAIL_KEYS = Set.of(
             "phase",

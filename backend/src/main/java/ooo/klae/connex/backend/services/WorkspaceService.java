@@ -577,6 +577,18 @@ public class WorkspaceService {
         return parsePermissions(roleMapper.lockPermissions(workspaceId, roleId));
     }
 
+    /**
+     * Holds the active workspace authorization root exclusively for a reconciliation sweep. The
+     * lock serializes explicit authorization-root mutations and active membership inserts whose
+     * foreign-key checks take a shared lock on this workspace row. Member and permission reads made
+     * after it remain valid until the surrounding transaction completes.
+     */
+    void lockApprovalReconciliationAuthorizationRoot(int workspaceId) {
+        if (workspaceMapper.lockActiveIdentity(workspaceId) == null) {
+            throw new ResourceNotFoundException("Workspace not found: " + workspaceId);
+        }
+    }
+
     /** Returns the current member's effective permissions in the active workspace. */
     public Set<Permission> getCurrentPermissions() {
         return permissionsFor(getCurrentWorkspaceId(), currentUser().getId());

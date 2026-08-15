@@ -8,6 +8,7 @@ public record ApprovalImpactItemDto(
     String documentTitle,
     int version,
     String requestedByName,
+    boolean requestedByFormerMember,
     String requestedAt
 ) {
 }

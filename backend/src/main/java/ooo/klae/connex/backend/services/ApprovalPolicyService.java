@@ -70,6 +70,7 @@ public class ApprovalPolicyService {
         "name", "active", "documentType", "currency", "minTotal", "minDiscountPercent",
         "mode", "separationOfDuties");
     private static final String ANY_APPROVER = "any_approver";
+    private static final String FORMER_MEMBER = "Former member";
     private static final int IMPACT_ITEM_LIMIT = 20;
 
     public List<ApprovalPolicy> getAll() {
@@ -118,7 +119,7 @@ public class ApprovalPolicyService {
             }
             if (pendingApprovalCount > 0) {
                 pendingApprovals = approvalMapper.findPendingByPolicyId(workspaceId, id);
-                String currentImpactFingerprint = impactFingerprint(before, pendingApprovals.stream()
+                String currentImpactFingerprint = impactFingerprint(before, policy, pendingApprovals.stream()
                     .map(DocumentApproval::getId)
                     .toList());
                 if (!Objects.equals(currentImpactFingerprint, presentedImpactFingerprint)) {
@@ -165,7 +166,8 @@ public class ApprovalPolicyService {
             .map(row -> impactItem(row, requesterNames))
             .toList();
         return new ApprovalPolicyImpactDto(changeClass.name(), pendingApprovalCount,
-            effectOf(changeClass, pendingApprovalCount), impactFingerprint(before, pendingApprovalIds),
+            effectOf(changeClass, pendingApprovalCount),
+            impactFingerprint(before, proposed, pendingApprovalIds),
             affected);
     }
 
@@ -176,22 +178,64 @@ public class ApprovalPolicyService {
 
     private ApprovalImpactItemDto impactItem(ApprovalImpactSummaryRow row,
             Map<Integer, String> requesterNames) {
+        String requestedByName = requesterNames.get(row.requestedBy());
         return new ApprovalImpactItemDto(row.dealId(), row.dealName(), row.documentId(),
-            row.documentTitle(), row.version(), requesterNames.get(row.requestedBy()),
-            row.requestedAt());
+            row.documentTitle(), row.version(),
+            requestedByName == null ? FORMER_MEMBER : requestedByName,
+            requestedByName == null, row.requestedAt());
     }
 
-    private String impactFingerprint(ApprovalPolicy policy, List<Integer> pendingApprovalIds) {
-        String updatedAt = policy.getUpdatedAt();
+    /**
+     * Digests the UTF-8 encoding of a canonical sequence of length-prefixed tokens. A non-null
+     * token is {@code <UTF-8 byte length>:<value>} and a null token is {@code -1:}. The sequence is:
+     * version marker; persisted policy id and {@code updated_at}; pending-approval count and ids in
+     * ascending order; proposed document type, normalized currency, canonical minimum total,
+     * canonical minimum discount percent, normalized mode, normalized separation of duties, and
+     * step count; then each step in submitted order with its id, name, normalized required count,
+     * and approver count; then that step's approvers ordered by kind and nullable user id, each as
+     * kind followed by user id. Decimal tokens use {@link BigDecimal#stripTrailingZeros()} and plain
+     * notation, so numerically equal values have one representation.
+     */
+    private String impactFingerprint(ApprovalPolicy persisted, ApprovalPolicy proposed,
+            List<Integer> pendingApprovalIds) {
+        normalize(proposed);
+        String updatedAt = persisted.getUpdatedAt();
         if (updatedAt == null) {
             throw new IllegalStateException("Persisted approval policy updated_at is missing");
         }
-        StringBuilder input = new StringBuilder()
-            .append(policy.getId())
-            .append('\0')
-            .append(updatedAt);
-        pendingApprovalIds.stream().sorted()
-            .forEach(approvalId -> input.append('\0').append(approvalId));
+        StringBuilder input = new StringBuilder();
+        appendFingerprintToken(input, "approval-impact-v2");
+        appendFingerprintToken(input, Integer.toString(persisted.getId()));
+        appendFingerprintToken(input, updatedAt);
+        List<Integer> sortedPendingIds = pendingApprovalIds.stream().sorted().toList();
+        appendFingerprintToken(input, Integer.toString(sortedPendingIds.size()));
+        sortedPendingIds.forEach(approvalId ->
+            appendFingerprintToken(input, Integer.toString(approvalId)));
+        appendFingerprintToken(input, proposed.getDocumentType());
+        appendFingerprintToken(input, proposed.getCurrency());
+        appendFingerprintToken(input, canonicalDecimal(proposed.getMinTotal()));
+        appendFingerprintToken(input, canonicalDecimal(proposed.getMinDiscountPercent()));
+        appendFingerprintToken(input, proposed.getMode());
+        appendFingerprintToken(input, proposed.getSeparationOfDuties());
+        appendFingerprintToken(input, Integer.toString(proposed.getSteps().size()));
+        for (ApprovalPolicyStep step : proposed.getSteps()) {
+            appendFingerprintToken(input, Integer.toString(step.getId()));
+            appendFingerprintToken(input, step.getName());
+            appendFingerprintToken(input, Integer.toString(step.getRequiredCount()));
+            List<ApprovalStepApprover> approvers = step.getApprovers().stream()
+                .sorted(Comparator
+                    .comparing(ApprovalStepApprover::getApproverKind,
+                        Comparator.nullsFirst(Comparator.naturalOrder()))
+                    .thenComparing(ApprovalStepApprover::getUserId,
+                        Comparator.nullsFirst(Comparator.naturalOrder())))
+                .toList();
+            appendFingerprintToken(input, Integer.toString(approvers.size()));
+            for (ApprovalStepApprover approver : approvers) {
+                appendFingerprintToken(input, approver.getApproverKind());
+                appendFingerprintToken(input,
+                    approver.getUserId() == null ? null : approver.getUserId().toString());
+            }
+        }
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
                 .digest(input.toString().getBytes(StandardCharsets.UTF_8));
@@ -199,6 +243,18 @@ public class ApprovalPolicyService {
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 is unavailable", e);
         }
+    }
+
+    private void appendFingerprintToken(StringBuilder input, String value) {
+        if (value == null) {
+            input.append("-1:");
+            return;
+        }
+        input.append(value.getBytes(StandardCharsets.UTF_8).length).append(':').append(value);
+    }
+
+    private String canonicalDecimal(BigDecimal value) {
+        return value == null ? null : value.stripTrailingZeros().toPlainString();
     }
 
     private String effectOf(PolicyChangeClass changeClass, int pendingApprovalCount) {

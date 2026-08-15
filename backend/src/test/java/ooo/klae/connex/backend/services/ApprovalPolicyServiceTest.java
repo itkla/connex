@@ -489,6 +489,48 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void impactFingerprintBindsTheNormalizedProposedPolicy() {
+        User first = admin();
+        User second = admin();
+        ApprovalPolicy saved = policyService.create(chained("sequential",
+            step(1, "Manager", namedApprover(first.getId()))));
+        PendingApproval pending = pendingUnder(saved);
+        ApprovalPolicy proposed = copyPolicy(saved);
+        proposed.setCurrency(" jpy ");
+        proposed.setMinDiscountPercent(new BigDecimal("10.0"));
+        List<ApprovalPolicyStep> proposedSteps = new ArrayList<>(proposed.getSteps());
+        proposedSteps.add(step(1, "Finance",
+            namedApprover(first.getId()), namedApprover(second.getId())));
+        proposed.setSteps(proposedSteps);
+        ApprovalPolicyImpactDto preview = policyService.impact(saved.getId(), proposed);
+
+        ApprovalPolicy differentTightening = copyPolicy(proposed);
+        differentTightening.getSteps().getLast().setRequiredCount(2);
+        assertThrows(ApprovalImpactConfirmationRequiredException.class,
+            () -> policyService.update(saved.getId(), differentTightening, true,
+                preview.impactFingerprint()));
+
+        assertEquals("pending", approvalService.getForDocument(
+            pending.deal().getId(), pending.document().id()).getFirst().status());
+        assertEquals(1, policyMapper.getWithStepsById(
+            workspace.getId(), saved.getId()).getSteps().size());
+
+        ApprovalPolicy equivalentResubmission = copyPolicy(proposed);
+        equivalentResubmission.setCurrency("JPY");
+        equivalentResubmission.setMinDiscountPercent(new BigDecimal("10.000"));
+        ApprovalPolicyStep finance = equivalentResubmission.getSteps().getLast();
+        finance.setApprovers(finance.getApprovers().reversed());
+        policyService.update(saved.getId(), equivalentResubmission, true,
+            preview.impactFingerprint());
+
+        assertEquals("invalidated", approvalService.getForDocument(
+            pending.deal().getId(), pending.document().id()).getFirst().status());
+        ApprovalPolicy updated = policyMapper.getWithStepsById(workspace.getId(), saved.getId());
+        assertEquals(2, updated.getSteps().size());
+        assertEquals(1, updated.getSteps().getLast().getRequiredCount());
+    }
+
+    @Test
     void looseningLeavesPendingApprovalAndFrozenChainUntouched() {
         User approver = admin();
         ApprovalPolicy saved = policyService.create(chained("sequential",
@@ -625,6 +667,25 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
             foreignWorkspace.getId(), saved.getId()).isEmpty());
         assertEquals(0, approvalMapper.countPendingByPolicyId(
             foreignWorkspace.getId(), saved.getId()));
+    }
+
+    @Test
+    void impactLabelsARequesterWhoLeftTheWorkspace() {
+        User approver = admin();
+        ApprovalPolicy saved = policyService.create(chained("sequential",
+            step(1, "Manager", namedApprover(approver.getId()))));
+        pendingUnder(saved);
+        workspaceMapper.removeMember(workspace.getId(), currentUser.getId());
+        authenticateAs(approver, workspace.getId());
+        ApprovalPolicy proposed = copyPolicy(saved);
+        List<ApprovalPolicyStep> steps = new ArrayList<>(proposed.getSteps());
+        steps.add(step(1, "Finance", anyApprover()));
+        proposed.setSteps(steps);
+
+        ApprovalPolicyImpactDto impact = policyService.impact(saved.getId(), proposed);
+
+        assertEquals("Former member", impact.affected().getFirst().requestedByName());
+        assertTrue(impact.affected().getFirst().requestedByFormerMember());
     }
 
     @Test

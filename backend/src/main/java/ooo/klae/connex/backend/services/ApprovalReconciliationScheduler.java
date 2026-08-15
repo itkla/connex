@@ -4,7 +4,10 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,6 +15,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
@@ -29,10 +33,10 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
  *
  * <p>The tenant and system-actor scope is installed before any transaction opens, because
  * {@code TenantWorkScope} refuses to re-pin the catalog once a transaction holds a connection. Each
- * termination then runs in its own {@link TransactionTemplate} transaction: the termination method
- * is package-private so it stays outside the RBAC-guarded surface, and Spring's proxy-based
- * transaction management only advises public methods, so the caller must own the transaction for
- * the document row lock to be held across the whole write.
+ * workspace batch runs in one {@link TransactionTemplate} transaction that holds the workspace
+ * authorization root and one post-lock approver pool across every document. Each termination uses
+ * a nested savepoint so one failed document can roll back without releasing the root or poisoning
+ * successful siblings; the outer root remains held until the bounded batch finishes.
  */
 @Component
 @RequiredArgsConstructor
@@ -42,6 +46,7 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
     matchIfMissing = true)
 public class ApprovalReconciliationScheduler {
     private static final Logger log = LoggerFactory.getLogger(ApprovalReconciliationScheduler.class);
+    private static final int MAX_CONSECUTIVE_FULL_BATCHES = 16;
 
     private final DocumentApprovalMapper approvalMapper;
     private final WorkspaceMapper workspaceMapper;
@@ -52,7 +57,7 @@ public class ApprovalReconciliationScheduler {
     private final SystemActor systemActor;
     private final JobRunRecorder jobRunRecorder;
     private final TransactionTemplate transactionTemplate;
-    private final Map<Integer, Integer> cursors = new ConcurrentHashMap<>();
+    private final Map<Integer, CursorState> cursors = new ConcurrentHashMap<>();
 
     @Value("${connex.approvals.reconciliation-batch-size:200}")
     private int batchSize;
@@ -64,6 +69,10 @@ public class ApprovalReconciliationScheduler {
     public void reconcile() {
         List<String> catalogs = placementRegistry.activeCatalogs();
         Map<String, List<Integer>> workspacesByCatalog = workspacesByCatalog(catalogs);
+        Set<Integer> activeWorkspaceIds = workspacesByCatalog.values().stream()
+            .flatMap(List::stream)
+            .collect(Collectors.toSet());
+        cursors.keySet().retainAll(activeWorkspaceIds);
         for (String catalog : catalogs) {
             try {
                 tenantWorkScope.withCatalog(catalog, () -> {
@@ -129,23 +138,23 @@ public class ApprovalReconciliationScheduler {
         }
     }
 
-    private BatchResult reconcileBatch(int workspaceId) {
+    BatchResult reconcileBatch(int workspaceId) {
+        BatchResult result = transactionTemplate.execute(
+            status -> reconcileLockedBatch(workspaceId));
+        return Objects.requireNonNull(result, "Approval reconciliation transaction returned no result");
+    }
+
+    private BatchResult reconcileLockedBatch(int workspaceId) {
         int limit = Math.max(1, batchSize);
-        int afterId = cursors.getOrDefault(workspaceId, 0);
-        List<DocumentApproval> approvals = afterId == 0
-            ? approvalMapper.findPendingForWorkspace(workspaceId, limit)
-            : approvalMapper.findPendingForWorkspaceAfter(workspaceId, afterId, limit);
-        if (approvals.isEmpty() && afterId != 0) {
-            approvals = approvalMapper.findPendingForWorkspace(workspaceId, limit);
-        }
-        if (!approvals.isEmpty()) {
-            cursors.put(workspaceId, approvals.getLast().getId());
-        }
+        DocumentApprovalService.ApproverPool pool =
+            approvalService.reconciliationApproverPool(workspaceId);
+        List<DocumentApproval> approvals = selectPendingBatch(workspaceId, limit);
+        TransactionTemplate terminationTransaction = terminationTransactionTemplate();
         int failedCount = 0;
         for (DocumentApproval approval : approvals) {
             try {
-                transactionTemplate.executeWithoutResult(
-                    status -> approvalService.terminateIfUnsatisfiable(workspaceId, approval));
+                terminationTransaction.executeWithoutResult(status ->
+                    approvalService.terminateIfUnsatisfiable(workspaceId, approval, pool));
             } catch (RuntimeException exception) {
                 failedCount++;
                 log.warn("Approval reconciliation failed for workspace {} approval {}: {}",
@@ -153,6 +162,41 @@ public class ApprovalReconciliationScheduler {
             }
         }
         return new BatchResult(approvals.size(), failedCount);
+    }
+
+    List<DocumentApproval> selectPendingBatch(int workspaceId, int limit) {
+        CursorState cursor = cursors.getOrDefault(workspaceId, CursorState.start());
+        int afterId = cursor.afterId();
+        List<DocumentApproval> approvals = afterId == 0
+            ? approvalMapper.findPendingForWorkspace(workspaceId, limit)
+            : approvalMapper.findPendingForWorkspaceAfter(workspaceId, afterId, limit);
+        cursors.put(workspaceId, nextCursor(cursor, approvals, limit));
+        return approvals;
+    }
+
+    private CursorState nextCursor(
+            CursorState cursor, List<DocumentApproval> approvals, int limit) {
+        if (approvals.size() < limit) {
+            return CursorState.start();
+        }
+        int lastId = approvals.getLast().getId();
+        if (cursor.wrapHighWaterId() != null) {
+            return lastId >= cursor.wrapHighWaterId()
+                ? new CursorState(lastId, 0, null)
+                : new CursorState(lastId, 0, cursor.wrapHighWaterId());
+        }
+        if (cursor.consecutiveFullBatches() + 1 >= MAX_CONSECUTIVE_FULL_BATCHES) {
+            return new CursorState(0, 0, lastId);
+        }
+        return new CursorState(lastId, cursor.consecutiveFullBatches() + 1, null);
+    }
+
+    private TransactionTemplate terminationTransactionTemplate() {
+        TransactionTemplate termination = new TransactionTemplate(Objects.requireNonNull(
+            transactionTemplate.getTransactionManager(),
+            "Approval reconciliation requires a transaction manager"));
+        termination.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
+        return termination;
     }
 
     private void record(int workspaceId, JobRunStatus status, JobRunDetail detail) {
@@ -166,11 +210,26 @@ public class ApprovalReconciliationScheduler {
         }
     }
 
-    private record BatchResult(int attemptedCount, int failedCount) {
-        private BatchResult {
+    record BatchResult(int attemptedCount, int failedCount) {
+        BatchResult {
             if (attemptedCount < 0 || failedCount < 0 || failedCount > attemptedCount) {
                 throw new IllegalArgumentException("Invalid approval reconciliation counts");
             }
+        }
+    }
+
+    private record CursorState(
+            int afterId, int consecutiveFullBatches, Integer wrapHighWaterId) {
+        private CursorState {
+            if (afterId < 0 || consecutiveFullBatches < 0
+                    || consecutiveFullBatches >= MAX_CONSECUTIVE_FULL_BATCHES
+                    || (wrapHighWaterId != null && wrapHighWaterId <= 0)) {
+                throw new IllegalArgumentException("Invalid approval reconciliation cursor");
+            }
+        }
+
+        private static CursorState start() {
+            return new CursorState(0, 0, null);
         }
     }
 }

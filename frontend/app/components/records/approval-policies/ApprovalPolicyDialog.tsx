@@ -251,7 +251,9 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
                                         {t('impactItemMeta', {
                                             deal: item.dealName,
                                             version: item.version,
-                                            requester: item.requestedByName,
+                                            requester: item.requestedByFormerMember
+                                                ? t('formerMember')
+                                                : item.requestedByName,
                                         })}
                                     </p>
                                 </li>

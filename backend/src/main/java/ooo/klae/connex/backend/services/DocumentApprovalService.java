@@ -179,6 +179,16 @@ public class DocumentApprovalService {
     }
 
     /**
+     * Locks the workspace authorization root before resolving the pool reused by one reconciliation
+     * sweep. The caller's transaction must retain this root through every document mutation.
+     */
+    ApproverPool reconciliationApproverPool(int workspaceId) {
+        requireActiveTransaction();
+        workspaceService.lockApprovalReconciliationAuthorizationRoot(workspaceId);
+        return approverPool(workspaceId);
+    }
+
+    /**
      * Refuses a request that this particular actor could never get past. Separation of duties
      * removes the requester and the document's author from the pool for this request only, so a step
      * whose remaining named approvers can no longer reach its quorum is a dead end the requester can
@@ -216,7 +226,7 @@ public class DocumentApprovalService {
     }
 
     /** The workspace's members and the subset of them that may approve documents. */
-    private record ApproverPool(List<User> members, Set<Integer> approvers) {
+    record ApproverPool(List<User> members, Set<Integer> approvers) {
     }
 
     /**
@@ -537,6 +547,12 @@ public class DocumentApprovalService {
      * {@link #invalidateForPolicyChange}.
      */
     boolean terminateIfUnsatisfiable(int workspaceId, DocumentApproval approval) {
+        return terminateIfUnsatisfiable(
+            workspaceId, approval, reconciliationApproverPool(workspaceId));
+    }
+
+    /** Terminates one pending request using the post-authorization-lock workspace pool. */
+    boolean terminateIfUnsatisfiable(int workspaceId, DocumentApproval approval, ApproverPool pool) {
         requireActiveTransaction();
         DealDocument document = lockDocument(
             workspaceId, approval.getDealId(), approval.getDocumentId());
@@ -547,7 +563,7 @@ public class DocumentApprovalService {
         }
         current = withChain(workspaceId, List.of(current)).getFirst();
         ApprovalProjection projection = projectAvailability(
-            current, document, approverPool(workspaceId));
+            current, document, pool);
         if (projection.overall().satisfiable()) {
             return false;
         }
@@ -574,7 +590,7 @@ public class DocumentApprovalService {
             auditService.singleChange("status", PENDING, UNSATISFIABLE));
         User actor = userMapper.getUserById(workspaceService.getCurrentUserId());
         notifyTerminated(workspaceId, document, current, List.of(), actor,
-            UNSATISFIABLE, detail, false);
+            UNSATISFIABLE, detail, false, pool);
         return true;
     }
 
@@ -807,7 +823,14 @@ public class DocumentApprovalService {
     private void notifyTerminated(int workspaceId, DealDocument document,
             DocumentApproval approval, List<DocumentApprovalStep> activeSteps, User actor,
             String outcomeReason, String detail, boolean includeActiveApprovers) {
-        ApproverPool pool = approverPool(workspaceId);
+        notifyTerminated(workspaceId, document, approval, activeSteps, actor,
+            outcomeReason, detail, includeActiveApprovers, approverPool(workspaceId));
+    }
+
+    private void notifyTerminated(int workspaceId, DealDocument document,
+            DocumentApproval approval, List<DocumentApprovalStep> activeSteps, User actor,
+            String outcomeReason, String detail, boolean includeActiveApprovers,
+            ApproverPool pool) {
         Set<User> recipients = new LinkedHashSet<>();
         if (approval.getRequestedBy() != null) {
             pool.members().stream()

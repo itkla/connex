@@ -484,6 +484,8 @@
     "approvalRequestDescription": "ドキュメントの承認があなたに依頼されたとき。",
     "approvalDecisionTitle": "承認結果",
     "approvalDecisionDescription": "承認依頼が承認・却下・取り下げされたとき。",
+    "approvalTerminatedTitle": "終了した承認依頼",
+    "approvalTerminatedDescription": "ポリシーの変更や承認者の不在により承認依頼が終了したとき。",
     "loadFailed": "通知設定を読み込めませんでした。",
     "saveFailed": "変更を保存できませんでした。もう一度お試しください。",
     "retry": "再試行"
