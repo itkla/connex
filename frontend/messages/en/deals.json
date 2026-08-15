@@ -506,8 +506,6 @@
         "chainSummaryParallel": "{done} of {total} steps approved, all at once",
         "chainStatus_unsatisfiable": "cannot be completed",
         "chainBlocked": "This step can no longer reach its quorum. It will be closed automatically unless approvers regain access.",
-        "status_invalidated": "Invalidated",
-        "status_unsatisfiable": "Cannot be completed",
         "outcome_quorum": "Approved by every step",
         "outcome_rejected": "Rejected",
         "outcome_superseded": "Cancelled by a newer version",

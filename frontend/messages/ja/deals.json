@@ -506,8 +506,6 @@
         "chainSummaryParallel": "{total}ステップ中{done}件承認済み（全ステップ同時）",
         "chainStatus_unsatisfiable": "完了できません",
         "chainBlocked": "このステップは必要な承認数に到達できなくなりました。承認者の権限が戻らない限り、自動的に終了します。",
-        "status_invalidated": "無効",
-        "status_unsatisfiable": "完了不可",
         "outcome_quorum": "すべてのステップで承認済み",
         "outcome_rejected": "却下",
         "outcome_superseded": "新しいバージョンにより取り消し",
