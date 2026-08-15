@@ -51,7 +51,7 @@ class ApprovalPolicyChangeClassifierTest {
     }
 
     @Test
-    void reorderingStableIdsDoesNotChangeThePolicySemantics() {
+    void reorderingStableIdsRetargetsASequentialChain() {
         ApprovalPolicy current = policy(
             anyStep(31, null),
             namedStep(32, null, 7));
@@ -59,14 +59,30 @@ class ApprovalPolicyChangeClassifierTest {
             namedStep(32, null, 7),
             anyStep(31, null));
 
+        assertEquals(PolicyChangeClass.RETARGET, classifier.classify(current, reordered));
+    }
+
+    @Test
+    void reorderingStableIdsDoesNotChangeAParallelChain() {
+        ApprovalPolicy current = policy("parallel",
+            anyStep(31, null),
+            namedStep(32, null, 7));
+        ApprovalPolicy reordered = policy("parallel",
+            namedStep(32, null, 7),
+            anyStep(31, null));
+
         assertEquals(PolicyChangeClass.NONE, classifier.classify(current, reordered));
     }
 
     private ApprovalPolicy policy(ApprovalPolicyStep... steps) {
+        return policy("sequential", steps);
+    }
+
+    private ApprovalPolicy policy(String mode, ApprovalPolicyStep... steps) {
         ApprovalPolicy policy = new ApprovalPolicy();
         policy.setName("Policy");
         policy.setActive(true);
-        policy.setMode("sequential");
+        policy.setMode(mode);
         policy.setSeparationOfDuties("requester");
         policy.setSteps(List.of(steps));
         return policy;

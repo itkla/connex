@@ -7,6 +7,7 @@ import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -171,7 +172,7 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
         assertTrue(quote(deal).requiresApproval());
 
         p.setActive(false);
-        policyService.update(p.getId(), p, false);
+        policyService.update(p.getId(), p, false, null);
         assertFalse(quote(deal).requiresApproval());
     }
 
@@ -308,7 +309,7 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
 
         ApprovalPolicy replacement = chained("sequential", step(1, "Only", namedApprover(one.getId())));
         replacement.setName(saved.getName());
-        ApprovalPolicy updated = policyService.update(saved.getId(), replacement, false);
+        ApprovalPolicy updated = policyService.update(saved.getId(), replacement, false, null);
 
         assertEquals(1, updated.getSteps().size());
         assertEquals("Only", updated.getSteps().getFirst().getName());
@@ -408,7 +409,7 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
 
         ApprovalImpactConfirmationRequiredException exception = assertThrows(
             ApprovalImpactConfirmationRequiredException.class,
-            () -> policyService.update(saved.getId(), proposed, false));
+            () -> policyService.update(saved.getId(), proposed, false, null));
 
         assertTrue(exception.getMessage().contains("1 pending approval request"));
         assertEquals(1, policyMapper.getWithStepsById(workspace.getId(), saved.getId()).getSteps().size());
@@ -436,7 +437,8 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
         steps.add(step(1, "Finance", anyApprover()));
         proposed.setSteps(steps);
 
-        policyService.update(saved.getId(), proposed, true);
+        ApprovalPolicyImpactDto impact = policyService.impact(saved.getId(), proposed);
+        policyService.update(saved.getId(), proposed, true, impact.impactFingerprint());
 
         DocumentApprovalDto invalidated = approvalService.getForDocument(
             pending.deal().getId(), pending.document().id()).getFirst();
@@ -456,6 +458,37 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void staleImpactFingerprintRefusesTighteningAndLeavesEveryApprovalPending() {
+        User approver = admin();
+        ApprovalPolicy saved = policyService.create(chained("sequential",
+            step(1, "Manager", namedApprover(approver.getId()))));
+        PendingApproval first = pendingUnder(saved);
+        ApprovalPolicy proposed = copyPolicy(saved);
+        List<ApprovalPolicyStep> steps = new ArrayList<>(proposed.getSteps());
+        steps.add(step(1, "Finance", anyApprover()));
+        proposed.setSteps(steps);
+        ApprovalPolicyImpactDto stalePreview = policyService.impact(saved.getId(), proposed);
+        assertEquals(1, stalePreview.pendingApprovalCount());
+        PendingApproval second = pendingUnder(saved);
+
+        ApprovalImpactConfirmationRequiredException exception = assertThrows(
+            ApprovalImpactConfirmationRequiredException.class,
+            () -> policyService.update(
+                saved.getId(), proposed, true, stalePreview.impactFingerprint()));
+
+        assertTrue(exception.getMessage().contains("situation changed"));
+        assertEquals("pending", approvalService.getForDocument(
+            first.deal().getId(), first.document().id()).getFirst().status());
+        assertEquals("pending", approvalService.getForDocument(
+            second.deal().getId(), second.document().id()).getFirst().status());
+        assertEquals(1, policyMapper.getWithStepsById(
+            workspace.getId(), saved.getId()).getSteps().size());
+        ApprovalPolicyImpactDto freshPreview = policyService.impact(saved.getId(), proposed);
+        assertEquals(2, freshPreview.pendingApprovalCount());
+        assertNotEquals(stalePreview.impactFingerprint(), freshPreview.impactFingerprint());
+    }
+
+    @Test
     void looseningLeavesPendingApprovalAndFrozenChainUntouched() {
         User approver = admin();
         ApprovalPolicy saved = policyService.create(chained("sequential",
@@ -465,7 +498,7 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
         ApprovalPolicy proposed = copyPolicy(saved);
         proposed.setSteps(List.of(proposed.getSteps().getFirst()));
 
-        policyService.update(saved.getId(), proposed, false);
+        policyService.update(saved.getId(), proposed, false, null);
 
         DocumentApprovalDto reread = approvalService.getForDocument(
             pending.deal().getId(), pending.document().id()).getFirst();
@@ -482,7 +515,7 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
         ApprovalPolicy proposed = copyPolicy(saved);
         proposed.setName("Retargeted " + unique());
 
-        policyService.update(saved.getId(), proposed, false);
+        policyService.update(saved.getId(), proposed, false, null);
 
         DocumentApprovalDto reread = approvalService.getForDocument(
             pending.deal().getId(), pending.document().id()).getFirst();
@@ -497,12 +530,12 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
             step(1, "Manager", namedApprover(approver.getId()))));
         ApprovalPolicy stalePayload = copyPolicy(saved);
         ApprovalPolicy refreshed = policyService.update(
-            saved.getId(), copyPolicy(saved), false);
+            saved.getId(), copyPolicy(saved), false, null);
         assertEquals(saved.getSteps().getFirst().getId(),
             refreshed.getSteps().getFirst().getId());
         PendingApproval pending = pendingUnder(refreshed);
 
-        policyService.update(saved.getId(), stalePayload, false);
+        policyService.update(saved.getId(), stalePayload, false, null);
 
         DocumentApprovalDto reread = approvalService.getForDocument(
             pending.deal().getId(), pending.document().id()).getFirst();
@@ -519,7 +552,7 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
         proposed.getSteps().getFirst().setId(saved.getSteps().getFirst().getId() + 100_000);
 
         assertThrows(ConflictException.class,
-            () -> policyService.update(saved.getId(), proposed, false));
+            () -> policyService.update(saved.getId(), proposed, false, null));
 
         ApprovalPolicy unchanged = policyMapper.getWithStepsById(workspace.getId(), saved.getId());
         assertEquals(saved.getSteps().getFirst().getId(),
@@ -563,8 +596,11 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
         assertEquals("TIGHTEN", impact.changeClass());
         assertEquals(21, impact.pendingApprovalCount());
         assertEquals("invalidate_pending_approvals", impact.effect());
+        assertTrue(impact.impactFingerprint().matches("[0-9a-f]{64}"));
         assertEquals(20, impact.affected().size());
         assertTrue(impact.affected().stream().allMatch(item -> item.dealId() == deal.getId()));
+        assertTrue(impact.affected().stream()
+            .allMatch(item -> currentUser.getDisplayName().equals(item.requestedByName())));
         assertTrue(impact.affected().stream().allMatch(item -> item.requestedAt() != null));
 
         Workspace foreignWorkspace = new Workspace();

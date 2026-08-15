@@ -90,6 +90,35 @@
     ORDER BY document_id, id
   </select>
 
+  <select id="findPendingIdsByPolicyId" resultType="int">
+    SELECT id FROM document_approval
+    WHERE workspace_id = #{workspaceId} AND policy_id = #{policyId} AND status = 'pending'
+    ORDER BY id
+  </select>
+
+  <select id="findPendingImpactSummaries"
+      resultType="ooo.klae.connex.backend.dto.ApprovalImpactSummaryRow">
+    SELECT d.id AS dealId,
+           d.name AS dealName,
+           dd.id AS documentId,
+           dd.title AS documentTitle,
+           dd.version,
+           a.requested_by AS requestedBy,
+           a.created_at AS requestedAt
+    FROM document_approval a
+    JOIN deal d
+      ON d.workspace_id = a.workspace_id AND d.id = a.deal_id
+    JOIN deal_document dd
+      ON dd.workspace_id = a.workspace_id
+     AND dd.deal_id = a.deal_id
+     AND dd.id = a.document_id
+    WHERE a.workspace_id = #{workspaceId}
+      AND a.policy_id = #{policyId}
+      AND a.status = 'pending'
+    ORDER BY a.id
+    LIMIT #{limit}
+  </select>
+
   <select id="findPendingForWorkspace" resultMap="DocumentApprovalResult">
     SELECT <include refid="cols"/> FROM document_approval
     WHERE workspace_id = #{workspaceId} AND status = 'pending'

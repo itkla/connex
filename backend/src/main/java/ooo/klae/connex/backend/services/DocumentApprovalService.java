@@ -121,6 +121,11 @@ public class DocumentApprovalService {
     @RequirePermission(Permission.DEAL_UPDATE)
     public DocumentApprovalDto requestApproval(int dealId, int documentId, String comment) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = workspaceService.getCurrentUserId();
+        if (!workspaceService.lockedPermissionsFor(workspaceId, actorId)
+                .contains(Permission.DEAL_UPDATE)) {
+            throw new ForbiddenException("You cannot update deals in this workspace");
+        }
         Deal deal = requireDeal(workspaceId, dealId);
         requireDocument(workspaceId, dealId, documentId);
         List<ApprovalPolicy> policies = policyService.activePoliciesForRequest(workspaceId);
@@ -132,7 +137,7 @@ public class DocumentApprovalService {
             throw new BadRequestException("An approval is already pending for this document");
         }
         ApprovalPolicy policy = policyService.firstMatch(policies, document, parseContent(document));
-        User actor = userMapper.getUserById(workspaceService.getCurrentUserId());
+        User actor = userMapper.getUserById(actorId);
 
         DocumentApproval approval = new DocumentApproval();
         approval.setWorkspaceId(workspaceId);
@@ -461,13 +466,17 @@ public class DocumentApprovalService {
     @RequirePermission(Permission.DEAL_UPDATE)
     public DocumentApprovalDto cancel(int dealId, int documentId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int currentUserId = workspaceService.getCurrentUserId();
+        if (!workspaceService.lockedPermissionsFor(workspaceId, currentUserId)
+                .contains(Permission.DEAL_UPDATE)) {
+            throw new ForbiddenException("You cannot update deals in this workspace");
+        }
         Deal deal = requireDeal(workspaceId, dealId);
         DealDocument document = lockDocument(workspaceId, dealId, documentId);
         DocumentApproval approval = approvalMapper.findPending(workspaceId, documentId);
         if (approval == null || !"pending_approval".equals(document.getStatus())) {
             throw new BadRequestException("No pending approval on this document");
         }
-        int currentUserId = workspaceService.getCurrentUserId();
         if (approval.getRequestedBy() == null) {
             workspaceService.requireRole(WorkspaceService.Role.ADMIN);
         } else if (approval.getRequestedBy() != currentUserId) {

@@ -105,7 +105,22 @@ final class ApprovalPolicyChangeClassifier {
             || !Objects.equals(before.getCurrency(), after.getCurrency())
             || !decimalEquals(before.getMinTotal(), after.getMinTotal())
             || !decimalEquals(before.getMinDiscountPercent(), after.getMinDiscountPercent())
-            || !Objects.equals(before.getMode(), after.getMode());
+            || !Objects.equals(before.getMode(), after.getMode())
+            || sequentialStepOrderChanged(before, after);
+    }
+
+    private boolean sequentialStepOrderChanged(ApprovalPolicy before, ApprovalPolicy after) {
+        if (!"sequential".equals(before.getMode()) || !"sequential".equals(after.getMode())) {
+            return false;
+        }
+        return !persistedStepIds(before).equals(persistedStepIds(after));
+    }
+
+    private List<Integer> persistedStepIds(ApprovalPolicy policy) {
+        return policy.getSteps().stream()
+            .map(ApprovalPolicyStep::getId)
+            .filter(id -> id > 0)
+            .toList();
     }
 
     private boolean decimalEquals(BigDecimal left, BigDecimal right) {

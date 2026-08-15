@@ -11,11 +11,13 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doAnswer;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import ooo.klae.connex.backend.beans.ApprovalPolicy;
 import ooo.klae.connex.backend.beans.ApprovalPolicyStep;
@@ -47,6 +49,7 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
     @Autowired ProductService productService;
     @Autowired DocumentApprovalMapper approvalMapper;
     @Autowired JdbcTemplate jdbcTemplate;
+    @MockitoSpyBean WorkspaceService workspaceService;
 
     private Deal jpyDeal() {
         Pipeline pipeline = newPipeline();
@@ -132,6 +135,17 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         return approver;
     }
 
+    private void deactivateCurrentMembershipBeforeLockedPermissionRead() {
+        int workspaceId = workspace.getId();
+        int actorId = currentUser.getId();
+        doAnswer(invocation -> {
+            jdbcTemplate.update(
+                "UPDATE workspace_member SET status = 'pending' WHERE workspace_id = ? AND user_id = ?",
+                workspaceId, actorId);
+            return invocation.callRealMethod();
+        }).when(workspaceService).lockedPermissionsFor(workspaceId, actorId);
+    }
+
     @Test
     void requestMovesDraftToPendingAndRecordsTriggeringPolicy() {
         ApprovalPolicy policy = jpyTotalPolicy("100");
@@ -149,6 +163,23 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         DealDocumentDto pending = documentService.getOne(deal.getId(), doc.id());
         assertEquals("pending_approval", pending.status());
         assertNotNull(pending.latestApproval());
+    }
+
+    @Test
+    void requestFailsClosedWhenMembershipIsDeactivatedAfterEntryBeforeAuthorizationLock() {
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        deactivateCurrentMembershipBeforeLockedPermissionRead();
+
+        assertThrows(ForbiddenException.class,
+            () -> approvalService.requestApproval(deal.getId(), document.id(), null));
+
+        assertEquals("draft", jdbcTemplate.queryForObject(
+            "SELECT status FROM deal_document WHERE workspace_id = ? AND id = ?",
+            String.class, workspace.getId(), document.id()));
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM document_approval WHERE workspace_id = ? AND document_id = ?",
+            Integer.class, workspace.getId(), document.id()));
     }
 
     @Test
@@ -314,6 +345,24 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         assertEquals("cancelled", cancelled.status());
         assertEquals("cancelled_by_requester", cancelled.outcomeReason());
         assertEquals("draft", documentService.getOne(deal.getId(), doc.id()).status());
+    }
+
+    @Test
+    void cancelFailsClosedWhenMembershipIsDeactivatedAfterEntryBeforeAuthorizationLock() {
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto approval = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        deactivateCurrentMembershipBeforeLockedPermissionRead();
+
+        assertThrows(ForbiddenException.class,
+            () -> approvalService.cancel(deal.getId(), document.id()));
+
+        assertEquals("pending", approvalMapper.getById(
+            workspace.getId(), approval.id()).getStatus());
+        assertEquals("pending_approval", jdbcTemplate.queryForObject(
+            "SELECT status FROM deal_document WHERE workspace_id = ? AND id = ?",
+            String.class, workspace.getId(), document.id()));
     }
 
     @Test
@@ -643,7 +692,7 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         edited.setMode("parallel");
         edited.setSeparationOfDuties(policy.getSeparationOfDuties());
         edited.setSteps(policy.getSteps());
-        policyService.update(policy.getId(), edited, false);
+        policyService.update(policy.getId(), edited, false, null);
 
         DocumentApprovalDto reread = approvalService.getForDocument(deal.getId(), doc.id()).getFirst();
         assertEquals(1, reread.steps().size());
@@ -779,6 +828,29 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void outcomeConstraintAcceptsLegacyTerminalNullAndRejectsPendingReason() {
+        Deal firstDeal = jpyDeal();
+        DealDocumentDto firstDocument = generate(firstDeal);
+        DocumentApprovalDto terminal = approvalService.requestApproval(
+            firstDeal.getId(), firstDocument.id(), null);
+
+        assertEquals(1, jdbcTemplate.update(
+            "UPDATE document_approval SET status = 'rejected', outcome_reason = NULL "
+                + "WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), terminal.id()));
+        assertNull(approvalMapper.getById(workspace.getId(), terminal.id()).getOutcomeReason());
+
+        Deal secondDeal = jpyDeal();
+        DealDocumentDto secondDocument = generate(secondDeal);
+        DocumentApprovalDto pending = approvalService.requestApproval(
+            secondDeal.getId(), secondDocument.id(), null);
+        assertThrows(DataAccessException.class, () -> jdbcTemplate.update(
+            "UPDATE document_approval SET outcome_reason = 'rejected' "
+                + "WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), pending.id()));
+    }
+
+    @Test
     void newPendingApprovalMapperReadsRemainWorkspaceScoped() {
         ApprovalPolicy policy = jpyTotalPolicy("1");
         Deal deal = jpyDeal();
@@ -789,6 +861,10 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
 
         assertTrue(approvalMapper.findPendingByPolicyId(
             foreignWorkspaceId, policy.getId()).isEmpty());
+        assertTrue(approvalMapper.findPendingIdsByPolicyId(
+            foreignWorkspaceId, policy.getId()).isEmpty());
+        assertTrue(approvalMapper.findPendingImpactSummaries(
+            foreignWorkspaceId, policy.getId(), 20).isEmpty());
         assertTrue(approvalMapper.findPendingForWorkspace(
             foreignWorkspaceId, 200).isEmpty());
         assertTrue(approvalMapper.findPendingForWorkspaceAfter(

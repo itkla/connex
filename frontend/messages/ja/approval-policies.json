@@ -60,6 +60,7 @@
     "save": "ポリシーを保存",
     "created": "ポリシーを作成しました",
     "updated": "ポリシーを更新しました",
+    "pendingApprovalsUnchanged": "承認待ちの申請は、確定済みの承認チェーンのまま変更されません。",
     "saveFailed": "ポリシーを保存できませんでした",
     "chainTitle": "承認チェーン",
     "modeLabel": "ステップの進め方",

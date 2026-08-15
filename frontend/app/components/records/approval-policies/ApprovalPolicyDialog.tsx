@@ -166,13 +166,18 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
         steps: draft.steps.map(toStepPayload),
     });
 
-    const commit = async (payload: UpdateApprovalPolicyPayload) => {
+    const commit = async (
+        payload: UpdateApprovalPolicyPayload,
+        pendingApprovalsUnchanged = false,
+    ) => {
         setSaving(true);
         try {
             const saved = policy
                 ? await updateApprovalPolicy(policy.id, payload)
                 : await createApprovalPolicy(payload);
-            toastSuccess(policy ? t('updated') : t('created'));
+            toastSuccess(policy ? t('updated') : t('created'), pendingApprovalsUnchanged
+                ? { description: t('pendingApprovalsUnchanged') }
+                : undefined);
             onSaved(saved, policy === null);
             onOpenChange(false);
         } catch (err) {
@@ -208,12 +213,19 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
             setImpact(preview);
             return;
         }
-        await commit(payload);
+        await commit(
+            payload,
+            preview != null
+                && preview.changeClass !== 'TIGHTEN'
+                && preview.pendingApprovalCount > 0,
+        );
     };
 
     const confirmInvalidation = async () => {
+        if (!impact) return;
+        const impactFingerprint = impact.impactFingerprint;
         setImpact(null);
-        await commit({ ...buildPayload(), confirmInvalidation: true });
+        await commit({ ...buildPayload(), confirmInvalidation: true, impactFingerprint });
     };
 
     if (impact) {

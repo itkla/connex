@@ -59,6 +59,9 @@ public class ApprovalPolicyDto {
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private boolean confirmInvalidation;
 
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    private String impactFingerprint;
+
     @Valid
     @Size(max = 10, message = "a policy may not have more than 10 approval steps")
     private List<@NotNull(message = "steps must not contain empty entries") ApprovalPolicyStepDto> steps =

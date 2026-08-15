@@ -60,6 +60,7 @@
     "save": "Save policy",
     "created": "Policy created",
     "updated": "Policy updated",
+    "pendingApprovalsUnchanged": "Pending approvals continue unchanged under their frozen chain.",
     "saveFailed": "Couldn't save the policy",
     "chainTitle": "Approver chain",
     "modeLabel": "Run steps",

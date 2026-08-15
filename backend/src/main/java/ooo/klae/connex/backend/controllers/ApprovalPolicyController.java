@@ -38,7 +38,7 @@ public class ApprovalPolicyController {
     @PutMapping("/{id}")
     public ApprovalPolicyDto update(@PathVariable int id, @Valid @RequestBody ApprovalPolicyDto dto) {
         return ApprovalPolicyDto.from(
-            policyService.update(id, dto.toBean(), dto.isConfirmInvalidation()));
+            policyService.update(id, dto.toBean(), dto.isConfirmInvalidation(), dto.getImpactFingerprint()));
     }
 
     @PostMapping("/{id}/impact")

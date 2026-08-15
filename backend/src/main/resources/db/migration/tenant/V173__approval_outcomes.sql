@@ -1,6 +1,8 @@
 -- Approval requests retain a stable terminal reason independently of their coarse status. Policy
 -- tightening and loss of eligible approvers terminate the request without rewriting its frozen
--- chain, while legacy cancelled rows are backfilled before terminal consistency is enforced.
+-- chain. A terminal row may deliberately have no reason when it was written during a rolling
+-- deployment by a binary that predates outcome reasons. The current runtime still writes a reason
+-- on every terminal transition, while pending rows must never carry one.
 ALTER TABLE document_approval
     ADD COLUMN outcome_reason VARCHAR(32) NULL COMMENT 'Stable reason for a terminal approval outcome',
     ADD COLUMN outcome_detail VARCHAR(500) NULL COMMENT 'Bounded operator-facing detail for the terminal outcome';
@@ -22,7 +24,7 @@ ALTER TABLE document_approval
             'quorum','rejected','superseded','cancelled_by_requester','cancelled_by_admin',
             'policy_invalidated','unsatisfiable','cancelled_legacy')),
     ADD CONSTRAINT chk_document_approval_outcome_terminal
-        CHECK ((status = 'pending') = (outcome_reason IS NULL));
+        CHECK (status <> 'pending' OR outcome_reason IS NULL);
 
 ALTER TABLE document_approval_step
     DROP CONSTRAINT chk_document_approval_step_status,

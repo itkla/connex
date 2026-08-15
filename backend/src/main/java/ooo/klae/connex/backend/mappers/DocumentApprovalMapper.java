@@ -8,6 +8,7 @@ import ooo.klae.connex.backend.beans.ApprovalStepApprover;
 import ooo.klae.connex.backend.beans.DocumentApproval;
 import ooo.klae.connex.backend.beans.DocumentApprovalDecision;
 import ooo.klae.connex.backend.beans.DocumentApprovalStep;
+import ooo.klae.connex.backend.dto.ApprovalImpactSummaryRow;
 
 /** Mapper for {@code document_approval} and its frozen chain; every statement is workspace-scoped. */
 public interface DocumentApprovalMapper {
@@ -17,6 +18,12 @@ public interface DocumentApprovalMapper {
     DocumentApproval findPending(@Param("workspaceId") int workspaceId, @Param("documentId") int documentId);
     List<DocumentApproval> findPendingByPolicyId(@Param("workspaceId") int workspaceId,
         @Param("policyId") int policyId);
+    List<Integer> findPendingIdsByPolicyId(@Param("workspaceId") int workspaceId,
+        @Param("policyId") int policyId);
+    List<ApprovalImpactSummaryRow> findPendingImpactSummaries(
+        @Param("workspaceId") int workspaceId,
+        @Param("policyId") int policyId,
+        @Param("limit") int limit);
     List<DocumentApproval> findPendingForWorkspace(@Param("workspaceId") int workspaceId,
         @Param("limit") int limit);
     List<DocumentApproval> findPendingForWorkspaceAfter(@Param("workspaceId") int workspaceId,

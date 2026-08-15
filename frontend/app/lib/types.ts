@@ -1655,6 +1655,7 @@ export type CreateApprovalPolicyPayload = {
  */
 export type UpdateApprovalPolicyPayload = CreateApprovalPolicyPayload & {
     confirmInvalidation?: boolean;
+    impactFingerprint?: string;
 };
 
 /** How a proposed policy edit compares with the persisted one. */
@@ -1680,6 +1681,7 @@ export type ApprovalPolicyImpact = {
     changeClass: PolicyChangeClass;
     pendingApprovalCount: number;
     effect: string;
+    impactFingerprint: string;
     affected: ApprovalImpactItem[];
 };
 
