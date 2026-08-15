@@ -150,6 +150,43 @@ public class AuditService {
     }
 
     /**
+     * Records a successful event without copying request IP, user-agent, session, or correlation
+     * metadata into the audit row. Use for public evidence-bearing flows that retain only their
+     * own pseudonymized request evidence.
+     */
+    public void recordWithoutRequestMetadata(
+            String action,
+            String entityType,
+            Integer entityId,
+            String targetLabel,
+            String summary,
+            Object changes) {
+        try {
+            writeUnchecked(
+                action,
+                entityType,
+                entityId,
+                targetLabel,
+                OUTCOME_SUCCESS,
+                summary,
+                changes,
+                null,
+                false,
+                false,
+                null,
+                null,
+                false);
+        } catch (Exception exception) {
+            log.error(
+                "Failed to record audit event action={} entityType={} entityId={}",
+                action,
+                entityType,
+                entityId,
+                exception);
+        }
+    }
+
+    /**
      * Records a single successful audit event and propagates any persistence failure, for
      * operations that must not proceed without a durable access record (e.g. bulk personal-data
      * disclosure). Call inside the operation's transaction so a failed append aborts it.
@@ -164,7 +201,7 @@ public class AuditService {
     public void recordStrict(String action, String entityType, Integer entityId,
             String targetLabel, String summary, Object changes) {
         writeUnchecked(action, entityType, entityId, targetLabel, OUTCOME_SUCCESS, summary, changes,
-                null, false, false, null, null);
+                null, false, false, null, null, true);
     }
 
     /**
@@ -182,7 +219,7 @@ public class AuditService {
     public void recordStrictScoped(String action, String entityType, Integer entityId,
             Integer workspaceId, Integer orgId, String targetLabel, String summary, Object changes) {
         writeUnchecked(action, entityType, entityId, targetLabel, OUTCOME_SUCCESS, summary, changes,
-                null, false, true, workspaceId, orgId);
+                null, false, true, workspaceId, orgId, true);
     }
 
     /**
@@ -234,7 +271,7 @@ public class AuditService {
     public void recordStrictIndependentScoped(String action, String entityType, Integer entityId,
             Integer workspaceId, Integer orgId, String targetLabel, String summary, Object changes) {
         writeUnchecked(action, entityType, entityId, targetLabel, OUTCOME_SUCCESS, summary, changes,
-                null, true, true, workspaceId, orgId);
+                null, true, true, workspaceId, orgId, true);
     }
 
     /**
@@ -289,7 +326,7 @@ public class AuditService {
             boolean explicitScope, Integer workspaceId, Integer orgId) {
         try {
             writeUnchecked(action, entityType, entityId, targetLabel, outcome, summary, changes,
-                    context, independent, explicitScope, workspaceId, orgId);
+                    context, independent, explicitScope, workspaceId, orgId, true);
         } catch (Exception e) {
             log.error("Failed to record audit event action={} entityType={} entityId={}",
                     action, entityType, entityId, e);
@@ -301,7 +338,8 @@ public class AuditService {
      */
     private void writeUnchecked(String action, String entityType, Integer entityId, String targetLabel,
             String outcome, String summary, Object changes, Object context, boolean independent,
-            boolean explicitScope, Integer workspaceId, Integer orgId) {
+            boolean explicitScope, Integer workspaceId, Integer orgId,
+            boolean includeRequestMetadata) {
         AuditLog entry = new AuditLog();
         entry.setAction(truncate(action, ACTION_MAX));
         entry.setEntityType(truncate(entityType, ENTITY_TYPE_MAX));
@@ -321,7 +359,9 @@ public class AuditService {
             entry.setOrgId(orgLevel ? entityId : tenantContext.getOrgId());
         }
         resolveActor(entry);
-        resolveRequest(entry);
+        if (includeRequestMetadata) {
+            resolveRequest(entry);
+        }
 
         if (independent) {
             auditIntegrityService.appendIndependent(entry);

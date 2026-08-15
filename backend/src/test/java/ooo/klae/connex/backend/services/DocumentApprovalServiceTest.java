@@ -189,6 +189,31 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void appliedPolicySnapshotSurvivesPolicyDeletion() {
+        ApprovalPolicy policy = jpyTotalPolicy("100");
+        Deal deal = jpyDeal();
+        addLine(deal, "150.00", "1");
+        DealDocumentDto doc = generate(deal);
+        DocumentApprovalDto approval = approvalService.requestApproval(
+            deal.getId(), doc.id(), null);
+
+        policyService.delete(policy.getId());
+
+        assertNull(approvalService.getForDocument(
+            deal.getId(), doc.id()).getFirst().policyId());
+        assertEquals(policy.getId(), jdbcTemplate.queryForObject(
+            "SELECT policy_id_snapshot FROM document_approval WHERE workspace_id = ? AND id = ?",
+            Integer.class,
+            workspace.getId(),
+            approval.id()));
+        assertEquals("applied", jdbcTemplate.queryForObject(
+            "SELECT policy_binding FROM document_approval WHERE workspace_id = ? AND id = ?",
+            String.class,
+            workspace.getId(),
+            approval.id()));
+    }
+
+    @Test
     void differentApproverCanApprove() {
         jpyTotalPolicy("100");
         Deal deal = jpyDeal();

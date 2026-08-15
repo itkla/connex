@@ -60,6 +60,7 @@ class CapabilitiesControllerTest {
         when(capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)).thenReturn(true);
         when(connectedAccountProviders.mode(ConnectedAccountProviders.GOOGLE))
                 .thenReturn(ConnectedAccountMode.MANAGED);
+        when(capabilityRegistry.isAvailable(Capability.DOCUMENT_SIGNATURE)).thenReturn(true);
 
         mockMvc.perform(get("/api/capabilities"))
                 .andExpect(status().isOk())
@@ -75,7 +76,8 @@ class CapabilitiesControllerTest {
                 .andExpect(jsonPath("$.mailManaged").value(false))
                 .andExpect(jsonPath("$.businessCardScanning").value(true))
                 .andExpect(jsonPath("$.businessCardImport").value(true))
-                .andExpect(jsonPath("$.campaignDelivery").value(true));
+                .andExpect(jsonPath("$.campaignDelivery").value(true))
+                .andExpect(jsonPath("$.documentSignature").value(true));
     }
 
     @Test
@@ -85,5 +87,6 @@ class CapabilitiesControllerTest {
                 .andExpect(jsonPath("$.campaignDelivery").value(false));
 
         verify(capabilityRegistry).isAvailable(Capability.CAMPAIGN_DELIVERY);
+        verify(capabilityRegistry).isAvailable(Capability.DOCUMENT_SIGNATURE);
     }
 }

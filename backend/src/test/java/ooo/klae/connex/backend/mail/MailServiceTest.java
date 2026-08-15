@@ -90,6 +90,15 @@ class MailServiceTest {
         verify(smtpDestinationGuard, never()).resolveForSend(config);
     }
 
+    @Test
+    void workspaceTransportAvailabilityReflectsTheEffectiveResolvedConfig() {
+        when(resolver.resolveForWorkspace(7)).thenReturn(config(true));
+        when(resolver.resolveForWorkspace(8)).thenReturn(null);
+
+        assertTrue(mailService.hasUsableWorkspaceTransport(7));
+        assertFalse(mailService.hasUsableWorkspaceTransport(8));
+    }
+
     private static ResolvedMailConfig config(boolean workspaceSupplied) {
         return new ResolvedMailConfig(
             "smtp.example.com", 587, null, null, "sender@example.com", "Connex",

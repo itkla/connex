@@ -31,6 +31,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.DocumentDeliveryArtifact;
 import ooo.klae.connex.backend.beans.DealPerson;
 import ooo.klae.connex.backend.beans.DealStageHistory;
 import ooo.klae.connex.backend.beans.Note;
@@ -79,6 +80,7 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealDocumentMapper;
+import ooo.klae.connex.backend.mappers.DocumentDeliveryMapper;
 import ooo.klae.connex.backend.mappers.DealLineItemMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
@@ -90,6 +92,7 @@ import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
+import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.util.AnalyticsPeriods.AnalyticsPeriod;
 import ooo.klae.connex.backend.util.AnalyticsPeriods.Window;
 import ooo.klae.connex.backend.util.CanonicalNameNormalizer;
@@ -105,6 +108,7 @@ import ooo.klae.connex.backend.util.CanonicalNameNormalizer;
 public class DealService {
     private final DealMapper dealMapper;
     private final DealDocumentMapper dealDocumentMapper;
+    private final DocumentDeliveryMapper documentDeliveryMapper;
     private final DealLineItemMapper dealLineItemMapper;
     private final PersonMapper personMapper;
     private final PipelineMapper pipelineMapper;
@@ -128,6 +132,7 @@ public class DealService {
     private final DealStageHistoryService dealStageHistoryService;
     private final ObjectMapper objectMapper;
     private final DealRiskService dealRiskService;
+    private final ManagedObjectService managedObjectService;
     private final SegmentService segmentService;
     private final DealValueService dealValueService;
     private final DealOutcomeWriter dealOutcomeWriter;
@@ -1304,6 +1309,11 @@ public class DealService {
         Deal before = requireDealForUpdate(workspaceId, id);
         if (dealDocumentMapper.countNonDraftByDeal(workspaceId, id) > 0) {
             workspaceService.requireRole(WorkspaceService.Role.ADMIN);
+        }
+        for (DocumentDeliveryArtifact artifact
+                : documentDeliveryMapper.getArtifactsByDeal(workspaceId, id)) {
+            managedObjectService.deleteDocumentArtifactAfterCommit(
+                workspaceId, artifact.getDeliveryId(), artifact.getObjectKey());
         }
         customFieldValueService.deleteByEntity("deal", id);
         dealMapper.delete(workspaceId, id);

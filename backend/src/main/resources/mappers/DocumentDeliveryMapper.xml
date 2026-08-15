@@ -1,0 +1,461 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.DocumentDeliveryMapper">
+
+  <resultMap id="DeliveryResult" type="DocumentDelivery">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="dealId" column="deal_id"/>
+    <result property="documentId" column="document_id"/>
+    <result property="provider" column="provider"/>
+    <result property="providerEnvelopeId" column="provider_envelope_id"/>
+    <result property="status" column="status"/>
+    <result property="message" column="message"/>
+    <result property="expiresAt" column="expires_at"/>
+    <result property="sentBy" column="sent_by"/>
+    <result property="sentAt" column="sent_at"/>
+    <result property="completedAt" column="completed_at"/>
+    <result property="terminatedAt" column="terminated_at"/>
+    <result property="terminationReason" column="termination_reason"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <resultMap id="RecipientResult" type="DocumentDeliveryRecipient">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="deliveryId" column="delivery_id"/>
+    <result property="personId" column="person_id"/>
+    <result property="name" column="name"/>
+    <result property="email" column="email"/>
+    <result property="role" column="role"/>
+    <result property="recipientOrder" column="recipient_order"/>
+    <result property="status" column="status"/>
+    <result property="tokenHash" column="token_hash"/>
+    <result property="tokenExpiresAt" column="token_expires_at"/>
+    <result property="providerRecipientId" column="provider_recipient_id"/>
+    <result property="firstViewedAt" column="first_viewed_at"/>
+    <result property="decidedAt" column="decided_at"/>
+    <result property="typedName" column="typed_name"/>
+    <result property="declineReason" column="decline_reason"/>
+    <result property="evidenceIpHash" column="evidence_ip_hash"/>
+    <result property="evidenceAgentHash" column="evidence_agent_hash"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <resultMap id="EventResult" type="DocumentDeliveryEvent">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="deliveryId" column="delivery_id"/>
+    <result property="recipientId" column="recipient_id"/>
+    <result property="eventType" column="event_type"/>
+    <result property="source" column="source"/>
+    <result property="externalEventId" column="external_event_id"/>
+    <result property="detail" column="detail"/>
+    <result property="occurredAt" column="occurred_at"/>
+    <result property="createdAt" column="created_at"/>
+  </resultMap>
+
+  <resultMap id="ArtifactResult" type="DocumentDeliveryArtifact">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="deliveryId" column="delivery_id"/>
+    <result property="kind" column="kind"/>
+    <result property="objectKey" column="object_key"/>
+    <result property="contentType" column="content_type"/>
+    <result property="byteLength" column="byte_length"/>
+    <result property="sha256" column="sha256"/>
+    <result property="createdAt" column="created_at"/>
+  </resultMap>
+
+  <sql id="deliveryColumns">
+    id, workspace_id, deal_id, document_id, provider, provider_envelope_id, status, message,
+    expires_at, sent_by, sent_at, completed_at, terminated_at, termination_reason, created_at, updated_at
+  </sql>
+
+  <sql id="recipientColumns">
+    id, workspace_id, delivery_id, person_id, name, email, role, recipient_order, status,
+    token_hash, token_expires_at, provider_recipient_id, first_viewed_at, decided_at, typed_name,
+    decline_reason, evidence_ip_hash, evidence_agent_hash, created_at, updated_at
+  </sql>
+
+  <sql id="eventColumns">
+    id, workspace_id, delivery_id, recipient_id, event_type, source, external_event_id,
+    detail, occurred_at, created_at
+  </sql>
+
+  <sql id="artifactColumns">
+    id, workspace_id, delivery_id, kind, object_key, content_type, byte_length, sha256, created_at
+  </sql>
+
+  <select id="getByDocument" resultMap="DeliveryResult">
+    SELECT <include refid="deliveryColumns"/> FROM document_delivery
+    WHERE workspace_id = #{workspaceId} AND document_id = #{documentId}
+    ORDER BY id DESC
+  </select>
+
+  <select id="getById" resultMap="DeliveryResult">
+    SELECT <include refid="deliveryColumns"/> FROM document_delivery
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <select id="lockById" resultMap="DeliveryResult">
+    SELECT <include refid="deliveryColumns"/> FROM document_delivery
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <select id="findActiveByDocument" resultMap="DeliveryResult">
+    SELECT <include refid="deliveryColumns"/> FROM document_delivery
+    WHERE workspace_id = #{workspaceId}
+      AND document_id = #{documentId}
+      AND status IN ('sent', 'viewed')
+    LIMIT 1
+  </select>
+
+  <select id="findByProviderEnvelope" resultMap="DeliveryResult">
+    SELECT <include refid="deliveryColumns"/> FROM document_delivery
+    WHERE workspace_id = #{workspaceId}
+      AND provider = #{provider}
+      AND provider_envelope_id = #{providerEnvelopeId}
+  </select>
+
+  <select id="workspaceIdsWithExpired" resultType="int">
+    SELECT DISTINCT workspace_id FROM document_delivery
+    WHERE status IN ('sent', 'viewed')
+      AND expires_at IS NOT NULL
+      AND expires_at &lt;= UTC_TIMESTAMP()
+    ORDER BY workspace_id
+  </select>
+
+  <select id="findDueDeliveryIds" resultType="int">
+    SELECT id FROM document_delivery
+    WHERE workspace_id = #{workspaceId}
+      AND status IN ('sent', 'viewed')
+      AND expires_at IS NOT NULL
+      AND expires_at &lt;= #{now}
+    ORDER BY expires_at, id
+    LIMIT #{limit}
+  </select>
+
+  <insert id="insertDelivery" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO document_delivery (
+      workspace_id, deal_id, document_id, provider, provider_envelope_id, status, message,
+      expires_at, sent_by
+    ) VALUES (
+      #{workspaceId}, #{dealId}, #{documentId}, #{provider}, #{providerEnvelopeId}, #{status},
+      #{message}, #{expiresAt}, #{sentBy}
+    )
+  </insert>
+
+  <insert id="claimRequest">
+    INSERT IGNORE INTO document_delivery_request (
+      workspace_id, idempotency_key, operation, request_fingerprint, document_id,
+      delivery_id, recipient_id, created_by_user_id
+    ) VALUES (
+      #{workspaceId}, #{idempotencyKey}, #{operation}, #{requestFingerprint}, #{documentId},
+      #{deliveryId}, #{recipientId}, #{createdByUserId}
+    )
+  </insert>
+
+  <delete id="cancelUncompletedRequest">
+    DELETE FROM document_delivery_request
+    WHERE workspace_id = #{workspaceId}
+      AND idempotency_key = #{idempotencyKey}
+      AND completed_at IS NULL
+  </delete>
+
+  <select id="getRequestForUpdate" resultType="DocumentDeliveryRequest">
+    SELECT operation,
+      request_fingerprint AS requestFingerprint,
+      document_id AS documentId,
+      delivery_id AS deliveryId,
+      recipient_id AS recipientId,
+      created_by_user_id AS createdByUserId
+    FROM document_delivery_request
+    WHERE workspace_id = #{workspaceId} AND idempotency_key = #{idempotencyKey}
+    FOR UPDATE
+  </select>
+
+  <update id="completeRequest">
+    UPDATE document_delivery_request
+    SET delivery_id = #{deliveryId}, completed_at = CURRENT_TIMESTAMP
+    WHERE workspace_id = #{workspaceId}
+      AND idempotency_key = #{idempotencyKey}
+      AND delivery_id IS NULL
+  </update>
+
+  <update id="setProviderEnvelopeId">
+    UPDATE document_delivery SET provider_envelope_id = #{providerEnvelopeId}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <update id="markDeliveryViewed">
+    UPDATE document_delivery SET status = 'viewed'
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'sent'
+  </update>
+
+  <update id="completeDelivery">
+    UPDATE document_delivery
+    SET status = 'completed', completed_at = #{completedAt}
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status IN ('sent', 'viewed')
+  </update>
+
+  <update id="completeExpiredDelivery">
+    UPDATE document_delivery
+    SET status = 'completed', completed_at = #{completedAt},
+        terminated_at = NULL, termination_reason = NULL
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'expired'
+  </update>
+
+  <update id="terminateDelivery">
+    UPDATE document_delivery
+    SET status = #{status}, terminated_at = #{terminatedAt}, termination_reason = #{reason}
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status IN ('sent', 'viewed')
+  </update>
+
+  <update id="replaceExpiredTermination">
+    UPDATE document_delivery
+    SET status = #{status}, terminated_at = #{terminatedAt}, termination_reason = #{reason}
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'expired'
+  </update>
+
+  <insert id="insertRecipient" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO document_delivery_recipient (
+      workspace_id, delivery_id, person_id, name, email, role, recipient_order, status,
+      token_hash, token_expires_at, provider_recipient_id
+    ) VALUES (
+      #{workspaceId}, #{deliveryId}, #{personId}, #{name}, #{email}, #{role}, #{recipientOrder},
+      #{status}, #{tokenHash}, #{tokenExpiresAt}, #{providerRecipientId}
+    )
+  </insert>
+
+  <select id="getRecipients" resultMap="RecipientResult">
+    SELECT <include refid="recipientColumns"/> FROM document_delivery_recipient
+    WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId}
+    ORDER BY recipient_order, id
+  </select>
+
+  <select id="getRecipientsByDeliveryIds" resultMap="RecipientResult">
+    SELECT <include refid="recipientColumns"/> FROM document_delivery_recipient
+    WHERE workspace_id = #{workspaceId} AND delivery_id IN
+    <foreach collection="deliveryIds" item="deliveryId" open="(" separator="," close=")">
+      #{deliveryId}
+    </foreach>
+    ORDER BY delivery_id, recipient_order, id
+  </select>
+
+  <select id="getRecipient" resultMap="RecipientResult">
+    SELECT <include refid="recipientColumns"/> FROM document_delivery_recipient
+    WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId} AND id = #{id}
+  </select>
+
+  <select id="lockRecipient" resultMap="RecipientResult">
+    SELECT <include refid="recipientColumns"/> FROM document_delivery_recipient
+    WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <select id="getRecipientByTokenHash" resultMap="RecipientResult">
+    SELECT <include refid="recipientColumns"/> FROM document_delivery_recipient
+    WHERE workspace_id = #{workspaceId} AND token_hash = #{tokenHash}
+    LIMIT 1
+  </select>
+
+  <select id="getRecipientByProviderId" resultMap="RecipientResult">
+    SELECT <include refid="recipientColumns"/> FROM document_delivery_recipient
+    WHERE workspace_id = #{workspaceId}
+      AND delivery_id = #{deliveryId}
+      AND provider_recipient_id = #{providerRecipientId}
+    LIMIT 1
+  </select>
+
+  <select id="getRecipientIds" resultType="int">
+    SELECT id FROM document_delivery_recipient
+    WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId}
+    ORDER BY id
+  </select>
+
+  <update id="updateRecipientToken">
+    UPDATE document_delivery_recipient
+    SET token_hash = #{tokenHash}, token_expires_at = #{tokenExpiresAt},
+        provider_recipient_id = #{providerRecipientId}
+    WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId} AND id = #{id}
+      AND status IN ('pending', 'viewed')
+  </update>
+
+  <update id="markRecipientViewed">
+    UPDATE document_delivery_recipient
+    SET status = CASE WHEN status = 'pending' THEN 'viewed' ELSE status END,
+        first_viewed_at = COALESCE(first_viewed_at, #{viewedAt})
+    WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId} AND id = #{id}
+      AND status IN ('pending', 'viewed')
+  </update>
+
+  <update id="completeRecipient">
+    UPDATE document_delivery_recipient
+    SET status = 'completed', typed_name = #{typedName}, decided_at = #{decidedAt},
+        evidence_ip_hash = #{evidenceIpHash}, evidence_agent_hash = #{evidenceAgentHash}
+    WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId} AND id = #{id}
+      AND role = 'signer' AND status IN ('pending', 'viewed')
+  </update>
+
+  <update id="completeProviderRecipient">
+    UPDATE document_delivery_recipient
+    SET status = 'completed', decided_at = #{decidedAt},
+        token_hash = NULL, token_expires_at = NULL
+    WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId} AND id = #{id}
+      AND status IN ('pending', 'viewed')
+  </update>
+
+  <update id="completeExpiredProviderRecipient">
+    UPDATE document_delivery_recipient
+    SET status = 'completed', decided_at = #{decidedAt},
+        token_hash = NULL, token_expires_at = NULL
+    WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId} AND id = #{id}
+      AND role = 'signer' AND status = 'expired'
+  </update>
+
+  <update id="declineRecipient">
+    UPDATE document_delivery_recipient
+    SET status = 'declined', decline_reason = #{reason}, decided_at = #{decidedAt},
+        evidence_ip_hash = #{evidenceIpHash}, evidence_agent_hash = #{evidenceAgentHash}
+    WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId} AND id = #{id}
+      AND role = 'signer' AND status IN ('pending', 'viewed')
+  </update>
+
+  <update id="declineExpiredRecipient">
+    UPDATE document_delivery_recipient
+    SET status = 'declined', decline_reason = #{reason}, decided_at = #{decidedAt},
+        token_hash = NULL, token_expires_at = NULL
+    WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId} AND id = #{id}
+      AND role = 'signer' AND status = 'expired'
+  </update>
+
+  <update id="completeViewersAndInvalidateTokens">
+    UPDATE document_delivery_recipient
+    SET status = 'completed', token_hash = NULL, token_expires_at = NULL
+    WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId}
+      AND role = 'viewer' AND status IN ('pending', 'viewed', 'expired')
+  </update>
+
+  <update id="closeOutstandingRecipients">
+    UPDATE document_delivery_recipient
+    SET status = #{status}, token_hash = NULL, token_expires_at = NULL
+    WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId}
+      AND status IN ('pending', 'viewed')
+      <if test="exceptRecipientId != null">
+        AND id &lt;&gt; #{exceptRecipientId}
+      </if>
+  </update>
+
+  <update id="replaceExpiredRecipients">
+    UPDATE document_delivery_recipient
+    SET status = #{status}, token_hash = NULL, token_expires_at = NULL
+    WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId}
+      AND status = 'expired'
+      <if test="exceptRecipientId != null">
+        AND id &lt;&gt; #{exceptRecipientId}
+      </if>
+  </update>
+
+  <update id="invalidateAllTokens">
+    UPDATE document_delivery_recipient
+    SET token_hash = NULL, token_expires_at = NULL
+    WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId}
+      AND token_hash IS NOT NULL
+  </update>
+
+  <update id="invalidateTokensExcept">
+    UPDATE document_delivery_recipient
+    SET token_hash = NULL, token_expires_at = NULL
+    WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId}
+      AND token_hash IS NOT NULL
+      <if test="exceptRecipientId != null">
+        AND id &lt;&gt; #{exceptRecipientId}
+      </if>
+  </update>
+
+  <select id="countIncompleteSigners" resultType="int">
+    SELECT COUNT(*) FROM document_delivery_recipient
+    WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId}
+      AND role = 'signer' AND status &lt;&gt; 'completed'
+  </select>
+
+  <insert id="insertEvent" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO document_delivery_event (
+      workspace_id, delivery_id, recipient_id, event_type, source, external_event_id, detail, occurred_at
+    ) VALUES (
+      #{workspaceId}, #{deliveryId}, #{recipientId}, #{eventType}, #{source},
+      #{externalEventId}, #{detail}, #{occurredAt}
+    )
+  </insert>
+
+  <select id="hasEvent" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM document_delivery_event
+      WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId}
+        AND event_type = #{eventType}
+        <choose>
+          <when test="recipientId == null">AND recipient_id IS NULL</when>
+          <otherwise>AND recipient_id = #{recipientId}</otherwise>
+        </choose>
+    )
+  </select>
+
+  <select id="hasExternalEvent" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1 FROM document_delivery_event
+      WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId}
+        AND external_event_id = #{externalEventId}
+    )
+  </select>
+
+  <select id="getEventsByDeliveryIds" resultMap="EventResult">
+    SELECT <include refid="eventColumns"/> FROM document_delivery_event
+    WHERE workspace_id = #{workspaceId} AND delivery_id IN
+    <foreach collection="deliveryIds" item="deliveryId" open="(" separator="," close=")">
+      #{deliveryId}
+    </foreach>
+    ORDER BY delivery_id, id
+  </select>
+
+  <insert id="insertArtifact" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO document_delivery_artifact (
+      workspace_id, delivery_id, kind, object_key, content_type, byte_length, sha256
+    ) VALUES (
+      #{workspaceId}, #{deliveryId}, #{kind}, #{objectKey}, #{contentType}, #{byteLength}, #{sha256}
+    )
+  </insert>
+
+  <select id="getArtifact" resultMap="ArtifactResult">
+    SELECT <include refid="artifactColumns"/> FROM document_delivery_artifact
+    WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId} AND id = #{id}
+  </select>
+
+  <select id="getArtifactByKind" resultMap="ArtifactResult">
+    SELECT <include refid="artifactColumns"/> FROM document_delivery_artifact
+    WHERE workspace_id = #{workspaceId} AND delivery_id = #{deliveryId} AND kind = #{kind}
+  </select>
+
+  <select id="getArtifactsByDeliveryIds" resultMap="ArtifactResult">
+    SELECT <include refid="artifactColumns"/> FROM document_delivery_artifact
+    WHERE workspace_id = #{workspaceId} AND delivery_id IN
+    <foreach collection="deliveryIds" item="deliveryId" open="(" separator="," close=")">
+      #{deliveryId}
+    </foreach>
+    ORDER BY delivery_id, id
+  </select>
+
+  <select id="getArtifactsByDeal" resultMap="ArtifactResult">
+    SELECT a.id, a.workspace_id, a.delivery_id, a.kind, a.object_key, a.content_type,
+      a.byte_length, a.sha256, a.created_at
+    FROM document_delivery_artifact a
+    JOIN document_delivery d
+      ON d.workspace_id = a.workspace_id AND d.id = a.delivery_id
+    WHERE a.workspace_id = #{workspaceId} AND d.deal_id = #{dealId}
+    ORDER BY a.id
+  </select>
+</mapper>

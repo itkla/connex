@@ -56,6 +56,13 @@
     FROM company c
     WHERE c.workspace_id = #{workspaceId}
       AND c.logo_url LIKE CONCAT('/api/companies/', c.id, '/logo/%')
+    UNION DISTINCT
+    SELECT artifact.object_key,
+           'document_delivery_artifact' AS kind,
+           artifact.delivery_id AS owner_id,
+           artifact.object_key AS persisted_url
+    FROM document_delivery_artifact artifact
+    WHERE artifact.workspace_id = #{workspaceId}
   </sql>
 
   <select id="streamActiveObjectReferences"
@@ -103,6 +110,10 @@
       FROM company c
       WHERE c.workspace_id = #{workspaceId}
         AND c.logo_url LIKE CONCAT('/api/companies/', c.id, '/logo/%')
+      UNION DISTINCT
+      SELECT artifact.object_key
+      FROM document_delivery_artifact artifact
+      WHERE artifact.workspace_id = #{workspaceId}
     ) lifecycle_objects
     WHERE object_key &gt; #{afterKey}
     ORDER BY object_key
@@ -127,6 +138,10 @@
         FROM company
         WHERE workspace_id = #{workspaceId}
           AND logo_url LIKE CONCAT('/api/companies/', id, '/logo/%')
+      ) + (
+        SELECT COUNT(*)
+        FROM document_delivery_artifact
+        WHERE workspace_id = #{workspaceId}
       ) AS activeObjectCount,
       (SELECT COUNT(*) FROM managed_object_usage
        WHERE workspace_id = #{workspaceId}) AS usageCount,

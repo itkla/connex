@@ -141,6 +141,13 @@ and active flights are each bounded by `CONNEX_AI_INVOCATION_QUOTA_MAX_ORGANIZAT
 defaulting to 10,000. The 300-attempt quota, refresh throttle, and single-flight registries are per
 JVM backend replica, so the effective organization quota multiplies across replicas; multi-replica
 deployments need a shared coordinator for cluster-wide enforcement.
+
+Commercial-document delivery is independently fail-closed. It remains unavailable unless the
+operator sets `CONNEX_SIGNATURE_ENABLED=true`; the deployment capability and the sender's
+`DOCUMENT_SEND` workspace permission must also allow it. Enabling the switch activates the built-in
+`in_app` acceptance provider and its bounded expiry scheduler. It does not install a third-party
+signature vendor or a server-side PDF renderer. Review the evidence, recovery, and support contract
+in [ESIGNATURE.md](ESIGNATURE.md) before opting in.
 Paddle's current CPU wheel requires AVX support, and the default sidecar reserves up to two CPUs and
 2 GiB of memory. A deployment that lacks AVX or cannot spare those resources must set both
 `COMPOSE_PROFILES=` and `CONNEX_BUSINESS_CARD_SCANNING_ENABLED=false`; the empty profile omits the

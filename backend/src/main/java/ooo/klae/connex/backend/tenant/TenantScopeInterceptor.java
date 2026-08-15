@@ -74,6 +74,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "DealDocumentMapper",
         MAPPERS + "ApprovalPolicyMapper",
         MAPPERS + "DocumentApprovalMapper",
+        MAPPERS + "DocumentDeliveryMapper",
         MAPPERS + "CustomFieldDefinitionMapper",
         MAPPERS + "CustomFieldValueMapper",
         MAPPERS + "SavedViewMapper",

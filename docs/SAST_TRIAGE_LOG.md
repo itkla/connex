@@ -53,6 +53,37 @@ An open-ended suppression is forbidden by [STATIC_ANALYSIS.md](STATIC_ANALYSIS.m
   positives. The query does not claim CSRF is disabled; it claims a state-changing action is served
   over a request method that CSRF does not protect. The verified reason is recorded below.
 
+### `java/csrf-unprotected-request-type` — alert #77, `DocumentAcceptanceController.preview`
+
+Raised on PR #1307 (e-signature delivery). Triaged 2026-08-15.
+
+The rule fires on `GET /api/document-acceptance/{token}` for "an apparent state-changing action".
+Two genuine defects it surfaced were **fixed**, not dismissed:
+
+- `DocumentDeliveryService.downloadArtifact` wrote an audit record on a `GET`, so a forged cross-site
+  request could fabricate a download entry on the signed-artifact trail. The audit write was removed;
+  no other managed-object reader records one either.
+- `DocumentAcceptanceService.preview` stamped `first_viewed_at` and appended a `viewed` event on the
+  `GET`. Email scanners, prefetchers and URL-rewriting proxies all issue that request, so recipient
+  view evidence in the completion certificate could be forged by ordinary mail infrastructure.
+  Recording moved to `POST /api/document-acceptance/{token}/viewed`.
+
+What remains is a false positive. After those fixes the only mutation reachable from the handler is
+`DocumentAcceptanceRateLimiter`, which updates two in-process `ConcurrentHashMap` windows. Rate
+limiting a public endpoint is required, not incidental, and an in-memory window is neither persistent
+nor attacker-valuable state. The route is also necessarily CSRF-exempt: it is session-less, carries no
+ambient authority, and is authorized solely by a 256-bit bearer token that a cross-site attacker
+cannot supply.
+
+Disposition: **false positive**, dismissed to unblock the required gate. Flagged here for independent
+re-review because it was triaged by the same author as the change.
+
+The rule re-raised as alert #79 against the same handler once the code moved, and was dismissed on the
+same basis. Expect a new alert number whenever this handler changes shape: the heuristic reads the
+locking read and transaction open as a state change, so it will keep firing on a route that is
+necessarily CSRF-exempt. Re-check that the handler still records nothing before dismissing the next
+one — that property, not the alert count, is what matters.
+
 ## Remediated
 
 ### `java/spring-disabled-csrf-protection` — #10

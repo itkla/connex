@@ -227,7 +227,7 @@ non-GET methods are not silently rewritten, and preserve the path and query stri
 |---|---|---|
 | `CF-CUSTOM-01-METHODS` | Intended host and method is `TRACE` or `CONNECT` | Block. Connex exposes neither method. |
 | `CF-EX-01-WEBSOCKET` | Host is `connexcrm.jp` or `preview.connexcrm.jp`, and path is exactly `/api/ws` | Skip Super Bot Fight Mode. Keep managed WAF inspection of the initial handshake; the generic rate expression excludes this path. Logging may remain enabled because this path carries no credential. |
-| `CF-EX-02-TOKEN-CALLBACKS` | Intended host and path starts with `/api/delivery/webhooks/` or `/api/delivery/unsubscribe/` | Skip Super Bot Fight Mode, rate limiting, and managed WAF. Disable Skip-rule logging because the path contains a credential. Application webhook signature/token verification and idempotent unsubscribe handling remain authoritative. |
+| `CF-EX-02-TOKEN-CALLBACKS` | Intended host and path starts with `/api/delivery/webhooks/`, `/api/delivery/unsubscribe/`, `/document-acceptance/`, or `/api/document-acceptance/` | Skip Super Bot Fight Mode, rate limiting, and managed WAF. Disable Skip-rule logging because the path contains a credential. Application webhook signature/token verification, idempotent unsubscribe handling, and acceptance-token admission remain authoritative. |
 | `CF-EX-03-SAML` | Intended host, method `POST`, and path starts with `/api/login/saml2/sso/` | Skip Super Bot Fight Mode and interactive challenges. Preserve the form body, cookies, and redirect response unchanged. Keep managed WAF inspection unless one rule ID is proven incompatible. |
 | `CF-EX-04-UPLOADS` | Intended host and an upload path listed in the Caddy table, including `/api/imports/*` and `/api/business-cards/*` | Skip Super Bot Fight Mode so multipart/binary clients are not challenged mid-transfer. Do not skip the dedicated upload rate rule, the origin body cap, or all managed WAF rules. |
 
@@ -241,7 +241,7 @@ CF-EX-01-WEBSOCKET
 (http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and http.request.uri.path eq "/api/ws")
 
 CF-EX-02-TOKEN-CALLBACKS
-(http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and (starts_with(http.request.uri.path, "/api/delivery/webhooks/") or starts_with(http.request.uri.path, "/api/delivery/unsubscribe/")))
+(http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and (starts_with(http.request.uri.path, "/api/delivery/webhooks/") or starts_with(http.request.uri.path, "/api/delivery/unsubscribe/") or starts_with(http.request.uri.path, "/document-acceptance/") or starts_with(http.request.uri.path, "/api/document-acceptance/")))
 
 CF-EX-03-SAML
 (http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and http.request.method eq "POST" and starts_with(http.request.uri.path, "/api/login/saml2/sso/"))
@@ -258,7 +258,7 @@ active.
 
 ```text
 CF-CONFIG-01-COMPATIBILITY
-(http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and (http.request.uri.path eq "/api/ws" or starts_with(http.request.uri.path, "/api/delivery/webhooks/") or starts_with(http.request.uri.path, "/api/delivery/unsubscribe/") or (http.request.method eq "POST" and starts_with(http.request.uri.path, "/api/login/saml2/sso/")) or (http.request.method in {"POST" "PUT"} and (http.request.uri.path eq "/api/attachments/upload" or (starts_with(http.request.uri.path, "/api/ai/assistant/sessions/") and ends_with(http.request.uri.path, "/attachments")) or http.request.uri.path eq "/api/users/me/profile-picture" or (starts_with(http.request.uri.path, "/api/persons/") and ends_with(http.request.uri.path, "/profile-picture")) or (starts_with(http.request.uri.path, "/api/companies/") and ends_with(http.request.uri.path, "/logo")) or starts_with(http.request.uri.path, "/api/imports/") or starts_with(http.request.uri.path, "/api/business-cards/")))))
+(http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and (http.request.uri.path eq "/api/ws" or starts_with(http.request.uri.path, "/api/delivery/webhooks/") or starts_with(http.request.uri.path, "/api/delivery/unsubscribe/") or starts_with(http.request.uri.path, "/document-acceptance/") or starts_with(http.request.uri.path, "/api/document-acceptance/") or (http.request.method eq "POST" and starts_with(http.request.uri.path, "/api/login/saml2/sso/")) or (http.request.method in {"POST" "PUT"} and (http.request.uri.path eq "/api/attachments/upload" or (starts_with(http.request.uri.path, "/api/ai/assistant/sessions/") and ends_with(http.request.uri.path, "/attachments")) or http.request.uri.path eq "/api/users/me/profile-picture" or (starts_with(http.request.uri.path, "/api/persons/") and ends_with(http.request.uri.path, "/profile-picture")) or (starts_with(http.request.uri.path, "/api/companies/") and ends_with(http.request.uri.path, "/logo")) or starts_with(http.request.uri.path, "/api/imports/") or starts_with(http.request.uri.path, "/api/business-cards/")))))
 ```
 
 Configure Super Bot Fight Mode according to the recorded origin-lock design:
@@ -273,7 +273,7 @@ Cloudflare Tunnel's connector is outbound-only and does not require visitor requ
 Definitely Automated to bypass bot mitigation. The managed WAF, rate rules, and DDoS controls
 remain active in both designs. The four Skip rules above remain mandatory because bot
 classification can otherwise break provider callbacks, WebSocket upgrades, SAML POST binding,
-unsubscribe links, and large multipart uploads.
+unsubscribe and document-acceptance links, and large multipart uploads.
 
 ### Rate-limiting rules
 
@@ -286,7 +286,7 @@ above. Deploy on staging first. These are coarse abuse ceilings, not user entitl
 | `CF-RL-02-ACCOUNT-LIFECYCLE` | `POST /api/auth/register`, `/api/auth/forgot-password`, `/api/auth/reset-password`, `/api/auth/verify-email/confirm`, `/api/users/me/verify-email/resend`, and `POST` paths ending in `/accept` below `/api/invites/` or `/api/invite-links/` | 20 requests / 60 seconds / IP | Block 300 seconds |
 | `CF-RL-03-AI` | `POST /api/ai/*`, `POST /api/deals/*/brief`, `POST /api/deals/*/rationale`, `POST /api/introductions/suggestions/rationale`, and `POST /api/reports/*/generate` | 60 requests / 60 seconds / IP | Block 60 seconds |
 | `CF-RL-04-UPLOADS` | Multipart/import/business-card routes listed in `CF-EX-04-UPLOADS` | 30 requests / 60 seconds / IP | Block 60 seconds |
-| `CF-RL-05-API-VOLUME` | All `/api/*` requests except `/api/ws`, `/api/delivery/webhooks/*`, `/api/delivery/unsubscribe/*`, and `POST`/`PUT` requests counted by the dedicated upload rule | 1,200 requests / 60 seconds / IP | Block 60 seconds |
+| `CF-RL-05-API-VOLUME` | All `/api/*` requests except `/api/ws`, `/api/delivery/webhooks/*`, `/api/delivery/unsubscribe/*`, `/api/document-acceptance/*`, and `POST`/`PUT` requests counted by the dedicated upload rule | 1,200 requests / 60 seconds / IP | Block 60 seconds |
 
 Use these rate-rule expressions exactly. `CF-RL-04-UPLOADS` intentionally repeats the upload
 expression because its exception skips only the bot phase, not the rate phase. `CF-RL-05` excludes
@@ -308,7 +308,7 @@ CF-RL-04-UPLOADS
 (http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and http.request.method in {"POST" "PUT"} and (http.request.uri.path eq "/api/attachments/upload" or (starts_with(http.request.uri.path, "/api/ai/assistant/sessions/") and ends_with(http.request.uri.path, "/attachments")) or http.request.uri.path eq "/api/users/me/profile-picture" or (starts_with(http.request.uri.path, "/api/persons/") and ends_with(http.request.uri.path, "/profile-picture")) or (starts_with(http.request.uri.path, "/api/companies/") and ends_with(http.request.uri.path, "/logo")) or starts_with(http.request.uri.path, "/api/imports/") or starts_with(http.request.uri.path, "/api/business-cards/")))
 
 CF-RL-05-API-VOLUME
-(http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and starts_with(http.request.uri.path, "/api/") and not (http.request.uri.path eq "/api/ws" or starts_with(http.request.uri.path, "/api/delivery/webhooks/") or starts_with(http.request.uri.path, "/api/delivery/unsubscribe/") or (http.request.method in {"POST" "PUT"} and (http.request.uri.path eq "/api/attachments/upload" or (starts_with(http.request.uri.path, "/api/ai/assistant/sessions/") and ends_with(http.request.uri.path, "/attachments")) or http.request.uri.path eq "/api/users/me/profile-picture" or (starts_with(http.request.uri.path, "/api/persons/") and ends_with(http.request.uri.path, "/profile-picture")) or (starts_with(http.request.uri.path, "/api/companies/") and ends_with(http.request.uri.path, "/logo")) or starts_with(http.request.uri.path, "/api/imports/") or starts_with(http.request.uri.path, "/api/business-cards/")))))
+(http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and starts_with(http.request.uri.path, "/api/") and not (http.request.uri.path eq "/api/ws" or starts_with(http.request.uri.path, "/api/delivery/webhooks/") or starts_with(http.request.uri.path, "/api/delivery/unsubscribe/") or starts_with(http.request.uri.path, "/api/document-acceptance/") or (http.request.method in {"POST" "PUT"} and (http.request.uri.path eq "/api/attachments/upload" or (starts_with(http.request.uri.path, "/api/ai/assistant/sessions/") and ends_with(http.request.uri.path, "/attachments")) or http.request.uri.path eq "/api/users/me/profile-picture" or (starts_with(http.request.uri.path, "/api/persons/") and ends_with(http.request.uri.path, "/profile-picture")) or (starts_with(http.request.uri.path, "/api/companies/") and ends_with(http.request.uri.path, "/logo")) or starts_with(http.request.uri.path, "/api/imports/") or starts_with(http.request.uri.path, "/api/business-cards/")))))
 
 ```
 
@@ -317,12 +317,13 @@ ceiling. Do not key a rule on `JSESSIONID`, workspace cookies, invite tokens, un
 authorization headers, request bodies, or query parameters; doing so would disclose credentials or
 personal data to edge configuration and event logs.
 
-Webhook and unsubscribe token paths are deliberately excluded from edge rate rules. A provider may
-legitimately burst from shared egress, and a Cloudflare block event can retain the live path token.
-Managed DDoS protection, the 10 MiB request-read ceiling, signature/token verification, webhook
-idempotency, and secret-redacted application controls are the compensating boundary. Replacing that
-decision requires either moving the credential out of the URI or a reviewed origin admission
-control; do not add a path-token rate event merely to make the rule count look comprehensive.
+Webhook, unsubscribe, and document-acceptance token paths are deliberately excluded from edge rate
+rules. A provider may legitimately burst from shared egress, and a Cloudflare block event can retain a
+live path token. Managed DDoS protection, the 10 MiB request-read ceiling, signature/token verification,
+webhook idempotency, document-acceptance token/source throttles, and secret-redacted application controls
+are the compensating boundary. Replacing that decision requires either moving the credential out of the
+URI or a reviewed origin admission control; do not add a path-token rate event merely to make the rule
+count look comprehensive.
 
 ## Compatibility invariants
 
@@ -337,6 +338,9 @@ control; do not add a path-token rate event merely to make the rule count look c
   exported in edge logs.
 - **Unsubscribe:** GET/POST `/api/delivery/unsubscribe/{token}` remains unchallenged and idempotent;
   the token is redacted from exported paths.
+- **Document acceptance:** GET `/document-acceptance/{token}` and GET/POST
+  `/api/document-acceptance/{token}/*` remain unchallenged; API requests are application-throttled,
+  and the path-embedded bearer is redacted from exported paths.
 - **File upload/download:** the 27 MiB multipart envelope preserves the 25 MiB stored-object limit,
   imports retain 64 MiB, and Business-plan upload capacity exceeds both. Downloads are not body
   capped and authenticated responses are not cached.
@@ -364,7 +368,8 @@ Longer-term evidence must be created only through a reviewed field-allowlisting 
 allowlist is UTC time bucket, hostname, HTTP method, action, Cloudflare service and stable rule ID,
 count, and country/ASN only when operationally justified. It excludes event-level IP/`CF-Ray`, raw
 URI paths and query strings, request or response bodies, `Cookie`, `Set-Cookie`, `Authorization`,
-CSRF headers, SAML assertions, webhook signatures, invite/unsubscribe/download tokens, AI content,
+CSRF headers, SAML assertions, webhook signatures, invite/unsubscribe/document-acceptance/download
+tokens, AI content,
 uploaded filenames, and custom request headers. Business does not include Logpush; until an
 approved contract and sanitizer are operating, retain only manually reviewed aggregate rule counts
 and do not export native events. Any future exporter is a separate security/privacy-reviewed change
@@ -415,7 +420,7 @@ Post-cutover tests, using staging-only accounts/files and provider test fixtures
 - complete one SP-initiated SAML POST flow;
 - complete a real STOMP-over-WebSocket handshake and exchange after an idle interval;
 - deliver and replay a valid signed webhook fixture, reject an invalid signature, and complete an
-  unsubscribe GET/POST without a challenge;
+  unsubscribe GET/POST and document-acceptance preview/decision without a challenge;
 - start an authorized AI request and poll its handle without triggering the AI or generic ceiling;
 - through each accepted ingress topology, prove two visitor addresses remain distinct in audit and
   login throttling and that forged `CF-Connecting-IP`/`X-Forwarded-For` values cannot win;

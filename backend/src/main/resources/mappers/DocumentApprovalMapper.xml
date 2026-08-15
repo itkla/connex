@@ -9,6 +9,8 @@
     <result property="dealId"             column="deal_id"/>
     <result property="documentId"         column="document_id"/>
     <result property="policyId"           column="policy_id"/>
+    <result property="policyIdSnapshot"   column="policy_id_snapshot"/>
+    <result property="policyBinding"      column="policy_binding"/>
     <result property="status"             column="status"/>
     <result property="outcomeReason"      column="outcome_reason"/>
     <result property="outcomeDetail"      column="outcome_detail"/>
@@ -55,9 +57,9 @@
   </resultMap>
 
   <sql id="cols">
-    id, workspace_id, deal_id, document_id, policy_id, status, mode, separation_of_duties,
-    outcome_reason, outcome_detail, requested_by, request_comment, decided_by, decision_comment,
-    decided_at, created_at, updated_at
+    id, workspace_id, deal_id, document_id, policy_id, policy_id_snapshot, policy_binding,
+    status, mode, separation_of_duties, outcome_reason, outcome_detail,
+    requested_by, request_comment, decided_by, decision_comment, decided_at, created_at, updated_at
   </sql>
 
   <select id="getByDealId" resultMap="DocumentApprovalResult">
@@ -140,10 +142,12 @@
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO document_approval (
-      workspace_id, deal_id, document_id, policy_id, status, mode, separation_of_duties,
+      workspace_id, deal_id, document_id, policy_id, policy_id_snapshot, policy_binding,
+      status, mode, separation_of_duties,
       requested_by, request_comment
     ) VALUES (
-      #{workspaceId}, #{dealId}, #{documentId}, #{policyId}, #{status}, #{mode},
+      #{workspaceId}, #{dealId}, #{documentId}, #{policyId}, #{policyIdSnapshot}, #{policyBinding},
+      #{status}, #{mode},
       #{separationOfDuties}, #{requestedBy}, #{requestComment}
     )
   </insert>
