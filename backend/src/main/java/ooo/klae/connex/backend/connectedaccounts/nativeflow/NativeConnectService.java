@@ -95,12 +95,8 @@ public class NativeConnectService {
     public NativePairingStatusResponse pairingStatus(String provider) {
         requireNativeProvider(provider);
         int userId = workspaceService.getCurrentUserId();
-        NativeConnectPoll poll = tenantWorkScope.unrouted(
+        NativeConnectSession session = tenantWorkScope.unrouted(
             () -> sessionPersistence.poll(userId, provider));
-        NativeConnectSession session = poll.session();
-        if (poll.expiredTransition()) {
-            auditFailure(userId, provider, "expired");
-        }
         if (session == null) {
             return new NativePairingStatusResponse("none", null, null);
         }

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -56,33 +57,33 @@ class NativeConnectSessionPersistenceTest {
         when(sessionMapper.getLatestByUserAndProvider(USER_ID, "google"))
             .thenReturn(session);
 
-        NativeConnectPoll poll = persistence.poll(USER_ID, "google");
+        NativeConnectSession polled = persistence.poll(USER_ID, "google");
 
-        assertSame(session, poll.session());
-        assertFalse(poll.expiredTransition());
+        assertSame(session, polled);
+        assertEquals("pending", polled.getStatus());
         verify(userMapper, never()).lockById(anyInt());
         verify(sessionMapper, never())
             .getLatestByUserAndProviderForUpdate(USER_ID, "google");
     }
 
     @Test
-    void pollEscalatesToLocksOnlyToTransitionAnExpiredActiveSession() {
+    void pollReportsAnExpiredActiveSessionWithoutWritingAnything() {
         NativeConnectSession session = session(
             8, "prepared", LocalDateTime.ofInstant(NOW.minusSeconds(1), ZoneOffset.UTC));
         session.setVerifierRef("secret:8");
         when(sessionMapper.getLatestByUserAndProvider(USER_ID, "google"))
             .thenReturn(session);
-        when(userMapper.lockById(USER_ID)).thenReturn(USER_ID);
-        when(sessionMapper.getLatestByUserAndProviderForUpdate(USER_ID, "google"))
-            .thenReturn(session);
-        when(sessionMapper.fail(8, "prepared", "expired")).thenReturn(1);
 
-        NativeConnectPoll poll = persistence.poll(USER_ID, "google");
+        NativeConnectSession polled = persistence.poll(USER_ID, "google");
 
-        assertSame(session, poll.session());
-        assertTrue(poll.expiredTransition());
-        assertEquals("failed", session.getStatus());
-        verify(pkceSecretCipher).delete("google", USER_ID, "secret:8");
+        assertSame(session, polled);
+        assertEquals("failed", polled.getStatus());
+        assertEquals("expired", polled.getErrorCode());
+        verify(userMapper, never()).lockById(anyInt());
+        verify(sessionMapper, never())
+            .getLatestByUserAndProviderForUpdate(USER_ID, "google");
+        verify(sessionMapper, never()).fail(anyInt(), anyString(), anyString());
+        verify(pkceSecretCipher, never()).delete(anyString(), anyInt(), anyString());
     }
 
     @Test

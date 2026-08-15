@@ -59,28 +59,21 @@ public class NativeConnectSessionPersistence {
         return superseded;
     }
 
-    /** Returns the current user's latest provider session, expiring it atomically when due. */
-    @Transactional
-    public NativeConnectPoll poll(int userId, String provider) {
+    /**
+     * Reads the current user's latest provider session without mutating it. An active session past
+     * its expiry is reported as failed for display only; the claim paths re-check expiry in SQL and
+     * {@link NativeConnectSessionCleanup} reclaims the row and its verifier, so this read never
+     * needs to write. Keeping it side-effect free means the status endpoint stays a true GET.
+     */
+    public NativeConnectSession poll(int userId, String provider) {
         requireReadableUser(userId);
         NativeConnectSession session =
             sessionMapper.getLatestByUserAndProvider(userId, provider);
-        boolean expiredTransition = false;
         if (session != null && ACTIVE_STATUSES.contains(session.getStatus()) && expired(session)) {
-            requireUser(userId);
-            session = sessionMapper.getLatestByUserAndProviderForUpdate(userId, provider);
-            if (session != null
-                    && ACTIVE_STATUSES.contains(session.getStatus())
-                    && expired(session)
-                    && sessionMapper.fail(
-                        session.getId(), session.getStatus(), "expired") == 1) {
-                deleteVerifier(session);
-                session.setStatus("failed");
-                session.setErrorCode("expired");
-                expiredTransition = true;
-            }
+            session.setStatus("failed");
+            session.setErrorCode("expired");
         }
-        return new NativeConnectPoll(session, expiredTransition);
+        return session;
     }
 
     /** Cancels only the current user's active provider session. */
