@@ -60,6 +60,7 @@
     "save": "ポリシーを保存",
     "created": "ポリシーを作成しました",
     "updated": "ポリシーを更新しました",
+    "pendingApprovalsUnchanged": "承認待ちの申請は、確定済みの承認チェーンのまま変更されません。",
     "saveFailed": "ポリシーを保存できませんでした",
     "chainTitle": "承認チェーン",
     "modeLabel": "ステップの進め方",
@@ -87,6 +88,14 @@
     "noApproverMatches": "該当するメンバーがいません。",
     "removeApprover": "{name}を削除",
     "moveStepUp": "ステップを上へ",
-    "moveStepDown": "ステップを下へ"
+    "moveStepDown": "ステップを下へ",
+    "impactTitle": "進行中の承認が無効になります",
+    "impactBody": "{count, plural, other {このポリシーで承認待ちの申請が#件あります。}}",
+    "impactConsequence": "ポリシーを厳格化しても、確定済みの申請内容は書き換えられません。そのため対象の申請は終了します。各ドキュメントは下書きに戻り、新しい承認チェーンで再申請が必要です。記録済みの承認判断は保持されます。",
+    "formerMember": "以前のメンバー",
+    "impactItemMeta": "{deal}・v{version}・申請者 {requester}",
+    "impactMore": "{count, plural, other {ほか#件}}",
+    "impactBack": "編集に戻る",
+    "impactConfirm": "保存して終了する"
   }
 }

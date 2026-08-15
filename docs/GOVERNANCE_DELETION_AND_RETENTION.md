@@ -62,6 +62,64 @@ Deciding re-reads the actor's permissions from **exclusively locked** membership
 before the document row lock so the order stays membership → record. A concurrent removal or role
 change therefore serializes against the decision instead of racing it.
 
+## Policy changes and approvals already in flight
+
+Policy edits are classified against the persisted policy, including its steps and approver sets.
+When an edit contains more than one kind of change, the precedence is **tighten → loosen →
+retarget → none**:
+
+- **Tighten** adds a step, raises a step quorum, narrows its approver set, replaces "any approver"
+  with named approvers, or strengthens separation of duties along `off` → `requester` → `strict`.
+- **Loosen** only removes a step, lowers a quorum, adds approvers, replaces named approvers with
+  "any approver", or relaxes separation of duties.
+- **Retarget** changes the policy name, active state, document type, currency, total or discount
+  threshold, or chain mode without tightening or loosening the chain.
+- **None** is a semantically identical save.
+
+Only tightening invalidates pending requests frozen from that policy. Loosening, retargeting,
+identical saves, and policy deletion leave them in flight because each request was legitimately
+raised under the rule in force at the time. Invalidation terminates the request, cancels its open
+steps, returns the document to `draft`, and requires a fresh request to freeze the new chain; it
+never replaces the request's frozen steps or approver assignments.
+
+An administrator must explicitly confirm a tightening edit when pending requests would be
+invalidated. The pending count, confirmation check, policy write, and invalidations are evaluated in
+one transaction while the policy root is locked. The write therefore cannot proceed against a count
+that changed between disclosure and save.
+
+## A step that can no longer be satisfied
+
+Every approval read projects whether each open frozen step can still reach quorum from current
+workspace membership and `DOCUMENT_APPROVE` grants. Named steps count only their still-active,
+still-permitted named approvers; "any approver" steps count every active permission holder. Both
+remove the people excluded by the request's frozen separation-of-duties rule and people whose
+approval is already recorded, then compare the remaining people with the remaining approvals needed.
+
+This is a computed projection and never edits the snapshot. A bounded reconciliation sweep revisits
+pending requests and terminates a request whose step is unsatisfiable: the blocking step becomes
+`unsatisfiable`, other open steps are cancelled, and the document returns to `draft`. Decisions
+already recorded and every frozen step and approver assignment remain as historical evidence.
+
+## Why a request ended
+
+Every terminal request records an `outcome_reason` in addition to its coarse status:
+
+| Reason | Meaning |
+| --- | --- |
+| `quorum` | Every frozen step reached quorum. |
+| `rejected` | An eligible approver rejected a step. |
+| `superseded` | The immutable document version was superseded. |
+| `cancelled_by_requester` | The attributed requester withdrew it. |
+| `cancelled_by_admin` | An administrator withdrew an unattributed legacy request. |
+| `policy_invalidated` | A confirmed tightening policy edit invalidated it. |
+| `unsatisfiable` | Current membership, permissions, decisions, and separation of duties left a step unable to reach quorum. |
+| `cancelled_legacy` | Backfill-only marker for cancellations written before reasons existed. |
+
+New application code never writes `cancelled_legacy`; old rows cannot reliably distinguish a
+supersede from a manual cancellation, so the migration preserves that uncertainty instead of
+inventing history. `outcome_detail` carries bounded context for policy invalidation and
+unsatisfiability without storing document body content.
+
 ## Creator-or-admin deletion
 
 `DeletionPolicy.requireDeletable(creatorUserId)` gates deletion of **report definitions, report

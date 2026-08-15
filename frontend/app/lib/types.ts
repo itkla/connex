@@ -1516,7 +1516,27 @@ export type DocumentStatus = 'draft' | 'pending_approval' | 'approved' | 'final'
  */
 export type DocumentClientStatus = 'draft' | 'final' | 'superseded';
 
-export type DocumentApprovalStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
+export type DocumentApprovalStatus =
+    | 'pending'
+    | 'approved'
+    | 'rejected'
+    | 'cancelled'
+    | 'invalidated'
+    | 'unsatisfiable';
+
+/**
+ * Why a request ended. `cancelled_legacy` only appears on rows written before outcome reasons
+ * existed, where supersede and manual cancellation are indistinguishable.
+ */
+export type ApprovalOutcomeReason =
+    | 'quorum'
+    | 'rejected'
+    | 'superseded'
+    | 'cancelled_by_requester'
+    | 'cancelled_by_admin'
+    | 'policy_invalidated'
+    | 'unsatisfiable'
+    | 'cancelled_legacy';
 
 /** How an approval chain runs: one step at a time, or every step at once. */
 export type ApprovalChainMode = 'sequential' | 'parallel';
@@ -1530,7 +1550,13 @@ export type SeparationOfDuties = 'strict' | 'requester' | 'off';
 /** Whether a step is decided by named members or by anyone who can approve documents. */
 export type ApprovalApproverKind = 'user' | 'any_approver';
 
-export type ApprovalStepStatus = 'pending' | 'active' | 'approved' | 'rejected' | 'cancelled';
+export type ApprovalStepStatus =
+    | 'pending'
+    | 'active'
+    | 'approved'
+    | 'rejected'
+    | 'cancelled'
+    | 'unsatisfiable';
 
 export type ApprovalStepApprover = {
     approverKind: ApprovalApproverKind;
@@ -1556,6 +1582,8 @@ export type DocumentApprovalStep = {
     approvedCount: number;
     status: ApprovalStepStatus;
     decidedAt?: string | null;
+    satisfiable: boolean;
+    unsatisfiableReason?: string | null;
     approvers: ApprovalStepApprover[];
     decisions: DocumentApprovalDecision[];
 };
@@ -1566,6 +1594,10 @@ export type DocumentApproval = {
     documentId: number;
     policyId?: number | null;
     status: DocumentApprovalStatus;
+    outcomeReason?: ApprovalOutcomeReason | null;
+    outcomeDetail?: string | null;
+    satisfiable: boolean;
+    blockedReason?: string | null;
     mode: ApprovalChainMode;
     separationOfDuties: SeparationOfDuties;
     requestedBy?: number | null;
@@ -1616,8 +1648,43 @@ export type CreateApprovalPolicyPayload = {
 /**
  * Full-replace payload: the backend PUT nulls any omitted field and re-activates when
  * {@code active} is absent, so partial bodies are not safe — always send the complete policy.
+ *
+ * Each step must carry the {@link ApprovalPolicyStep.id} it was loaded with. A step arriving
+ * without one is treated as newly added, which classifies the whole edit as a tightening and
+ * invalidates approvals already pending under the policy.
  */
-export type UpdateApprovalPolicyPayload = CreateApprovalPolicyPayload;
+export type UpdateApprovalPolicyPayload = CreateApprovalPolicyPayload & {
+    confirmInvalidation?: boolean;
+    impactFingerprint?: string;
+};
+
+/** How a proposed policy edit compares with the persisted one. */
+export type PolicyChangeClass = 'TIGHTEN' | 'LOOSEN' | 'RETARGET' | 'NONE';
+
+/** One pending approval a policy edit would invalidate. Carries no document content. */
+export type ApprovalImpactItem = {
+    dealId: number;
+    dealName: string;
+    documentId: number;
+    documentTitle: string;
+    version: number;
+    requestedByName: string;
+    requestedByFormerMember: boolean;
+    requestedAt: string;
+};
+
+/**
+ * Preview of what a proposed policy edit does to approvals already in flight. Only a `TIGHTEN`
+ * with a non-zero count invalidates anything; `affected` is capped, so `pendingApprovalCount` is
+ * the authoritative total.
+ */
+export type ApprovalPolicyImpact = {
+    changeClass: PolicyChangeClass;
+    pendingApprovalCount: number;
+    effect: string;
+    impactFingerprint: string;
+    affected: ApprovalImpactItem[];
+};
 
 /** A party rendered on a document (workspace, company, or owner). */
 export type DocumentParty = {

@@ -60,6 +60,7 @@
     "save": "Save policy",
     "created": "Policy created",
     "updated": "Policy updated",
+    "pendingApprovalsUnchanged": "Pending approvals continue unchanged under their frozen chain.",
     "saveFailed": "Couldn't save the policy",
     "chainTitle": "Approver chain",
     "modeLabel": "Run steps",
@@ -87,6 +88,14 @@
     "noApproverMatches": "No matching members.",
     "removeApprover": "Remove {name}",
     "moveStepUp": "Move step up",
-    "moveStepDown": "Move step down"
+    "moveStepDown": "Move step down",
+    "impactTitle": "This change invalidates approvals in flight",
+    "impactBody": "{count, plural, one {# approval is pending under this policy.} other {# approvals are pending under this policy.}}",
+    "impactConsequence": "Tightening a policy cannot rewrite a request that is already frozen, so these requests end instead. Each document returns to draft and has to be sent for approval again under the new chain. Decisions already recorded are kept.",
+    "formerMember": "Former member",
+    "impactItemMeta": "{deal} · v{version} · requested by {requester}",
+    "impactMore": "{count, plural, one {and # more} other {and # more}}",
+    "impactBack": "Keep editing",
+    "impactConfirm": "Save and end them"
   }
 }

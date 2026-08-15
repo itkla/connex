@@ -4,6 +4,8 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
@@ -53,6 +55,12 @@ public class ApprovalPolicyDto {
     @Pattern(regexp = "strict|requester|off",
         message = "separationOfDuties must be strict, requester, or off")
     private String separationOfDuties;
+
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    private boolean confirmInvalidation;
+
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    private String impactFingerprint;
 
     @Valid
     @Size(max = 10, message = "a policy may not have more than 10 approval steps")

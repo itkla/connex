@@ -38,9 +38,14 @@ import type {
 /**
  * One step being edited. `userIds` is only meaningful while `kind` is `user`, and `key` is a stable
  * client-side identity so reordering never re-keys the rows around it.
+ *
+ * `id` is the server's identity for a step that already exists and must survive editing: the
+ * backend classifies a step with no id as newly added, which makes the whole save a tightening and
+ * invalidates approvals pending under the policy. A step the user just added has no id by design.
  */
 export type ChainStepDraft = {
     key: string;
+    id?: number;
     name: string;
     requiredCount: number;
     kind: ApprovalApproverKind;

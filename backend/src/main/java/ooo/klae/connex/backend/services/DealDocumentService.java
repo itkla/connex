@@ -5,7 +5,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -80,10 +79,12 @@ public class DealDocumentService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireDeal(workspaceId, dealId);
         List<ApprovalPolicy> policies = policyService.activePolicies(workspaceId);
-        Map<Integer, DocumentApproval> latest = approvalService
-            .withChain(workspaceId, approvalMapper.getByDealId(workspaceId, dealId)).stream()
-            .collect(Collectors.toMap(DocumentApproval::getDocumentId, Function.identity(), (a, b) -> a));
-        return documentMapper.getByDealId(workspaceId, dealId).stream()
+        List<DealDocument> documents = documentMapper.getByDealId(workspaceId, dealId);
+        Map<Integer, DealDocument> documentsById = documents.stream()
+            .collect(Collectors.toMap(DealDocument::getId, document -> document));
+        Map<Integer, DocumentApprovalDto> latest = approvalService.latestDtosByDocument(
+            workspaceId, approvalMapper.getByDealId(workspaceId, dealId), documentsById);
+        return documents.stream()
             .map(document -> toDto(document, policies, latest.get(document.getId())))
             .toList();
     }
@@ -343,17 +344,19 @@ public class DealDocumentService {
             return toDto(document, policies, null);
         }
         DocumentApproval latest = approvals.getFirst();
-        return toDto(document, policies, approvalService.withChain(workspaceId, List.of(latest)).getFirst());
+        DocumentApproval withChain = approvalService.withChain(workspaceId, List.of(latest)).getFirst();
+        return toDto(document, policies, approvalService.toDto(workspaceId, withChain, document));
     }
 
-    private DealDocumentDto toDto(DealDocument d, List<ApprovalPolicy> policies, DocumentApproval latestApproval) {
+    private DealDocumentDto toDto(DealDocument d, List<ApprovalPolicy> policies,
+            DocumentApprovalDto latestApproval) {
         DocumentContent content = parseContent(d);
         boolean requiresApproval = !"final".equals(d.getStatus()) && !"superseded".equals(d.getStatus())
             && !"approved".equals(d.getStatus())
             && policyService.firstMatch(policies, d, content) != null;
         return new DealDocumentDto(d.getId(), d.getDealId(), d.getTemplateId(), d.getType(), d.getLocale(),
             d.getStatus(), d.getVersion(), d.getTitle(), d.getCurrency(), d.getGeneratedAt(), d.getCreatedBy(), content,
-            requiresApproval, DocumentApprovalDto.from(latestApproval));
+            requiresApproval, latestApproval);
     }
 
     private DocumentContent parseContent(DealDocument d) {

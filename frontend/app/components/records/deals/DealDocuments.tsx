@@ -93,6 +93,14 @@ const STATUS_DOT: Record<DocumentStatus, string> = {
     superseded: 'bg-muted-foreground',
 };
 
+function terminatedApproval(doc: DealDocument) {
+    const approval = doc.latestApproval;
+    if (!approval?.outcomeReason) return null;
+    return approval.status === 'invalidated' || approval.status === 'unsatisfiable'
+        ? approval
+        : null;
+}
+
 /**
  * Generated-documents panel for a deal. Documents are immutable server-side snapshots; the client
  * generates a draft from a template, transitions its status, runs the approval flow (request /
@@ -315,6 +323,11 @@ export default function DealDocuments({
                                                 {doc.latestApproval.decisionComment
                                                     ? t('rejectedWithComment', { comment: doc.latestApproval.decisionComment })
                                                     : t('rejectedNote')}
+                                            </div>
+                                        )}
+                                        {doc.status === 'draft' && terminatedApproval(doc) && (
+                                            <div className="mt-1 text-xs text-destructive">
+                                                {t(`outcome_${terminatedApproval(doc)!.outcomeReason!}`)}
                                             </div>
                                         )}
                                     </td>

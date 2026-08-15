@@ -15,6 +15,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.dto.ApprovalPolicyDto;
+import ooo.klae.connex.backend.dto.ApprovalPolicyImpactDto;
 import ooo.klae.connex.backend.services.ApprovalPolicyService;
 
 /** REST controller for document approval policies. */
@@ -36,7 +37,14 @@ public class ApprovalPolicyController {
 
     @PutMapping("/{id}")
     public ApprovalPolicyDto update(@PathVariable int id, @Valid @RequestBody ApprovalPolicyDto dto) {
-        return ApprovalPolicyDto.from(policyService.update(id, dto.toBean()));
+        return ApprovalPolicyDto.from(
+            policyService.update(id, dto.toBean(), dto.isConfirmInvalidation(), dto.getImpactFingerprint()));
+    }
+
+    @PostMapping("/{id}/impact")
+    public ApprovalPolicyImpactDto impact(@PathVariable int id,
+            @Valid @RequestBody ApprovalPolicyDto dto) {
+        return policyService.impact(id, dto.toBean());
     }
 
     @DeleteMapping("/{id}")

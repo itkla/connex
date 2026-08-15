@@ -144,10 +144,16 @@ class TenantDiagnosticsServiceTest {
                         + "\"password\":\"credential-sentinel\"}");
         global.setJobName(JobRunRecorder.NOTIFICATION_RECONCILIATION);
         global.setWorkspaceId(null);
+        JobRun approvalFailure = run(
+                5,
+                "failed",
+                "{\"attemptedCount\":3,\"failedCount\":1}");
+        approvalFailure.setJobName(JobRunRecorder.APPROVAL_RECONCILIATION);
         when(jobRunMapper.findLatestVisible(WORKSPACE_ID, "[11]", null))
-                .thenReturn(List.of(last, global));
+                .thenReturn(List.of(last, global, approvalFailure));
         when(jobRunMapper.findLatestVisible(WORKSPACE_ID, "[11]", "succeeded")).thenReturn(List.of(success));
-        when(jobRunMapper.findLatestVisible(WORKSPACE_ID, "[11]", "failed")).thenReturn(List.of(last));
+        when(jobRunMapper.findLatestVisible(WORKSPACE_ID, "[11]", "failed"))
+                .thenReturn(List.of(last, approvalFailure));
 
         TenantDiagnosticsDto result = service.forWorkspace(WORKSPACE_ID, ACTOR_ID);
 
@@ -193,6 +199,15 @@ class TenantDiagnosticsServiceTest {
                 .findFirst()
                 .orElseThrow();
         assertEquals(Map.of("phase", "catalog_sweep"), notification.last().detail());
+        Job approval = result.jobs().stream()
+                .filter(job -> JobRunRecorder.APPROVAL_RECONCILIATION.equals(job.jobName()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("failed", approval.last().status());
+        assertEquals("failed", approval.lastFailure().status());
+        assertEquals(1, approval.workspacesFailingLatest());
+        assertEquals(Map.of("attemptedCount", 3, "failedCount", 1),
+                approval.last().detail());
         assertFalse(new ObjectMapper().writeValueAsString(result).contains("credential-sentinel"));
         verify(jobRunMapper).findLatestVisible(WORKSPACE_ID, "[11]", null);
         verify(jobRunMapper).findLatestVisible(WORKSPACE_ID, "[11]", "succeeded");

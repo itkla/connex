@@ -24,14 +24,21 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { createApprovalPolicy, getActiveWorkspaceMembers, updateApprovalPolicy } from '@/app/lib/api';
+import {
+    createApprovalPolicy,
+    getActiveWorkspaceMembers,
+    previewApprovalPolicyImpact,
+    updateApprovalPolicy,
+} from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type {
     ApprovalChainMode,
     ApprovalPolicy,
+    ApprovalPolicyImpact,
     ApprovalPolicyStep,
     DocumentType,
     SeparationOfDuties,
+    UpdateApprovalPolicyPayload,
     WorkspaceMember,
 } from '@/app/lib/types';
 import ApprovalChainEditor, {
@@ -68,6 +75,7 @@ const toStepDraft = (step: ApprovalPolicyStep, index: number): ChainStepDraft =>
     const anyApprover = step.approvers.some((approver) => approver.approverKind === 'any_approver');
     return {
         key: `saved-${step.id ?? index}`,
+        id: step.id,
         name: step.name ?? '',
         requiredCount: step.requiredCount,
         kind: anyApprover ? 'any_approver' : 'user',
@@ -90,6 +98,7 @@ const toDraft = (policy: ApprovalPolicy | null): Draft => ({
 });
 
 const toStepPayload = (step: ChainStepDraft): ApprovalPolicyStep => ({
+    id: step.id,
     name: step.name.trim() === '' ? null : step.name.trim(),
     requiredCount: step.requiredCount,
     approvers:
@@ -109,10 +118,14 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
     const [saving, setSaving] = useState(false);
     const [wasOpen, setWasOpen] = useState(open);
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
+    const [impact, setImpact] = useState<ApprovalPolicyImpact | null>(null);
 
     if (open !== wasOpen) {
         setWasOpen(open);
-        if (open) setDraft(toDraft(policy));
+        if (open) {
+            setDraft(toDraft(policy));
+            setImpact(null);
+        }
     }
 
     useEffect(() => {
@@ -141,25 +154,30 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
     );
     const canSave = draft.name.trim() !== '' && !minTotalNeedsCurrency && chainIsValid && !saving;
 
-    const save = async () => {
-        if (!canSave) return;
+    const buildPayload = (): UpdateApprovalPolicyPayload => ({
+        name: draft.name.trim(),
+        active: draft.active,
+        documentType: isDocumentType(draft.documentType) ? draft.documentType : null,
+        currency: draft.currency.trim() === '' ? null : draft.currency.trim().toUpperCase(),
+        minTotal: draft.minTotal.trim() === '' ? null : Number(draft.minTotal),
+        minDiscountPercent: draft.minDiscountPercent.trim() === '' ? null : Number(draft.minDiscountPercent),
+        mode: draft.mode,
+        separationOfDuties: draft.separationOfDuties,
+        steps: draft.steps.map(toStepPayload),
+    });
+
+    const commit = async (
+        payload: UpdateApprovalPolicyPayload,
+        pendingApprovalsUnchanged = false,
+    ) => {
         setSaving(true);
         try {
-            const payload = {
-                name: draft.name.trim(),
-                active: draft.active,
-                documentType: isDocumentType(draft.documentType) ? draft.documentType : null,
-                currency: draft.currency.trim() === '' ? null : draft.currency.trim().toUpperCase(),
-                minTotal: draft.minTotal.trim() === '' ? null : Number(draft.minTotal),
-                minDiscountPercent: draft.minDiscountPercent.trim() === '' ? null : Number(draft.minDiscountPercent),
-                mode: draft.mode,
-                separationOfDuties: draft.separationOfDuties,
-                steps: draft.steps.map(toStepPayload),
-            };
             const saved = policy
                 ? await updateApprovalPolicy(policy.id, payload)
                 : await createApprovalPolicy(payload);
-            toastSuccess(policy ? t('updated') : t('created'));
+            toastSuccess(policy ? t('updated') : t('created'), pendingApprovalsUnchanged
+                ? { description: t('pendingApprovalsUnchanged') }
+                : undefined);
             onSaved(saved, policy === null);
             onOpenChange(false);
         } catch (err) {
@@ -168,6 +186,99 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
             setSaving(false);
         }
     };
+
+    /**
+     * Tightening a policy terminates the approvals already pending under it, so the count and the
+     * consequence are disclosed before anything is written. The preview is advisory: the server
+     * re-runs the same classification under the policy lock and still refuses an unconfirmed
+     * tightening, so a request that races another edit fails rather than invalidating silently.
+     */
+    const save = async () => {
+        if (!canSave) return;
+        const payload = buildPayload();
+        if (!policy) {
+            await commit(payload);
+            return;
+        }
+        setSaving(true);
+        let preview: ApprovalPolicyImpact | null = null;
+        try {
+            preview = await previewApprovalPolicyImpact(policy.id, payload);
+        } catch {
+            preview = null;
+        } finally {
+            setSaving(false);
+        }
+        if (preview && preview.changeClass === 'TIGHTEN' && preview.pendingApprovalCount > 0) {
+            setImpact(preview);
+            return;
+        }
+        await commit(
+            payload,
+            preview != null
+                && preview.changeClass !== 'TIGHTEN'
+                && preview.pendingApprovalCount > 0,
+        );
+    };
+
+    const confirmInvalidation = async () => {
+        if (!impact) return;
+        const impactFingerprint = impact.impactFingerprint;
+        setImpact(null);
+        await commit({ ...buildPayload(), confirmInvalidation: true, impactFingerprint });
+    };
+
+    if (impact) {
+        return (
+            <Dialog open={open} onOpenChange={onOpenChange}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>{t('impactTitle')}</DialogTitle>
+                        <DialogDescription>
+                            {t('impactBody', { count: impact.pendingApprovalCount })}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="max-h-[50dvh] space-y-3 overflow-y-auto pr-1">
+                        <p className="text-sm text-muted-foreground">{t('impactConsequence')}</p>
+                        <ul className="flex flex-col gap-2">
+                            {impact.affected.map((item) => (
+                                <li
+                                    key={item.documentId}
+                                    className="rounded-xl border border-border px-3 py-2 text-sm"
+                                >
+                                    <p className="font-medium">{item.documentTitle}</p>
+                                    <p className="text-xs text-muted-foreground">
+                                        {t('impactItemMeta', {
+                                            deal: item.dealName,
+                                            version: item.version,
+                                            requester: item.requestedByFormerMember
+                                                ? t('formerMember')
+                                                : item.requestedByName,
+                                        })}
+                                    </p>
+                                </li>
+                            ))}
+                        </ul>
+                        {impact.pendingApprovalCount > impact.affected.length && (
+                            <p className="text-xs text-muted-foreground">
+                                {t('impactMore', {
+                                    count: impact.pendingApprovalCount - impact.affected.length,
+                                })}
+                            </p>
+                        )}
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" disabled={saving} onClick={() => setImpact(null)}>
+                            {t('impactBack')}
+                        </Button>
+                        <Button variant="destructive" disabled={saving} onClick={confirmInvalidation}>
+                            {saving ? <Loader2Icon className="size-4 animate-spin" /> : t('impactConfirm')}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        );
+    }
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>

@@ -44,6 +44,12 @@ const TYPES = [
         titleKey: "approvalDecisionTitle",
         descriptionKey: "approvalDecisionDescription",
     },
+    {
+        type: "document.approval_terminated",
+        icon: ShieldCheckIcon,
+        titleKey: "approvalTerminatedTitle",
+        descriptionKey: "approvalTerminatedDescription",
+    },
 ] as const;
 
 type Channels = { inApp: boolean; email: boolean };

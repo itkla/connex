@@ -484,6 +484,8 @@
     "approvalRequestDescription": "When a document is sent for your approval.",
     "approvalDecisionTitle": "Approval decisions",
     "approvalDecisionDescription": "When your approval request is approved, rejected, or withdrawn.",
+    "approvalTerminatedTitle": "Ended approval requests",
+    "approvalTerminatedDescription": "When a policy change or unavailable approver ends an approval request.",
     "loadFailed": "Your notification preferences couldn't be loaded.",
     "saveFailed": "Your change couldn't be saved. Try again.",
     "retry": "Try again"

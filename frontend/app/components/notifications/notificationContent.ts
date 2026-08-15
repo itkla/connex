@@ -163,6 +163,18 @@ export function notificationContent(notification: Notification, t: Translator, l
             }),
         };
     }
+    if (notification.type === "document.approval_terminated") {
+        const document = text(data.documentTitle, notification.sourceLabel ?? "");
+        const bodyKey = data.outcomeReason === "policy_invalidated"
+            ? "documentApprovalPolicyInvalidatedBody"
+            : data.outcomeReason === "unsatisfiable"
+                ? "documentApprovalUnsatisfiableBody"
+                : "documentApprovalTerminatedBody";
+        return {
+            title: t("documentApprovalTerminatedTitle"),
+            body: t(bodyKey, { document }),
+        };
+    }
     return { title: notification.title, body: notification.body ?? "" };
 }
 

@@ -178,6 +178,35 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void approvalImpactConfirmationRequiredReturnsConflictMessageBody() {
+        ResponseEntity<Map<String, String>> response =
+            handler.approvalImpactConfirmationRequired(
+                new ApprovalImpactConfirmationRequiredException(3));
+
+        assertEquals(HttpStatus.CONFLICT, response.getStatusCode());
+        Map<String, String> body = response.getBody();
+        assertNotNull(body);
+        assertEquals(
+            "This policy change would invalidate 3 pending approval requests; "
+                + "confirm invalidation to continue",
+            body.get("message"));
+    }
+
+    @Test
+    void changedApprovalImpactReturnsDistinctConflictMessageBody() {
+        ResponseEntity<Map<String, String>> response =
+            handler.approvalImpactConfirmationRequired(
+                ApprovalImpactConfirmationRequiredException.changed());
+
+        assertEquals(HttpStatus.CONFLICT, response.getStatusCode());
+        Map<String, String> body = response.getBody();
+        assertNotNull(body);
+        assertEquals(
+            "The approval situation changed; review the impact again before saving",
+            body.get("message"));
+    }
+
+    @Test
     void illegalState_returnsGenericBody_notRawMessage() {
         ResponseEntity<String> response = handler.illegalState(
             new IllegalStateException("Failed to decrypt secret: bad AES key length"));

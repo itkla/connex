@@ -2,13 +2,23 @@ package ooo.klae.connex.backend.services;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
@@ -17,12 +27,20 @@ import ooo.klae.connex.backend.beans.ApprovalPolicy;
 import ooo.klae.connex.backend.beans.ApprovalPolicyStep;
 import ooo.klae.connex.backend.beans.ApprovalStepApprover;
 import ooo.klae.connex.backend.beans.DealDocument;
+import ooo.klae.connex.backend.beans.DocumentApproval;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.ApprovalImpactItemDto;
+import ooo.klae.connex.backend.dto.ApprovalImpactSummaryRow;
+import ooo.klae.connex.backend.dto.ApprovalPolicyImpactDto;
 import ooo.klae.connex.backend.dto.DealLineItemDto;
 import ooo.klae.connex.backend.dto.DocumentContent;
+import ooo.klae.connex.backend.exceptions.ApprovalImpactConfirmationRequiredException;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ApprovalPolicyMapper;
+import ooo.klae.connex.backend.mappers.DocumentApprovalMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
@@ -42,13 +60,18 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 @RequiredArgsConstructor
 public class ApprovalPolicyService {
     private final ApprovalPolicyMapper policyMapper;
+    private final DocumentApprovalMapper approvalMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
+    private final ObjectProvider<DocumentApprovalService> documentApprovalService;
+    private final ApprovalPolicyChangeClassifier changeClassifier = new ApprovalPolicyChangeClassifier();
 
     private static final Set<String> AUDIT_FIELDS = Set.of(
         "name", "active", "documentType", "currency", "minTotal", "minDiscountPercent",
         "mode", "separationOfDuties");
     private static final String ANY_APPROVER = "any_approver";
+    private static final String FORMER_MEMBER = "Former member";
+    private static final int IMPACT_ITEM_LIMIT = 20;
 
     public List<ApprovalPolicy> getAll() {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -58,6 +81,7 @@ public class ApprovalPolicyService {
     @Transactional
     @RequirePermission(Permission.DOCUMENT_MANAGE)
     public ApprovalPolicy create(ApprovalPolicy policy) {
+        policy.getSteps().forEach(step -> step.setId(0));
         normalize(policy);
         validate(policy);
         policy.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
@@ -70,18 +94,49 @@ public class ApprovalPolicyService {
         return saved;
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DOCUMENT_MANAGE)
-    public ApprovalPolicy update(int id, ApprovalPolicy policy) {
+    public ApprovalPolicy update(int id, ApprovalPolicy policy, boolean confirmInvalidation,
+            String presentedImpactFingerprint) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = workspaceService.getCurrentUserId();
+        if (!workspaceService.lockedPermissionsFor(workspaceId, actorId)
+                .contains(Permission.DOCUMENT_MANAGE)) {
+            throw new ForbiddenException("You cannot manage document approval policies in this workspace");
+        }
+        ApprovalPolicy before = requireForUpdate(workspaceId, id);
         normalize(policy);
         validate(policy);
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        ApprovalPolicy before = require(workspaceId, id);
+        validateStepIdentities(before, policy);
         policy.setId(id);
         policy.setWorkspaceId(workspaceId);
+        PolicyChangeClass changeClass = classify(before, policy);
+        List<DocumentApproval> pendingApprovals = List.of();
+        if (changeClass == PolicyChangeClass.TIGHTEN) {
+            int pendingApprovalCount = approvalMapper.countPendingByPolicyId(workspaceId, id);
+            if (pendingApprovalCount > 0 && !confirmInvalidation) {
+                throw new ApprovalImpactConfirmationRequiredException(pendingApprovalCount);
+            }
+            if (pendingApprovalCount > 0) {
+                pendingApprovals = approvalMapper.findPendingByPolicyId(workspaceId, id);
+                String currentImpactFingerprint = impactFingerprint(before, policy, pendingApprovals.stream()
+                    .map(DocumentApproval::getId)
+                    .toList());
+                if (!Objects.equals(currentImpactFingerprint, presentedImpactFingerprint)) {
+                    throw ApprovalImpactConfirmationRequiredException.changed();
+                }
+            }
+        }
         policyMapper.update(policy);
         policyMapper.deleteStepsByPolicyId(workspaceId, id);
         insertSteps(workspaceId, id, policy.getSteps());
+        if (!pendingApprovals.isEmpty()) {
+            String detail = "Approval policy \"" + before.getName() + "\" was tightened";
+            for (DocumentApproval approval : pendingApprovals) {
+                documentApprovalService.getObject()
+                    .invalidateForPolicyChange(workspaceId, approval, detail);
+            }
+        }
         ApprovalPolicy after = require(workspaceId, id);
         auditService.record("approval_policy.update", "approval_policy", id, after.getName(),
             "Updated approval policy " + after.getName() + chainSummary(after),
@@ -89,6 +144,129 @@ public class ApprovalPolicyService {
         return after;
     }
 
+    /** Previews the pending approvals associated with a proposed policy edit without taking locks. */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    @RequirePermission(Permission.DOCUMENT_MANAGE)
+    public ApprovalPolicyImpactDto impact(int id, ApprovalPolicy proposed) {
+        normalize(proposed);
+        validate(proposed);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        ApprovalPolicy before = require(workspaceId, id);
+        validateStepIdentities(before, proposed);
+        proposed.setId(id);
+        proposed.setWorkspaceId(workspaceId);
+        PolicyChangeClass changeClass = classify(before, proposed);
+        int pendingApprovalCount = approvalMapper.countPendingByPolicyId(workspaceId, id);
+        List<Integer> pendingApprovalIds = approvalMapper.findPendingIdsByPolicyId(workspaceId, id);
+        Map<Integer, String> requesterNames = new HashMap<>();
+        workspaceService.getMembers(workspaceId).forEach(member ->
+            requesterNames.put(member.getId(), member.getDisplayName()));
+        List<ApprovalImpactItemDto> affected = approvalMapper.findPendingImpactSummaries(
+                workspaceId, id, IMPACT_ITEM_LIMIT).stream()
+            .map(row -> impactItem(row, requesterNames))
+            .toList();
+        return new ApprovalPolicyImpactDto(changeClass.name(), pendingApprovalCount,
+            effectOf(changeClass, pendingApprovalCount),
+            impactFingerprint(before, proposed, pendingApprovalIds),
+            affected);
+    }
+
+    /** Classifies a normalized proposed policy against the persisted frozen policy shape. */
+    PolicyChangeClass classify(ApprovalPolicy before, ApprovalPolicy after) {
+        return changeClassifier.classify(before, after);
+    }
+
+    private ApprovalImpactItemDto impactItem(ApprovalImpactSummaryRow row,
+            Map<Integer, String> requesterNames) {
+        String requestedByName = requesterNames.get(row.requestedBy());
+        return new ApprovalImpactItemDto(row.dealId(), row.dealName(), row.documentId(),
+            row.documentTitle(), row.version(),
+            requestedByName == null ? FORMER_MEMBER : requestedByName,
+            requestedByName == null, row.requestedAt());
+    }
+
+    /**
+     * Digests the UTF-8 encoding of a canonical sequence of length-prefixed tokens. A non-null
+     * token is {@code <UTF-8 byte length>:<value>} and a null token is {@code -1:}. The sequence is:
+     * version marker; persisted policy id and {@code updated_at}; pending-approval count and ids in
+     * ascending order; proposed document type, normalized currency, canonical minimum total,
+     * canonical minimum discount percent, normalized mode, normalized separation of duties, and
+     * step count; then each step in submitted order with its id, name, normalized required count,
+     * and approver count; then that step's approvers ordered by kind and nullable user id, each as
+     * kind followed by user id. Decimal tokens use {@link BigDecimal#stripTrailingZeros()} and plain
+     * notation, so numerically equal values have one representation.
+     */
+    private String impactFingerprint(ApprovalPolicy persisted, ApprovalPolicy proposed,
+            List<Integer> pendingApprovalIds) {
+        normalize(proposed);
+        String updatedAt = persisted.getUpdatedAt();
+        if (updatedAt == null) {
+            throw new IllegalStateException("Persisted approval policy updated_at is missing");
+        }
+        StringBuilder input = new StringBuilder();
+        appendFingerprintToken(input, "approval-impact-v2");
+        appendFingerprintToken(input, Integer.toString(persisted.getId()));
+        appendFingerprintToken(input, updatedAt);
+        List<Integer> sortedPendingIds = pendingApprovalIds.stream().sorted().toList();
+        appendFingerprintToken(input, Integer.toString(sortedPendingIds.size()));
+        sortedPendingIds.forEach(approvalId ->
+            appendFingerprintToken(input, Integer.toString(approvalId)));
+        appendFingerprintToken(input, proposed.getDocumentType());
+        appendFingerprintToken(input, proposed.getCurrency());
+        appendFingerprintToken(input, canonicalDecimal(proposed.getMinTotal()));
+        appendFingerprintToken(input, canonicalDecimal(proposed.getMinDiscountPercent()));
+        appendFingerprintToken(input, proposed.getMode());
+        appendFingerprintToken(input, proposed.getSeparationOfDuties());
+        appendFingerprintToken(input, Integer.toString(proposed.getSteps().size()));
+        for (ApprovalPolicyStep step : proposed.getSteps()) {
+            appendFingerprintToken(input, Integer.toString(step.getId()));
+            appendFingerprintToken(input, step.getName());
+            appendFingerprintToken(input, Integer.toString(step.getRequiredCount()));
+            List<ApprovalStepApprover> approvers = step.getApprovers().stream()
+                .sorted(Comparator
+                    .comparing(ApprovalStepApprover::getApproverKind,
+                        Comparator.nullsFirst(Comparator.naturalOrder()))
+                    .thenComparing(ApprovalStepApprover::getUserId,
+                        Comparator.nullsFirst(Comparator.naturalOrder())))
+                .toList();
+            appendFingerprintToken(input, Integer.toString(approvers.size()));
+            for (ApprovalStepApprover approver : approvers) {
+                appendFingerprintToken(input, approver.getApproverKind());
+                appendFingerprintToken(input,
+                    approver.getUserId() == null ? null : approver.getUserId().toString());
+            }
+        }
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                .digest(input.toString().getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is unavailable", e);
+        }
+    }
+
+    private void appendFingerprintToken(StringBuilder input, String value) {
+        if (value == null) {
+            input.append("-1:");
+            return;
+        }
+        input.append(value.getBytes(StandardCharsets.UTF_8).length).append(':').append(value);
+    }
+
+    private String canonicalDecimal(BigDecimal value) {
+        return value == null ? null : value.stripTrailingZeros().toPlainString();
+    }
+
+    private String effectOf(PolicyChangeClass changeClass, int pendingApprovalCount) {
+        return switch (changeClass) {
+            case TIGHTEN -> pendingApprovalCount == 0
+                ? "no_pending_approvals" : "invalidate_pending_approvals";
+            case LOOSEN, RETARGET -> "frozen_approvals_unchanged";
+            case NONE -> "no_change";
+        };
+    }
+
+    @Transactional
     @RequirePermission(Permission.DOCUMENT_MANAGE)
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -101,6 +279,25 @@ public class ApprovalPolicyService {
     /** Active policies for a workspace, fetched once so callers can evaluate many documents. */
     public List<ApprovalPolicy> activePolicies(int workspaceId) {
         return policyMapper.getActive(workspaceId);
+    }
+
+    /** Locks and returns the current active policy snapshots before a document request is locked. */
+    List<ApprovalPolicy> activePoliciesForRequest(int workspaceId) {
+        List<ApprovalPolicy> current = new ArrayList<>(policyMapper.getAllForUpdate(workspaceId));
+        if (current.isEmpty()) {
+            return current;
+        }
+        Map<Integer, List<ApprovalPolicyStep>> stepsByPolicy =
+            policyMapper.getStepsByPolicyIdsForUpdate(workspaceId,
+                    current.stream().map(ApprovalPolicy::getId).toList()).stream()
+                .collect(Collectors.groupingBy(ApprovalPolicyStep::getPolicyId));
+        current.forEach(policy ->
+            policy.setSteps(stepsByPolicy.getOrDefault(policy.getId(), List.of())));
+        return current.stream()
+            .filter(ApprovalPolicy::isActive)
+            .sorted(Comparator.comparing(ApprovalPolicy::getName)
+                .thenComparingInt(ApprovalPolicy::getId))
+            .toList();
     }
 
     /**
@@ -192,6 +389,22 @@ public class ApprovalPolicyService {
             throw new BadRequestException("currency is required when minTotal is set");
         }
         validateChain(policy);
+    }
+
+    private void validateStepIdentities(ApprovalPolicy before, ApprovalPolicy requested) {
+        Set<Integer> persistedIds = before.getSteps().stream()
+            .map(ApprovalPolicyStep::getId)
+            .collect(Collectors.toSet());
+        Set<Integer> requestedIds = new HashSet<>();
+        for (ApprovalPolicyStep step : requested.getSteps()) {
+            int stepId = step.getId();
+            if (stepId < 0) {
+                throw new BadRequestException("Approval policy step id must not be negative");
+            }
+            if (stepId > 0 && (!persistedIds.contains(stepId) || !requestedIds.add(stepId))) {
+                throw new ConflictException("Approval policy steps changed; refresh and retry");
+            }
+        }
     }
 
     /**
@@ -315,6 +528,15 @@ public class ApprovalPolicyService {
         ApprovalPolicy policy = policyMapper.getById(workspaceId, id);
         if (policy == null) throw new ResourceNotFoundException("Approval policy not found with id: " + id);
         policy.setSteps(stepsFor(workspaceId, id));
+        return policy;
+    }
+
+    private ApprovalPolicy requireForUpdate(int workspaceId, int id) {
+        ApprovalPolicy policy = policyMapper.getByIdForUpdate(workspaceId, id);
+        if (policy == null) {
+            throw new ResourceNotFoundException("Approval policy not found with id: " + id);
+        }
+        policy.setSteps(policyMapper.getStepsByPolicyIdsForUpdate(workspaceId, List.of(id)));
         return policy;
     }
 }

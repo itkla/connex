@@ -8,6 +8,7 @@ import ooo.klae.connex.backend.beans.ApprovalStepApprover;
 import ooo.klae.connex.backend.beans.DocumentApproval;
 import ooo.klae.connex.backend.beans.DocumentApprovalDecision;
 import ooo.klae.connex.backend.beans.DocumentApprovalStep;
+import ooo.klae.connex.backend.dto.ApprovalImpactSummaryRow;
 
 /** Mapper for {@code document_approval} and its frozen chain; every statement is workspace-scoped. */
 public interface DocumentApprovalMapper {
@@ -15,9 +16,23 @@ public interface DocumentApprovalMapper {
     List<DocumentApproval> getByDocumentId(@Param("workspaceId") int workspaceId, @Param("documentId") int documentId);
     DocumentApproval getById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     DocumentApproval findPending(@Param("workspaceId") int workspaceId, @Param("documentId") int documentId);
+    List<DocumentApproval> findPendingByPolicyId(@Param("workspaceId") int workspaceId,
+        @Param("policyId") int policyId);
+    List<Integer> findPendingIdsByPolicyId(@Param("workspaceId") int workspaceId,
+        @Param("policyId") int policyId);
+    List<ApprovalImpactSummaryRow> findPendingImpactSummaries(
+        @Param("workspaceId") int workspaceId,
+        @Param("policyId") int policyId,
+        @Param("limit") int limit);
+    List<DocumentApproval> findPendingForWorkspace(@Param("workspaceId") int workspaceId,
+        @Param("limit") int limit);
+    List<DocumentApproval> findPendingForWorkspaceAfter(@Param("workspaceId") int workspaceId,
+        @Param("afterId") int afterId, @Param("limit") int limit);
+    int countPendingByPolicyId(@Param("workspaceId") int workspaceId, @Param("policyId") int policyId);
     int insert(DocumentApproval approval);
     int decide(@Param("workspaceId") int workspaceId, @Param("id") int id, @Param("status") String status,
-        @Param("decidedBy") Integer decidedBy, @Param("decisionComment") String decisionComment);
+        @Param("decidedBy") Integer decidedBy, @Param("decisionComment") String decisionComment,
+        @Param("outcomeReason") String outcomeReason, @Param("outcomeDetail") String outcomeDetail);
 
     List<DocumentApprovalStep> getStepsByApprovalIds(@Param("workspaceId") int workspaceId,
         @Param("approvalIds") List<Integer> approvalIds);
