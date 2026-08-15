@@ -502,6 +502,7 @@
         "chainStatus_active": "open",
         "chainStatus_approved": "approved",
         "chainStatus_rejected": "rejected",
-        "chainStatus_cancelled": "cancelled"
+        "chainStatus_cancelled": "cancelled",
+        "chainSummary": "Step {step} of {total} · {name} · {approved} of {required} approvals"
     }
 }
