@@ -249,10 +249,7 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
                         <p className="text-xs text-muted-foreground">{t('thresholdHint')}</p>
                     )}
                     <div className="space-y-3 border-t border-border pt-4">
-                        <div className="space-y-1">
-                            <p className="text-sm font-medium">{t('chainTitle')}</p>
-                            <p className="text-xs text-muted-foreground">{t('chainHint')}</p>
-                        </div>
+                        <p className="text-sm font-medium">{t('chainTitle')}</p>
                         <ApprovalChainEditor
                             mode={draft.mode}
                             onModeChange={(mode) => set('mode', mode)}

@@ -1,54 +1,132 @@
 'use client';
 
+import { useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import {
+    CheckCircleIcon,
+    ChevronDownIcon,
+    ClockIcon,
+    MinusCircleIcon,
+    XCircleIcon,
+} from '@heroicons/react/24/outline';
 
 import { cn } from '@/lib/utils';
-import type { ApprovalStepStatus, DocumentApproval } from '@/app/lib/types';
+import { easeOut, instant } from '@/app/lib/motion';
+import type { ApprovalStepStatus, DocumentApproval, DocumentApprovalStep } from '@/app/lib/types';
 
 type Props = {
     approval: DocumentApproval;
     activeStepId?: number | null;
 };
 
-const STEP_DOT: Record<ApprovalStepStatus, string> = {
-    pending: 'bg-muted-foreground/40',
-    active: 'bg-risk-medium',
-    approved: 'bg-chart-won',
-    rejected: 'bg-destructive',
-    cancelled: 'bg-muted-foreground/40',
+const STEP_ICON = {
+    pending: ClockIcon,
+    active: ClockIcon,
+    approved: CheckCircleIcon,
+    rejected: XCircleIcon,
+    cancelled: MinusCircleIcon,
+} satisfies Record<ApprovalStepStatus, typeof ClockIcon>;
+
+const STEP_TONE: Record<ApprovalStepStatus, string> = {
+    pending: 'text-muted-foreground',
+    active: 'text-risk-medium',
+    approved: 'text-chart-won',
+    rejected: 'text-destructive',
+    cancelled: 'text-muted-foreground',
 };
 
 /**
- * Compact progress readout for an approval chain: one pill per frozen step, showing its label,
- * how many of the required approvals it holds, and which step is waiting on the current user.
+ * Progress readout for an approval chain inside the deal-documents table. It stays collapsed to one
+ * summary line so a ten-step chain cannot turn a table row into a paragraph, and expands in place on
+ * demand. Status is carried by an icon plus assistive text, never by colour alone.
  */
 export default function DocumentApprovalChain({ approval, activeStepId }: Props) {
     const t = useTranslations('DealsDocuments');
+    const reduceMotion = useReducedMotion();
+    const [expanded, setExpanded] = useState(false);
+
     if (approval.steps.length === 0) return null;
 
+    const ordered = [...approval.steps].sort((a, b) => a.stepOrder - b.stepOrder);
+    const current = ordered.find((step) => step.id === activeStepId)
+        ?? ordered.find((step) => step.status === 'active')
+        ?? ordered[0];
+    const label = (step: DocumentApprovalStep) =>
+        step.name?.trim() || t('chainStep', { number: step.stepOrder });
+
     return (
-        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-            {approval.steps.map((step) => (
-                <span
-                    key={step.id}
-                    className={cn(
-                        'inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs',
-                        step.id === activeStepId
-                            ? 'border-brand text-foreground'
-                            : 'border-border text-muted-foreground',
-                    )}
-                >
-                    <span className={cn('size-1.5 rounded-full', STEP_DOT[step.status])} aria-hidden="true" />
-                    {step.name?.trim() || t('chainStep', { number: step.stepOrder })}
-                    <span className="tabular-nums">
-                        {t('chainProgress', { approved: step.approvedCount, required: step.requiredCount })}
-                    </span>
-                    <span className="text-muted-foreground">{t(`chainStatus_${step.status}`)}</span>
+        <div className="mt-1.5">
+            <button
+                type="button"
+                aria-expanded={expanded}
+                onClick={() => setExpanded((open) => !open)}
+                className={cn(
+                    'inline-flex min-h-8 items-center gap-1.5 rounded-full py-1 pr-1 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+                    !reduceMotion && 'transition-colors active:scale-[0.98]',
+                )}
+            >
+                <span>
+                    {approval.mode === 'parallel'
+                        ? t('chainSummaryParallel', {
+                            total: ordered.length,
+                            done: ordered.filter((step) => step.status === 'approved').length,
+                        })
+                        : t('chainSummary', {
+                            step: current.stepOrder,
+                            total: ordered.length,
+                            name: label(current),
+                            approved: current.approvedCount,
+                            required: current.requiredCount,
+                        })}
                 </span>
-            ))}
-            {approval.mode === 'parallel' ? (
-                <span className="text-xs text-muted-foreground">{t('chainParallel')}</span>
-            ) : null}
+                <ChevronDownIcon
+                    className={cn(
+                        'size-3',
+                        !reduceMotion && 'transition-transform duration-150',
+                        expanded && 'rotate-180',
+                    )}
+                    aria-hidden="true"
+                />
+            </button>
+
+            <AnimatePresence initial={false}>
+                {expanded && (
+                    <motion.ul
+                        initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -2 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -2 }}
+                        transition={reduceMotion ? instant : { duration: 0.15, ease: easeOut }}
+                        className="mt-1.5 flex flex-col gap-1"
+                    >
+                        {ordered.map((step) => {
+                            const Icon = STEP_ICON[step.status];
+                            return (
+                                <li
+                                    key={step.id}
+                                    className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                                >
+                                    <Icon
+                                        className={cn('size-3.5 shrink-0', STEP_TONE[step.status])}
+                                        aria-hidden="true"
+                                    />
+                                    <span className={cn(step.id === activeStepId && 'text-foreground')}>
+                                        {label(step)}
+                                    </span>
+                                    <span className="tabular-nums">
+                                        {t('chainProgress', {
+                                            approved: step.approvedCount,
+                                            required: step.requiredCount,
+                                        })}
+                                    </span>
+                                    <span className="sr-only">{t(`chainStatus_${step.status}`)}</span>
+                                </li>
+                            );
+                        })}
+
+                    </motion.ul>
+                )}
+            </AnimatePresence>
         </div>
     );
 }
