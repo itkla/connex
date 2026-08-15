@@ -497,12 +497,12 @@
         "pdf": "PDF",
         "chainStep": "Step {number}",
         "chainProgress": "{approved}/{required}",
-        "chainParallel": "all steps at once",
         "chainStatus_pending": "waiting",
         "chainStatus_active": "open",
         "chainStatus_approved": "approved",
         "chainStatus_rejected": "rejected",
         "chainStatus_cancelled": "cancelled",
-        "chainSummary": "Step {step} of {total} · {name} · {approved} of {required} approvals"
+        "chainSummary": "Step {step} of {total} · {name} · {approved} of {required} approvals",
+        "chainSummaryParallel": "{done} of {total} steps approved, all at once"
     }
 }

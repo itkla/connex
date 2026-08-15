@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
@@ -97,6 +97,7 @@ export default function ApprovalChainEditor({
     const t = useTranslations('ApprovalPolicyDialog');
     const reduceMotion = useReducedMotion();
     const moveButtons = useRef(new Map<string, HTMLButtonElement>());
+    const [queries, setQueries] = useState<Record<string, string>>({});
 
     const updateStep = (index: number, patch: Partial<ChainStepDraft>) =>
         onStepsChange(steps.map((step, i) => (i === index ? { ...step, ...patch } : step)));
@@ -107,8 +108,9 @@ export default function ApprovalChainEditor({
         const reordered = [...steps];
         [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
         onStepsChange(reordered);
+        const landedAtBoundary = target === 0 ? 1 : target === steps.length - 1 ? -1 : delta;
         requestAnimationFrame(() => {
-            moveButtons.current.get(`${steps[index].key}:${delta}`)?.focus();
+            moveButtons.current.get(`${steps[index].key}:${landedAtBoundary}`)?.focus();
         });
     };
 
@@ -131,6 +133,13 @@ export default function ApprovalChainEditor({
         const member = members.find((candidate) => candidate.id === userId);
         return member?.displayName || member?.username || String(userId);
     };
+
+    /**
+     * Display names are not unique in a workspace, so the picker's option text carries the member's
+     * email. Selecting by that string can never resolve to the wrong person.
+     */
+    const optionOf = (member: WorkspaceMember) =>
+        `${member.displayName || member.username} (${member.email})`;
 
     return (
         <div className="flex flex-col gap-3">
@@ -248,17 +257,21 @@ export default function ApprovalChainEditor({
                                         <div className="flex flex-col gap-2">
                                             <Autocomplete
                                                 items={unpicked}
-                                                value=""
+                                                value={queries[step.key] ?? ''}
                                                 onValueChange={(value, eventDetails) => {
                                                     if (eventDetails.reason === 'escape-key') {
                                                         eventDetails.allowPropagation();
                                                         return;
                                                     }
                                                     const picked = unpicked.find(
-                                                        (member) =>
-                                                            (member.displayName || member.username) === value,
+                                                        (member) => optionOf(member) === value,
                                                     );
-                                                    if (picked) addApprover(index, picked.id);
+                                                    if (picked) {
+                                                        addApprover(index, picked.id);
+                                                        setQueries((prev) => ({ ...prev, [step.key]: '' }));
+                                                        return;
+                                                    }
+                                                    setQueries((prev) => ({ ...prev, [step.key]: value }));
                                                 }}
                                                 mode="list"
                                                 openOnInputClick
@@ -273,11 +286,8 @@ export default function ApprovalChainEditor({
                                                     <AutocompleteEmpty>{t('noApproverMatches')}</AutocompleteEmpty>
                                                     <AutocompleteList>
                                                         {(member: WorkspaceMember) => (
-                                                            <AutocompleteItem
-                                                                key={member.id}
-                                                                value={member.displayName || member.username}
-                                                            >
-                                                                {member.displayName || member.username}
+                                                            <AutocompleteItem key={member.id} value={optionOf(member)}>
+                                                                {optionOf(member)}
                                                             </AutocompleteItem>
                                                         )}
                                                     </AutocompleteList>

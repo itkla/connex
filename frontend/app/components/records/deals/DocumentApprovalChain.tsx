@@ -12,7 +12,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 import { cn } from '@/lib/utils';
-import { easeOut } from '@/app/lib/motion';
+import { easeOut, instant } from '@/app/lib/motion';
 import type { ApprovalStepStatus, DocumentApproval, DocumentApprovalStep } from '@/app/lib/types';
 
 type Props = {
@@ -61,19 +61,31 @@ export default function DocumentApprovalChain({ approval, activeStepId }: Props)
                 type="button"
                 aria-expanded={expanded}
                 onClick={() => setExpanded((open) => !open)}
-                className="inline-flex items-center gap-1.5 rounded-full text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring active:scale-[0.98]"
+                className={cn(
+                    'inline-flex min-h-8 items-center gap-1.5 rounded-full py-1 pr-1 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+                    !reduceMotion && 'transition-colors active:scale-[0.98]',
+                )}
             >
                 <span>
-                    {t('chainSummary', {
-                        step: current.stepOrder,
-                        total: ordered.length,
-                        name: label(current),
-                        approved: current.approvedCount,
-                        required: current.requiredCount,
-                    })}
+                    {approval.mode === 'parallel'
+                        ? t('chainSummaryParallel', {
+                            total: ordered.length,
+                            done: ordered.filter((step) => step.status === 'approved').length,
+                        })
+                        : t('chainSummary', {
+                            step: current.stepOrder,
+                            total: ordered.length,
+                            name: label(current),
+                            approved: current.approvedCount,
+                            required: current.requiredCount,
+                        })}
                 </span>
                 <ChevronDownIcon
-                    className={cn('size-3 transition-transform duration-150', expanded && 'rotate-180')}
+                    className={cn(
+                        'size-3',
+                        !reduceMotion && 'transition-transform duration-150',
+                        expanded && 'rotate-180',
+                    )}
                     aria-hidden="true"
                 />
             </button>
@@ -84,7 +96,7 @@ export default function DocumentApprovalChain({ approval, activeStepId }: Props)
                         initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -2 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -2 }}
-                        transition={{ duration: 0.15, ease: easeOut }}
+                        transition={reduceMotion ? instant : { duration: 0.15, ease: easeOut }}
                         className="mt-1.5 flex flex-col gap-1"
                     >
                         {ordered.map((step) => {
@@ -111,9 +123,7 @@ export default function DocumentApprovalChain({ approval, activeStepId }: Props)
                                 </li>
                             );
                         })}
-                        {approval.mode === 'parallel' && (
-                            <li className="text-xs text-muted-foreground">{t('chainParallel')}</li>
-                        )}
+
                     </motion.ul>
                 )}
             </AnimatePresence>
