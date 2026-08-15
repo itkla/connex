@@ -305,6 +305,26 @@ public final class ArchiveVisibilityRegistry {
             ExemptionReason.CLOSED_PERIOD_ANALYTICS,
             "Forecast figures grouped by account across an explicit date window; the window, not the "
                 + "current list visibility, decides which accounts belong in it.");
+        exempt(entries, "ReportMapper", "aggregateDealDiscount", List.of("c"),
+            ExemptionReason.CLOSED_PERIOD_ANALYTICS,
+            "Effective line-item discount over the won or expected-close cohort of a period, grouped "
+                + "by the account the concession was made to. Archiving the account later must not "
+                + "move a discount figure that was already reported.");
+        exempt(entries, "ReportMapper", "aggregateDocuments", List.of("c"),
+            ExemptionReason.CLOSED_PERIOD_ANALYTICS,
+            "Counts quotes generated in the period against the account they were issued to; dropping "
+                + "the accounts archived since would make the same period report different volumes "
+                + "over time.");
+        exempt(entries, "ReportMapper", "aggregateDocumentOutcomes", List.of("c"),
+            ExemptionReason.CLOSED_PERIOD_ANALYTICS,
+            "Conversion of deals whose first document fell in the period, grouped by account. The "
+                + "cohort is fixed by when the document was generated, not by which accounts are "
+                + "still on the live lists.");
+        exempt(entries, "ReportMapper", "aggregateDocumentApprovals", List.of("c"),
+            ExemptionReason.CLOSED_PERIOD_ANALYTICS,
+            "Approval decisions settled in the period, grouped by account. A decision that happened "
+                + "belongs to that period's turnaround whether or not the account has since been "
+                + "archived.");
         exempt(entries, "ReportMapper", "aggregatePeople", List.of("company"),
             ExemptionReason.CLOSED_PERIOD_ANALYTICS,
             "Counts contacts created in the period against the employer they were created under, so "
