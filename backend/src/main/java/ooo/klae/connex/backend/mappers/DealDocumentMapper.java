@@ -11,6 +11,7 @@ public interface DealDocumentMapper {
     List<DealDocument> getByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     DealDocument getById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     DealDocument lockById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    Integer findDealIdById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Integer maxVersion(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     int countNonDraftByDeal(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     int insert(DealDocument document);

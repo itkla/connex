@@ -69,6 +69,7 @@ public class DealDocumentService {
     private final DeletionPolicy deletionPolicy;
     private final AuditService auditService;
     private final DocumentDeliveryService documentDeliveryService;
+    private final RuleTriggerPublisher ruleTriggers;
     private final ObjectMapper objectMapper;
 
     private static final Set<String> CLIENT_TARGET_STATUSES = Set.of("draft", "final", "superseded");
@@ -203,6 +204,11 @@ public class DealDocumentService {
         documentMapper.updateStatus(workspaceId, documentId, status);
         auditService.record("deal_document.status", "deal", dealId, deal.getName(),
             "Document v" + document.getVersion() + " status " + document.getStatus() + " → " + status, null);
+        if ("final".equals(status)) {
+            ruleTriggers.publish(workspaceId, "document", documentId, "document.finalized");
+        } else if ("superseded".equals(status)) {
+            ruleTriggers.publish(workspaceId, "document", documentId, "document.superseded");
+        }
         return enrichWith(workspaceId, requireDocument(workspaceId, dealId, documentId), policies);
     }
 

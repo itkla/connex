@@ -9,9 +9,17 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
@@ -33,6 +41,7 @@ class DealDocumentServiceTest extends AbstractServiceTest {
     @Autowired DealLineItemService lineItemService;
     @Autowired ProductService productService;
     @Autowired JdbcTemplate jdbcTemplate;
+    @MockitoSpyBean RuleTriggerPublisher ruleTriggers;
 
     private Deal jpyDeal() {
         Pipeline pipeline = newPipeline();
@@ -285,6 +294,53 @@ class DealDocumentServiceTest extends AbstractServiceTest {
         tpl.setLocale("en");
         tpl.setBody("{\"type\":\"doc\",\"content\":[" + node + "]}");
         assertThrows(BadRequestException.class, () -> templateService.create(tpl));
+    }
+
+    @Test
+    void finalizingPublishesFinalizedTrigger() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = documentService.generate(deal.getId(), template().getId());
+        clearInvocations(ruleTriggers);
+
+        documentService.updateStatus(deal.getId(), doc.id(), "final");
+
+        verify(ruleTriggers).publish(
+            workspace.getId(), "document", doc.id(), "document.finalized");
+    }
+
+    @Test
+    void supersedingPublishesSupersededTrigger() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = documentService.generate(deal.getId(), template().getId());
+        clearInvocations(ruleTriggers);
+
+        documentService.updateStatus(deal.getId(), doc.id(), "superseded");
+
+        verify(ruleTriggers).publish(
+            workspace.getId(), "document", doc.id(), "document.superseded");
+    }
+
+    @Test
+    void noOpStatusChangePublishesNoTrigger() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = documentService.generate(deal.getId(), template().getId());
+        documentService.updateStatus(deal.getId(), doc.id(), "final");
+        clearInvocations(ruleTriggers);
+
+        documentService.updateStatus(deal.getId(), doc.id(), "final");
+
+        verify(ruleTriggers, never()).publish(anyInt(), anyString(), anyInt(), anyString());
+    }
+
+    @Test
+    void generatePublishesNoTrigger() {
+        Deal deal = jpyDeal();
+        clearInvocations(ruleTriggers);
+
+        documentService.generate(deal.getId(), template().getId());
+
+        verify(ruleTriggers, never()).publish(
+            anyInt(), eq("document"), anyInt(), anyString());
     }
 
     @Test

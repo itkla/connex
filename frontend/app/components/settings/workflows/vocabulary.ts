@@ -5,13 +5,14 @@ import type { RuleAction } from "@/app/lib/types";
  * so the two surfaces can never drift. Mirrors the server-side validation in RuleService — a
  * change here must stay within what the backend accepts.
  */
-export const RECORD_TYPES = ["deal", "company", "person", "task"];
+export const RECORD_TYPES = ["deal", "company", "person", "task", "document"];
 
 export const EVENTS: Record<string, string[]> = {
     deal: ["deal.created", "deal.stage_changed", "deal.updated", "deal.won", "deal.lost", "deal.owner_changed", "deal.value_changed"],
     company: ["company.created", "company.updated", "company.owner_changed"],
     person: ["person.created", "person.updated", "person.job_changed", "person.owner_changed"],
     task: ["task.created", "task.completed"],
+    document: ["document.approval_requested", "document.approved", "document.rejected", "document.finalized", "document.superseded"],
 };
 
 export const ACTIONS: Record<string, string[]> = {
@@ -19,6 +20,7 @@ export const ACTIONS: Record<string, string[]> = {
     company: ["add_tag", "remove_tag", "notify"],
     person: ["create_task", "log_activity", "add_tag", "remove_tag", "create_note", "notify"],
     task: ["notify"],
+    document: ["notify", "create_task", "log_activity", "create_note"],
 };
 
 export const CADENCES = ["hourly", "daily", "weekly"];

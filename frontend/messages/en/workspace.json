@@ -286,7 +286,8 @@
       "deal": "deal",
       "company": "company",
       "person": "contact",
-      "task": "task"
+      "task": "task",
+      "document": "document"
     },
     "cadence": {
       "hourly": "hour",
@@ -317,6 +318,13 @@
       "task": {
         "created": "created",
         "completed": "completed"
+      },
+      "document": {
+        "approval_requested": "approval requested",
+        "approved": "approved",
+        "rejected": "rejected",
+        "finalized": "finalized",
+        "superseded": "superseded"
       }
     },
     "action": {

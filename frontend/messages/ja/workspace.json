@@ -286,7 +286,8 @@
       "deal": "案件",
       "company": "会社",
       "person": "連絡先",
-      "task": "タスク"
+      "task": "タスク",
+      "document": "ドキュメント"
     },
     "cadence": {
       "hourly": "時間",
@@ -317,6 +318,13 @@
       "task": {
         "created": "作成",
         "completed": "完了"
+      },
+      "document": {
+        "approval_requested": "承認申請",
+        "approved": "承認",
+        "rejected": "却下",
+        "finalized": "確定",
+        "superseded": "差し替え"
       }
     },
     "action": {
