@@ -28,7 +28,7 @@ import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest {
 
     @Test
-    void previewReturnsFrozenContentAndStampsTheFirstViewOnce() {
+    void previewReturnsFrozenContentAndRecordsNothing() {
         DocumentFixture fixture = finalDocument();
         DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
         String token = installToken(delivery.recipients().getFirst().id());
@@ -37,6 +37,17 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
             acceptanceService.preview(token, "192.0.2.10");
         DocumentAcceptancePreviewDto second =
             acceptanceService.preview(token, "192.0.2.10");
+
+        assertEquals(0, countEvents(delivery.id(), "viewed"));
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM document_delivery_recipient WHERE workspace_id = ? "
+                + "AND delivery_id = ? AND first_viewed_at IS NOT NULL",
+            Integer.class,
+            workspace.getId(),
+            delivery.id()));
+
+        acceptanceService.markViewed(token, "192.0.2.10");
+        acceptanceService.markViewed(token, "192.0.2.10");
 
         assertEquals(fixture.deal().getName(), first.dealName());
         assertEquals(fixture.document().content(), first.content());

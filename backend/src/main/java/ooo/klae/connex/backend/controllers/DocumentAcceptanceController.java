@@ -29,11 +29,25 @@ public class DocumentAcceptanceController {
     private final DocumentAcceptanceService acceptanceService;
     private final ClientIpResolver clientIpResolver;
 
+    /**
+     * Returns the frozen document without recording anything, so an email scanner, link prefetcher
+     * or URL-rewriting proxy that fetches the emailed link cannot forge recipient view evidence into
+     * the completion certificate. The rendered recipient page reports the view through
+     * {@link #markViewed}.
+     */
     @GetMapping("/{token}")
     public DocumentAcceptancePreviewDto preview(
             @Pattern(regexp = "w\\d+-[a-f0-9]{64}") @PathVariable String token,
             HttpServletRequest servletRequest) {
         return acceptanceService.preview(token, clientIpResolver.resolve(servletRequest));
+    }
+
+    /** Idempotently records that the recipient opened the document. */
+    @PostMapping("/{token}/viewed")
+    public DocumentAcceptancePreviewDto markViewed(
+            @Pattern(regexp = "w\\d+-[a-f0-9]{64}") @PathVariable String token,
+            HttpServletRequest servletRequest) {
+        return acceptanceService.markViewed(token, clientIpResolver.resolve(servletRequest));
     }
 
     @PostMapping("/{token}/accept")

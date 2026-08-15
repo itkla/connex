@@ -41,6 +41,22 @@ never writes the token or raw path to application/audit logs, uses a uniform una
 applies the per-token and trusted-source admission above. These controls compensate for the path shape;
 edge events or exported raw paths must never be treated as secret-free evidence.
 
+## What a recorded view means
+
+Opening the emailed link is a `GET`, and email security scanners, link prefetchers and URL-rewriting
+proxies all issue one. `GET /api/document-acceptance/{token}` therefore records nothing at all: it
+returns the frozen document and stamps no evidence.
+
+The view is recorded by `POST /api/document-acceptance/{token}/viewed`, which the rendered recipient
+page calls. Automated fetchers do not execute that page, so they cannot forge
+`first_viewed_at` or a `viewed` event into the completion certificate. The call is idempotent — only
+the first one stamps the timestamp and appends the event.
+
+The residual limitation is deliberate and bounded: anyone holding the token can record a view, but
+holding the token is already the credential for accepting or declining, so there is no privilege to
+escalate. A recorded view attests that something rendered the page with a valid token, not that a
+specific human read the document.
+
 ## Evidence and artifacts
 
 The append-only `document_delivery_event` ledger records actor, recipient, system, and provider events.

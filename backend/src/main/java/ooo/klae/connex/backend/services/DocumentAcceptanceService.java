@@ -70,7 +70,15 @@ public class DocumentAcceptanceService {
     private final TransactionTemplate transactionTemplate;
     private final ObjectMapper objectMapper;
 
-    /** Returns the frozen document and idempotently records the first view. */
+    /**
+     * Returns the frozen document. Records nothing.
+     *
+     * <p>A browser opening an emailed link issues a {@code GET}, and so do email security scanners,
+     * link prefetchers and URL-rewriting proxies. Stamping the first view here would let any of them
+     * forge "the recipient viewed this at ..." into the completion certificate, which is the one
+     * artifact whose value is trustworthy attribution. The view is recorded by
+     * {@link #markViewed(String, String)} instead, which the rendered recipient page calls.
+     */
     public DocumentAcceptancePreviewDto preview(String token, String sourceAddress) {
         Link link = admit(token, sourceAddress);
         DocumentAcceptancePreviewDto result = automationExecutor.runAs(
@@ -79,6 +87,56 @@ public class DocumentAcceptanceService {
             "system",
             () -> transactionTemplate.execute(status -> previewInTransaction(link)));
         return Objects.requireNonNull(result, "document preview result");
+    }
+
+    /**
+     * Idempotently records that the recipient opened the document. Safe to call repeatedly: only the
+     * first call stamps {@code first_viewed_at} and appends the {@code viewed} event.
+     */
+    public DocumentAcceptancePreviewDto markViewed(String token, String sourceAddress) {
+        Link link = admit(token, sourceAddress);
+        DocumentAcceptancePreviewDto result = automationExecutor.runAs(
+            link.workspace().getId(),
+            systemActor.user(),
+            "system",
+            () -> transactionTemplate.execute(status -> markViewedInTransaction(link)));
+        return Objects.requireNonNull(result, "document view result");
+    }
+
+    private DocumentAcceptancePreviewDto markViewedInTransaction(Link link) {
+        Aggregate aggregate = lockAggregate(link, true);
+        requireActionable(aggregate.delivery(), aggregate.recipient(), now());
+        if (aggregate.recipient().getFirstViewedAt() == null) {
+            LocalDateTime viewedAt = now();
+            if (deliveryMapper.markRecipientViewed(
+                    link.workspace().getId(),
+                    aggregate.delivery().getId(),
+                    aggregate.recipient().getId(),
+                    viewedAt) != 1) {
+                throw unavailable();
+            }
+            deliveryMapper.markDeliveryViewed(
+                link.workspace().getId(), aggregate.delivery().getId());
+            appendRecipientEvent(
+                link.workspace().getId(),
+                aggregate.delivery().getId(),
+                aggregate.recipient().getId(),
+                "viewed",
+                viewedAt);
+            aggregate.delivery().setStatus("viewed");
+            aggregate.recipient().setStatus("viewed");
+        }
+        DocumentAcceptancePreviewDto viewed = new DocumentAcceptancePreviewDto(
+            parseContent(aggregate.document()),
+            aggregate.deal().getName(),
+            link.workspace().getName(),
+            ContactMask.maskEmail(aggregate.recipient().getEmail()),
+            aggregate.delivery().getStatus(),
+            aggregate.recipient().getStatus(),
+            true);
+        auditRecipientOperation(
+            aggregate, "document_delivery.preview", "Viewed a delivered document");
+        return viewed;
     }
 
     /** Records one signer acceptance and completes the envelope after the last signer. */
@@ -116,26 +174,6 @@ public class DocumentAcceptanceService {
     private DocumentAcceptancePreviewDto previewInTransaction(Link link) {
         Aggregate aggregate = lockAggregate(link, false);
         requireActionable(aggregate.delivery(), aggregate.recipient(), now());
-        if (aggregate.recipient().getFirstViewedAt() == null) {
-            LocalDateTime viewedAt = now();
-            if (deliveryMapper.markRecipientViewed(
-                    link.workspace().getId(),
-                    aggregate.delivery().getId(),
-                    aggregate.recipient().getId(),
-                    viewedAt) != 1) {
-                throw unavailable();
-            }
-            deliveryMapper.markDeliveryViewed(
-                link.workspace().getId(), aggregate.delivery().getId());
-            appendRecipientEvent(
-                link.workspace().getId(),
-                aggregate.delivery().getId(),
-                aggregate.recipient().getId(),
-                "viewed",
-                viewedAt);
-            aggregate.delivery().setStatus("viewed");
-            aggregate.recipient().setStatus("viewed");
-        }
         DocumentAcceptancePreviewDto preview = new DocumentAcceptancePreviewDto(
             parseContent(aggregate.document()),
             aggregate.deal().getName(),
@@ -144,8 +182,6 @@ public class DocumentAcceptanceService {
             aggregate.delivery().getStatus(),
             aggregate.recipient().getStatus(),
             true);
-        auditRecipientOperation(
-            aggregate, "document_delivery.preview", "Viewed a delivered document");
         return preview;
     }
 
