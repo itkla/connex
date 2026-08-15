@@ -246,6 +246,10 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("document_approval_step_approver", 106));
         raw.add(direct("document_approval_step", 108));
         raw.add(direct("document_approval", 110));
+        raw.add(direct("document_delivery_event", 112));
+        raw.add(direct("document_delivery_artifact", 114));
+        raw.add(direct("document_delivery_recipient", 116));
+        raw.add(direct("document_delivery", 118));
         raw.add(direct("deal_document", 120));
         raw.add(direct("deal_line_item", 130));
         raw.add(direct("deal_stage_history", 140));

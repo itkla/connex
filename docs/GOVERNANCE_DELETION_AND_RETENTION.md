@@ -147,6 +147,25 @@ carrying **any** non-draft document (`status != 'draft'`) is therefore deletable
 only**, in both the single and bulk delete paths. Deals carrying only drafts, or no documents, are
 unchanged.
 
+### Completed document-delivery evidence
+
+A completed commercial-document envelope retains its frozen `signed_document` JSON or authenticated
+provider PDF and deterministic completion `certificate` as managed tenant objects. A provider artifact
+may be staged before terminal completion to tolerate callback reordering; if that envelope later expires or
+is voided, the staged immutable object remains under the same retention and deletion lifecycle. Workspace
+export includes artifact metadata and object bytes. Tenant teardown enumerates the artifact keys, enqueues
+them through the same durable
+`object_deletion_queue` used by attachments, removes metadata in child-before-parent order, and verifies
+that no object or quota ledger residue remains. Ordinary deal deletion enqueues every delivery artifact
+before the database cascade removes its metadata.
+
+Recipient identity, typed acceptance name, decision time, and salted request-evidence hashes are part of
+the completion record. “Erase where legally permitted” therefore means an operator must first decide
+whether the completed envelope is subject to a contractual, tax, litigation-hold, or other retention
+obligation. Where erasure is permitted, delete the owning deal or workspace through the supported
+lifecycle path so object bytes and metadata are removed together; direct object-store deletion is not a
+supported erasure procedure. See [ESIGNATURE.md](ESIGNATURE.md) for the artifact and recovery contract.
+
 ## Report-snapshot retention
 
 `report_snapshot.origin` is `'manual'` (created by hand) or `'scheduled'` (frozen by scheduled

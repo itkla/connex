@@ -32,6 +32,7 @@ import ooo.klae.connex.backend.dto.DealLineItemsResponse;
 import ooo.klae.connex.backend.dto.DocumentApprovalDto;
 import ooo.klae.connex.backend.dto.DocumentContent;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealDocumentMapper;
@@ -67,6 +68,7 @@ public class DealDocumentService {
     private final WorkspaceService workspaceService;
     private final DeletionPolicy deletionPolicy;
     private final AuditService auditService;
+    private final DocumentDeliveryService documentDeliveryService;
     private final ObjectMapper objectMapper;
 
     private static final Set<String> CLIENT_TARGET_STATUSES = Set.of("draft", "final", "superseded");
@@ -160,13 +162,19 @@ public class DealDocumentService {
     /**
      * Transitions a document's status on the client's behalf. draft → final|superseded,
      * approved → final|superseded, pending_approval → superseded (withdrawing the pending
-     * request), final → superseded. Finalizing a draft is refused while an active approval
-     * policy matches; the approval flow is the only path to {@code final} for such documents.
+     * request), final|sent|signed → superseded. Finalizing a draft is refused while an active
+     * approval policy matches; the approval flow is the only path to {@code final} for such
+     * documents. Superseding a sent document voids its live delivery before the status changes.
      */
     @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public DealDocumentDto updateStatus(int dealId, int documentId, String status) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = workspaceService.getCurrentUserId();
+        Set<Permission> lockedPermissions = workspaceService.lockedPermissionsFor(workspaceId, actorId);
+        if (!lockedPermissions.contains(Permission.DEAL_UPDATE)) {
+            throw new ForbiddenException("Requires the DEAL_UPDATE permission in this workspace");
+        }
         Deal deal = requireDeal(workspaceId, dealId);
         DealDocument document = lockDocument(workspaceId, dealId, documentId);
         if (status == null || !CLIENT_TARGET_STATUSES.contains(status)) {
@@ -184,6 +192,13 @@ public class DealDocumentService {
         }
         if ("pending_approval".equals(document.getStatus())) {
             approvalService.cancelPendingOnSupersede(workspaceId, deal, document);
+        }
+        if ("superseded".equals(status) && "sent".equals(document.getStatus())) {
+            if (!lockedPermissions.contains(Permission.DOCUMENT_SEND)) {
+                throw new ForbiddenException(
+                    "Requires the DOCUMENT_SEND permission to supersede a sent document");
+            }
+            documentDeliveryService.voidOnSupersede(workspaceId, document);
         }
         documentMapper.updateStatus(workspaceId, documentId, status);
         auditService.record("deal_document.status", "deal", dealId, deal.getName(),
@@ -212,7 +227,7 @@ public class DealDocumentService {
             case "draft" -> to.equals("final") || to.equals("superseded");
             case "pending_approval" -> to.equals("superseded");
             case "approved" -> to.equals("final") || to.equals("superseded");
-            case "final" -> to.equals("superseded");
+            case "final", "sent", "signed" -> to.equals("superseded");
             default -> false;
         };
     }
@@ -351,8 +366,8 @@ public class DealDocumentService {
     private DealDocumentDto toDto(DealDocument d, List<ApprovalPolicy> policies,
             DocumentApprovalDto latestApproval) {
         DocumentContent content = parseContent(d);
-        boolean requiresApproval = !"final".equals(d.getStatus()) && !"superseded".equals(d.getStatus())
-            && !"approved".equals(d.getStatus())
+        boolean requiresApproval = !Set.of("final", "sent", "signed", "superseded", "approved")
+            .contains(d.getStatus())
             && policyService.firstMatch(policies, d, content) != null;
         return new DealDocumentDto(d.getId(), d.getDealId(), d.getTemplateId(), d.getType(), d.getLocale(),
             d.getStatus(), d.getVersion(), d.getTitle(), d.getCurrency(), d.getGeneratedAt(), d.getCreatedBy(), content,

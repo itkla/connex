@@ -197,7 +197,9 @@ public class SecurityConfig {
                     "/api/account/connections/native/prepare",
                     "/api/account/connections/native/complete",
                     "/api/delivery/unsubscribe/**",
-                    "/api/delivery/webhooks/**");
+                    "/api/delivery/webhooks/**",
+                    "/api/document-acceptance/**",
+                    "/api/document-signature/webhooks/**");
             if (ssoEnabled) {
                 csrf.ignoringRequestMatchers("/api/login/saml2/sso/**");
             }
@@ -213,6 +215,8 @@ public class SecurityConfig {
                     .requestMatchers(HttpMethod.GET, "/api/mail/managed").permitAll()
                     .requestMatchers("/api/delivery/unsubscribe/**").permitAll()
                     .requestMatchers("/api/delivery/webhooks/**").permitAll()
+                    .requestMatchers("/api/document-acceptance/**").permitAll()
+                    .requestMatchers("/api/document-signature/webhooks/**").permitAll()
                     .requestMatchers("/api/auth/webauthn/authenticate/**").permitAll()
                     .requestMatchers("/api/auth/webauthn/**").authenticated()
                     .requestMatchers(HttpMethod.POST, "/api/invites/exchange").permitAll()

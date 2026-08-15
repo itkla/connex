@@ -37,6 +37,7 @@ public class JobRunRecorder {
     public static final String RELATIONSHIP_SIGNAL_RECONCILIATION =
         "relationship_signal_reconciliation";
     public static final String APPROVAL_RECONCILIATION = "approval_reconciliation";
+    public static final String DOCUMENT_DELIVERY_EXPIRY = "document_delivery_expiry";
 
     private static final Logger log = LoggerFactory.getLogger(JobRunRecorder.class);
     /**
@@ -63,7 +64,8 @@ public class JobRunRecorder {
         OBJECT_DELETION_RETRY,
         WORKFLOW_RUNTIME,
         RELATIONSHIP_SIGNAL_RECONCILIATION,
-        APPROVAL_RECONCILIATION);
+        APPROVAL_RECONCILIATION,
+        DOCUMENT_DELIVERY_EXPIRY);
     private static final Set<String> METADATA_KEYS = Set.of(
         "phase",
         "purgedCount",
@@ -76,7 +78,8 @@ public class JobRunRecorder {
         "failedCount",
         "scheduleId",
         "snapshotId",
-        "recipientCount");
+        "recipientCount",
+        "expiredCount");
 
     private final JobRunMapper mapper;
     private final ObjectMapper objectMapper;

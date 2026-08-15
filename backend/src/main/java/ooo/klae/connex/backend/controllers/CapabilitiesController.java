@@ -46,7 +46,8 @@ public class CapabilitiesController {
                 capabilityRegistry.isAvailable(Capability.MANAGED_MAIL),
                 capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_SCANNING),
                 capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_IMPORT),
-                capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY));
+                capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY),
+                capabilityRegistry.isAvailable(Capability.DOCUMENT_SIGNATURE));
     }
 
     private String modeOf(String provider) {
@@ -65,6 +66,7 @@ public class CapabilitiesController {
      * @param businessCardScanning whether local OCR and durable card retention are ready
      * @param businessCardImport whether reviewed source-image import and retention are ready
      * @param campaignDelivery whether native email campaign delivery is available
+     * @param documentSignature whether commercial-document signature delivery is available
      */
     public record CapabilitiesResponse(
             boolean sso,
@@ -75,7 +77,8 @@ public class CapabilitiesController {
             boolean mailManaged,
             boolean businessCardScanning,
             boolean businessCardImport,
-            boolean campaignDelivery) {
+            boolean campaignDelivery,
+            boolean documentSignature) {
     }
 
     /**
