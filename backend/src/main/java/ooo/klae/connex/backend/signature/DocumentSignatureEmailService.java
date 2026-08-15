@@ -2,6 +2,9 @@ package ooo.klae.connex.backend.signature;
 
 /** Delivers one opaque document-acceptance link without persisting or logging the raw token. */
 public interface DocumentSignatureEmailService {
+    /** Fails before durable delivery state when a workspace has no effective transport. */
+    void requireTransport(int workspaceId);
+
     /**
      * Sends or locally records one recipient-link delivery attempt.
      *

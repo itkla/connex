@@ -394,7 +394,8 @@ connex:
         # does NOT start sending reset/verification mail. It is the fallback sender for
         # workspaces without their own SMTP. A workspace can override host/from via
         # Settings → Email; its SMTP password is stored in the central secret store.
-        # app-base-url is the frontend origin used to build invite links (never a request header).
+        # app-base-url is the frontend origin used to build invite and document-acceptance links
+        # (never a request header).
         enabled: ${CONNEX_MAIL_ENABLED:false}
         # When true, per-workspace SMTP overrides are disabled and the instance transport
         # (enabled + host/from below) is authoritative for all workspace mail; if the instance

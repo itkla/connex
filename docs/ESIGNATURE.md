@@ -13,6 +13,11 @@ built-in roles receive that permission; custom roles receive it only when explic
 gate returns an explicit unavailable response and never pretends that a send succeeded. Deployment setup
 is described in [DEPLOYMENT.md](DEPLOYMENT.md).
 
+The recipient-facing `/document-acceptance/{token}` frontend page is not implemented yet.
+`CONNEX_SIGNATURE_ENABLED` must remain `false` until that page ships. The backend acceptance API and
+email-link contract exist now for integration work, but enabling delivery before the page exists would
+send recipients to a route that cannot render the document or submit their decision.
+
 Send and resend require a caller-retained UUID `Idempotency-Key`. Connex claims the key in the workspace
 and binds it to the complete operation fingerprint and actor. Retrying the same request with the same key
 returns the first delivery result without minting another token or producing another event, audit, or email.
@@ -34,18 +39,20 @@ to the routed workspace, and revalidates the hash with a constant-time compariso
 stored hash. Void, expiry, decline, and supersede invalidate every outstanding token. Public requests are
 bounded independently per token hash and per hashed, trusted source address.
 
-The complete bearer is embedded in `/api/document-acceptance/{token}` and therefore appears in the request
-path. Cloudflare must apply the same no-log Skip rule, compatibility exception, and generic-rate exclusion
-used for other path credentials to `/api/document-acceptance/*`. The application stores only the hash,
-never writes the token or raw path to application/audit logs, uses a uniform unavailable response, and
-applies the per-token and trusted-source admission above. These controls compensate for the path shape;
-edge events or exported raw paths must never be treated as secret-free evidence.
+The emailed bearer link points to the frontend route `/document-acceptance/{token}`. The recipient page
+will call `/api/document-acceptance/{token}` and its decision subpaths, so the complete bearer appears in
+both frontend and API request paths. Cloudflare must apply the no-log Skip rule and compatibility
+exception to both routes; the API route also stays excluded from the generic API rate rule. The
+application stores only the hash, never writes the token or raw path to application/audit logs, uses a
+uniform unavailable response, and applies the per-token and trusted-source admission before request-body
+parsing. These controls compensate for the path shape; edge events or exported raw paths must never be
+treated as secret-free evidence.
 
 ## What a recorded view means
 
-Opening the emailed link is a `GET`, and email security scanners, link prefetchers and URL-rewriting
-proxies all issue one. `GET /api/document-acceptance/{token}` therefore records nothing at all: it
-returns the frozen document and stamps no evidence.
+Opening the emailed frontend link is a `GET`, and email security scanners, link prefetchers and
+URL-rewriting proxies all issue one. The page's `GET /api/document-acceptance/{token}` therefore records
+nothing at all: it returns the frozen document and stamps no evidence.
 
 The view is recorded by `POST /api/document-acceptance/{token}/viewed`, which the rendered recipient
 page calls. Automated fetchers do not execute that page, so they cannot forge

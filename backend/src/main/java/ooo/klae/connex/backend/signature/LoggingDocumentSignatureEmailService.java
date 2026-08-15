@@ -18,6 +18,10 @@ public class LoggingDocumentSignatureEmailService implements DocumentSignatureEm
         LoggerFactory.getLogger(LoggingDocumentSignatureEmailService.class);
 
     @Override
+    public void requireTransport(int workspaceId) {
+    }
+
+    @Override
     @Async
     public void send(
             int workspaceId,

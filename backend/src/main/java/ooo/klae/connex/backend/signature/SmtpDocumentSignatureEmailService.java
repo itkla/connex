@@ -6,6 +6,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.mail.EmailTemplateRenderer;
 import ooo.klae.connex.backend.mail.MailMessage;
 import ooo.klae.connex.backend.mail.MailService;
@@ -19,6 +20,14 @@ public class SmtpDocumentSignatureEmailService implements DocumentSignatureEmail
     private final EmailTemplateRenderer templateRenderer;
 
     private static final String JAPANESE = "ja";
+
+    @Override
+    public void requireTransport(int workspaceId) {
+        if (!mailService.hasUsableWorkspaceTransport(workspaceId)) {
+            throw new ServiceUnavailableException(
+                "Document-signature email transport is unavailable");
+        }
+    }
 
     @Override
     public void send(

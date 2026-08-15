@@ -122,6 +122,7 @@ public class DocumentDeliveryService {
         requireRecipientPeople(workspaceId, recipients);
         DocumentSignatureProvider provider = providerRouter.adapterFor(request.getProvider());
         requireOutboundProvider(provider);
+        emailService.requireTransport(workspaceId);
 
         DocumentDelivery delivery = new DocumentDelivery();
         delivery.setWorkspaceId(workspaceId);
@@ -288,6 +289,7 @@ public class DocumentDeliveryService {
         }
         DocumentSignatureProvider provider = providerRouter.adapterFor(delivery.getProvider());
         requireOutboundProvider(provider);
+        emailService.requireTransport(workspaceId);
         SendOutcome outcome = provider.send(new SendCommand(
             workspaceId,
             deliveryId,

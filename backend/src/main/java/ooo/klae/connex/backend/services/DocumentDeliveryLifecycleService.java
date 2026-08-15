@@ -56,6 +56,7 @@ public class DocumentDeliveryLifecycleService {
     private final SystemActor systemActor;
     private final NotificationDelivery notificationDelivery;
     private final NotificationPreferenceService notificationPreferenceService;
+    private final WorkspaceService workspaceService;
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
 
@@ -424,7 +425,9 @@ public class DocumentDeliveryLifecycleService {
         }
         for (int recipientId : recipients) {
             try {
-                if (!notificationPreferenceService.isEnabled(recipientId, type, "in_app")) {
+                if (!workspaceService.isMember(workspaceId, recipientId)
+                        || !notificationPreferenceService.isEnabled(
+                            recipientId, type, "in_app")) {
                     continue;
                 }
                 Notification notification = new Notification();

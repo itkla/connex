@@ -46,7 +46,9 @@ class InAppAcceptanceProviderTest {
         assertEquals(sha256(secondToken),
             outcome.recipients().getLast().deliveryLink().orElseThrow().tokenHash());
         assertTrue(outcome.recipients().getFirst().deliveryLink().orElseThrow().url()
-            .startsWith("https://connex.example/api/document-acceptance/"));
+            .startsWith("https://connex.example/document-acceptance/"));
+        assertFalse(outcome.recipients().getFirst().deliveryLink().orElseThrow().url()
+            .contains("/api/document-acceptance/"));
         assertFalse(provider.parseWebhook("in_app", Map.of(), new byte[0]).isPresent());
     }
 

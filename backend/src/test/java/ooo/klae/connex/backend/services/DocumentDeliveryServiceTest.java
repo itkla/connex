@@ -6,11 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doThrow;
 
 import java.util.List;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import ooo.klae.connex.backend.beans.DocumentDeliveryRecipient;
@@ -23,11 +25,13 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
+import ooo.klae.connex.backend.signature.DocumentSignatureEmailService;
 import ooo.klae.connex.backend.signature.RecipientDeliveryLink;
 import ooo.klae.connex.backend.signature.SendOutcome;
 import ooo.klae.connex.backend.signature.SendRecipientOutcome;
 
 class DocumentDeliveryServiceTest extends AbstractDocumentDeliveryServiceTest {
+    @MockitoBean DocumentSignatureEmailService emailService;
 
     @Test
     void sendRefusesDisabledGateNonFinalDocumentLiveEnvelopeAndMissingPermission() {
@@ -85,6 +89,24 @@ class DocumentDeliveryServiceTest extends AbstractDocumentDeliveryServiceTest {
         assertEquals(2, hashes.size());
         assertNotNull(hashes.get(0));
         assertNotEquals(hashes.get(0), hashes.get(1));
+    }
+
+    @Test
+    void sendWithoutAnEffectiveMailTransportCreatesNoEnvelope() {
+        DocumentFixture fixture = finalDocument();
+        SendDeliveryRequest request = new SendDeliveryRequest();
+        request.setRecipients(List.of(signer("unreachable@example.test", 1)));
+        doThrow(new ServiceUnavailableException("transport unavailable"))
+            .when(emailService).requireTransport(workspace.getId());
+
+        assertThrows(ServiceUnavailableException.class, () -> deliveryService.send(
+            fixture.deal().getId(), fixture.document().id(), request, requestKey()));
+
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM document_delivery WHERE workspace_id = ? AND document_id = ?",
+            Integer.class,
+            workspace.getId(),
+            fixture.document().id()));
     }
 
     @Test

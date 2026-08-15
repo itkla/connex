@@ -10,8 +10,6 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -41,7 +39,7 @@ import ooo.klae.connex.backend.mappers.DealDocumentMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.DocumentDeliveryMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
-import ooo.klae.connex.backend.signature.DocumentAcceptanceRateLimiter;
+import ooo.klae.connex.backend.signature.DocumentAcceptanceToken;
 import ooo.klae.connex.backend.signature.SignatureProperties;
 import ooo.klae.connex.backend.util.ContactMask;
 
@@ -52,7 +50,6 @@ import ooo.klae.connex.backend.util.ContactMask;
 @Service
 @RequiredArgsConstructor
 public class DocumentAcceptanceService {
-    private static final Pattern TOKEN = Pattern.compile("w(\\d+)-[a-f0-9]{64}");
     private static final String UNAVAILABLE = "Document link is no longer available";
     private static final List<String> LIVE = List.of("sent", "viewed");
 
@@ -62,7 +59,6 @@ public class DocumentAcceptanceService {
     private final WorkspaceMapper workspaceMapper;
     private final DocumentDeliveryLifecycleService lifecycleService;
     private final AuditService auditService;
-    private final DocumentAcceptanceRateLimiter rateLimiter;
     private final SignatureProperties signatureProperties;
     private final CapabilityRegistry capabilityRegistry;
     private final SystemActor systemActor;
@@ -80,7 +76,7 @@ public class DocumentAcceptanceService {
      * {@link #markViewed(String, String)} instead, which the rendered recipient page calls.
      */
     public DocumentAcceptancePreviewDto preview(String token, String sourceAddress) {
-        Link link = admit(token, sourceAddress);
+        Link link = admit(token);
         DocumentAcceptancePreviewDto result = automationExecutor.runAs(
             link.workspace().getId(),
             systemActor.user(),
@@ -94,7 +90,7 @@ public class DocumentAcceptanceService {
      * first call stamps {@code first_viewed_at} and appends the {@code viewed} event.
      */
     public DocumentAcceptancePreviewDto markViewed(String token, String sourceAddress) {
-        Link link = admit(token, sourceAddress);
+        Link link = admit(token);
         DocumentAcceptancePreviewDto result = automationExecutor.runAs(
             link.workspace().getId(),
             systemActor.user(),
@@ -145,7 +141,7 @@ public class DocumentAcceptanceService {
             AcceptDocumentRequest request,
             String sourceAddress,
             String userAgent) {
-        Link link = admit(token, sourceAddress);
+        Link link = admit(token);
         DocumentAcceptanceDecisionDto result = automationExecutor.runAs(
             link.workspace().getId(),
             systemActor.user(),
@@ -161,7 +157,7 @@ public class DocumentAcceptanceService {
             DeclineDocumentRequest request,
             String sourceAddress,
             String userAgent) {
-        Link link = admit(token, sourceAddress);
+        Link link = admit(token);
         DocumentAcceptanceDecisionDto result = automationExecutor.runAs(
             link.workspace().getId(),
             systemActor.user(),
@@ -359,18 +355,16 @@ public class DocumentAcceptanceService {
         return recipient;
     }
 
-    private Link admit(String token, String sourceAddress) {
+    private Link admit(String token) {
         requireAvailable();
-        Matcher matcher = token == null ? TOKEN.matcher("") : TOKEN.matcher(token);
-        if (!matcher.matches()) {
+        if (!DocumentAcceptanceToken.hasValidShape(token)) {
             throw unavailable();
         }
-        String tokenHash = sha256(token);
-        rateLimiter.acquire(tokenHash, sourceAddress);
+        String tokenHash = DocumentAcceptanceToken.hash(token);
         int workspaceId;
         try {
-            workspaceId = Integer.parseInt(matcher.group(1));
-        } catch (NumberFormatException exception) {
+            workspaceId = DocumentAcceptanceToken.workspaceId(token);
+        } catch (IllegalArgumentException exception) {
             throw unavailable();
         }
         Workspace workspace = workspaceMapper.getActiveById(workspaceId);
@@ -460,15 +454,6 @@ public class DocumentAcceptanceService {
             return HexFormat.of().formatHex(mac.doFinal(value.getBytes(StandardCharsets.UTF_8)));
         } catch (GeneralSecurityException exception) {
             throw new IllegalStateException("HMAC-SHA256 is unavailable", exception);
-        }
-    }
-
-    private static String sha256(String value) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                .digest(value.getBytes(StandardCharsets.UTF_8)));
-        } catch (GeneralSecurityException exception) {
-            throw new IllegalStateException("SHA-256 is unavailable", exception);
         }
     }
 

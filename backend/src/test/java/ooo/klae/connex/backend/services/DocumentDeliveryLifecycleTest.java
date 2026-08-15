@@ -92,6 +92,32 @@ class DocumentDeliveryLifecycleTest extends AbstractDocumentDeliveryServiceTest 
     }
 
     @Test
+    void expiryDoesNotNotifyASenderWhoLeftTheWorkspace() {
+        DocumentFixture fixture = finalDocument();
+        DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
+        workspaceMapper.removeMember(workspace.getId(), currentUser.getId());
+        jdbcTemplate.update(
+            "UPDATE document_delivery SET expires_at = ? WHERE workspace_id = ? AND id = ?",
+            LocalDateTime.now().minusMinutes(1),
+            workspace.getId(),
+            delivery.id());
+
+        scheduler.expire();
+
+        assertEquals("expired", jdbcTemplate.queryForObject(
+            "SELECT status FROM document_delivery WHERE workspace_id = ? AND id = ?",
+            String.class,
+            workspace.getId(),
+            delivery.id()));
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM notification WHERE workspace_id = ? "
+                + "AND recipient_id = ? AND type = 'document.delivery_expired'",
+            Integer.class,
+            workspace.getId(),
+            currentUser.getId()));
+    }
+
+    @Test
     void terminalProviderEventBeforeExpiryWinsAfterSchedulerExpiry() {
         DocumentFixture fixture = finalDocument();
         DocumentDeliveryDto delivery = sendWithProvider(fixture, "test_signature");

@@ -227,7 +227,7 @@ non-GET methods are not silently rewritten, and preserve the path and query stri
 |---|---|---|
 | `CF-CUSTOM-01-METHODS` | Intended host and method is `TRACE` or `CONNECT` | Block. Connex exposes neither method. |
 | `CF-EX-01-WEBSOCKET` | Host is `connexcrm.jp` or `preview.connexcrm.jp`, and path is exactly `/api/ws` | Skip Super Bot Fight Mode. Keep managed WAF inspection of the initial handshake; the generic rate expression excludes this path. Logging may remain enabled because this path carries no credential. |
-| `CF-EX-02-TOKEN-CALLBACKS` | Intended host and path starts with `/api/delivery/webhooks/`, `/api/delivery/unsubscribe/`, or `/api/document-acceptance/` | Skip Super Bot Fight Mode, rate limiting, and managed WAF. Disable Skip-rule logging because the path contains a credential. Application webhook signature/token verification, idempotent unsubscribe handling, and acceptance-token admission remain authoritative. |
+| `CF-EX-02-TOKEN-CALLBACKS` | Intended host and path starts with `/api/delivery/webhooks/`, `/api/delivery/unsubscribe/`, `/document-acceptance/`, or `/api/document-acceptance/` | Skip Super Bot Fight Mode, rate limiting, and managed WAF. Disable Skip-rule logging because the path contains a credential. Application webhook signature/token verification, idempotent unsubscribe handling, and acceptance-token admission remain authoritative. |
 | `CF-EX-03-SAML` | Intended host, method `POST`, and path starts with `/api/login/saml2/sso/` | Skip Super Bot Fight Mode and interactive challenges. Preserve the form body, cookies, and redirect response unchanged. Keep managed WAF inspection unless one rule ID is proven incompatible. |
 | `CF-EX-04-UPLOADS` | Intended host and an upload path listed in the Caddy table, including `/api/imports/*` and `/api/business-cards/*` | Skip Super Bot Fight Mode so multipart/binary clients are not challenged mid-transfer. Do not skip the dedicated upload rate rule, the origin body cap, or all managed WAF rules. |
 
@@ -241,7 +241,7 @@ CF-EX-01-WEBSOCKET
 (http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and http.request.uri.path eq "/api/ws")
 
 CF-EX-02-TOKEN-CALLBACKS
-(http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and (starts_with(http.request.uri.path, "/api/delivery/webhooks/") or starts_with(http.request.uri.path, "/api/delivery/unsubscribe/") or starts_with(http.request.uri.path, "/api/document-acceptance/")))
+(http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and (starts_with(http.request.uri.path, "/api/delivery/webhooks/") or starts_with(http.request.uri.path, "/api/delivery/unsubscribe/") or starts_with(http.request.uri.path, "/document-acceptance/") or starts_with(http.request.uri.path, "/api/document-acceptance/")))
 
 CF-EX-03-SAML
 (http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and http.request.method eq "POST" and starts_with(http.request.uri.path, "/api/login/saml2/sso/"))
@@ -258,7 +258,7 @@ active.
 
 ```text
 CF-CONFIG-01-COMPATIBILITY
-(http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and (http.request.uri.path eq "/api/ws" or starts_with(http.request.uri.path, "/api/delivery/webhooks/") or starts_with(http.request.uri.path, "/api/delivery/unsubscribe/") or starts_with(http.request.uri.path, "/api/document-acceptance/") or (http.request.method eq "POST" and starts_with(http.request.uri.path, "/api/login/saml2/sso/")) or (http.request.method in {"POST" "PUT"} and (http.request.uri.path eq "/api/attachments/upload" or (starts_with(http.request.uri.path, "/api/ai/assistant/sessions/") and ends_with(http.request.uri.path, "/attachments")) or http.request.uri.path eq "/api/users/me/profile-picture" or (starts_with(http.request.uri.path, "/api/persons/") and ends_with(http.request.uri.path, "/profile-picture")) or (starts_with(http.request.uri.path, "/api/companies/") and ends_with(http.request.uri.path, "/logo")) or starts_with(http.request.uri.path, "/api/imports/") or starts_with(http.request.uri.path, "/api/business-cards/")))))
+(http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and (http.request.uri.path eq "/api/ws" or starts_with(http.request.uri.path, "/api/delivery/webhooks/") or starts_with(http.request.uri.path, "/api/delivery/unsubscribe/") or starts_with(http.request.uri.path, "/document-acceptance/") or starts_with(http.request.uri.path, "/api/document-acceptance/") or (http.request.method eq "POST" and starts_with(http.request.uri.path, "/api/login/saml2/sso/")) or (http.request.method in {"POST" "PUT"} and (http.request.uri.path eq "/api/attachments/upload" or (starts_with(http.request.uri.path, "/api/ai/assistant/sessions/") and ends_with(http.request.uri.path, "/attachments")) or http.request.uri.path eq "/api/users/me/profile-picture" or (starts_with(http.request.uri.path, "/api/persons/") and ends_with(http.request.uri.path, "/profile-picture")) or (starts_with(http.request.uri.path, "/api/companies/") and ends_with(http.request.uri.path, "/logo")) or starts_with(http.request.uri.path, "/api/imports/") or starts_with(http.request.uri.path, "/api/business-cards/")))))
 ```
 
 Configure Super Bot Fight Mode according to the recorded origin-lock design:
@@ -338,8 +338,9 @@ count look comprehensive.
   exported in edge logs.
 - **Unsubscribe:** GET/POST `/api/delivery/unsubscribe/{token}` remains unchallenged and idempotent;
   the token is redacted from exported paths.
-- **Document acceptance:** GET/POST `/api/document-acceptance/{token}/*` remains unchallenged and
-  application-throttled; the path-embedded bearer is redacted from exported paths.
+- **Document acceptance:** GET `/document-acceptance/{token}` and GET/POST
+  `/api/document-acceptance/{token}/*` remain unchallenged; API requests are application-throttled,
+  and the path-embedded bearer is redacted from exported paths.
 - **File upload/download:** the 27 MiB multipart envelope preserves the 25 MiB stored-object limit,
   imports retain 64 MiB, and Business-plan upload capacity exceeds both. Downloads are not body
   capped and authenticated responses are not cached.

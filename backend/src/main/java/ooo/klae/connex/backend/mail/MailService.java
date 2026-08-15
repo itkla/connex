@@ -53,6 +53,12 @@ public class MailService {
         deliverQuietly(config, message, "workspace " + workspaceId);
     }
 
+    /** Returns whether the workspace currently resolves to a usable SMTP transport. */
+    public boolean hasUsableWorkspaceTransport(int workspaceId) {
+        ResolvedMailConfig config = resolver.resolveForWorkspace(workspaceId);
+        return config != null && config.usable();
+    }
+
     /**
      * Delivers synchronously, throwing on failure. Used by the test-email action so
      * the admin sees the real transport error.

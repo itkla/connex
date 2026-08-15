@@ -55,7 +55,7 @@ public class InAppAcceptanceProvider implements DocumentSignatureProvider {
             String token = "w" + command.workspaceId() + "-" + HexFormat.of().formatHex(secret);
             String acceptanceUrl = UriComponentsBuilder
                 .fromUriString(mailProperties.getAppBaseUrl())
-                .path("/api/document-acceptance/{token}")
+                .path("/document-acceptance/{token}")
                 .encode()
                 .buildAndExpand(token)
                 .toUriString();

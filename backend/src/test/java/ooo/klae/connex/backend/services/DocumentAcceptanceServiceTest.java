@@ -14,8 +14,10 @@ import java.util.HexFormat;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
+import jakarta.validation.Validator;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.AcceptDocumentRequest;
 import ooo.klae.connex.backend.dto.DeclineDocumentRequest;
@@ -23,9 +25,9 @@ import ooo.klae.connex.backend.dto.DocumentAcceptanceDecisionDto;
 import ooo.klae.connex.backend.dto.DocumentAcceptancePreviewDto;
 import ooo.klae.connex.backend.dto.DocumentDeliveryDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
-import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 
 class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest {
+    @Autowired Validator validator;
 
     @Test
     void previewReturnsFrozenContentAndRecordsNothing() {
@@ -183,6 +185,12 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
     }
 
     @Test
+    void declineReasonValidationMatchesThePersistedTerminationWidth() {
+        assertTrue(validator.validate(new DeclineDocumentRequest("a".repeat(500))).isEmpty());
+        assertFalse(validator.validate(new DeclineDocumentRequest("a".repeat(501))).isEmpty());
+    }
+
+    @Test
     void repeatedDecisionIsIdempotentAcrossEvidenceActivityAndNotification() {
         DocumentFixture fixture = finalDocument();
         DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
@@ -261,21 +269,6 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
             assertFalse(method.isAnnotationPresent(Transactional.class), method.getName());
         }
         assertFalse(DocumentAcceptanceService.class.isAnnotationPresent(Transactional.class));
-    }
-
-    @Test
-    void unknownWorkspacePrefixesConsumeTheSourceRateLimit() {
-        int previousLimit = signatureProperties.getMaxRequestsPerSource();
-        signatureProperties.setMaxRequestsPerSource(1);
-        String source = "unknown-workspace-source-" + unique();
-        try {
-            assertThrows(ResourceNotFoundException.class, () -> acceptanceService.preview(
-                "w2147483646-" + "b".repeat(64), source));
-            assertThrows(TooManyRequestsException.class, () -> acceptanceService.preview(
-                "w2147483645-" + "c".repeat(64), source));
-        } finally {
-            signatureProperties.setMaxRequestsPerSource(previousLimit);
-        }
     }
 
     private String unavailableMessage(String token) {
