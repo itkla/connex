@@ -74,6 +74,47 @@ class ApprovalPolicyChangeClassifierTest {
         assertEquals(PolicyChangeClass.NONE, classifier.classify(current, reordered));
     }
 
+    @Test
+    void dueIntervalChangeIsRetarget() {
+        ApprovalPolicy current = policy(deadline(anyStep(31, "Manager"), 24, "expire"));
+        ApprovalPolicy requested = policy(deadline(anyStep(31, "Manager"), 48, "expire"));
+
+        assertEquals(PolicyChangeClass.RETARGET, classifier.classify(current, requested));
+    }
+
+    @Test
+    void onExpiryChangeIsRetarget() {
+        ApprovalPolicy current = policy(deadline(anyStep(31, "Manager"), 24, "expire"));
+        ApprovalPolicy requested = policy(deadline(anyStep(31, "Manager"), 24, "escalate"));
+
+        assertEquals(PolicyChangeClass.RETARGET, classifier.classify(current, requested));
+    }
+
+    @Test
+    void dueConfigChangeDoesNotOverrideTighten() {
+        ApprovalPolicy current = policy(deadline(namedStep(31, "Manager", 7), 24, "expire"));
+        ApprovalPolicyStep tightened = deadline(namedStep(31, "Manager", 8), 48, "escalate");
+        ApprovalPolicy requested = policy(tightened);
+
+        assertEquals(PolicyChangeClass.TIGHTEN, classifier.classify(current, requested));
+    }
+
+    @Test
+    void dueConfigChangeDoesNotOverrideLoosen() {
+        ApprovalPolicy current = policy(deadline(namedStep(31, "Manager", 7), 24, "expire"));
+        ApprovalPolicyStep loosened = deadline(namedStep(31, "Manager", 7, 8), 48, "escalate");
+        ApprovalPolicy requested = policy(loosened);
+
+        assertEquals(PolicyChangeClass.LOOSEN, classifier.classify(current, requested));
+    }
+
+    private ApprovalPolicyStep deadline(ApprovalPolicyStep step, Integer dueIntervalHours,
+            String onExpiry) {
+        step.setDueIntervalHours(dueIntervalHours);
+        step.setOnExpiry(onExpiry);
+        return step;
+    }
+
     private ApprovalPolicy policy(ApprovalPolicyStep... steps) {
         return policy("sequential", steps);
     }

@@ -236,6 +236,8 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
         copy.setStepOrder(source.getStepOrder());
         copy.setName(source.getName());
         copy.setRequiredCount(source.getRequiredCount());
+        copy.setDueIntervalHours(source.getDueIntervalHours());
+        copy.setOnExpiry(source.getOnExpiry());
         copy.setApprovers(source.getApprovers().stream().map(this::copyApprover).toList());
         return copy;
     }
@@ -686,6 +688,116 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
 
         assertEquals("Former member", impact.affected().getFirst().requestedByName());
         assertTrue(impact.affected().getFirst().requestedByFormerMember());
+    }
+
+    @Test
+    void aStepMayDeclareADueIntervalAndExpiryBehaviour() {
+        User approver = admin();
+        ApprovalPolicyStep declared = step(1, "Manager", namedApprover(approver.getId()));
+        declared.setDueIntervalHours(24);
+        declared.setOnExpiry("escalate");
+        ApprovalPolicy saved = policyService.create(chained("sequential", declared));
+
+        assertEquals(24, saved.getSteps().getFirst().getDueIntervalHours());
+        assertEquals("escalate", saved.getSteps().getFirst().getOnExpiry());
+
+        ApprovalPolicy proposed = copyPolicy(saved);
+        proposed.getSteps().getFirst().setDueIntervalHours(48);
+        proposed.getSteps().getFirst().setOnExpiry("expire");
+        ApprovalPolicy updated = policyService.update(saved.getId(), proposed, false, null);
+
+        assertEquals(48, updated.getSteps().getFirst().getDueIntervalHours());
+        assertEquals("expire", updated.getSteps().getFirst().getOnExpiry());
+    }
+
+    @Test
+    void escalateWithoutADueIntervalIsRefused() {
+        User approver = admin();
+        ApprovalPolicyStep declared = step(1, "Manager", namedApprover(approver.getId()));
+        declared.setOnExpiry("escalate");
+
+        assertThrows(BadRequestException.class,
+            () -> policyService.create(chained("sequential", declared)));
+        assertTrue(policyService.getAll().isEmpty());
+    }
+
+    @Test
+    void dueIntervalOutOfRangeIsRefused() {
+        User approver = admin();
+        ApprovalPolicyStep tooShort = step(1, "Manager", namedApprover(approver.getId()));
+        tooShort.setDueIntervalHours(0);
+        ApprovalPolicyStep tooLong = step(1, "Manager", namedApprover(approver.getId()));
+        tooLong.setDueIntervalHours(8761);
+
+        assertThrows(BadRequestException.class,
+            () -> policyService.create(chained("sequential", tooShort)));
+        assertThrows(BadRequestException.class,
+            () -> policyService.create(chained("sequential", tooLong)));
+        assertTrue(policyService.getAll().isEmpty());
+    }
+
+    @Test
+    void aDueIntervalChangeClassifiesAsRetargetAndLeavesPendingApprovalsAlone() {
+        User approver = admin();
+        ApprovalPolicyStep declared = step(1, "Manager", namedApprover(approver.getId()));
+        declared.setDueIntervalHours(24);
+        ApprovalPolicy saved = policyService.create(chained("sequential", declared));
+        PendingApproval pending = pendingUnder(saved);
+        ApprovalPolicy proposed = copyPolicy(saved);
+        proposed.getSteps().getFirst().setDueIntervalHours(72);
+
+        ApprovalPolicyImpactDto impact = policyService.impact(saved.getId(), copyPolicy(proposed));
+        assertEquals("RETARGET", impact.changeClass());
+        assertEquals("frozen_approvals_unchanged", impact.effect());
+
+        policyService.update(saved.getId(), proposed, false, null);
+
+        DocumentApprovalDto reread = approvalService.getForDocument(
+            pending.deal().getId(), pending.document().id()).getFirst();
+        assertEquals("pending", reread.status());
+        assertEquals(24, reread.steps().getFirst().dueIntervalHours());
+        assertNotNull(reread.steps().getFirst().dueAt());
+    }
+
+    @Test
+    void theImpactFingerprintCoversDueIntervalAndExpiryBehaviour() {
+        User approver = admin();
+        ApprovalPolicyStep declared = step(1, "Manager", namedApprover(approver.getId()));
+        declared.setDueIntervalHours(24);
+        ApprovalPolicy saved = policyService.create(chained("sequential", declared));
+        pendingUnder(saved);
+
+        ApprovalPolicy baseline = copyPolicy(saved);
+        ApprovalPolicy differentInterval = copyPolicy(saved);
+        differentInterval.getSteps().getFirst().setDueIntervalHours(48);
+        ApprovalPolicy differentExpiry = copyPolicy(saved);
+        differentExpiry.getSteps().getFirst().setOnExpiry("escalate");
+
+        String baselinePrint = policyService.impact(saved.getId(), baseline).impactFingerprint();
+        String intervalPrint = policyService.impact(
+            saved.getId(), differentInterval).impactFingerprint();
+        String expiryPrint = policyService.impact(
+            saved.getId(), differentExpiry).impactFingerprint();
+
+        assertNotEquals(baselinePrint, intervalPrint);
+        assertNotEquals(baselinePrint, expiryPrint);
+        assertNotEquals(intervalPrint, expiryPrint);
+
+        ApprovalPolicy tightened = copyPolicy(saved);
+        List<ApprovalPolicyStep> steps = new ArrayList<>(tightened.getSteps());
+        steps.add(step(1, "Finance", anyApprover()));
+        tightened.setSteps(steps);
+        String presented = policyService.impact(saved.getId(), copyPolicy(tightened))
+            .impactFingerprint();
+        ApprovalPolicy stalePresentation = copyPolicy(saved);
+        stalePresentation.getSteps().getFirst().setDueIntervalHours(96);
+        List<ApprovalPolicyStep> staleSteps = new ArrayList<>(stalePresentation.getSteps());
+        staleSteps.add(step(1, "Finance", anyApprover()));
+        stalePresentation.setSteps(staleSteps);
+
+        assertNotNull(presented);
+        assertThrows(ApprovalImpactConfirmationRequiredException.class,
+            () -> policyService.update(saved.getId(), stalePresentation, true, presented));
     }
 
     @Test

@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
@@ -18,10 +19,14 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.Test;
+import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.beans.ApprovalPolicy;
 import ooo.klae.connex.backend.beans.ApprovalPolicyStep;
@@ -34,6 +39,7 @@ import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Product;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.ApprovalInboxItemDto;
 import ooo.klae.connex.backend.dto.DealDocumentDto;
 import ooo.klae.connex.backend.dto.DealLineItemRequest;
 import ooo.klae.connex.backend.dto.DocumentApprovalDto;
@@ -54,8 +60,31 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
     @Autowired ProductService productService;
     @Autowired DocumentApprovalMapper approvalMapper;
     @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired SqlSessionTemplate sqlSession;
+    @Autowired PlatformTransactionManager transactionManager;
     @MockitoSpyBean WorkspaceService workspaceService;
     @MockitoSpyBean DealDocumentMapper documentMapper;
+
+    /**
+     * Drops the MyBatis session cache. The suite runs one transaction per test, so a write made with
+     * {@link JdbcTemplate} would otherwise stay invisible to mapper statements already executed with
+     * the same arguments. Production never sees this: each sweep and each request uses its own
+     * session.
+     */
+    private void flushSession() {
+        sqlSession.clearCache();
+    }
+
+    /**
+     * Runs one call on its own savepoint, the way the reconciliation sweep and a real request both
+     * get their own transaction. Without this a post-write guard's rollback would only be recorded
+     * on the suite-wide transaction, leaving its refused write readable.
+     */
+    private void inNestedTransaction(Runnable work) {
+        TransactionTemplate nested = new TransactionTemplate(transactionManager);
+        nested.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
+        nested.executeWithoutResult(status -> work.run());
+    }
 
     private Deal jpyDeal() {
         Pipeline pipeline = newPipeline();
@@ -65,11 +94,15 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
     }
 
     private DocumentTemplate template() {
+        return template("quote");
+    }
+
+    private DocumentTemplate template(String type) {
         DocumentTemplate t = new DocumentTemplate();
-        t.setName("Quote template " + unique());
-        t.setType("quote");
+        t.setName(type + " template " + unique());
+        t.setType(type);
         t.setLocale("en");
-        t.setTitle("Quote for {{company.name}}");
+        t.setTitle("Document for {{company.name}}");
         return templateService.create(t);
     }
 
@@ -133,6 +166,20 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
 
     private DealDocumentDto generate(Deal deal) {
         return documentService.generate(deal.getId(), template().getId());
+    }
+
+    private DealDocumentDto generate(Deal deal, String type) {
+        return documentService.generate(deal.getId(), template(type).getId());
+    }
+
+    private ApprovalPolicy typedChainPolicy(String documentType, ApprovalPolicyStep... steps) {
+        ApprovalPolicy policy = new ApprovalPolicy();
+        policy.setName("Typed policy " + unique());
+        policy.setActive(true);
+        policy.setDocumentType(documentType);
+        policy.setMode("sequential");
+        policy.setSteps(List.of(steps));
+        return policyService.create(policy);
     }
 
     private User approver() {
@@ -948,6 +995,22 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
             foreignWorkspaceId, 0, 200).isEmpty());
         assertEquals(0, approvalMapper.countPendingByPolicyId(
             foreignWorkspaceId, policy.getId()));
+        DocumentApprovalDto pending = approvalService.getForDocument(
+            deal.getId(), document.id()).getFirst();
+        assertTrue(approvalMapper.findActionableSteps(
+            foreignWorkspaceId, currentUser.getId(), 200).isEmpty());
+        assertTrue(approvalMapper.findExpiredActiveSteps(
+            foreignWorkspaceId, pending.id()).isEmpty());
+        assertTrue(approvalMapper.findReminderDueSteps(
+            foreignWorkspaceId, pending.id()).isEmpty());
+        assertTrue(approvalMapper.getAssignmentsByApprovalIds(
+            foreignWorkspaceId, List.of(pending.id())).isEmpty());
+        assertEquals(0, approvalMapper.maxReassignmentRound(
+            foreignWorkspaceId, pending.steps().getFirst().id()));
+        assertEquals(0, approvalMapper.escalateStep(
+            foreignWorkspaceId, pending.steps().getFirst().id()));
+        assertEquals(0, approvalMapper.advanceRemindedRound(
+            foreignWorkspaceId, pending.steps().getFirst().id(), 1, 0));
     }
 
     @Test
@@ -976,6 +1039,843 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         assertEquals(1, decided.steps().size());
         assertEquals("approved", decided.steps().getFirst().status());
         assertEquals("approved", documentService.getOne(deal.getId(), doc.id()).status());
+    }
+
+    private ApprovalPolicyStep deadline(ApprovalPolicyStep step, Integer hours, String onExpiry) {
+        step.setDueIntervalHours(hours);
+        step.setOnExpiry(onExpiry);
+        return step;
+    }
+
+    private DocumentApprovalService.ApproverPool pool() {
+        return approvalService.reconciliationApproverPool(workspace.getId());
+    }
+
+    private void sweep(DocumentApprovalDto approval) {
+        flushSession();
+        approvalService.reconcileApproval(workspace.getId(),
+            approvalMapper.getById(workspace.getId(), approval.id()), pool());
+    }
+
+    private void backdateDue(int stepId, String activatedExpression, String dueExpression) {
+        assertEquals(1, jdbcTemplate.update(
+            "UPDATE document_approval_step SET activated_at = " + activatedExpression
+                + ", due_at = " + dueExpression + " WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), stepId));
+        flushSession();
+    }
+
+    private String stepColumn(int stepId, String column) {
+        return jdbcTemplate.queryForObject(
+            "SELECT CAST(" + column + " AS CHAR) FROM document_approval_step "
+                + "WHERE workspace_id = ? AND id = ?",
+            String.class, workspace.getId(), stepId);
+    }
+
+    private int assignmentCount(int stepId) {
+        return jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM document_approval_step_assignment "
+                + "WHERE workspace_id = ? AND step_id = ?",
+            Integer.class, workspace.getId(), stepId);
+    }
+
+    private int approverSnapshotCount(int stepId) {
+        return jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM document_approval_step_approver "
+                + "WHERE workspace_id = ? AND step_id = ?",
+            Integer.class, workspace.getId(), stepId);
+    }
+
+    private void disableInApp(int userId, String type) {
+        jdbcTemplate.update(
+            "INSERT INTO notification_preference (user_id, type, channel, enabled) "
+                + "VALUES (?, ?, 'in_app', FALSE)", userId, type);
+        flushSession();
+    }
+
+    private List<ApprovalStepApprover> approverList(User... users) {
+        return java.util.Arrays.stream(users).map(this::namedApprover).toList();
+    }
+
+    @Test
+    void stepWithADueIntervalStampsActivatedAndDueWhenItOpens() {
+        User first = approver();
+        User second = approver();
+        chainPolicy("sequential",
+            deadline(step(1, "Manager", first), 4, "expire"),
+            deadline(step(1, "Finance", second), 2, "expire"));
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+
+        DocumentApprovalDto requested = approvalService.requestApproval(deal.getId(), doc.id(), null);
+        assertNotNull(stepOf(requested, 1).activatedAt());
+        assertNotNull(stepOf(requested, 1).dueAt());
+        assertNull(stepOf(requested, 2).activatedAt());
+        assertNull(stepOf(requested, 2).dueAt());
+        assertEquals(4, jdbcTemplate.queryForObject(
+            "SELECT TIMESTAMPDIFF(HOUR, activated_at, due_at) FROM document_approval_step "
+                + "WHERE workspace_id = ? AND id = ?",
+            Integer.class, workspace.getId(), stepOf(requested, 1).id()));
+
+        authenticateAs(first, workspace.getId());
+        DocumentApprovalDto afterFirst = approvalService.decide(
+            deal.getId(), doc.id(), "approved", null, null);
+
+        assertNotNull(stepOf(afterFirst, 2).activatedAt());
+        assertNotNull(stepOf(afterFirst, 2).dueAt());
+        assertEquals(2, jdbcTemplate.queryForObject(
+            "SELECT TIMESTAMPDIFF(HOUR, activated_at, due_at) FROM document_approval_step "
+                + "WHERE workspace_id = ? AND id = ?",
+            Integer.class, workspace.getId(), stepOf(afterFirst, 2).id()));
+    }
+
+    @Test
+    void aStepWithNoDueIntervalNeverGetsADueDate() {
+        User assigned = approver();
+        chainPolicy("sequential", step(1, "Manager", assigned));
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+
+        DocumentApprovalDto requested = approvalService.requestApproval(deal.getId(), doc.id(), null);
+
+        assertNull(stepOf(requested, 1).dueAt());
+        assertNull(stepOf(requested, 1).dueIntervalHours());
+        assertEquals("expire", stepOf(requested, 1).onExpiry());
+        assertTrue(approvalMapper.findExpiredActiveSteps(
+            workspace.getId(), requested.id()).isEmpty());
+        assertTrue(approvalMapper.findReminderDueSteps(
+            workspace.getId(), requested.id()).isEmpty());
+    }
+
+    @Test
+    void anExpiredStepTerminatesTheRequestAndReturnsTheDocumentToDraft() {
+        User first = approver();
+        User second = approver();
+        chainPolicy("sequential",
+            deadline(step(1, "Manager", first), 4, "expire"),
+            step(1, "Finance", second));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        backdateDue(stepOf(requested, 1).id(),
+            "TIMESTAMPADD(HOUR, -8, CURRENT_TIMESTAMP)",
+            "TIMESTAMPADD(HOUR, -4, CURRENT_TIMESTAMP)");
+
+        sweep(requested);
+
+        DocumentApprovalDto terminated = approvalService.getForDocument(
+            deal.getId(), document.id()).getFirst();
+        assertEquals("expired", terminated.status());
+        assertEquals("expired", terminated.outcomeReason());
+        assertNotNull(terminated.outcomeDetail());
+        assertEquals("expired", stepOf(terminated, 1).status());
+        assertEquals("cancelled", stepOf(terminated, 2).status());
+        assertEquals("draft", documentService.getOne(deal.getId(), document.id()).status());
+    }
+
+    @Test
+    void expiryIsIdempotentUnderARepeatedSweep() {
+        User first = approver();
+        chainPolicy("sequential", deadline(step(1, "Manager", first), 4, "expire"));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        backdateDue(stepOf(requested, 1).id(),
+            "TIMESTAMPADD(HOUR, -8, CURRENT_TIMESTAMP)",
+            "TIMESTAMPADD(HOUR, -4, CURRENT_TIMESTAMP)");
+        sweep(requested);
+        String decidedAt = jdbcTemplate.queryForObject(
+            "SELECT CAST(decided_at AS CHAR) FROM document_approval WHERE workspace_id = ? AND id = ?",
+            String.class, workspace.getId(), requested.id());
+
+        sweep(requested);
+
+        assertEquals("expired", approvalMapper.getById(
+            workspace.getId(), requested.id()).getStatus());
+        assertEquals(decidedAt, jdbcTemplate.queryForObject(
+            "SELECT CAST(decided_at AS CHAR) FROM document_approval WHERE workspace_id = ? AND id = ?",
+            String.class, workspace.getId(), requested.id()));
+    }
+
+    @Test
+    void anEscalateStepWidensToTheApproverPoolExactlyOnce() {
+        User assigned = approver();
+        approver();
+        chainPolicy("sequential", deadline(step(1, "Manager", assigned), 4, "escalate"));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+        backdateDue(stepId, "TIMESTAMPADD(HOUR, -8, CURRENT_TIMESTAMP)",
+            "TIMESTAMPADD(HOUR, -4, CURRENT_TIMESTAMP)");
+
+        sweep(requested);
+
+        assertEquals(1, assignmentCount(stepId));
+        assertEquals("escalation", jdbcTemplate.queryForObject(
+            "SELECT assignment_kind FROM document_approval_step_assignment "
+                + "WHERE workspace_id = ? AND step_id = ?",
+            String.class, workspace.getId(), stepId));
+        assertEquals("any_approver", jdbcTemplate.queryForObject(
+            "SELECT approver_kind FROM document_approval_step_assignment "
+                + "WHERE workspace_id = ? AND step_id = ?",
+            String.class, workspace.getId(), stepId));
+        assertNotNull(stepColumn(stepId, "escalated_at"));
+        assertNull(stepColumn(stepId, "due_at"));
+        assertEquals(1, approverSnapshotCount(stepId));
+
+        DocumentApprovalDto widened = approvalService.getForDocument(
+            deal.getId(), document.id()).getFirst();
+        assertEquals("pending", widened.status());
+        assertEquals("active", stepOf(widened, 1).status());
+        assertTrue(stepOf(widened, 1).effectiveAnyApprover());
+
+        sweep(requested);
+
+        assertEquals(1, assignmentCount(stepId));
+        assertEquals("pending", approvalMapper.getById(
+            workspace.getId(), requested.id()).getStatus());
+    }
+
+    @Test
+    void anEscalatedStepIsDecidableByAnyApproverWhoWasNotNamed() {
+        User assigned = approver();
+        User bystander = approver();
+        chainPolicy("sequential", deadline(step(1, "Manager", assigned), 4, "escalate"));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        backdateDue(stepOf(requested, 1).id(),
+            "TIMESTAMPADD(HOUR, -8, CURRENT_TIMESTAMP)",
+            "TIMESTAMPADD(HOUR, -4, CURRENT_TIMESTAMP)");
+        sweep(requested);
+
+        authenticateAs(bystander, workspace.getId());
+        DocumentApprovalDto decided = approvalService.decide(
+            deal.getId(), document.id(), "approved", null, null);
+
+        assertEquals("approved", decided.status());
+    }
+
+    @Test
+    void expiryAndEscalationAreNeverBoth() {
+        User assigned = approver();
+        approver();
+        typedChainPolicy("quote",
+            deadline(step(1, "Escalating", assigned), 4, "escalate"));
+        Deal escalatingDeal = jpyDeal();
+        DealDocumentDto escalatingDocument = generate(escalatingDeal);
+        DocumentApprovalDto escalating = approvalService.requestApproval(
+            escalatingDeal.getId(), escalatingDocument.id(), null);
+        backdateDue(stepOf(escalating, 1).id(),
+            "TIMESTAMPADD(HOUR, -8, CURRENT_TIMESTAMP)",
+            "TIMESTAMPADD(HOUR, -4, CURRENT_TIMESTAMP)");
+
+        sweep(escalating);
+
+        assertEquals("pending", approvalMapper.getById(
+            workspace.getId(), escalating.id()).getStatus());
+        assertEquals("active", stepColumn(stepOf(escalating, 1).id(), "status"));
+
+        typedChainPolicy("contract", deadline(step(1, "Expiring"), 4, "expire"));
+        Deal expiringDeal = jpyDeal();
+        DealDocumentDto expiringDocument = generate(expiringDeal, "contract");
+        DocumentApprovalDto expiring = approvalService.requestApproval(
+            expiringDeal.getId(), expiringDocument.id(), null);
+        int expiringStepId = stepOf(expiring, 1).id();
+        backdateDue(expiringStepId, "TIMESTAMPADD(HOUR, -8, CURRENT_TIMESTAMP)",
+            "TIMESTAMPADD(HOUR, -4, CURRENT_TIMESTAMP)");
+
+        sweep(expiring);
+
+        flushSession();
+        assertEquals("expired", approvalMapper.getById(
+            workspace.getId(), expiring.id()).getStatus());
+        assertEquals(0, assignmentCount(expiringStepId));
+    }
+
+    @Test
+    void remindersFireOncePerRoundAndStopWhenTheDeadlinePasses() {
+        User assigned = approver();
+        chainPolicy("sequential", deadline(step(1, "Manager", assigned), 20, "expire"));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+
+        backdateDue(stepId, "TIMESTAMPADD(HOUR, -10, CURRENT_TIMESTAMP)",
+            "TIMESTAMPADD(HOUR, 10, CURRENT_TIMESTAMP)");
+        sweep(requested);
+        assertEquals("1", stepColumn(stepId, "reminded_round"));
+        assertNotNull(notificationMapper.findByDedupe(workspace.getId(), assigned.getId(),
+            "document.approval_reminder:" + requested.id() + ":" + stepId + ":1:"
+                + assigned.getId()));
+
+        sweep(requested);
+        assertEquals("1", stepColumn(stepId, "reminded_round"));
+
+        backdateDue(stepId, "TIMESTAMPADD(HOUR, -19, CURRENT_TIMESTAMP)",
+            "TIMESTAMPADD(HOUR, 1, CURRENT_TIMESTAMP)");
+        sweep(requested);
+        assertEquals("2", stepColumn(stepId, "reminded_round"));
+        assertNotNull(notificationMapper.findByDedupe(workspace.getId(), assigned.getId(),
+            "document.approval_reminder:" + requested.id() + ":" + stepId + ":2:"
+                + assigned.getId()));
+
+        backdateDue(stepId, "TIMESTAMPADD(HOUR, -21, CURRENT_TIMESTAMP)",
+            "TIMESTAMPADD(HOUR, -1, CURRENT_TIMESTAMP)");
+        assertEquals(3, approvalMapper.findReminderDueSteps(
+            workspace.getId(), requested.id()).getFirst().dueRound());
+
+        sweep(requested);
+
+        assertEquals("expired", approvalMapper.getById(
+            workspace.getId(), requested.id()).getStatus());
+        assertNull(notificationMapper.findByDedupe(workspace.getId(), assigned.getId(),
+            "document.approval_reminder:" + requested.id() + ":" + stepId + ":3:"
+                + assigned.getId()));
+    }
+
+    @Test
+    void remindersReachOnlyApproversOfAnActiveStep() {
+        User first = approver();
+        User second = approver();
+        User later = approver();
+        chainPolicy("sequential",
+            deadline(step(2, "Managers", first, second), 20, "expire"),
+            deadline(step(1, "Finance", later), 20, "expire"));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+        authenticateAs(first, workspace.getId());
+        approvalService.decide(deal.getId(), document.id(), "approved", null, stepId);
+        authenticateAs(currentUser, workspace.getId());
+        User revoked = approver();
+        workspaceMapper.updateMemberRole(workspace.getId(), revoked.getId(), "member");
+        backdateDue(stepId, "TIMESTAMPADD(HOUR, -10, CURRENT_TIMESTAMP)",
+            "TIMESTAMPADD(HOUR, 10, CURRENT_TIMESTAMP)");
+
+        sweep(requested);
+
+        assertNotNull(notificationMapper.findByDedupe(workspace.getId(), second.getId(),
+            "document.approval_reminder:" + requested.id() + ":" + stepId + ":1:"
+                + second.getId()));
+        assertNull(notificationMapper.findByDedupe(workspace.getId(), first.getId(),
+            "document.approval_reminder:" + requested.id() + ":" + stepId + ":1:"
+                + first.getId()));
+        assertNull(notificationMapper.findByDedupe(workspace.getId(), later.getId(),
+            "document.approval_reminder:" + requested.id() + ":" + stepId + ":1:"
+                + later.getId()));
+        assertNull(notificationMapper.findByDedupe(workspace.getId(), revoked.getId(),
+            "document.approval_reminder:" + requested.id() + ":" + stepId + ":1:"
+                + revoked.getId()));
+        assertEquals("0", stepColumn(stepOf(requested, 2).id(), "reminded_round"));
+    }
+
+    @Test
+    void reminderRespectsTheRecipientPreference() {
+        User assigned = approver();
+        chainPolicy("sequential", deadline(step(1, "Manager", assigned), 20, "expire"));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+        disableInApp(assigned.getId(), "document.approval_reminder");
+        backdateDue(stepId, "TIMESTAMPADD(HOUR, -10, CURRENT_TIMESTAMP)",
+            "TIMESTAMPADD(HOUR, 10, CURRENT_TIMESTAMP)");
+
+        sweep(requested);
+
+        assertNull(notificationMapper.findByDedupe(workspace.getId(), assigned.getId(),
+            "document.approval_reminder:" + requested.id() + ":" + stepId + ":1:"
+                + assigned.getId()));
+        assertEquals("1", stepColumn(stepId, "reminded_round"));
+    }
+
+    @Test
+    void delegationLetsTheDelegateDecideAndRefusesTheDelegator() {
+        User bob = approver();
+        User carol = approver();
+        chainPolicy("sequential", step(1, "Manager", bob));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+
+        authenticateAs(bob, workspace.getId());
+        DocumentApprovalDto delegated = approvalService.createDelegation(
+            deal.getId(), document.id(), stepId, carol.getId(), "over to you");
+
+        assertEquals(1, stepOf(delegated, 1).assignments().size());
+        assertEquals("delegation", stepOf(delegated, 1).assignments().getFirst().assignmentKind());
+        assertEquals(carol.getId(), stepOf(delegated, 1).assignments().getFirst().userId());
+        assertEquals(bob.getId(), stepOf(delegated, 1).assignments().getFirst().delegatedByUserId());
+        assertEquals(List.of(carol.getId()), stepOf(delegated, 1).effectiveApproverIds());
+        assertEquals(1, approverSnapshotCount(stepId));
+        assertEquals(bob.getId(), stepOf(delegated, 1).approvers().getFirst().getUserId());
+
+        assertThrows(ForbiddenException.class,
+            () -> approvalService.decide(deal.getId(), document.id(), "approved", null, null));
+
+        authenticateAs(carol, workspace.getId());
+        assertEquals("approved",
+            approvalService.decide(deal.getId(), document.id(), "approved", null, null).status());
+    }
+
+    @Test
+    void delegationToSomeoneSeparationOfDutiesExcludesIsRefused() {
+        User bob = approver();
+        chainPolicy("sequential", step(1, "Manager", bob));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+
+        authenticateAs(bob, workspace.getId());
+        assertThrows(ForbiddenException.class, () -> approvalService.createDelegation(
+            deal.getId(), document.id(), stepId, currentUser.getId(), null));
+        assertEquals(0, assignmentCount(stepId));
+    }
+
+    @Test
+    void delegationToAMemberWithoutDocumentApproveIsRefused() {
+        User bob = approver();
+        User plain = newUser();
+        chainPolicy("sequential", step(1, "Manager", bob));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+
+        authenticateAs(bob, workspace.getId());
+        assertThrows(ForbiddenException.class, () -> approvalService.createDelegation(
+            deal.getId(), document.id(), stepId, plain.getId(), null));
+        assertEquals(0, assignmentCount(stepId));
+    }
+
+    @Test
+    void delegatingTwiceOrToAMemberWhoAlreadyDelegatedIsRefused() {
+        User bob = approver();
+        User erin = approver();
+        User carol = approver();
+        User dave = approver();
+        chainPolicy("sequential", step(1, "Managers", bob, erin));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+
+        authenticateAs(bob, workspace.getId());
+        approvalService.createDelegation(deal.getId(), document.id(), stepId, carol.getId(), null);
+
+        assertThrows(ForbiddenException.class, () -> approvalService.createDelegation(
+            deal.getId(), document.id(), stepId, dave.getId(), null));
+
+        authenticateAs(erin, workspace.getId());
+        assertThrows(BadRequestException.class, () -> approvalService.createDelegation(
+            deal.getId(), document.id(), stepId, bob.getId(), null));
+        assertThrows(BadRequestException.class, () -> approvalService.createDelegation(
+            deal.getId(), document.id(), stepId, erin.getId(), null));
+        assertEquals(1, assignmentCount(stepId));
+    }
+
+    @Test
+    void delegationThatWouldBreakQuorumIsRefused() {
+        User bob = approver();
+        User carol = approver();
+        chainPolicy("sequential", step(2, "Both of us", bob, carol));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+
+        authenticateAs(bob, workspace.getId());
+        assertThrows(BadRequestException.class, () -> inNestedTransaction(
+            () -> approvalService.createDelegation(
+                deal.getId(), document.id(), stepId, carol.getId(), null)));
+
+        flushSession();
+        assertEquals(0, assignmentCount(stepId));
+    }
+
+    @Test
+    void delegationIsInertOnceTheDelegatorIsReassignedAway() {
+        User bob = approver();
+        User carol = approver();
+        User dave = approver();
+        chainPolicy("sequential", step(1, "Manager", bob));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+        authenticateAs(bob, workspace.getId());
+        approvalService.createDelegation(deal.getId(), document.id(), stepId, carol.getId(), null);
+
+        authenticateAs(currentUser, workspace.getId());
+        DocumentApprovalDto reassigned = approvalService.replaceStepApprovers(
+            deal.getId(), document.id(), stepId, approverList(dave), null);
+
+        assertEquals(List.of(dave.getId()), stepOf(reassigned, 1).effectiveApproverIds());
+        authenticateAs(carol, workspace.getId());
+        assertThrows(ForbiddenException.class, () -> approvalService.decide(
+            deal.getId(), document.id(), "approved", null, stepId));
+    }
+
+    @Test
+    void escalationWidensWithoutRewritingTheFrozenSnapshot() {
+        User bob = approver();
+        User carol = approver();
+        chainPolicy("sequential", step(1, "Manager", bob));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+
+        DocumentApprovalDto widened = approvalService.addStepApprovers(
+            deal.getId(), document.id(), stepId, approverList(carol), "need cover");
+
+        assertEquals(1, approverSnapshotCount(stepId));
+        assertEquals(bob.getId(), stepOf(widened, 1).approvers().getFirst().getUserId());
+        assertEquals(List.of(bob.getId(), carol.getId()),
+            stepOf(widened, 1).effectiveApproverIds());
+        assertEquals("escalation", stepOf(widened, 1).assignments().getFirst().assignmentKind());
+        assertEquals(0, stepOf(widened, 1).assignments().getFirst().assignmentRound());
+
+        authenticateAs(carol, workspace.getId());
+        assertEquals("approved",
+            approvalService.decide(deal.getId(), document.id(), "approved", null, null).status());
+    }
+
+    @Test
+    void reassignmentReplacesTheSetAndOpensANewRound() {
+        User bob = approver();
+        User carol = approver();
+        User dave = approver();
+        chainPolicy("sequential", step(1, "Manager", bob));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+
+        approvalService.addStepApprovers(deal.getId(), document.id(), stepId,
+            approverList(dave), null);
+        DocumentApprovalDto firstRound = approvalService.replaceStepApprovers(
+            deal.getId(), document.id(), stepId, approverList(carol), null);
+        assertEquals(List.of(carol.getId()), firstRound.steps().getFirst().effectiveApproverIds());
+
+        DocumentApprovalDto secondRound = approvalService.replaceStepApprovers(
+            deal.getId(), document.id(), stepId, approverList(dave), null);
+
+        assertEquals(List.of(dave.getId()), secondRound.steps().getFirst().effectiveApproverIds());
+        assertEquals(2, jdbcTemplate.queryForObject(
+            "SELECT MAX(assignment_round) FROM document_approval_step_assignment "
+                + "WHERE workspace_id = ? AND step_id = ? AND assignment_kind = 'reassignment'",
+            Integer.class, workspace.getId(), stepId));
+        assertEquals(3, assignmentCount(stepId));
+    }
+
+    @Test
+    void reassignmentPreservesDecisionsAlreadyCollected() {
+        User bob = approver();
+        User carol = approver();
+        User dave = approver();
+        chainPolicy("sequential", step(2, "Two of us", bob, carol));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+        authenticateAs(bob, workspace.getId());
+        approvalService.decide(deal.getId(), document.id(), "approved", null, stepId);
+        authenticateAs(currentUser, workspace.getId());
+
+        DocumentApprovalDto reassigned = approvalService.replaceStepApprovers(
+            deal.getId(), document.id(), stepId, approverList(carol, dave), null);
+
+        assertEquals(1, stepOf(reassigned, 1).approvedCount());
+        assertEquals(1, stepOf(reassigned, 1).decisions().size());
+        assertEquals(List.of(carol.getId(), dave.getId()),
+            stepOf(reassigned, 1).effectiveApproverIds());
+        assertTrue(reassigned.satisfiable());
+
+        authenticateAs(dave, workspace.getId());
+        assertEquals("approved",
+            approvalService.decide(deal.getId(), document.id(), "approved", null, null).status());
+    }
+
+    @Test
+    void reassignmentThatCannotReachQuorumIsRefused() {
+        User bob = approver();
+        User carol = approver();
+        chainPolicy("sequential", step(2, "Two of us", bob, carol));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+
+        assertThrows(BadRequestException.class, () -> inNestedTransaction(
+            () -> approvalService.replaceStepApprovers(
+                deal.getId(), document.id(), stepId, approverList(carol), null)));
+
+        flushSession();
+        assertEquals(0, assignmentCount(stepId));
+    }
+
+    @Test
+    void reassignmentMayRepairAnAlreadyUnsatisfiableStep() {
+        User assigned = approver();
+        User rescuer = approver();
+        chainPolicy("sequential", step(1, "Manager", assigned));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+        workspaceMapper.updateMemberRole(workspace.getId(), assigned.getId(), "member");
+        assertFalse(approvalService.getForDocument(
+            deal.getId(), document.id()).getFirst().satisfiable());
+
+        DocumentApprovalDto repaired = approvalService.replaceStepApprovers(
+            deal.getId(), document.id(), stepId, approverList(rescuer), null);
+
+        assertTrue(repaired.satisfiable());
+        assertEquals(List.of(rescuer.getId()), stepOf(repaired, 1).effectiveApproverIds());
+    }
+
+    @Test
+    void escalationAndReassignmentRequireDocumentManage() {
+        User bob = approver();
+        User carol = approver();
+        chainPolicy("sequential", step(1, "Manager", bob));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+        User approveOnly = newUser();
+        workspaceMapper.updateMemberRole(workspace.getId(), approveOnly.getId(), "member");
+        jdbcTemplate.update(
+            "UPDATE workspace_member SET role = 'member' WHERE workspace_id = ? AND user_id = ?",
+            workspace.getId(), approveOnly.getId());
+        authenticateAs(approveOnly, workspace.getId());
+
+        assertThrows(ForbiddenException.class, () -> approvalService.addStepApprovers(
+            deal.getId(), document.id(), stepId, approverList(carol), null));
+        assertThrows(ForbiddenException.class, () -> approvalService.replaceStepApprovers(
+            deal.getId(), document.id(), stepId, approverList(carol), null));
+        assertEquals(0, assignmentCount(stepId));
+    }
+
+    @Test
+    void inboxListsOnlyStepsTheCallerCanActuallyDecide() {
+        User caller = approver();
+        User other = approver();
+        User bystander = approver();
+        typedChainPolicy("quote", step(1, "Anyone"));
+        typedChainPolicy("contract", step(1, "Other", other));
+
+        Deal openDeal = jpyDeal();
+        DealDocumentDto openDocument = generate(openDeal);
+        DocumentApprovalDto open = approvalService.requestApproval(
+            openDeal.getId(), openDocument.id(), null);
+
+        Deal namedDeal = jpyDeal();
+        DealDocumentDto namedDocument = generate(namedDeal, "contract");
+        DocumentApprovalDto named = approvalService.requestApproval(
+            namedDeal.getId(), namedDocument.id(), null);
+
+        Deal delegatedDeal = jpyDeal();
+        DealDocumentDto delegatedDocument = generate(delegatedDeal, "contract");
+        DocumentApprovalDto delegated = approvalService.requestApproval(
+            delegatedDeal.getId(), delegatedDocument.id(), null);
+        authenticateAs(other, workspace.getId());
+        approvalService.createDelegation(delegatedDeal.getId(), delegatedDocument.id(),
+            delegated.steps().getFirst().id(), caller.getId(), null);
+        authenticateAs(currentUser, workspace.getId());
+
+        Deal reassignedDeal = jpyDeal();
+        DealDocumentDto reassignedDocument = generate(reassignedDeal, "contract");
+        DocumentApprovalDto reassigned = approvalService.requestApproval(
+            reassignedDeal.getId(), reassignedDocument.id(), null);
+        int reassignedStepId = reassigned.steps().getFirst().id();
+        authenticateAs(other, workspace.getId());
+        approvalService.createDelegation(reassignedDeal.getId(), reassignedDocument.id(),
+            reassignedStepId, caller.getId(), null);
+        authenticateAs(currentUser, workspace.getId());
+        approvalService.replaceStepApprovers(reassignedDeal.getId(), reassignedDocument.id(),
+            reassignedStepId, approverList(bystander), null);
+
+        Deal decidedDeal = jpyDeal();
+        DealDocumentDto decidedDocument = generate(decidedDeal);
+        DocumentApprovalDto partly = approvalService.requestApproval(
+            decidedDeal.getId(), decidedDocument.id(), null);
+        jdbcTemplate.update("UPDATE document_approval_step SET required_count = 2 "
+            + "WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), partly.steps().getFirst().id());
+        flushSession();
+        authenticateAs(caller, workspace.getId());
+        approvalService.decide(decidedDeal.getId(), decidedDocument.id(), "approved", null, null);
+
+        Deal requesterDeal = jpyDeal();
+        DealDocumentDto requesterDocument = generate(requesterDeal);
+        DocumentApprovalDto ownRequest = approvalService.requestApproval(
+            requesterDeal.getId(), requesterDocument.id(), null);
+
+        List<Integer> visible = approvalService.inbox().stream()
+            .map(ApprovalInboxItemDto::approvalId).toList();
+
+        assertTrue(visible.contains(open.id()));
+        assertTrue(visible.contains(delegated.id()));
+        assertFalse(visible.contains(named.id()));
+        assertFalse(visible.contains(reassigned.id()));
+        assertEquals("pending",
+            approvalMapper.getById(workspace.getId(), partly.id()).getStatus());
+        assertFalse(visible.contains(partly.id()));
+        assertFalse(visible.contains(ownRequest.id()));
+
+        authenticateAs(other, workspace.getId());
+        assertFalse(approvalService.inbox().stream()
+            .map(ApprovalInboxItemDto::approvalId).toList().contains(delegated.id()));
+    }
+
+    @Test
+    void inboxStoresNothingAndTakesNoLocks() {
+        User caller = approver();
+        chainPolicy("sequential", step(1, "Anyone"));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        approvalService.requestApproval(deal.getId(), document.id(), null);
+        authenticateAs(caller, workspace.getId());
+        List<String> before = approvalDomainSnapshot();
+        clearInvocations(workspaceService, documentMapper);
+
+        assertFalse(approvalService.inbox().isEmpty());
+
+        assertEquals(before, approvalDomainSnapshot());
+        verify(workspaceService, times(0)).lockedPermissionsFor(anyInt(), anyInt());
+        verify(workspaceService, times(0))
+            .lockApprovalReconciliationAuthorizationRoot(anyInt());
+        verify(documentMapper, times(0)).lockById(anyInt(), anyInt());
+    }
+
+    private List<String> approvalDomainSnapshot() {
+        List<String> rows = new java.util.ArrayList<>();
+        rows.addAll(jdbcTemplate.queryForList(
+            "SELECT id, status, outcome_reason FROM document_approval WHERE workspace_id = ? ORDER BY id",
+            workspace.getId()).stream().map(String::valueOf).toList());
+        rows.addAll(jdbcTemplate.queryForList(
+            "SELECT id, status, reminded_round, escalated_at FROM document_approval_step "
+                + "WHERE workspace_id = ? ORDER BY id", workspace.getId())
+            .stream().map(String::valueOf).toList());
+        rows.addAll(jdbcTemplate.queryForList(
+            "SELECT id, assignment_kind, assignment_round FROM document_approval_step_assignment "
+                + "WHERE workspace_id = ? ORDER BY id", workspace.getId())
+            .stream().map(String::valueOf).toList());
+        rows.addAll(jdbcTemplate.queryForList(
+            "SELECT id, decision FROM document_approval_decision WHERE workspace_id = ? ORDER BY id",
+            workspace.getId()).stream().map(String::valueOf).toList());
+        return rows;
+    }
+
+    @Test
+    void expiredOutcomeConstraintAcceptsTheNewVocabularyAndStillRejectsAPendingReason() {
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto approval = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+
+        assertThrows(DataAccessException.class, () -> jdbcTemplate.update(
+            "UPDATE document_approval SET outcome_reason = 'expired' "
+                + "WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), approval.id()));
+
+        assertEquals(1, jdbcTemplate.update(
+            "UPDATE document_approval SET status = 'expired', outcome_reason = 'expired' "
+                + "WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), approval.id()));
+        flushSession();
+        assertEquals("expired",
+            approvalMapper.getById(workspace.getId(), approval.id()).getOutcomeReason());
+    }
+
+    @Test
+    void approvalChainFenceStillRejectsRootApprovalWithAnExpiredStep() {
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto approval = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        assertEquals(1, jdbcTemplate.update(
+            "UPDATE document_approval_step SET status = 'expired', decided_at = CURRENT_TIMESTAMP "
+                + "WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), approval.steps().getFirst().id()));
+
+        DataAccessException refused = assertThrows(DataAccessException.class, () -> jdbcTemplate.update(
+            "UPDATE document_approval SET status = 'approved', outcome_reason = 'quorum', "
+                + "decided_at = CURRENT_TIMESTAMP WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), approval.id()));
+        SQLException cause = assertInstanceOf(SQLException.class, refused.getCause());
+        assertEquals("45000", cause.getSQLState());
+    }
+
+    @Test
+    void escalatedStepCannotCarryADueDate() {
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto approval = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = approval.steps().getFirst().id();
+        assertEquals(1, jdbcTemplate.update(
+            "UPDATE document_approval_step SET escalated_at = CURRENT_TIMESTAMP "
+                + "WHERE workspace_id = ? AND id = ?", workspace.getId(), stepId));
+
+        assertThrows(DataAccessException.class, () -> jdbcTemplate.update(
+            "UPDATE document_approval_step SET due_at = CURRENT_TIMESTAMP "
+                + "WHERE workspace_id = ? AND id = ?", workspace.getId(), stepId));
+    }
+
+    @Test
+    void assignmentDelegationConstraintsFailClosed() {
+        User bob = approver();
+        chainPolicy("sequential", step(1, "Manager", bob));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto approval = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = approval.steps().getFirst().id();
+
+        assertThrows(DataAccessException.class, () -> jdbcTemplate.update(
+            "INSERT INTO document_approval_step_assignment (workspace_id, approval_id, step_id, "
+                + "assignment_kind, assignment_round, approver_kind, user_id, delegated_by_user_id) "
+                + "VALUES (?, ?, ?, 'delegation', 0, 'any_approver', NULL, ?)",
+            workspace.getId(), approval.id(), stepId, bob.getId()));
+        assertThrows(DataAccessException.class, () -> jdbcTemplate.update(
+            "INSERT INTO document_approval_step_assignment (workspace_id, approval_id, step_id, "
+                + "assignment_kind, assignment_round, approver_kind, user_id, delegated_by_user_id) "
+                + "VALUES (?, ?, ?, 'delegation', 1, 'user', ?, ?)",
+            workspace.getId(), approval.id(), stepId, currentUser.getId(), bob.getId()));
+        assertThrows(DataAccessException.class, () -> jdbcTemplate.update(
+            "INSERT INTO document_approval_step_assignment (workspace_id, approval_id, step_id, "
+                + "assignment_kind, assignment_round, approver_kind, user_id, delegated_by_user_id) "
+                + "VALUES (?, ?, ?, 'escalation', 0, 'user', ?, ?)",
+            workspace.getId(), approval.id(), stepId, currentUser.getId(), bob.getId()));
+        assertEquals(0, assignmentCount(stepId));
     }
 
     @Test

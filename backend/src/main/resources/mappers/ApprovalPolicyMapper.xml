@@ -25,6 +25,8 @@
     <result property="stepOrder"     column="step_order"/>
     <result property="name"          column="name"/>
     <result property="requiredCount" column="required_count"/>
+    <result property="dueIntervalHours" column="due_interval_hours"/>
+    <result property="onExpiry"      column="on_expiry"/>
     <result property="createdAt"     column="created_at"/>
     <result property="updatedAt"     column="updated_at"/>
     <collection property="approvers" ofType="ApprovalStepApprover" notNullColumn="approver_id">
@@ -134,7 +136,7 @@
 
   <select id="getStepsByPolicyIds" resultMap="ApprovalPolicyStepResult">
     SELECT s.id, s.workspace_id, s.policy_id, s.step_order, s.name, s.required_count,
-           s.created_at, s.updated_at,
+           s.due_interval_hours, s.on_expiry, s.created_at, s.updated_at,
            a.id AS approver_id, a.workspace_id AS approver_workspace_id, a.step_id AS approver_step_id,
            a.approver_kind, a.user_id AS approver_user_id
     FROM approval_policy_step s
@@ -148,7 +150,7 @@
 
   <select id="getStepsByPolicyIdsForUpdate" resultMap="ApprovalPolicyStepResult">
     SELECT s.id, s.workspace_id, s.policy_id, s.step_order, s.name, s.required_count,
-           s.created_at, s.updated_at,
+           s.due_interval_hours, s.on_expiry, s.created_at, s.updated_at,
            a.id AS approver_id, a.workspace_id AS approver_workspace_id, a.step_id AS approver_step_id,
            a.approver_kind, a.user_id AS approver_user_id
     FROM approval_policy_step s
@@ -164,10 +166,11 @@
   <insert id="insertStep" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO approval_policy_step (
       <if test="id > 0">id,</if>
-      workspace_id, policy_id, step_order, name, required_count
+      workspace_id, policy_id, step_order, name, required_count, due_interval_hours, on_expiry
     ) VALUES (
       <if test="id > 0">#{id},</if>
-      #{workspaceId}, #{policyId}, #{stepOrder}, #{name}, #{requiredCount}
+      #{workspaceId}, #{policyId}, #{stepOrder}, #{name}, #{requiredCount},
+      #{dueIntervalHours,jdbcType=INTEGER}, #{onExpiry,jdbcType=VARCHAR}
     )
   </insert>
 

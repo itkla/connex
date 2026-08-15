@@ -8,7 +8,10 @@ import ooo.klae.connex.backend.beans.ApprovalStepApprover;
 import ooo.klae.connex.backend.beans.DocumentApproval;
 import ooo.klae.connex.backend.beans.DocumentApprovalDecision;
 import ooo.klae.connex.backend.beans.DocumentApprovalStep;
+import ooo.klae.connex.backend.beans.DocumentApprovalStepAssignment;
 import ooo.klae.connex.backend.dto.ApprovalImpactSummaryRow;
+import ooo.klae.connex.backend.dto.ApprovalInboxRow;
+import ooo.klae.connex.backend.dto.ApprovalReminderRow;
 
 /** Mapper for {@code document_approval} and its frozen chain; every statement is workspace-scoped. */
 public interface DocumentApprovalMapper {
@@ -45,4 +48,18 @@ public interface DocumentApprovalMapper {
         @Param("status") String status, @Param("expectedStatus") String expectedStatus);
     int cancelOpenSteps(@Param("workspaceId") int workspaceId, @Param("approvalId") int approvalId);
     int countStepApprovals(@Param("workspaceId") int workspaceId, @Param("stepId") int stepId);
+
+    List<DocumentApprovalStepAssignment> getAssignmentsByApprovalIds(
+        @Param("workspaceId") int workspaceId, @Param("approvalIds") List<Integer> approvalIds);
+    int insertAssignment(DocumentApprovalStepAssignment assignment);
+    int maxReassignmentRound(@Param("workspaceId") int workspaceId, @Param("stepId") int stepId);
+    List<Integer> findExpiredActiveSteps(@Param("workspaceId") int workspaceId,
+        @Param("approvalId") int approvalId);
+    int escalateStep(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    List<ApprovalReminderRow> findReminderDueSteps(@Param("workspaceId") int workspaceId,
+        @Param("approvalId") int approvalId);
+    int advanceRemindedRound(@Param("workspaceId") int workspaceId, @Param("id") int id,
+        @Param("round") int round, @Param("expectedRound") int expectedRound);
+    List<ApprovalInboxRow> findActionableSteps(@Param("workspaceId") int workspaceId,
+        @Param("userId") int userId, @Param("limit") int limit);
 }

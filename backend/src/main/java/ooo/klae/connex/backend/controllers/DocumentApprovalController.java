@@ -5,6 +5,7 @@ import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -12,8 +13,12 @@ import org.springframework.web.bind.annotation.RestController;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
+import ooo.klae.connex.backend.beans.ApprovalStepApprover;
 import ooo.klae.connex.backend.dto.ApprovalDecisionRequest;
+import ooo.klae.connex.backend.dto.ApprovalDelegationRequest;
 import ooo.klae.connex.backend.dto.ApprovalRequestBody;
+import ooo.klae.connex.backend.dto.ApprovalStepApproverChangeRequest;
+import ooo.klae.connex.backend.dto.ApprovalStepApproverDto;
 import ooo.klae.connex.backend.dto.DocumentApprovalDto;
 import ooo.klae.connex.backend.services.DocumentApprovalService;
 
@@ -45,5 +50,31 @@ public class DocumentApprovalController {
     @PostMapping("/cancel")
     public DocumentApprovalDto cancel(@PathVariable int dealId, @PathVariable int documentId) {
         return approvalService.cancel(dealId, documentId);
+    }
+
+    @PostMapping("/steps/{stepId}/delegate")
+    public DocumentApprovalDto delegate(@PathVariable int dealId, @PathVariable int documentId,
+            @PathVariable int stepId, @Valid @RequestBody ApprovalDelegationRequest body) {
+        return approvalService.createDelegation(dealId, documentId, stepId,
+            body.getDelegateUserId(), body.getComment());
+    }
+
+    @PostMapping("/steps/{stepId}/approvers")
+    public DocumentApprovalDto addApprovers(@PathVariable int dealId, @PathVariable int documentId,
+            @PathVariable int stepId, @Valid @RequestBody ApprovalStepApproverChangeRequest body) {
+        return approvalService.addStepApprovers(dealId, documentId, stepId,
+            approversOf(body), body.getComment());
+    }
+
+    @PutMapping("/steps/{stepId}/approvers")
+    public DocumentApprovalDto replaceApprovers(@PathVariable int dealId,
+            @PathVariable int documentId, @PathVariable int stepId,
+            @Valid @RequestBody ApprovalStepApproverChangeRequest body) {
+        return approvalService.replaceStepApprovers(dealId, documentId, stepId,
+            approversOf(body), body.getComment());
+    }
+
+    private List<ApprovalStepApprover> approversOf(ApprovalStepApproverChangeRequest body) {
+        return body.getApprovers().stream().map(ApprovalStepApproverDto::toBean).toList();
     }
 }

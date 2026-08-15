@@ -157,6 +157,7 @@ public final class TablePlaneRegistry {
         "document_approval_decision",
         "document_approval_step",
         "document_approval_step_approver",
+        "document_approval_step_assignment",
         "document_delivery",
         "document_delivery_artifact",
         "document_delivery_event",

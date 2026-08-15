@@ -47,7 +47,13 @@ final class ApprovalPolicyChangeClassifier {
         if (loosen) {
             return PolicyChangeClass.LOOSEN;
         }
-        return retargeted(before, after) ? PolicyChangeClass.RETARGET : PolicyChangeClass.NONE;
+        boolean dueConfigChanged = pairs.stream().anyMatch(pair -> pair.before() != null
+            && pair.after() != null
+            && (!Objects.equals(pair.before().getDueIntervalHours(),
+                    pair.after().getDueIntervalHours())
+                || !Objects.equals(pair.before().getOnExpiry(), pair.after().getOnExpiry())));
+        return retargeted(before, after) || dueConfigChanged
+            ? PolicyChangeClass.RETARGET : PolicyChangeClass.NONE;
     }
 
     private List<StepPair> pairSteps(List<ApprovalPolicyStep> before, List<ApprovalPolicyStep> after) {
