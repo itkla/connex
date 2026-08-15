@@ -170,7 +170,8 @@ public class DocumentDeliveryService {
                 recipient.getEmail(),
                 titleOf(document),
                 delivery.getMessage(),
-                requireText(deliveryLink.url(), "Acceptance URL"));
+                requireText(deliveryLink.url(), "Acceptance URL"),
+                document.getLocale());
         }
         return DocumentDeliveryDto.from(requireHydrated(workspaceId, delivery.getId()));
     }
@@ -270,7 +271,8 @@ public class DocumentDeliveryService {
             recipient.getEmail(),
             titleOf(document),
             delivery.getMessage(),
-            requireText(deliveryLink.url(), "Acceptance URL"));
+            requireText(deliveryLink.url(), "Acceptance URL"),
+            document.getLocale());
         return DocumentDeliveryDto.from(requireHydrated(workspaceId, deliveryId));
     }
 
@@ -604,7 +606,8 @@ public class DocumentDeliveryService {
             String recipientEmail,
             String documentTitle,
             String message,
-            String acceptanceUrl) {
+            String acceptanceUrl,
+            String locale) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
             throw new IllegalStateException("Document-link email requires a transaction synchronization");
         }
@@ -617,7 +620,8 @@ public class DocumentDeliveryService {
                     recipientEmail,
                     documentTitle,
                     message,
-                    acceptanceUrl);
+                    acceptanceUrl,
+                    locale);
             }
         });
     }

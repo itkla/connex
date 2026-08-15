@@ -18,9 +18,13 @@ CREATE TABLE document_delivery (
     completed_at         DATETIME NULL,
     terminated_at        DATETIME NULL,
     termination_reason   VARCHAR(500) NULL,
+    -- VIRTUAL, not STORED: MySQL refuses a foreign key with ON DELETE CASCADE on a column that a
+    -- STORED generated column reads (errno 1215), and document_id is both an FK column and this
+    -- column's input. A VIRTUAL column still takes a unique secondary index in InnoDB, which is all
+    -- the partial-uniqueness trick needs, and it keeps the cascade that tenant teardown relies on.
     active_key           INT GENERATED ALWAYS AS (
         CASE WHEN status IN ('sent', 'viewed') THEN document_id ELSE NULL END
-    ) STORED COMMENT 'Non-NULL only while the envelope is live, enabling partial uniqueness',
+    ) VIRTUAL COMMENT 'Non-NULL only while the envelope is live, enabling partial uniqueness',
     created_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_document_delivery_deal FOREIGN KEY (workspace_id, deal_id)

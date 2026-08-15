@@ -18,6 +18,8 @@ public class SmtpDocumentSignatureEmailService implements DocumentSignatureEmail
     private final MailService mailService;
     private final EmailTemplateRenderer templateRenderer;
 
+    private static final String JAPANESE = "ja";
+
     @Override
     public void send(
             int workspaceId,
@@ -25,8 +27,10 @@ public class SmtpDocumentSignatureEmailService implements DocumentSignatureEmail
             String recipientEmail,
             String documentTitle,
             String message,
-            String acceptanceUrl) {
-        String body = templateRenderer.render("document-signature", "en", Map.of(
+            String acceptanceUrl,
+            String locale) {
+        String language = JAPANESE.equalsIgnoreCase(locale) ? JAPANESE : "en";
+        String body = templateRenderer.render("document-signature", language, Map.of(
             "recipientName", recipientName,
             "documentTitle", documentTitle,
             "message", message == null ? "" : message,
@@ -35,7 +39,13 @@ public class SmtpDocumentSignatureEmailService implements DocumentSignatureEmail
             workspaceId,
             MailMessage.html(
                 recipientEmail,
-                "Review and accept " + documentTitle,
+                subjectFor(language, documentTitle),
                 body));
+    }
+
+    private String subjectFor(String language, String documentTitle) {
+        return JAPANESE.equals(language)
+            ? documentTitle + " のご確認とご承諾のお願い"
+            : "Review and accept " + documentTitle;
     }
 }

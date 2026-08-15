@@ -25,7 +25,8 @@ public class LoggingDocumentSignatureEmailService implements DocumentSignatureEm
             String recipientEmail,
             String documentTitle,
             String message,
-            String acceptanceUrl) {
+            String acceptanceUrl,
+            String locale) {
         log.warn("Document-signature email requested but signature delivery is disabled");
     }
 }

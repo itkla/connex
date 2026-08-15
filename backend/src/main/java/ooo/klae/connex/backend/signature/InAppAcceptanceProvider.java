@@ -9,6 +9,7 @@ import java.util.HexFormat;
 import java.util.Map;
 import java.util.Optional;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.util.UriComponentsBuilder;
 
@@ -22,6 +23,12 @@ public class InAppAcceptanceProvider implements DocumentSignatureProvider {
     private final MailProperties mailProperties;
     private final SecureRandom secureRandom;
 
+    /**
+     * The marker is required because the class declares two constructors: Spring only auto-selects
+     * one when a class declares exactly one, and otherwise looks for a no-arg constructor that does
+     * not exist here. The second constructor is the deterministic-randomness seam for tests.
+     */
+    @Autowired
     public InAppAcceptanceProvider(MailProperties mailProperties) {
         this(mailProperties, new SecureRandom());
     }
