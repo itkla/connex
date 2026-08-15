@@ -325,7 +325,16 @@ public class DocumentDeliveryService {
         return DocumentDeliveryDto.from(requireHydrated(workspaceId, deliveryId));
     }
 
-    /** Opens one authenticated, workspace-scoped immutable artifact. */
+    /**
+     * Opens one authenticated, workspace-scoped immutable artifact.
+     *
+     * <p>Deliberately writes nothing. A browser download has to be a {@code GET}, and a {@code GET}
+     * that mutates is reachable by cross-site request forgery: an attacker could make a member's
+     * browser emit this request and forge an audit entry for a download that never happened, on the
+     * one trail where attribution is the whole point. The other managed-object readers
+     * ({@code AttachmentService}, {@code ManagedObjectService}) record nothing here either, and the
+     * meaningful lifecycle facts already live in {@code document_delivery_event}.
+     */
     @RequirePermission(Permission.DOCUMENT_SEND)
     public ManagedContent downloadArtifact(
             int dealId, int documentId, int deliveryId, int artifactId) {
@@ -339,13 +348,6 @@ public class DocumentDeliveryService {
         if (artifact == null) {
             throw new ResourceNotFoundException("Document-delivery artifact was not found");
         }
-        auditService.record(
-            "document_delivery.artifact_download",
-            "deal",
-            dealId,
-            null,
-            "Downloaded a document-delivery artifact",
-            Map.of("deliveryId", deliveryId, "artifactId", artifactId, "kind", artifact.getKind()));
         return managedObjectService.openDocumentArtifact(
             workspaceId,
             deliveryId,
