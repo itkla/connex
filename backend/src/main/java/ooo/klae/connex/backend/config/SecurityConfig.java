@@ -59,7 +59,6 @@ import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.WorkspaceService;
-import ooo.klae.connex.backend.signature.DocumentAcceptanceRateLimiter;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 import ooo.klae.connex.backend.tenant.WorkspaceRequestResolver;
 import ooo.klae.connex.backend.util.ClientIpResolver;
@@ -292,17 +291,6 @@ public class SecurityConfig {
             );
         }
         return http.build();
-    }
-
-    @Bean
-    FilterRegistrationBean<DocumentAcceptanceAdmissionFilter> documentAcceptanceAdmissionFilterRegistration(
-            DocumentAcceptanceRateLimiter rateLimiter,
-            ClientIpResolver clientIpResolver) {
-        FilterRegistrationBean<DocumentAcceptanceAdmissionFilter> registration =
-            new FilterRegistrationBean<>(
-                new DocumentAcceptanceAdmissionFilter(rateLimiter, clientIpResolver));
-        registration.setOrder(OrderedFormContentFilter.DEFAULT_ORDER - 3);
-        return registration;
     }
 
     @Bean
