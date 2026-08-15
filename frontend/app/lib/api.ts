@@ -1472,6 +1472,7 @@ export const DEFAULT_CAPABILITIES: Types.InstanceCapabilities = {
     sso: false,
     socialLogin: { google: false, microsoft: false },
     connectedAccounts: { google: false, microsoft: false },
+    connectedAccountModes: { google: "custom", microsoft: "custom" },
     connectedCapture: { google: false, microsoft: false },
     mailManaged: false,
     businessCardScanning: false,
@@ -1504,6 +1505,38 @@ export function resumeProviderConnection(provider: Types.ConnectedAccountProvide
 
 export function disconnectProviderConnection(provider: Types.ConnectedAccountProvider, init: RequestInit = {}) {
     return deleteJson<void[]>(`/api/account/connections/${provider}`, init);
+}
+
+/**
+ * Issues a pairing handle for the Connex-managed connect flow. The authorization itself runs in a
+ * helper process on the user's own machine, so the browser only ever holds the pairing code.
+ * @param provider the provider being connected
+ * @returns the pairing code, its expiry, this instance's base URL, and the helper command to run
+ */
+export function beginManagedPairing(provider: Types.ConnectedAccountProvider) {
+    return postJson<Types.ManagedPairingSession>(
+        `/api/account/connections/native/${provider}/pairing`,
+        {},
+    );
+}
+
+/** Reads the server-side progress of the caller's own managed pairing for one provider. */
+export function getManagedPairingStatus(
+    provider: Types.ConnectedAccountProvider,
+    init: RequestInit = {},
+) {
+    return getJson<Types.ManagedPairingStatus>(
+        `/api/account/connections/native/${provider}/pairing`,
+        { cache: "no-store", ...init },
+    );
+}
+
+/** Cancels the caller's pending managed pairing so a stale code cannot later be claimed. */
+export function cancelManagedPairing(
+    provider: Types.ConnectedAccountProvider,
+    init: RequestInit = {},
+) {
+    return deleteJson<void>(`/api/account/connections/native/${provider}/pairing`, init);
 }
 
 export function getCaptureOverview(init: RequestInit = {}) {
