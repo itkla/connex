@@ -156,8 +156,9 @@ any ────────────► (null)   -- withdraw from the lifecy
 Rules the implementation enforces:
 
 - A transition into `DISQUALIFIED` requires a reason from the workspace's configured vocabulary.
-- `CONVERTED` is reachable only from `QUALIFIED`, and is set by the conversion action rather than by a manual
-  stage edit, so the stage cannot claim a deal that does not exist.
+- `CONVERTED` is reachable only from `QUALIFIED`, and requires a deal already linked to the contact, so the
+  stage can never claim a deal that does not exist. The conversion action of increment 5 automates that pairing;
+  until it lands, a user who has created the deal by hand can still record the outcome truthfully.
 - Re-selecting the current stage is a no-op, not a history row.
 - Withdrawing to *(null)* is always allowed and is recorded like any other transition.
 
