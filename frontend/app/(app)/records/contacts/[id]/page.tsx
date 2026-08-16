@@ -1,4 +1,4 @@
-import { getAttachmentsFromCookie, getContactById, getContactLifecycle, getContactConnections, getContactEmployment, getContactEvidence, getContactIntroPath, getContextNotifications, getCurrentUserResultFromCookie, getEffectivePermissionsFromCookie, getEntityCustomFieldsFromCookie, getTags, getUserReferences } from "@/app/lib/api";
+import { getAttachmentsFromCookie, getContactById, getContactLifecycle, getContactLifecycleHistory, getContactConnections, getContactEmployment, getContactEvidence, getContactIntroPath, getContextNotifications, getCurrentUserResultFromCookie, getEffectivePermissionsFromCookie, getEntityCustomFieldsFromCookie, getTags, getUserReferences } from "@/app/lib/api";
 import { notFound, redirect } from "next/navigation";
 import AccessDeniedPage from "@/app/components/AccessDeniedPage";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
@@ -56,7 +56,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
         redirect('/auth/login');
     }
 
-    const [t, locale, contactAccess, allTags, attachments, notificationPage, employment, connections, introPath, customFields, evidence, effectivePermissions, lifecycle] = await Promise.all([
+    const [t, locale, contactAccess, allTags, attachments, notificationPage, employment, connections, introPath, customFields, evidence, effectivePermissions, lifecycle, lifecycleHistory] = await Promise.all([
         getTranslations("ContactsPage"),
         getLocale(),
         loadRecord<Contact>(() => getContactById(id, init)),
@@ -75,6 +75,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
         getContactEvidence(id, init).catch(() => null),
         getEffectivePermissionsFromCookie(cookie),
         getContactLifecycle(id, init).catch(() => null),
+        getContactLifecycleHistory(id, init).catch(() => []),
     ]);
     if (contactAccess.kind === "forbidden") {
         return <AccessDeniedPage />;
@@ -412,6 +413,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                 users={interactionUsers}
                                 persons={[contact]}
                                 deals={deals}
+                                lifecycleHistory={ownsContact ? lifecycleHistory : []}
                                 currentUserId={currentUser.id}
                                 companyId={contact.companyId ?? contact.company?.id ?? null}
                             />

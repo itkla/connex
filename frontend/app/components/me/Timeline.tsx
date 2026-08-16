@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { getTranslations } from "next-intl/server";
 
 import { getMyWorkspacesFromCookie } from "@/app/lib/api";
-import { type Activity, type Contact, type Deal, type Note, type Task, type UserReference } from "@/app/lib/types";
+import { type Activity, type Contact, type ContactLifecycleHistoryEntry, type Deal, type Note, type Task, type UserReference } from "@/app/lib/types";
 import { timeOf } from "@/app/lib/utils";
 import TimelineRow, { type TimelineEntry } from "./TimelineRow";
 
@@ -10,6 +10,7 @@ function buildTimeline(
     tasks: Task[],
     activities: Activity[],
     notes: Note[],
+    lifecycleHistory: ContactLifecycleHistoryEntry[],
 ): TimelineEntry[] {
     const entries: TimelineEntry[] = [
         ...tasks.map<TimelineEntry>((task) => ({
@@ -27,6 +28,11 @@ function buildTimeline(
             sortAt: timeOf(note.updatedAt) || timeOf(note.createdAt),
             note,
         })),
+        ...lifecycleHistory.map<TimelineEntry>((lifecycle) => ({
+            kind: "lifecycle",
+            sortAt: timeOf(lifecycle.changedAt),
+            lifecycle,
+        })),
     ];
     return entries.sort((a, b) => b.sortAt - a.sortAt);
 }
@@ -34,6 +40,7 @@ function buildTimeline(
 function entryAuthorId(entry: TimelineEntry): number | undefined {
     if (entry.kind === "task") return entry.task.assignedToId;
     if (entry.kind === "activity") return entry.activity.createdById;
+    if (entry.kind === "lifecycle") return entry.lifecycle.changedById ?? undefined;
     return entry.note.author;
 }
 
@@ -44,6 +51,7 @@ export default async function Timeline({
     users = [],
     persons = [],
     deals = [],
+    lifecycleHistory = [],
     currentUserId,
     companyId,
     limit,
@@ -54,6 +62,7 @@ export default async function Timeline({
     users?: UserReference[];
     persons?: Contact[];
     deals?: Deal[];
+    lifecycleHistory?: ContactLifecycleHistoryEntry[];
     currentUserId?: number;
     companyId?: number | null;
     limit?: number;
@@ -63,7 +72,7 @@ export default async function Timeline({
         getTranslations("MeTimeline"),
         getMyWorkspacesFromCookie(cookie),
     ]);
-    const entries = buildTimeline(tasks, activities, notes);
+    const entries = buildTimeline(tasks, activities, notes, lifecycleHistory);
     const visible = limit ? entries.slice(0, limit) : entries;
 
     if (visible.length === 0) {
@@ -88,7 +97,9 @@ export default async function Timeline({
                                 ? entry.task.id
                                 : entry.kind === "activity"
                                     ? entry.activity.id
-                                    : entry.note.id
+                                    : entry.kind === "lifecycle"
+                                        ? entry.lifecycle.id
+                                        : entry.note.id
                         }`}
                         entry={entry}
                         author={author}

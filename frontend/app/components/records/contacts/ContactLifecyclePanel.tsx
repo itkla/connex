@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useFormatter, useTranslations } from 'next-intl';
 
@@ -24,17 +24,12 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import {
-    getContactLifecycleHistory,
-    updateContactLifecycle,
-    withdrawContactLifecycle,
-} from '@/app/lib/api';
+import { updateContactLifecycle, withdrawContactLifecycle } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { DISQUALIFICATION_REASONS } from '@/app/lib/contactLifecycle';
 import type {
     ContactDisqualificationReason,
     ContactLifecycle,
-    ContactLifecycleHistoryEntry,
     ContactLifecycleStage,
 } from '@/app/lib/types';
 import { cn } from '@/lib/utils';
@@ -48,13 +43,14 @@ type Props = {
 const WITHDRAW_VALUE = '__withdraw__';
 
 /**
- * The contact's lead-lifecycle state, its stage control, and its append-only timeline (issue #559).
+ * The contact's current lead-lifecycle state and its stage control (issue #559).
  *
  * <p>Connex keeps the lifecycle on the contact rather than in a separate lead record, so this panel
  * sits beside the profile in the record rail. A contact with no stage is not at the start of a
  * pipeline — it is deliberately outside one — and the empty state says so rather than implying the
  * record is incomplete. The server owns the transition rules; this component only offers the moves
- * it was told are legal.
+ * it was told are legal. Past transitions appear in the record's main timeline, not here, so the
+ * lifecycle reads as part of the contact's one history rather than a parallel log.
  */
 export default function ContactLifecyclePanel({ contactId, lifecycle, className }: Props) {
     const t = useTranslations('ContactLifecycle');
@@ -70,21 +66,6 @@ export default function ContactLifecyclePanel({ contactId, lifecycle, className 
     const [stage, setStage] = useState<string>('');
     const [reason, setReason] = useState<ContactDisqualificationReason | ''>('');
     const [note, setNote] = useState('');
-    const [history, setHistory] = useState<ContactLifecycleHistoryEntry[]>([]);
-    const [historyLoaded, setHistoryLoaded] = useState(false);
-
-    const loadHistory = useCallback(() => {
-        getContactLifecycleHistory(contactId)
-            .then((entries) => {
-                setHistory(entries);
-                setHistoryLoaded(true);
-            })
-            .catch(() => setHistoryLoaded(true));
-    }, [contactId]);
-
-    useEffect(() => {
-        loadHistory();
-    }, [loadHistory]);
 
     const stageOptions = useMemo(
         () => lifecycle.allowedTransitions.map((value) => ({
@@ -123,7 +104,6 @@ export default function ContactLifecyclePanel({ contactId, lifecycle, className 
             }
             toastSuccess(t('toastSaved'));
             setOpen(false);
-            loadHistory();
             router.refresh();
         } catch (err) {
             toastError(err instanceof Error ? err.message : t('toastFailed'));
@@ -173,34 +153,6 @@ export default function ContactLifecyclePanel({ contactId, lifecycle, className 
                     </p>
                 ) : null}
 
-                {historyLoaded && history.length > 0 ? (
-                    <ol className="divide-y divide-border border-t border-border">
-                        {history.map((entry) => (
-                            <li key={entry.id} className="px-6 py-3 xl:px-4">
-                                <p className="text-xs font-medium text-foreground">
-                                    {t('transition', {
-                                        from: stageLabel(entry.fromStage ?? null, t),
-                                        to: stageLabel(entry.toStage ?? null, t),
-                                    })}
-                                </p>
-                                <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">
-                                    {format.dateTime(new Date(entry.changedAt), {
-                                        dateStyle: 'medium',
-                                        timeStyle: 'short',
-                                    })}
-                                </p>
-                                {entry.reason != null ? (
-                                    <p className="mt-0.5 text-xs text-muted-foreground">
-                                        {t(`reason.${entry.reason}`)}
-                                    </p>
-                                ) : null}
-                                {entry.note ? (
-                                    <p className="mt-1 text-xs text-muted-foreground">{entry.note}</p>
-                                ) : null}
-                            </li>
-                        ))}
-                    </ol>
-                ) : null}
             </div>
 
             <ResponsiveDialog open={open} onOpenChange={openDialog}>
