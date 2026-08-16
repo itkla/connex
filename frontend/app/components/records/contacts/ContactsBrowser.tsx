@@ -242,17 +242,18 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         const lifecycleCounts = new Map(
             (personFacets.lifecycleStages ?? []).map((facet) => [facet.key, facet.count]),
         );
+        const selectedLifecycle = new Set(filterState.lifecycle ?? []);
         const lifecycleOptions = LIFECYCLE_STAGES
-            .filter((stage) => (lifecycleCounts.get(stage) ?? 0) > 0)
+            .filter((stage) => (lifecycleCounts.get(stage) ?? 0) > 0 || selectedLifecycle.has(stage))
             .map((stage) => ({ key: stage as string, label: tl(`stage.${stage}`) }));
-        if ((lifecycleCounts.get(LIFECYCLE_NONE_KEY) ?? 0) > 0) {
+        if ((lifecycleCounts.get(LIFECYCLE_NONE_KEY) ?? 0) > 0 || selectedLifecycle.has(FILTER_EMPTY)) {
             lifecycleOptions.push({ key: FILTER_EMPTY, label: tl('stage.none') });
         }
         if (lifecycleOptions.length) {
             out.push({ key: 'lifecycle', label: tl('title'), options: lifecycleOptions });
         }
         return out;
-    }, [personFacets, t, tl]);
+    }, [personFacets, filterState.lifecycle, t, tl]);
 
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
     useEffect(() => { getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([])); }, []);

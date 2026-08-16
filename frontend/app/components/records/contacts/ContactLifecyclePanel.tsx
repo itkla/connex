@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useFormatter, useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import { Button } from '@/components/ui/button';
@@ -26,6 +26,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { updateContactLifecycle, withdrawContactLifecycle } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
+import { formatDateTime } from '@/app/lib/utils';
 import { DISQUALIFICATION_REASONS } from '@/app/lib/contactLifecycle';
 import type {
     ContactDisqualificationReason,
@@ -37,6 +38,10 @@ import { cn } from '@/lib/utils';
 type Props = {
     contactId: number;
     lifecycle: ContactLifecycle;
+    /** Whether the viewer may move the contact; without it the panel is read-only. */
+    canEdit: boolean;
+    /** Whether a deal is linked to the contact, the prerequisite for marking it converted. */
+    hasLinkedDeal: boolean;
     className?: string;
 };
 
@@ -52,9 +57,15 @@ const WITHDRAW_VALUE = '__withdraw__';
  * it was told are legal. Past transitions appear in the record's main timeline, not here, so the
  * lifecycle reads as part of the contact's one history rather than a parallel log.
  */
-export default function ContactLifecyclePanel({ contactId, lifecycle, className }: Props) {
+export default function ContactLifecyclePanel({
+    contactId,
+    lifecycle,
+    canEdit,
+    hasLinkedDeal,
+    className,
+}: Props) {
     const t = useTranslations('ContactLifecycle');
-    const format = useFormatter();
+    const locale = useLocale();
     const router = useRouter();
     const currentStage = lifecycle.stage ?? null;
     const currentReason = lifecycle.disqualifiedReason ?? null;
@@ -67,23 +78,29 @@ export default function ContactLifecyclePanel({ contactId, lifecycle, className 
     const [reason, setReason] = useState<ContactDisqualificationReason | ''>('');
     const [note, setNote] = useState('');
 
-    const stageOptions = useMemo(
-        () => lifecycle.allowedTransitions.map((value) => ({
-            value: value as string,
-            label: t(`stage.${value}`),
-        })),
-        [lifecycle.allowedTransitions, t],
-    );
+    const stageOptions = useMemo(() => {
+        const moves = lifecycle.allowedTransitions
+            .filter((value) => value !== 'CONVERTED' || hasLinkedDeal)
+            .map((value) => ({ value: value as string, label: t(`stage.${value}`) }));
+        if (currentStage !== null) {
+            moves.unshift({
+                value: currentStage as string,
+                label: t('stayOption', { stage: t(`stage.${currentStage}`) }),
+            });
+        }
+        return moves;
+    }, [lifecycle.allowedTransitions, currentStage, hasLinkedDeal, t]);
 
     const disqualifying = stage === 'DISQUALIFIED';
     const withdrawing = stage === WITHDRAW_VALUE;
-    const submittable = stage !== '' && (!disqualifying || reason !== '');
+    const submittable = stage !== ''
+        && (!disqualifying || (reason !== '' && (reason !== 'OTHER' || note.trim() !== '')));
 
     const openDialog = (next: boolean) => {
         if (!next && saving) return;
         if (next) {
             setStage('');
-            setReason('');
+            setReason(currentStage === 'DISQUALIFIED' ? (currentReason ?? '') : '');
             setNote(currentNotes ?? '');
         }
         setOpen(next);
@@ -123,12 +140,7 @@ export default function ContactLifecyclePanel({ contactId, lifecycle, className 
                             {currentStage === null
                                 ? t('notInLifecycle')
                                 : currentChangedAt
-                                    ? t('changedAt', {
-                                        when: format.dateTime(new Date(currentChangedAt), {
-                                            dateStyle: 'medium',
-                                            timeStyle: 'short',
-                                        }),
-                                    })
+                                    ? t('changedAt', { when: formatDateTime(currentChangedAt, locale) })
                                     : ''}
                         </p>
                         {currentReason ? (
@@ -137,14 +149,16 @@ export default function ContactLifecyclePanel({ contactId, lifecycle, className 
                             </p>
                         ) : null}
                     </div>
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        className="shrink-0"
-                        onClick={() => openDialog(true)}
-                    >
-                        {currentStage === null ? t('startAction') : t('changeAction')}
-                    </Button>
+                    {canEdit ? (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            className="shrink-0"
+                            onClick={() => openDialog(true)}
+                        >
+                            {currentStage === null ? t('startAction') : t('changeAction')}
+                        </Button>
+                    ) : null}
                 </div>
 
                 {currentNotes ? (

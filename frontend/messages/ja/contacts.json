@@ -390,6 +390,7 @@
         "stagePlaceholder": "段階を選択",
         "withdrawOption": "ライフサイクルから外す",
         "withdrawHint": "段階・理由・メモを消去します。履歴は保持されます。",
+        "stayOption": "{stage} のまま — メモを更新",
         "reasonLabel": "失注理由",
         "reasonPlaceholder": "理由を選択",
         "noteLabel": "メモ",

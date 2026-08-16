@@ -390,6 +390,7 @@
         "stagePlaceholder": "Choose a stage",
         "withdrawOption": "Remove from the lifecycle",
         "withdrawHint": "Clears the stage, reason, and notes. The history is kept.",
+        "stayOption": "Stay in {stage} — update the note",
         "reasonLabel": "Disqualification reason",
         "reasonPlaceholder": "Choose a reason",
         "noteLabel": "Note",

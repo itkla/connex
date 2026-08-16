@@ -98,6 +98,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
         ...activities.map((activity) => activity.createdById),
         ...notes.map((note) => note.author),
         ...tasks.map((task) => task.assignedToId),
+        ...lifecycleHistory.map((entry) => entry.changedById),
     ].filter((value): value is number => typeof value === "number"));
     const userIds = new Set(interactionUserIds);
     if (contact.ownerId != null) userIds.add(contact.ownerId);
@@ -284,6 +285,11 @@ export default async function ContactPage({ params }: ContactPageProps) {
                             <ContactLifecyclePanel
                                 contactId={contact.id}
                                 lifecycle={lifecycle}
+                                canEdit={effectivePermissions.includes("PERSON_UPDATE")
+                                    && !contact.archivedAt
+                                    && !contact.suspendedAt
+                                    && !contact.provisionCeasedAt}
+                                hasLinkedDeal={deals.length > 0}
                                 className="mt-0"
                             />
                         ) : null}
