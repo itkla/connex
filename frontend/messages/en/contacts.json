@@ -420,5 +420,35 @@
             "SPAM": "Not a genuine inquiry",
             "OTHER": "Other"
         }
+    },
+    "ContactProvenance": {
+        "title": "Source",
+        "notCaptured": "How this relationship began was never recorded.",
+        "captureAction": "Record",
+        "correctAction": "Correct",
+        "referredBy": "Referred by",
+        "dialogTitle": "Record the source",
+        "dialogDescription": "Where this relationship originally came from. Corrections replace the whole record; the previous values stay in the audit log.",
+        "sourceLabel": "Source",
+        "detailLabel": "Detail",
+        "detailPlaceholder": "Event name, website, campaign…",
+        "referrerLabel": "Referred by",
+        "referrerPlaceholder": "Find a contact…",
+        "referrerEmpty": "No matching contacts.",
+        "cancel": "Cancel",
+        "save": "Save",
+        "toastSaved": "Source updated.",
+        "toastFailed": "Couldn't update the source.",
+        "source": {
+            "none": "Not recorded",
+            "REFERRAL": "Referral",
+            "PARTNER": "Partner",
+            "EVENT": "Event",
+            "WEB": "Web",
+            "OUTBOUND": "Outbound",
+            "BUSINESS_CARD": "Business card",
+            "IMPORT": "Import",
+            "OTHER": "Other"
+        }
     }
 }

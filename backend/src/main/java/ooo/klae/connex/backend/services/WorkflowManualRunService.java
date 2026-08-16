@@ -419,6 +419,8 @@ public class WorkflowManualRunService {
                 memberScope,
                 null,
                 false,
+                null,
+                false,
                 false);
             case "company" -> companyService.getMatchingCompanyIds(
                 blankToNull(resolved.query()),

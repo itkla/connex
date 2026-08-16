@@ -23,6 +23,10 @@ export type ContactsPageParams = PageParams & MemberScopeParams & {
     lifecycleStages?: ContactLifecycleStage[];
     /** Includes contacts that are not in a lead lifecycle at all (issue #559). */
     noLifecycle?: boolean;
+    /** Lead sources to include (issue #559). */
+    leadSources?: ContactLeadSource[];
+    /** Includes contacts whose provenance was never captured (issue #559). */
+    noLeadSource?: boolean;
     /** Selects the archived contacts instead of the active ones (issue #854). */
     archived?: boolean;
 };
@@ -223,6 +227,11 @@ export type PersonFacets = {
      * lifecycle are counted under the `__none__` key.
      */
     lifecycleStages: FacetCount[];
+    /**
+     * How many active contacts entered through each lead source (issue #559); uncaptured
+     * provenance is counted under the `__none__` key.
+     */
+    leadSources: FacetCount[];
 };
 
 export type CompanyFacets = {
@@ -1152,6 +1161,31 @@ export type Contact = {
     lifecycleChangedAt?: string | null;
     disqualifiedReason?: ContactDisqualificationReason | null;
     qualificationNotes?: string | null;
+    /**
+     * Source provenance (issue #559): how the relationship originally entered Connex. Owner-workspace
+     * only, settable at creation and via the provenance endpoint. Absent means never captured.
+     */
+    leadSource?: ContactLeadSource | null;
+    leadSourceDetail?: string | null;
+    referrerPersonId?: number | null;
+};
+
+/** The closed vocabulary for how a contact originally entered Connex (issue #559). */
+export type ContactLeadSource =
+    | 'REFERRAL'
+    | 'EVENT'
+    | 'WEB'
+    | 'OUTBOUND'
+    | 'BUSINESS_CARD'
+    | 'IMPORT'
+    | 'PARTNER'
+    | 'OTHER';
+
+/** A requested replacement of a contact's source provenance; all-null clears it. */
+export type UpdateContactProvenancePayload = {
+    leadSource?: ContactLeadSource | null;
+    leadSourceDetail?: string | null;
+    referrerPersonId?: number | null;
 };
 
 /** The closed lead-lifecycle vocabulary a contact can hold (issue #559). */

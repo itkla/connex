@@ -35,6 +35,7 @@ import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.IdentityMatchRow;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.PersonLeadSource;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.dto.ColumnMapping;
@@ -276,6 +277,7 @@ public class ImportService {
             Person bean = new Person();
             bean.setWorkspaceId(workspaceId);
             bean.setOwnerId(actorId);
+            bean.setLeadSource(PersonLeadSource.IMPORT);
             bean.setName(row.std.get("name"));
             bean.setEmail(row.std.get("email"));
             bean.setPhone(row.std.get("phone"));

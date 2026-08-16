@@ -30,6 +30,7 @@ import Attachments from "@/app/components/attachments/Attachments";
 import CommentsSection from "@/app/components/records/comments/CommentsSection";
 import CustomFieldRows from "@/app/components/records/CustomFieldRows";
 import ContactLifecyclePanel from "@/app/components/records/contacts/ContactLifecyclePanel";
+import ContactProvenancePanel from "@/app/components/records/contacts/ContactProvenancePanel";
 import EngineEvaluationPanel from "@/app/components/records/EngineEvaluationPanel";
 import RecordDetailSection from "@/app/components/records/RecordDetailSection";
 import { formatCompactCurrency, formatDate, formatDateTime, formatShortDate } from "@/app/lib/utils";
@@ -84,6 +85,9 @@ export default async function ContactPage({ params }: ContactPageProps) {
         notFound();
     }
     const contact = contactAccess.record;
+    const referrer = contact.referrerPersonId != null
+        ? await getContactById(contact.referrerPersonId, init).catch(() => null)
+        : null;
 
     const tasks = contact.tasks ?? [];
     const activities = contact.activities ?? [];
@@ -280,6 +284,20 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                 </div>
                             ) : null}
                         </RecordDetailSection>
+
+                        {ownsContact ? (
+                            <ContactProvenancePanel
+                                contactId={contact.id}
+                                leadSource={contact.leadSource ?? null}
+                                leadSourceDetail={contact.leadSourceDetail ?? null}
+                                referrer={referrer}
+                                canEdit={effectivePermissions.includes("PERSON_UPDATE")
+                                    && !contact.archivedAt
+                                    && !contact.suspendedAt
+                                    && !contact.provisionCeasedAt}
+                                className="mt-0"
+                            />
+                        ) : null}
 
                         {ownsContact && lifecycle ? (
                             <ContactLifecyclePanel

@@ -420,5 +420,35 @@
             "SPAM": "正規の問い合わせではない",
             "OTHER": "その他"
         }
+    },
+    "ContactProvenance": {
+        "title": "獲得元",
+        "notCaptured": "この関係の始まりは記録されていません。",
+        "captureAction": "記録",
+        "correctAction": "修正",
+        "referredBy": "紹介者",
+        "dialogTitle": "獲得元を記録",
+        "dialogDescription": "この関係が元々どこから始まったかを記録します。修正は記録全体を置き換え、以前の値は監査ログに残ります。",
+        "sourceLabel": "獲得元",
+        "detailLabel": "詳細",
+        "detailPlaceholder": "イベント名、ウェブサイト、キャンペーンなど",
+        "referrerLabel": "紹介者",
+        "referrerPlaceholder": "連絡先を検索…",
+        "referrerEmpty": "該当する連絡先がありません。",
+        "cancel": "キャンセル",
+        "save": "保存",
+        "toastSaved": "獲得元を更新しました。",
+        "toastFailed": "獲得元を更新できませんでした。",
+        "source": {
+            "none": "未記録",
+            "REFERRAL": "紹介",
+            "PARTNER": "パートナー",
+            "EVENT": "イベント",
+            "WEB": "ウェブ",
+            "OUTBOUND": "アウトバウンド",
+            "BUSINESS_CARD": "名刺",
+            "IMPORT": "インポート",
+            "OTHER": "その他"
+        }
     }
 }

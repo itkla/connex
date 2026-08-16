@@ -872,14 +872,14 @@ class PersonServiceTest extends AbstractServiceTest {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(mapper.countPersons(
             7, "Security", null, null, false, MemberScope.allTeam(),
-            null, false, false)).thenReturn(1001L);
+            null, false, null, false, false)).thenReturn(1001L);
 
         assertThrows(BadRequestException.class,
             () -> service.getMatchingPersonIds(
-                "Security", null, null, false, MemberScope.allTeam(), null, false, false));
+                "Security", null, null, false, MemberScope.allTeam(), null, false, null, false, false));
 
         verify(mapper, never()).getPersonIdsFiltered(
-            7, "Security", null, null, false, MemberScope.allTeam(), null, false, false, 1000);
+            7, "Security", null, null, false, MemberScope.allTeam(), null, false, null, false, false, 1000);
     }
 
     @Test

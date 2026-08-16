@@ -102,18 +102,18 @@ class RecordListControllerTest {
         when(workspaceService.getCurrentUserId()).thenReturn(7);
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(memberScope);
         when(personService.getPersonsPage(
-            null, null, null, null, null, false, memberScope, null, false, false, 100, 0)).thenReturn(List.of());
+            null, null, null, null, null, false, memberScope, null, false, null, false, false, 100, 0)).thenReturn(List.of());
         when(personService.countPersons(
-            null, null, null, false, memberScope, null, false, false)).thenReturn(0L);
+            null, null, null, false, memberScope, null, false, null, false, false)).thenReturn(0L);
 
         var response = controller.getPersonsPage(
-            0, 500, null, null, null, null, null, false, null, null, null, false, false);
+            0, 500, null, null, null, null, null, false, null, null, null, false, null, false, false);
 
         assertEquals(0, response.total());
         verify(personService).getPersonsPage(
-            null, null, null, null, null, false, memberScope, null, false, false, 100, 0);
+            null, null, null, null, null, false, memberScope, null, false, null, false, false, 100, 0);
         verify(personService).countPersons(
-            null, null, null, false, memberScope, null, false, false);
+            null, null, null, false, memberScope, null, false, null, false, false);
     }
 
     @Test
@@ -121,10 +121,10 @@ class RecordListControllerTest {
         PersonController controller = personController();
 
         assertThrows(BadRequestException.class, () -> controller.getPersonsPage(
-            1, 25, null, "warmth", "desc", null, null, false, null, null, null, false, false));
+            1, 25, null, "warmth", "desc", null, null, false, null, null, null, false, null, false, false));
 
         verify(personService, never()).getPersonsPage(
-            null, "warmth", "desc", null, null, false, null, null, false, false, 25, 0);
+            null, "warmth", "desc", null, null, false, null, null, false, null, false, false, 25, 0);
     }
 
     @Test
@@ -135,22 +135,22 @@ class RecordListControllerTest {
         when(memberScopeResolver.resolve("members", List.of(3, 5), 7)).thenReturn(memberScope);
         when(personService.getPersonsPage(
             "%Target%", "name", "desc", List.of("Acme"), List.of("Director"), true,
-            memberScope, null, false, false, 25, 25)).thenReturn(List.of());
+            memberScope, null, false, null, false, false, 25, 25)).thenReturn(List.of());
         when(personService.countPersons(
             "%Target%", List.of("Acme"), List.of("Director"), true, memberScope,
-            null, false, false)).thenReturn(4L);
+            null, false, null, false, false)).thenReturn(4L);
 
         var response = controller.getPersonsPage(
             2, 25, "Target", "name", "desc", List.of("Acme"), List.of("Director"), true,
-            "members", List.of(3, 5), null, false, false);
+            "members", List.of(3, 5), null, false, null, false, false);
 
         assertEquals(4, response.total());
         verify(personService).getPersonsPage(
             "%Target%", "name", "desc", List.of("Acme"), List.of("Director"), true,
-            memberScope, null, false, false, 25, 25);
+            memberScope, null, false, null, false, false, 25, 25);
         verify(personService).countPersons(
             "%Target%", List.of("Acme"), List.of("Director"), true, memberScope,
-            null, false, false);
+            null, false, null, false, false);
     }
 
     @Test
@@ -160,10 +160,10 @@ class RecordListControllerTest {
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(MemberScope.allTeam());
 
         assertThrows(BadRequestException.class,
-            () -> controller.getPersonIds(null, null, null, false, null, null, null, false, false));
+            () -> controller.getPersonIds(null, null, null, false, null, null, null, false, null, false, false));
 
         verify(personService, never()).getMatchingPersonIds(
-            null, null, null, false, MemberScope.allTeam(), null, false, false);
+            null, null, null, false, MemberScope.allTeam(), null, false, null, false, false);
     }
 
     @Test
