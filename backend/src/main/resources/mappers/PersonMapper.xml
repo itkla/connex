@@ -19,6 +19,10 @@
     <result property="suspendedAt" column="suspended_at"/>
     <result property="provisionCeasedAt" column="provision_ceased_at"/>
     <result property="archivedAt" column="archived_at"/>
+    <result property="lifecycleStage" column="lifecycle_stage"/>
+    <result property="lifecycleChangedAt" column="lifecycle_changed_at"/>
+    <result property="disqualifiedReason" column="disqualified_reason"/>
+    <result property="qualificationNotes" column="qualification_notes"/>
     <association property="company" javaType="Company" notNullColumn="company_id">
       <id property="id" column="company_id"/>
       <result property="name" column="company_name"/>
@@ -33,7 +37,8 @@
 
   <sql id="personColumns">
     p.id, p.workspace_id, p.owner_id, p.name, p.email, p.phone, p.title, p.created_at, p.updated_at, p.image_url,
-    p.risk_excluded, p.intro_excluded, p.suspended_at, p.provision_ceased_at, p.archived_at
+    p.risk_excluded, p.intro_excluded, p.suspended_at, p.provision_ceased_at, p.archived_at,
+    p.lifecycle_stage, p.lifecycle_changed_at, p.disqualified_reason, p.qualification_notes
   </sql>
 
   <sql id="companyJoinColumns">
@@ -519,6 +524,17 @@
       <if test="titles != null and titles.size() > 0">
         AND p.title IN <foreach item="ti" collection="titles" open="(" separator="," close=")">#{ti}</foreach>
       </if>
+      <if test="(lifecycleStages != null and lifecycleStages.size() > 0) or noLifecycle">
+        AND (
+          <trim prefixOverrides="OR ">
+            <if test="lifecycleStages != null and lifecycleStages.size() > 0">
+              p.lifecycle_stage IN
+              <foreach item="ls" collection="lifecycleStages" open="(" separator="," close=")">#{ls}</foreach>
+            </if>
+            <if test="noLifecycle">OR p.lifecycle_stage IS NULL</if>
+          </trim>
+        )
+      </if>
     </where>
   </sql>
 
@@ -751,6 +767,24 @@
         END
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
+
+  <update id="updateLifecycle">
+    UPDATE person
+    SET lifecycle_stage = #{stage,jdbcType=VARCHAR},
+        lifecycle_changed_at = #{changedAt},
+        disqualified_reason = #{reason,jdbcType=VARCHAR},
+        qualification_notes = #{notes,jdbcType=VARCHAR}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <select id="countsByLifecycleStage" resultType="ooo.klae.connex.backend.dto.FacetCount">
+    SELECT COALESCE(p.lifecycle_stage, '__none__') AS `key`,
+           COUNT(*) AS count, NULL AS label
+    FROM person p
+    WHERE p.workspace_id = #{workspaceId} AND p.archived_at IS NULL
+      AND p.suspended_at IS NULL
+    GROUP BY p.lifecycle_stage
+  </select>
 
   <update id="clearMemberOwnership">
     UPDATE person SET owner_id = NULL

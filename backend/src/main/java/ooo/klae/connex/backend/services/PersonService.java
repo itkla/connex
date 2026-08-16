@@ -23,6 +23,7 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.PersonEmployment;
+import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.Workspace;
@@ -121,17 +122,20 @@ public class PersonService {
      * active one, so the reversible archive has a place to be reviewed and restored from.
      */
     public List<Person> getPersonsPage(String query, String sort, String dir, List<String> companies,
-            List<String> titles, boolean noCompany, MemberScope memberScope, boolean archived,
+            List<String> titles, boolean noCompany, MemberScope memberScope,
+            List<PersonLifecycleStage> lifecycleStages, boolean noLifecycle, boolean archived,
             int limit, int offset) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         return personMapper.getPersonsPage(workspaceId, query, sort, dir,
-            companies, titles, noCompany, memberScope, archived, limit, offset);
+            companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
+            archived, limit, offset);
     }
 
     public long countPersons(String query, List<String> companies, List<String> titles, boolean noCompany,
-            MemberScope memberScope, boolean archived) {
+            MemberScope memberScope, List<PersonLifecycleStage> lifecycleStages, boolean noLifecycle,
+            boolean archived) {
         return personMapper.countPersons(workspaceService.getCurrentWorkspaceId(),
-            query, companies, titles, noCompany, memberScope, archived);
+            query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle, archived);
     }
 
     /** How many contacts the active workspace currently holds archived. */
@@ -145,26 +149,33 @@ public class PersonService {
      * bulk action can target the whole filtered set, not just the loaded page.
      */
     public List<Integer> getMatchingPersonIds(String query, List<String> companies, List<String> titles,
-            boolean noCompany, MemberScope memberScope, boolean archived) {
-        if (!archived && !hasMatchingIdFilter(query, companies, titles, noCompany, memberScope)) {
+            boolean noCompany, MemberScope memberScope, List<PersonLifecycleStage> lifecycleStages,
+            boolean noLifecycle, boolean archived) {
+        if (!archived && !hasMatchingIdFilter(
+                query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle)) {
             throw new BadRequestException("At least one filter is required before selecting matching contact ids");
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         long total = personMapper.countPersons(
-            workspaceId, query, companies, titles, noCompany, memberScope, archived);
+            workspaceId, query, companies, titles, noCompany, memberScope,
+            lifecycleStages, noLifecycle, archived);
         if (total > MAX_MATCHING_IDS) {
             throw new BadRequestException("Too many matching contacts; narrow the filters before selecting all");
         }
         return personMapper.getPersonIdsFiltered(
-            workspaceId, query, companies, titles, noCompany, memberScope, archived, MAX_MATCHING_IDS);
+            workspaceId, query, companies, titles, noCompany, memberScope,
+            lifecycleStages, noLifecycle, archived, MAX_MATCHING_IDS);
     }
 
     private static boolean hasMatchingIdFilter(String query, List<String> companies, List<String> titles,
-            boolean noCompany, MemberScope memberScope) {
+            boolean noCompany, MemberScope memberScope, List<PersonLifecycleStage> lifecycleStages,
+            boolean noLifecycle) {
         return query != null
             || (companies != null && !companies.isEmpty())
             || (titles != null && !titles.isEmpty())
             || noCompany
+            || (lifecycleStages != null && !lifecycleStages.isEmpty())
+            || noLifecycle
             || (memberScope != null && memberScope.mode() != MemberScope.Mode.ALL_TEAM);
     }
 
@@ -182,6 +193,11 @@ public class PersonService {
 
     public List<FacetCount> countsByOwner() {
         return personMapper.countsByOwner(workspaceService.getCurrentWorkspaceId());
+    }
+
+    /** How many active contacts sit in each lead-lifecycle stage, for the browser's filter menu. */
+    public List<FacetCount> countsByLifecycleStage() {
+        return personMapper.countsByLifecycleStage(workspaceService.getCurrentWorkspaceId());
     }
 
     /**

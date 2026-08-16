@@ -53,7 +53,7 @@ public class ExportService {
             MemberScope memberScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Person> people = personMapper.getPersonsFiltered(
-            workspaceId, query, companies, titles, noCompany, memberScope, false);
+            workspaceId, query, companies, titles, noCompany, memberScope, null, false, false);
         List<CustomFieldDefinition> defs = activeDefinitions(workspaceId, "person");
         Map<Integer, Map<Integer, Object>> custom =
             customFieldValueService.getForEntities("person", people.stream().map(Person::getId).toList());

@@ -42,6 +42,10 @@ public class Person {
     private LocalDateTime suspendedAt;
     private LocalDateTime provisionCeasedAt;
     private LocalDateTime archivedAt;
+    private PersonLifecycleStage lifecycleStage;
+    private LocalDateTime lifecycleChangedAt;
+    private PersonDisqualificationReason disqualifiedReason;
+    private String qualificationNotes;
 
     public int getId() {
         return id;

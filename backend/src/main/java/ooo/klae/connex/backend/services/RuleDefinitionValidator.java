@@ -46,7 +46,8 @@ public class RuleDefinitionValidator {
     private static final Set<String> COMPANY_EVENTS = Set.of(
         "company.created", "company.updated", "company.owner_changed");
     private static final Set<String> PERSON_EVENTS = Set.of(
-        "person.created", "person.updated", "person.job_changed", "person.owner_changed");
+        "person.created", "person.updated", "person.job_changed", "person.owner_changed",
+        "person.lifecycle_changed");
     private static final Set<String> TASK_EVENTS = Set.of("task.created", "task.completed");
     private static final Map<String, Set<String>> ACTION_RECORD_TYPES = Map.of(
         "create_task", Set.of("person", "deal"),
