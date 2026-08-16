@@ -95,9 +95,22 @@
     ORDER BY id DESC
   </select>
 
+  <select id="getByIds" resultMap="DocumentApprovalResult">
+    SELECT <include refid="cols"/> FROM document_approval
+    WHERE workspace_id = #{workspaceId}
+      AND id IN
+      <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+  </select>
+
   <select id="getById" resultMap="DocumentApprovalResult">
     SELECT <include refid="cols"/> FROM document_approval
     WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <select id="getByIdForUpdate" resultMap="DocumentApprovalResult">
+    SELECT <include refid="cols"/> FROM document_approval
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
   </select>
 
   <select id="findPending" resultMap="DocumentApprovalResult">
@@ -105,6 +118,14 @@
     WHERE workspace_id = #{workspaceId} AND document_id = #{documentId} AND status = 'pending'
     ORDER BY id DESC
     LIMIT 1
+  </select>
+
+  <select id="findPendingForUpdate" resultMap="DocumentApprovalResult">
+    SELECT <include refid="cols"/> FROM document_approval
+    WHERE workspace_id = #{workspaceId} AND document_id = #{documentId} AND status = 'pending'
+    ORDER BY id DESC
+    LIMIT 1
+    FOR UPDATE
   </select>
 
   <select id="findPendingByPolicyId" resultMap="DocumentApprovalResult">
@@ -199,6 +220,22 @@
     ORDER BY s.approval_id, s.step_order, s.id, a.id
   </select>
 
+  <select id="getStepsByApprovalIdsForUpdate" resultMap="DocumentApprovalStepResult">
+    SELECT s.id, s.workspace_id, s.approval_id, s.step_order, s.name, s.required_count, s.status,
+           s.decided_at, s.due_interval_hours, s.on_expiry, s.activated_at, s.due_at,
+           s.escalated_at, s.reminded_round, s.created_at, s.updated_at,
+           a.id AS approver_id, a.workspace_id AS approver_workspace_id, a.step_id AS approver_step_id,
+           a.approver_kind, a.user_id AS approver_user_id
+    FROM document_approval_step s
+    LEFT JOIN document_approval_step_approver a
+      ON a.workspace_id = s.workspace_id AND a.step_id = s.id
+    WHERE s.workspace_id = #{workspaceId}
+      AND s.approval_id IN
+      <foreach collection="approvalIds" item="approvalId" open="(" separator="," close=")">#{approvalId}</foreach>
+    ORDER BY s.approval_id, s.step_order, s.id, a.id
+    FOR UPDATE
+  </select>
+
   <select id="getDecisionsByApprovalIds" resultMap="DocumentApprovalDecisionResult">
     SELECT id, workspace_id, approval_id, step_id, decision, decided_by, comment, decided_at
     FROM document_approval_decision
@@ -206,6 +243,16 @@
       AND approval_id IN
       <foreach collection="approvalIds" item="approvalId" open="(" separator="," close=")">#{approvalId}</foreach>
     ORDER BY approval_id, step_id, id
+  </select>
+
+  <select id="getDecisionsByApprovalIdsForUpdate" resultMap="DocumentApprovalDecisionResult">
+    SELECT id, workspace_id, approval_id, step_id, decision, decided_by, comment, decided_at
+    FROM document_approval_decision
+    WHERE workspace_id = #{workspaceId}
+      AND approval_id IN
+      <foreach collection="approvalIds" item="approvalId" open="(" separator="," close=")">#{approvalId}</foreach>
+    ORDER BY approval_id, step_id, id
+    FOR UPDATE
   </select>
 
   <insert id="insertStep" useGeneratedKeys="true" keyProperty="id">
@@ -258,11 +305,6 @@
       AND status IN ('pending', 'active')
   </update>
 
-  <select id="countStepApprovals" resultType="int">
-    SELECT COUNT(*) FROM document_approval_decision
-    WHERE workspace_id = #{workspaceId} AND step_id = #{stepId} AND decision = 'approved'
-  </select>
-
   <select id="getAssignmentsByApprovalIds" resultMap="DocumentApprovalStepAssignmentResult">
     SELECT id, workspace_id, approval_id, step_id, assignment_kind, assignment_round,
            approver_kind, user_id, delegated_by_user_id, created_by_user_id, comment, created_at
@@ -271,6 +313,17 @@
       AND approval_id IN
       <foreach collection="approvalIds" item="approvalId" open="(" separator="," close=")">#{approvalId}</foreach>
     ORDER BY approval_id, step_id, id
+  </select>
+
+  <select id="getAssignmentsByApprovalIdsForUpdate" resultMap="DocumentApprovalStepAssignmentResult">
+    SELECT id, workspace_id, approval_id, step_id, assignment_kind, assignment_round,
+           approver_kind, user_id, delegated_by_user_id, created_by_user_id, comment, created_at
+    FROM document_approval_step_assignment
+    WHERE workspace_id = #{workspaceId}
+      AND approval_id IN
+      <foreach collection="approvalIds" item="approvalId" open="(" separator="," close=")">#{approvalId}</foreach>
+    ORDER BY approval_id, step_id, id
+    FOR UPDATE
   </select>
 
   <insert id="insertAssignment" useGeneratedKeys="true" keyProperty="id">
@@ -287,6 +340,7 @@
     SELECT COALESCE(MAX(assignment_round), 0) FROM document_approval_step_assignment
     WHERE workspace_id = #{workspaceId} AND step_id = #{stepId}
       AND assignment_kind = 'reassignment'
+    FOR UPDATE
   </select>
 
   <select id="findExpiredActiveSteps" resultType="int">

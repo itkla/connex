@@ -17,8 +17,13 @@ import ooo.klae.connex.backend.dto.ApprovalReminderRow;
 public interface DocumentApprovalMapper {
     List<DocumentApproval> getByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     List<DocumentApproval> getByDocumentId(@Param("workspaceId") int workspaceId, @Param("documentId") int documentId);
+    List<DocumentApproval> getByIds(@Param("workspaceId") int workspaceId,
+        @Param("ids") List<Integer> ids);
     DocumentApproval getById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    DocumentApproval getByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
     DocumentApproval findPending(@Param("workspaceId") int workspaceId, @Param("documentId") int documentId);
+    DocumentApproval findPendingForUpdate(@Param("workspaceId") int workspaceId,
+        @Param("documentId") int documentId);
     List<DocumentApproval> findPendingByPolicyId(@Param("workspaceId") int workspaceId,
         @Param("policyId") int policyId);
     List<Integer> findPendingIdsByPolicyId(@Param("workspaceId") int workspaceId,
@@ -39,17 +44,22 @@ public interface DocumentApprovalMapper {
 
     List<DocumentApprovalStep> getStepsByApprovalIds(@Param("workspaceId") int workspaceId,
         @Param("approvalIds") List<Integer> approvalIds);
+    List<DocumentApprovalStep> getStepsByApprovalIdsForUpdate(@Param("workspaceId") int workspaceId,
+        @Param("approvalIds") List<Integer> approvalIds);
     List<DocumentApprovalDecision> getDecisionsByApprovalIds(@Param("workspaceId") int workspaceId,
         @Param("approvalIds") List<Integer> approvalIds);
+    List<DocumentApprovalDecision> getDecisionsByApprovalIdsForUpdate(
+        @Param("workspaceId") int workspaceId, @Param("approvalIds") List<Integer> approvalIds);
     int insertStep(DocumentApprovalStep step);
     int insertStepApprover(ApprovalStepApprover approver);
     int insertDecision(DocumentApprovalDecision decision);
     int updateStepStatus(@Param("workspaceId") int workspaceId, @Param("id") int id,
         @Param("status") String status, @Param("expectedStatus") String expectedStatus);
     int cancelOpenSteps(@Param("workspaceId") int workspaceId, @Param("approvalId") int approvalId);
-    int countStepApprovals(@Param("workspaceId") int workspaceId, @Param("stepId") int stepId);
 
     List<DocumentApprovalStepAssignment> getAssignmentsByApprovalIds(
+        @Param("workspaceId") int workspaceId, @Param("approvalIds") List<Integer> approvalIds);
+    List<DocumentApprovalStepAssignment> getAssignmentsByApprovalIdsForUpdate(
         @Param("workspaceId") int workspaceId, @Param("approvalIds") List<Integer> approvalIds);
     int insertAssignment(DocumentApprovalStepAssignment assignment);
     int maxReassignmentRound(@Param("workspaceId") int workspaceId, @Param("stepId") int stepId);

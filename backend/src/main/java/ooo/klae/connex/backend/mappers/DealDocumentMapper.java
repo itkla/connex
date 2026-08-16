@@ -9,6 +9,8 @@ import ooo.klae.connex.backend.beans.DealDocument;
 /** Mapper for {@code deal_document}; every statement is workspace-scoped. */
 public interface DealDocumentMapper {
     List<DealDocument> getByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
+    List<DealDocument> getByIds(@Param("workspaceId") int workspaceId,
+        @Param("ids") List<Integer> ids);
     DealDocument getById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     DealDocument lockById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Integer maxVersion(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);

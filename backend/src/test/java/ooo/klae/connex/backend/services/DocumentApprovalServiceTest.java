@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
@@ -58,7 +59,7 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
     @Autowired DocumentTemplateService templateService;
     @Autowired DealLineItemService lineItemService;
     @Autowired ProductService productService;
-    @Autowired DocumentApprovalMapper approvalMapper;
+    @MockitoSpyBean DocumentApprovalMapper approvalMapper;
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired SqlSessionTemplate sqlSession;
     @Autowired PlatformTransactionManager transactionManager;
@@ -556,7 +557,7 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         DocumentApprovalDto approval = approvalService.requestApproval(deal.getId(), doc.id(), null);
         assertNotNull(notificationMapper.findByDedupe(workspace.getId(), approver.getId(),
             "document.approval_request:" + approval.id() + ":"
-                + approval.steps().getFirst().id() + ":" + approver.getId()));
+                + approval.steps().getFirst().id() + ":requested:" + approver.getId()));
 
         authenticateAs(approver, workspace.getId());
         approvalService.decide(deal.getId(), doc.id(), "approved", null, null);
@@ -926,9 +927,18 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
             "UPDATE document_approval SET status = 'cancelled', outcome_reason = 'superseded', "
                 + "decided_at = CURRENT_TIMESTAMP WHERE workspace_id = ? AND id = ?",
             workspace.getId(), requested.id());
+        flushSession();
+        clearInvocations(workspaceService, approvalMapper, documentMapper);
 
         assertFalse(approvalService.terminateIfUnsatisfiable(workspace.getId(), approval));
 
+        org.mockito.InOrder order = inOrder(workspaceService, documentMapper, approvalMapper);
+        order.verify(workspaceService)
+            .lockApprovalReconciliationAuthorizationRoot(workspace.getId());
+        order.verify(documentMapper).lockById(workspace.getId(), document.id());
+        order.verify(approvalMapper).getByIdForUpdate(workspace.getId(), requested.id());
+        verify(approvalMapper, times(0))
+            .decide(anyInt(), anyInt(), any(), any(), any(), any(), any());
         DocumentApproval reread = approvalMapper.getById(workspace.getId(), requested.id());
         assertEquals("cancelled", reread.getStatus());
         assertEquals("superseded", reread.getOutcomeReason());
@@ -1005,6 +1015,18 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
             foreignWorkspaceId, pending.id()).isEmpty());
         assertTrue(approvalMapper.getAssignmentsByApprovalIds(
             foreignWorkspaceId, List.of(pending.id())).isEmpty());
+        assertTrue(approvalMapper.getAssignmentsByApprovalIdsForUpdate(
+            foreignWorkspaceId, List.of(pending.id())).isEmpty());
+        assertTrue(approvalMapper.getStepsByApprovalIdsForUpdate(
+            foreignWorkspaceId, List.of(pending.id())).isEmpty());
+        assertTrue(approvalMapper.getDecisionsByApprovalIdsForUpdate(
+            foreignWorkspaceId, List.of(pending.id())).isEmpty());
+        assertTrue(approvalMapper.getByIds(
+            foreignWorkspaceId, List.of(pending.id())).isEmpty());
+        assertNull(approvalMapper.getByIdForUpdate(foreignWorkspaceId, pending.id()));
+        assertNull(approvalMapper.findPendingForUpdate(foreignWorkspaceId, document.id()));
+        assertTrue(documentMapper.getByIds(
+            foreignWorkspaceId, List.of(document.id())).isEmpty());
         assertEquals(0, approvalMapper.maxReassignmentRound(
             foreignWorkspaceId, pending.steps().getFirst().id()));
         assertEquals(0, approvalMapper.escalateStep(
@@ -1148,6 +1170,21 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void reconciliationReusesTheDocumentLockForUnsatisfiability() {
+        User assigned = approver();
+        chainPolicy("sequential", step(1, "Manager", assigned));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        clearInvocations(documentMapper);
+
+        sweep(requested);
+
+        verify(documentMapper).lockById(workspace.getId(), document.id());
+    }
+
+    @Test
     void anExpiredStepTerminatesTheRequestAndReturnsTheDocumentToDraft() {
         User first = approver();
         User second = approver();
@@ -1238,6 +1275,25 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         assertEquals(1, assignmentCount(stepId));
         assertEquals("pending", approvalMapper.getById(
             workspace.getId(), requested.id()).getStatus());
+    }
+
+    @Test
+    void aFailedExpiryEscalationCasDoesNotAppendAnAssignment() {
+        User assigned = approver();
+        chainPolicy("sequential", deadline(step(1, "Manager", assigned), 4, "escalate"));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+        backdateDue(stepId, "TIMESTAMPADD(HOUR, -8, CURRENT_TIMESTAMP)",
+            "TIMESTAMPADD(HOUR, -4, CURRENT_TIMESTAMP)");
+        doAnswer(invocation -> 0).when(approvalMapper).escalateStep(workspace.getId(), stepId);
+
+        sweep(requested);
+
+        assertEquals(0, assignmentCount(stepId));
+        assertNull(stepColumn(stepId, "escalated_at"));
     }
 
     @Test
@@ -1432,6 +1488,30 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void delegationRenotifiesAnApproverWhoReceivedTheOriginalRequest() {
+        User bob = approver();
+        User carol = approver();
+        chainPolicy("sequential", step(1, "Managers", bob, carol));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+        assertNotNull(notificationMapper.findByDedupe(workspace.getId(), carol.getId(),
+            "document.approval_request:" + requested.id() + ":" + stepId
+                + ":requested:" + carol.getId()));
+        authenticateAs(bob, workspace.getId());
+
+        DocumentApprovalDto delegated = approvalService.createDelegation(
+            deal.getId(), document.id(), stepId, carol.getId(), null);
+        int assignmentId = stepOf(delegated, 1).assignments().getFirst().id();
+
+        assertNotNull(notificationMapper.findByDedupe(workspace.getId(), carol.getId(),
+            "document.approval_request:" + requested.id() + ":" + stepId
+                + ":delegated:" + assignmentId + ":" + carol.getId()));
+    }
+
+    @Test
     void delegationToSomeoneSeparationOfDutiesExcludesIsRefused() {
         User bob = approver();
         chainPolicy("sequential", step(1, "Manager", bob));
@@ -1583,11 +1663,42 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
             deal.getId(), document.id(), stepId, approverList(dave), null);
 
         assertEquals(List.of(dave.getId()), secondRound.steps().getFirst().effectiveApproverIds());
+        assertEquals(List.of(1, 2), secondRound.steps().getFirst().assignments().stream()
+            .filter(assignment -> "reassignment".equals(assignment.assignmentKind()))
+            .map(assignment -> assignment.assignmentRound())
+            .toList());
         assertEquals(2, jdbcTemplate.queryForObject(
             "SELECT MAX(assignment_round) FROM document_approval_step_assignment "
                 + "WHERE workspace_id = ? AND step_id = ? AND assignment_kind = 'reassignment'",
             Integer.class, workspace.getId(), stepId));
         assertEquals(3, assignmentCount(stepId));
+        authenticateAs(carol, workspace.getId());
+        assertThrows(ForbiddenException.class, () -> approvalService.decide(
+            deal.getId(), document.id(), "approved", null, stepId));
+    }
+
+    @Test
+    void decisionHydratesAuthorizationWithCurrentReadsAfterTheDocumentLock() {
+        User assigned = approver();
+        chainPolicy("sequential", step(1, "Manager", assigned));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        authenticateAs(assigned, workspace.getId());
+        clearInvocations(approvalMapper, documentMapper);
+
+        approvalService.decide(deal.getId(), document.id(), "approved", null, null);
+
+        org.mockito.InOrder order = inOrder(documentMapper, approvalMapper);
+        order.verify(documentMapper).lockById(workspace.getId(), document.id());
+        order.verify(approvalMapper).findPendingForUpdate(workspace.getId(), document.id());
+        order.verify(approvalMapper).getStepsByApprovalIdsForUpdate(
+            workspace.getId(), List.of(requested.id()));
+        order.verify(approvalMapper).getDecisionsByApprovalIdsForUpdate(
+            workspace.getId(), List.of(requested.id()));
+        order.verify(approvalMapper).getAssignmentsByApprovalIdsForUpdate(
+            workspace.getId(), List.of(requested.id()));
     }
 
     @Test
@@ -1761,10 +1872,11 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         chainPolicy("sequential", step(1, "Anyone"));
         Deal deal = jpyDeal();
         DealDocumentDto document = generate(deal);
-        approvalService.requestApproval(deal.getId(), document.id(), null);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
         authenticateAs(caller, workspace.getId());
         List<String> before = approvalDomainSnapshot();
-        clearInvocations(workspaceService, documentMapper);
+        clearInvocations(workspaceService, approvalMapper, documentMapper);
 
         assertFalse(approvalService.inbox().isEmpty());
 
@@ -1772,6 +1884,9 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         verify(workspaceService, times(0)).lockedPermissionsFor(anyInt(), anyInt());
         verify(workspaceService, times(0))
             .lockApprovalReconciliationAuthorizationRoot(anyInt());
+        verify(approvalMapper).getByIds(workspace.getId(), List.of(requested.id()));
+        verify(documentMapper).getByIds(workspace.getId(), List.of(document.id()));
+        verify(documentMapper, times(0)).getById(anyInt(), anyInt());
         verify(documentMapper, times(0)).lockById(anyInt(), anyInt());
     }
 

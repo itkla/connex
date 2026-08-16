@@ -32,6 +32,13 @@
     ORDER BY version DESC, id DESC
   </select>
 
+  <select id="getByIds" resultMap="DealDocumentResult">
+    SELECT <include refid="cols"/> FROM deal_document
+    WHERE workspace_id = #{workspaceId}
+      AND id IN
+      <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+  </select>
+
   <select id="getById" resultMap="DealDocumentResult">
     SELECT <include refid="cols"/> FROM deal_document
     WHERE workspace_id = #{workspaceId} AND id = #{id}

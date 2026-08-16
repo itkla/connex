@@ -10,6 +10,8 @@ import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.dto.ApprovalInboxItemDto;
 import ooo.klae.connex.backend.services.DocumentApprovalService;
+import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.tenant.RequirePermission;
 
 /**
  * REST controller for the workspace-scoped approval inbox. The deal-scoped approval controller is
@@ -22,6 +24,7 @@ public class ApprovalInboxController {
     private final DocumentApprovalService approvalService;
 
     @GetMapping("/inbox")
+    @RequirePermission(Permission.DOCUMENT_APPROVE)
     public List<ApprovalInboxItemDto> inbox() {
         return approvalService.inbox();
     }
