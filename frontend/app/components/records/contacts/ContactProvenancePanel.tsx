@@ -45,6 +45,9 @@ type Props = {
     contactId: number;
     leadSource: ContactLeadSource | null;
     leadSourceDetail: string | null;
+    /** The stored referrer id, authoritative even when the referrer record cannot be resolved. */
+    referrerPersonId: number | null;
+    /** The resolved referrer record, when it is still visible; used only for its label and link. */
     referrer: Contact | null;
     /** Whether the viewer may correct the provenance; without it the panel is read-only. */
     canEdit: boolean;
@@ -65,6 +68,7 @@ export default function ContactProvenancePanel({
     contactId,
     leadSource,
     leadSourceDetail,
+    referrerPersonId,
     referrer,
     canEdit,
     className,
@@ -79,7 +83,7 @@ export default function ContactProvenancePanel({
     const [referrerId, setReferrerId] = useState<number | null>(null);
     const referrerSearch = useContactTargetSearch(
         open,
-        [referrerId ?? referrer?.id],
+        [referrerId ?? referrerPersonId],
         referrer ? [referrer] : [],
     );
     const [referrerQuery, setReferrerQuery] = useState('');
@@ -100,7 +104,7 @@ export default function ContactProvenancePanel({
         if (next) {
             setSource(leadSource ?? NO_SOURCE_VALUE);
             setDetail(leadSourceDetail ?? '');
-            setReferrerId(referrer?.id ?? null);
+            setReferrerId(referrerPersonId);
             setReferrerQuery('');
         }
         setOpen(next);
@@ -141,14 +145,14 @@ export default function ContactProvenancePanel({
                                 {leadSourceDetail ? (
                                     <p className="mt-0.5 text-xs text-muted-foreground">{leadSourceDetail}</p>
                                 ) : null}
-                                {referrer ? (
+                                {referrerPersonId !== null ? (
                                     <p className="mt-1 text-xs text-muted-foreground">
                                         {t('referredBy')}{' '}
                                         <Link
-                                            href={`/records/contacts/${referrer.id}`}
+                                            href={`/records/contacts/${referrerPersonId}`}
                                             className="font-medium text-foreground underline-offset-2 hover:underline"
                                         >
-                                            {referrer.name}
+                                            {referrer?.name ?? t('referrerUnavailable')}
                                         </Link>
                                     </p>
                                 ) : null}

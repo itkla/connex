@@ -290,6 +290,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                 contactId={contact.id}
                                 leadSource={contact.leadSource ?? null}
                                 leadSourceDetail={contact.leadSourceDetail ?? null}
+                                referrerPersonId={contact.referrerPersonId ?? null}
                                 referrer={referrer}
                                 canEdit={effectivePermissions.includes("PERSON_UPDATE")
                                     && !contact.archivedAt

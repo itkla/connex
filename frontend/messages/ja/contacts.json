@@ -435,6 +435,7 @@
         "referrerLabel": "紹介者",
         "referrerPlaceholder": "連絡先を検索…",
         "referrerEmpty": "該当する連絡先がありません。",
+        "referrerUnavailable": "表示できない連絡先",
         "cancel": "キャンセル",
         "save": "保存",
         "toastSaved": "獲得元を更新しました。",

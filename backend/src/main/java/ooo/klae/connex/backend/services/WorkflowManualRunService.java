@@ -26,6 +26,8 @@ import tools.jackson.databind.ObjectMapper;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.PersonLeadSource;
+import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.beans.SavedView;
 import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowInvocation;
@@ -356,7 +358,7 @@ public class WorkflowManualRunService {
                 "search_snapshot",
                 resolveFilterForRecordType(recordType, new WorkflowManualFilter(
                     query, null, null, null, false, null, null, null,
-                    null, null, null, null, null), requesterId),
+                    null, null, null, null, null, null, false, null, false), requesterId),
                 scope);
         }
         throw new BadRequestException("Unsupported manual workflow scope");
@@ -406,7 +408,7 @@ public class WorkflowManualRunService {
         WorkflowManualFilter resolved = filter == null
             ? new WorkflowManualFilter(
                 null, null, null, null, false, null, null, null,
-                null, null, null, null, null)
+                null, null, null, null, null, null, false, null, false)
             : filter;
         MemberScope memberScope = memberScopeResolver.resolve(
             resolved.memberScope(), resolved.memberIds(), requesterId);
@@ -417,10 +419,10 @@ public class WorkflowManualRunService {
                 resolved.titles(),
                 Boolean.TRUE.equals(resolved.noCompany()),
                 memberScope,
-                null,
-                false,
-                null,
-                false,
+                resolved.lifecycleStages(),
+                Boolean.TRUE.equals(resolved.noLifecycle()),
+                resolved.leadSources(),
+                Boolean.TRUE.equals(resolved.noLeadSource()),
                 false);
             case "company" -> companyService.getMatchingCompanyIds(
                 blankToNull(resolved.query()),
@@ -653,9 +655,11 @@ public class WorkflowManualRunService {
         if (config == null || config.isNull()) {
             return new WorkflowManualFilter(
                 null, null, null, null, false, null, null, null,
-                null, null, null, null, null);
+                null, null, null, null, null, null, false, null, false);
         }
         JsonNode filters = config.get("filters");
+        List<String> lifecycle = textValues(filters, "lifecycle");
+        List<String> leadSource = textValues(filters, "leadSource");
         return new WorkflowManualFilter(
             text(config.get("query")),
             textValues(filters, "company"),
@@ -669,7 +673,44 @@ public class WorkflowManualRunService {
             textValues(filters, "status"),
             textValues(filters, "risk"),
             firstValue(filters, "scope"),
-            integerValues(filters, "memberId"));
+            integerValues(filters, "memberId"),
+            enumValues(lifecycle, PersonLifecycleStage.class),
+            containsEmptySentinel(lifecycle),
+            enumValues(leadSource, PersonLeadSource.class),
+            containsEmptySentinel(leadSource));
+    }
+
+    /**
+     * The record browsers store their none-bucket selection as the {@code __empty__} sentinel
+     * inside the facet's value list; it maps to the corresponding no-value flag here.
+     */
+    private static final String EMPTY_FACET_SENTINEL = "__empty__";
+
+    private static boolean containsEmptySentinel(List<String> values) {
+        return values != null && values.contains(EMPTY_FACET_SENTINEL);
+    }
+
+    /**
+     * Maps stored facet values onto a closed enum vocabulary, failing loudly on anything
+     * unrecognised: silently dropping a value would run the workflow against a broader set of
+     * records than the saved view showed.
+     */
+    private static <E extends Enum<E>> List<E> enumValues(List<String> values, Class<E> type) {
+        if (values == null) {
+            return null;
+        }
+        List<E> result = new ArrayList<>();
+        for (String value : values) {
+            if (EMPTY_FACET_SENTINEL.equals(value)) {
+                continue;
+            }
+            try {
+                result.add(Enum.valueOf(type, value));
+            } catch (IllegalArgumentException exception) {
+                throw new BadRequestException("Saved view filter value is not recognised: " + value);
+            }
+        }
+        return result.isEmpty() ? null : List.copyOf(result);
     }
 
     private static boolean hasNativeFilter(WorkflowManualFilter filter) {
@@ -684,6 +725,10 @@ public class WorkflowManualRunService {
             || nonempty(filter.companyIds())
             || nonempty(filter.statuses())
             || nonempty(filter.risks())
+            || nonempty(filter.lifecycleStages())
+            || Boolean.TRUE.equals(filter.noLifecycle())
+            || nonempty(filter.leadSources())
+            || Boolean.TRUE.equals(filter.noLeadSource())
             || blankToNull(filter.memberScope()) != null;
     }
 

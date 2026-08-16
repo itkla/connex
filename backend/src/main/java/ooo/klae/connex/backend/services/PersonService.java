@@ -462,12 +462,15 @@ public class PersonService {
      * lifecycle, is the owning workspace's own record — a merely shared-in contact is not
      * updatable here, which {@code requireOwnedPerson} already enforces.
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person updateProvenance(
             int id, PersonLeadSource source, String detail, Integer referrerPersonId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Person before = requireOwnedPerson(workspaceId, id);
+        Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
+        if (before == null || before.getArchivedAt() != null) {
+            throw new ResourceNotFoundException("Person not found with id: " + id);
+        }
         String acceptedDetail = trimToNull(detail);
         validateProvenance(workspaceId, id, source, acceptedDetail, referrerPersonId);
         personMapper.updateProvenance(workspaceId, id, source, acceptedDetail, referrerPersonId);
