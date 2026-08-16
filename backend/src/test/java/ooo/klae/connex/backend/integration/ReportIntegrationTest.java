@@ -2315,6 +2315,30 @@ class ReportIntegrationTest {
     }
 
     @Test
+    void effectiveDiscountAggregatesAcrossLineItemUnits() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(workspace.getId(), "Commercial");
+        int stage = insertStage(workspace.getId(), pipeline, "Proposal");
+        int deal = insertCommercialDeal(workspace.getId(), pipeline, stage, member.getId(),
+                "Mixed-unit win", "USD", true, "2026-01-15 09:00:00", "2026-01-20");
+        insertLineItem(workspace.getId(), deal, "100.00", "1", "amount", "10.00", "USD", "seat");
+        insertLineItem(workspace.getId(), deal, "300.00", "1", "amount", "60.00", "USD", "hour");
+
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget("won-discount", "deals", "effective_discount_percent", "none", "bar"))));
+        JsonNode widget = findWidget(
+                generateDocument(session, workspace, reportId).get("widgets"), "won-discount");
+
+        assertNotNull(widget);
+        assertEquals(1, widget.get("points").size());
+        assertDecimal("17.5", widget.get("points").get(0).get("value").decimalValue());
+        assertDecimal("17.5", widget.get("total").decimalValue());
+    }
+
+    @Test
     void effectiveDiscountPartitionsCurrencyAndSuppressesTheBlendedScalar() throws Exception {
         RequestContextHolder.resetRequestAttributes();
         Workspace blended = newWorkspace();
@@ -2354,6 +2378,50 @@ class ReportIntegrationTest {
         assertNotNull(singleWidget);
         assertDecimal("33.333", singleWidget.get("total").decimalValue());
         assertEquals("percent", singleWidget.get("unit").asText());
+    }
+
+    @Test
+    void dateGroupedDiscountMatchesEachCurrencyToItsOwnPrior() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(workspace.getId(), "Commercial");
+        int stage = insertStage(workspace.getId(), pipeline, "Proposal");
+        int currentYen = insertCommercialDeal(workspace.getId(), pipeline, stage, member.getId(),
+                "Current yen win", "JPY", true, "2026-01-15 09:00:00", "2026-01-20");
+        insertLineItem(workspace.getId(), currentYen, "100.00", "1", "amount", "40.00", "JPY");
+        int currentDollar = insertCommercialDeal(workspace.getId(), pipeline, stage, member.getId(),
+                "Current dollar win", "USD", true, "2026-01-16 09:00:00", "2026-01-21");
+        insertLineItem(workspace.getId(), currentDollar, "100.00", "1", "amount", "20.00", "USD");
+        int priorYen = insertCommercialDeal(workspace.getId(), pipeline, stage, member.getId(),
+                "Prior yen win", "JPY", true, "2025-12-15 09:00:00", "2025-12-20");
+        insertLineItem(workspace.getId(), priorYen, "100.00", "1", "amount", "25.00", "JPY");
+        int priorDollar = insertCommercialDeal(workspace.getId(), pipeline, stage, member.getId(),
+                "Prior dollar win", "USD", true, "2025-12-16 09:00:00", "2025-12-21");
+        insertLineItem(workspace.getId(), priorDollar, "100.00", "1", "amount", "10.00", "USD");
+
+        int reportId = createReport(session, workspace, commercialReportBody(
+                List.of(new CommercialWidget(
+                        "won-discount", "deals", "effective_discount_percent", "date", "bar")),
+                "{\"pipelineIds\": null, \"ownerIds\": null, \"statuses\": null, "
+                        + "\"tagIds\": null, \"warmthBands\": null}",
+                "2026-01-01",
+                "2026-01-31",
+                "month"));
+        JsonNode widget = findWidget(
+                generateDocument(session, workspace, reportId).get("widgets"), "won-discount");
+        assertNotNull(widget);
+        Map<String, BigDecimal> current = pointValues(widget);
+        Map<String, BigDecimal> prior = pointPriorValues(widget);
+
+        assertEquals(Set.of("JPY:2026-01", "USD:2026-01"), current.keySet());
+        assertDecimal("40", current.get("JPY:2026-01"));
+        assertDecimal("25", prior.get("JPY:2026-01"));
+        assertDecimal("15", current.get("JPY:2026-01").subtract(prior.get("JPY:2026-01")));
+        assertDecimal("20", current.get("USD:2026-01"));
+        assertDecimal("10", prior.get("USD:2026-01"));
+        assertDecimal("10", current.get("USD:2026-01").subtract(prior.get("USD:2026-01")));
     }
 
     @Test
@@ -3214,6 +3282,19 @@ class ReportIntegrationTest {
             String discountType,
             String discountValue,
             String currency) {
+        insertLineItem(
+                workspaceId, dealId, unitPrice, quantity, discountType, discountValue, currency, null);
+    }
+
+    private void insertLineItem(
+            int workspaceId,
+            int dealId,
+            String unitPrice,
+            String quantity,
+            String discountType,
+            String discountValue,
+            String currency,
+            String unit) {
         BigDecimal price = new BigDecimal(unitPrice);
         BigDecimal amount = new BigDecimal(quantity);
         BigDecimal gross = price.multiply(amount);
@@ -3229,10 +3310,10 @@ class ReportIntegrationTest {
         }
         BigDecimal subtotal = gross.subtract(discount).setScale(2, RoundingMode.HALF_UP);
         jdbcTemplate.update(
-                "INSERT INTO deal_line_item (workspace_id, deal_id, name, unit_price, quantity, "
+                "INSERT INTO deal_line_item (workspace_id, deal_id, name, unit, unit_price, quantity, "
                         + "discount_type, discount_value, currency, line_subtotal, line_tax, line_total) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                workspaceId, dealId, "Reported line", price, amount, discountType,
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                workspaceId, dealId, "Reported line", unit, price, amount, discountType,
                 discountValue == null ? null : new BigDecimal(discountValue), currency,
                 subtotal, BigDecimal.ZERO, subtotal);
     }

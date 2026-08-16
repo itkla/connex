@@ -329,7 +329,7 @@
       </otherwise>
     </choose>
     <include refid="dealFilters"/>
-    GROUP BY group_key, group_label, unit
+    GROUP BY group_key, group_label
     HAVING SUM(li.unit_price * li.quantity) &gt; 0
     <choose>
       <when test="query.groupBy == 'stage'">ORDER BY MIN(d.pipeline_id), MIN(s.position), group_key</when>

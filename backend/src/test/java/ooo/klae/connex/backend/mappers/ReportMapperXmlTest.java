@@ -284,6 +284,14 @@ class ReportMapperXmlTest {
         }
     }
 
+    /**
+     * The discount aggregate joins {@code deal_line_item}, which carries its own {@code unit}
+     * column. MySQL resolves a bare {@code unit} in {@code GROUP BY} to that column rather than to
+     * the {@code 'percent' AS unit} select alias, which would split one discount figure into one
+     * row per line-item unit. Grouping by the {@code group_key}/{@code group_label} aliases keeps
+     * the currency partition — already encoded in {@code group_key} — without naming a column that
+     * a joined table can shadow.
+     */
     @Test
     void dealDiscountAggregateBindsWorkspaceLineItemsAndCurrencyPartition() throws Exception {
         Configuration configuration = reportMapperConfiguration();
@@ -299,6 +307,8 @@ class ReportMapperXmlTest {
                 assertTrue(sql.contains("CONCAT(COALESCE(d.currency, ''), ':',"));
                 assertTrue(sql.contains("NULLIF(SUM(li.unit_price * li.quantity), 0)"));
                 assertTrue(sql.contains("HAVING SUM(li.unit_price * li.quantity) > 0"));
+                assertTrue(sql.contains("GROUP BY group_key, group_label"));
+                assertFalse(sql.contains("GROUP BY group_key, group_label, unit"));
                 assertFalse(sql.contains("${"));
             }
         }

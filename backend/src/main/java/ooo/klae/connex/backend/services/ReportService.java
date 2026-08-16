@@ -1802,7 +1802,13 @@ public class ReportService {
             case "month" -> ChronoUnit.MONTHS.between(periodAnchor, bucketDate);
             default -> throw new BadRequestException("Invalid report bucket: " + bucket);
         };
-        return position + "\u0000" + normalizedUnit(row.unit());
+        return position + "\u0000" + dateGroupPartition(row.groupKey())
+                + "\u0000" + normalizedUnit(row.unit());
+    }
+
+    private static String dateGroupPartition(String groupKey) {
+        int separator = groupKey.lastIndexOf(':');
+        return separator >= 0 ? groupKey.substring(0, separator) : "";
     }
 
     private static ReportAggregateRow alignPriorDateRow(
