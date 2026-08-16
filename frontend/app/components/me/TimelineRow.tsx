@@ -8,7 +8,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { CheckIcon, EllipsisVerticalIcon, PencilIcon, TrashIcon, UserIcon } from '@heroicons/react/24/outline';
 
-import { type Activity, type Contact, type Deal, type Note, type Task, type UserReference } from '@/app/lib/types';
+import { type Activity, type Contact, type ContactLifecycleHistoryEntry, type ContactLifecycleStage, type Deal, type Note, type Task, type UserReference } from '@/app/lib/types';
 import { formatShortDate } from '@/app/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
@@ -29,24 +29,34 @@ import {
 export type TimelineEntry =
     | { kind: 'task'; sortAt: number; task: Task }
     | { kind: 'activity'; sortAt: number; activity: Activity }
-    | { kind: 'note'; sortAt: number; note: Note };
+    | { kind: 'note'; sortAt: number; note: Note }
+    | { kind: 'lifecycle'; sortAt: number; lifecycle: ContactLifecycleHistoryEntry };
 
 const CHIP_CLASS: Record<TimelineEntry['kind'], string> = {
     task: 'bg-brand-light text-brand-dark',
     activity: 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900',
     note: 'bg-neutral-200 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200',
+    lifecycle: 'bg-muted text-muted-foreground',
 };
 
-const CHIP_LABEL_KEY: Record<TimelineEntry['kind'], 'chipTask' | 'chipActivity' | 'chipNote'> = {
+const CHIP_LABEL_KEY: Record<TimelineEntry['kind'], 'chipTask' | 'chipActivity' | 'chipNote' | 'chipLifecycle'> = {
     task: 'chipTask',
     activity: 'chipActivity',
     note: 'chipNote',
+    lifecycle: 'chipLifecycle',
 };
 
 function entryDate(entry: TimelineEntry, locale: string): string {
     return entry.sortAt
         ? formatShortDate(new Date(entry.sortAt).toISOString(), locale)
         : '';
+}
+
+function lifecycleStageLabel(
+    stage: ContactLifecycleStage | null | undefined,
+    tl: (key: string) => string,
+): string {
+    return stage == null ? tl('stage.none') : tl(`stage.${stage}`);
 }
 
 export default function TimelineRow({
@@ -67,6 +77,7 @@ export default function TimelineRow({
     originWorkspaceId: number | null;
 }) {
     const t = useTranslations('MeTimeline');
+    const tl = useTranslations('ContactLifecycle');
     const locale = useLocale();
     const router = useRouter();
     const [editOpen, setEditOpen] = useState(false);
@@ -74,6 +85,7 @@ export default function TimelineRow({
     const searchParams = useSearchParams();
     const reduceMotion = useReducedMotion();
     const isHighlighted = entry.kind === 'note' && searchParams.get('note') === String(entry.note.id);
+    const isLifecycle = entry.kind === 'lifecycle';
     const noteOpen = editOpen && entry.kind === 'note';
     const personSearch = useContactTargetSearch(
         noteOpen,
@@ -100,7 +112,7 @@ export default function TimelineRow({
             } else if (entry.kind === 'activity') {
                 await deleteActivity(entry.activity.id);
                 toastSuccess(t('activityDeleted'));
-            } else {
+            } else if (entry.kind === 'note') {
                 await deleteNote(entry.note.id);
                 toastSuccess(t('noteDeleted'));
             }
@@ -166,6 +178,23 @@ export default function TimelineRow({
                 ) : null}
             </div>
         );
+    } else if (entry.kind === 'lifecycle') {
+        const { lifecycle } = entry;
+        title = (
+            <p className="text-sm text-foreground">
+                {tl('transition', {
+                    from: lifecycleStageLabel(lifecycle.fromStage, tl),
+                    to: lifecycleStageLabel(lifecycle.toStage, tl),
+                })}
+            </p>
+        );
+        const detail = [
+            lifecycle.reason != null ? tl(`reason.${lifecycle.reason}`) : null,
+            lifecycle.note ?? null,
+        ].filter((part): part is string => part !== null).join(' · ');
+        if (detail) {
+            subtitle = <p className="mt-0.5 text-xs text-muted-foreground">{detail}</p>;
+        }
     } else {
         title = (
             <p className="line-clamp-2 text-sm text-foreground">
@@ -206,7 +235,7 @@ export default function TimelineRow({
                 </div>
                 {subtitle}
             </div>
-            {entry.kind !== 'activity' || !isProviderOwnedActivity(entry.activity) ? (
+            {!isLifecycle && (entry.kind !== 'activity' || !isProviderOwnedActivity(entry.activity)) ? (
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon" className="rounded-full" aria-label={t('actionsAria')}>
