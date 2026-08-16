@@ -2222,6 +2222,7 @@ export function exportContactsCsv(params: Types.ContactsPageParams = {}, init: R
     const query = buildQuery({
         q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany,
         scope: params.scope, memberIds: params.memberIds,
+        lifecycleStages: params.lifecycleStages, noLifecycle: params.noLifecycle,
     });
     return downloadCsv(`/api/exports/persons${query}`, "contacts.csv", init);
 }
@@ -2361,7 +2362,9 @@ export function bulkChangeDealStage(ids: number[], stageId: number) {
 export function getContactIds(params: Types.ContactsPageParams = {}, init: RequestInit = {}) {
     const query = buildQuery({
         q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany,
-        scope: params.scope, memberIds: params.memberIds, archived: params.archived,
+        scope: params.scope, memberIds: params.memberIds,
+        lifecycleStages: params.lifecycleStages, noLifecycle: params.noLifecycle,
+        archived: params.archived,
     });
     return getJson<number[]>(`/api/persons/ids${query}`, init);
 }
@@ -2766,6 +2769,29 @@ export async function uploadContactPicture(contactId: number, file: File, init: 
 
 export function updateContactEvaluation(id: number, payload: Types.UpdateContactEvaluationPayload) {
     return putJson<Types.Contact>(`/api/persons/${id}/evaluation`, payload);
+}
+
+/** The contact's current lead-lifecycle state and the moves it may make next (issue #559). */
+export function getContactLifecycle(id: number, init: RequestInit = {}) {
+    return getJson<Types.ContactLifecycle>(`/api/persons/${id}/lifecycle`, init);
+}
+
+/** Moves a contact to a lead-lifecycle stage (issue #559). */
+export function updateContactLifecycle(id: number, payload: Types.UpdateContactLifecyclePayload) {
+    return putJson<Types.ContactLifecycle>(`/api/persons/${id}/lifecycle`, payload);
+}
+
+/**
+ * Withdraws a contact from the lead lifecycle. Deliberately a separate call from
+ * {@link updateContactLifecycle} so an omitted stage can never erase the lifecycle by accident, and
+ * the note travels in the body so it never lands in a URL or an access log.
+ */
+export function withdrawContactLifecycle(id: number, note?: string) {
+    return postJson<Types.ContactLifecycle>(`/api/persons/${id}/lifecycle/withdrawal`, { note: note ?? null });
+}
+
+export function getContactLifecycleHistory(id: number, init: RequestInit = {}) {
+    return getJson<Types.ContactLifecycleHistoryEntry[]>(`/api/persons/${id}/lifecycle/history`, init);
 }
 
 export function getContactTags(id: number, init: RequestInit = {}) {

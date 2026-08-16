@@ -375,5 +375,49 @@
         "save": "Save",
         "toastSaved": "Restrictions updated.",
         "toastFailed": "Restrictions could not be updated."
+    },
+    "ContactLifecycle": {
+        "title": "Lead lifecycle",
+        "notInLifecycle": "Not in a lead lifecycle. This contact is a relationship, not an open prospect.",
+        "changedAt": "Since {when}",
+        "reasonLine": "Reason: {reason}",
+        "startAction": "Start",
+        "changeAction": "Change",
+        "transition": "{from} → {to}",
+        "dialogTitle": "Move this contact",
+        "dialogDescription": "Only the moves this contact can legally make are offered. Every change is recorded in its lifecycle history.",
+        "stageLabel": "Stage",
+        "stagePlaceholder": "Choose a stage",
+        "withdrawOption": "Remove from the lifecycle",
+        "withdrawHint": "Clears the stage, reason, and notes. The history is kept.",
+        "reasonLabel": "Disqualification reason",
+        "reasonPlaceholder": "Choose a reason",
+        "noteLabel": "Note",
+        "notePlaceholder": "What changed, and why?",
+        "cancel": "Cancel",
+        "save": "Save",
+        "toastSaved": "Lifecycle updated.",
+        "toastFailed": "Couldn't update the lifecycle.",
+        "stage": {
+            "none": "No stage",
+            "NEW": "New",
+            "WORKING": "Working",
+            "NURTURING": "Nurturing",
+            "QUALIFIED": "Qualified",
+            "DISQUALIFIED": "Disqualified",
+            "CONVERTED": "Converted",
+            "RECYCLED": "Recycled"
+        },
+        "reason": {
+            "NO_BUDGET": "No budget",
+            "NO_FIT": "Not a fit",
+            "NO_AUTHORITY": "No route to a decision maker",
+            "BAD_TIMING": "Wrong timing",
+            "COMPETITOR": "Went with a competitor",
+            "DUPLICATE": "Duplicate",
+            "UNRESPONSIVE": "Unresponsive",
+            "SPAM": "Not a genuine inquiry",
+            "OTHER": "Other"
+        }
     }
 }

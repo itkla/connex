@@ -1,4 +1,4 @@
-import { getAttachmentsFromCookie, getContactById, getContactConnections, getContactEmployment, getContactEvidence, getContactIntroPath, getContextNotifications, getCurrentUserResultFromCookie, getEffectivePermissionsFromCookie, getEntityCustomFieldsFromCookie, getTags, getUserReferences } from "@/app/lib/api";
+import { getAttachmentsFromCookie, getContactById, getContactLifecycle, getContactConnections, getContactEmployment, getContactEvidence, getContactIntroPath, getContextNotifications, getCurrentUserResultFromCookie, getEffectivePermissionsFromCookie, getEntityCustomFieldsFromCookie, getTags, getUserReferences } from "@/app/lib/api";
 import { notFound, redirect } from "next/navigation";
 import AccessDeniedPage from "@/app/components/AccessDeniedPage";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
@@ -29,6 +29,7 @@ import Timeline from "@/app/components/me/Timeline";
 import Attachments from "@/app/components/attachments/Attachments";
 import CommentsSection from "@/app/components/records/comments/CommentsSection";
 import CustomFieldRows from "@/app/components/records/CustomFieldRows";
+import ContactLifecyclePanel from "@/app/components/records/contacts/ContactLifecyclePanel";
 import EngineEvaluationPanel from "@/app/components/records/EngineEvaluationPanel";
 import RecordDetailSection from "@/app/components/records/RecordDetailSection";
 import { formatCompactCurrency, formatDate, formatDateTime, formatShortDate } from "@/app/lib/utils";
@@ -55,7 +56,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
         redirect('/auth/login');
     }
 
-    const [t, locale, contactAccess, allTags, attachments, notificationPage, employment, connections, introPath, customFields, evidence, effectivePermissions] = await Promise.all([
+    const [t, locale, contactAccess, allTags, attachments, notificationPage, employment, connections, introPath, customFields, evidence, effectivePermissions, lifecycle] = await Promise.all([
         getTranslations("ContactsPage"),
         getLocale(),
         loadRecord<Contact>(() => getContactById(id, init)),
@@ -73,6 +74,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
         getEntityCustomFieldsFromCookie("person", id, cookie),
         getContactEvidence(id, init).catch(() => null),
         getEffectivePermissionsFromCookie(cookie),
+        getContactLifecycle(id, init).catch(() => null),
     ]);
     if (contactAccess.kind === "forbidden") {
         return <AccessDeniedPage />;
@@ -276,6 +278,14 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                 </div>
                             ) : null}
                         </RecordDetailSection>
+
+                        {ownsContact && lifecycle ? (
+                            <ContactLifecyclePanel
+                                contactId={contact.id}
+                                lifecycle={lifecycle}
+                                className="mt-0"
+                            />
+                        ) : null}
 
                         {ownsContact ? (
                             <EngineEvaluationPanel

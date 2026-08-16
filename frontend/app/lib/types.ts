@@ -19,6 +19,10 @@ export type ContactsPageParams = PageParams & MemberScopeParams & {
     companies?: string[];
     titles?: string[];
     noCompany?: boolean;
+    /** Lead-lifecycle stages to include (issue #559). */
+    lifecycleStages?: ContactLifecycleStage[];
+    /** Includes contacts that are not in a lead lifecycle at all (issue #559). */
+    noLifecycle?: boolean;
     /** Selects the archived contacts instead of the active ones (issue #854). */
     archived?: boolean;
 };
@@ -214,6 +218,11 @@ export type PersonFacets = {
     owners: FacetCount[];
     /** How many contacts the workspace currently holds archived (issue #854). */
     archivedCount: number;
+    /**
+     * How many active contacts sit in each lead-lifecycle stage (issue #559). Contacts outside the
+     * lifecycle are counted under the `__none__` key.
+     */
+    lifecycleStages: FacetCount[];
 };
 
 export type CompanyFacets = {
@@ -1134,6 +1143,69 @@ export type Contact = {
     provisionCeasedAt?: string | null;
     /** Set while the contact is archived (issue #854); read-only, cleared by restore. */
     archivedAt?: string | null;
+    /**
+     * Lead lifecycle (issue #559); read-only, set through the lifecycle endpoints. A null or
+     * absent stage means the contact is not in a lead lifecycle — it is a relationship, not a
+     * prospect — and is not the same as being at the start of one.
+     */
+    lifecycleStage?: ContactLifecycleStage | null;
+    lifecycleChangedAt?: string | null;
+    disqualifiedReason?: ContactDisqualificationReason | null;
+    qualificationNotes?: string | null;
+};
+
+/** The closed lead-lifecycle vocabulary a contact can hold (issue #559). */
+export type ContactLifecycleStage =
+    | 'NEW'
+    | 'WORKING'
+    | 'NURTURING'
+    | 'QUALIFIED'
+    | 'DISQUALIFIED'
+    | 'CONVERTED'
+    | 'RECYCLED';
+
+/** Why a contact was disqualified from its lead lifecycle (issue #559). */
+export type ContactDisqualificationReason =
+    | 'NO_BUDGET'
+    | 'NO_FIT'
+    | 'NO_AUTHORITY'
+    | 'BAD_TIMING'
+    | 'COMPETITOR'
+    | 'DUPLICATE'
+    | 'UNRESPONSIVE'
+    | 'SPAM'
+    | 'OTHER';
+
+/**
+ * A contact's current lifecycle state plus the stages it may move to next. The server owns the
+ * transition rules, so the client renders `allowedTransitions` rather than recomputing them.
+ */
+export type ContactLifecycle = {
+    personId: number | null;
+    stage: ContactLifecycleStage | null;
+    changedAt: string | null;
+    disqualifiedReason: ContactDisqualificationReason | null;
+    qualificationNotes: string | null;
+    allowedTransitions: ContactLifecycleStage[];
+};
+
+/** One entry of a contact's append-only lifecycle timeline (issue #559). */
+export type ContactLifecycleHistoryEntry = {
+    id: number;
+    personId: number;
+    fromStage: ContactLifecycleStage | null;
+    toStage: ContactLifecycleStage | null;
+    reason: ContactDisqualificationReason | null;
+    note: string | null;
+    changedById: number | null;
+    changedAt: string;
+};
+
+/** A requested lifecycle move. Withdrawal is a separate delete, never an omitted stage. */
+export type UpdateContactLifecyclePayload = {
+    stage: ContactLifecycleStage;
+    reason?: ContactDisqualificationReason | null;
+    note?: string | null;
 };
 
 export type DataSubjectRequestType = 'disclosure' | 'correction' | 'cease_use' | 'cease_provision';

@@ -50,13 +50,14 @@ import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompany
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
 import { updateContact, createContact, importBusinessCard, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkArchiveContacts, bulkRestoreContacts, bulkAssignPersonOwner, getActiveWorkspaceMembers, getContactIds, exportContactsCsv, isFieldError, uploadContactPicture } from '@/app/lib/api';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
-import { type BusinessCardImportDraft, type Contact, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag, type WorkspaceMember } from '@/app/lib/types';
+import { type BusinessCardImportDraft, type Contact, type ContactLifecycleStage, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag, type WorkspaceMember } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
 import CommentIndicatorChip from '@/app/components/records/comments/CommentIndicatorChip';
 import { useCommentIndicators } from '@/app/hooks/useCommentIndicators';
 import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
+import { LIFECYCLE_NONE_KEY, LIFECYCLE_STAGES, asLifecycleStage } from '@/app/lib/contactLifecycle';
 import {
     recordDetailNavigationPath,
     recordDetailPath,
@@ -98,6 +99,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
     const t = useTranslations('ContactsBrowser');
     const tf = useTranslations('Filters');
     const ts = useTranslations('MemberScope');
+    const tl = useTranslations('ContactLifecycle');
     const reduce = useReducedMotion() ?? false;
     const {
         displayMode,
@@ -122,11 +124,17 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
     const filterParams = useMemo(() => {
         const company = filterState.company ?? [];
         const titles = filterState.title ?? [];
+        const lifecycle = filterState.lifecycle ?? [];
         const companies = company.filter((k) => k !== FILTER_EMPTY);
-        const params: { companies?: string[]; titles?: string[]; noCompany?: boolean; scope?: 'me' | 'members' | 'unassigned'; memberIds?: number[]; archived?: boolean } = {};
+        const stages = lifecycle
+            .map((key) => asLifecycleStage(key))
+            .filter((stage): stage is ContactLifecycleStage => stage !== null);
+        const params: { companies?: string[]; titles?: string[]; noCompany?: boolean; scope?: 'me' | 'members' | 'unassigned'; memberIds?: number[]; lifecycleStages?: ContactLifecycleStage[]; noLifecycle?: boolean; archived?: boolean } = {};
         if (companies.length) params.companies = companies;
         if (titles.length) params.titles = titles;
         if (company.includes(FILTER_EMPTY)) params.noCompany = true;
+        if (stages.length) params.lifecycleStages = stages;
+        if (lifecycle.includes(FILTER_EMPTY)) params.noLifecycle = true;
         if (ownerScope.mode !== 'all') params.scope = ownerScope.mode;
         if (ownerScope.mode === 'members') params.memberIds = ownerScope.memberIds;
         if (showArchived) params.archived = true;
@@ -231,8 +239,20 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         if (companyOptions.length) out.push({ key: 'company', label: t('columnCompany'), options: companyOptions });
         const titleOptions = personFacets.titles.map((ti) => ({ key: ti, label: ti }));
         if (titleOptions.length) out.push({ key: 'title', label: t('columnTitle'), options: titleOptions });
+        const lifecycleCounts = new Map(
+            (personFacets.lifecycleStages ?? []).map((facet) => [facet.key, facet.count]),
+        );
+        const lifecycleOptions = LIFECYCLE_STAGES
+            .filter((stage) => (lifecycleCounts.get(stage) ?? 0) > 0)
+            .map((stage) => ({ key: stage as string, label: tl(`stage.${stage}`) }));
+        if ((lifecycleCounts.get(LIFECYCLE_NONE_KEY) ?? 0) > 0) {
+            lifecycleOptions.push({ key: FILTER_EMPTY, label: tl('stage.none') });
+        }
+        if (lifecycleOptions.length) {
+            out.push({ key: 'lifecycle', label: tl('title'), options: lifecycleOptions });
+        }
         return out;
-    }, [personFacets, t]);
+    }, [personFacets, t, tl]);
 
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
     useEffect(() => { getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([])); }, []);

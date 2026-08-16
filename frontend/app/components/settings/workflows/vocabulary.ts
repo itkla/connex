@@ -10,7 +10,7 @@ export const RECORD_TYPES = ["deal", "company", "person", "task"];
 export const EVENTS: Record<string, string[]> = {
     deal: ["deal.created", "deal.stage_changed", "deal.updated", "deal.won", "deal.lost", "deal.owner_changed", "deal.value_changed"],
     company: ["company.created", "company.updated", "company.owner_changed"],
-    person: ["person.created", "person.updated", "person.job_changed", "person.owner_changed"],
+    person: ["person.created", "person.updated", "person.job_changed", "person.owner_changed", "person.lifecycle_changed"],
     task: ["task.created", "task.completed"],
 };
 

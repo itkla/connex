@@ -375,5 +375,49 @@
         "save": "保存",
         "toastSaved": "取扱い制限を更新しました。",
         "toastFailed": "取扱い制限を更新できませんでした。"
+    },
+    "ContactLifecycle": {
+        "title": "リードライフサイクル",
+        "notInLifecycle": "リードライフサイクルに含まれていません。この連絡先は商談候補ではなく、関係先です。",
+        "changedAt": "{when} から",
+        "reasonLine": "理由：{reason}",
+        "startAction": "開始",
+        "changeAction": "変更",
+        "transition": "{from} → {to}",
+        "dialogTitle": "この連絡先を移動",
+        "dialogDescription": "この連絡先が実際に移動できる段階のみを表示しています。変更はすべてライフサイクル履歴に記録されます。",
+        "stageLabel": "段階",
+        "stagePlaceholder": "段階を選択",
+        "withdrawOption": "ライフサイクルから外す",
+        "withdrawHint": "段階・理由・メモを消去します。履歴は保持されます。",
+        "reasonLabel": "失注理由",
+        "reasonPlaceholder": "理由を選択",
+        "noteLabel": "メモ",
+        "notePlaceholder": "何がどう変わったかを記録します",
+        "cancel": "キャンセル",
+        "save": "保存",
+        "toastSaved": "ライフサイクルを更新しました。",
+        "toastFailed": "ライフサイクルを更新できませんでした。",
+        "stage": {
+            "none": "段階なし",
+            "NEW": "新規",
+            "WORKING": "対応中",
+            "NURTURING": "育成中",
+            "QUALIFIED": "有望",
+            "DISQUALIFIED": "対象外",
+            "CONVERTED": "商談化",
+            "RECYCLED": "再検討"
+        },
+        "reason": {
+            "NO_BUDGET": "予算なし",
+            "NO_FIT": "適合しない",
+            "NO_AUTHORITY": "決裁者に到達できない",
+            "BAD_TIMING": "時期が合わない",
+            "COMPETITOR": "競合他社に決定",
+            "DUPLICATE": "重複",
+            "UNRESPONSIVE": "反応なし",
+            "SPAM": "正規の問い合わせではない",
+            "OTHER": "その他"
+        }
     }
 }
