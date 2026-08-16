@@ -46,6 +46,9 @@ public class Person {
     private LocalDateTime lifecycleChangedAt;
     private PersonDisqualificationReason disqualifiedReason;
     private String qualificationNotes;
+    private PersonLeadSource leadSource;
+    private String leadSourceDetail;
+    private Integer referrerPersonId;
 
     public int getId() {
         return id;

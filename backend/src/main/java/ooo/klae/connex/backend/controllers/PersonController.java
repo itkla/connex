@@ -16,6 +16,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.PersonLeadSource;
 import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.util.LikePattern;
 import ooo.klae.connex.backend.util.PageBounds;
@@ -45,6 +46,7 @@ import ooo.klae.connex.backend.dto.PersonLifecycleDto;
 import ooo.klae.connex.backend.dto.PersonLifecycleHistoryDto;
 import ooo.klae.connex.backend.dto.PersonLifecycleRequest;
 import ooo.klae.connex.backend.dto.PersonLifecycleWithdrawalRequest;
+import ooo.klae.connex.backend.dto.PersonProvenanceRequest;
 import ooo.klae.connex.backend.dto.PersonOwnerDto;
 import ooo.klae.connex.backend.dto.PersonRestrictionsDto;
 import ooo.klae.connex.backend.dto.TagDto;
@@ -141,6 +143,8 @@ public class PersonController {
         @RequestParam(required = false) List<Integer> memberIds,
         @RequestParam(required = false) List<PersonLifecycleStage> lifecycleStages,
         @RequestParam(defaultValue = "false") boolean noLifecycle,
+        @RequestParam(required = false) List<PersonLeadSource> leadSources,
+        @RequestParam(defaultValue = "false") boolean noLeadSource,
         @RequestParam(defaultValue = "false") boolean archived
     ) {
         if (WARMTH_SORT.equalsIgnoreCase(sort)) {
@@ -150,10 +154,12 @@ public class PersonController {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
         List<PersonDto> items = personService.getPersonsPage(query, sort, dir, companies, titles, noCompany,
-            memberScope, lifecycleStages, noLifecycle, archived, bounds.size(), bounds.offset())
+            memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource, archived,
+            bounds.size(), bounds.offset())
             .stream().map(PersonDto::from).toList();
         return new PageResponse<>(items, personService.countPersons(
-            query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle, archived));
+            query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
+            leadSources, noLeadSource, archived));
     }
 
     /**
@@ -176,6 +182,8 @@ public class PersonController {
         @RequestParam(required = false) List<Integer> memberIds,
         @RequestParam(required = false) List<PersonLifecycleStage> lifecycleStages,
         @RequestParam(defaultValue = "false") boolean noLifecycle,
+        @RequestParam(required = false) List<PersonLeadSource> leadSources,
+        @RequestParam(defaultValue = "false") boolean noLeadSource,
         @RequestParam(defaultValue = "false") boolean archived
     ) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
@@ -187,11 +195,14 @@ public class PersonController {
             && !noCompany
             && (lifecycleStages == null || lifecycleStages.isEmpty())
             && !noLifecycle
+            && (leadSources == null || leadSources.isEmpty())
+            && !noLeadSource
             && memberScope.mode() == MemberScope.Mode.ALL_TEAM) {
             throw new BadRequestException("At least one filter is required before selecting matching contact ids");
         }
         return personService.getMatchingPersonIds(
-            query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle, archived);
+            query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
+            leadSources, noLeadSource, archived);
     }
 
     /**
@@ -207,7 +218,8 @@ public class PersonController {
             personService.hasPersonWithoutCompany(),
             personService.countsByOwner(),
             personService.countArchivedPersons(),
-            personService.countsByLifecycleStage()
+            personService.countsByLifecycleStage(),
+            personService.countsByLeadSource()
         );
     }
 
@@ -292,6 +304,20 @@ public class PersonController {
     public PersonDto updateRestrictions(@PathVariable int id, @Valid @RequestBody PersonRestrictionsDto dto) {
         return PersonDto.from(personService.updateProcessingRestrictions(
             id, dto.getSuspended(), dto.getProvisionCeased()));
+    }
+
+    /**
+     * PUT endpoint to replace the contact's source provenance (#559). A body with every field null
+     * clears it, recording that the origin is unknown.
+     * @param id contact id
+     * @param request requested provenance
+     * @return the updated contact
+     */
+    @PutMapping("/{id}/provenance")
+    public PersonDto updateProvenance(
+            @PathVariable int id, @Valid @RequestBody PersonProvenanceRequest request) {
+        return PersonDto.from(personService.updateProvenance(
+            id, request.getLeadSource(), request.getLeadSourceDetail(), request.getReferrerPersonId()));
     }
 
     /**

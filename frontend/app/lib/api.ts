@@ -2223,6 +2223,7 @@ export function exportContactsCsv(params: Types.ContactsPageParams = {}, init: R
         q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany,
         scope: params.scope, memberIds: params.memberIds,
         lifecycleStages: params.lifecycleStages, noLifecycle: params.noLifecycle,
+        leadSources: params.leadSources, noLeadSource: params.noLeadSource,
     });
     return downloadCsv(`/api/exports/persons${query}`, "contacts.csv", init);
 }
@@ -2364,6 +2365,7 @@ export function getContactIds(params: Types.ContactsPageParams = {}, init: Reque
         q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany,
         scope: params.scope, memberIds: params.memberIds,
         lifecycleStages: params.lifecycleStages, noLifecycle: params.noLifecycle,
+        leadSources: params.leadSources, noLeadSource: params.noLeadSource,
         archived: params.archived,
     });
     return getJson<number[]>(`/api/persons/ids${query}`, init);
@@ -2769,6 +2771,11 @@ export async function uploadContactPicture(contactId: number, file: File, init: 
 
 export function updateContactEvaluation(id: number, payload: Types.UpdateContactEvaluationPayload) {
     return putJson<Types.Contact>(`/api/persons/${id}/evaluation`, payload);
+}
+
+/** Replaces a contact's source provenance (issue #559); an all-null body clears it. */
+export function updateContactProvenance(id: number, payload: Types.UpdateContactProvenancePayload) {
+    return putJson<Types.Contact>(`/api/persons/${id}/provenance`, payload);
 }
 
 /** The contact's current lead-lifecycle state and the moves it may make next (issue #559). */

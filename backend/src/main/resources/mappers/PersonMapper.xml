@@ -23,6 +23,9 @@
     <result property="lifecycleChangedAt" column="lifecycle_changed_at"/>
     <result property="disqualifiedReason" column="disqualified_reason"/>
     <result property="qualificationNotes" column="qualification_notes"/>
+    <result property="leadSource" column="lead_source"/>
+    <result property="leadSourceDetail" column="lead_source_detail"/>
+    <result property="referrerPersonId" column="referrer_person_id"/>
     <association property="company" javaType="Company" notNullColumn="company_id">
       <id property="id" column="company_id"/>
       <result property="name" column="company_name"/>
@@ -41,14 +44,18 @@
     <include refid="lifecycleColumns"/>
   </sql>
 
-  <!-- The lead lifecycle is the owning workspace's own pipeline assessment, including free-text
-       qualification notes. A workspace that merely has the contact shared in must not read it, so
-       every projection nulls these columns for rows it does not own. -->
+  <!-- The lead lifecycle and source provenance are the owning workspace's own assessment of the
+       relationship, including free-text notes and the referring contact. A workspace that merely
+       has the contact shared in must not read them, so every projection nulls these columns for
+       rows it does not own. -->
   <sql id="lifecycleColumns">
     CASE WHEN p.workspace_id = #{workspaceId} THEN p.lifecycle_stage END AS lifecycle_stage,
     CASE WHEN p.workspace_id = #{workspaceId} THEN p.lifecycle_changed_at END AS lifecycle_changed_at,
     CASE WHEN p.workspace_id = #{workspaceId} THEN p.disqualified_reason END AS disqualified_reason,
-    CASE WHEN p.workspace_id = #{workspaceId} THEN p.qualification_notes END AS qualification_notes
+    CASE WHEN p.workspace_id = #{workspaceId} THEN p.qualification_notes END AS qualification_notes,
+    CASE WHEN p.workspace_id = #{workspaceId} THEN p.lead_source END AS lead_source,
+    CASE WHEN p.workspace_id = #{workspaceId} THEN p.lead_source_detail END AS lead_source_detail,
+    CASE WHEN p.workspace_id = #{workspaceId} THEN p.referrer_person_id END AS referrer_person_id
   </sql>
 
   <sql id="companyJoinColumns">
@@ -546,6 +553,18 @@
           </trim>
         )
       </if>
+      <if test="(leadSources != null and leadSources.size() > 0) or noLeadSource">
+        AND p.workspace_id = #{workspaceId}
+        AND (
+          <trim prefixOverrides="OR ">
+            <if test="leadSources != null and leadSources.size() > 0">
+              p.lead_source IN
+              <foreach item="src" collection="leadSources" open="(" separator="," close=")">#{src}</foreach>
+            </if>
+            <if test="noLeadSource">OR p.lead_source IS NULL</if>
+          </trim>
+        )
+      </if>
     </where>
   </sql>
 
@@ -704,7 +723,8 @@
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO person (workspace_id, owner_id, name, email, phone, company_id, title, image_url, created_at)
+    INSERT INTO person (workspace_id, owner_id, name, email, phone, company_id, title, image_url,
+                        lead_source, lead_source_detail, referrer_person_id, created_at)
     VALUES (
       #{workspaceId}, #{ownerId,jdbcType=INTEGER}, #{name}, #{email}, #{phone},
       <choose>
@@ -713,17 +733,23 @@
       </choose>,
       #{title},
       #{imageUrl},
+      #{leadSource,jdbcType=VARCHAR},
+      #{leadSourceDetail,jdbcType=VARCHAR},
+      #{referrerPersonId,jdbcType=INTEGER},
       COALESCE(#{createdAt}, CURRENT_TIMESTAMP)
     )
   </insert>
 
   <insert id="insertBatch" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO person (workspace_id, owner_id, name, email, phone, company_id, title, image_url)
+    INSERT INTO person (workspace_id, owner_id, name, email, phone, company_id, title, image_url,
+                        lead_source, lead_source_detail, referrer_person_id)
     VALUES
     <foreach collection="list" item="p" separator=",">
       (#{p.workspaceId}, #{p.ownerId,jdbcType=INTEGER}, #{p.name}, #{p.email}, #{p.phone},
        <choose><when test="p.company != null">#{p.company.id}</when><otherwise>NULL</otherwise></choose>,
-       #{p.title}, #{p.imageUrl})
+       #{p.title}, #{p.imageUrl},
+       #{p.leadSource,jdbcType=VARCHAR}, #{p.leadSourceDetail,jdbcType=VARCHAR},
+       #{p.referrerPersonId,jdbcType=INTEGER})
     </foreach>
   </insert>
 
@@ -778,6 +804,22 @@
         END
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
+
+  <update id="updateProvenance">
+    UPDATE person
+    SET lead_source = #{source,jdbcType=VARCHAR},
+        lead_source_detail = #{detail,jdbcType=VARCHAR},
+        referrer_person_id = #{referrerPersonId,jdbcType=INTEGER}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <select id="countsByLeadSource" resultType="ooo.klae.connex.backend.dto.FacetCount">
+    SELECT COALESCE(p.lead_source, '__none__') AS `key`,
+           COUNT(*) AS count, NULL AS label
+    FROM person p
+    WHERE p.workspace_id = #{workspaceId} AND p.archived_at IS NULL
+    GROUP BY p.lead_source
+  </select>
 
   <update id="updateLifecycle">
     UPDATE person

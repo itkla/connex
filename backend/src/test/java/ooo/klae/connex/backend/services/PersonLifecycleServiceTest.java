@@ -230,7 +230,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
             () -> lifecycleService.getHistory(person.getId()));
 
         assertEquals(0L, personService.countPersons(null, null, null, false,
-            MemberScope.allTeam(), List.of(PersonLifecycleStage.DISQUALIFIED), false, false));
+            MemberScope.allTeam(), List.of(PersonLifecycleStage.DISQUALIFIED), false, null, false, false));
     }
 
     @Test
@@ -272,19 +272,19 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
         Person unstaged = newPerson(company);
 
         List<Integer> working = personService.getPersonsPage(null, null, null, null, null, false,
-                MemberScope.allTeam(), List.of(PersonLifecycleStage.NEW), false, false, 100, 0)
+                MemberScope.allTeam(), List.of(PersonLifecycleStage.NEW), false, null, false, false, 100, 0)
             .stream().map(Person::getId).toList();
         assertTrue(working.contains(staged.getId()));
         assertTrue(!working.contains(unstaged.getId()));
 
         List<Integer> outside = personService.getPersonsPage(null, null, null, null, null, false,
-                MemberScope.allTeam(), null, true, false, 100, 0)
+                MemberScope.allTeam(), null, true, null, false, false, 100, 0)
             .stream().map(Person::getId).toList();
         assertTrue(outside.contains(unstaged.getId()));
         assertTrue(!outside.contains(staged.getId()));
 
         assertEquals(1L, personService.countPersons(null, null, null, false,
-            MemberScope.allTeam(), List.of(PersonLifecycleStage.NEW), false, false));
+            MemberScope.allTeam(), List.of(PersonLifecycleStage.NEW), false, null, false, false));
 
         Map<String, Long> facets = personService.countsByLifecycleStage().stream()
             .collect(java.util.stream.Collectors.toMap(FacetCount::getKey, FacetCount::getCount));

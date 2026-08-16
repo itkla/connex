@@ -51,6 +51,9 @@ public class DataSubjectDisclosureDto {
         private LocalDateTime lifecycleChangedAt;
         private String disqualifiedReason;
         private String qualificationNotes;
+        private String leadSource;
+        private String leadSourceDetail;
+        private Integer referrerPersonId;
         private LocalDateTime createdAt;
         private LocalDateTime updatedAt;
     }
