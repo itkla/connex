@@ -1522,7 +1522,8 @@ export type DocumentApprovalStatus =
     | 'rejected'
     | 'cancelled'
     | 'invalidated'
-    | 'unsatisfiable';
+    | 'unsatisfiable'
+    | 'expired';
 
 /**
  * Why a request ended. `cancelled_legacy` only appears on rows written before outcome reasons
@@ -1536,6 +1537,7 @@ export type ApprovalOutcomeReason =
     | 'cancelled_by_admin'
     | 'policy_invalidated'
     | 'unsatisfiable'
+    | 'expired'
     | 'cancelled_legacy';
 
 /** How an approval chain runs: one step at a time, or every step at once. */
@@ -1550,13 +1552,17 @@ export type SeparationOfDuties = 'strict' | 'requester' | 'off';
 /** Whether a step is decided by named members or by anyone who can approve documents. */
 export type ApprovalApproverKind = 'user' | 'any_approver';
 
+/** What happens when an active approval step reaches its deadline. */
+export type ApprovalStepExpiryAction = 'expire' | 'escalate';
+
 export type ApprovalStepStatus =
     | 'pending'
     | 'active'
     | 'approved'
     | 'rejected'
     | 'cancelled'
-    | 'unsatisfiable';
+    | 'unsatisfiable'
+    | 'expired';
 
 export type ApprovalStepApprover = {
     approverKind: ApprovalApproverKind;
@@ -1573,6 +1579,30 @@ export type DocumentApprovalDecision = {
     decidedAt: string;
 };
 
+/** One delegation, escalation, or reassignment fact appended to a frozen approval step. */
+export type ApprovalStepAssignment = {
+    id: number;
+    assignmentKind: 'delegation' | 'escalation' | 'reassignment';
+    assignmentRound: number;
+    approverKind: ApprovalApproverKind;
+    userId?: number | null;
+    userDisplayName?: string | null;
+    delegatedByUserId?: number | null;
+    delegatedByDisplayName?: string | null;
+    createdByUserId?: number | null;
+    createdByDisplayName?: string | null;
+    comment?: string | null;
+    createdAt: string;
+};
+
+/** One server-authorized destination for delegating the current approval seat. */
+export type ApprovalDelegate = {
+    id: number;
+    username: string;
+    displayName?: string | null;
+    email: string;
+};
+
 /** One frozen step of an approval chain, with the approvals collected so far. */
 export type DocumentApprovalStep = {
     id: number;
@@ -1582,9 +1612,17 @@ export type DocumentApprovalStep = {
     approvedCount: number;
     status: ApprovalStepStatus;
     decidedAt?: string | null;
+    dueIntervalHours?: number | null;
+    onExpiry: ApprovalStepExpiryAction;
+    activatedAt?: string | null;
+    dueAt?: string | null;
+    escalatedAt?: string | null;
     satisfiable: boolean;
     unsatisfiableReason?: string | null;
+    effectiveAnyApprover: boolean;
+    effectiveApproverIds: number[];
     approvers: ApprovalStepApprover[];
+    assignments: ApprovalStepAssignment[];
     decisions: DocumentApprovalDecision[];
 };
 
@@ -1614,7 +1652,28 @@ export type ApprovalPolicyStep = {
     id?: number;
     name?: string | null;
     requiredCount: number;
+    dueIntervalHours?: number | null;
+    onExpiry: ApprovalStepExpiryAction;
     approvers: ApprovalStepApprover[];
+};
+
+/** One workspace-scoped approval step the caller can still decide. */
+export type ApprovalInboxItem = {
+    approvalId: number;
+    dealId: number;
+    dealName: string;
+    documentId: number;
+    documentTitle: string;
+    documentType: DocumentType;
+    version: number;
+    stepId: number;
+    stepOrder: number;
+    stepName?: string | null;
+    requiredCount: number;
+    dueAt?: string | null;
+    escalated: boolean;
+    requestedBy?: number | null;
+    requestedAt: string;
 };
 
 /** Declares when a generated document requires internal approval before finalization. */

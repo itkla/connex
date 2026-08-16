@@ -70,8 +70,12 @@ public class ApprovalPolicyService {
         "name", "active", "documentType", "currency", "minTotal", "minDiscountPercent",
         "mode", "separationOfDuties");
     private static final String ANY_APPROVER = "any_approver";
+    private static final String EXPIRE = "expire";
+    private static final String ESCALATE = "escalate";
     private static final String FORMER_MEMBER = "Former member";
     private static final int IMPACT_ITEM_LIMIT = 20;
+    private static final int MIN_DUE_INTERVAL_HOURS = 1;
+    private static final int MAX_DUE_INTERVAL_HOURS = 8760;
 
     public List<ApprovalPolicy> getAll() {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -192,9 +196,10 @@ public class ApprovalPolicyService {
      * ascending order; proposed document type, normalized currency, canonical minimum total,
      * canonical minimum discount percent, normalized mode, normalized separation of duties, and
      * step count; then each step in submitted order with its id, name, normalized required count,
-     * and approver count; then that step's approvers ordered by kind and nullable user id, each as
-     * kind followed by user id. Decimal tokens use {@link BigDecimal#stripTrailingZeros()} and plain
-     * notation, so numerically equal values have one representation.
+     * nullable due interval, normalized expiry behaviour, and approver count; then that step's
+     * approvers ordered by kind and nullable user id, each as kind followed by user id. Decimal
+     * tokens use {@link BigDecimal#stripTrailingZeros()} and plain notation, so numerically equal
+     * values have one representation.
      */
     private String impactFingerprint(ApprovalPolicy persisted, ApprovalPolicy proposed,
             List<Integer> pendingApprovalIds) {
@@ -204,7 +209,7 @@ public class ApprovalPolicyService {
             throw new IllegalStateException("Persisted approval policy updated_at is missing");
         }
         StringBuilder input = new StringBuilder();
-        appendFingerprintToken(input, "approval-impact-v2");
+        appendFingerprintToken(input, "approval-impact-v3");
         appendFingerprintToken(input, Integer.toString(persisted.getId()));
         appendFingerprintToken(input, updatedAt);
         List<Integer> sortedPendingIds = pendingApprovalIds.stream().sorted().toList();
@@ -222,6 +227,9 @@ public class ApprovalPolicyService {
             appendFingerprintToken(input, Integer.toString(step.getId()));
             appendFingerprintToken(input, step.getName());
             appendFingerprintToken(input, Integer.toString(step.getRequiredCount()));
+            appendFingerprintToken(input, step.getDueIntervalHours() == null
+                ? null : Integer.toString(step.getDueIntervalHours()));
+            appendFingerprintToken(input, step.getOnExpiry());
             List<ApprovalStepApprover> approvers = step.getApprovers().stream()
                 .sorted(Comparator
                     .comparing(ApprovalStepApprover::getApproverKind,
@@ -376,6 +384,9 @@ public class ApprovalPolicyService {
             if (step.getRequiredCount() < 1) {
                 step.setRequiredCount(1);
             }
+            if (step.getOnExpiry() == null || step.getOnExpiry().isBlank()) {
+                step.setOnExpiry(EXPIRE);
+            }
         });
     }
 
@@ -410,7 +421,8 @@ public class ApprovalPolicyService {
     /**
      * Refuses a chain that could never complete: an unknown approver, an approver who cannot hold
      * {@link Permission#DOCUMENT_APPROVE}, a step mixing named approvers with {@code any_approver},
-     * or a quorum larger than the number of members who could satisfy it today.
+     * a quorum larger than the number of members who could satisfy it today, an out-of-range due
+     * interval, or an {@code escalate} step with no deadline to escalate at.
      */
     private void validateChain(ApprovalPolicy policy) {
         List<ApprovalPolicyStep> steps = policy.getSteps();
@@ -424,9 +436,14 @@ public class ApprovalPolicyService {
                 .contains(Permission.DOCUMENT_APPROVE))
             .collect(Collectors.toSet());
         for (ApprovalPolicyStep step : steps) {
+            validateDeadline(step);
             List<ApprovalStepApprover> approvers = step.getApprovers();
             boolean anyApprover = approvers.stream()
                 .anyMatch(approver -> ANY_APPROVER.equals(approver.getApproverKind()));
+            if (anyApprover && ESCALATE.equals(step.getOnExpiry())) {
+                throw new BadRequestException("Step \"" + stepLabel(step)
+                    + "\" cannot escalate because it is already open to any approver");
+            }
             if (anyApprover && approvers.size() > 1) {
                 throw new BadRequestException(
                     "A step set to any approver cannot also name individual approvers");
@@ -456,6 +473,18 @@ public class ApprovalPolicyService {
         }
     }
 
+    private void validateDeadline(ApprovalPolicyStep step) {
+        Integer hours = step.getDueIntervalHours();
+        if (hours != null && (hours < MIN_DUE_INTERVAL_HOURS || hours > MAX_DUE_INTERVAL_HOURS)) {
+            throw new BadRequestException("Step \"" + stepLabel(step) + "\" must be due between "
+                + MIN_DUE_INTERVAL_HOURS + " and " + MAX_DUE_INTERVAL_HOURS + " hours after it opens");
+        }
+        if (ESCALATE.equals(step.getOnExpiry()) && hours == null) {
+            throw new BadRequestException("Step \"" + stepLabel(step)
+                + "\" can only escalate when it has a due interval");
+        }
+    }
+
     private String stepLabel(ApprovalPolicyStep step) {
         return step.getName() == null || step.getName().isBlank() ? "unnamed" : step.getName();
     }
@@ -473,7 +502,9 @@ public class ApprovalPolicyService {
             + "(" + step.getApprovers().stream()
                 .map(approver -> ANY_APPROVER.equals(approver.getApproverKind())
                     ? ANY_APPROVER : String.valueOf(approver.getUserId()))
-                .collect(Collectors.joining(",")) + ")")
+                .collect(Collectors.joining(",")) + ")"
+            + (step.getDueIntervalHours() == null ? ""
+                : " due " + step.getDueIntervalHours() + "h/" + step.getOnExpiry()))
             .collect(Collectors.joining("; "));
         return " with a " + policy.getMode() + " chain [" + steps + "]";
     }

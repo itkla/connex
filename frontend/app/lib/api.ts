@@ -3622,6 +3622,42 @@ export function cancelDocumentApproval(dealId: number, documentId: number) {
     return postJson<Types.DocumentApproval>(`/api/deals/${dealId}/documents/${documentId}/approval/cancel`, {});
 }
 
+export function delegateDocumentApproval(
+    dealId: number,
+    documentId: number,
+    stepId: number,
+    delegateUserId: number,
+    comment?: string | null,
+) {
+    return postJson<Types.DocumentApproval>(
+        `/api/deals/${dealId}/documents/${documentId}/approval/steps/${stepId}/delegate`,
+        { delegateUserId, comment: comment ?? null },
+    );
+}
+
+export function getDocumentApprovalDelegateCandidates(
+    dealId: number,
+    documentId: number,
+    stepId: number,
+    init: RequestInit = {},
+) {
+    return getJson<Types.ApprovalDelegate[]>(
+        `/api/deals/${dealId}/documents/${documentId}/approval/steps/${stepId}/delegate-candidates`,
+        { cache: 'no-store', ...init },
+    );
+}
+
+export function getApprovalInbox(init: RequestInit = {}) {
+    return getJson<Types.ApprovalInboxItem[]>(`/api/approvals/inbox`, {
+        cache: 'no-store',
+        ...init,
+    });
+}
+
+export function getApprovalInboxResultFromCookie(cookie: string | null) {
+    return resultWithCookie<Types.ApprovalInboxItem[]>((init) => getApprovalInbox(init), cookie);
+}
+
 export function getDealLineItems(dealId: number, init: RequestInit = {}) {
     return getJson<Types.DealLineItemsResponse>(`/api/deals/${dealId}/line-items`, init);
 }

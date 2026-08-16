@@ -243,6 +243,7 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("campaign_message", 90));
         raw.add(direct("campaign", 100, nullify("parent_campaign_id")));
         raw.add(direct("document_approval_decision", 104));
+        raw.add(direct("document_approval_step_assignment", 105));
         raw.add(direct("document_approval_step_approver", 106));
         raw.add(direct("document_approval_step", 108));
         raw.add(direct("document_approval", 110));

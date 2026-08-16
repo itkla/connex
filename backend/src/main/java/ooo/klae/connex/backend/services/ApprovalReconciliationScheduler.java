@@ -29,7 +29,9 @@ import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunStatus;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
- * Reconciles pending approvals whose frozen chains can no longer reach quorum.
+ * Reconciles pending approvals against the wall clock and the current approver pool: a step that
+ * passed its deadline expires or escalates, a chain that can no longer reach quorum is terminated,
+ * and an open step approaching its deadline reminds the approvers who can still decide it.
  *
  * <p>The tenant and system-actor scope is installed before any transaction opens, because
  * {@code TenantWorkScope} refuses to re-pin the catalog once a transaction holds a connection. Each
@@ -154,7 +156,7 @@ public class ApprovalReconciliationScheduler {
         for (DocumentApproval approval : approvals) {
             try {
                 terminationTransaction.executeWithoutResult(status ->
-                    approvalService.terminateIfUnsatisfiable(workspaceId, approval, pool));
+                    approvalService.reconcileApproval(workspaceId, approval, pool));
             } catch (RuntimeException exception) {
                 failedCount++;
                 log.warn("Approval reconciliation failed for workspace {} approval {}: {}",
