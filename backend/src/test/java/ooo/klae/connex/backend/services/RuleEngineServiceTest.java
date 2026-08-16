@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -362,6 +363,24 @@ class RuleEngineServiceTest extends AbstractServiceTest {
 
         assertEquals(1, matchedExecutions(rule.getId()));
         assertEquals(newOwner.getId(), dealMapper.getDealById(workspace.getId(), deal.getId()).getOwnerId());
+    }
+
+    @Test
+    void assignOwner_action_routesContact() {
+        Person person = newPerson(newCompany());
+        assertNull(personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
+        User router = newUser();
+        RuleAction assign = new RuleAction();
+        assign.setType("assign_owner");
+        assign.setTargetUserId(router.getId());
+        RuleDto rule = entityChangeRule("person", assign, null, "person.lifecycle_changed");
+
+        ruleEngineService.onEntityChange(
+            workspace.getId(), "person", person.getId(), "person.lifecycle_changed");
+
+        assertEquals(1, matchedExecutions(rule.getId()));
+        assertEquals(router.getId(),
+            personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
     }
 
     @Test

@@ -17,7 +17,7 @@ export const EVENTS: Record<string, string[]> = {
 export const ACTIONS: Record<string, string[]> = {
     deal: ["create_task", "log_activity", "add_tag", "remove_tag", "create_note", "assign_owner", "change_stage", "notify"],
     company: ["add_tag", "remove_tag", "notify"],
-    person: ["create_task", "log_activity", "add_tag", "remove_tag", "create_note", "notify"],
+    person: ["create_task", "log_activity", "add_tag", "remove_tag", "create_note", "assign_owner", "notify"],
     task: ["notify"],
 };
 

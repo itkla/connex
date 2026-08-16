@@ -55,7 +55,7 @@ public class RuleDefinitionValidator {
         "add_tag", Set.of("company", "person", "deal"),
         "remove_tag", Set.of("company", "person", "deal"),
         "create_note", Set.of("person", "deal"),
-        "assign_owner", Set.of("deal"),
+        "assign_owner", Set.of("person", "deal"),
         "change_stage", Set.of("deal"),
         "notify", Set.of("company", "person", "deal", "task"));
 
@@ -335,7 +335,12 @@ public class RuleDefinitionValidator {
             case "create_task" -> Permission.TASK_CREATE;
             case "log_activity" -> Permission.ACTIVITY_CREATE;
             case "create_note" -> Permission.NOTE_CREATE;
-            case "assign_owner", "change_stage" -> Permission.DEAL_UPDATE;
+            case "change_stage" -> Permission.DEAL_UPDATE;
+            case "assign_owner" -> switch (recordType) {
+                case "person" -> Permission.PERSON_UPDATE;
+                case "deal" -> Permission.DEAL_UPDATE;
+                default -> null;
+            };
             case "add_tag", "remove_tag" -> switch (recordType) {
                 case "company" -> Permission.COMPANY_UPDATE;
                 case "person" -> Permission.PERSON_UPDATE;
