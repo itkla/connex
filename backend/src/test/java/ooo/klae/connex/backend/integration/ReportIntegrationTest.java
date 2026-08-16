@@ -2496,6 +2496,91 @@ class ReportIntegrationTest {
         }
     }
 
+    /**
+     * A quote is issued once, when it reaches final. Delivery then moves it to {@code sent} and to
+     * {@code signed}, and a later version supersedes it, so the issue rate has to survive every one
+     * of those transitions: counting {@code final} alone makes the rate fall as quotes are actually
+     * delivered. A superseded quote keeps its delivery envelope as issuance evidence, while a
+     * superseded quote that never left draft or approval has none and stays out of the numerator.
+     */
+    @Test
+    void deliveredSignedAndDeliveredSupersededQuotesStayInTheIssuedNumerator() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(workspace.getId(), "Commercial");
+        int stage = insertStage(workspace.getId(), pipeline, "Proposal");
+        int deal = insertCommercialDeal(workspace.getId(), pipeline, stage, member.getId(),
+                "Delivered quote deal", "USD", null, null, "2026-01-25");
+        insertDealDocument(workspace.getId(), deal, "quote", "final", 1, "2026-01-02 09:00:00", "USD");
+        int sent = insertDealDocument(
+                workspace.getId(), deal, "quote", "sent", 2, "2026-01-03 09:00:00", "USD");
+        insertDocumentDelivery(workspace.getId(), deal, sent, "sent");
+        int signed = insertDealDocument(
+                workspace.getId(), deal, "quote", "signed", 3, "2026-01-04 09:00:00", "USD");
+        insertDocumentDelivery(workspace.getId(), deal, signed, "completed");
+        int supersededAfterDelivery = insertDealDocument(
+                workspace.getId(), deal, "quote", "superseded", 4, "2026-01-05 09:00:00", "USD");
+        insertDocumentDelivery(workspace.getId(), deal, supersededAfterDelivery, "voided");
+        insertDealDocument(workspace.getId(), deal, "quote", "superseded", 5, "2026-01-06 09:00:00", "USD");
+        insertDealDocument(workspace.getId(), deal, "quote", "draft", 6, "2026-01-07 09:00:00", "USD");
+        insertDealDocument(
+                workspace.getId(), deal, "quote", "pending_approval", 7, "2026-01-08 09:00:00", "USD");
+        insertDealDocument(workspace.getId(), deal, "quote", "approved", 8, "2026-01-09 09:00:00", "USD");
+
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget("quote-volume", "documents", "quote_count", "none", "kpi"),
+                new CommercialWidget("issue-rate", "documents", "quote_issue_rate", "none", "kpi"))));
+        JsonNode widgets = generateDocument(session, workspace, reportId).get("widgets");
+
+        assertDecimal("8", findWidget(widgets, "quote-volume").get("total").decimalValue());
+        assertDecimal("50", findWidget(widgets, "issue-rate").get("total").decimalValue());
+    }
+
+    /**
+     * A prior period with no cohort is undefined, not zero. A rate, an average, and a discount each
+     * publish a current-period scalar while leaving the prior scalar, the prior point value, and the
+     * change absent, so the report never claims the business moved off a measured zero. A count is
+     * genuinely zero over an empty period and keeps reporting it.
+     */
+    @Test
+    void anEmptyPriorPeriodLeavesRatesAveragesAndDiscountsUndefined() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(workspace.getId(), "Commercial");
+        int stage = insertStage(workspace.getId(), pipeline, "Proposal");
+        int deal = insertCommercialDeal(workspace.getId(), pipeline, stage, member.getId(),
+                "Current period win", "USD", true, "2026-01-15 09:00:00", "2026-01-20");
+        insertLineItem(workspace.getId(), deal, "300.00", "1", "amount", "100.00", "USD");
+        int document = insertDealDocument(
+                workspace.getId(), deal, "quote", "final", 1, "2026-01-05 09:00:00", "USD");
+        insertDealDocument(workspace.getId(), deal, "quote", "draft", 2, "2026-01-06 09:00:00", "USD");
+        insertDocumentApproval(workspace.getId(), deal, document, "approved",
+                "2026-01-05 00:00:00", "2026-01-07 00:00:00");
+
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget("quote-volume", "documents", "quote_count", "none", "kpi"),
+                new CommercialWidget("issue-rate", "documents", "quote_issue_rate", "none", "kpi"),
+                new CommercialWidget("cycle", "documents", "approval_cycle_days", "none", "kpi"),
+                new CommercialWidget("won-discount", "deals", "effective_discount_percent", "none", "bar"))));
+        JsonNode widgets = generateDocument(session, workspace, reportId).get("widgets");
+
+        JsonNode volume = findWidget(widgets, "quote-volume");
+        assertNotNull(volume);
+        assertDecimal("2", volume.get("total").decimalValue());
+        assertDecimal("0", volume.get("priorTotal").decimalValue());
+
+        assertDecimal("50", findWidget(widgets, "issue-rate").get("total").decimalValue());
+        assertDecimal("2", findWidget(widgets, "cycle").get("total").decimalValue());
+        assertDecimal("33.333", findWidget(widgets, "won-discount").get("total").decimalValue());
+        for (String widgetId : List.of("issue-rate", "cycle", "won-discount")) {
+            assertNoPriorComparison(findWidget(widgets, widgetId), widgetId);
+        }
+    }
+
     @Test
     void commercialMetricsStayInsideTheTenantBoundary() throws Exception {
         RequestContextHolder.resetRequestAttributes();
@@ -2571,6 +2656,12 @@ class ReportIntegrationTest {
         assertDecimal("33.333", findWidget(widgets, "won-discount").get("total").decimalValue());
     }
 
+    /**
+     * The appendix carries the same undefined prior period the widgets do. The quote count is
+     * genuinely zero over an empty prior period and exports {@code 0}; the average approval cycle
+     * and the effective discount have no value without a cohort, so their prior cells stay empty
+     * rather than exporting a zero an analyst would read as a real figure.
+     */
     @Test
     void commercialMetricsFreezeIntoSnapshotsAndCsvAppendix() throws Exception {
         RequestContextHolder.resetRequestAttributes();
@@ -2613,8 +2704,8 @@ class ReportIntegrationTest {
         String csv = csvResult.getResponse().getContentAsString();
 
         assertTrue(csv.contains("\"quote_count · Total\",\"1\",\"0\",\"count\""), csv);
-        assertTrue(csv.contains("\"approval_cycle_days · Total\",\"2\",\"0\",\"days\""), csv);
-        assertTrue(csv.contains("\"effective_discount_percent · USD · Total\",\"33.333\",\"0\",\"percent\""), csv);
+        assertTrue(csv.contains("\"approval_cycle_days · Total\",\"2\",\"\",\"days\""), csv);
+        assertTrue(csv.contains("\"effective_discount_percent · USD · Total\",\"33.333\",\"\",\"percent\""), csv);
     }
 
     @Test
@@ -2904,6 +2995,23 @@ class ReportIntegrationTest {
     private static void assertNoScalarTotal(JsonNode widget, String widgetId) {
         assertNotNull(widget, widgetId);
         assertTrue(widget.get("total") == null || widget.get("total").isNull(), widgetId);
+    }
+
+    /**
+     * A widget whose prior period has no cohort: the serialized document omits the prior scalar, the
+     * change, and every point's prior value rather than publishing an undefined figure as zero.
+     */
+    private static void assertNoPriorComparison(JsonNode widget, String widgetId) {
+        assertNotNull(widget, widgetId);
+        assertTrue(isAbsent(widget.get("priorTotal")), widgetId);
+        assertTrue(isAbsent(widget.get("changePercent")), widgetId);
+        for (JsonNode point : widget.get("points")) {
+            assertTrue(isAbsent(point.get("priorValue")), widgetId);
+        }
+    }
+
+    private static boolean isAbsent(JsonNode value) {
+        return value == null || value.isNull();
     }
 
     private static void assertDecimal(String expected, BigDecimal actual) {
@@ -3255,6 +3363,18 @@ class ReportIntegrationTest {
         return jdbcTemplate.queryForObject(
                 "SELECT id FROM deal_document WHERE workspace_id = ? AND deal_id = ? AND version = ?",
                 Integer.class, workspaceId, dealId, version);
+    }
+
+    /**
+     * Persists one delivery envelope for an immutable document version, matching what
+     * {@code DocumentDeliveryService} writes when a finalized document is sent for acceptance.
+     */
+    private void insertDocumentDelivery(
+            int workspaceId, int dealId, int documentId, String status) {
+        jdbcTemplate.update(
+                "INSERT INTO document_delivery (workspace_id, deal_id, document_id, provider, status, "
+                        + "sent_at) VALUES (?, ?, ?, ?, ?, ?)",
+                workspaceId, dealId, documentId, "in_app", status, "2026-01-10 09:00:00");
     }
 
     private void insertDocumentApproval(

@@ -699,6 +699,23 @@
     </choose>
   </sql>
 
+  <!--
+    A quote counts as issued once it has reached final. The delivery lifecycle (#904) owns two
+    further statuses beyond it — a finalized quote becomes sent when its envelope goes out and
+    signed when the recipient completes it — so testing final alone would drop a quote out of the
+    numerator at the exact moment it was genuinely issued, making the rate fall as quotes are
+    delivered. A superseded quote no longer carries the status it held before it was replaced, so a
+    delivery envelope is used as the surviving evidence that it was issued: only a final document
+    can be sent, and the envelope row outlives the supersede.
+  -->
+  <sql id="quoteReachedFinal">
+    dd.status IN ('final', 'sent', 'signed')
+      OR (dd.status = 'superseded' AND EXISTS (
+        SELECT 1 FROM document_delivery issued_delivery
+        WHERE issued_delivery.workspace_id = #{query.workspaceId}
+          AND issued_delivery.document_id = dd.id))
+  </sql>
+
   <select id="aggregateDocuments" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
     SELECT <include refid="documentGroupKey"/> AS group_key,
            <include refid="documentGroupLabel"/> AS group_label,
@@ -708,7 +725,7 @@
            </choose> AS unit,
            <choose>
              <when test="query.measure == 'quote_issue_rate'">
-               COALESCE(100.0 * SUM(CASE WHEN dd.status = 'final' THEN 1 ELSE 0 END)
+               COALESCE(100.0 * SUM(CASE WHEN (<include refid="quoteReachedFinal"/>) THEN 1 ELSE 0 END)
                  / NULLIF(COUNT(*), 0), 0)
              </when>
              <otherwise>COUNT(*)</otherwise>

@@ -863,6 +863,15 @@ public class ReportService {
                 hydrateOwnerLabels(prior, widget, inputs.ownerLabels()));
     }
 
+    /**
+     * Builds one widget's points, appendix rows, and scalars.
+     *
+     * <p>Current-period and prior-period emptiness are tracked separately. A rate, average, or
+     * discount has no value at all without a cohort, so an absent prior row stays undefined instead
+     * of collapsing to a measured zero — otherwise a period that simply had no quotes, decisions, or
+     * discounted deals would be published as a real figure and turn every current value into a
+     * fabricated change against it.
+     */
     private WidgetResult widgetResult(
             ReportWidgetConfig widget,
             int widgetIndex,
@@ -876,18 +885,18 @@ public class ReportService {
         for (ReportAggregateRow row : prior) {
             priorByKey.put(comparisonKey(row, widget, bucket, period.priorStart()), row);
         }
+        boolean undefinedWhenEmpty = undefinedWhenEmpty(widget);
         List<ReportDataPointDto> points = new ArrayList<>();
         List<ReportAppendixRowDto> appendix = new ArrayList<>();
         Set<String> units = new LinkedHashSet<>();
         BigDecimal total = BigDecimal.ZERO;
         BigDecimal priorTotal = BigDecimal.ZERO;
+        boolean priorTotalDefined = priorComparable && !(undefinedWhenEmpty && prior.isEmpty());
         int pointIndex = 0;
         for (ReportAggregateRow row : current) {
             ReportAggregateRow priorRow = priorByKey.remove(
                     comparisonKey(row, widget, bucket, period.start()));
-            BigDecimal priorValue = priorComparable
-                    ? priorRow == null ? BigDecimal.ZERO : safe(priorRow.value())
-                    : null;
+            BigDecimal priorValue = priorPointValue(priorRow, priorComparable, undefinedWhenEmpty);
             BigDecimal value = safe(row.value());
             String sourceId = "metric." + widgetIndex + "." + pointIndex++;
             String unit = normalizedUnit(row.unit());
@@ -896,7 +905,9 @@ public class ReportService {
                     widget.measure() + " · " + row.groupLabel(), value, priorValue, unit));
             units.add(unit);
             total = total.add(value);
-            if (priorValue != null) {
+            if (priorValue == null) {
+                priorTotalDefined = false;
+            } else {
                 priorTotal = priorTotal.add(priorValue);
             }
         }
@@ -923,9 +934,7 @@ public class ReportService {
                 ? points.size() <= 1
                 : !NON_ADDITIVE_MEASURES.contains(widget.measure())
                         || "none".equals(normalizeGroup(widget.groupBy()));
-        boolean undefinedRatio = current.isEmpty()
-                && ("attainment".equals(widget.measure())
-                        || UNDEFINED_WHEN_EMPTY_MEASURES.contains(widget.measure()));
+        boolean undefinedCurrent = undefinedWhenEmpty && current.isEmpty();
         BigDecimal scalarTotal = total;
         Set<String> scalarUnits = units;
         if (authoritativeTotalRows != null) {
@@ -936,10 +945,8 @@ public class ReportService {
                 scalarUnits.add(normalizedUnit(row.unit()));
             }
         }
-        BigDecimal publicTotal = scalarUnits.size() <= 1 && additive && !undefinedRatio ? scalarTotal : null;
-        BigDecimal publicPrior = units.size() <= 1 && additive && priorComparable && !undefinedRatio
-                ? priorTotal
-                : null;
+        BigDecimal publicTotal = scalarUnits.size() <= 1 && additive && !undefinedCurrent ? scalarTotal : null;
+        BigDecimal publicPrior = units.size() <= 1 && additive && priorTotalDefined ? priorTotal : null;
         BigDecimal change = "attainment".equals(widget.measure())
                 ? attainmentPercent(publicTotal, publicPrior)
                 : percentChange(publicTotal, publicPrior);
@@ -947,6 +954,28 @@ public class ReportService {
                 widget.id(), displayTitle(widget), widget.chartType(), widget.dataSource(), widget.measure(),
                 widget.groupBy(), unit, publicTotal, publicPrior, change, List.copyOf(points));
         return new WidgetResult(data, List.copyOf(appendix));
+    }
+
+    /**
+     * Whether the measure is a ratio, average, or attainment figure that has no value on an empty
+     * cohort, so an absent row means undefined rather than zero.
+     */
+    private static boolean undefinedWhenEmpty(ReportWidgetConfig widget) {
+        return "attainment".equals(widget.measure())
+                || UNDEFINED_WHEN_EMPTY_MEASURES.contains(widget.measure());
+    }
+
+    /**
+     * The prior-period value aligned to one current-period group, or {@code null} when the periods
+     * are not comparable or the prior period has no cohort for a measure that is undefined without
+     * one. A zero here would be published as a measured prior figure and as a real change.
+     */
+    private static BigDecimal priorPointValue(
+            ReportAggregateRow priorRow, boolean priorComparable, boolean undefinedWhenEmpty) {
+        if (!priorComparable || (priorRow == null && undefinedWhenEmpty)) {
+            return null;
+        }
+        return priorRow == null ? BigDecimal.ZERO : safe(priorRow.value());
     }
 
     private List<ReportAggregateRow> aggregate(String dataSource, ReportAggregateQuery query) {

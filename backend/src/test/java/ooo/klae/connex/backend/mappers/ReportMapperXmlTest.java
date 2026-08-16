@@ -285,6 +285,28 @@ class ReportMapperXmlTest {
     }
 
     /**
+     * The delivery lifecycle moves a finalized quote through {@code sent} and {@code signed}, so the
+     * issued numerator must accept all three terminal-or-later statuses and fall back to workspace-
+     * scoped delivery evidence for a quote that was superseded after it was issued.
+     */
+    @Test
+    void quoteIssueRateCountsDeliveredSignedAndDeliveredSupersededQuotes() throws Exception {
+        Configuration configuration = reportMapperConfiguration();
+        for (String group : new String[] {"none", "date", "owner", "company"}) {
+            String sql = aggregateSql(
+                    configuration, "aggregateDocuments", "quote_issue_rate", group, "day");
+            assertTrue(sql.contains("dd.status IN ('final', 'sent', 'signed')"));
+            assertTrue(sql.contains("dd.status = 'superseded'"));
+            assertTrue(sql.contains("FROM document_delivery issued_delivery"));
+            assertTrue(sql.contains("issued_delivery.workspace_id = ?"));
+            assertTrue(sql.contains("issued_delivery.document_id = dd.id"));
+            assertFalse(sql.contains("${"));
+        }
+        assertFalse(aggregateSql(configuration, "aggregateDocuments", "quote_count", "none", "day")
+                .contains("document_delivery"));
+    }
+
+    /**
      * The discount aggregate joins {@code deal_line_item}, which carries its own {@code unit}
      * column. MySQL resolves a bare {@code unit} in {@code GROUP BY} to that column rather than to
      * the {@code 'percent' AS unit} select alias, which would split one discount figure into one
