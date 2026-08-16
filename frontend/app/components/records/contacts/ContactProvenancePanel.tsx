@@ -35,7 +35,7 @@ import {
 } from '@/components/ui/select';
 import { updateContactProvenance } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import { LEAD_SOURCES, REFERRER_SOURCES } from '@/app/lib/contactProvenance';
+import { LEAD_SOURCES, REFERRER_SOURCES, asLeadSource } from '@/app/lib/contactProvenance';
 import { useContactTargetSearch } from '@/app/hooks/useRecordTargetSearch';
 import { filterByNameQuery } from '@/app/lib/filterByNameQuery';
 import type { Contact, ContactLeadSource } from '@/app/lib/types';
@@ -43,6 +43,8 @@ import { cn } from '@/lib/utils';
 
 type Props = {
     contactId: number;
+    /** The owning workspace, used to keep shared-in contacts out of the referrer choices. */
+    ownerWorkspaceId: number | undefined;
     leadSource: ContactLeadSource | null;
     leadSourceDetail: string | null;
     /** The stored referrer id, authoritative even when the referrer record cannot be resolved. */
@@ -66,6 +68,7 @@ const NO_SOURCE_VALUE = '__none__';
  */
 export default function ContactProvenancePanel({
     contactId,
+    ownerWorkspaceId,
     leadSource,
     leadSourceDetail,
     referrerPersonId,
@@ -88,11 +91,13 @@ export default function ContactProvenancePanel({
     );
     const [referrerQuery, setReferrerQuery] = useState('');
 
-    const selectedSource = source === NO_SOURCE_VALUE ? null : (source as ContactLeadSource);
+    const selectedSource = asLeadSource(source);
     const supportsReferrer = selectedSource !== null
         && REFERRER_SOURCES.includes(selectedSource);
     const referrerOptions = filterByNameQuery(
-        referrerSearch.contacts.filter((contact) => contact.id !== contactId),
+        referrerSearch.contacts.filter((contact) =>
+            contact.id !== contactId
+            && (ownerWorkspaceId === undefined || contact.workspaceId === ownerWorkspaceId)),
         referrerQuery,
     );
     const selectedReferrer = referrerId === null

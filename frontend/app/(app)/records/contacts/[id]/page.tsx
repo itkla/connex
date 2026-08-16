@@ -288,6 +288,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
                         {ownsContact ? (
                             <ContactProvenancePanel
                                 contactId={contact.id}
+                                ownerWorkspaceId={contact.workspaceId}
                                 leadSource={contact.leadSource ?? null}
                                 leadSourceDetail={contact.leadSourceDetail ?? null}
                                 referrerPersonId={contact.referrerPersonId ?? null}
