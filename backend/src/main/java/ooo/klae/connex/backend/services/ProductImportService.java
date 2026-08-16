@@ -27,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Product;
+import ooo.klae.connex.backend.beans.ProductSkuResolution;
 import ooo.klae.connex.backend.dto.ProductImportColumnMapping;
 import ooo.klae.connex.backend.dto.ProductImportPreviewResult;
 import ooo.klae.connex.backend.dto.ProductImportRequest;
@@ -68,7 +69,6 @@ public class ProductImportService {
     private static final String RECURRING_BILLING_FREQUENCY = "recurring";
     private static final int MAX_ROWS = 5000;
     private static final int MAX_MAPPINGS = 64;
-    private static final int SKU_CHUNK = 250;
     private static final int INSERT_BATCH = 250;
     private static final int MAX_DECIMAL_LENGTH = 32;
     private static final int UNIT_PRICE_INTEGER_DIGITS = 13;
@@ -272,7 +272,6 @@ public class ProductImportService {
             return;
         }
         row.skuRaw = sku;
-        row.skuKey = sku.toLowerCase(Locale.ROOT);
     }
 
     private static String bounded(
@@ -386,23 +385,23 @@ public class ProductImportService {
             int workspaceId,
             ProductImportRequest request,
             List<PlanRow> plan) {
-        markWithinFileDuplicates(plan);
-        Map<String, Product> existing = existingBySkuKey(workspaceId, plan);
+        Map<PlanRow, ProductSkuResolution> resolutions = resolveSkus(workspaceId, plan);
+        markWithinFileDuplicates(plan, resolutions);
         boolean overwrite = OVERWRITE.equals(policy(request));
         Map<Integer, String> decisions = rowDecisions(request);
         for (PlanRow row : plan) {
             if (INVALID.equals(row.status)) {
                 continue;
             }
-            Product match = existing.get(row.skuKey);
-            if (match == null) {
+            ProductSkuResolution resolution = resolutions.get(row);
+            if (resolution == null || resolution.getProductId() == null) {
                 row.status = CREATE;
             } else {
-                row.matchedId = match.getId();
-                row.matchedLabel = match.getName();
+                row.matchedId = resolution.getProductId();
+                row.matchedLabel = resolution.getProductName();
                 row.status = overwrite ? UPDATE : SKIP;
             }
-            applyDecision(row, decisions.get(row.rowIndex), match != null);
+            applyDecision(row, decisions.get(row.rowIndex), row.matchedId != null);
         }
         for (PlanRow row : plan) {
             if (CREATE.equals(row.status) && row.name == null) {
@@ -411,55 +410,54 @@ public class ProductImportService {
         }
     }
 
-    private static void markWithinFileDuplicates(List<PlanRow> plan) {
-        Map<String, List<PlanRow>> byKey = new LinkedHashMap<>();
+    private static void markWithinFileDuplicates(
+            List<PlanRow> plan,
+            Map<PlanRow, ProductSkuResolution> resolutions) {
         for (PlanRow row : plan) {
-            if (INVALID.equals(row.status) || row.skuKey == null) {
+            ProductSkuResolution resolution = resolutions.get(row);
+            if (INVALID.equals(row.status)
+                    || resolution == null
+                    || resolution.getEquivalentCount() < 2) {
                 continue;
             }
-            byKey.computeIfAbsent(row.skuKey, ignored -> new ArrayList<>()).add(row);
-        }
-        for (List<PlanRow> rows : byKey.values()) {
-            if (rows.size() < 2) {
-                continue;
-            }
-            for (PlanRow row : rows) {
-                fail(row, "Row " + (row.rowIndex + 1) + " repeats SKU " + row.skuRaw
-                    + "; a SKU may appear once per import");
-            }
+            fail(row, "Row " + (row.rowIndex + 1) + " repeats SKU " + row.skuRaw
+                + "; a SKU may appear once per import");
         }
     }
 
-    private Map<String, Product> existingBySkuKey(
+    private Map<PlanRow, ProductSkuResolution> resolveSkus(
             int workspaceId,
             List<PlanRow> plan) {
-        Set<String> requestedKeys = new LinkedHashSet<>();
-        List<String> skus = new ArrayList<>();
-        for (PlanRow row : plan) {
-            if (INVALID.equals(row.status) || row.skuKey == null) {
-                continue;
-            }
-            if (requestedKeys.add(row.skuKey)) {
-                skus.add(row.skuRaw);
-            }
+        List<PlanRow> candidates = plan.stream()
+            .filter(row -> !INVALID.equals(row.status) && row.skuRaw != null)
+            .toList();
+        if (candidates.isEmpty()) {
+            return Map.of();
         }
-        Map<String, Product> existing = new LinkedHashMap<>();
-        for (int offset = 0; offset < skus.size(); offset += SKU_CHUNK) {
-            List<String> batch = skus.subList(
-                offset, Math.min(offset + SKU_CHUNK, skus.size()));
-            for (Product product : productMapper.findBySkus(workspaceId, batch)) {
-                String key = product.getSku() == null
-                    ? null
-                    : product.getSku().toLowerCase(Locale.ROOT);
-                if (key == null || !requestedKeys.contains(key)) {
-                    throw new BadRequestException(
-                        "SKU '" + product.getSku() + "' collides with an existing catalog SKU "
-                            + "under this database's collation; rename it or import it separately");
-                }
-                existing.putIfAbsent(key, product);
-            }
+        List<String> skus = candidates.stream().map(row -> row.skuRaw).toList();
+        List<ProductSkuResolution> resolved = productMapper.resolveImportSkus(workspaceId, skus);
+        if (resolved.size() != candidates.size()) {
+            throw new IllegalStateException("Database did not resolve every catalog SKU candidate");
         }
-        return existing;
+        Map<PlanRow, ProductSkuResolution> byRow = new LinkedHashMap<>();
+        boolean[] seen = new boolean[candidates.size()];
+        for (ProductSkuResolution resolution : resolved) {
+            int candidateIndex = resolution.getCandidateIndex();
+            if (candidateIndex < 0
+                    || candidateIndex >= candidates.size()
+                    || seen[candidateIndex]
+                    || resolution.getEquivalentCount() < 1
+                    || resolution.getCollationOrder() < 1
+                    || (resolution.getProductId() != null
+                        && resolution.getProductName() == null)) {
+                throw new IllegalStateException("Database returned an invalid catalog SKU resolution");
+            }
+            seen[candidateIndex] = true;
+            PlanRow row = candidates.get(candidateIndex);
+            row.collationOrder = resolution.getCollationOrder();
+            byRow.put(row, resolution);
+        }
+        return byRow;
     }
 
     private static void applyDecision(
@@ -511,8 +509,17 @@ public class ProductImportService {
             Product product = locked.get(row.matchedId);
             if (product == null) {
                 fail(row, "Catalog row for SKU " + row.skuRaw + " no longer exists");
-            } else if (product.getSku() == null
-                    || !product.getSku().toLowerCase(Locale.ROOT).equals(row.skuKey)) {
+            }
+        }
+        Map<PlanRow, ProductSkuResolution> current = resolveSkus(
+            workspaceId,
+            plan.stream().filter(row -> UPDATE.equals(row.status)).toList());
+        for (PlanRow row : plan) {
+            if (!UPDATE.equals(row.status) || row.matchedId == null) {
+                continue;
+            }
+            ProductSkuResolution resolution = current.get(row);
+            if (resolution == null || !row.matchedId.equals(resolution.getProductId())) {
                 fail(row, "Catalog row for SKU " + row.skuRaw
                     + " changed before the import committed");
             }
@@ -600,7 +607,8 @@ public class ProductImportService {
             List<PlanRow> plan) {
         List<Product> creates = plan.stream()
             .filter(row -> CREATE.equals(row.status))
-            .sorted(Comparator.comparing((PlanRow row) -> row.skuKey))
+            .sorted(Comparator.comparingInt((PlanRow row) -> row.collationOrder)
+                .thenComparingInt(row -> row.rowIndex))
             .map(row -> newProduct(workspaceId, row))
             .toList();
         for (int offset = 0; offset < creates.size(); offset += INSERT_BATCH) {
@@ -732,7 +740,7 @@ public class ProductImportService {
         for (PlanRow row : plan) {
             updateDigest(digest, Integer.toString(row.rowIndex));
             updateDigest(digest, row.status);
-            updateDigest(digest, row.skuKey);
+            updateDigest(digest, row.skuRaw);
             updateDigest(
                 digest,
                 row.matchedId == null ? null : Integer.toString(row.matchedId));
@@ -814,7 +822,7 @@ public class ProductImportService {
         private final List<String> errors = new ArrayList<>();
         private String status;
         private String skuRaw;
-        private String skuKey;
+        private int collationOrder;
         private Integer matchedId;
         private String matchedLabel;
         private String name;

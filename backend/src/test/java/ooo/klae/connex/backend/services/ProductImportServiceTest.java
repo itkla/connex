@@ -48,6 +48,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.beans.Product;
+import ooo.klae.connex.backend.beans.ProductSkuResolution;
 import ooo.klae.connex.backend.dto.ProductImportColumnMapping;
 import ooo.klae.connex.backend.dto.ProductImportPreviewResult;
 import ooo.klae.connex.backend.dto.ProductImportRequest;
@@ -95,8 +96,8 @@ class ProductImportServiceTest {
         lenient().when(duplicatePreflightService.beginImportCommit(
                 anyList(), anyList(), anyString(), eq(admission)))
             .thenAnswer(invocation -> commits.removeFirst());
-        lenient().when(productMapper.findBySkus(eq(WORKSPACE_ID), anyList()))
-            .thenAnswer(invocation -> collationMatches(invocation.getArgument(1)));
+        lenient().when(productMapper.resolveImportSkus(eq(WORKSPACE_ID), anyList()))
+            .thenAnswer(invocation -> collationResolutions(invocation.getArgument(1)));
         lenient().when(productMapper.getByIdForUpdate(eq(WORKSPACE_ID), anyInt()))
             .thenAnswer(invocation -> catalogById.get(invocation.getArgument(1, Integer.class)));
         lenient().when(productMapper.insertBatch(anyList()))
@@ -238,7 +239,8 @@ class ProductImportServiceTest {
             .startsWith("Row 1 repeats SKU A-1"));
         assertTrue(preview.rows().get(1).errors().getFirst()
             .startsWith("Row 2 repeats SKU a-1"));
-        verify(productMapper).findBySkus(WORKSPACE_ID, List.of("B-2"));
+        verify(productMapper).resolveImportSkus(
+            eq(WORKSPACE_ID), eq(List.of("A-1", "a-1", "B-2")));
     }
 
     @Test
@@ -433,11 +435,12 @@ class ProductImportServiceTest {
 
     @Test
     void failedPreviewCancelsItsReservedProof() {
-        catalog(31, "café-1", "Accented widget");
         queuePreview();
-        ProductImportRequest request = request(OVERWRITE, row("cafe-1", "Widget"));
+        ProductImportRequest request = request(OVERWRITE, row("A-1", "Widget"));
+        when(productMapper.resolveImportSkus(eq(WORKSPACE_ID), anyList()))
+            .thenThrow(new IllegalStateException("resolution failed"));
 
-        assertThrows(BadRequestException.class, () -> service.previewProducts(request));
+        assertThrows(IllegalStateException.class, () -> service.previewProducts(request));
 
         verify(duplicatePreflightService).cancelImportPreview(PROOF);
     }
@@ -518,7 +521,10 @@ class ProductImportServiceTest {
         request.setDuplicateReviewProof(PROOF);
         queueCommit();
         Product renamed = catalogSnapshot(31, "RENAMED-1", "Existing widget");
-        when(productMapper.getByIdForUpdate(WORKSPACE_ID, 31)).thenReturn(renamed);
+        when(productMapper.getByIdForUpdate(WORKSPACE_ID, 31)).thenAnswer(invocation -> {
+            catalogById.put(31, renamed);
+            return renamed;
+        });
 
         ProductImportResult result = service.commitProducts(request);
 
@@ -607,7 +613,11 @@ class ProductImportServiceTest {
                 Set.of("DealLineItemMapper", "DealLineItemService", "DealService", "ProductService")),
             "Catalog imports must not reach deal line items: " + dependencies);
         assertEquals(
-            Set.of("WorkspaceService", "DuplicatePreflightService", "ProductMapper", "AuditService"),
+            Set.of(
+                "WorkspaceService",
+                "DuplicatePreflightService",
+                "ProductMapper",
+                "AuditService"),
             dependencies);
     }
 
@@ -644,18 +654,17 @@ class ProductImportServiceTest {
     }
 
     @Test
-    void collationLooseMatchFromTheDatabaseIsRejected() {
+    void collationEquivalentExistingSkuIsClassifiedAsAConflict() {
         catalog(31, "café", "Accented widget");
         queuePreview();
         ProductImportRequest request = request(OVERWRITE, row("cafe", "Widget"));
 
-        BadRequestException exception = assertThrows(BadRequestException.class,
-            () -> service.previewProducts(request));
+        ProductImportPreviewResult preview = service.previewProducts(request);
 
-        assertTrue(exception.getMessage().startsWith(
-            "SKU 'café' collides with an existing catalog SKU under this database's collation"),
-            exception.getMessage());
-        assertTrue(inserted.isEmpty());
+        assertEquals(1, preview.toUpdate());
+        assertEquals(31, preview.rows().getFirst().matchedId());
+        assertEquals("Accented widget", preview.rows().getFirst().matchedLabel());
+        verify(duplicatePreflightService, never()).cancelImportPreview(PROOF);
     }
 
     private String latestDecisionFingerprint() {
@@ -704,21 +713,38 @@ class ProductImportServiceTest {
         return product;
     }
 
-    /** Stands in for the {@code utf8mb4_0900_ai_ci} case- and accent-insensitive SKU column. */
-    private List<Product> collationMatches(List<String> skus) {
-        Set<String> keys = skus.stream()
-            .map(ProductImportServiceTest::collationKey)
-            .collect(Collectors.toSet());
-        return catalogById.values().stream()
-            .filter(product -> keys.contains(collationKey(product.getSku())))
-            .sorted(Comparator.comparingInt(Product::getId))
-            .toList();
+    /** Stands in for the mapper's database-collated result; real equivalence is integration-tested. */
+    private List<ProductSkuResolution> collationResolutions(List<String> skus) {
+        Map<String, Long> counts = skus.stream()
+            .collect(Collectors.groupingBy(
+                ProductImportServiceTest::collationKey,
+                LinkedHashMap::new,
+                Collectors.counting()));
+        List<String> orderedKeys = counts.keySet().stream().sorted().toList();
+        List<ProductSkuResolution> resolutions = new ArrayList<>();
+        for (int index = 0; index < skus.size(); index++) {
+            String key = collationKey(skus.get(index));
+            ProductSkuResolution resolution = new ProductSkuResolution();
+            resolution.setCandidateIndex(index);
+            resolution.setEquivalentCount(Math.toIntExact(counts.get(key)));
+            resolution.setCollationOrder(orderedKeys.indexOf(key) + 1);
+            catalogById.values().stream()
+                .filter(product -> key.equals(collationKey(product.getSku())))
+                .min(Comparator.comparingInt(Product::getId))
+                .ifPresent(product -> {
+                    resolution.setProductId(product.getId());
+                    resolution.setProductName(product.getName());
+                });
+            resolutions.add(resolution);
+        }
+        return resolutions;
     }
 
     private static String collationKey(String sku) {
-        return Normalizer.normalize(sku, Normalizer.Form.NFD)
+        return Normalizer.normalize(sku, Normalizer.Form.NFKD)
             .replaceAll("\\p{M}", "")
-            .toLowerCase(Locale.ROOT);
+            .toLowerCase(Locale.ROOT)
+            .replace("ß", "ss");
     }
 
     private static Map<String, String> row(String sku, String name) {

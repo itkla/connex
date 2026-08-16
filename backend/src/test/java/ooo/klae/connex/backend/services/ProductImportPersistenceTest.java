@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test;
 import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
@@ -52,6 +53,7 @@ class ProductImportPersistenceTest extends AbstractServiceTest {
 
     private static final String OVERWRITE = "overwrite";
     private static final String SKIP = "skip";
+    private static final String INDEX_PROBE = "Unique index probe";
 
     @Autowired private ProductImportService importService;
     @Autowired private DealLineItemService dealLineItemService;
@@ -190,6 +192,92 @@ class ProductImportPersistenceTest extends AbstractServiceTest {
     }
 
     @Test
+    void previewRejectsAccentWidthAndExpansionEquivalentSkusWithinTheFile() {
+        String prefix = prefix();
+        ProductImportRequest request = catalogRequest(
+            OVERWRITE,
+            fullRow(prefix + "accent-A", "Accent plain", "1.00", "0.000"),
+            fullRow(prefix + "accent-Á", "Accent marked", "1.00", "0.000"),
+            fullRow(prefix + "width-A", "Width narrow", "1.00", "0.000"),
+            fullRow(prefix + "width-Ａ", "Width full", "1.00", "0.000"),
+            fullRow(prefix + "expand-ss", "Expansion pair", "1.00", "0.000"),
+            fullRow(prefix + "expand-ß", "Expansion character", "1.00", "0.000"));
+
+        ProductImportPreviewResult preview = importService.previewProducts(request);
+
+        assertEquals(6, preview.invalid());
+        assertEquals(0, preview.toCreate());
+        assertTrue(preview.rows().stream().allMatch(row -> "invalid".equals(row.status())));
+        assertTrue(preview.rows().stream().allMatch(
+            row -> row.errors().stream().anyMatch(error -> error.contains("repeats SKU"))));
+    }
+
+    @Test
+    void previewAndCommitMatchAnExpansionEquivalentExistingSku() {
+        String prefix = prefix();
+        String storedSku = prefix + "existing-ß";
+        insertRacingProduct(storedSku);
+        Product existing = requireBySku(workspace.getId(), storedSku);
+        ProductImportRequest request = catalogRequest(
+            OVERWRITE,
+            fullRow(prefix + "existing-ss", "Reviewed conflict", "5.00", "0.000"));
+
+        ProductImportPreviewResult preview = importService.previewProducts(request);
+
+        assertEquals(0, preview.toCreate());
+        assertEquals(1, preview.toUpdate());
+        assertEquals(existing.getId(), preview.rows().getFirst().matchedId());
+        request.setDuplicateReviewProof(preview.duplicateReviewProof());
+        ProductImportResult result = importService.commitProducts(request);
+        assertEquals(1, result.updated());
+        assertEquals(
+            "Reviewed conflict",
+            productMapper.getById(workspace.getId(), existing.getId()).getName());
+    }
+
+    @Test
+    void previewAndCommitAgreeWithTheUniqueIndexOnEquivalentSkus() {
+        String prefix = prefix();
+        insertCatalogProduct(prefix + "accent-A", "Accent stored");
+        insertCatalogProduct(prefix + "width-A", "Width stored");
+        insertCatalogProduct(prefix + "expand-ss", "Expansion stored");
+        Map<String, String> imported = new LinkedHashMap<>();
+        imported.put(prefix + "accent-Á", "Accent imported");
+        imported.put(prefix + "width-Ａ", "Width imported");
+        imported.put(prefix + "expand-ß", "Expansion imported");
+        imported.put(prefix + "distinct-Z", "Distinct imported");
+        ProductImportRequest request = catalogRequest(
+            OVERWRITE,
+            fullRow(prefix + "accent-Á", "Accent imported", "1.00", "0.000"),
+            fullRow(prefix + "width-Ａ", "Width imported", "1.00", "0.000"),
+            fullRow(prefix + "expand-ß", "Expansion imported", "1.00", "0.000"),
+            fullRow(prefix + "distinct-Z", "Distinct imported", "1.00", "0.000"));
+
+        ProductImportPreviewResult preview = importService.previewProducts(request);
+
+        assertEquals(0, preview.invalid());
+        List<String> skus = List.copyOf(imported.keySet());
+        for (int index = 0; index < skus.size(); index++) {
+            String sku = skus.get(index);
+            assertEquals(
+                uniqueIndexRejects(sku),
+                preview.rows().get(index).matchedId() != null,
+                "preview must classify " + sku + " the way uq_product_workspace_sku acts");
+        }
+
+        request.setDuplicateReviewProof(preview.duplicateReviewProof());
+        ProductImportResult result = importService.commitProducts(request);
+
+        assertTrue(result.failed().isEmpty());
+        assertEquals(preview.toUpdate(), result.updated());
+        assertEquals(preview.toCreate(), result.created());
+        imported.forEach((sku, name) -> {
+            assertEquals(1, countBySku(sku), "commit must leave one catalog row for " + sku);
+            assertEquals(name, requireBySku(workspace.getId(), sku).getName());
+        });
+    }
+
+    @Test
     void committingWithAConsumedProofIsAConflict() {
         String prefix = prefix();
         ProductImportRequest request = catalogRequest(
@@ -312,7 +400,7 @@ class ProductImportPersistenceTest extends AbstractServiceTest {
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
             doAnswer(invocation -> {
-                List<Product> found = realProductMapper.findBySkus(
+                List<?> found = realProductMapper.resolveImportSkus(
                     invocation.getArgument(0, Integer.class),
                     invocation.getArgument(1));
                 if (armed.compareAndSet(true, false)) {
@@ -320,7 +408,7 @@ class ProductImportPersistenceTest extends AbstractServiceTest {
                         .get(20, TimeUnit.SECONDS);
                 }
                 return found;
-            }).when(productMapper).findBySkus(eq(workspace.getId()), anyList());
+            }).when(productMapper).resolveImportSkus(eq(workspace.getId()), anyList());
 
             assertThrows(
                 DataIntegrityViolationException.class,
@@ -356,15 +444,33 @@ class ProductImportPersistenceTest extends AbstractServiceTest {
     }
 
     private int insertRacingProduct(String sku) {
+        return insertCatalogProduct(sku, "Raced in");
+    }
+
+    private int insertCatalogProduct(String sku, String name) {
         return jdbcTemplate.update(
             "INSERT INTO product (workspace_id, sku, name, unit_price, currency, "
                 + "billing_frequency) VALUES (?, ?, ?, ?, ?, ?)",
             workspace.getId(),
             sku,
-            "Raced in",
+            name,
             new BigDecimal("1.00"),
             "USD",
             "one_time");
+    }
+
+    private boolean uniqueIndexRejects(String sku) {
+        try {
+            insertCatalogProduct(sku, INDEX_PROBE);
+        } catch (DuplicateKeyException rejected) {
+            return true;
+        }
+        jdbcTemplate.update(
+            "DELETE FROM product WHERE workspace_id = ? AND sku = ? AND name = ?",
+            workspace.getId(),
+            sku,
+            INDEX_PROBE);
+        return false;
     }
 
     private ProductImportResult previewAndCommit(ProductImportRequest request) {

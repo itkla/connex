@@ -55,6 +55,36 @@
     ORDER BY id
   </select>
 
+  <!-- Product-import collation authority. The candidate list is typed by a zero-row branch that
+       selects product.sku itself, so MySQL aggregates the bound candidates onto the column's own
+       collation: within-file duplicate detection, insert ordering, and the existence join then
+       agree with uq_product_workspace_sku on every deployment. Naming a literal collation here
+       would silently disagree with the index (or fail with errno 1267) on any catalog whose
+       product.sku was not created as utf8mb4_0900_ai_ci — V102 declares no explicit collation, so
+       the column follows whatever the server's utf8mb4 default was when it ran. The statement stays
+       bounded by the 5,000-row import cap. Requires a non-empty candidate list. -->
+  <select id="resolveImportSkus"
+          resultType="ooo.klae.connex.backend.beans.ProductSkuResolution">
+    WITH candidates (candidate_index, sku) AS (
+      SELECT 0, product.sku FROM product WHERE workspace_id = #{workspaceId} AND 1 = 0
+      UNION ALL
+      VALUES
+      <foreach collection="skus" item="sku" index="candidateIndex" separator=",">
+        ROW(#{candidateIndex}, #{sku})
+      </foreach>
+    )
+    SELECT candidates.candidate_index,
+           COUNT(*) OVER (PARTITION BY candidates.sku) AS equivalent_count,
+           DENSE_RANK() OVER (ORDER BY candidates.sku) AS collation_order,
+           product.id AS product_id,
+           product.name AS product_name
+    FROM candidates
+    LEFT JOIN product
+      ON product.workspace_id = #{workspaceId}
+      AND product.sku = candidates.sku
+    ORDER BY candidates.candidate_index
+  </select>
+
   <select id="getByIdForUpdate" resultMap="ProductResult">
     SELECT <include refid="cols"/> FROM product
     WHERE workspace_id = #{workspaceId} AND id = #{id}
