@@ -290,6 +290,15 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
             .collect(java.util.stream.Collectors.toMap(FacetCount::getKey, FacetCount::getCount));
         assertEquals(1L, facets.get(PersonLifecycleStage.NEW.name()));
         assertTrue(facets.getOrDefault("__none__", 0L) >= 1L);
+
+        jdbcTemplate.update(
+            "UPDATE person SET suspended_at = CURRENT_TIMESTAMP WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), staged.getId());
+        Map<String, Long> facetsWithSuspended = personService.countsByLifecycleStage().stream()
+            .collect(java.util.stream.Collectors.toMap(FacetCount::getKey, FacetCount::getCount));
+        assertEquals(facets.get(PersonLifecycleStage.NEW.name()),
+            facetsWithSuspended.get(PersonLifecycleStage.NEW.name()),
+            "facet counts must match the page filter, which keeps suspended contacts visible");
     }
 
     private Workspace siblingWorkspace() {

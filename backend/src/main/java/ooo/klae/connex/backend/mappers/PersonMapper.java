@@ -122,7 +122,8 @@ public interface PersonMapper {
     boolean hasPersonWithoutCompany(int workspaceId);
     List<FacetCount> countsByOwner(@Param("workspaceId") int workspaceId);
     /**
-     * How many active, unsuspended contacts sit in each lead-lifecycle stage. Contacts outside the
+     * How many active contacts sit in each lead-lifecycle stage, matching the page filter's
+     * population (suspended contacts stay administratively visible in both). Contacts outside the
      * lifecycle are counted under the {@code __none__} key so the browser can offer them as a bucket.
      *
      * @param workspaceId owning workspace

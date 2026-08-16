@@ -47,6 +47,10 @@ public class DataSubjectDisclosureDto {
         private boolean introExcluded;
         private LocalDateTime suspendedAt;
         private LocalDateTime provisionCeasedAt;
+        private String lifecycleStage;
+        private LocalDateTime lifecycleChangedAt;
+        private String disqualifiedReason;
+        private String qualificationNotes;
         private LocalDateTime createdAt;
         private LocalDateTime updatedAt;
     }

@@ -23,7 +23,8 @@
     SELECT p.id, p.workspace_id, p.name, p.email, p.phone, p.title,
            c.id AS company_id, c.name AS company_name,
            p.image_url, p.risk_excluded, p.intro_excluded, p.suspended_at,
-           p.provision_ceased_at, p.created_at, p.updated_at
+           p.provision_ceased_at, p.lifecycle_stage, p.lifecycle_changed_at,
+           p.disqualified_reason, p.qualification_notes, p.created_at, p.updated_at
     FROM person p
     LEFT JOIN company c ON c.id = p.company_id AND c.workspace_id IN
       <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
