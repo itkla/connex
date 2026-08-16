@@ -60,6 +60,10 @@ export default function ContactLifecyclePanel({ contactId, lifecycle, className 
     const t = useTranslations('ContactLifecycle');
     const format = useFormatter();
     const router = useRouter();
+    const currentStage = lifecycle.stage ?? null;
+    const currentReason = lifecycle.disqualifiedReason ?? null;
+    const currentNotes = lifecycle.qualificationNotes ?? null;
+    const currentChangedAt = lifecycle.changedAt ?? null;
 
     const [open, setOpen] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -99,7 +103,7 @@ export default function ContactLifecyclePanel({ contactId, lifecycle, className 
         if (next) {
             setStage('');
             setReason('');
-            setNote(lifecycle.qualificationNotes ?? '');
+            setNote(currentNotes ?? '');
         }
         setOpen(next);
     };
@@ -134,22 +138,22 @@ export default function ContactLifecyclePanel({ contactId, lifecycle, className 
             <div className="overflow-hidden rounded-2xl border border-border bg-card">
                 <div className="flex items-start justify-between gap-4 px-6 py-4 xl:px-4">
                     <div className="min-w-0">
-                        <StageBadge stage={lifecycle.stage} label={stageLabel(lifecycle.stage, t)} />
+                        <StageBadge stage={currentStage} label={stageLabel(currentStage, t)} />
                         <p className="mt-2 text-xs text-muted-foreground">
-                            {lifecycle.stage === null
+                            {currentStage === null
                                 ? t('notInLifecycle')
-                                : lifecycle.changedAt
+                                : currentChangedAt
                                     ? t('changedAt', {
-                                        when: format.dateTime(new Date(lifecycle.changedAt), {
+                                        when: format.dateTime(new Date(currentChangedAt), {
                                             dateStyle: 'medium',
                                             timeStyle: 'short',
                                         }),
                                     })
                                     : ''}
                         </p>
-                        {lifecycle.disqualifiedReason ? (
+                        {currentReason ? (
                             <p className="mt-1 text-xs text-muted-foreground">
-                                {t('reasonLine', { reason: t(`reason.${lifecycle.disqualifiedReason}`) })}
+                                {t('reasonLine', { reason: t(`reason.${currentReason}`) })}
                             </p>
                         ) : null}
                     </div>
@@ -159,13 +163,13 @@ export default function ContactLifecyclePanel({ contactId, lifecycle, className 
                         className="shrink-0"
                         onClick={() => openDialog(true)}
                     >
-                        {lifecycle.stage === null ? t('startAction') : t('changeAction')}
+                        {currentStage === null ? t('startAction') : t('changeAction')}
                     </Button>
                 </div>
 
-                {lifecycle.qualificationNotes ? (
+                {currentNotes ? (
                     <p className="border-t border-border px-6 py-4 text-sm text-foreground xl:px-4">
-                        {lifecycle.qualificationNotes}
+                        {currentNotes}
                     </p>
                 ) : null}
 
@@ -175,8 +179,8 @@ export default function ContactLifecyclePanel({ contactId, lifecycle, className 
                             <li key={entry.id} className="px-6 py-3 xl:px-4">
                                 <p className="text-xs font-medium text-foreground">
                                     {t('transition', {
-                                        from: stageLabel(entry.fromStage, t),
-                                        to: stageLabel(entry.toStage, t),
+                                        from: stageLabel(entry.fromStage ?? null, t),
+                                        to: stageLabel(entry.toStage ?? null, t),
                                     })}
                                 </p>
                                 <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">
@@ -185,7 +189,7 @@ export default function ContactLifecyclePanel({ contactId, lifecycle, className 
                                         timeStyle: 'short',
                                     })}
                                 </p>
-                                {entry.reason ? (
+                                {entry.reason != null ? (
                                     <p className="mt-0.5 text-xs text-muted-foreground">
                                         {t(`reason.${entry.reason}`)}
                                     </p>
@@ -219,7 +223,7 @@ export default function ContactLifecyclePanel({ contactId, lifecycle, className 
                                             {option.label}
                                         </SelectItem>
                                     ))}
-                                    {lifecycle.stage === null ? null : (
+                                    {currentStage === null ? null : (
                                         <SelectItem value={WITHDRAW_VALUE}>{t('withdrawOption')}</SelectItem>
                                     )}
                                 </SelectContent>
