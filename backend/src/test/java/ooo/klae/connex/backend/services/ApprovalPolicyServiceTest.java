@@ -722,6 +722,17 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void anyApproverStepCannotDeclareANoopEscalation() {
+        ApprovalPolicyStep declared = step(1, "Everyone", anyApprover());
+        declared.setDueIntervalHours(24);
+        declared.setOnExpiry("escalate");
+
+        assertThrows(BadRequestException.class,
+            () -> policyService.create(chained("sequential", declared)));
+        assertTrue(policyService.getAll().isEmpty());
+    }
+
+    @Test
     void dueIntervalOutOfRangeIsRefused() {
         User approver = admin();
         ApprovalPolicyStep tooShort = step(1, "Manager", namedApprover(approver.getId()));

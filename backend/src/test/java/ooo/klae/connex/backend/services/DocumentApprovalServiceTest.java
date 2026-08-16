@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import java.math.BigDecimal;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -40,6 +41,7 @@ import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Product;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.ApprovalDelegateDto;
 import ooo.klae.connex.backend.dto.ApprovalInboxItemDto;
 import ooo.klae.connex.backend.dto.DealDocumentDto;
 import ooo.klae.connex.backend.dto.DealLineItemRequest;
@@ -174,11 +176,16 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
     }
 
     private ApprovalPolicy typedChainPolicy(String documentType, ApprovalPolicyStep... steps) {
+        return typedChainPolicy(documentType, "sequential", steps);
+    }
+
+    private ApprovalPolicy typedChainPolicy(
+            String documentType, String mode, ApprovalPolicyStep... steps) {
         ApprovalPolicy policy = new ApprovalPolicy();
         policy.setName("Typed policy " + unique());
         policy.setActive(true);
         policy.setDocumentType(documentType);
-        policy.setMode("sequential");
+        policy.setMode(mode);
         policy.setSteps(List.of(steps));
         return policyService.create(policy);
     }
@@ -1008,7 +1015,7 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         DocumentApprovalDto pending = approvalService.getForDocument(
             deal.getId(), document.id()).getFirst();
         assertTrue(approvalMapper.findActionableSteps(
-            foreignWorkspaceId, currentUser.getId(), 200).isEmpty());
+            foreignWorkspaceId, currentUser.getId(), 0, 200).isEmpty());
         assertTrue(approvalMapper.findExpiredActiveSteps(
             foreignWorkspaceId, pending.id()).isEmpty());
         assertTrue(approvalMapper.findReminderDueSteps(
@@ -1099,6 +1106,13 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
             "SELECT COUNT(*) FROM document_approval_step_assignment "
                 + "WHERE workspace_id = ? AND step_id = ?",
             Integer.class, workspace.getId(), stepId);
+    }
+
+    private int decisionCount(int approvalId) {
+        return jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM document_approval_decision "
+                + "WHERE workspace_id = ? AND approval_id = ?",
+            Integer.class, workspace.getId(), approvalId);
     }
 
     private int approverSnapshotCount(int stepId) {
@@ -1212,6 +1226,59 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void aDecisionSubmittedAfterTheDeadlineExpiresBeforeItCanBeRecorded() {
+        User assigned = approver();
+        chainPolicy("sequential", deadline(step(1, "Manager", assigned), 4, "expire"));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        backdateDue(stepOf(requested, 1).id(),
+            "TIMESTAMPADD(HOUR, -8, CURRENT_TIMESTAMP)",
+            "TIMESTAMPADD(HOUR, -4, CURRENT_TIMESTAMP)");
+        authenticateAs(assigned, workspace.getId());
+
+        DocumentApprovalDto result = approvalService.decide(
+            deal.getId(), document.id(), "approved", null, null);
+
+        assertEquals("expired", result.status());
+        assertEquals("expired", result.outcomeReason());
+        assertEquals(0, decisionCount(requested.id()));
+        assertEquals("draft", documentService.getOne(deal.getId(), document.id()).status());
+    }
+
+    @Test
+    void aLateDecisionReconcilesEveryOverdueParallelEscalationFirst() {
+        User first = approver();
+        User second = approver();
+        User newlyEligible = approver();
+        chainPolicy("parallel",
+            deadline(step(1, "Legal", first), 4, "escalate"),
+            deadline(step(1, "Finance", second), 4, "escalate"));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        for (DocumentApprovalStepDto step : requested.steps()) {
+            backdateDue(step.id(), "TIMESTAMPADD(HOUR, -8, CURRENT_TIMESTAMP)",
+                "TIMESTAMPADD(HOUR, -4, CURRENT_TIMESTAMP)");
+        }
+        authenticateAs(first, workspace.getId());
+
+        DocumentApprovalDto result = approvalService.decide(
+            deal.getId(), document.id(), "approved", null, stepOf(requested, 1).id());
+
+        assertEquals("pending", result.status());
+        assertEquals(1, decisionCount(requested.id()));
+        for (DocumentApprovalStepDto step : result.steps()) {
+            assertNotNull(step.escalatedAt());
+            assertNull(step.dueAt());
+            assertEquals("escalation", step.assignments().getFirst().assignmentKind());
+        }
+        assertTrue(stepOf(result, 2).effectiveApproverIds().contains(newlyEligible.getId()));
+    }
+
+    @Test
     void expiryIsIdempotentUnderARepeatedSweep() {
         User first = approver();
         chainPolicy("sequential", deadline(step(1, "Manager", first), 4, "expire"));
@@ -1275,6 +1342,34 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         assertEquals(1, assignmentCount(stepId));
         assertEquals("pending", approvalMapper.getById(
             workspace.getId(), requested.id()).getStatus());
+    }
+
+    @Test
+    void deadlineEscalationNotifiesOnlyApproversTheWideningAdded() {
+        User assigned = approver();
+        User addedFirst = approver();
+        User addedSecond = approver();
+        chainPolicy("sequential", deadline(step(1, "Manager", assigned), 4, "escalate"));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+        backdateDue(stepId, "TIMESTAMPADD(HOUR, -8, CURRENT_TIMESTAMP)",
+            "TIMESTAMPADD(HOUR, -4, CURRENT_TIMESTAMP)");
+
+        sweep(requested);
+
+        int assignmentId = approvalService.getForDocument(deal.getId(), document.id())
+            .getFirst().steps().getFirst().assignments().getFirst().id();
+        String key = "document.approval_request:" + requested.id() + ":" + stepId
+            + ":escalated:" + assignmentId + ":";
+        assertNull(notificationMapper.findByDedupe(
+            workspace.getId(), assigned.getId(), key + assigned.getId()));
+        assertNotNull(notificationMapper.findByDedupe(
+            workspace.getId(), addedFirst.getId(), key + addedFirst.getId()));
+        assertNotNull(notificationMapper.findByDedupe(
+            workspace.getId(), addedSecond.getId(), key + addedSecond.getId()));
     }
 
     @Test
@@ -1475,6 +1570,12 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         assertEquals("delegation", stepOf(delegated, 1).assignments().getFirst().assignmentKind());
         assertEquals(carol.getId(), stepOf(delegated, 1).assignments().getFirst().userId());
         assertEquals(bob.getId(), stepOf(delegated, 1).assignments().getFirst().delegatedByUserId());
+        assertEquals(carol.getDisplayName(),
+            stepOf(delegated, 1).assignments().getFirst().userDisplayName());
+        assertEquals(bob.getDisplayName(),
+            stepOf(delegated, 1).assignments().getFirst().delegatedByDisplayName());
+        assertEquals(bob.getDisplayName(),
+            stepOf(delegated, 1).assignments().getFirst().createdByDisplayName());
         assertEquals(List.of(carol.getId()), stepOf(delegated, 1).effectiveApproverIds());
         assertEquals(1, approverSnapshotCount(stepId));
         assertEquals(bob.getId(), stepOf(delegated, 1).approvers().getFirst().getUserId());
@@ -1491,7 +1592,8 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
     void delegationRenotifiesAnApproverWhoReceivedTheOriginalRequest() {
         User bob = approver();
         User carol = approver();
-        chainPolicy("sequential", step(1, "Managers", bob, carol));
+        User dave = approver();
+        chainPolicy("sequential", step(1, "Managers", bob, carol, dave));
         Deal deal = jpyDeal();
         DealDocumentDto document = generate(deal);
         DocumentApprovalDto requested = approvalService.requestApproval(
@@ -1509,6 +1611,43 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         assertNotNull(notificationMapper.findByDedupe(workspace.getId(), carol.getId(),
             "document.approval_request:" + requested.id() + ":" + stepId
                 + ":delegated:" + assignmentId + ":" + carol.getId()));
+        assertNull(notificationMapper.findByDedupe(workspace.getId(), dave.getId(),
+            "document.approval_request:" + requested.id() + ":" + stepId
+                + ":delegated:" + assignmentId + ":" + dave.getId()));
+    }
+
+    @Test
+    void eligibleDelegatesAreProjectedFromTheAuthoritativeStepState() {
+        User bob = approver();
+        User decided = approver();
+        User delegatedAway = approver();
+        User eligible = approver();
+        User lacksPermission = newUser();
+        chainPolicy("sequential", step(2, "Managers", bob, decided, delegatedAway));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+        authenticateAs(decided, workspace.getId());
+        approvalService.decide(deal.getId(), document.id(), "approved", null, stepId);
+        authenticateAs(delegatedAway, workspace.getId());
+        approvalService.createDelegation(
+            deal.getId(), document.id(), stepId, eligible.getId(), null);
+        authenticateAs(bob, workspace.getId());
+
+        List<ApprovalDelegateDto> delegates = approvalService.eligibleDelegates(
+            deal.getId(), document.id(), stepId);
+
+        assertEquals(List.of(eligible.getId()), delegates.stream()
+            .map(ApprovalDelegateDto::id).toList());
+        assertEquals(eligible.getDisplayName(), delegates.getFirst().displayName());
+        assertFalse(delegates.stream().anyMatch(candidate ->
+            candidate.id() == currentUser.getId()
+                || candidate.id() == lacksPermission.getId()
+                || candidate.id() == decided.getId()
+                || candidate.id() == delegatedAway.getId()
+                || candidate.id() == bob.getId()));
     }
 
     @Test
@@ -1642,6 +1781,32 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void manualEscalationNotifiesOnlyTheNewlyAddedApprover() {
+        User bob = approver();
+        User unchanged = approver();
+        User added = approver();
+        chainPolicy("sequential", step(1, "Managers", bob, unchanged));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+
+        DocumentApprovalDto widened = approvalService.addStepApprovers(
+            deal.getId(), document.id(), stepId, approverList(added), null);
+
+        int assignmentId = stepOf(widened, 1).assignments().getFirst().id();
+        String key = "document.approval_request:" + requested.id() + ":" + stepId
+            + ":escalated:" + assignmentId + ":";
+        assertNotNull(notificationMapper.findByDedupe(
+            workspace.getId(), added.getId(), key + added.getId()));
+        assertNull(notificationMapper.findByDedupe(
+            workspace.getId(), bob.getId(), key + bob.getId()));
+        assertNull(notificationMapper.findByDedupe(
+            workspace.getId(), unchanged.getId(), key + unchanged.getId()));
+    }
+
+    @Test
     void reassignmentReplacesTheSetAndOpensANewRound() {
         User bob = approver();
         User carol = approver();
@@ -1675,6 +1840,32 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         authenticateAs(carol, workspace.getId());
         assertThrows(ForbiddenException.class, () -> approvalService.decide(
             deal.getId(), document.id(), "approved", null, stepId));
+    }
+
+    @Test
+    void reassignmentNotifiesOnlyTheNewApproverSet() {
+        User bob = approver();
+        User carol = approver();
+        User dave = approver();
+        chainPolicy("sequential", step(1, "Managers", bob, carol));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+
+        DocumentApprovalDto reassigned = approvalService.replaceStepApprovers(
+            deal.getId(), document.id(), stepId, approverList(carol, dave), null);
+
+        int assignmentId = stepOf(reassigned, 1).assignments().getFirst().id();
+        String key = "document.approval_request:" + requested.id() + ":" + stepId
+            + ":reassigned:" + assignmentId + ":";
+        assertNotNull(notificationMapper.findByDedupe(
+            workspace.getId(), dave.getId(), key + dave.getId()));
+        assertNull(notificationMapper.findByDedupe(
+            workspace.getId(), bob.getId(), key + bob.getId()));
+        assertNull(notificationMapper.findByDedupe(
+            workspace.getId(), carol.getId(), key + carol.getId()));
     }
 
     @Test
@@ -1864,6 +2055,52 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         authenticateAs(other, workspace.getId());
         assertFalse(approvalService.inbox().stream()
             .map(ApprovalInboxItemDto::approvalId).toList().contains(delegated.id()));
+    }
+
+    @Test
+    void staleCandidatePagesCannotStarveLaterInboxWork() {
+        User caller = approver();
+        User replacement = approver();
+        List<ApprovalPolicyStep> steps = new ArrayList<>();
+        for (int index = 0; index < 10; index++) {
+            steps.add(step(1, "Stale " + index, caller));
+        }
+        typedChainPolicy("quote", "parallel", steps.toArray(ApprovalPolicyStep[]::new));
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Company company = newCompany();
+        DocumentTemplate documentTemplate = template();
+        for (int approvalIndex = 0; approvalIndex < 20; approvalIndex++) {
+            Deal staleDeal = newDeal(pipeline, stage, company);
+            DealDocumentDto staleDocument = documentService.generate(
+                staleDeal.getId(), documentTemplate.getId());
+            DocumentApprovalDto stale = approvalService.requestApproval(
+                staleDeal.getId(), staleDocument.id(), null);
+            for (DocumentApprovalStepDto staleStep : stale.steps()) {
+                assertEquals(1, jdbcTemplate.update(
+                    "INSERT INTO document_approval_step_assignment (workspace_id, approval_id, "
+                        + "step_id, assignment_kind, assignment_round, approver_kind, user_id, "
+                        + "created_by_user_id) VALUES (?, ?, ?, 'reassignment', 1, 'user', ?, ?)",
+                    workspace.getId(), stale.id(), staleStep.id(), replacement.getId(),
+                    currentUser.getId()));
+            }
+        }
+        Deal actionableDeal = newDeal(pipeline, stage, company);
+        DealDocumentDto actionableDocument = documentService.generate(
+            actionableDeal.getId(), documentTemplate.getId());
+        DocumentApprovalDto actionable = approvalService.requestApproval(
+            actionableDeal.getId(), actionableDocument.id(), null);
+        flushSession();
+        authenticateAs(caller, workspace.getId());
+
+        List<Integer> visible = approvalService.inbox().stream()
+            .map(ApprovalInboxItemDto::approvalId).toList();
+
+        assertTrue(visible.contains(actionable.id()));
+        verify(approvalMapper).findActionableSteps(
+            workspace.getId(), caller.getId(), 0, 200);
+        verify(approvalMapper).findActionableSteps(
+            workspace.getId(), caller.getId(), 200, 200);
     }
 
     @Test

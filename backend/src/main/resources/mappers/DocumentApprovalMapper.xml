@@ -404,7 +404,7 @@
         OR EXISTS (SELECT 1 FROM document_approval_step_assignment sa
                    WHERE sa.workspace_id = s.workspace_id AND sa.step_id = s.id
                      AND (sa.approver_kind = 'any_approver' OR sa.user_id = #{userId})))
-    ORDER BY s.due_at IS NULL, s.due_at, a.id, s.step_order
-    LIMIT #{limit}
+    ORDER BY s.due_at IS NULL, s.due_at, a.id, s.step_order, s.id
+    LIMIT #{limit} OFFSET #{offset}
   </select>
 </mapper>

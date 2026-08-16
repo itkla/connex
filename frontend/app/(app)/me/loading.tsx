@@ -46,19 +46,6 @@ export default function MeLoading() {
                     ))}
                 </div>
 
-                <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                    {Array.from({ length: 2 }).map((_, i) => (
-                        <div key={i} className="flex items-center gap-4 border-b border-border px-5 py-4 last:border-0">
-                            <Skeleton className="size-9 shrink-0 rounded-lg" />
-                            <div className="flex-1 space-y-1.5">
-                                <Skeleton className="h-3.5 w-48" />
-                                <Skeleton className="h-3 w-64" />
-                            </div>
-                            <Skeleton className="h-3 w-28" />
-                        </div>
-                    ))}
-                </div>
-
                 <div className="rounded-2xl border border-border bg-card p-5">
                     <Skeleton className="h-4 w-28" />
                     <Skeleton className="mt-5 h-24 w-full" />

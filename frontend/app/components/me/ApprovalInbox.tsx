@@ -7,7 +7,7 @@ import { EmptyState } from '@/app/components/EmptyState';
 import SectionUnavailable from '@/app/components/SectionUnavailable';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import type { ApprovalInboxItem } from '@/app/lib/types';
-import { formatDateTime } from '@/app/lib/utils';
+import { formatUtcDateTime } from '@/app/lib/utils';
 
 type Props = {
     items: ApprovalInboxItem[] | null;
@@ -68,7 +68,7 @@ export default async function ApprovalInbox({ items }: Props) {
                                         <ClockIcon className="size-3.5" aria-hidden="true" />
                                         {item.dueAt
                                             ? t('approvalInboxDue', {
-                                                date: formatDateTime(item.dueAt, locale),
+                                                date: formatUtcDateTime(item.dueAt, locale),
                                             })
                                             : t('approvalInboxNoDeadline')}
                                     </span>

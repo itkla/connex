@@ -440,6 +440,10 @@ public class ApprovalPolicyService {
             List<ApprovalStepApprover> approvers = step.getApprovers();
             boolean anyApprover = approvers.stream()
                 .anyMatch(approver -> ANY_APPROVER.equals(approver.getApproverKind()));
+            if (anyApprover && ESCALATE.equals(step.getOnExpiry())) {
+                throw new BadRequestException("Step \"" + stepLabel(step)
+                    + "\" cannot escalate because it is already open to any approver");
+            }
             if (anyApprover && approvers.size() > 1) {
                 throw new BadRequestException(
                     "A step set to any approver cannot also name individual approvers");

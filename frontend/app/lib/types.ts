@@ -1586,10 +1586,21 @@ export type ApprovalStepAssignment = {
     assignmentRound: number;
     approverKind: ApprovalApproverKind;
     userId?: number | null;
+    userDisplayName?: string | null;
     delegatedByUserId?: number | null;
+    delegatedByDisplayName?: string | null;
     createdByUserId?: number | null;
+    createdByDisplayName?: string | null;
     comment?: string | null;
     createdAt: string;
+};
+
+/** One server-authorized destination for delegating the current approval seat. */
+export type ApprovalDelegate = {
+    id: number;
+    username: string;
+    displayName?: string | null;
+    email: string;
 };
 
 /** One frozen step of an approval chain, with the approvals collected so far. */

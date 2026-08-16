@@ -34,6 +34,7 @@ import ooo.klae.connex.backend.beans.DocumentApprovalStep;
 import ooo.klae.connex.backend.beans.DocumentApprovalStepAssignment;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.ApprovalDelegateDto;
 import ooo.klae.connex.backend.dto.ApprovalInboxItemDto;
 import ooo.klae.connex.backend.dto.ApprovalInboxRow;
 import ooo.klae.connex.backend.dto.ApprovalReminderRow;
@@ -308,9 +309,16 @@ public class DocumentApprovalService {
         if (approval == null || !"pending_approval".equals(document.getStatus())) {
             throw new BadRequestException("No pending approval on this document");
         }
-        requireSeparationOfDuties(approval, document, actor);
         List<DocumentApprovalStep> steps = chainOfForUpdate(workspaceId, approval);
         ApproverPool pool = approverPool(workspaceId);
+        while (reconcileExpiry(workspaceId, document, approval, pool)) {
+            approval = requireApprovalForUpdate(workspaceId, approval.getId());
+            if (!PENDING.equals(approval.getStatus())) {
+                return toDto(approval, document, pool);
+            }
+            steps = approval.getSteps();
+        }
+        requireSeparationOfDuties(approval, document, actor);
         DocumentApprovalStep step = resolveStep(approval, document, steps, stepId, actor, pool);
 
         DocumentApprovalDecision recorded = new DocumentApprovalDecision();
@@ -741,9 +749,44 @@ public class DocumentApprovalService {
         auditService.record("document_approval.delegate", "deal", deal.getId(), deal.getName(),
             "Delegated step " + step.getStepOrder() + " of " + document.getType()
                 + " v" + document.getVersion() + " to " + delegate.getDisplayName(), null);
+        Set<Integer> recipients = newlyAffectedRecipients(
+            approval, step, reloaded, document, pool, delegateUserId);
         notifyStepApprovers(workspaceId, deal, document, reloaded,
-            stepsOf(reloaded, step.getId()), actor, pool, "delegated", assignment.getId());
+            stepsOf(reloaded, step.getId()), actor, pool, "delegated", assignment.getId(), recipients);
         return toDto(reloaded, document, pool);
+    }
+
+    /** Members the current approver may delegate one active step to right now. */
+    @Transactional(readOnly = true)
+    @RequirePermission(Permission.DOCUMENT_APPROVE)
+    public List<ApprovalDelegateDto> eligibleDelegates(int dealId, int documentId, int stepId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = workspaceService.getCurrentUserId();
+        requireDeal(workspaceId, dealId);
+        DealDocument document = requireDocument(workspaceId, dealId, documentId);
+        DocumentApproval approval = approvalMapper.findPending(workspaceId, documentId);
+        if (approval == null || !"pending_approval".equals(document.getStatus())) {
+            throw new BadRequestException("No pending approval on this document");
+        }
+        approval = withChain(workspaceId, List.of(approval)).getFirst();
+        DocumentApprovalStep step = requireActiveStep(approval.getSteps(), stepId);
+        ApproverPool pool = approverPool(workspaceId);
+        Set<Integer> exclusions = separationExclusions(approval, document);
+        EffectiveApprovers effective = eligibility.resolve(step, pool, exclusions);
+        if (attributionFailure(approval, document) != null
+                || !effective.undecided().contains(actorId)) {
+            throw new ForbiddenException("You are not an approver for that step");
+        }
+        return pool.members().stream()
+            .filter(member -> member.getId() != actorId)
+            .filter(member -> pool.approvers().contains(member.getId()))
+            .filter(member -> !exclusions.contains(member.getId()))
+            .filter(member -> !hasDecided(step, member.getId()))
+            .filter(member -> !hasDelegated(step, member.getId()))
+            .filter(member -> delegationKeepsSatisfiable(
+                effective, actorId, member.getId()))
+            .map(ApprovalDelegateDto::from)
+            .toList();
     }
 
     /**
@@ -785,6 +828,7 @@ public class DocumentApprovalService {
             throw new BadRequestException("No pending approval on this document");
         }
         DocumentApprovalStep step = requireActiveStep(chainOfForUpdate(workspaceId, approval), stepId);
+        DocumentApproval before = approval;
         int currentRound = approvalMapper.maxReassignmentRound(workspaceId, step.getId());
         int round = REASSIGNMENT.equals(assignmentKind) ? currentRound + 1 : currentRound;
         Integer appendedAssignmentId = null;
@@ -820,20 +864,22 @@ public class DocumentApprovalService {
                 + document.getType() + " v" + document.getVersion() + " to "
                 + approverSummary(requested), null);
         if (appendedAssignmentId != null) {
+            Set<Integer> recipients = newlyAffectedRecipients(
+                before, step, reloaded, document, pool, null);
             notifyStepApprovers(workspaceId, deal, document, reloaded,
                 stepsOf(reloaded, step.getId()), actor, pool,
-                escalation ? "escalated" : "reassigned", appendedAssignmentId);
+                escalation ? "escalated" : "reassigned", appendedAssignmentId, recipients);
         }
         return toDto(reloaded, document, pool);
     }
 
     /**
-     * Approval steps the caller can still decide across the whole workspace, newest deadline first.
+     * Approval steps the caller can still decide across the whole workspace, nearest deadline first.
      *
      * <p>This is a pure projection over {@code document_approval}, {@code document_approval_step},
      * and {@code document_approval_step_assignment}: it takes no locks, writes nothing, and persists
-     * no state. The bounded mapper prefilter deliberately over-selects, so every candidate is
-     * re-resolved in Java before it is disclosed.
+     * no state. The mapper deliberately over-selects bounded pages, so every candidate is
+     * re-resolved in Java before it is disclosed and stale early pages cannot starve later work.
      *
      * <p>Disclosure note: an approver sees the deal name and document title of a request routed to
      * them even when owner-scope record visibility would otherwise hide that deal. That is the same
@@ -845,11 +891,27 @@ public class DocumentApprovalService {
     public List<ApprovalInboxItemDto> inbox() {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int callerId = workspaceService.getCurrentUserId();
-        List<ApprovalInboxRow> candidates = approvalMapper.findActionableSteps(
-            workspaceId, callerId, CANDIDATE_LIMIT);
-        if (candidates.isEmpty()) {
-            return List.of();
+        ApproverPool pool = approverPool(workspaceId);
+        List<ApprovalInboxItemDto> items = new ArrayList<>();
+        int offset = 0;
+        while (items.size() < INBOX_LIMIT) {
+            List<ApprovalInboxRow> candidates = approvalMapper.findActionableSteps(
+                workspaceId, callerId, offset, CANDIDATE_LIMIT);
+            if (candidates.isEmpty()) {
+                break;
+            }
+            appendInboxItems(workspaceId, callerId, candidates, pool, items);
+            if (candidates.size() < CANDIDATE_LIMIT) {
+                break;
+            }
+            offset += candidates.size();
         }
+        return items;
+    }
+
+    private void appendInboxItems(int workspaceId, int callerId,
+            List<ApprovalInboxRow> candidates, ApproverPool pool,
+            List<ApprovalInboxItemDto> items) {
         List<Integer> approvalIds = candidates.stream()
             .map(ApprovalInboxRow::approvalId)
             .distinct()
@@ -865,8 +927,6 @@ public class DocumentApprovalService {
             .getByIds(workspaceId, documentIds).stream()
             .collect(Collectors.toMap(DealDocument::getId, document -> document,
                 (first, second) -> first, LinkedHashMap::new));
-        ApproverPool pool = approverPool(workspaceId);
-        List<ApprovalInboxItemDto> items = new ArrayList<>();
         for (ApprovalInboxRow row : candidates) {
             if (items.size() >= INBOX_LIMIT) {
                 break;
@@ -893,7 +953,6 @@ public class DocumentApprovalService {
                 row.stepId(), row.stepOrder(), row.stepName(), row.requiredCount(), row.dueAt(),
                 row.escalatedAt() != null, row.requestedBy(), row.requestedAt()));
         }
-        return items;
     }
 
     /**
@@ -968,8 +1027,10 @@ public class DocumentApprovalService {
                 + " v" + document.getVersion() + " to every approver after its deadline passed",
             null);
         DocumentApproval reloaded = requireApprovalForUpdate(workspaceId, current.getId());
+        Set<Integer> recipients = newlyAffectedRecipients(
+            current, step, reloaded, document, pool, null);
         notifyStepApprovers(workspaceId, deal, document, reloaded,
-            stepsOf(reloaded, step.getId()), null, pool, "escalated", assignment.getId());
+            stepsOf(reloaded, step.getId()), null, pool, "escalated", assignment.getId(), recipients);
         return true;
     }
 
@@ -1160,13 +1221,15 @@ public class DocumentApprovalService {
     private DocumentApprovalDto toDto(DocumentApproval approval, DealDocument document,
             ApproverPool pool) {
         ApprovalProjection projection = projectAvailability(approval, document, pool);
+        Map<Integer, String> memberLabels = pool.members().stream()
+            .collect(Collectors.toMap(User::getId, this::displayLabel));
         List<DocumentApprovalStepDto> steps = approval.getSteps().stream()
             .map(step -> {
                 ApprovalAvailability availability = projection.steps().get(step.getId());
                 EffectiveApprovers effective = projection.effective().get(step.getId());
                 return DocumentApprovalStepDto.from(step, availability.satisfiable(),
                     availability.reason(), effective.anyApprover(),
-                    List.copyOf(effective.undecided()));
+                    List.copyOf(effective.undecided()), memberLabels);
             })
             .toList();
         return DocumentApprovalDto.from(approval, projection.overall().satisfiable(),
@@ -1269,10 +1332,21 @@ public class DocumentApprovalService {
     private void notifyStepApprovers(int workspaceId, Deal deal, DealDocument document,
             DocumentApproval approval, List<DocumentApprovalStep> steps, User actor,
             ApproverPool pool, String reason, Integer assignmentId) {
+        notifyStepApprovers(workspaceId, deal, document, approval, steps, actor,
+            pool, reason, assignmentId, null);
+    }
+
+    private void notifyStepApprovers(int workspaceId, Deal deal, DealDocument document,
+            DocumentApproval approval, List<DocumentApprovalStep> steps, User actor,
+            ApproverPool pool, String reason, Integer assignmentId,
+            Set<Integer> recipientIds) {
         String triggeredAt = LocalDateTime.now(ZoneOffset.UTC).format(TS);
         String eventKey = reason == null ? "requested" : reason + ":" + assignmentId;
         for (DocumentApprovalStep step : steps) {
             for (User member : recipientsFor(approval, document, step, pool)) {
+                if (recipientIds != null && !recipientIds.contains(member.getId())) {
+                    continue;
+                }
                 if (actor != null && member.getId() == actor.getId()) {
                     continue;
                 }
@@ -1330,6 +1404,42 @@ public class DocumentApprovalService {
         return pool.members().stream()
             .filter(member -> undecided.contains(member.getId()))
             .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private Set<Integer> newlyAffectedRecipients(DocumentApproval beforeApproval,
+            DocumentApprovalStep beforeStep, DocumentApproval afterApproval,
+            DealDocument document, ApproverPool pool, Integer explicitDelegateId) {
+        Set<Integer> before = new LinkedHashSet<>(eligibility.resolve(
+            beforeStep, pool, separationExclusions(beforeApproval, document)).undecided());
+        DocumentApprovalStep afterStep = afterApproval.getSteps().stream()
+            .filter(candidate -> candidate.getId() == beforeStep.getId())
+            .findFirst()
+            .orElseThrow(() -> new IllegalStateException("Changed approval step is missing"));
+        Set<Integer> after = new LinkedHashSet<>(eligibility.resolve(
+            afterStep, pool, separationExclusions(afterApproval, document)).undecided());
+        after.removeAll(before);
+        if (explicitDelegateId != null) {
+            after.add(explicitDelegateId);
+        }
+        return after;
+    }
+
+    private boolean delegationKeepsSatisfiable(EffectiveApprovers effective,
+            int delegatorId, int delegateId) {
+        Set<Integer> after = new LinkedHashSet<>(effective.undecided());
+        after.remove(delegatorId);
+        after.add(delegateId);
+        return after.size() >= effective.remainingNeeded();
+    }
+
+    private String displayLabel(User user) {
+        if (user.getDisplayName() != null && !user.getDisplayName().isBlank()) {
+            return user.getDisplayName();
+        }
+        if (user.getUsername() != null && !user.getUsername().isBlank()) {
+            return user.getUsername();
+        }
+        return Integer.toString(user.getId());
     }
 
     /**

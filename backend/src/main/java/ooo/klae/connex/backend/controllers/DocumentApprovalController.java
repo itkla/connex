@@ -15,12 +15,15 @@ import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.beans.ApprovalStepApprover;
 import ooo.klae.connex.backend.dto.ApprovalDecisionRequest;
+import ooo.klae.connex.backend.dto.ApprovalDelegateDto;
 import ooo.klae.connex.backend.dto.ApprovalDelegationRequest;
 import ooo.klae.connex.backend.dto.ApprovalRequestBody;
 import ooo.klae.connex.backend.dto.ApprovalStepApproverChangeRequest;
 import ooo.klae.connex.backend.dto.ApprovalStepApproverDto;
 import ooo.klae.connex.backend.dto.DocumentApprovalDto;
 import ooo.klae.connex.backend.services.DocumentApprovalService;
+import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.tenant.RequirePermission;
 
 /** REST controller for the approval lifecycle on generated deal documents. */
 @RestController
@@ -57,6 +60,13 @@ public class DocumentApprovalController {
             @PathVariable int stepId, @Valid @RequestBody ApprovalDelegationRequest body) {
         return approvalService.createDelegation(dealId, documentId, stepId,
             body.getDelegateUserId(), body.getComment());
+    }
+
+    @GetMapping("/steps/{stepId}/delegate-candidates")
+    @RequirePermission(Permission.DOCUMENT_APPROVE)
+    public List<ApprovalDelegateDto> delegateCandidates(@PathVariable int dealId,
+            @PathVariable int documentId, @PathVariable int stepId) {
+        return approvalService.eligibleDelegates(dealId, documentId, stepId);
     }
 
     @PostMapping("/steps/{stepId}/approvers")

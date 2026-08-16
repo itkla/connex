@@ -29,32 +29,18 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { easeOut, instant, springSnappy } from '@/app/lib/motion';
-import type {
-    ApprovalApproverKind,
-    ApprovalChainMode,
-    ApprovalStepExpiryAction,
-    SeparationOfDuties,
-    WorkspaceMember,
-} from '@/app/lib/types';
-
-/**
- * One step being edited. `userIds` is only meaningful while `kind` is `user`, and `key` is a stable
- * client-side identity so reordering never re-keys the rows around it.
- *
- * `id` is the server's identity for a step that already exists and must survive editing: the
- * backend classifies a step with no id as newly added, which makes the whole save a tightening and
- * invalidates approvals pending under the policy. A step the user just added has no id by design.
- */
-export type ChainStepDraft = {
-    key: string;
-    id?: number;
-    name: string;
-    requiredCount: number;
-    dueIntervalHours: string;
-    onExpiry: ApprovalStepExpiryAction;
-    kind: ApprovalApproverKind;
-    userIds: number[];
-};
+import type { ApprovalChainMode, SeparationOfDuties, WorkspaceMember } from '@/app/lib/types';
+import {
+    availableApprovers,
+    dueIntervalIsValid,
+    isApprovalApproverKind,
+    isApprovalChainMode,
+    isApprovalStepExpiryAction,
+    isSeparationOfDuties,
+    MAX_DUE_INTERVAL_HOURS,
+    newChainStep,
+    type ChainStepDraft,
+} from './approvalChainDraft';
 
 type Props = {
     mode: ApprovalChainMode;
@@ -68,35 +54,6 @@ type Props = {
 };
 
 const MAX_STEPS = 10;
-const MAX_QUORUM = 20;
-const MAX_DUE_INTERVAL_HOURS = 8760;
-
-let nextStepKey = 0;
-
-export const newChainStep = (): ChainStepDraft => ({
-    key: `new-${nextStepKey++}`,
-    name: '',
-    requiredCount: 1,
-    dueIntervalHours: '',
-    onExpiry: 'expire',
-    kind: 'any_approver',
-    userIds: [],
-});
-
-/**
- * The largest quorum a step may require. A step naming specific members is capped by how many are
- * named; a step open to anyone is capped only by the server's maximum, because the client cannot see
- * which members hold the approve permission and must not guess from the member count.
- */
-export const availableApprovers = (step: ChainStepDraft) =>
-    step.kind === 'any_approver' ? MAX_QUORUM : step.userIds.length;
-
-/** Whether an optional deadline is a whole number of hours accepted by the backend. */
-export const dueIntervalIsValid = (value: string) => {
-    if (value.trim() === '') return true;
-    const hours = Number(value);
-    return Number.isInteger(hours) && hours >= 1 && hours <= MAX_DUE_INTERVAL_HOURS;
-};
 
 /**
  * Editor for a policy's approver chain, composed as sentences rather than stacked field labels to
@@ -166,7 +123,9 @@ export default function ApprovalChainEditor({
                 <span>{t('chainRunLabel')}</span>
                 <Select
                     value={mode}
-                    onValueChange={(value) => onModeChange(value as ApprovalChainMode)}
+                    onValueChange={(value) => {
+                        if (isApprovalChainMode(value)) onModeChange(value);
+                    }}
                     disabled={disabled}
                 >
                     <SelectTrigger size="sm" aria-label={t('chainRunLabel')} className="w-44 shrink-0">
@@ -180,7 +139,9 @@ export default function ApprovalChainEditor({
                 <span>{t('sodLabel')}</span>
                 <Select
                     value={separationOfDuties}
-                    onValueChange={(value) => onSeparationOfDutiesChange(value as SeparationOfDuties)}
+                    onValueChange={(value) => {
+                        if (isSeparationOfDuties(value)) onSeparationOfDutiesChange(value);
+                    }}
                     disabled={disabled}
                 >
                     <SelectTrigger size="sm" aria-label={t('sodLabel')} className="w-64 shrink-0">
@@ -250,12 +211,17 @@ export default function ApprovalChainEditor({
                                         <span>{t('stepApprovalsFrom')}</span>
                                         <Select
                                             value={step.kind}
-                                            onValueChange={(value) =>
-                                                updateStep(index, {
-                                                    kind: value as ApprovalApproverKind,
-                                                    requiredCount: 1,
-                                                })
-                                            }
+                                            onValueChange={(value) => {
+                                                if (isApprovalApproverKind(value)) {
+                                                    updateStep(index, {
+                                                        kind: value,
+                                                        requiredCount: 1,
+                                                        ...(value === 'any_approver'
+                                                            ? { onExpiry: 'expire' }
+                                                            : {}),
+                                                    });
+                                                }
+                                            }}
                                             disabled={disabled}
                                         >
                                             <SelectTrigger
@@ -379,10 +345,14 @@ export default function ApprovalChainEditor({
                                             <Label>{t('stepOnExpiryLabel')}</Label>
                                             <Select
                                                 value={step.onExpiry}
-                                                onValueChange={(value) => updateStep(index, {
-                                                    onExpiry: value as ApprovalStepExpiryAction,
-                                                })}
-                                                disabled={disabled || step.dueIntervalHours.trim() === ''}
+                                                onValueChange={(value) => {
+                                                    if (isApprovalStepExpiryAction(value)) {
+                                                        updateStep(index, { onExpiry: value });
+                                                    }
+                                                }}
+                                                disabled={disabled
+                                                    || step.kind === 'any_approver'
+                                                    || step.dueIntervalHours.trim() === ''}
                                             >
                                                 <SelectTrigger
                                                     size="sm"
@@ -395,9 +365,11 @@ export default function ApprovalChainEditor({
                                                     <SelectItem value="expire">
                                                         {t('stepOnExpiryExpire')}
                                                     </SelectItem>
-                                                    <SelectItem value="escalate">
-                                                        {t('stepOnExpiryEscalate')}
-                                                    </SelectItem>
+                                                    {step.kind === 'user' && (
+                                                        <SelectItem value="escalate">
+                                                            {t('stepOnExpiryEscalate')}
+                                                        </SelectItem>
+                                                    )}
                                                 </SelectContent>
                                             </Select>
                                         </div>

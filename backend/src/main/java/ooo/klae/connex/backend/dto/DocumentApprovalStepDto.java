@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.dto;
 
 import java.util.List;
+import java.util.Map;
 
 import ooo.klae.connex.backend.beans.DocumentApprovalStep;
 
@@ -60,6 +61,13 @@ public record DocumentApprovalStepDto(
     public static DocumentApprovalStepDto from(DocumentApprovalStep s, boolean satisfiable,
             String unsatisfiableReason, boolean effectiveAnyApprover,
             List<Integer> effectiveApproverIds) {
+        return from(s, satisfiable, unsatisfiableReason, effectiveAnyApprover,
+            effectiveApproverIds, Map.of());
+    }
+
+    public static DocumentApprovalStepDto from(DocumentApprovalStep s, boolean satisfiable,
+            String unsatisfiableReason, boolean effectiveAnyApprover,
+            List<Integer> effectiveApproverIds, Map<Integer, String> memberLabels) {
         if (s == null) return null;
         int approvedCount = (int) s.getDecisions().stream()
             .filter(decision -> "approved".equals(decision.getDecision())).count();
@@ -69,7 +77,9 @@ public record DocumentApprovalStepDto(
             s.getEscalatedAt(), satisfiable, unsatisfiableReason,
             effectiveAnyApprover, effectiveApproverIds,
             s.getApprovers().stream().map(ApprovalStepApproverDto::from).toList(),
-            s.getAssignments().stream().map(ApprovalStepAssignmentDto::from).toList(),
+            s.getAssignments().stream()
+                .map(assignment -> ApprovalStepAssignmentDto.from(assignment, memberLabels))
+                .toList(),
             s.getDecisions().stream().map(DocumentApprovalDecisionDto::from).toList());
     }
 }

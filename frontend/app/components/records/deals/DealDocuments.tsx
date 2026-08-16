@@ -61,16 +61,16 @@ import {
     decideDocumentApproval,
     delegateDocumentApproval,
     cancelDocumentApproval,
-    getActiveWorkspaceMembers,
+    getDocumentApprovalDelegateCandidates,
 } from '@/app/lib/api';
 import type {
+    ApprovalDelegate,
     DealDocument,
     DocumentApprovalStep,
     DocumentClientStatus,
     DocumentStatus,
     DocumentTemplate,
     DocumentType,
-    WorkspaceMember,
 } from '@/app/lib/types';
 import DocumentApprovalChain from './DocumentApprovalChain';
 
@@ -105,6 +105,9 @@ const STATUS_DOT: Record<DocumentStatus, string> = {
     final: 'bg-chart-won',
     superseded: 'bg-muted-foreground',
 };
+
+const delegateOption = (candidate: ApprovalDelegate) =>
+    `${candidate.displayName || candidate.username} (${candidate.email})`;
 
 function terminatedApproval(doc: DealDocument) {
     const approval = doc.latestApproval;
@@ -141,9 +144,9 @@ export default function DealDocuments({
         { doc: DealDocument; action: ApprovalAction; stepId: number | null } | null>(null);
     const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
     const [comment, setComment] = useState('');
-    const [members, setMembers] = useState<WorkspaceMember[]>([]);
-    const [membersLoading, setMembersLoading] = useState(false);
-    const [membersError, setMembersError] = useState(false);
+    const [delegateCandidates, setDelegateCandidates] = useState<ApprovalDelegate[]>([]);
+    const [delegateCandidatesLoading, setDelegateCandidatesLoading] = useState(false);
+    const [delegateCandidatesError, setDelegateCandidatesError] = useState(false);
     const [delegateQuery, setDelegateQuery] = useState('');
     const [delegateUserId, setDelegateUserId] = useState<number | null>(null);
 
@@ -154,27 +157,29 @@ export default function DealDocuments({
     }, []);
 
     useEffect(() => {
-        if (!approvalDialogOpen || approvalDialog?.action !== 'delegate') return;
+        if (
+            !approvalDialogOpen
+            || approvalDialog?.action !== 'delegate'
+            || approvalDialog.stepId == null
+        ) return;
         let cancelled = false;
-        getActiveWorkspaceMembers()
-            .then((all) => {
-                if (!cancelled) {
-                    setMembers(all.filter((member) => member.status !== 'pending'));
-                }
+        getDocumentApprovalDelegateCandidates(dealId, approvalDialog.doc.id, approvalDialog.stepId)
+            .then((candidates) => {
+                if (!cancelled) setDelegateCandidates(candidates);
             })
             .catch(() => {
                 if (!cancelled) {
-                    setMembers([]);
-                    setMembersError(true);
+                    setDelegateCandidates([]);
+                    setDelegateCandidatesError(true);
                 }
             })
             .finally(() => {
-                if (!cancelled) setMembersLoading(false);
+                if (!cancelled) setDelegateCandidatesLoading(false);
             });
         return () => {
             cancelled = true;
         };
-    }, [approvalDialog?.action, approvalDialogOpen]);
+    }, [approvalDialog, approvalDialogOpen, dealId]);
 
     const run = async (op: () => Promise<void>) => {
         setBusy(true);
@@ -259,9 +264,9 @@ export default function DealDocuments({
         setDelegateQuery('');
         setDelegateUserId(null);
         if (action === 'delegate') {
-            setMembers([]);
-            setMembersLoading(true);
-            setMembersError(false);
+            setDelegateCandidates([]);
+            setDelegateCandidatesLoading(true);
+            setDelegateCandidatesError(false);
         }
         setApprovalDialog({ doc, action, stepId });
         setApprovalDialogOpen(true);
@@ -273,7 +278,6 @@ export default function DealDocuments({
 
     const isRequester = (doc: DealDocument) => doc.latestApproval?.requestedBy === currentUserId;
 
-    /** The first active step the server currently resolves to this user. */
     const actionableStep = (doc: DealDocument): DocumentApprovalStep | null => {
         const approval = doc.latestApproval;
         if (!canApprove || !approval || approval.status !== 'pending' || doc.status !== 'pending_approval') {
@@ -287,16 +291,6 @@ export default function DealDocuments({
         }
         return candidate;
     };
-
-    const delegateOptions = () => {
-        const step = approvalDialog?.doc.latestApproval?.steps
-            .find((candidate) => candidate.id === approvalDialog.stepId);
-        const decided = new Set(step?.decisions.map((decision) => decision.decidedBy) ?? []);
-        return members.filter((member) => member.id !== currentUserId && !decided.has(member.id));
-    };
-
-    const delegateOption = (member: WorkspaceMember) =>
-        `${member.displayName || member.username} (${member.email})`;
 
     const canFinalize = (doc: DealDocument) =>
         (doc.status === 'draft' && !doc.requiresApproval) || doc.status === 'approved';
@@ -331,7 +325,7 @@ export default function DealDocuments({
     );
 
     const dialogKeys = approvalDialog ? APPROVAL_DIALOG_KEYS[approvalDialog.action] : null;
-    const eligibleDelegates = approvalDialog?.action === 'delegate' ? delegateOptions() : [];
+    const eligibleDelegates = approvalDialog?.action === 'delegate' ? delegateCandidates : [];
 
     return (
         <section id="deal-documents">
@@ -505,16 +499,16 @@ export default function DealDocuments({
                             >
                                 <AutocompleteInput
                                     id="approval-delegate-member"
-                                    placeholder={membersLoading
+                                    placeholder={delegateCandidatesLoading
                                         ? t('delegateMemberLoading')
                                         : t('delegateMemberPlaceholder')}
                                     aria-label={t('delegateMemberLabel')}
-                                    disabled={busy || membersLoading || membersError}
+                                    disabled={busy || delegateCandidatesLoading || delegateCandidatesError}
                                 />
                                 <AutocompleteContent>
                                     <AutocompleteEmpty>{t('delegateMemberNoMatches')}</AutocompleteEmpty>
                                     <AutocompleteList>
-                                        {(member: WorkspaceMember) => (
+                                        {(member: ApprovalDelegate) => (
                                             <AutocompleteItem key={member.id} value={delegateOption(member)}>
                                                 {delegateOption(member)}
                                             </AutocompleteItem>
@@ -522,7 +516,7 @@ export default function DealDocuments({
                                     </AutocompleteList>
                                 </AutocompleteContent>
                             </Autocomplete>
-                            {membersError && (
+                            {delegateCandidatesError && (
                                 <p role="alert" className="text-xs text-destructive">
                                     {t('delegateMemberLoadFailed')}
                                 </p>
@@ -548,7 +542,9 @@ export default function DealDocuments({
                         <Button
                             variant={approvalDialog?.action === 'reject' ? 'destructive' : 'brand'}
                             disabled={busy || (approvalDialog?.action === 'delegate'
-                                && (membersLoading || membersError || delegateUserId == null))}
+                                && (delegateCandidatesLoading
+                                    || delegateCandidatesError
+                                    || delegateUserId == null))}
                             onClick={submitApprovalAction}
                         >
                             {busy

@@ -71,5 +71,5 @@ public interface DocumentApprovalMapper {
     int advanceRemindedRound(@Param("workspaceId") int workspaceId, @Param("id") int id,
         @Param("round") int round, @Param("expectedRound") int expectedRound);
     List<ApprovalInboxRow> findActionableSteps(@Param("workspaceId") int workspaceId,
-        @Param("userId") int userId, @Param("limit") int limit);
+        @Param("userId") int userId, @Param("offset") int offset, @Param("limit") int limit);
 }

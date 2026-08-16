@@ -41,11 +41,12 @@ import type {
     UpdateApprovalPolicyPayload,
     WorkspaceMember,
 } from '@/app/lib/types';
-import ApprovalChainEditor, {
+import ApprovalChainEditor from './ApprovalChainEditor';
+import {
     availableApprovers,
     dueIntervalIsValid,
     type ChainStepDraft,
-} from './ApprovalChainEditor';
+} from './approvalChainDraft';
 
 type Props = {
     open: boolean;
@@ -58,7 +59,7 @@ const DOCUMENT_TYPES: DocumentType[] = ['quote', 'proposal', 'order_form', 'cont
 const ALL_TYPES = 'all';
 
 const isDocumentType = (value: string): value is DocumentType =>
-    (DOCUMENT_TYPES as string[]).includes(value);
+    DOCUMENT_TYPES.some((documentType) => documentType === value);
 
 type Draft = {
     name: string;
