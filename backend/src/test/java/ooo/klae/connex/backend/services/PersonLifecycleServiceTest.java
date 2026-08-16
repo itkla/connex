@@ -67,6 +67,20 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void theCurrentStateExposesOnlyThePermittedNextMoves() {
+        Person person = newPerson(newCompany());
+
+        assertEquals(List.of(PersonLifecycleStage.NEW),
+            lifecycleService.getLifecycle(person.getId()).allowedTransitions());
+
+        enterLifecycle(person);
+        assertEquals(
+            List.of(PersonLifecycleStage.WORKING, PersonLifecycleStage.NURTURING,
+                PersonLifecycleStage.QUALIFIED, PersonLifecycleStage.DISQUALIFIED),
+            lifecycleService.getLifecycle(person.getId()).allowedTransitions());
+    }
+
+    @Test
     void anImpossibleTransitionIsRejectedAndChangesNothing() {
         Person person = enterLifecycle(newPerson(newCompany()));
 
@@ -183,6 +197,8 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
 
         assertThrows(ResourceNotFoundException.class,
             () -> lifecycleService.getHistory(person.getId()));
+        assertThrows(ResourceNotFoundException.class,
+            () -> lifecycleService.getLifecycle(person.getId()));
         assertThrows(ResourceNotFoundException.class, () -> lifecycleService.updateLifecycle(
             person.getId(), request(PersonLifecycleStage.WORKING, null, null)));
     }

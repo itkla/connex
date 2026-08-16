@@ -294,6 +294,16 @@ public class PersonController {
     }
 
     /**
+     * GET endpoint for the contact's current lead-lifecycle state and its permitted next moves.
+     * @param id contact id
+     * @return current lifecycle state
+     */
+    @GetMapping("/{id}/lifecycle")
+    public PersonLifecycleDto getLifecycle(@PathVariable int id) {
+        return personLifecycleService.getLifecycle(id);
+    }
+
+    /**
      * PUT endpoint to move a contact to a lead-lifecycle stage (#559). Requesting the stage the
      * contact already holds updates only the accompanying reason and note.
      * @param id contact id

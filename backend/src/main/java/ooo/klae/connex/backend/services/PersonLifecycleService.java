@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.PersonDisqualificationReason;
 import ooo.klae.connex.backend.beans.PersonLifecycleHistory;
 import ooo.klae.connex.backend.beans.PersonLifecycleStage;
+import ooo.klae.connex.backend.dto.PersonLifecycleDto;
 import ooo.klae.connex.backend.dto.PersonLifecycleHistoryDto;
 import ooo.klae.connex.backend.dto.PersonLifecycleRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -87,6 +88,22 @@ public class PersonLifecycleService {
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person withdrawFromLifecycle(int personId, String note) {
         return applyStage(personId, null, null, note);
+    }
+
+    /**
+     * The current lifecycle state of a contact the caller can see, including the moves it may make
+     * next. Clients render those moves rather than reimplementing the transition rules.
+     *
+     * @param personId contact to read
+     * @return current lifecycle state
+     */
+    public PersonLifecycleDto getLifecycle(int personId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Person person = personMapper.getPersonById(workspaceId, personId);
+        if (person == null) {
+            throw new ResourceNotFoundException("Person not found with id: " + personId);
+        }
+        return PersonLifecycleDto.from(person);
     }
 
     /**
