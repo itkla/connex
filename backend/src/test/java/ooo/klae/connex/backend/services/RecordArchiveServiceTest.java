@@ -283,13 +283,13 @@ class RecordArchiveServiceTest extends AbstractServiceTest {
 
     private List<Integer> listedPersonIds() {
         return personService.getPersonsPage(null, null, null, null, null, false,
-                MemberScope.allTeam(), false, 100, 0)
+                MemberScope.allTeam(), null, false, false, 100, 0)
             .stream().map(Person::getId).toList();
     }
 
     private List<Integer> archivedPersonIds() {
         return personService.getPersonsPage(null, null, null, null, null, false,
-                MemberScope.allTeam(), true, 100, 0)
+                MemberScope.allTeam(), null, false, true, 100, 0)
             .stream().map(Person::getId).toList();
     }
 

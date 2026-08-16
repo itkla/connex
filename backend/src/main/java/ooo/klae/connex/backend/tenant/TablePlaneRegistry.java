@@ -179,6 +179,7 @@ public final class TablePlaneRegistry {
         "person_identity",
         "person_edge",
         "person_employment",
+        "person_lifecycle_history",
         "person_share",
         "person_tag",
         "pipeline",

@@ -9,6 +9,7 @@ import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.AttachmentDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.CustomFieldValueDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.DealAssociationDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.EmploymentDto;
+import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.LifecycleTransitionDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.IntroductionDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.NoteDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.PersonIdentityDto;
@@ -76,6 +77,10 @@ public interface DataSubjectDisclosureMapper {
         @Param("workspaceIds") List<Integer> workspaceIds);
 
     List<EmploymentDto> findEmployment(@Param("workspaceId") int workspaceId,
+        @Param("personId") int personId,
+        @Param("workspaceIds") List<Integer> workspaceIds);
+
+    List<LifecycleTransitionDto> findLifecycleHistory(@Param("workspaceId") int workspaceId,
         @Param("personId") int personId,
         @Param("workspaceIds") List<Integer> workspaceIds);
 
