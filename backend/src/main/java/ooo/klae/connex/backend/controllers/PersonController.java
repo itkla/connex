@@ -44,6 +44,7 @@ import ooo.klae.connex.backend.dto.PersonEvaluationDto;
 import ooo.klae.connex.backend.dto.PersonLifecycleDto;
 import ooo.klae.connex.backend.dto.PersonLifecycleHistoryDto;
 import ooo.klae.connex.backend.dto.PersonLifecycleRequest;
+import ooo.klae.connex.backend.dto.PersonLifecycleWithdrawalRequest;
 import ooo.klae.connex.backend.dto.PersonOwnerDto;
 import ooo.klae.connex.backend.dto.PersonRestrictionsDto;
 import ooo.klae.connex.backend.dto.TagDto;
@@ -317,16 +318,19 @@ public class PersonController {
     }
 
     /**
-     * DELETE endpoint to withdraw a contact from the lead lifecycle. Withdrawal is a deliberate,
-     * separate operation so that a client which omits the stage field cannot erase it by accident.
+     * POST endpoint to withdraw a contact from the lead lifecycle. Withdrawal is a deliberate,
+     * separate operation so that a client which omits the stage field cannot erase it by accident,
+     * and it carries its note in a body so the note never reaches a URL.
      * @param id contact id
-     * @param note optional explanation recorded in the lifecycle history
+     * @param request optional explanation recorded in the lifecycle history
      * @return the contact's lifecycle state after the withdrawal
      */
-    @DeleteMapping("/{id}/lifecycle")
+    @PostMapping("/{id}/lifecycle/withdrawal")
     public PersonLifecycleDto withdrawFromLifecycle(
-            @PathVariable int id, @RequestParam(required = false) String note) {
-        return PersonLifecycleDto.from(personLifecycleService.withdrawFromLifecycle(id, note));
+            @PathVariable int id,
+            @Valid @RequestBody(required = false) PersonLifecycleWithdrawalRequest request) {
+        return PersonLifecycleDto.from(personLifecycleService.withdrawFromLifecycle(
+            id, request == null ? null : request.getNote()));
     }
 
     /**

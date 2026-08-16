@@ -55,7 +55,7 @@ class RbacEnforcementArchTest {
      * of scope for this rule.
      */
     private static final List<String> ENTITY_SERVICES = List.of(
-        "CompanyService", "PersonService", "DealService", "ActivityService",
+        "CompanyService", "PersonService", "PersonLifecycleService", "DealService", "ActivityService",
         "NoteService", "TaskService", "TagService", "PipelineService", "AttachmentService",
         "ProductService", "DealLineItemService",
         "DocumentTemplateService", "DealDocumentService",
@@ -67,7 +67,7 @@ class RbacEnforcementArchTest {
 
     /** Verb prefixes that denote a state-changing public method in these services. */
     private static final Pattern MUTATOR = Pattern.compile(
-        "^(create|update|delete|add|remove|replace|close|reopen|resolve|reply|complete|commit|assign|change|reschedule|scan|import|dismiss|accept|request|decide|cancel)[A-Z]?\\w*");
+        "^(create|update|delete|add|remove|replace|close|reopen|resolve|reply|complete|commit|assign|change|reschedule|scan|import|dismiss|accept|request|decide|cancel|withdraw)[A-Z]?\\w*");
 
     @Test
     void every_mutating_entity_service_method_is_permission_guarded() throws Exception {

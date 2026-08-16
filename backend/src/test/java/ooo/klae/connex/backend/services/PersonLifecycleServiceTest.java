@@ -30,6 +30,7 @@ import ooo.klae.connex.backend.dto.PersonLifecycleHistoryDto;
 import ooo.klae.connex.backend.dto.PersonLifecycleRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 
 /**
@@ -42,6 +43,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
     @Autowired PersonLifecycleService lifecycleService;
     @Autowired PersonService personService;
     @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired ShareMapper shareMapper;
     @MockitoBean RuleTriggerPublisher ruleTriggers;
     @MockitoBean NotificationChangePublisher notificationChanges;
 
@@ -187,10 +189,7 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
     void anotherTenantCanNeitherMoveNorReadTheLifecycle() {
         Person person = enterLifecycle(newPerson(newCompany()));
 
-        Workspace other = new Workspace();
-        other.setName("Other " + unique());
-        other.setSlug("other-" + unique());
-        workspaceMapper.insert(other);
+        Workspace other = siblingWorkspace();
         User outsider = newUser();
         workspaceMapper.addMember(other.getId(), outsider.getId(), "owner");
         authenticateAs(outsider, other.getId());
@@ -201,6 +200,69 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
             () -> lifecycleService.getLifecycle(person.getId()));
         assertThrows(ResourceNotFoundException.class, () -> lifecycleService.updateLifecycle(
             person.getId(), request(PersonLifecycleStage.WORKING, null, null)));
+    }
+
+    @Test
+    void aSharedInContactKeepsItsLifecycleInsideTheOwningWorkspace() {
+        Person person = enterLifecycle(newPerson(newCompany()));
+        lifecycleService.updateLifecycle(person.getId(), request(
+            PersonLifecycleStage.DISQUALIFIED,
+            PersonDisqualificationReason.NO_FIT,
+            "competitor incumbent"));
+
+        Workspace grantee = siblingWorkspace();
+        shareMapper.sharePerson(
+            person.getId(), workspace.getId(), grantee.getId(), currentUser.getId(), false);
+        User outsider = newUser();
+        workspaceMapper.addMember(grantee.getId(), outsider.getId(), "owner");
+        authenticateAs(outsider, grantee.getId());
+
+        Person shared = personMapper.getPersonById(grantee.getId(), person.getId());
+        assertNotNull(shared, "the share itself must still be visible");
+        assertNull(shared.getLifecycleStage());
+        assertNull(shared.getDisqualifiedReason());
+        assertNull(shared.getQualificationNotes());
+        assertNull(shared.getLifecycleChangedAt());
+
+        assertThrows(ResourceNotFoundException.class,
+            () -> lifecycleService.getLifecycle(person.getId()));
+        assertThrows(ResourceNotFoundException.class,
+            () -> lifecycleService.getHistory(person.getId()));
+
+        assertEquals(0L, personService.countPersons(null, null, null, false,
+            MemberScope.allTeam(), List.of(PersonLifecycleStage.DISQUALIFIED), false, false));
+    }
+
+    @Test
+    void disqualifyingForAnotherReasonRequiresANote() {
+        Person person = enterLifecycle(newPerson(newCompany()));
+
+        assertThrows(BadRequestException.class, () -> lifecycleService.updateLifecycle(
+            person.getId(),
+            request(PersonLifecycleStage.DISQUALIFIED, PersonDisqualificationReason.OTHER, "  ")));
+
+        Person disqualified = lifecycleService.updateLifecycle(person.getId(), request(
+            PersonLifecycleStage.DISQUALIFIED, PersonDisqualificationReason.OTHER, "acquired last week"));
+        assertEquals(PersonDisqualificationReason.OTHER, disqualified.getDisqualifiedReason());
+    }
+
+    @Test
+    void aConvertedContactCanStillBeAnnotatedAfterItsDealLinkIsRemoved() {
+        Person person = enterLifecycle(newPerson(newCompany()));
+        lifecycleService.updateLifecycle(
+            person.getId(), request(PersonLifecycleStage.QUALIFIED, null, null));
+        Pipeline pipeline = newPipeline();
+        Deal deal = newDeal(pipeline, newStage(pipeline, 1), newCompany());
+        dealMapper.addPerson(workspace.getId(), deal.getId(), person.getId(), "champion");
+        lifecycleService.updateLifecycle(
+            person.getId(), request(PersonLifecycleStage.CONVERTED, null, null));
+        dealMapper.removePerson(workspace.getId(), deal.getId(), person.getId());
+
+        Person annotated = lifecycleService.updateLifecycle(
+            person.getId(), request(PersonLifecycleStage.CONVERTED, null, "deal link cleaned up"));
+
+        assertEquals(PersonLifecycleStage.CONVERTED, annotated.getLifecycleStage());
+        assertEquals("deal link cleaned up", annotated.getQualificationNotes());
     }
 
     @Test
@@ -228,6 +290,15 @@ class PersonLifecycleServiceTest extends AbstractServiceTest {
             .collect(java.util.stream.Collectors.toMap(FacetCount::getKey, FacetCount::getCount));
         assertEquals(1L, facets.get(PersonLifecycleStage.NEW.name()));
         assertTrue(facets.getOrDefault("__none__", 0L) >= 1L);
+    }
+
+    private Workspace siblingWorkspace() {
+        Workspace sibling = new Workspace();
+        sibling.setName("Sibling " + unique());
+        sibling.setSlug("sibling-" + unique());
+        sibling.setOrgId(workspaceMapper.getOrgId(workspace.getId()));
+        workspaceMapper.insert(sibling);
+        return sibling;
     }
 
     private Person enterLifecycle(Person person) {

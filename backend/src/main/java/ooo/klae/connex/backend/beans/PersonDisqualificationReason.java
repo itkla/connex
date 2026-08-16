@@ -24,6 +24,6 @@ public enum PersonDisqualificationReason {
     UNRESPONSIVE,
     /** Not a genuine inquiry. */
     SPAM,
-    /** Anything else; expects an accompanying note. */
+    /** Anything else. A note explaining it is required. */
     OTHER
 }

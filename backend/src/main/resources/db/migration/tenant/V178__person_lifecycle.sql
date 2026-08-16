@@ -18,10 +18,13 @@ ALTER TABLE person
     ADD CONSTRAINT chk_person_lifecycle_stage CHECK (
         lifecycle_stage IS NULL OR lifecycle_stage IN (
             'NEW', 'WORKING', 'NURTURING', 'QUALIFIED', 'DISQUALIFIED', 'CONVERTED', 'RECYCLED')),
-    -- A reason code is meaningless unless the contact is currently disqualified; transitions out of
-    -- DISQUALIFIED must clear it. The reason survives in person_lifecycle_history either way.
+    -- A reason code is meaningless unless the contact is currently disqualified, and a disqualified
+    -- contact without one is an unexplained rejection. Both halves are enforced here so the column
+    -- pair cannot drift even if a future write path forgets. Transitions out of DISQUALIFIED clear
+    -- the reason; it survives in person_lifecycle_history either way.
     ADD CONSTRAINT chk_person_disqualified_reason CHECK (
-        disqualified_reason IS NULL OR lifecycle_stage = 'DISQUALIFIED'),
+        (disqualified_reason IS NULL AND (lifecycle_stage IS NULL OR lifecycle_stage <> 'DISQUALIFIED'))
+        OR (disqualified_reason IS NOT NULL AND lifecycle_stage = 'DISQUALIFIED')),
     ADD INDEX idx_person_workspace_lifecycle_stage (workspace_id, lifecycle_stage);
 
 -- Append-only transition log. It backs the contact's lifecycle timeline and is the source for
@@ -50,8 +53,13 @@ CREATE TABLE person_lifecycle_history (
     CONSTRAINT chk_person_lifecycle_history_to_stage CHECK (
         to_stage IS NULL OR to_stage IN (
             'NEW', 'WORKING', 'NURTURING', 'QUALIFIED', 'DISQUALIFIED', 'CONVERTED', 'RECYCLED')),
+    -- A row must record an actual move: never the same stage twice, and never nothing to nothing.
     CONSTRAINT chk_person_lifecycle_history_change CHECK (
-        from_stage IS NULL OR to_stage IS NULL OR from_stage <> to_stage),
+        (from_stage IS NOT NULL OR to_stage IS NOT NULL)
+        AND (from_stage IS NULL OR to_stage IS NULL OR from_stage <> to_stage)),
+    -- A reason only ever belongs to a disqualification.
+    CONSTRAINT chk_person_lifecycle_history_reason CHECK (
+        reason IS NULL OR to_stage = 'DISQUALIFIED'),
     UNIQUE KEY uq_person_lifecycle_history_workspace_id (workspace_id, id),
     INDEX idx_person_lifecycle_history_workspace_person (workspace_id, person_id, changed_at, id),
     CONSTRAINT fk_person_lifecycle_history_person

@@ -99,11 +99,7 @@ public class PersonLifecycleService {
      */
     public PersonLifecycleDto getLifecycle(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Person person = personMapper.getPersonById(workspaceId, personId);
-        if (person == null) {
-            throw new ResourceNotFoundException("Person not found with id: " + personId);
-        }
-        return PersonLifecycleDto.from(person);
+        return PersonLifecycleDto.from(requireOwnedPerson(workspaceId, personId));
     }
 
     /**
@@ -114,9 +110,7 @@ public class PersonLifecycleService {
      */
     public List<PersonLifecycleHistoryDto> getHistory(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (!personMapper.exists(workspaceId, personId)) {
-            throw new ResourceNotFoundException("Person not found with id: " + personId);
-        }
+        requireOwnedPerson(workspaceId, personId);
         return historyMapper.getByPersonId(workspaceId, personId, MAX_HISTORY_ROWS).stream()
             .map(PersonLifecycleHistoryDto::from)
             .toList();
@@ -143,10 +137,14 @@ public class PersonLifecycleService {
         }
         PersonDisqualificationReason acceptedReason =
             requireReasonDisposition(requested, reason);
-        if (requested == PersonLifecycleStage.CONVERTED) {
+        if (transitioning && requested == PersonLifecycleStage.CONVERTED) {
             requireLinkedDeal(workspaceId, personId);
         }
         String acceptedNote = trimToNull(note);
+        if (acceptedReason == PersonDisqualificationReason.OTHER && acceptedNote == null) {
+            throw new BadRequestException(
+                "Disqualifying for another reason requires a note explaining it");
+        }
         String retainedNote = requested == null ? null : acceptedNote;
         LocalDateTime changedAt = transitioning ? now() : before.getLifecycleChangedAt();
         personMapper.updateLifecycle(
@@ -230,9 +228,14 @@ public class PersonLifecycleService {
             "Updated lead lifecycle for " + after.getName(), changes);
     }
 
+    /**
+     * The contact only when the active workspace owns it. A contact that is merely shared in stays a
+     * 404 here: the lifecycle, its reasons, and its notes are the owning workspace's own pipeline
+     * assessment, and a grantee must not be able to read or move them.
+     */
     private Person requireOwnedPerson(int workspaceId, int personId) {
         Person person = personMapper.getPersonById(workspaceId, personId);
-        if (person == null) {
+        if (person == null || person.getWorkspaceId() != workspaceId) {
             throw new ResourceNotFoundException("Person not found with id: " + personId);
         }
         return person;
