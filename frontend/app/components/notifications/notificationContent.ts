@@ -138,10 +138,41 @@ export function notificationContent(notification: Notification, t: Translator, l
         };
     }
     if (notification.type === "document.approval_request") {
+        const document = text(data.documentTitle, notification.sourceLabel ?? "");
+        if (data.reason === "delegated") {
+            return {
+                title: t("documentApprovalDelegatedTitle"),
+                body: t("documentApprovalDelegatedBody", {
+                    actor: notification.actorLabel ?? "",
+                    document,
+                }),
+            };
+        }
+        if (data.reason === "escalated") {
+            return {
+                title: t("documentApprovalEscalatedTitle"),
+                body: t("documentApprovalEscalatedBody", { document }),
+            };
+        }
+        if (data.reason === "reassigned") {
+            return {
+                title: t("documentApprovalReassignedTitle"),
+                body: t("documentApprovalReassignedBody", { document }),
+            };
+        }
         return {
             title: t("documentApprovalRequestTitle"),
             body: t("documentApprovalRequestBody", {
                 actor: notification.actorLabel ?? "",
+                document,
+            }),
+        };
+    }
+    if (notification.type === "document.approval_reminder") {
+        const overdue = notification.severity === "warning";
+        return {
+            title: t(overdue ? "documentApprovalOverdueTitle" : "documentApprovalReminderTitle"),
+            body: t(overdue ? "documentApprovalOverdueBody" : "documentApprovalReminderBody", {
                 document: text(data.documentTitle, notification.sourceLabel ?? ""),
             }),
         };

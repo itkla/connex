@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
     CheckCircleIcon,
@@ -15,6 +15,7 @@ import {
 import { cn } from '@/lib/utils';
 import { easeOut, instant } from '@/app/lib/motion';
 import type { ApprovalStepStatus, DocumentApproval, DocumentApprovalStep } from '@/app/lib/types';
+import { formatDateTime } from '@/app/lib/utils';
 
 type Props = {
     approval: DocumentApproval;
@@ -28,6 +29,7 @@ const STEP_ICON = {
     rejected: XCircleIcon,
     cancelled: MinusCircleIcon,
     unsatisfiable: ExclamationTriangleIcon,
+    expired: ExclamationTriangleIcon,
 } satisfies Record<ApprovalStepStatus, typeof ClockIcon>;
 
 const STEP_TONE: Record<ApprovalStepStatus, string> = {
@@ -37,6 +39,7 @@ const STEP_TONE: Record<ApprovalStepStatus, string> = {
     rejected: 'text-destructive',
     cancelled: 'text-muted-foreground',
     unsatisfiable: 'text-destructive',
+    expired: 'text-destructive',
 };
 
 /**
@@ -46,6 +49,7 @@ const STEP_TONE: Record<ApprovalStepStatus, string> = {
  */
 export default function DocumentApprovalChain({ approval, activeStepId }: Props) {
     const t = useTranslations('DealsDocuments');
+    const locale = useLocale();
     const reduceMotion = useReducedMotion();
     const [expanded, setExpanded] = useState(false);
 
@@ -147,6 +151,13 @@ export default function DocumentApprovalChain({ approval, activeStepId }: Props)
                                     {stuck && (
                                         <p className="ml-5 text-destructive">
                                             {step.unsatisfiableReason?.trim() || t('chainBlocked')}
+                                        </p>
+                                    )}
+                                    {step.dueAt && (
+                                        <p className="ml-5">
+                                            {t('chainDueAt', {
+                                                date: formatDateTime(step.dueAt, locale),
+                                            })}
                                         </p>
                                     )}
                                 </li>

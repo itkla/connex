@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/autocomplete';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
     Select,
     SelectContent,
@@ -31,6 +32,7 @@ import { easeOut, instant, springSnappy } from '@/app/lib/motion';
 import type {
     ApprovalApproverKind,
     ApprovalChainMode,
+    ApprovalStepExpiryAction,
     SeparationOfDuties,
     WorkspaceMember,
 } from '@/app/lib/types';
@@ -48,6 +50,8 @@ export type ChainStepDraft = {
     id?: number;
     name: string;
     requiredCount: number;
+    dueIntervalHours: string;
+    onExpiry: ApprovalStepExpiryAction;
     kind: ApprovalApproverKind;
     userIds: number[];
 };
@@ -65,6 +69,7 @@ type Props = {
 
 const MAX_STEPS = 10;
 const MAX_QUORUM = 20;
+const MAX_DUE_INTERVAL_HOURS = 8760;
 
 let nextStepKey = 0;
 
@@ -72,6 +77,8 @@ export const newChainStep = (): ChainStepDraft => ({
     key: `new-${nextStepKey++}`,
     name: '',
     requiredCount: 1,
+    dueIntervalHours: '',
+    onExpiry: 'expire',
     kind: 'any_approver',
     userIds: [],
 });
@@ -83,6 +90,13 @@ export const newChainStep = (): ChainStepDraft => ({
  */
 export const availableApprovers = (step: ChainStepDraft) =>
     step.kind === 'any_approver' ? MAX_QUORUM : step.userIds.length;
+
+/** Whether an optional deadline is a whole number of hours accepted by the backend. */
+export const dueIntervalIsValid = (value: string) => {
+    if (value.trim() === '') return true;
+    const hours = Number(value);
+    return Number.isInteger(hours) && hours >= 1 && hours <= MAX_DUE_INTERVAL_HOURS;
+};
 
 /**
  * Editor for a policy's approver chain, composed as sentences rather than stacked field labels to
@@ -333,6 +347,69 @@ export default function ApprovalChainEditor({
                                         disabled={disabled}
                                         className="h-8 text-sm"
                                     />
+
+                                    <div className="grid gap-3 sm:grid-cols-2">
+                                        <div className="space-y-1.5">
+                                            <Label htmlFor={`step-due-${step.key}`}>
+                                                {t('stepDueIntervalLabel')}
+                                            </Label>
+                                            <Input
+                                                id={`step-due-${step.key}`}
+                                                type="number"
+                                                min={1}
+                                                max={MAX_DUE_INTERVAL_HOURS}
+                                                step={1}
+                                                value={step.dueIntervalHours}
+                                                placeholder={t('stepDueIntervalPlaceholder')}
+                                                onChange={(event) => {
+                                                    const dueIntervalHours = event.target.value;
+                                                    updateStep(index, {
+                                                        dueIntervalHours,
+                                                        ...(dueIntervalHours.trim() === ''
+                                                            ? { onExpiry: 'expire' }
+                                                            : {}),
+                                                    });
+                                                }}
+                                                disabled={disabled}
+                                                aria-invalid={!dueIntervalIsValid(step.dueIntervalHours) || undefined}
+                                                className="h-8 text-sm"
+                                            />
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <Label>{t('stepOnExpiryLabel')}</Label>
+                                            <Select
+                                                value={step.onExpiry}
+                                                onValueChange={(value) => updateStep(index, {
+                                                    onExpiry: value as ApprovalStepExpiryAction,
+                                                })}
+                                                disabled={disabled || step.dueIntervalHours.trim() === ''}
+                                            >
+                                                <SelectTrigger
+                                                    size="sm"
+                                                    aria-label={t('stepOnExpiryLabel')}
+                                                    className="w-full"
+                                                >
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="expire">
+                                                        {t('stepOnExpiryExpire')}
+                                                    </SelectItem>
+                                                    <SelectItem value="escalate">
+                                                        {t('stepOnExpiryEscalate')}
+                                                    </SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    </div>
+                                    <p className={dueIntervalIsValid(step.dueIntervalHours)
+                                        ? 'text-xs text-muted-foreground'
+                                        : 'text-xs text-destructive'}
+                                    >
+                                        {dueIntervalIsValid(step.dueIntervalHours)
+                                            ? t('stepDueIntervalHint')
+                                            : t('stepDueIntervalInvalid')}
+                                    </p>
                                 </div>
 
                                 <div className="flex shrink-0 items-center gap-0.5">
