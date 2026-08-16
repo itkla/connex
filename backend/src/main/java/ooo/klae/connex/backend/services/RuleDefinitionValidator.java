@@ -26,7 +26,12 @@ import ooo.klae.connex.backend.exceptions.WorkflowDefinitionValidationException;
 import ooo.klae.connex.backend.services.WorkspaceService.Role;
 import ooo.klae.connex.backend.tenant.Permission;
 
-/** Validates and normalizes the shared semantic definition used by automation rules. */
+/**
+ * Validates and normalizes the shared semantic definition used by automation rules. Every path that
+ * authors, publishes, manually runs, simulates, or revalidates a definition passes through here, so
+ * {@link WorkflowDocumentAutomationGate} refusing {@code document} here closes the rolling-deployment
+ * fence for every one of them.
+ */
 @Component
 @RequiredArgsConstructor
 public class RuleDefinitionValidator {
@@ -66,6 +71,7 @@ public class RuleDefinitionValidator {
     private final SegmentService segmentService;
     private final WorkspaceService workspaceService;
     private final Validator beanValidator;
+    private final WorkflowDocumentAutomationGate documentAutomationGate;
 
     String validatePreview(RulePreviewRequest request) {
         String recordType = normalize(request.getRecordType());
@@ -239,7 +245,8 @@ public class RuleDefinitionValidator {
         actions.forEach(this::requireStructurallyValid);
 
         String recordType = normalize(recordTypeValue);
-        if (!RECORD_TYPES.contains(recordType)) {
+        if (!RECORD_TYPES.contains(recordType)
+                || !documentAutomationGate.permits(recordType)) {
             throw invalid(
                 WorkflowDiagnosticCode.RECORD_TYPE_INVALID,
                 "Invalid record type: " + recordTypeValue,

@@ -24,6 +24,7 @@ export default function WorkflowSimulationDialog({
     open,
     records,
     loading,
+    supported,
     result,
     diagnosticMessage,
     onOpenChange,
@@ -34,6 +35,7 @@ export default function WorkflowSimulationDialog({
     open: boolean;
     records: RecordSelectOption[];
     loading: boolean;
+    supported: boolean;
     result: WorkflowSimulation | null;
     diagnosticMessage: (diagnostic: { code: WorkflowDiagnosticCode; params: Record<string, string> }) => string;
     onOpenChange: (open: boolean) => void;
@@ -63,42 +65,53 @@ export default function WorkflowSimulationDialog({
                     <ResponsiveDialogDescription>{t("simulation.description")}</ResponsiveDialogDescription>
                 </ResponsiveDialogHeader>
                 <div className="space-y-4 px-4 sm:px-0">
-                    <div className="rounded-xl border border-brand/30 bg-brand-light p-3 text-sm text-foreground">
-                        <p className="font-medium">{t("simulation.previewOnlyTitle")}</p>
-                        <p className="mt-1 text-muted-foreground">{t("simulation.previewOnlyBody")}</p>
-                    </div>
-                    <div className="space-y-1.5">
-                        <Label htmlFor="workflow-simulation-record">{t("simulation.recordLabel")}</Label>
-                        <RecordSelect
-                            id="workflow-simulation-record"
-                            options={records}
-                            value={recordId}
-                            onValueChange={(value) => {
-                                setRecordId(value);
-                                onClear();
-                            }}
-                            placeholder={t("simulation.recordPlaceholder")}
-                            emptyLabel={t("simulation.recordEmpty")}
-                            onInputValueChange={onSearch}
-                        />
-                    </div>
-                    {result ? (
+                    {supported ? (
+                        <>
+                            <div className="rounded-xl border border-brand/30 bg-brand-light p-3 text-sm text-foreground">
+                                <p className="font-medium">{t("simulation.previewOnlyTitle")}</p>
+                                <p className="mt-1 text-muted-foreground">{t("simulation.previewOnlyBody")}</p>
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label htmlFor="workflow-simulation-record">{t("simulation.recordLabel")}</Label>
+                                <RecordSelect
+                                    id="workflow-simulation-record"
+                                    options={records}
+                                    value={recordId}
+                                    onValueChange={(value) => {
+                                        setRecordId(value);
+                                        onClear();
+                                    }}
+                                    placeholder={t("simulation.recordPlaceholder")}
+                                    emptyLabel={t("simulation.recordEmpty")}
+                                    onInputValueChange={onSearch}
+                                />
+                            </div>
+                        </>
+                    ) : (
+                        <div className="rounded-xl border border-border bg-muted/35 p-3 text-sm text-foreground">
+                            <p className="font-medium">{t("simulation.unsupportedTitle")}</p>
+                            <p className="mt-1 text-muted-foreground">{t("simulation.unsupportedBody")}</p>
+                        </div>
+                    )}
+                    {supported && result ? (
                         <WorkflowSimulationEvidence result={result} diagnosticMessage={diagnosticMessage} />
                     ) : null}
                 </div>
                 <ResponsiveDialogFooter className="border-t border-border px-4 py-4 sm:border-0 sm:px-0 sm:py-0">
                     <Button variant="outline" onClick={() => changeOpen(false)}>{t("close")}</Button>
-                    <Button
-                        variant="brand"
-                        disabled={!recordId || loading}
-                        onClick={() => {
-                            onClear();
-                            onSimulate(Number(recordId));
-                        }}
-                    >
-                        {loading ? <Loader2Icon className="size-4 animate-spin motion-reduce:animate-none" /> : <BeakerIcon className="size-4" />}
-                        {t("simulation.previewButton")}
-                    </Button>
+                    {supported ? (
+                        <Button
+                            variant="brand"
+                            disabled={!recordId || loading}
+                            onClick={() => {
+                                onClear();
+                                onSimulate(Number(recordId));
+                            }}
+                        >
+                            {loading ? <Loader2Icon className="size-4 animate-spin motion-reduce:animate-none" /> : <BeakerIcon className="size-4" />}
+                            {t("simulation.previewButton")}
+                        </Button>
+                    ) : null}
                 </ResponsiveDialogFooter>
             </ResponsiveDialogContent>
         </ResponsiveDialog>

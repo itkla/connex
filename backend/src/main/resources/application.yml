@@ -361,6 +361,13 @@ connex:
         evaluation-delay-ms: ${CONNEX_RULES_EVALUATION_DELAY_MS:900000}
         initial-delay-ms: ${CONNEX_RULES_INITIAL_DELAY_MS:900000}
     workflows:
+        # Rolling-deployment fence for the `document` automation record type. A binary that predates
+        # document automation would attach a document run's task/activity/note to nothing and fails
+        # every canonical document run closed, so leave this off until every node in the deployment
+        # runs a document-capable binary, then turn it on everywhere. Reverse the order to roll back:
+        # turn it off everywhere first so no document trigger is enqueued, then replace binaries.
+        document-automation:
+            enabled: ${CONNEX_WORKFLOWS_DOCUMENT_AUTOMATION_ENABLED:false}
         runtime:
             enabled: ${CONNEX_WORKFLOWS_RUNTIME_ENABLED:false}
             scheduling-enabled: ${CONNEX_WORKFLOWS_RUNTIME_SCHEDULING_ENABLED:true}

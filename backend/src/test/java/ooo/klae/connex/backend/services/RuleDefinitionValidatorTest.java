@@ -46,7 +46,15 @@ class RuleDefinitionValidatorTest {
 
     @BeforeEach
     void setUp() {
-        validator = new RuleDefinitionValidator(segmentService, workspaceService, BEAN_VALIDATOR);
+        validator = validatorWithDocumentFence(true);
+    }
+
+    private RuleDefinitionValidator validatorWithDocumentFence(boolean open) {
+        return new RuleDefinitionValidator(
+            segmentService,
+            workspaceService,
+            BEAN_VALIDATOR,
+            new WorkflowDocumentAutomationGate(open));
     }
 
     @AfterAll
@@ -369,6 +377,40 @@ class RuleDefinitionValidatorTest {
         assertEquals(
             Set.of(Permission.TASK_CREATE, Permission.ACTIVITY_CREATE, Permission.NOTE_CREATE),
             required);
+    }
+
+    @Test
+    void closedDocumentFenceRefusesEveryDocumentDefinition() {
+        RuleDefinitionValidator fenced = validatorWithDocumentFence(false);
+
+        for (RuleAction action : List.of(
+                action("notify"), action("create_task"),
+                action("log_activity"), action("create_note"))) {
+            RuleRequest request = request(
+                "document", entityChange("document.approved"), "user", action);
+
+            BadRequestException exception = assertThrows(BadRequestException.class,
+                () -> fenced.validateForMutation(request),
+                () -> action.getType() + " must stay fenced until the deployment opens it");
+
+            assertEquals("Invalid record type: document", exception.getMessage());
+        }
+
+        verify(workspaceService, never()).requirePermission(any());
+    }
+
+    @Test
+    void closedDocumentFenceLeavesEveryOtherRecordTypeAuthorable() {
+        RuleDefinitionValidator fenced = validatorWithDocumentFence(false);
+
+        for (String recordType : List.of("deal", "company", "person", "task")) {
+            RuleRequest request = request(
+                recordType, entityChange(recordType + ".created"), "user", action("notify"));
+
+            assertDoesNotThrow(
+                () -> fenced.validateForMutation(request),
+                () -> recordType + " must remain authorable behind the document fence");
+        }
     }
 
     private void assertStructurallyInvalid(RuleRequest request) {

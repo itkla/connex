@@ -54,7 +54,10 @@ class WorkflowDefinitionValidatorTest {
     @BeforeEach
     void setUp() {
         RuleDefinitionValidator ruleDefinitionValidator = new RuleDefinitionValidator(
-            segmentService, workspaceService, BEAN_VALIDATOR);
+            segmentService,
+            workspaceService,
+            BEAN_VALIDATOR,
+            new WorkflowDocumentAutomationGate(true));
         validator = new WorkflowDefinitionValidator(ruleDefinitionValidator);
     }
 

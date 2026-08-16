@@ -21,6 +21,7 @@ import type {
 } from "@/app/lib/types";
 import type { RecordType } from "@/app/lib/actions/types";
 import { isWorkflowManualScopeValid } from "@/app/lib/workflowOperations";
+import { supportsManualRun } from "@/app/components/settings/workflows/vocabulary";
 import {
     formatWorkflowRunDateTime,
     normalizeWorkflowRunDateTime,
@@ -62,10 +63,17 @@ function scopeCount(scope: WorkflowManualScope | null): number | null {
     return null;
 }
 
+/**
+ * Whether a launcher may offer a workflow. The record-type allowlist is not made redundant by the
+ * caller's filter: search, the command palette, and the Operations "new run" action all pass a null
+ * record type, while `WorkflowManualRunService` refuses every record type outside these three, so
+ * offering one of those would guarantee a failed request.
+ */
 function isRunnableWorkflow(workflow: WorkflowListItem, recordType: RecordType | null): boolean {
     return workflow.activeVersion !== null
         && workflow.runtimeOwner === "canonical"
         && workflow.archivedAt === null
+        && supportsManualRun(workflow.recordType)
         && (recordType === null || workflow.recordType === recordType);
 }
 
@@ -102,7 +110,11 @@ export default function WorkflowManualRunLauncher({
         const controller = new AbortController();
         void getWorkflows(false, { ...requestInit, signal: controller.signal })
             .then((items) => {
-                if (!controller.signal.aborted) setWorkflows(items.filter((item) => isRunnableWorkflow(item, recordType)));
+                if (controller.signal.aborted) return;
+                const runnable = items.filter((item) => isRunnableWorkflow(item, recordType));
+                setWorkflows(runnable);
+                setWorkflowId((current) =>
+                    runnable.some((item) => String(item.id) === current) ? current : "");
             })
             .catch(() => {
                 if (!controller.signal.aborted) setError(t("manual.errors.workflows"));

@@ -31,9 +31,33 @@ export const SEGMENT_RECORD_TYPES = ["company", "person", "deal"];
 
 export const SCHEDULE_RECORD_TYPES = ["company", "person", "deal"];
 
+/**
+ * Record types a manual run can be scoped to. Mirrors `WorkflowManualRunService`, whose scope
+ * resolution and the `workflow_invocation` check constraint cover only these three — a workflow of
+ * any other record type is rejected by the server, so no launcher may offer one.
+ */
+export const MANUAL_RUN_RECORD_TYPES = ["company", "person", "deal"];
+
+/**
+ * Record types whose simulation subject can be found through workspace search. `document` is absent
+ * because a document is reached from its parent deal, never from `/api/search`; submitting anything
+ * else would send the server an id of the wrong entity.
+ */
+export const SIMULATION_RECORD_TYPES = ["company", "person", "deal", "task"];
+
 /** Entity-change events available for a record type. */
 export function eventsFor(recordType: string): string[] {
     return EVENTS[recordType] ?? [];
+}
+
+/** Whether a manual run can be prepared for a record type; an unset record type never can. */
+export function supportsManualRun(recordType: string | null): boolean {
+    return recordType !== null && MANUAL_RUN_RECORD_TYPES.includes(recordType);
+}
+
+/** Whether a simulation subject can be chosen for a record type; an unset record type never can. */
+export function supportsSimulation(recordType: string | null): boolean {
+    return recordType !== null && SIMULATION_RECORD_TYPES.includes(recordType);
 }
 
 /** Actions available for a record type. */

@@ -5,12 +5,14 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 
 import type { RecordSelectOption } from "@/app/components/records/RecordSelect";
+import { supportsSimulation } from "@/app/components/settings/workflows/vocabulary";
 import {
     connectWorkflowBranch,
     createEmptyWorkflowGraph,
     disconnectWorkflowBranch,
     ensureScheduleEnrollment,
     insertWorkflowNode,
+    normalizeWorkflowForRecordType,
     removeWorkflowNode,
 } from "@/app/components/settings/workflows/workflowGraph";
 import {
@@ -359,12 +361,9 @@ export function useWorkflowEditor({
         mode: "transient" | "commit",
     ) => {
         let document = { ...history.present, [field]: value };
-        if (field === "recordType" && typeof value === "string") {
-            const trigger = document.definition.nodes.find((node) => node.id === document.definition.entryNodeId);
-            if (trigger?.type === "TRIGGER" && trigger.config.type === "schedule") {
-                const enrollment = ensureScheduleEnrollment(document.definition, document.canvas, value);
-                document = { ...document, definition: enrollment.definition, canvas: enrollment.canvas };
-            }
+        if (field === "recordType" && typeof value === "string" && value !== history.present.recordType) {
+            const normalized = normalizeWorkflowForRecordType(document.definition, document.canvas, value);
+            document = { ...document, definition: normalized.definition, canvas: normalized.canvas };
         }
         updateDocument(document, mode);
     }, [history.present, updateDocument]);
@@ -670,12 +669,12 @@ export function useWorkflowEditor({
         if (!isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
         searchControllerRef.current?.abort();
         if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-        if (query.trim().length < 2) {
+        const recordType = history.present.recordType ?? "deal";
+        if (query.trim().length < 2 || !supportsSimulation(recordType)) {
             setSimulationRecords([]);
             return;
         }
         const documentGeneration = documentGenerationRef.current;
-        const recordType = history.present.recordType;
         searchTimerRef.current = setTimeout(() => {
             if (documentGeneration !== documentGenerationRef.current
                 || !isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
@@ -695,7 +694,9 @@ export function useWorkflowEditor({
                             ? results.people.map((person) => ({ id: person.id, label: person.name, imageUrl: person.imageUrl }))
                             : recordType === "task"
                                 ? results.tasks.map((task) => ({ id: task.id, label: task.description }))
-                                : results.deals.map((deal) => ({ id: deal.id, label: deal.name }));
+                                : recordType === "deal"
+                                    ? results.deals.map((deal) => ({ id: deal.id, label: deal.name }))
+                                    : [];
                     setSimulationRecords(options.slice(0, 50));
                 })
                 .catch(() => {
@@ -768,6 +769,7 @@ export function useWorkflowEditor({
         simulation: scopeReady ? simulation : null,
         simulationLoading: scopeReady && simulationLoadState === "loading",
         simulationRecords: scopeReady ? simulationRecords : [],
+        simulationSupported: supportsSimulation(history.present.recordType ?? "deal"),
         conflict,
         conflictOpen,
         selectedNodeId,
