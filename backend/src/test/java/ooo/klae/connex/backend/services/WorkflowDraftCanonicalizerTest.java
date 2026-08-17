@@ -315,6 +315,41 @@ class WorkflowDraftCanonicalizerTest {
         assertArrayEquals(expected, draft.definitionHash());
     }
 
+    @Test
+    void anActionWithoutAResponseDeadlineCanonicalizesWithoutTheField() {
+        String withoutSla = definition(
+            "[{\"type\":\"ACTION\",\"id\":\"action-1\","
+                + "\"config\":{\"title\":\"Notify\",\"type\":\"notify\"}},"
+                + "{\"type\":\"END\",\"id\":\"end\"}]",
+            "[{\"id\":\"action-1--next--end\",\"sourceNodeId\":\"action-1\","
+                + "\"targetNodeId\":\"end\",\"outcome\":\"next\"}]",
+            "action-1");
+
+        String canonical = canonicalize(withoutSla, canvas("action-1", "end")).definitionJson();
+
+        assertFalse(canonical.contains("dueInHours"),
+            "the canonical definition is content-addressed by a stored hash, so an action that "
+                + "sets no response deadline must serialize exactly as it did before the field "
+                + "existed — otherwise every workflow predating it rehashes and the legacy "
+                + "backfill's replay check rejects its own stored definition");
+        assertTrue(canonical.contains("\"dueInDays\":null"),
+            "every other optional field is still written, so the omission is specific");
+    }
+
+    @Test
+    void anActionThatSetsAResponseDeadlineCanonicalizesWithIt() {
+        String withSla = definition(
+            "[{\"type\":\"ACTION\",\"id\":\"action-1\","
+                + "\"config\":{\"dueInHours\":4,\"type\":\"set_response_due\"}},"
+                + "{\"type\":\"END\",\"id\":\"end\"}]",
+            "[{\"id\":\"action-1--next--end\",\"sourceNodeId\":\"action-1\","
+                + "\"targetNodeId\":\"end\",\"outcome\":\"next\"}]",
+            "action-1");
+
+        assertTrue(canonicalize(withSla, canvas("action-1", "end")).definitionJson()
+            .contains("\"dueInHours\":4"));
+    }
+
     private WorkflowDraftCanonicalizer.CanonicalDraft canonicalize(
             String definitionJson, String canvasJson) {
         return canonicalizer.canonicalizeDraftJson(
