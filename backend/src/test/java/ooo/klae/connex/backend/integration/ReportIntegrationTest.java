@@ -32,7 +32,6 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
-import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -49,6 +48,9 @@ import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpSession;
@@ -513,10 +515,11 @@ class ReportIntegrationTest {
     @Autowired private ReportDeliveryScheduler reportDeliveryScheduler;
     @Autowired private ApprovalPolicyService approvalPolicyService;
 
+    @Autowired private Clock clock;
+
     @MockitoBean private AiReportNarrativeService aiReportNarrativeService;
     @MockitoBean private AiGenerationService aiGenerationService;
     @MockitoBean private AiRestrictionEpoch aiRestrictionEpoch;
-    @MockitoBean private Clock clock;
     @MockitoBean private MailService mailService;
     @MockitoBean private OrganizationWorkspaceScopeControlAccess workspaceScopeControlAccess;
     @MockitoSpyBean private PersonEdgeMapper personEdgeMapper;
@@ -529,11 +532,6 @@ class ReportIntegrationTest {
                 new OrganizationWorkspaceScopeControlOperations(workspaceMapper);
         when(workspaceScopeControlAccess.getForWorkspace(anyInt())).thenAnswer(invocation ->
                 scopeOperations.getForWorkspace(invocation.getArgument(0, Integer.class)));
-        when(clock.instant()).thenReturn(FIXED_NOW);
-        when(clock.millis()).thenReturn(FIXED_NOW.toEpochMilli());
-        when(clock.getZone()).thenReturn(ZoneOffset.UTC);
-        when(clock.withZone(any(ZoneId.class))).thenAnswer(invocation ->
-                Clock.fixed(FIXED_NOW, invocation.getArgument(0, ZoneId.class)));
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(springSecurityFilterChain)
                 .build();
@@ -3502,5 +3500,27 @@ class ReportIntegrationTest {
         MockHttpSession session = (MockHttpSession) result.getRequest().getSession(false);
         assertNotNull(session, "login did not establish a report test session");
         return session;
+    }
+
+    /**
+     * Pins the whole context to {@link #FIXED_NOW} with a real fixed clock rather than a mock.
+     *
+     * <p>Replacing {@code Clock} context-wide also replaces it for every {@code @Scheduled} bean
+     * that consumes it, and those run on scheduler threads. A Mockito mock cannot be stubbed on one
+     * thread while another invokes it, so a scheduler tick landing inside a {@code when(clock...)}
+     * call corrupted the pending stubbing and threw {@link ClassCastException} out of the setup
+     * method, failing whichever test happened to run next. A fixed clock holds no stubbing state to
+     * race, and answers {@code instant}, {@code millis}, {@code getZone} and {@code withZone}
+     * exactly as the stubs did.
+     */
+    @TestConfiguration
+    static class FixedClockConfiguration {
+
+        /** Named apart from {@code BackendApplication.clock()} so neither definition overrides the other. */
+        @Bean
+        @Primary
+        Clock fixedClock() {
+            return Clock.fixed(FIXED_NOW, ZoneOffset.UTC);
+        }
     }
 }
