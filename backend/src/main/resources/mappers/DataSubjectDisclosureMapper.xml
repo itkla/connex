@@ -25,7 +25,8 @@
            p.image_url, p.risk_excluded, p.intro_excluded, p.suspended_at,
            p.provision_ceased_at, p.lifecycle_stage, p.lifecycle_changed_at,
            p.disqualified_reason, p.qualification_notes, p.lead_source, p.lead_source_detail,
-           p.referrer_person_id, p.created_at, p.updated_at
+           p.referrer_person_id, p.first_response_due_at, p.first_responded_at,
+           p.first_response_breached_at, p.created_at, p.updated_at
     FROM person p
     LEFT JOIN company c ON c.id = p.company_id AND c.workspace_id IN
       <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">

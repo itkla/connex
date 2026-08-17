@@ -42,8 +42,9 @@ public class RuleDefinitionValidator {
     private static final Set<String> EXECUTION_MODES = Set.of("user", "system");
     private static final Set<String> ACTION_TYPES = Set.of(
         "create_task", "log_activity", "add_tag", "remove_tag", "create_note",
-        "assign_owner", "change_stage", "notify");
+        "assign_owner", "set_response_due", "change_stage", "notify");
     private static final Set<String> CADENCES = Set.of("hourly", "daily", "weekly");
+    private static final int MAX_RESPONSE_DUE_IN_HOURS = 24 * 365;
     private static final Set<String> ENTITY_CHANGE_RECORD_TYPES = Set.of(
         "deal", "company", "person", "task", "document");
     private static final Set<String> SEGMENT_RECORD_TYPES = Set.of("company", "person", "deal");
@@ -54,7 +55,7 @@ public class RuleDefinitionValidator {
         "company.created", "company.updated", "company.owner_changed");
     private static final Set<String> PERSON_EVENTS = Set.of(
         "person.created", "person.updated", "person.job_changed", "person.owner_changed",
-        "person.lifecycle_changed");
+        "person.lifecycle_changed", "person.first_response_overdue");
     private static final Set<String> TASK_EVENTS = Set.of("task.created", "task.completed");
     private static final Set<String> DOCUMENT_EVENTS = Set.of(
         "document.approval_requested", "document.approved", "document.rejected",
@@ -66,6 +67,7 @@ public class RuleDefinitionValidator {
         "remove_tag", Set.of("company", "person", "deal"),
         "create_note", Set.of("person", "deal", "document"),
         "assign_owner", Set.of("person", "deal"),
+        "set_response_due", Set.of("person"),
         "change_stage", Set.of("deal"),
         "notify", Set.of("company", "person", "deal", "task", "document"));
 
@@ -348,6 +350,7 @@ public class RuleDefinitionValidator {
             case "log_activity" -> Permission.ACTIVITY_CREATE;
             case "create_note" -> Permission.NOTE_CREATE;
             case "change_stage" -> Permission.DEAL_UPDATE;
+            case "set_response_due" -> Permission.PERSON_UPDATE;
             case "assign_owner" -> switch (recordType) {
                 case "person" -> Permission.PERSON_UPDATE;
                 case "deal" -> Permission.DEAL_UPDATE;
@@ -464,6 +467,15 @@ public class RuleDefinitionValidator {
                         throw requiredActionField(
                             "An assign_owner action requires a targetUserId",
                             configured.nodeId(), "targetUserId");
+                    }
+                }
+                case "set_response_due" -> {
+                    if (action.getDueInHours() == null || action.getDueInHours() < 1
+                            || action.getDueInHours() > MAX_RESPONSE_DUE_IN_HOURS) {
+                        throw requiredActionField(
+                            "A set_response_due action requires a dueInHours between 1 and "
+                                + MAX_RESPONSE_DUE_IN_HOURS,
+                            configured.nodeId(), "dueInHours");
                     }
                 }
                 case "change_stage" -> {

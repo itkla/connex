@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.PersonFirstResponseState;
 import ooo.klae.connex.backend.beans.PersonLeadSource;
 import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.beans.Product;
@@ -54,11 +55,13 @@ public class ExportService {
      */
     public String exportPersons(String query, List<String> companies, List<String> titles, boolean noCompany,
             MemberScope memberScope, List<PersonLifecycleStage> lifecycleStages, boolean noLifecycle,
-            List<PersonLeadSource> leadSources, boolean noLeadSource) {
+            List<PersonLeadSource> leadSources, boolean noLeadSource,
+            List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Person> people = personMapper.getPersonsFiltered(
             workspaceId, query, companies, titles, noCompany, memberScope,
-            lifecycleStages, noLifecycle, leadSources, noLeadSource, false);
+            lifecycleStages, noLifecycle, leadSources, noLeadSource,
+            firstResponseStates, noFirstResponse, false);
         List<CustomFieldDefinition> defs = activeDefinitions(workspaceId, "person");
         Map<Integer, Map<Integer, Object>> custom =
             customFieldValueService.getForEntities("person", people.stream().map(Person::getId).toList());

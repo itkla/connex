@@ -5,8 +5,8 @@ import java.util.List;
 /**
  * Distinct company, title, owner, and lead-lifecycle facets for the contact records filter menu,
  * plus how many contacts are currently archived so the browser can offer its archived toggle.
- * Contacts outside the lead lifecycle, and contacts with no captured lead source, are counted
- * under the {@code __none__} key of their facet.
+ * Contacts outside the lead lifecycle, contacts with no captured lead source, and contacts under
+ * no first-response SLA are counted under the {@code __none__} key of their facet.
  */
 public record PersonFacets(
     List<String> companies,
@@ -15,5 +15,6 @@ public record PersonFacets(
     List<FacetCount> owners,
     long archivedCount,
     List<FacetCount> lifecycleStages,
-    List<FacetCount> leadSources
+    List<FacetCount> leadSources,
+    List<FacetCount> firstResponseStates
 ) {}

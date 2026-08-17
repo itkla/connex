@@ -54,6 +54,9 @@ public class DataSubjectDisclosureDto {
         private String leadSource;
         private String leadSourceDetail;
         private Integer referrerPersonId;
+        private LocalDateTime firstResponseDueAt;
+        private LocalDateTime firstRespondedAt;
+        private LocalDateTime firstResponseBreachedAt;
         private LocalDateTime createdAt;
         private LocalDateTime updatedAt;
     }

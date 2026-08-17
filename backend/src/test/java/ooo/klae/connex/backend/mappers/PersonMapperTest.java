@@ -251,7 +251,7 @@ class PersonMapperTest extends AbstractMapperTest {
         assertFalse(personMapper.getPersonsForNetworkReport(workspace.getId(), 10_000).stream()
             .anyMatch(person -> person.getId() == suspended.getId()));
         assertFalse(personMapper.getPersonsFiltered(
-            workspace.getId(), null, null, null, false, allTeamScope(), null, false, null, false, false).stream()
+            workspace.getId(), null, null, null, false, allTeamScope(), null, false, null, false, null, false, false).stream()
             .anyMatch(person -> person.getId() == suspended.getId()));
 
         assertNotNull(personMapper.getPersonById(workspace.getId(), suspended.getId()));
@@ -259,7 +259,7 @@ class PersonMapperTest extends AbstractMapperTest {
             .anyMatch(person -> person.getId() == suspended.getId()));
         assertTrue(personMapper.getPersonsPage(
             workspace.getId(), null, null, null, null, null, false, allTeamScope(),
-            null, false, null, false, false, 10_000, 0).stream()
+            null, false, null, false, null, false, false, 10_000, 0).stream()
             .anyMatch(person -> person.getId() == suspended.getId()));
         assertTrue(personMapper.getPersonsByDealId(workspace.getId(), deal.getId()).stream()
             .anyMatch(person -> person.getId() == suspended.getId()));
@@ -303,11 +303,11 @@ class PersonMapperTest extends AbstractMapperTest {
 
         List<Person> page = personMapper.getPersonsPage(
             pageWorkspace.getId(), null, null, null, null, null, false, allTeamScope(),
-            null, false, null, false, false, 2, 0);
+            null, false, null, false, null, false, false, 2, 0);
 
         assertEquals(2, page.size());
         assertEquals(3, personMapper.countPersons(
-            pageWorkspace.getId(), null, null, null, false, allTeamScope(), null, false, null, false, false));
+            pageWorkspace.getId(), null, null, null, false, allTeamScope(), null, false, null, false, null, false, false));
         assertTrue(page.stream().noneMatch(person -> person.getId() == foreign.getId()));
         assertTrue(page.stream().allMatch(person -> List.of(first.getId(), second.getId(), third.getId()).contains(person.getId())));
     }
@@ -321,7 +321,7 @@ class PersonMapperTest extends AbstractMapperTest {
         Person foreign = newPerson(newCompany());
 
         List<Integer> ids = personMapper.getPersonIdsFiltered(
-            pageWorkspace.getId(), null, null, null, false, allTeamScope(), null, false, null, false, false, 2);
+            pageWorkspace.getId(), null, null, null, false, allTeamScope(), null, false, null, false, null, false, false, 2);
 
         assertEquals(List.of(first.getId(), second.getId()), ids);
         assertFalse(ids.contains(foreign.getId()));
@@ -580,11 +580,11 @@ class PersonMapperTest extends AbstractMapperTest {
     private void assertOwnerScope(Workspace ws, MemberScope memberScope, List<Integer> expectedIds) {
         List<Integer> actualIds = personMapper.getPersonsPage(
             ws.getId(), null, "name", "asc", null, null, false, memberScope,
-            null, false, null, false, false, 100, 0)
+            null, false, null, false, null, false, false, 100, 0)
             .stream().map(Person::getId).toList();
         assertEquals(expectedIds.stream().sorted().toList(), actualIds.stream().sorted().toList());
         assertEquals(expectedIds.size(), personMapper.countPersons(
-            ws.getId(), null, null, null, false, memberScope, null, false, null, false, false));
+            ws.getId(), null, null, null, false, memberScope, null, false, null, false, null, false, false));
     }
 
     private Map<String, Long> facetCounts(List<FacetCount> counts) {

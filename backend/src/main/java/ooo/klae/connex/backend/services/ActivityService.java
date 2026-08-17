@@ -40,6 +40,12 @@ import lombok.RequiredArgsConstructor;
  * Delegates persistence to {@code ActivityMapper}, resolves inline @/# references
  * in the activity notes via {@code ReferenceService}, and dispatches member-mention
  * notifications.
+ *
+ * <p>Logging an activity against a contact is what stops that contact's first-response SLA clock
+ * (#559): an activity is the record of the workspace having touched the lead. Interactions written
+ * by provider capture and bulk history import do not pass through here and therefore do not stop
+ * the clock — those paths do not model direction, so counting them would let the lead's own inbound
+ * message satisfy the workspace's own response deadline.
  */
 
 @Service
@@ -53,6 +59,7 @@ public class ActivityService {
     private final ReferenceService referenceService;
     private final NotificationDelivery notificationDelivery;
     private final NotificationPreferenceService notificationPreferenceService;
+    private final LeadResponseSlaService leadResponseSlaService;
     private final ObjectMapper objectMapper;
 
     private static final Set<String> AUDIT_FIELDS =
@@ -208,6 +215,9 @@ public class ActivityService {
         List<Integer> mentioned = referenceService.syncReferences(
             workspaceId, ReferenceService.SOURCE_ACTIVITY, activity.getId(), activity.getNotes());
         notifyMentions(workspaceId, activity, mentioned, actor);
+        if (activity.getPerson() != null) {
+            leadResponseSlaService.recordFirstResponse(workspaceId, activity.getPerson().getId());
+        }
         return hydrate(workspaceId, activity);
     }
 

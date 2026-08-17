@@ -26,7 +26,7 @@ public class WorkflowActionRetryPolicy {
             : action.getType().trim().toLowerCase(Locale.ROOT);
         return switch (type) {
             case "create_task", "log_activity", "add_tag", "remove_tag", "create_note",
-                 "assign_owner", "change_stage" -> RetrySafety.TRANSACTIONAL;
+                 "assign_owner", "set_response_due", "change_stage" -> RetrySafety.TRANSACTIONAL;
             case "notify" -> RetrySafety.DEDUPLICATED;
             default -> RetrySafety.NONE;
         };

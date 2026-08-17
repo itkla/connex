@@ -16,6 +16,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.PersonFirstResponseState;
 import ooo.klae.connex.backend.beans.PersonLeadSource;
 import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.util.LikePattern;
@@ -145,6 +146,8 @@ public class PersonController {
         @RequestParam(defaultValue = "false") boolean noLifecycle,
         @RequestParam(required = false) List<PersonLeadSource> leadSources,
         @RequestParam(defaultValue = "false") boolean noLeadSource,
+        @RequestParam(required = false) List<PersonFirstResponseState> firstResponseStates,
+        @RequestParam(defaultValue = "false") boolean noFirstResponse,
         @RequestParam(defaultValue = "false") boolean archived
     ) {
         if (WARMTH_SORT.equalsIgnoreCase(sort)) {
@@ -154,12 +157,13 @@ public class PersonController {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
         List<PersonDto> items = personService.getPersonsPage(query, sort, dir, companies, titles, noCompany,
-            memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource, archived,
+            memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource,
+            firstResponseStates, noFirstResponse, archived,
             bounds.size(), bounds.offset())
             .stream().map(PersonDto::from).toList();
         return new PageResponse<>(items, personService.countPersons(
             query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
-            leadSources, noLeadSource, archived));
+            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived));
     }
 
     /**
@@ -184,6 +188,8 @@ public class PersonController {
         @RequestParam(defaultValue = "false") boolean noLifecycle,
         @RequestParam(required = false) List<PersonLeadSource> leadSources,
         @RequestParam(defaultValue = "false") boolean noLeadSource,
+        @RequestParam(required = false) List<PersonFirstResponseState> firstResponseStates,
+        @RequestParam(defaultValue = "false") boolean noFirstResponse,
         @RequestParam(defaultValue = "false") boolean archived
     ) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
@@ -197,12 +203,14 @@ public class PersonController {
             && !noLifecycle
             && (leadSources == null || leadSources.isEmpty())
             && !noLeadSource
+            && (firstResponseStates == null || firstResponseStates.isEmpty())
+            && !noFirstResponse
             && memberScope.mode() == MemberScope.Mode.ALL_TEAM) {
             throw new BadRequestException("At least one filter is required before selecting matching contact ids");
         }
         return personService.getMatchingPersonIds(
             query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
-            leadSources, noLeadSource, archived);
+            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived);
     }
 
     /**
@@ -219,7 +227,8 @@ public class PersonController {
             personService.countsByOwner(),
             personService.countArchivedPersons(),
             personService.countsByLifecycleStage(),
-            personService.countsByLeadSource()
+            personService.countsByLeadSource(),
+            personService.countsByFirstResponseState()
         );
     }
 

@@ -9,7 +9,8 @@ import lombok.NoArgsConstructor;
 /**
  * One THEN action. {@code type} selects the kind ({@code create_task}, {@code log_activity},
  * {@code add_tag}, {@code notify}, {@code remove_tag}, {@code create_note}, {@code assign_owner},
- * {@code change_stage}); the remaining fields carry that type's configuration and are validated per
+ * {@code set_response_due}, {@code change_stage}); the remaining fields carry that type's
+ * configuration and are validated per
  * type by the service. Every action runs through the tenant- and RBAC-enforcing service for its kind.
  */
 @Data
@@ -32,6 +33,8 @@ public class RuleAction {
     private Integer tagId;
 
     private Integer dueInDays;
+
+    private Integer dueInHours;
 
     @Size(max = 16)
     private String severity;
