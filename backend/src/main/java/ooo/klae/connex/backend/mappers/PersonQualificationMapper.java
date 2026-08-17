@@ -26,6 +26,21 @@ public interface PersonQualificationMapper {
      */
     int upsert(PersonQualificationAnswer answer);
 
+    /**
+     * Clears every answer to one criterion across all contacts, used when the question itself
+     * changes and the recorded answers no longer answer it.
+     *
+     * @param workspaceId owning workspace
+     * @param criterionId criterion whose answers are no longer meaningful
+     * @return rows removed
+     */
+    int deleteByCriterionId(
+        @Param("workspaceId") int workspaceId, @Param("criterionId") int criterionId);
+
+    /** Whether any contact has answered this criterion. */
+    boolean existsForCriterion(
+        @Param("workspaceId") int workspaceId, @Param("criterionId") int criterionId);
+
     /** Clears one answer, returning the criterion to unanswered. */
     int delete(
         @Param("workspaceId") int workspaceId,

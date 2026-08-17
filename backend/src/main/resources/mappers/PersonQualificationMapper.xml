@@ -31,6 +31,17 @@
       answered_at = CURRENT_TIMESTAMP
   </insert>
 
+  <delete id="deleteByCriterionId">
+    DELETE FROM person_qualification_answer
+    WHERE workspace_id = #{workspaceId} AND criterion_id = #{criterionId}
+  </delete>
+
+  <select id="existsForCriterion" resultType="boolean">
+    SELECT EXISTS (
+      SELECT 1 FROM person_qualification_answer
+      WHERE workspace_id = #{workspaceId} AND criterion_id = #{criterionId})
+  </select>
+
   <delete id="delete">
     DELETE FROM person_qualification_answer
     WHERE workspace_id = #{workspaceId}

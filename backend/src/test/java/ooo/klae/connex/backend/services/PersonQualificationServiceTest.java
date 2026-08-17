@@ -40,6 +40,7 @@ class PersonQualificationServiceTest extends AbstractServiceTest {
     @Autowired PersonQualificationService qualificationService;
     @Autowired QualificationCriterionService criterionService;
     @Autowired PersonLifecycleService lifecycleService;
+    @Autowired PersonService personService;
     @Autowired ShareMapper shareMapper;
     @MockitoBean RuleTriggerPublisher ruleTriggers;
     @MockitoBean NotificationChangePublisher notificationChanges;
@@ -207,6 +208,59 @@ class PersonQualificationServiceTest extends AbstractServiceTest {
         assertEquals(1, qualification.criteria().size());
         assertEquals(QualificationAnswer.NOT_MET, qualification.criteria().getFirst().answer());
         assertNotNull(qualification.criteria().getFirst().answeredAt());
+    }
+
+    @Test
+    void renamingACriterionDiscardsTheAnswersToTheQuestionItUsedToAsk() {
+        Person person = enterLifecycle(newPerson(newCompany()));
+        QualificationCriterion budget =
+            criterion("Has confirmed budget", QualificationDimension.FIT, 1, true);
+        answer(person, budget, QualificationAnswer.MET);
+
+        QualificationCriterionRequest renamed = new QualificationCriterionRequest();
+        renamed.setLabel("Security review complete");
+        renamed.setDimension(QualificationDimension.FIT);
+        renamed.setWeight(1);
+        renamed.setRequired(true);
+        criterionService.update(budget.getId(), renamed);
+
+        assertNull(qualificationService.getQualification(person.getId()).criteria().getFirst().answer(),
+            "an answer to the old question must not score for the new one");
+        assertThrows(BadRequestException.class, () -> lifecycleService.updateLifecycle(
+            person.getId(), stage(PersonLifecycleStage.QUALIFIED)),
+            "and must not satisfy the required gate for a question nobody was asked");
+    }
+
+    @Test
+    void reweightingACriterionKeepsItsAnswers() {
+        Person person = newPerson(newCompany());
+        QualificationCriterion budget =
+            criterion("Has confirmed budget", QualificationDimension.FIT, 1, false);
+        answer(person, budget, QualificationAnswer.MET);
+
+        QualificationCriterionRequest reweighted = new QualificationCriterionRequest();
+        reweighted.setLabel("Has confirmed budget");
+        reweighted.setDimension(QualificationDimension.ENGAGEMENT);
+        reweighted.setWeight(40);
+        reweighted.setRequired(true);
+        criterionService.update(budget.getId(), reweighted);
+
+        assertEquals(QualificationAnswer.MET,
+            qualificationService.getQualification(person.getId()).criteria().getFirst().answer(),
+            "the question is unchanged, so what was said about it still stands");
+    }
+
+    @Test
+    void aRestrictedContactCannotBeAssessed() {
+        Person person = newPerson(newCompany());
+        QualificationCriterion budget = criterion("Has budget", QualificationDimension.FIT, 1, false);
+        personService.updateProcessingRestrictions(person.getId(), true, false);
+
+        PersonQualificationRequest request = new PersonQualificationRequest();
+        request.setCriterionId(budget.getId());
+        request.setAnswer(QualificationAnswer.MET);
+        assertThrows(ResourceNotFoundException.class,
+            () -> qualificationService.answer(person.getId(), request));
     }
 
     @Test

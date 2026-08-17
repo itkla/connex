@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -13,6 +14,7 @@ import ooo.klae.connex.backend.beans.QualificationDimension;
 import ooo.klae.connex.backend.dto.QualificationCriterionRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.PersonQualificationMapper;
 import ooo.klae.connex.backend.mappers.QualificationCriterionMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -37,6 +39,7 @@ public class QualificationCriterionService {
     private static final int MAX_ACTIVE_CRITERIA = 50;
 
     private final QualificationCriterionMapper criterionMapper;
+    private final PersonQualificationMapper qualificationMapper;
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
 
@@ -77,8 +80,18 @@ public class QualificationCriterionService {
     }
 
     /**
-     * Replaces the editable fields of one criterion. Changing a weight or a required flag changes
-     * what "qualified" means for every contact scored against it, so the whole change is audited.
+     * Replaces the editable fields of one criterion.
+     *
+     * <p>Changing the <em>label</em> changes the question, and an answer only ever meant "the team
+     * said this about <em>that</em> question". Renaming "Has confirmed budget" to "Security review
+     * complete" while its recorded MET answers stayed attached would let those answers score, and
+     * satisfy the required gate, for a question nobody was ever asked. So a label change discards
+     * the answers to that criterion — audited, and reported back to the caller. Fixing a typo
+     * therefore costs the answers; that is the safe direction to fail, because the alternative is a
+     * contact qualified on evidence that does not exist.
+     *
+     * <p>Weight, required, position, and dimension do not invalidate anything: they change how an
+     * answer is scored or whether it gates, not what was asked.
      *
      * @param id criterion to update
      * @param request new values
@@ -93,10 +106,17 @@ public class QualificationCriterionService {
         criterion.setId(id);
         criterion.setWorkspaceId(workspaceId);
         criterionMapper.update(criterion);
+        int discardedAnswers = 0;
+        if (!before.getLabel().equals(criterion.getLabel())) {
+            discardedAnswers = qualificationMapper.deleteByCriterionId(workspaceId, id);
+        }
+        Map<String, Object> changes = new LinkedHashMap<>(auditService.diff(before, criterion,
+            java.util.Set.of("label", "dimension", "weight", "required", "position")));
+        if (discardedAnswers > 0) {
+            changes.put("discardedAnswers", discardedAnswers);
+        }
         auditService.record("qualification.criterion.update", "qualification_criterion", id,
-            criterion.getLabel(), "Updated qualification criterion " + criterion.getLabel(),
-            auditService.diff(before, criterion,
-                java.util.Set.of("label", "dimension", "weight", "required", "position")));
+            criterion.getLabel(), "Updated qualification criterion " + criterion.getLabel(), changes);
         return require(workspaceId, id);
     }
 
@@ -128,6 +148,10 @@ public class QualificationCriterionService {
     public void restore(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         QualificationCriterion before = require(workspaceId, id);
+        if (criterionMapper.getActive(workspaceId).size() >= MAX_ACTIVE_CRITERIA) {
+            throw new BadRequestException(
+                "A workspace can keep at most " + MAX_ACTIVE_CRITERIA + " active criteria");
+        }
         if (criterionMapper.restore(workspaceId, id) == 0) {
             throw new BadRequestException("That criterion is not archived");
         }

@@ -85,7 +85,7 @@ public class PersonQualificationService {
             throw new BadRequestException("A criterion is required");
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Person person = requireOwnedPerson(workspaceId, personId);
+        Person person = requireAssessablePerson(workspaceId, personId);
         QualificationCriterion criterion =
             criterionMapper.getById(workspaceId, request.getCriterionId());
         if (criterion == null) {
@@ -222,6 +222,30 @@ public class PersonQualificationService {
                 "answer", Map.of(
                     "from", before == null ? "unanswered" : before.name(),
                     "to", after == null ? "unanswered" : after.name())));
+    }
+
+    /**
+     * The contact, locked for the duration of the write.
+     *
+     * <p>The lifecycle transition takes this same row lock before it evaluates the required
+     * criteria, so taking it here is what makes the gate hold: without it an answer could be
+     * cleared between the gate's read and the transition's commit, qualifying a contact whose
+     * required criteria are no longer met. Serialising both writers on the contact removes the
+     * window without inventing a second lock protocol.
+     *
+     * <p>Archived and restricted contacts are refused, matching the lifecycle and the first-response
+     * SLA: recording an assessment is processing, and a contact under an APPI restriction has
+     * stopped being processed.
+     */
+    private Person requireAssessablePerson(int workspaceId, int personId) {
+        Person person = personMapper.getOwnedPersonByIdForUpdate(workspaceId, personId);
+        if (person == null
+                || person.getArchivedAt() != null
+                || person.getSuspendedAt() != null
+                || person.getProvisionCeasedAt() != null) {
+            throw new ResourceNotFoundException("Person not found with id: " + personId);
+        }
+        return person;
     }
 
     private Person requireOwnedPerson(int workspaceId, int personId) {
