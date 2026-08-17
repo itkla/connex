@@ -23,6 +23,7 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.ProductMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
+import ooo.klae.connex.backend.util.CsvFormulaGuard;
 
 /**
  * Builds RFC-4180 CSV exports for contacts, companies, deals, and products, scoped to the active
@@ -255,13 +256,7 @@ public class ExportService {
 
     private static String escape(String value) {
         if (value == null || value.isEmpty()) return "";
-        String s = value;
-        char first = s.charAt(0);
-        if (first == '=' || first == '+' || first == '-' || first == '@'
-                || first == '\t' || first == '\r' || first == '\n'
-                || first == '＝' || first == '＋' || first == '－' || first == '＠') {
-            s = "'" + s;
-        }
+        String s = CsvFormulaGuard.guard(value);
         if (s.indexOf(',') >= 0 || s.indexOf('"') >= 0 || s.indexOf('\n') >= 0 || s.indexOf('\r') >= 0) {
             s = "\"" + s.replace("\"", "\"\"") + "\"";
         }

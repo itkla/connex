@@ -20,6 +20,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -38,6 +39,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.ProductMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.util.CsvFormulaGuard;
 
 /**
  * Proof-bound CSV import of the workspace product catalog.
@@ -52,6 +54,20 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
  * deactivated because it is absent from the file — deal line items snapshot catalog values, and
  * deleting a product would null out {@code deal_line_item.product_id}. Writes go straight to
  * {@link ProductMapper} with one summary audit event, never per row.
+ *
+ * <p><strong>Money and tax rates accept exactly two formats:</strong> a plain decimal with an
+ * optional period separator ({@code 1234.56}, {@code 1234}), or ASCII digit grouping in strict
+ * three-digit groups that also carries a period decimal separator ({@code 1,234.56}). Every other
+ * shape fails the row. A comma without a period is ambiguous — {@code 12,50} is 1250 to a
+ * thousands-separator reader and 12.50 to a decimal-comma reader, and a tax rate {@code 10,5} is
+ * either 105 or 10.5 — so it is rejected rather than guessed; the same applies to space grouping
+ * ({@code 1 000}) and to the decimal-comma form ({@code 1.000,50}). Silently normalizing those
+ * would corrupt a catalog price by a factor of one hundred, so the importer refuses them and asks
+ * the operator to restate the value.
+ *
+ * <p>SKUs are compared after trimming, matching {@link ProductService}, which stores a trimmed
+ * SKU. Exporting the catalog and reimporting it therefore matches the same rows instead of
+ * inserting whitespace-only variants.
  */
 @Service
 @RequiredArgsConstructor
@@ -75,6 +91,12 @@ public class ProductImportService {
     private static final int UNIT_PRICE_SCALE = 2;
     private static final int TAX_RATE_INTEGER_DIGITS = 3;
     private static final int TAX_RATE_SCALE = 3;
+    private static final Pattern PLAIN_DECIMAL = Pattern.compile("^[+-]?\\d+(?:\\.\\d+)?$");
+    private static final Pattern GROUPED_DECIMAL =
+        Pattern.compile("^[+-]?\\d{1,3}(?:,\\d{3})+\\.\\d+$");
+    private static final String DECIMAL_FORMAT_ERROR =
+        " must be a decimal number such as 1234.56 or 1,234.56;"
+            + " a decimal comma is not supported";
     private static final Set<String> FIELDS = Set.of(
         "sku", "name", "description", "active", "unit", "unitPrice", "currency",
         "taxRate", "billingFrequency", "effectiveStart", "effectiveEnd");
@@ -312,18 +334,12 @@ public class ProductImportService {
         if (raw == null) {
             return null;
         }
-        String candidate = raw.replaceAll("[,\\s]", "");
-        if (candidate.isEmpty() || candidate.length() > MAX_DECIMAL_LENGTH) {
-            row.errors.add(field + " must be a decimal number");
+        String candidate = canonicalDecimal(raw);
+        if (candidate == null) {
+            row.errors.add(field + DECIMAL_FORMAT_ERROR);
             return null;
         }
-        BigDecimal parsed;
-        try {
-            parsed = new BigDecimal(candidate);
-        } catch (NumberFormatException exception) {
-            row.errors.add(field + " must be a decimal number");
-            return null;
-        }
+        BigDecimal parsed = new BigDecimal(candidate);
         if (parsed.signum() < 0) {
             row.errors.add(field + " must not be negative");
             return null;
@@ -338,6 +354,16 @@ public class ProductImportService {
             return null;
         }
         return scaled;
+    }
+
+    private static String canonicalDecimal(String raw) {
+        if (raw.length() > MAX_DECIMAL_LENGTH) {
+            return null;
+        }
+        if (PLAIN_DECIMAL.matcher(raw).matches()) {
+            return raw;
+        }
+        return GROUPED_DECIMAL.matcher(raw).matches() ? raw.replace(",", "") : null;
     }
 
     private static long integerDigits(BigDecimal value) {
@@ -519,7 +545,11 @@ public class ProductImportService {
                 continue;
             }
             ProductSkuResolution resolution = current.get(row);
-            if (resolution == null || !row.matchedId.equals(resolution.getProductId())) {
+            Product product = locked.get(row.matchedId);
+            if (resolution == null
+                    || !row.matchedId.equals(resolution.getProductId())
+                    || product == null
+                    || !Objects.equals(row.matchedLabel, product.getName())) {
                 fail(row, "Catalog row for SKU " + row.skuRaw
                     + " changed before the import committed");
             }
@@ -744,6 +774,7 @@ public class ProductImportService {
             updateDigest(
                 digest,
                 row.matchedId == null ? null : Integer.toString(row.matchedId));
+            updateDigest(digest, row.matchedLabel);
             for (String error : row.errors) {
                 updateDigest(digest, error);
             }
@@ -795,12 +826,7 @@ public class ProductImportService {
         if (value == null) {
             return null;
         }
-        String trimmed = value.trim();
-        if (trimmed.length() > 1
-                && trimmed.charAt(0) == '\''
-                && "=+-@\t\r".indexOf(trimmed.charAt(1)) >= 0) {
-            trimmed = trimmed.substring(1);
-        }
+        String trimmed = CsvFormulaGuard.unguard(value.trim());
         return trimmed.isEmpty() ? null : trimmed;
     }
 

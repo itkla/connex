@@ -56,6 +56,7 @@ import ooo.klae.connex.backend.dto.ProductImportResult;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.ProductMapper;
+import ooo.klae.connex.backend.util.CsvFormulaGuard;
 
 @ExtendWith(MockitoExtension.class)
 class ProductImportServiceTest {
@@ -66,6 +67,9 @@ class ProductImportServiceTest {
     private static final String SKIP = "skip";
     private static final String UPDATE = "update";
     private static final String CREATE = "create";
+    private static final String DECIMAL_FORMAT_ERROR =
+        " must be a decimal number such as 1234.56 or 1,234.56;"
+            + " a decimal comma is not supported";
 
     @Mock private WorkspaceService workspaceService;
     @Mock private DuplicatePreflightService duplicatePreflightService;
@@ -246,9 +250,9 @@ class ProductImportServiceTest {
     @Test
     void invalidUnitPriceTaxRateActiveBillingFrequencyAndDateRowsAreInvalid() {
         Map<String, List<String>> expected = new LinkedHashMap<>();
-        expected.put("Price=not-a-number", List.of("unitPrice must be a decimal number"));
+        expected.put("Price=not-a-number", List.of("unitPrice" + DECIMAL_FORMAT_ERROR));
         expected.put("Price=-1.00", List.of("unitPrice must not be negative"));
-        expected.put("Tax=ten percent", List.of("taxRate must be a decimal number"));
+        expected.put("Tax=ten percent", List.of("taxRate" + DECIMAL_FORMAT_ERROR));
         expected.put("Active=maybe", List.of("active must be true, false, yes, no, 1, or 0"));
         expected.put("Frequency=annually", List.of("billingFrequency must be one_time or recurring"));
         expected.put("Start=01/02/2026", List.of("effectiveStart must use YYYY-MM-DD"));
@@ -281,6 +285,46 @@ class ProductImportServiceTest {
         assertEquals(1, result.created());
         assertEquals(new BigDecimal("1200.01"), inserted.getFirst().getUnitPrice());
         assertEquals(new BigDecimal("10.001"), inserted.getFirst().getTaxRate());
+    }
+
+    @Test
+    void ambiguousGroupingAndDecimalCommasAreRejectedInsteadOfNormalized() {
+        Map<String, List<String>> expected = new LinkedHashMap<>();
+        expected.put("Price=12,50", List.of("unitPrice" + DECIMAL_FORMAT_ERROR));
+        expected.put("Price=1.000,50", List.of("unitPrice" + DECIMAL_FORMAT_ERROR));
+        expected.put("Price=1 000", List.of("unitPrice" + DECIMAL_FORMAT_ERROR));
+        expected.put("Price=1,000", List.of("unitPrice" + DECIMAL_FORMAT_ERROR));
+        expected.put("Price=1,2345.67", List.of("unitPrice" + DECIMAL_FORMAT_ERROR));
+        expected.put("Tax=10,5", List.of("taxRate" + DECIMAL_FORMAT_ERROR));
+
+        for (Map.Entry<String, List<String>> scenario : expected.entrySet()) {
+            String[] override = scenario.getKey().split("=", 2);
+            Map<String, String> row = fullRow("A-1");
+            row.put(override[0], override[1]);
+
+            ProductImportResult result = commit(fullRequest(OVERWRITE, row));
+
+            assertEquals(0, result.created(), scenario.getKey());
+            assertEquals(1, result.failed().size(), scenario.getKey());
+            assertEquals(
+                String.join("; ", scenario.getValue()),
+                result.failed().getFirst().getReason(),
+                scenario.getKey());
+        }
+        assertTrue(inserted.isEmpty(), "no ambiguous amount may reach the catalog");
+    }
+
+    @Test
+    void thousandsGroupingIsAcceptedOnlyWithAPeriodDecimalSeparator() {
+        Map<String, String> row = fullRow("A-1");
+        row.put("Price", "1,234,567.89");
+        row.put("Tax", "8.25");
+
+        ProductImportResult result = commit(fullRequest(OVERWRITE, row));
+
+        assertEquals(1, result.created());
+        assertEquals(new BigDecimal("1234567.89"), inserted.getFirst().getUnitPrice());
+        assertEquals(new BigDecimal("8.250"), inserted.getFirst().getTaxRate());
     }
 
     @Test
@@ -345,6 +389,18 @@ class ProductImportServiceTest {
         assertEquals("=A-1", inserted.getFirst().getSku());
         assertEquals("+Widget", inserted.getFirst().getName());
         assertEquals("-Injected", inserted.getFirst().getDescription());
+    }
+
+    @Test
+    void everyExportedFormulaPrefixIsReversedOnImport() {
+        for (String prefixed : List.of("＝A-1", "＋A-1", "－A-1", "＠A-1", "@A-1")) {
+            inserted.clear();
+            Map<String, String> row = row(CsvFormulaGuard.guard(prefixed), "Widget");
+
+            commit(request(OVERWRITE, row));
+
+            assertEquals(prefixed, inserted.getFirst().getSku(), prefixed);
+        }
     }
 
     @Test
@@ -632,6 +688,48 @@ class ProductImportServiceTest {
         service.previewProducts(request(OVERWRITE, row("A-1", "Widget")));
 
         assertNotEquals(whenNew, latestDecisionFingerprint());
+    }
+
+    @Test
+    void decisionFingerprintChangesWhenAMatchedProductIsRenamed() {
+        catalog(31, "A-1", "Existing widget");
+        queuePreview();
+        service.previewProducts(request(OVERWRITE, row("A-1", "Widget")));
+        String beforeRename = latestDecisionFingerprint();
+
+        catalog(31, "A-1", "Renamed by someone else");
+        queuePreview();
+        service.previewProducts(request(OVERWRITE, row("A-1", "Widget")));
+
+        assertNotEquals(beforeRename, latestDecisionFingerprint());
+    }
+
+    @Test
+    void commitFailsOnlyTheRowsWhoseLockedTargetChangedItsName() {
+        catalog(31, "A-1", "Existing widget");
+        Product survivor = catalog(32, "C-3", "Existing gadget");
+        queuePreview();
+        ProductImportRequest request =
+            request(OVERWRITE, row("A-1", "Widget"), row("C-3", "Gadget"));
+        service.previewProducts(request);
+        request.setDuplicateReviewProof(PROOF);
+        queueCommit();
+        Product renamed = catalogSnapshot(31, "A-1", "Renamed by someone else");
+        when(productMapper.getByIdForUpdate(WORKSPACE_ID, 31)).thenAnswer(invocation -> {
+            catalogById.put(31, renamed);
+            return renamed;
+        });
+
+        ProductImportResult result = service.commitProducts(request);
+
+        assertEquals(1, result.updated());
+        assertEquals(1, result.failed().size());
+        assertEquals(
+            "Catalog row for SKU A-1 changed before the import committed",
+            result.failed().getFirst().getReason());
+        assertEquals("Renamed by someone else", renamed.getName());
+        assertEquals("Gadget", survivor.getName());
+        verify(productMapper, never()).update(renamed);
     }
 
     @Test
