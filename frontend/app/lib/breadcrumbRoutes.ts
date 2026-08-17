@@ -42,6 +42,7 @@ export type BreadcrumbMessageKey =
     | "pipelines"
     | "products"
     | "profile"
+    | "qualification"
     | "radar"
     | "recipes"
     | "reports"
@@ -124,6 +125,7 @@ const SETTINGS_ROUTES: Readonly<Record<string, StaticWorkspaceRoute>> = {
     "/settings/members": { key: "members" },
     "/settings/roles": { key: "roles" },
     "/settings/custom-fields": { key: "customFields" },
+    "/settings/qualification": { key: "qualification" },
     "/settings/data": { key: "data" },
     "/settings/email": { key: "email" },
     "/settings/delivery": { key: "delivery" },
