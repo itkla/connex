@@ -16,6 +16,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.dto.PersonBreachRow;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -110,37 +111,43 @@ public class LeadResponseSlaService {
 
     /**
      * Contacts in the workspace whose first-response deadline has passed unanswered and whose breach
-     * has not been recorded yet, paged by an exclusive id cursor.
+     * has not been recorded yet, longest-waiting first.
+     *
+     * <p>Archived and restricted contacts are excluded, not merely skipped later. Stamping one would
+     * both process a contact under an APPI restriction and consume the single breach the guard
+     * allows — after which rule execution rejects the record as unavailable and the escalation could
+     * never fire again. Excluded, the deadline stays unbreached and escalates once the restriction
+     * lifts.
      *
      * @param workspaceId owning workspace
-     * @param afterId exclusive id cursor; {@code 0} starts at the beginning
-     * @param limit maximum ids to return
-     * @return breaching contact ids, ascending
+     * @param limit maximum rows to return
+     * @return breaching contacts, oldest deadline first
      */
-    public List<Integer> findBreaches(int workspaceId, int afterId, int limit) {
-        return personMapper.findFirstResponseBreaches(workspaceId, now(), afterId, Math.max(1, limit));
+    public List<PersonBreachRow> findBreaches(int workspaceId, int limit) {
+        return personMapper.findFirstResponseBreaches(workspaceId, now(), Math.max(1, limit));
     }
 
     /**
      * Records one breach and announces it to the rule engine so a workspace can escalate with the
      * actions it already has — notify, create a task, or route the lead to someone else.
      *
-     * <p>The update re-asserts every condition the sweep selected on, so a response that lands
-     * between the select and this call wins and no breach is written. Nothing is published unless
-     * the row actually changed, which keeps two overlapping sweeps from escalating twice.
+     * <p>The update re-asserts every condition the sweep selected on — including the archive and
+     * restriction fences — so a response, an archive, or a suspension that lands between the select
+     * and this call wins and no breach is written. Nothing is published unless the row actually
+     * changed, which keeps two overlapping sweeps from escalating twice.
      *
      * @param workspaceId owning workspace
-     * @param personId breaching contact
+     * @param breaching breaching contact with the name its audit entry records
      * @return {@code true} when this call recorded the breach
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public boolean recordBreach(int workspaceId, int personId) {
+    public boolean recordBreach(int workspaceId, PersonBreachRow breaching) {
+        int personId = breaching.id();
         LocalDateTime breachedAt = now();
         if (personMapper.recordFirstResponseBreach(workspaceId, personId, breachedAt) == 0) {
             return false;
         }
-        Person person = personMapper.getPersonById(workspaceId, personId);
-        String name = person == null ? "contact " + personId : person.getName();
+        String name = breaching.name() == null ? "contact " + personId : breaching.name();
         auditService.record("person.first_response_breached", "person", personId, name,
             "First-response SLA breached for " + name,
             Map.of("firstResponseBreachedAt", Map.of("from", "none", "to", breachedAt.toString())));

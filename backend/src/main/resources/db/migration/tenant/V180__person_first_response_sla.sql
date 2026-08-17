@@ -20,7 +20,10 @@ ALTER TABLE person
     ADD CONSTRAINT chk_person_first_response_pairing CHECK (
         (first_responded_at IS NULL OR first_response_due_at IS NOT NULL)
         AND (first_response_breached_at IS NULL OR first_response_due_at IS NOT NULL)),
-    -- The breach sweep selects on (workspace, deadline) and then filters the two NULL states in the
-    -- WHERE clause; MySQL has no partial index, so the deadline leads the key and the sweep reads
-    -- only the rows whose deadline has actually passed.
-    ADD INDEX idx_person_workspace_first_response_due (workspace_id, first_response_due_at);
+    -- Queue index for the breach sweep. MySQL has no partial index, but it does treat IS NULL as an
+    -- index-usable equality, so leading with the two settled-state columns lets the sweep scan only
+    -- contacts still owed a first response and read them in deadline order. Answered and breached
+    -- contacts keep their deadline forever; without this shape the past-due range would grow
+    -- without bound and every sweep would walk the whole history to find the few live rows.
+    ADD INDEX idx_person_workspace_first_response_queue (
+        workspace_id, first_response_breached_at, first_responded_at, first_response_due_at);

@@ -914,28 +914,44 @@
       AND first_responded_at IS NULL
   </update>
 
+  <!-- Every condition the sweep selected on is re-asserted here, including the restriction fences:
+       a suspension that lands between the select and this update wins, and no breach is stamped on
+       a contact the workspace is no longer allowed to process. -->
   <update id="recordFirstResponseBreach">
     UPDATE person
     SET first_response_breached_at = #{breachedAt}
     WHERE workspace_id = #{workspaceId} AND id = #{id}
       AND archived_at IS NULL
+      AND suspended_at IS NULL
+      AND provision_ceased_at IS NULL
       AND first_response_due_at IS NOT NULL
       AND first_response_due_at &lt;= #{breachedAt}
       AND first_responded_at IS NULL
       AND first_response_breached_at IS NULL
   </update>
 
-  <select id="findFirstResponseBreaches" resultType="int">
-    SELECT p.id
+  <!-- Ordered by deadline so the longest-waiting lead escalates first, which is also the order
+       idx_person_workspace_first_response_queue stores: the two IS NULL columns lead the key, so
+       the scan visits only contacts still owed a first response and never walks the settled ones,
+       however many deadlines the workspace has accumulated.
+
+       Restricted contacts are excluded rather than skipped-and-stamped. Marking one would both
+       process a contact under an APPI restriction and burn the single breach the guard allows,
+       after which rule execution rejects the record as unavailable and the escalation could never
+       fire again. Excluded, the deadline simply stays unbreached until the restriction lifts. -->
+  <select id="findFirstResponseBreaches"
+          resultType="ooo.klae.connex.backend.dto.PersonBreachRow">
+    SELECT p.id, p.name
     FROM person p
     WHERE p.workspace_id = #{workspaceId}
       AND p.archived_at IS NULL
+      AND p.suspended_at IS NULL
+      AND p.provision_ceased_at IS NULL
+      AND p.first_response_breached_at IS NULL
+      AND p.first_responded_at IS NULL
       AND p.first_response_due_at IS NOT NULL
       AND p.first_response_due_at &lt;= #{asOf}
-      AND p.first_responded_at IS NULL
-      AND p.first_response_breached_at IS NULL
-      AND p.id &gt; #{afterId}
-    ORDER BY p.id
+    ORDER BY p.first_response_due_at, p.id
     LIMIT #{limit}
   </select>
 

@@ -209,6 +209,13 @@ publishes `person.first_response_overdue`, so escalation is authored with the ac
 exist — notify, create a task, reassign the owner. The stamp is a guarded single statement, so two
 overlapping sweeps escalate once and a response that lands mid-sweep wins.
 
+**A restricted contact is never breached.** A contact under an APPI processing restriction —
+suspended or provision-ceased — is excluded from the sweep's selection *and* from the guarded stamp,
+so a restriction landing mid-sweep wins. Stamping one would both process a contact the workspace is
+no longer allowed to process and consume the single breach the guard permits, after which rule
+execution rejects the record as unavailable and the escalation could never fire. Excluded, the
+deadline simply stays unbreached and escalates once the restriction lifts.
+
 **A late answer keeps its breach.** The two timestamps are not mutually exclusive; erasing the breach
 to record the answer would destroy the evidence the SLA exists to produce. The queue of leads still
 waiting on somebody is the breached-and-unanswered set, which is what the browser's *Overdue* facet

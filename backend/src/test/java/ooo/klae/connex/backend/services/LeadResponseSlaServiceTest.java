@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.PersonBreachRow;
 import ooo.klae.connex.backend.dto.PersonLifecycleRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -112,16 +113,16 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
         slaService.startFirstResponseClock(person.getId(), 4);
         expireDeadline(person);
 
-        assertEquals(List.of(person.getId()), slaService.findBreaches(workspace.getId(), 0, 50));
-        assertTrue(slaService.recordBreach(workspace.getId(), person.getId()));
+        assertEquals(List.of(person.getId()), breachingIds(workspace.getId()));
+        assertTrue(slaService.recordBreach(workspace.getId(), breachRow(person)));
 
         assertNotNull(personMapper.getPersonById(workspace.getId(), person.getId())
             .getFirstResponseBreachedAt());
         verify(ruleTriggers).publish(
             workspace.getId(), "person", person.getId(), "person.first_response_overdue");
 
-        assertTrue(slaService.findBreaches(workspace.getId(), 0, 50).isEmpty());
-        assertFalse(slaService.recordBreach(workspace.getId(), person.getId()));
+        assertTrue(breachingIds(workspace.getId()).isEmpty());
+        assertFalse(slaService.recordBreach(workspace.getId(), breachRow(person)));
         verify(ruleTriggers).publish(
             workspace.getId(), "person", person.getId(), "person.first_response_overdue");
     }
@@ -133,8 +134,8 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
         expireDeadline(person);
         logActivity(person, "Answered just in time to matter");
 
-        assertTrue(slaService.findBreaches(workspace.getId(), 0, 50).isEmpty());
-        assertFalse(slaService.recordBreach(workspace.getId(), person.getId()));
+        assertTrue(breachingIds(workspace.getId()).isEmpty());
+        assertFalse(slaService.recordBreach(workspace.getId(), breachRow(person)));
 
         assertNull(personMapper.getPersonById(workspace.getId(), person.getId())
             .getFirstResponseBreachedAt());
@@ -147,7 +148,7 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
         Person person = newPerson(newCompany());
         slaService.startFirstResponseClock(person.getId(), 4);
         expireDeadline(person);
-        slaService.recordBreach(workspace.getId(), person.getId());
+        slaService.recordBreach(workspace.getId(), breachRow(person));
 
         logActivity(person, "Finally called");
 
@@ -188,7 +189,7 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
         Person withdrawn = enterLifecycle(newPerson(newCompany()));
         slaService.startFirstResponseClock(withdrawn.getId(), 4);
         expireDeadline(withdrawn);
-        slaService.recordBreach(workspace.getId(), withdrawn.getId());
+        slaService.recordBreach(workspace.getId(), breachRow(withdrawn));
 
         lifecycleService.withdrawFromLifecycle(withdrawn.getId(), "not a prospect after all");
 
@@ -215,7 +216,7 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
         Person person = newPerson(newCompany());
         slaService.startFirstResponseClock(person.getId(), 4);
         expireDeadline(person);
-        slaService.recordBreach(workspace.getId(), person.getId());
+        slaService.recordBreach(workspace.getId(), breachRow(person));
 
         Workspace grantee = siblingWorkspace();
         shareMapper.sharePerson(
@@ -235,7 +236,7 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
         assertEquals(0L, personService.countPersons(null, null, null, false,
             MemberScope.allTeam(), null, false, null, false,
             List.of(PersonFirstResponseState.OVERDUE), false, false));
-        assertTrue(slaService.findBreaches(grantee.getId(), 0, 50).isEmpty());
+        assertTrue(breachingIds(grantee.getId()).isEmpty());
     }
 
     @Test
@@ -248,7 +249,7 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
         slaService.startFirstResponseClock(overdue.getId(), 4);
         slaService.startFirstResponseClock(responded.getId(), 4);
         expireDeadline(overdue);
-        slaService.recordBreach(workspace.getId(), overdue.getId());
+        slaService.recordBreach(workspace.getId(), breachRow(overdue));
         logActivity(responded, "Replied");
 
         assertEquals(List.of(pending.getId()), filteredIds(PersonFirstResponseState.PENDING, false));
@@ -272,6 +273,65 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
             .stream().map(Person::getId).toList();
     }
 
+    @Test
+    void aRestrictedContactIsNeitherSweptNorBreached() {
+        Person suspended = newPerson(newCompany());
+        Person ceased = newPerson(newCompany());
+        slaService.startFirstResponseClock(suspended.getId(), 4);
+        slaService.startFirstResponseClock(ceased.getId(), 4);
+        expireDeadline(suspended);
+        expireDeadline(ceased);
+        personService.updateProcessingRestrictions(suspended.getId(), true, false);
+        personService.updateProcessingRestrictions(ceased.getId(), false, true);
+
+        assertTrue(breachingIds(workspace.getId()).isEmpty());
+        assertFalse(slaService.recordBreach(workspace.getId(), breachRow(suspended)));
+        assertFalse(slaService.recordBreach(workspace.getId(), breachRow(ceased)));
+
+        assertNull(personMapper.getPersonById(workspace.getId(), suspended.getId())
+            .getFirstResponseBreachedAt());
+        assertNull(personMapper.getPersonById(workspace.getId(), ceased.getId())
+            .getFirstResponseBreachedAt());
+        verify(ruleTriggers, never()).publish(
+            workspace.getId(), "person", suspended.getId(), "person.first_response_overdue");
+    }
+
+    @Test
+    void liftingARestrictionLetsTheStillOverdueDeadlineEscalate() {
+        Person person = newPerson(newCompany());
+        slaService.startFirstResponseClock(person.getId(), 4);
+        expireDeadline(person);
+        personService.updateProcessingRestrictions(person.getId(), true, false);
+        assertTrue(breachingIds(workspace.getId()).isEmpty());
+
+        personService.updateProcessingRestrictions(person.getId(), false, false);
+
+        assertEquals(List.of(person.getId()), breachingIds(workspace.getId()));
+        assertTrue(slaService.recordBreach(workspace.getId(), breachRow(person)));
+        verify(ruleTriggers).publish(
+            workspace.getId(), "person", person.getId(), "person.first_response_overdue");
+    }
+
+    @Test
+    void theSweepEscalatesTheLongestWaitingLeadFirst() {
+        Person older = newPerson(newCompany());
+        Person newer = newPerson(newCompany());
+        slaService.startFirstResponseClock(newer.getId(), 4);
+        slaService.startFirstResponseClock(older.getId(), 4);
+        expireDeadline(newer, "2021-01-01 00:00:00");
+        expireDeadline(older, "2020-01-01 00:00:00");
+
+        assertEquals(List.of(older.getId(), newer.getId()), breachingIds(workspace.getId()));
+    }
+
+    private List<Integer> breachingIds(int workspaceId) {
+        return slaService.findBreaches(workspaceId, 50).stream().map(PersonBreachRow::id).toList();
+    }
+
+    private PersonBreachRow breachRow(Person person) {
+        return new PersonBreachRow(person.getId(), person.getName());
+    }
+
     private Workspace siblingWorkspace() {
         Workspace sibling = new Workspace();
         sibling.setName("Sibling " + unique());
@@ -290,9 +350,13 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
     }
 
     private void expireDeadline(Person person) {
+        expireDeadline(person, "2020-01-01 00:00:00");
+    }
+
+    private void expireDeadline(Person person, String dueAt) {
         jdbcTemplate.update(
             "UPDATE person SET first_response_due_at = ? WHERE workspace_id = ? AND id = ?",
-            java.sql.Timestamp.valueOf("2020-01-01 00:00:00"), workspace.getId(), person.getId());
+            java.sql.Timestamp.valueOf(dueAt), workspace.getId(), person.getId());
     }
 
     private Person enterLifecycle(Person person) {

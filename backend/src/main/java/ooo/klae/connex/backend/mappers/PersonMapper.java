@@ -13,6 +13,7 @@ import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.dto.CompanyEngagementPersonDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.PersonBreachRow;
 import ooo.klae.connex.backend.dto.RelationshipEvidenceRowDto;
 import ooo.klae.connex.backend.dto.RelationshipEvidenceTotalsDto;
 import ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto;
@@ -270,8 +271,10 @@ public interface PersonMapper {
     );
     /**
      * Marks a passed deadline as breached. Every condition the sweep selected on is re-asserted in
-     * the WHERE clause, so two overlapping sweeps — or a response that lands between the select and
-     * the update — can never produce a second breach or a breach on an answered contact.
+     * the WHERE clause, so two overlapping sweeps — or a response, an archive, or a processing
+     * restriction that lands between the select and the update — can never produce a second breach,
+     * a breach on an answered contact, or a breach on a contact the workspace may no longer
+     * process.
      *
      * @param workspaceId owning workspace
      * @param id contact id
@@ -284,19 +287,19 @@ public interface PersonMapper {
         @Param("breachedAt") LocalDateTime breachedAt
     );
     /**
-     * Ids of contacts whose first-response deadline has passed unanswered and unbreached, ordered
-     * by id from an exclusive cursor so the sweep can page through a large backlog.
+     * Contacts whose first-response deadline has passed unanswered and unbreached, longest-waiting
+     * first, excluding archived and restricted contacts. Each row carries the name the breach audit
+     * entry needs, so a batch costs one query rather than one per breach. The set drains as the
+     * sweep stamps it, so no cursor is needed to make progress.
      *
      * @param workspaceId owning workspace
      * @param asOf evaluation instant; deadlines at or before it have passed
-     * @param afterId exclusive id cursor; {@code 0} starts at the beginning
-     * @param limit maximum ids to return
-     * @return breaching contact ids, ascending
+     * @param limit maximum rows to return
+     * @return breaching contacts, oldest deadline first
      */
-    List<Integer> findFirstResponseBreaches(
+    List<PersonBreachRow> findFirstResponseBreaches(
         @Param("workspaceId") int workspaceId,
         @Param("asOf") LocalDateTime asOf,
-        @Param("afterId") int afterId,
         @Param("limit") int limit
     );
     int updateProcessingRestrictions(

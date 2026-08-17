@@ -15,6 +15,7 @@ import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 
+import ooo.klae.connex.backend.dto.PersonBreachRow;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.observability.JobRunRecorder;
 import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunDetail;
@@ -33,9 +34,11 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
  * at most once per SLA clock.
  *
  * <p>Work is bounded twice: at most {@code batch-size} contacts per pass and at most
- * {@code max-batches} passes per workspace per run, with an id cursor advancing through the backlog.
- * A workspace with a very large backlog therefore drains over several runs instead of holding the
- * scheduler thread, and one failing workspace never starves the rest of the fleet.
+ * {@code max-batches} passes per workspace per run. No cursor is needed — stamping a breach removes
+ * the contact from the selection — so a pass that stamps nothing means the remaining rows are
+ * failing, and the sweep stops rather than re-reading them until the pass budget runs out. A
+ * workspace with a very large backlog drains over several runs instead of holding the scheduler
+ * thread, and one failing workspace never starves the rest of the fleet.
  */
 @Component
 @RequiredArgsConstructor
@@ -139,26 +142,27 @@ public class LeadResponseSlaScheduler {
         int passes = Math.max(1, maxBatches);
         int attempted = 0;
         int failed = 0;
-        int afterId = 0;
         for (int pass = 0; pass < passes; pass++) {
-            List<Integer> personIds = leadResponseSlaService.findBreaches(workspaceId, afterId, limit);
-            if (personIds.isEmpty()) {
+            List<PersonBreachRow> breaching = leadResponseSlaService.findBreaches(workspaceId, limit);
+            if (breaching.isEmpty()) {
                 break;
             }
-            for (int personId : personIds) {
+            int stamped = 0;
+            for (PersonBreachRow row : breaching) {
                 attempted++;
                 try {
-                    leadResponseSlaService.recordBreach(workspaceId, personId);
+                    if (leadResponseSlaService.recordBreach(workspaceId, row)) {
+                        stamped++;
+                    }
                 } catch (RuntimeException exception) {
                     failed++;
                     log.warn("Lead response SLA breach failed for workspace {} contact {}: {}",
-                        workspaceId, personId, exception.getClass().getSimpleName());
+                        workspaceId, row.id(), exception.getClass().getSimpleName());
                 }
             }
-            if (personIds.size() < limit) {
+            if (stamped == 0 || breaching.size() < limit) {
                 break;
             }
-            afterId = personIds.getLast();
         }
         return new BatchResult(attempted, failed);
     }
