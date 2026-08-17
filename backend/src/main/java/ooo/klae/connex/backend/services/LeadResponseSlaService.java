@@ -68,8 +68,9 @@ public class LeadResponseSlaService {
         int hours = requireDueInHours(dueInHours);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person person = requireOwnedPerson(workspaceId, personId);
-        LocalDateTime dueAt = now().plusHours(hours);
-        if (personMapper.startFirstResponseClock(workspaceId, personId, dueAt) == 0) {
+        LocalDateTime startedAt = now();
+        LocalDateTime dueAt = startedAt.plusHours(hours);
+        if (personMapper.startFirstResponseClock(workspaceId, personId, startedAt, dueAt) == 0) {
             return false;
         }
         auditService.record("person.first_response_sla", "person", personId, person.getName(),

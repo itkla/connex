@@ -2560,7 +2560,8 @@ export type ReportDataSource =
     | "activities"
     | "tasks"
     | "relationships"
-    | "documents";
+    | "documents"
+    | "leads";
 
 export type ReportMeasure =
     | "count"
@@ -2591,7 +2592,16 @@ export type ReportMeasure =
     | "forecast_best"
     | "forecast_weighted"
     | "forecast_worst"
-    | "attainment";
+    | "attainment"
+    | "lead_count"
+    | "qualified_count"
+    | "converted_count"
+    | "disqualified_count"
+    | "qualification_rate"
+    | "conversion_rate"
+    | "time_to_convert_days"
+    | "first_response_hours"
+    | "first_response_breach_rate";
 
 export type ReportGroupBy =
     | "none"
@@ -2609,7 +2619,8 @@ export type ReportGroupBy =
     | "trend"
     | "connector"
     | "pair"
-    | "person";
+    | "person"
+    | "lead_source";
 
 export type ReportRange = {
     start: string;

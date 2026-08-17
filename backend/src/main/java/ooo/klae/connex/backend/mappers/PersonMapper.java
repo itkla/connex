@@ -237,12 +237,14 @@ public interface PersonMapper {
      *
      * @param workspaceId owning workspace
      * @param id contact id
+     * @param startedAt when the clock started, so elapsed response time stays computable
      * @param dueAt deadline for the first response
      * @return rows updated; zero when a clock was already set or the contact is archived
      */
     int startFirstResponseClock(
         @Param("workspaceId") int workspaceId,
         @Param("id") int id,
+        @Param("startedAt") LocalDateTime startedAt,
         @Param("dueAt") LocalDateTime dueAt
     );
     /**

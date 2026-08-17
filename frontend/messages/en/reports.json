@@ -285,10 +285,20 @@
       "activities": "Activities",
       "tasks": "Tasks",
       "relationships": "Relationships",
-      "documents": "Documents"
+      "documents": "Documents",
+      "leads": "Leads"
     },
     "measure": {
       "count": "Count",
+      "lead_count": "Leads entered",
+      "qualified_count": "Qualified",
+      "converted_count": "Converted",
+      "disqualified_count": "Disqualified",
+      "qualification_rate": "Qualification rate",
+      "conversion_rate": "Conversion rate",
+      "time_to_convert_days": "Time to convert",
+      "first_response_hours": "Time to first response",
+      "first_response_breach_rate": "First-response breach rate",
       "new_pipeline_value": "New pipeline value",
       "won_revenue": "Won revenue",
       "win_rate": "Win rate",
@@ -320,6 +330,7 @@
     },
     "group": {
       "none": "No grouping",
+      "lead_source": "Lead source",
       "date": "Date",
       "pipeline": "Pipeline",
       "stage": "Stage",

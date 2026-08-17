@@ -890,6 +890,7 @@
   <update id="startFirstResponseClock">
     UPDATE person
     SET first_response_due_at = #{dueAt},
+        first_response_started_at = #{startedAt},
         first_responded_at = NULL,
         first_response_breached_at = NULL
     WHERE workspace_id = #{workspaceId} AND id = #{id}
@@ -900,6 +901,7 @@
   <update id="clearFirstResponseClock">
     UPDATE person
     SET first_response_due_at = NULL,
+        first_response_started_at = NULL,
         first_responded_at = NULL,
         first_response_breached_at = NULL
     WHERE workspace_id = #{workspaceId} AND id = #{id}

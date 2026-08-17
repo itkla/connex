@@ -180,6 +180,24 @@ class ReportMapperXmlTest {
                 assertFalse(sql.contains("${"));
             }
         }
+        for (String measure : new String[] {
+                "lead_count", "qualified_count", "converted_count", "disqualified_count",
+                "qualification_rate", "conversion_rate", "time_to_convert_days",
+                "first_response_hours", "first_response_breach_rate"}) {
+            for (String group : new String[] {"none", "date", "owner", "lead_source"}) {
+                String sql = configuration.getMappedStatement(
+                                ReportMapper.class.getName() + ".aggregateLeadLifecycle")
+                        .getBoundSql(Map.of("query", query(measure, group)))
+                        .getSql();
+                assertTrue(sql.contains("person.workspace_id = ?"), measure + "/" + group);
+                assertTrue(sql.contains("person.archived_at IS NULL"), measure + "/" + group);
+                assertTrue(sql.contains("person.suspended_at IS NULL"), measure + "/" + group);
+                assertFalse(sql.contains("${"), measure + "/" + group);
+                assertFalse(sql.contains("JOIN `user`"),
+                    "reports must not join the control-plane user table: " + measure);
+            }
+        }
+
         String filteredEmployment = configuration.getMappedStatement(
                         ReportMapper.class.getName() + ".aggregateEmployment")
                 .getBoundSql(Map.of("query", query(
