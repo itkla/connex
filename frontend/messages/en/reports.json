@@ -116,6 +116,10 @@
         "name": "Quota Attainment",
         "description": "Owner and workspace revenue targets compared with won revenue."
       },
+      "commercial-documents": {
+        "name": "Quotes & Approvals",
+        "description": "Quote volume, approval turnaround, and the discount actually conceded."
+      },
       "relationship-coverage": {
         "name": "Relationship Coverage",
         "description": "Warmth distribution and account coverage."
@@ -280,7 +284,8 @@
       "companies": "Companies",
       "activities": "Activities",
       "tasks": "Tasks",
-      "relationships": "Relationships"
+      "relationships": "Relationships",
+      "documents": "Documents"
     },
     "measure": {
       "count": "Count",
@@ -301,6 +306,13 @@
       "reverse_intro_weighted_opportunities": "Weighted reverse-intro opportunities",
       "employment_departure_count": "Employment departures",
       "employment_arrival_count": "Employment arrivals",
+      "quote_count": "Quote volume",
+      "quote_issue_rate": "Quote issue rate",
+      "document_to_win_rate": "Document-to-win rate",
+      "approval_decision_count": "Approval decisions",
+      "approval_cycle_days": "Approval cycle days",
+      "effective_discount_percent": "Effective discount (won)",
+      "open_discount_percent": "Effective discount (open)",
       "forecast_best": "Best-case forecast",
       "forecast_weighted": "Likely forecast (weighted)",
       "forecast_worst": "Commit forecast",

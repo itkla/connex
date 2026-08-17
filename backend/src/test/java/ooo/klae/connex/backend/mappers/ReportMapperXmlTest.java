@@ -245,6 +245,142 @@ class ReportMapperXmlTest {
     }
 
     @Test
+    void documentAggregatesBindWorkspaceAcrossEveryBranch() throws Exception {
+        Configuration configuration = reportMapperConfiguration();
+        for (String bucket : new String[] {"day", "week", "month"}) {
+            for (String group : new String[] {"none", "date", "owner", "company"}) {
+                for (String measure : new String[] {"quote_count", "quote_issue_rate"}) {
+                    String sql = aggregateSql(
+                            configuration, "aggregateDocuments", measure, group, bucket);
+                    assertTrue(sql.contains("dd.workspace_id = ?"));
+                    assertTrue(sql.contains("d.workspace_id = ?"));
+                    assertTrue(sql.contains("c.workspace_id = ?"));
+                    assertTrue(sql.contains("dd.type = 'quote'"));
+                    assertTrue(sql.contains("dd.generated_at >= ?"));
+                    assertTrue(sql.contains("dd.generated_at < ?"));
+                    assertFalse(sql.contains("${"));
+                }
+                String outcomes = aggregateSql(
+                        configuration, "aggregateDocumentOutcomes", "document_to_win_rate", group, bucket);
+                assertTrue(outcomes.contains("d.workspace_id = ?"));
+                assertTrue(outcomes.contains("c.workspace_id = ?"));
+                assertTrue(outcomes.contains("FROM deal_document WHERE workspace_id = ?"));
+                assertTrue(outcomes.contains("MIN(generated_at) AS first_generated_at"));
+                assertTrue(outcomes.contains("first_document.first_generated_at >= ?"));
+                assertTrue(outcomes.contains("first_document.first_generated_at < ?"));
+                assertFalse(outcomes.contains("${"));
+                for (String measure : new String[] {"approval_decision_count", "approval_cycle_days"}) {
+                    String sql = aggregateSql(
+                            configuration, "aggregateDocumentApprovals", measure, group, bucket);
+                    assertTrue(sql.contains("a.workspace_id = ?"));
+                    assertTrue(sql.contains("d.workspace_id = ?"));
+                    assertTrue(sql.contains("c.workspace_id = ?"));
+                    assertTrue(sql.contains("a.status IN ('approved', 'rejected')"));
+                    assertTrue(sql.contains("a.decided_at >= ?"));
+                    assertTrue(sql.contains("a.decided_at < ?"));
+                    assertFalse(sql.contains("${"));
+                }
+            }
+        }
+    }
+
+    /**
+     * The delivery lifecycle moves a finalized quote through {@code sent} and {@code signed}, so the
+     * issued numerator must accept all three terminal-or-later statuses and fall back to workspace-
+     * scoped delivery evidence for a quote that was superseded after it was issued.
+     */
+    @Test
+    void quoteIssueRateCountsDeliveredSignedAndDeliveredSupersededQuotes() throws Exception {
+        Configuration configuration = reportMapperConfiguration();
+        for (String group : new String[] {"none", "date", "owner", "company"}) {
+            String sql = aggregateSql(
+                    configuration, "aggregateDocuments", "quote_issue_rate", group, "day");
+            assertTrue(sql.contains("dd.status IN ('final', 'sent', 'signed')"));
+            assertTrue(sql.contains("dd.status = 'superseded'"));
+            assertTrue(sql.contains("FROM document_delivery issued_delivery"));
+            assertTrue(sql.contains("issued_delivery.workspace_id = ?"));
+            assertTrue(sql.contains("issued_delivery.document_id = dd.id"));
+            assertFalse(sql.contains("${"));
+        }
+        assertFalse(aggregateSql(configuration, "aggregateDocuments", "quote_count", "none", "day")
+                .contains("document_delivery"));
+    }
+
+    /**
+     * The discount aggregate joins {@code deal_line_item}, which carries its own {@code unit}
+     * column. MySQL resolves a bare {@code unit} in {@code GROUP BY} to that column rather than to
+     * the {@code 'percent' AS unit} select alias, which would split one discount figure into one
+     * row per line-item unit. Grouping by the {@code group_key}/{@code group_label} aliases keeps
+     * the currency partition — already encoded in {@code group_key} — without naming a column that
+     * a joined table can shadow.
+     */
+    @Test
+    void dealDiscountAggregateBindsWorkspaceLineItemsAndCurrencyPartition() throws Exception {
+        Configuration configuration = reportMapperConfiguration();
+        for (String measure : new String[] {"effective_discount_percent", "open_discount_percent"}) {
+            for (String group : new String[] {"none", "date", "pipeline", "stage", "owner", "company"}) {
+                String sql = aggregateSql(configuration, "aggregateDealDiscount", measure, group, "month");
+                assertTrue(sql.contains("d.workspace_id = ?"));
+                assertTrue(sql.contains("li.workspace_id = ?"));
+                assertTrue(sql.contains("li.deal_id = d.id"));
+                assertTrue(sql.contains("p.workspace_id = ?"));
+                assertTrue(sql.contains("s.workspace_id = ?"));
+                assertTrue(sql.contains("c.workspace_id = ?"));
+                assertTrue(sql.contains("CONCAT(COALESCE(d.currency, ''), ':',"));
+                assertTrue(sql.contains("NULLIF(SUM(li.unit_price * li.quantity), 0)"));
+                assertTrue(sql.contains("HAVING SUM(li.unit_price * li.quantity) > 0"));
+                assertTrue(sql.contains("GROUP BY group_key, group_label"));
+                assertFalse(sql.contains("GROUP BY group_key, group_label, unit"));
+                assertFalse(sql.contains("${"));
+            }
+        }
+        String won = aggregateSql(
+                configuration, "aggregateDealDiscount", "effective_discount_percent", "none", "month");
+        assertTrue(won.contains("d.won = TRUE"));
+        assertTrue(won.contains("d.closed_at >= ?"));
+        assertTrue(won.contains("d.closed_at < ?"));
+        String open = aggregateSql(
+                configuration, "aggregateDealDiscount", "open_discount_percent", "none", "month");
+        assertTrue(open.contains("d.won IS NULL"));
+        assertTrue(open.contains("d.expected_close_date >= ?"));
+        assertTrue(open.contains("d.expected_close_date < ?"));
+    }
+
+    /**
+     * {@code DealValueContractArchTest.revenueStatementsNeverReadDealLineItems} classifies a
+     * {@code ReportMapper} statement as revenue SQL when its id, any nested test attribute, or its
+     * resolved text mentions {@code revenue}, and forbids such a statement from reading
+     * {@code deal_line_item}. The discount aggregate reads line items by design, so a single
+     * {@code revenue} token anywhere inside it would fail the build.
+     */
+    @Test
+    void dealDiscountStatementNeverMentionsRevenue() throws Exception {
+        String mapper = resourceText("mappers/ReportMapper.xml");
+        int start = mapper.indexOf("<select id=\"aggregateDealDiscount\"");
+        assertTrue(start >= 0);
+        int end = mapper.indexOf("</select>", start);
+        assertTrue(end > start);
+        String statement = mapper.substring(start, end);
+
+        assertTrue(statement.contains("deal_line_item"));
+        assertFalse(statement.toLowerCase(java.util.Locale.ROOT).contains("revenue"));
+    }
+
+    @Test
+    void dealAggregateStillSelectsClosedAndExpectedCloseCohortsAfterFragmentWidening() throws Exception {
+        Configuration configuration = reportMapperConfiguration();
+        String won = aggregateSql(configuration, "aggregateDeals", "won_revenue", "date", "month");
+        assertTrue(won.contains("d.closed_at >= ?"));
+        assertTrue(won.contains("d.closed_at < ?"));
+        assertFalse(won.contains("deal_line_item"));
+        String open = aggregateSql(
+                configuration, "aggregateDeals", "open_pipeline_value", "date", "month");
+        assertTrue(open.contains("d.expected_close_date >= ?"));
+        assertTrue(open.contains("d.expected_close_date < ?"));
+        assertFalse(open.contains("deal_line_item"));
+    }
+
+    @Test
     void employmentArrivalMigrationAddsStartedAtRangeIndex() throws Exception {
         String sql = resourceText("db/migration/tenant/V122__person_employment_started_index.sql");
 
@@ -384,6 +520,20 @@ class ReportMapperXmlTest {
                 .getBoundSql(Map.of("query", query)).getSql();
     }
 
+    /**
+     * The bound SQL of a statement built from resolved {@code <include>} fragments, with runs of
+     * whitespace collapsed. MyBatis joins each dynamic fragment with a separator space, so an
+     * expression that spans an include boundary is only contiguous after normalization.
+     */
+    private static String aggregateSql(
+            Configuration configuration, String statement, String measure, String group, String bucket) {
+        String sql = configuration.getMappedStatement(ReportMapper.class.getName() + "." + statement)
+                .getBoundSql(Map.of("query", query(measure, group, bucket, null, null, null, null)))
+                .getSql();
+        assertNotNull(sql);
+        return sql.replaceAll("\\s+", " ");
+    }
+
     private static ReportAggregateQuery query(String measure, String groupBy) {
         return query(measure, groupBy, null, null, null, null);
     }
@@ -400,8 +550,19 @@ class ReportMapperXmlTest {
             java.util.List<Integer> ownerIds,
             java.util.List<String> statuses,
             java.util.List<Integer> tagIds) {
+        return query(measure, groupBy, "month", pipelineIds, ownerIds, statuses, tagIds);
+    }
+
+    private static ReportAggregateQuery query(
+            String measure,
+            String groupBy,
+            String bucket,
+            java.util.List<Integer> pipelineIds,
+            java.util.List<Integer> ownerIds,
+            java.util.List<String> statuses,
+            java.util.List<Integer> tagIds) {
         return new ReportAggregateQuery(
-                7, measure, groupBy, "month",
+                7, measure, groupBy, bucket,
                 LocalDateTime.of(2026, 1, 1, 0, 0), LocalDateTime.of(2026, 2, 1, 0, 0),
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 2, 1),
                 pipelineIds, ownerIds, statuses, tagIds, null,

@@ -2462,7 +2462,14 @@ export type ReportBucket = "day" | "week" | "month";
 
 export type ReportChartType = "bar" | "line-area" | "donut" | "funnel" | "table" | "kpi";
 
-export type ReportDataSource = "deals" | "people" | "companies" | "activities" | "tasks" | "relationships";
+export type ReportDataSource =
+    | "deals"
+    | "people"
+    | "companies"
+    | "activities"
+    | "tasks"
+    | "relationships"
+    | "documents";
 
 export type ReportMeasure =
     | "count"
@@ -2483,6 +2490,13 @@ export type ReportMeasure =
     | "reverse_intro_weighted_opportunities"
     | "employment_departure_count"
     | "employment_arrival_count"
+    | "quote_count"
+    | "quote_issue_rate"
+    | "document_to_win_rate"
+    | "approval_decision_count"
+    | "approval_cycle_days"
+    | "effective_discount_percent"
+    | "open_discount_percent"
     | "forecast_best"
     | "forecast_weighted"
     | "forecast_worst"

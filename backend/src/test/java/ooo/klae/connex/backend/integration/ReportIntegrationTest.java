@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.integration;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -25,6 +26,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -64,10 +66,14 @@ import ooo.klae.connex.backend.ai.report.AiReportNarrativeService;
 import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.ai.AiGenerationService;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
+import ooo.klae.connex.backend.beans.ApprovalPolicy;
+import ooo.klae.connex.backend.beans.DealDocument;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
+import ooo.klae.connex.backend.dto.DealLineItemDto;
+import ooo.klae.connex.backend.dto.DocumentContent;
 import ooo.klae.connex.backend.dto.ReportNarrativeClaimDto;
 import ooo.klae.connex.backend.dto.AiGenerationStatusDto;
 import ooo.klae.connex.backend.dto.ReportNarrativeDto;
@@ -80,6 +86,7 @@ import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.services.ApprovalPolicyService;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations;
 import ooo.klae.connex.backend.services.ReportDeliveryScheduler;
@@ -504,6 +511,7 @@ class ReportIntegrationTest {
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private ObjectMapper objectMapper;
     @Autowired private ReportDeliveryScheduler reportDeliveryScheduler;
+    @Autowired private ApprovalPolicyService approvalPolicyService;
 
     @MockitoBean private AiReportNarrativeService aiReportNarrativeService;
     @MockitoBean private AiGenerationService aiGenerationService;
@@ -2150,6 +2158,615 @@ class ReportIntegrationTest {
             .andExpect(jsonPath("$.periodEnd").value("2026-07-13"));
     }
 
+    @Test
+    void quoteVolumeAndIssueRateCountGeneratedQuotesInTheLocalPeriod() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(workspace.getId(), "Commercial");
+        int stage = insertStage(workspace.getId(), pipeline, "Proposal");
+        int deal = insertCommercialDeal(workspace.getId(), pipeline, stage, member.getId(),
+                "Quote deal", "USD", null, null, "2026-01-25");
+        insertDealDocument(workspace.getId(), deal, "quote", "final", 1, "2026-01-01 00:00:00", "USD");
+        insertDealDocument(workspace.getId(), deal, "quote", "draft", 2, "2026-01-20 09:00:00", "USD");
+        insertDealDocument(workspace.getId(), deal, "quote", "final", 3, "2026-02-01 00:00:00", "USD");
+        insertDealDocument(workspace.getId(), deal, "quote", "final", 4, "2025-11-15 09:00:00", "USD");
+        insertDealDocument(workspace.getId(), deal, "proposal", "final", 5, "2026-01-10 09:00:00", "USD");
+
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget("quote-volume", "documents", "quote_count", "none", "kpi"),
+                new CommercialWidget("issue-rate", "documents", "quote_issue_rate", "none", "kpi"))));
+        JsonNode document = generateDocument(session, workspace, reportId);
+
+        JsonNode volume = findWidget(document.get("widgets"), "quote-volume");
+        JsonNode issueRate = findWidget(document.get("widgets"), "issue-rate");
+        assertNotNull(volume);
+        assertNotNull(issueRate);
+        assertDecimal("2", volume.get("total").decimalValue());
+        assertDecimal("50", issueRate.get("total").decimalValue());
+        assertEquals("percent", issueRate.get("unit").asText());
+    }
+
+    @Test
+    void documentToWinRateAnchorsEachDealToItsFirstDocument() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(workspace.getId(), "Commercial");
+        int stage = insertStage(workspace.getId(), pipeline, "Proposal");
+        int won = insertCommercialDeal(workspace.getId(), pipeline, stage, member.getId(),
+                "Requoted win", "USD", true, "2026-03-05 09:00:00", "2026-03-01");
+        insertDealDocument(workspace.getId(), won, "quote", "superseded", 1, "2026-01-05 09:00:00", "USD");
+        insertDealDocument(workspace.getId(), won, "quote", "superseded", 2, "2026-02-10 09:00:00", "USD");
+        insertDealDocument(workspace.getId(), won, "quote", "final", 3, "2026-03-01 09:00:00", "USD");
+        int lost = insertCommercialDeal(workspace.getId(), pipeline, stage, member.getId(),
+                "Single-quote loss", "USD", false, "2026-02-15 09:00:00", "2026-02-10");
+        insertDealDocument(workspace.getId(), lost, "quote", "final", 1, "2026-01-06 09:00:00", "USD");
+
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget("doc-to-win", "documents", "document_to_win_rate", "none", "kpi"))));
+        JsonNode document = generateDocument(session, workspace, reportId);
+
+        JsonNode rate = findWidget(document.get("widgets"), "doc-to-win");
+        assertNotNull(rate);
+        assertDecimal("50", rate.get("total").decimalValue());
+        assertEquals("percent", rate.get("unit").asText());
+    }
+
+    @Test
+    void approvalCycleAveragesOnlyApproverDecidedRequests() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(workspace.getId(), "Commercial");
+        int stage = insertStage(workspace.getId(), pipeline, "Proposal");
+        int deal = insertCommercialDeal(workspace.getId(), pipeline, stage, member.getId(),
+                "Approval deal", "USD", null, null, "2026-01-25");
+        int document = insertDealDocument(
+                workspace.getId(), deal, "quote", "approved", 1, "2026-01-02 09:00:00", "USD");
+        insertDocumentApproval(workspace.getId(), deal, document, "approved",
+                "2026-01-05 00:00:00", "2026-01-07 00:00:00");
+        insertDocumentApproval(workspace.getId(), deal, document, "rejected",
+                "2026-01-10 00:00:00", "2026-01-10 12:00:00");
+        insertDocumentApproval(workspace.getId(), deal, document, "cancelled",
+                "2026-01-11 00:00:00", "2026-01-21 00:00:00");
+        insertDocumentApproval(workspace.getId(), deal, document, "approved",
+                "2026-02-01 00:00:00", "2026-02-05 00:00:00");
+
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget("decisions", "documents", "approval_decision_count", "none", "kpi"),
+                new CommercialWidget("cycle", "documents", "approval_cycle_days", "none", "kpi"))));
+        JsonNode report = generateDocument(session, workspace, reportId);
+
+        JsonNode decisions = findWidget(report.get("widgets"), "decisions");
+        JsonNode cycle = findWidget(report.get("widgets"), "cycle");
+        assertNotNull(decisions);
+        assertNotNull(cycle);
+        assertDecimal("2", decisions.get("total").decimalValue());
+        assertDecimal("1.25", cycle.get("total").decimalValue());
+        assertEquals("days", cycle.get("unit").asText());
+    }
+
+    @Test
+    void approvalCycleRoundsSubDayLatencyToTwoDecimals() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(workspace.getId(), "Commercial");
+        int stage = insertStage(workspace.getId(), pipeline, "Proposal");
+        int deal = insertCommercialDeal(workspace.getId(), pipeline, stage, member.getId(),
+                "Fast approval", "USD", null, null, "2026-01-25");
+        int document = insertDealDocument(
+                workspace.getId(), deal, "quote", "approved", 1, "2026-01-02 09:00:00", "USD");
+        insertDocumentApproval(workspace.getId(), deal, document, "approved",
+                "2026-01-05 00:00:00", "2026-01-05 06:00:00");
+
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget("cycle", "documents", "approval_cycle_days", "none", "kpi"))));
+        JsonNode report = generateDocument(session, workspace, reportId);
+
+        assertDecimal("0.25", findWidget(report.get("widgets"), "cycle").get("total").decimalValue());
+    }
+
+    /**
+     * The reported discount and the approval gate must agree at the threshold: the SQL transposes
+     * {@code ApprovalPolicyService}'s definition, so a policy set to the reported percent matches an
+     * equivalent document snapshot while the next representable step does not.
+     */
+    @Test
+    void effectiveDiscountMatchesTheApprovalPolicyDefinition() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(workspace.getId(), "Commercial");
+        int stage = insertStage(workspace.getId(), pipeline, "Proposal");
+        int deal = insertCommercialDeal(workspace.getId(), pipeline, stage, member.getId(),
+                "Discounted win", "USD", true, "2026-01-15 09:00:00", "2026-01-20");
+        insertLineItem(workspace.getId(), deal, "300.00", "1", "amount", "100.00", "USD");
+
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget("won-discount", "deals", "effective_discount_percent", "none", "bar"))));
+        JsonNode report = generateDocument(session, workspace, reportId);
+
+        JsonNode discount = findWidget(report.get("widgets"), "won-discount");
+        assertNotNull(discount);
+        assertDecimal("33.333", discount.get("total").decimalValue());
+        assertEquals("percent", discount.get("unit").asText());
+
+        DealLineItemDto line = new DealLineItemDto();
+        line.setUnitPrice(new BigDecimal("300.00"));
+        line.setQuantity(new BigDecimal("1"));
+        line.setLineSubtotal(new BigDecimal("200.00"));
+        DocumentContent content = new DocumentContent(
+                null, null, null, null, null, null, null, List.of(line), null);
+        DealDocument snapshot = new DealDocument();
+        snapshot.setType("quote");
+        snapshot.setCurrency("USD");
+
+        assertNotNull(approvalPolicyService.firstMatch(
+                List.of(discountPolicy(workspace.getId(), "33.333")), snapshot, content));
+        assertNull(approvalPolicyService.firstMatch(
+                List.of(discountPolicy(workspace.getId(), "33.334")), snapshot, content));
+    }
+
+    @Test
+    void effectiveDiscountAggregatesAcrossLineItemUnits() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(workspace.getId(), "Commercial");
+        int stage = insertStage(workspace.getId(), pipeline, "Proposal");
+        int deal = insertCommercialDeal(workspace.getId(), pipeline, stage, member.getId(),
+                "Mixed-unit win", "USD", true, "2026-01-15 09:00:00", "2026-01-20");
+        insertLineItem(workspace.getId(), deal, "100.00", "1", "amount", "10.00", "USD", "seat");
+        insertLineItem(workspace.getId(), deal, "300.00", "1", "amount", "60.00", "USD", "hour");
+
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget("won-discount", "deals", "effective_discount_percent", "none", "bar"))));
+        JsonNode widget = findWidget(
+                generateDocument(session, workspace, reportId).get("widgets"), "won-discount");
+
+        assertNotNull(widget);
+        assertEquals(1, widget.get("points").size());
+        assertDecimal("17.5", widget.get("points").get(0).get("value").decimalValue());
+        assertDecimal("17.5", widget.get("total").decimalValue());
+    }
+
+    @Test
+    void effectiveDiscountPartitionsCurrencyAndSuppressesTheBlendedScalar() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace blended = newWorkspace();
+        User member = newMember(blended, "member");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(blended.getId(), "Commercial");
+        int stage = insertStage(blended.getId(), pipeline, "Proposal");
+        int yenDeal = insertCommercialDeal(blended.getId(), pipeline, stage, member.getId(),
+                "Yen win", "JPY", true, "2026-01-15 09:00:00", "2026-01-20");
+        insertLineItem(blended.getId(), yenDeal, "300.00", "1", "amount", "100.00", "JPY");
+        int dollarDeal = insertCommercialDeal(blended.getId(), pipeline, stage, member.getId(),
+                "Dollar win", "USD", true, "2026-01-16 09:00:00", "2026-01-21");
+        insertLineItem(blended.getId(), dollarDeal, "200.00", "1", "amount", "50.00", "USD");
+
+        int blendedReport = createReport(session, blended, commercialReportBody(List.of(
+                new CommercialWidget("won-discount", "deals", "effective_discount_percent", "none", "bar"))));
+        JsonNode blendedWidget = findWidget(
+                generateDocument(session, blended, blendedReport).get("widgets"), "won-discount");
+        assertNoScalarTotal(blendedWidget, "won-discount");
+        Map<String, BigDecimal> byCurrency = pointValues(blendedWidget);
+        assertEquals(Set.of("JPY:total", "USD:total"), byCurrency.keySet());
+        assertDecimal("33.333", byCurrency.get("JPY:total"));
+        assertDecimal("25", byCurrency.get("USD:total"));
+
+        Workspace single = newWorkspace();
+        workspaceMapper.addMember(single.getId(), member.getId(), "member");
+        int singlePipeline = insertPipeline(single.getId(), "Commercial");
+        int singleStage = insertStage(single.getId(), singlePipeline, "Proposal");
+        int singleDeal = insertCommercialDeal(single.getId(), singlePipeline, singleStage,
+                member.getId(), "Single currency win", "JPY", true, "2026-01-15 09:00:00", "2026-01-20");
+        insertLineItem(single.getId(), singleDeal, "300.00", "1", "amount", "100.00", "JPY");
+        int singleReport = createReport(session, single, commercialReportBody(List.of(
+                new CommercialWidget("won-discount", "deals", "effective_discount_percent", "none", "bar"))));
+        JsonNode singleWidget = findWidget(
+                generateDocument(session, single, singleReport).get("widgets"), "won-discount");
+
+        assertNotNull(singleWidget);
+        assertDecimal("33.333", singleWidget.get("total").decimalValue());
+        assertEquals("percent", singleWidget.get("unit").asText());
+    }
+
+    @Test
+    void dateGroupedDiscountMatchesEachCurrencyToItsOwnPrior() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(workspace.getId(), "Commercial");
+        int stage = insertStage(workspace.getId(), pipeline, "Proposal");
+        int currentYen = insertCommercialDeal(workspace.getId(), pipeline, stage, member.getId(),
+                "Current yen win", "JPY", true, "2026-01-15 09:00:00", "2026-01-20");
+        insertLineItem(workspace.getId(), currentYen, "100.00", "1", "amount", "40.00", "JPY");
+        int currentDollar = insertCommercialDeal(workspace.getId(), pipeline, stage, member.getId(),
+                "Current dollar win", "USD", true, "2026-01-16 09:00:00", "2026-01-21");
+        insertLineItem(workspace.getId(), currentDollar, "100.00", "1", "amount", "20.00", "USD");
+        int priorYen = insertCommercialDeal(workspace.getId(), pipeline, stage, member.getId(),
+                "Prior yen win", "JPY", true, "2025-12-15 09:00:00", "2025-12-20");
+        insertLineItem(workspace.getId(), priorYen, "100.00", "1", "amount", "25.00", "JPY");
+        int priorDollar = insertCommercialDeal(workspace.getId(), pipeline, stage, member.getId(),
+                "Prior dollar win", "USD", true, "2025-12-16 09:00:00", "2025-12-21");
+        insertLineItem(workspace.getId(), priorDollar, "100.00", "1", "amount", "10.00", "USD");
+
+        int reportId = createReport(session, workspace, commercialReportBody(
+                List.of(new CommercialWidget(
+                        "won-discount", "deals", "effective_discount_percent", "date", "bar")),
+                "{\"pipelineIds\": null, \"ownerIds\": null, \"statuses\": null, "
+                        + "\"tagIds\": null, \"warmthBands\": null}",
+                "2026-01-01",
+                "2026-01-31",
+                "month"));
+        JsonNode widget = findWidget(
+                generateDocument(session, workspace, reportId).get("widgets"), "won-discount");
+        assertNotNull(widget);
+        Map<String, BigDecimal> current = pointValues(widget);
+        Map<String, BigDecimal> prior = pointPriorValues(widget);
+
+        assertEquals(Set.of("JPY:2026-01", "USD:2026-01"), current.keySet());
+        assertDecimal("40", current.get("JPY:2026-01"));
+        assertDecimal("25", prior.get("JPY:2026-01"));
+        assertDecimal("15", current.get("JPY:2026-01").subtract(prior.get("JPY:2026-01")));
+        assertDecimal("20", current.get("USD:2026-01"));
+        assertDecimal("10", prior.get("USD:2026-01"));
+        assertDecimal("10", current.get("USD:2026-01").subtract(prior.get("USD:2026-01")));
+    }
+
+    @Test
+    void openDiscountUsesTheExpectedCloseCohortAndSkipsDealsWithoutLineItems() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(workspace.getId(), "Commercial");
+        int stage = insertStage(workspace.getId(), pipeline, "Proposal");
+        int openWithLines = insertCommercialDeal(workspace.getId(), pipeline, stage,
+                member.getId(), "Open discounted", "USD", null, null, "2026-01-20");
+        insertLineItem(workspace.getId(), openWithLines, "300.00", "1", "amount", "100.00", "USD");
+        insertCommercialDeal(workspace.getId(), pipeline, stage, member.getId(),
+                "Open manual value", "USD", null, null, "2026-01-21");
+        int wonWithLines = insertCommercialDeal(workspace.getId(), pipeline, stage,
+                member.getId(), "Won discounted", "USD", true, "2026-01-15 09:00:00", "2026-01-22");
+        insertLineItem(workspace.getId(), wonWithLines, "500.00", "1", "amount", "400.00", "USD");
+
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget("open-discount", "deals", "open_discount_percent", "none", "table"))));
+        JsonNode widget = findWidget(
+                generateDocument(session, workspace, reportId).get("widgets"), "open-discount");
+
+        assertNotNull(widget);
+        assertEquals(Set.of("USD:total"), pointValues(widget).keySet());
+        assertDecimal("33.333", widget.get("total").decimalValue());
+    }
+
+    @Test
+    void discountExcludesZeroListDealsRatherThanReportingZeroPercent() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(workspace.getId(), "Commercial");
+        int stage = insertStage(workspace.getId(), pipeline, "Proposal");
+        int deal = insertCommercialDeal(workspace.getId(), pipeline, stage, member.getId(),
+                "Zero list win", "USD", true, "2026-01-15 09:00:00", "2026-01-20");
+        insertLineItem(workspace.getId(), deal, "0.00", "1", null, null, "USD");
+
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget("won-discount", "deals", "effective_discount_percent", "none", "bar"))));
+        JsonNode widget = findWidget(
+                generateDocument(session, workspace, reportId).get("widgets"), "won-discount");
+
+        assertNotNull(widget);
+        assertEquals(0, widget.get("points").size());
+        assertNoScalarTotal(widget, "won-discount");
+    }
+
+    @Test
+    void commercialMetricsReturnNoScalarOnAnEmptyCohort() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget("quote-volume", "documents", "quote_count", "none", "kpi"),
+                new CommercialWidget("issue-rate", "documents", "quote_issue_rate", "none", "kpi"),
+                new CommercialWidget("doc-to-win", "documents", "document_to_win_rate", "none", "kpi"),
+                new CommercialWidget("decisions", "documents", "approval_decision_count", "none", "kpi"),
+                new CommercialWidget("cycle", "documents", "approval_cycle_days", "none", "kpi"),
+                new CommercialWidget("won-discount", "deals", "effective_discount_percent", "none", "bar"))));
+        JsonNode widgets = generateDocument(session, workspace, reportId).get("widgets");
+
+        assertDecimal("0", findWidget(widgets, "quote-volume").get("total").decimalValue());
+        assertDecimal("0", findWidget(widgets, "decisions").get("total").decimalValue());
+        for (String widgetId : List.of("issue-rate", "doc-to-win", "cycle", "won-discount")) {
+            assertNoScalarTotal(findWidget(widgets, widgetId), widgetId);
+        }
+    }
+
+    /**
+     * A quote is issued once, when it reaches final. Delivery then moves it to {@code sent} and to
+     * {@code signed}, and a later version supersedes it, so the issue rate has to survive every one
+     * of those transitions: counting {@code final} alone makes the rate fall as quotes are actually
+     * delivered. A superseded quote keeps its delivery envelope as issuance evidence, while a
+     * superseded quote that never left draft or approval has none and stays out of the numerator.
+     */
+    @Test
+    void deliveredSignedAndDeliveredSupersededQuotesStayInTheIssuedNumerator() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(workspace.getId(), "Commercial");
+        int stage = insertStage(workspace.getId(), pipeline, "Proposal");
+        int deal = insertCommercialDeal(workspace.getId(), pipeline, stage, member.getId(),
+                "Delivered quote deal", "USD", null, null, "2026-01-25");
+        insertDealDocument(workspace.getId(), deal, "quote", "final", 1, "2026-01-02 09:00:00", "USD");
+        int sent = insertDealDocument(
+                workspace.getId(), deal, "quote", "sent", 2, "2026-01-03 09:00:00", "USD");
+        insertDocumentDelivery(workspace.getId(), deal, sent, "sent");
+        int signed = insertDealDocument(
+                workspace.getId(), deal, "quote", "signed", 3, "2026-01-04 09:00:00", "USD");
+        insertDocumentDelivery(workspace.getId(), deal, signed, "completed");
+        int supersededAfterDelivery = insertDealDocument(
+                workspace.getId(), deal, "quote", "superseded", 4, "2026-01-05 09:00:00", "USD");
+        insertDocumentDelivery(workspace.getId(), deal, supersededAfterDelivery, "voided");
+        insertDealDocument(workspace.getId(), deal, "quote", "superseded", 5, "2026-01-06 09:00:00", "USD");
+        insertDealDocument(workspace.getId(), deal, "quote", "draft", 6, "2026-01-07 09:00:00", "USD");
+        insertDealDocument(
+                workspace.getId(), deal, "quote", "pending_approval", 7, "2026-01-08 09:00:00", "USD");
+        insertDealDocument(workspace.getId(), deal, "quote", "approved", 8, "2026-01-09 09:00:00", "USD");
+
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget("quote-volume", "documents", "quote_count", "none", "kpi"),
+                new CommercialWidget("issue-rate", "documents", "quote_issue_rate", "none", "kpi"))));
+        JsonNode widgets = generateDocument(session, workspace, reportId).get("widgets");
+
+        assertDecimal("8", findWidget(widgets, "quote-volume").get("total").decimalValue());
+        assertDecimal("50", findWidget(widgets, "issue-rate").get("total").decimalValue());
+    }
+
+    /**
+     * A prior period with no cohort is undefined, not zero. A rate, an average, and a discount each
+     * publish a current-period scalar while leaving the prior scalar, the prior point value, and the
+     * change absent, so the report never claims the business moved off a measured zero. A count is
+     * genuinely zero over an empty period and keeps reporting it.
+     */
+    @Test
+    void anEmptyPriorPeriodLeavesRatesAveragesAndDiscountsUndefined() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(workspace.getId(), "Commercial");
+        int stage = insertStage(workspace.getId(), pipeline, "Proposal");
+        int deal = insertCommercialDeal(workspace.getId(), pipeline, stage, member.getId(),
+                "Current period win", "USD", true, "2026-01-15 09:00:00", "2026-01-20");
+        insertLineItem(workspace.getId(), deal, "300.00", "1", "amount", "100.00", "USD");
+        int document = insertDealDocument(
+                workspace.getId(), deal, "quote", "final", 1, "2026-01-05 09:00:00", "USD");
+        insertDealDocument(workspace.getId(), deal, "quote", "draft", 2, "2026-01-06 09:00:00", "USD");
+        insertDocumentApproval(workspace.getId(), deal, document, "approved",
+                "2026-01-05 00:00:00", "2026-01-07 00:00:00");
+
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget("quote-volume", "documents", "quote_count", "none", "kpi"),
+                new CommercialWidget("issue-rate", "documents", "quote_issue_rate", "none", "kpi"),
+                new CommercialWidget("cycle", "documents", "approval_cycle_days", "none", "kpi"),
+                new CommercialWidget("won-discount", "deals", "effective_discount_percent", "none", "bar"))));
+        JsonNode widgets = generateDocument(session, workspace, reportId).get("widgets");
+
+        JsonNode volume = findWidget(widgets, "quote-volume");
+        assertNotNull(volume);
+        assertDecimal("2", volume.get("total").decimalValue());
+        assertDecimal("0", volume.get("priorTotal").decimalValue());
+
+        assertDecimal("50", findWidget(widgets, "issue-rate").get("total").decimalValue());
+        assertDecimal("2", findWidget(widgets, "cycle").get("total").decimalValue());
+        assertDecimal("33.333", findWidget(widgets, "won-discount").get("total").decimalValue());
+        for (String widgetId : List.of("issue-rate", "cycle", "won-discount")) {
+            assertNoPriorComparison(findWidget(widgets, widgetId), widgetId);
+        }
+    }
+
+    @Test
+    void commercialMetricsStayInsideTheTenantBoundary() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Organization organization = newOrganization();
+        Workspace workspace = newWorkspaceInOrg(organization.getId());
+        Workspace sibling = newWorkspaceInOrg(organization.getId());
+        User member = newMember(workspace, "member");
+        User siblingMember = newMember(sibling, "member");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(sibling.getId(), "Commercial");
+        int stage = insertStage(sibling.getId(), pipeline, "Proposal");
+        commercialDealWithEvidence(
+                sibling.getId(), pipeline, stage, siblingMember.getId(), "Sibling deal");
+
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget("quote-volume", "documents", "quote_count", "none", "kpi"),
+                new CommercialWidget("doc-to-win", "documents", "document_to_win_rate", "none", "kpi"),
+                new CommercialWidget("decisions", "documents", "approval_decision_count", "none", "kpi"),
+                new CommercialWidget("won-discount", "deals", "effective_discount_percent", "none", "bar"))));
+        JsonNode widgets = generateDocument(session, workspace, reportId).get("widgets");
+
+        assertDecimal("0", findWidget(widgets, "quote-volume").get("total").decimalValue());
+        assertDecimal("0", findWidget(widgets, "decisions").get("total").decimalValue());
+        assertNoScalarTotal(findWidget(widgets, "doc-to-win"), "doc-to-win");
+        assertNoScalarTotal(findWidget(widgets, "won-discount"), "won-discount");
+
+        MockHttpSession siblingSession = login(siblingMember.getUsername());
+        mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+                .header("X-Workspace-Id", sibling.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(siblingSession)
+                .with(csrf().asHeader()))
+            .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void commercialMetricsRespectPipelineOwnerAndTagFilters() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        User otherOwner = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int tracked = insertPipeline(workspace.getId(), "Tracked");
+        int untracked = insertPipeline(workspace.getId(), "Untracked");
+        int trackedStage = insertStage(workspace.getId(), tracked, "Proposal");
+        int untrackedStage = insertStage(workspace.getId(), untracked, "Proposal");
+        int tag = insertTag(workspace.getId(), "Commercial focus");
+
+        tagDeal(commercialDealWithEvidence(
+                workspace.getId(), tracked, trackedStage, member.getId(), "Matching deal"), tag);
+        tagDeal(commercialDealWithEvidence(
+                workspace.getId(), untracked, untrackedStage, member.getId(), "Wrong pipeline deal"), tag);
+        tagDeal(commercialDealWithEvidence(
+                workspace.getId(), tracked, trackedStage, otherOwner.getId(), "Wrong owner deal"), tag);
+        commercialDealWithEvidence(
+                workspace.getId(), tracked, trackedStage, member.getId(), "Untagged deal");
+
+        String filters = """
+            {"pipelineIds": [%d], "ownerIds": [%d], "statuses": null, "tagIds": [%d], "warmthBands": null}
+            """.formatted(tracked, member.getId(), tag);
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget("quote-volume", "documents", "quote_count", "none", "kpi"),
+                new CommercialWidget("doc-to-win", "documents", "document_to_win_rate", "none", "kpi"),
+                new CommercialWidget("decisions", "documents", "approval_decision_count", "none", "kpi"),
+                new CommercialWidget("won-discount", "deals", "effective_discount_percent", "none", "bar")),
+                filters, "2026-01-01", "2026-01-31", "day"));
+        JsonNode widgets = generateDocument(session, workspace, reportId).get("widgets");
+
+        assertDecimal("1", findWidget(widgets, "quote-volume").get("total").decimalValue());
+        assertDecimal("1", findWidget(widgets, "decisions").get("total").decimalValue());
+        assertDecimal("100", findWidget(widgets, "doc-to-win").get("total").decimalValue());
+        assertDecimal("33.333", findWidget(widgets, "won-discount").get("total").decimalValue());
+    }
+
+    /**
+     * The appendix carries the same undefined prior period the widgets do. The quote count is
+     * genuinely zero over an empty prior period and exports {@code 0}; the average approval cycle
+     * and the effective discount have no value without a cohort, so their prior cells stay empty
+     * rather than exporting a zero an analyst would read as a real figure.
+     */
+    @Test
+    void commercialMetricsFreezeIntoSnapshotsAndCsvAppendix() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(workspace.getId(), "Commercial");
+        int stage = insertStage(workspace.getId(), pipeline, "Proposal");
+        commercialDealWithEvidence(workspace.getId(), pipeline, stage, member.getId(), "Frozen deal");
+
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget("quote-volume", "documents", "quote_count", "none", "kpi"),
+                new CommercialWidget("cycle", "documents", "approval_cycle_days", "none", "kpi"),
+                new CommercialWidget("won-discount", "deals", "effective_discount_percent", "none", "bar"))));
+        MvcResult snapshotResult = mockMvc.perform(post("/api/reports/{id}/snapshots", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.computedResult.widgets[0].total").value(1))
+            .andReturn();
+        int snapshotId = responseId(snapshotResult);
+
+        mockMvc.perform(get("/api/reports/{id}/snapshots/{snapshotId}", reportId, snapshotId)
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.computedResult.widgets[0].total").value(1));
+
+        MvcResult csvResult = mockMvc.perform(post("/api/reports/{id}/export.csv", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk())
+            .andReturn();
+        String csv = csvResult.getResponse().getContentAsString();
+
+        assertTrue(csv.contains("\"quote_count · Total\",\"1\",\"0\",\"count\""), csv);
+        assertTrue(csv.contains("\"approval_cycle_days · Total\",\"2\",\"\",\"days\""), csv);
+        assertTrue(csv.contains("\"effective_discount_percent · USD · Total\",\"33.333\",\"\",\"percent\""), csv);
+    }
+
+    @Test
+    void commercialDocumentTemplateIsAvailableWithCanonicalMeasuresAndGroups() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+
+        MvcResult result = mockMvc.perform(get("/api/reports/templates")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[?(@.key == 'commercial-documents')]").isNotEmpty())
+            .andReturn();
+
+        JsonNode template = findTemplate(
+                objectMapper.readTree(result.getResponse().getContentAsString()), "commercial-documents");
+        assertNotNull(template);
+        assertEquals("monthly", template.get("cadence").asText());
+        assertEquals("month", template.get("config").get("bucket").asText());
+        Set<String> sources = new java.util.HashSet<>();
+        Set<String> measures = new java.util.HashSet<>();
+        Set<String> groups = new java.util.HashSet<>();
+        for (JsonNode widget : template.get("config").get("widgets")) {
+            sources.add(widget.get("dataSource").asText());
+            measures.add(widget.get("measure").asText());
+            groups.add(widget.get("groupBy").asText());
+        }
+        assertEquals(Set.of("documents", "deals"), sources);
+        assertEquals(
+                Set.of("quote_count", "quote_issue_rate", "document_to_win_rate",
+                        "approval_decision_count", "approval_cycle_days",
+                        "effective_discount_percent", "open_discount_percent"),
+                measures);
+        assertEquals(Set.of("none", "date", "owner", "pipeline"), groups);
+    }
+
+    @Test
+    void unsupportedCommercialMeasureGroupPairsAreRejected() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        List<CommercialWidget> rejected = List.of(
+                new CommercialWidget("stage-documents", "documents", "quote_count", "stage", "bar"),
+                new CommercialWidget("risk-documents", "documents", "quote_count", "risk", "table"),
+                new CommercialWidget("status-discount", "deals", "effective_discount_percent", "status", "bar"),
+                new CommercialWidget("misplaced-quotes", "deals", "quote_count", "none", "kpi"));
+
+        for (CommercialWidget widget : rejected) {
+            mockMvc.perform(post("/api/reports")
+                    .header("X-Workspace-Id", workspace.getId())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(commercialReportBody(List.of(widget)))
+                    .session(session)
+                    .with(csrf().asHeader()))
+                .andExpect(status().isBadRequest());
+        }
+    }
+
     private int createReport(MockHttpSession session, Workspace workspace) throws Exception {
         return createReport(session, workspace, REPORT_BODY);
     }
@@ -2369,6 +2986,32 @@ class ReportIntegrationTest {
               }
             }
             """;
+    }
+
+    /**
+     * A widget without a defensible scalar: the serialized document omits {@code total} entirely
+     * rather than reporting a fabricated zero or a cross-currency blend.
+     */
+    private static void assertNoScalarTotal(JsonNode widget, String widgetId) {
+        assertNotNull(widget, widgetId);
+        assertTrue(widget.get("total") == null || widget.get("total").isNull(), widgetId);
+    }
+
+    /**
+     * A widget whose prior period has no cohort: the serialized document omits the prior scalar, the
+     * change, and every point's prior value rather than publishing an undefined figure as zero.
+     */
+    private static void assertNoPriorComparison(JsonNode widget, String widgetId) {
+        assertNotNull(widget, widgetId);
+        assertTrue(isAbsent(widget.get("priorTotal")), widgetId);
+        assertTrue(isAbsent(widget.get("changePercent")), widgetId);
+        for (JsonNode point : widget.get("points")) {
+            assertTrue(isAbsent(point.get("priorValue")), widgetId);
+        }
+    }
+
+    private static boolean isAbsent(JsonNode value) {
+        return value == null || value.isNull();
     }
 
     private static void assertDecimal(String expected, BigDecimal actual) {
@@ -2598,6 +3241,214 @@ class ReportIntegrationTest {
         jdbcTemplate.update(
                 "INSERT INTO person_share (person_id, workspace_id, granted_by, created_at) VALUES (?, ?, ?, ?)",
                 personId, workspaceId, grantedBy, "2026-01-01 00:00:00");
+    }
+
+    /** One widget of a generated commercial-metrics report body. */
+    private record CommercialWidget(
+            String id, String dataSource, String measure, String groupBy, String chartType) {
+    }
+
+    private static String commercialReportBody(List<CommercialWidget> widgets) {
+        return commercialReportBody(
+                widgets,
+                "{\"pipelineIds\": null, \"ownerIds\": null, \"statuses\": null, "
+                        + "\"tagIds\": null, \"warmthBands\": null}",
+                "2026-01-01",
+                "2026-01-31",
+                "day");
+    }
+
+    private static String commercialReportBody(
+            List<CommercialWidget> widgets,
+            String filters,
+            String rangeStart,
+            String rangeEnd,
+            String bucket) {
+        StringBuilder widgetJson = new StringBuilder();
+        StringBuilder layoutJson = new StringBuilder();
+        for (int index = 0; index < widgets.size(); index++) {
+            CommercialWidget widget = widgets.get(index);
+            if (index > 0) {
+                widgetJson.append(',');
+                layoutJson.append(',');
+            }
+            widgetJson.append(("{\"id\": \"%s\", \"title\": null, \"dataSource\": \"%s\", "
+                    + "\"measure\": \"%s\", \"groupBy\": \"%s\", \"chartType\": \"%s\"}").formatted(
+                    widget.id(), widget.dataSource(), widget.measure(),
+                    widget.groupBy(), widget.chartType()));
+            layoutJson.append(
+                    "{\"widgetId\": \"%s\", \"x\": %d, \"y\": %d, \"width\": 6, \"height\": 4}".formatted(
+                            widget.id(), index % 2 * 6, index / 2 * 4));
+        }
+        return """
+            {
+              "name": "Commercial documents",
+              "description": "Quote, approval, and discount metrics",
+              "cadence": "custom",
+              "templateKey": null,
+              "config": {
+                "widgets": [%s],
+                "filters": %s,
+                "range": {"start": "%s", "end": "%s"},
+                "bucket": "%s",
+                "layout": [%s]
+              }
+            }
+            """.formatted(widgetJson, filters, rangeStart, rangeEnd, bucket, layoutJson);
+    }
+
+    private JsonNode generateDocument(
+            MockHttpSession session, Workspace workspace, int reportId) throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk())
+            .andReturn();
+        return objectMapper.readTree(result.getResponse().getContentAsString());
+    }
+
+    /**
+     * A won deal carrying one in-period quote, one approver decision two days after its request,
+     * and one line item discounted by a third of its list value.
+     */
+    private int commercialDealWithEvidence(
+            int workspaceId, int pipelineId, int stageId, int ownerId, String name) {
+        int deal = insertCommercialDeal(workspaceId, pipelineId, stageId, ownerId, name, "USD",
+                true, "2026-01-15 09:00:00", "2026-01-20");
+        int document = insertDealDocument(
+                workspaceId, deal, "quote", "final", 1, "2026-01-05 09:00:00", "USD");
+        insertDocumentApproval(workspaceId, deal, document, "approved",
+                "2026-01-05 00:00:00", "2026-01-07 00:00:00");
+        insertLineItem(workspaceId, deal, "300.00", "1", "amount", "100.00", "USD");
+        return deal;
+    }
+
+    private int insertCommercialDeal(
+            int workspaceId,
+            int pipelineId,
+            int stageId,
+            Integer ownerId,
+            String name,
+            String currency,
+            Boolean won,
+            String closedAt,
+            String expectedCloseDate) {
+        jdbcTemplate.update(
+                "INSERT INTO deal (workspace_id, name, value, currency, pipeline_id, stage_id, owner_id, "
+                        + "expected_close_date, closed_at, won, created_at) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                workspaceId, name, "1000.00", currency, pipelineId, stageId, ownerId,
+                expectedCloseDate, closedAt, won, "2025-11-01 00:00:00");
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM deal WHERE workspace_id = ? AND name = ?",
+                Integer.class, workspaceId, name);
+    }
+
+    private int insertDealDocument(
+            int workspaceId,
+            int dealId,
+            String type,
+            String status,
+            int version,
+            String generatedAt,
+            String currency) {
+        jdbcTemplate.update(
+                "INSERT INTO deal_document (workspace_id, deal_id, type, locale, status, version, title, "
+                        + "content, currency, generated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                workspaceId, dealId, type, "en", status, version, type + " v" + version,
+                "{\"lineItems\":[]}", currency, generatedAt);
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM deal_document WHERE workspace_id = ? AND deal_id = ? AND version = ?",
+                Integer.class, workspaceId, dealId, version);
+    }
+
+    /**
+     * Persists one delivery envelope for an immutable document version, matching what
+     * {@code DocumentDeliveryService} writes when a finalized document is sent for acceptance.
+     */
+    private void insertDocumentDelivery(
+            int workspaceId, int dealId, int documentId, String status) {
+        jdbcTemplate.update(
+                "INSERT INTO document_delivery (workspace_id, deal_id, document_id, provider, status, "
+                        + "sent_at) VALUES (?, ?, ?, ?, ?, ?)",
+                workspaceId, dealId, documentId, "in_app", status, "2026-01-10 09:00:00");
+    }
+
+    private void insertDocumentApproval(
+            int workspaceId,
+            int dealId,
+            int documentId,
+            String status,
+            String createdAt,
+            String decidedAt) {
+        jdbcTemplate.update(
+                "INSERT INTO document_approval (workspace_id, deal_id, document_id, status, created_at, "
+                        + "decided_at) VALUES (?, ?, ?, ?, ?, ?)",
+                workspaceId, dealId, documentId, status, createdAt, decidedAt);
+    }
+
+    /**
+     * Persists one line item with the same server-computed money {@code DealLineItemService} writes,
+     * so the reported discount is derived from stored columns rather than test arithmetic.
+     */
+    private void insertLineItem(
+            int workspaceId,
+            int dealId,
+            String unitPrice,
+            String quantity,
+            String discountType,
+            String discountValue,
+            String currency) {
+        insertLineItem(
+                workspaceId, dealId, unitPrice, quantity, discountType, discountValue, currency, null);
+    }
+
+    private void insertLineItem(
+            int workspaceId,
+            int dealId,
+            String unitPrice,
+            String quantity,
+            String discountType,
+            String discountValue,
+            String currency,
+            String unit) {
+        BigDecimal price = new BigDecimal(unitPrice);
+        BigDecimal amount = new BigDecimal(quantity);
+        BigDecimal gross = price.multiply(amount);
+        BigDecimal discount = BigDecimal.ZERO;
+        if ("amount".equals(discountType)) {
+            discount = new BigDecimal(discountValue);
+        } else if ("percent".equals(discountType)) {
+            discount = gross.multiply(new BigDecimal(discountValue))
+                    .divide(new BigDecimal("100"), 10, RoundingMode.HALF_UP);
+        }
+        if (discount.compareTo(gross) > 0) {
+            discount = gross;
+        }
+        BigDecimal subtotal = gross.subtract(discount).setScale(2, RoundingMode.HALF_UP);
+        jdbcTemplate.update(
+                "INSERT INTO deal_line_item (workspace_id, deal_id, name, unit, unit_price, quantity, "
+                        + "discount_type, discount_value, currency, line_subtotal, line_tax, line_total) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                workspaceId, dealId, "Reported line", unit, price, amount, discountType,
+                discountValue == null ? null : new BigDecimal(discountValue), currency,
+                subtotal, BigDecimal.ZERO, subtotal);
+    }
+
+    private void tagDeal(int dealId, int tagId) {
+        jdbcTemplate.update("INSERT INTO deal_tag (deal_id, tag_id) VALUES (?, ?)", dealId, tagId);
+    }
+
+    private static ApprovalPolicy discountPolicy(int workspaceId, String minDiscountPercent) {
+        ApprovalPolicy policy = new ApprovalPolicy();
+        policy.setWorkspaceId(workspaceId);
+        policy.setName("Discount gate");
+        policy.setActive(true);
+        policy.setMinDiscountPercent(new BigDecimal(minDiscountPercent));
+        return policy;
     }
 
     private Workspace newWorkspace() {
