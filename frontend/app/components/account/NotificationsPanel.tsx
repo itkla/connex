@@ -39,6 +39,12 @@ const TYPES = [
         descriptionKey: "approvalRequestDescription",
     },
     {
+        type: "document.approval_reminder",
+        icon: ShieldCheckIcon,
+        titleKey: "approvalReminderTitle",
+        descriptionKey: "approvalReminderDescription",
+    },
+    {
         type: "document.approval_decision",
         icon: ShieldCheckIcon,
         titleKey: "approvalDecisionTitle",

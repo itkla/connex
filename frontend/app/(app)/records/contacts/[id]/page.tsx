@@ -1,4 +1,4 @@
-import { getAttachmentsFromCookie, getContactById, getContactConnections, getContactEmployment, getContactEvidence, getContactIntroPath, getContextNotifications, getCurrentUserResultFromCookie, getEffectivePermissionsFromCookie, getEntityCustomFieldsFromCookie, getTags, getUserReferences } from "@/app/lib/api";
+import { getAttachmentsFromCookie, getContactById, getContactLifecycle, getContactLifecycleHistory, getContactConnections, getContactEmployment, getContactEvidence, getContactIntroPath, getContextNotifications, getCurrentUserResultFromCookie, getEffectivePermissionsFromCookie, getEntityCustomFieldsFromCookie, getTags, getUserReferences } from "@/app/lib/api";
 import { notFound, redirect } from "next/navigation";
 import AccessDeniedPage from "@/app/components/AccessDeniedPage";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
@@ -29,6 +29,8 @@ import Timeline from "@/app/components/me/Timeline";
 import Attachments from "@/app/components/attachments/Attachments";
 import CommentsSection from "@/app/components/records/comments/CommentsSection";
 import CustomFieldRows from "@/app/components/records/CustomFieldRows";
+import ContactLifecyclePanel from "@/app/components/records/contacts/ContactLifecyclePanel";
+import ContactProvenancePanel from "@/app/components/records/contacts/ContactProvenancePanel";
 import EngineEvaluationPanel from "@/app/components/records/EngineEvaluationPanel";
 import RecordDetailSection from "@/app/components/records/RecordDetailSection";
 import { formatCompactCurrency, formatDate, formatDateTime, formatShortDate } from "@/app/lib/utils";
@@ -55,7 +57,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
         redirect('/auth/login');
     }
 
-    const [t, locale, contactAccess, allTags, attachments, notificationPage, employment, connections, introPath, customFields, evidence, effectivePermissions] = await Promise.all([
+    const [t, locale, contactAccess, allTags, attachments, notificationPage, employment, connections, introPath, customFields, evidence, effectivePermissions, lifecycle, lifecycleHistory] = await Promise.all([
         getTranslations("ContactsPage"),
         getLocale(),
         loadRecord<Contact>(() => getContactById(id, init)),
@@ -73,6 +75,8 @@ export default async function ContactPage({ params }: ContactPageProps) {
         getEntityCustomFieldsFromCookie("person", id, cookie),
         getContactEvidence(id, init).catch(() => null),
         getEffectivePermissionsFromCookie(cookie),
+        getContactLifecycle(id, init).catch(() => null),
+        getContactLifecycleHistory(id, init).catch(() => []),
     ]);
     if (contactAccess.kind === "forbidden") {
         return <AccessDeniedPage />;
@@ -81,6 +85,9 @@ export default async function ContactPage({ params }: ContactPageProps) {
         notFound();
     }
     const contact = contactAccess.record;
+    const referrer = contact.referrerPersonId != null
+        ? await getContactById(contact.referrerPersonId, init).catch(() => null)
+        : null;
 
     const tasks = contact.tasks ?? [];
     const activities = contact.activities ?? [];
@@ -95,6 +102,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
         ...activities.map((activity) => activity.createdById),
         ...notes.map((note) => note.author),
         ...tasks.map((task) => task.assignedToId),
+        ...lifecycleHistory.map((entry) => entry.changedById),
     ].filter((value): value is number => typeof value === "number"));
     const userIds = new Set(interactionUserIds);
     if (contact.ownerId != null) userIds.add(contact.ownerId);
@@ -278,6 +286,35 @@ export default async function ContactPage({ params }: ContactPageProps) {
                         </RecordDetailSection>
 
                         {ownsContact ? (
+                            <ContactProvenancePanel
+                                contactId={contact.id}
+                                ownerWorkspaceId={contact.workspaceId}
+                                leadSource={contact.leadSource ?? null}
+                                leadSourceDetail={contact.leadSourceDetail ?? null}
+                                referrerPersonId={contact.referrerPersonId ?? null}
+                                referrer={referrer}
+                                canEdit={effectivePermissions.includes("PERSON_UPDATE")
+                                    && !contact.archivedAt
+                                    && !contact.suspendedAt
+                                    && !contact.provisionCeasedAt}
+                                className="mt-0"
+                            />
+                        ) : null}
+
+                        {ownsContact && lifecycle ? (
+                            <ContactLifecyclePanel
+                                contactId={contact.id}
+                                lifecycle={lifecycle}
+                                canEdit={effectivePermissions.includes("PERSON_UPDATE")
+                                    && !contact.archivedAt
+                                    && !contact.suspendedAt
+                                    && !contact.provisionCeasedAt}
+                                hasLinkedDeal={deals.length > 0}
+                                className="mt-0"
+                            />
+                        ) : null}
+
+                        {ownsContact ? (
                             <EngineEvaluationPanel
                                 kind="contact"
                                 id={contact.id}
@@ -402,6 +439,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                 users={interactionUsers}
                                 persons={[contact]}
                                 deals={deals}
+                                lifecycleHistory={ownsContact ? lifecycleHistory : []}
                                 currentUserId={currentUser.id}
                                 companyId={contact.companyId ?? contact.company?.id ?? null}
                             />

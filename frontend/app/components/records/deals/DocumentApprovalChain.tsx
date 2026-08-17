@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
     CheckCircleIcon,
@@ -14,7 +14,13 @@ import {
 
 import { cn } from '@/lib/utils';
 import { easeOut, instant } from '@/app/lib/motion';
-import type { ApprovalStepStatus, DocumentApproval, DocumentApprovalStep } from '@/app/lib/types';
+import type {
+    ApprovalStepAssignment,
+    ApprovalStepStatus,
+    DocumentApproval,
+    DocumentApprovalStep,
+} from '@/app/lib/types';
+import { formatUtcDateTime } from '@/app/lib/utils';
 
 type Props = {
     approval: DocumentApproval;
@@ -28,6 +34,7 @@ const STEP_ICON = {
     rejected: XCircleIcon,
     cancelled: MinusCircleIcon,
     unsatisfiable: ExclamationTriangleIcon,
+    expired: ExclamationTriangleIcon,
 } satisfies Record<ApprovalStepStatus, typeof ClockIcon>;
 
 const STEP_TONE: Record<ApprovalStepStatus, string> = {
@@ -37,6 +44,7 @@ const STEP_TONE: Record<ApprovalStepStatus, string> = {
     rejected: 'text-destructive',
     cancelled: 'text-muted-foreground',
     unsatisfiable: 'text-destructive',
+    expired: 'text-destructive',
 };
 
 /**
@@ -46,6 +54,7 @@ const STEP_TONE: Record<ApprovalStepStatus, string> = {
  */
 export default function DocumentApprovalChain({ approval, activeStepId }: Props) {
     const t = useTranslations('DealsDocuments');
+    const locale = useLocale();
     const reduceMotion = useReducedMotion();
     const [expanded, setExpanded] = useState(false);
 
@@ -57,6 +66,39 @@ export default function DocumentApprovalChain({ approval, activeStepId }: Props)
         ?? ordered[0];
     const label = (step: DocumentApprovalStep) =>
         step.name?.trim() || t('chainStep', { number: step.stepOrder });
+    const memberLabel = (id: number | null | undefined, displayName: string | null | undefined) =>
+        displayName?.trim() || t('chainFormerMember', { id: id ?? 0 });
+    const assignmentDescription = (assignment: ApprovalStepAssignment) => {
+        if (assignment.assignmentKind === 'delegation') {
+            return t('chainAssignmentDelegation', {
+                from: memberLabel(assignment.delegatedByUserId, assignment.delegatedByDisplayName),
+                to: memberLabel(assignment.userId, assignment.userDisplayName),
+            });
+        }
+        const actor = assignment.createdByUserId == null
+            ? null
+            : memberLabel(assignment.createdByUserId, assignment.createdByDisplayName);
+        if (assignment.assignmentKind === 'escalation') {
+            if (assignment.approverKind === 'any_approver') {
+                return actor == null
+                    ? t('chainAssignmentDeadlineEscalation')
+                    : t('chainAssignmentEscalationAny', { actor });
+            }
+            return t('chainAssignmentEscalationUser', {
+                actor: actor ?? t('chainAutomatedActor'),
+                user: memberLabel(assignment.userId, assignment.userDisplayName),
+            });
+        }
+        if (assignment.approverKind === 'any_approver') {
+            return t('chainAssignmentReassignmentAny', {
+                actor: actor ?? t('chainAutomatedActor'),
+            });
+        }
+        return t('chainAssignmentReassignmentUser', {
+            actor: actor ?? t('chainAutomatedActor'),
+            user: memberLabel(assignment.userId, assignment.userDisplayName),
+        });
+    };
     const blocked = approval.status === 'pending' && !approval.satisfiable;
 
     return (
@@ -148,6 +190,34 @@ export default function DocumentApprovalChain({ approval, activeStepId }: Props)
                                         <p className="ml-5 text-destructive">
                                             {step.unsatisfiableReason?.trim() || t('chainBlocked')}
                                         </p>
+                                    )}
+                                    {step.dueAt && (
+                                        <p className="ml-5">
+                                            {t('chainDueAt', {
+                                                date: formatUtcDateTime(step.dueAt, locale),
+                                            })}
+                                        </p>
+                                    )}
+                                    {step.assignments.length > 0 && (
+                                        <ul className="ml-5 mt-1 space-y-1 border-l border-border pl-3">
+                                            {step.assignments.map((assignment) => (
+                                                <li key={assignment.id}>
+                                                    <p className="text-foreground">
+                                                        {assignmentDescription(assignment)}
+                                                    </p>
+                                                    <p className="text-muted-foreground">
+                                                        {formatUtcDateTime(assignment.createdAt, locale)}
+                                                    </p>
+                                                    {assignment.comment?.trim() && (
+                                                        <p className="text-muted-foreground">
+                                                            {t('chainAssignmentComment', {
+                                                                comment: assignment.comment.trim(),
+                                                            })}
+                                                        </p>
+                                                    )}
+                                                </li>
+                                            ))}
+                                        </ul>
                                     )}
                                 </li>
                             );

@@ -482,6 +482,8 @@
     "dealMentionDescription": "メンバーが案件の完了理由であなたをメンションしたとき。",
     "approvalRequestTitle": "承認依頼",
     "approvalRequestDescription": "ドキュメントの承認があなたに依頼されたとき。",
+    "approvalReminderTitle": "承認リマインダー",
+    "approvalReminderDescription": "承認待ちのドキュメントが期限に近づいた、または期限を過ぎたとき。",
     "approvalDecisionTitle": "承認結果",
     "approvalDecisionDescription": "承認依頼が承認・却下・取り下げされたとき。",
     "approvalTerminatedTitle": "終了した承認依頼",

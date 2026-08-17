@@ -55,10 +55,23 @@ public class RuleActionExecutor {
             case "add_tag" -> addTag(action, ctx);
             case "remove_tag" -> removeTag(action, ctx);
             case "create_note" -> createNote(action, ctx);
-            case "assign_owner" -> dealService.updateOwner(ctx.entityId(), action.getTargetUserId());
+            case "assign_owner" -> assignOwner(action, ctx);
             case "change_stage" -> dealService.changeStage(ctx.entityId(), action.getTargetStageId());
             case "notify" -> notify(action, ctx);
             default -> throw new BadRequestException("Unsupported action: " + action.getType());
+        }
+    }
+
+    /**
+     * Routes ownership of the triggering record to the configured member. Contacts and deals share
+     * one action so lead routing (#559) reuses the deal-assignment vocabulary; each service applies
+     * its own membership validation, audit, notification, and owner-changed trigger.
+     */
+    private void assignOwner(RuleAction action, AutomationActionContext ctx) {
+        if ("person".equals(ctx.recordType())) {
+            personService.updateOwner(ctx.entityId(), action.getTargetUserId());
+        } else {
+            dealService.updateOwner(ctx.entityId(), action.getTargetUserId());
         }
     }
 

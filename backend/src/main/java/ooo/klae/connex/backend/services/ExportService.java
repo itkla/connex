@@ -14,6 +14,8 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.PersonLeadSource;
+import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.beans.Product;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
@@ -50,10 +52,12 @@ public class ExportService {
      * unfiltered). Archived contacts are never exported: an export is the active working set.
      */
     public String exportPersons(String query, List<String> companies, List<String> titles, boolean noCompany,
-            MemberScope memberScope) {
+            MemberScope memberScope, List<PersonLifecycleStage> lifecycleStages, boolean noLifecycle,
+            List<PersonLeadSource> leadSources, boolean noLeadSource) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Person> people = personMapper.getPersonsFiltered(
-            workspaceId, query, companies, titles, noCompany, memberScope, false);
+            workspaceId, query, companies, titles, noCompany, memberScope,
+            lifecycleStages, noLifecycle, leadSources, noLeadSource, false);
         List<CustomFieldDefinition> defs = activeDefinitions(workspaceId, "person");
         Map<Integer, Map<Integer, Object>> custom =
             customFieldValueService.getForEntities("person", people.stream().map(Person::getId).toList());

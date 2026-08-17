@@ -61,6 +61,7 @@ import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.EmploymentService;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.NoteService;
+import ooo.klae.connex.backend.services.PersonLifecycleService;
 import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.ScoringService;
 import ooo.klae.connex.backend.services.TaskService;
@@ -70,6 +71,7 @@ import ooo.klae.connex.backend.util.AnalyticsPeriods.Window;
 @ExtendWith(MockitoExtension.class)
 class RecordListControllerTest {
     @Mock private PersonService personService;
+    @Mock private PersonLifecycleService personLifecycleService;
     @Mock private EmploymentService employmentService;
     @Mock private ConnectionService connectionService;
     @Mock private BulkOperationService bulkOperationService;
@@ -100,16 +102,18 @@ class RecordListControllerTest {
         when(workspaceService.getCurrentUserId()).thenReturn(7);
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(memberScope);
         when(personService.getPersonsPage(
-            null, null, null, null, null, false, memberScope, false, 100, 0)).thenReturn(List.of());
-        when(personService.countPersons(null, null, null, false, memberScope, false)).thenReturn(0L);
+            null, null, null, null, null, false, memberScope, null, false, null, false, false, 100, 0)).thenReturn(List.of());
+        when(personService.countPersons(
+            null, null, null, false, memberScope, null, false, null, false, false)).thenReturn(0L);
 
         var response = controller.getPersonsPage(
-            0, 500, null, null, null, null, null, false, null, null, false);
+            0, 500, null, null, null, null, null, false, null, null, null, false, null, false, false);
 
         assertEquals(0, response.total());
         verify(personService).getPersonsPage(
-            null, null, null, null, null, false, memberScope, false, 100, 0);
-        verify(personService).countPersons(null, null, null, false, memberScope, false);
+            null, null, null, null, null, false, memberScope, null, false, null, false, false, 100, 0);
+        verify(personService).countPersons(
+            null, null, null, false, memberScope, null, false, null, false, false);
     }
 
     @Test
@@ -117,10 +121,10 @@ class RecordListControllerTest {
         PersonController controller = personController();
 
         assertThrows(BadRequestException.class, () -> controller.getPersonsPage(
-            1, 25, null, "warmth", "desc", null, null, false, null, null, false));
+            1, 25, null, "warmth", "desc", null, null, false, null, null, null, false, null, false, false));
 
         verify(personService, never()).getPersonsPage(
-            null, "warmth", "desc", null, null, false, null, false, 25, 0);
+            null, "warmth", "desc", null, null, false, null, null, false, null, false, false, 25, 0);
     }
 
     @Test
@@ -131,20 +135,22 @@ class RecordListControllerTest {
         when(memberScopeResolver.resolve("members", List.of(3, 5), 7)).thenReturn(memberScope);
         when(personService.getPersonsPage(
             "%Target%", "name", "desc", List.of("Acme"), List.of("Director"), true,
-            memberScope, false, 25, 25)).thenReturn(List.of());
+            memberScope, null, false, null, false, false, 25, 25)).thenReturn(List.of());
         when(personService.countPersons(
-            "%Target%", List.of("Acme"), List.of("Director"), true, memberScope, false)).thenReturn(4L);
+            "%Target%", List.of("Acme"), List.of("Director"), true, memberScope,
+            null, false, null, false, false)).thenReturn(4L);
 
         var response = controller.getPersonsPage(
             2, 25, "Target", "name", "desc", List.of("Acme"), List.of("Director"), true,
-            "members", List.of(3, 5), false);
+            "members", List.of(3, 5), null, false, null, false, false);
 
         assertEquals(4, response.total());
         verify(personService).getPersonsPage(
             "%Target%", "name", "desc", List.of("Acme"), List.of("Director"), true,
-            memberScope, false, 25, 25);
+            memberScope, null, false, null, false, false, 25, 25);
         verify(personService).countPersons(
-            "%Target%", List.of("Acme"), List.of("Director"), true, memberScope, false);
+            "%Target%", List.of("Acme"), List.of("Director"), true, memberScope,
+            null, false, null, false, false);
     }
 
     @Test
@@ -154,9 +160,10 @@ class RecordListControllerTest {
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(MemberScope.allTeam());
 
         assertThrows(BadRequestException.class,
-            () -> controller.getPersonIds(null, null, null, false, null, null, false));
+            () -> controller.getPersonIds(null, null, null, false, null, null, null, false, null, false, false));
 
-        verify(personService, never()).getMatchingPersonIds(null, null, null, false, MemberScope.allTeam(), false);
+        verify(personService, never()).getMatchingPersonIds(
+            null, null, null, false, MemberScope.allTeam(), null, false, null, false, false);
     }
 
     @Test
@@ -1006,8 +1013,8 @@ class RecordListControllerTest {
 
     private PersonController personController() {
         return new PersonController(
-            personService, employmentService, connectionService, bulkOperationService,
-            workspaceService, memberScopeResolver);
+            personService, personLifecycleService, employmentService, connectionService,
+            bulkOperationService, workspaceService, memberScopeResolver);
     }
 
     private CompanyController companyController() {

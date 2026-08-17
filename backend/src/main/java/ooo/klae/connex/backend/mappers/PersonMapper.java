@@ -6,6 +6,9 @@ import java.util.List;
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.PersonDisqualificationReason;
+import ooo.klae.connex.backend.beans.PersonLeadSource;
+import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.dto.CompanyEngagementPersonDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
@@ -87,12 +90,21 @@ public interface PersonMapper {
             @Param("sort") String sort, @Param("dir") String dir,
             @Param("companies") List<String> companies, @Param("titles") List<String> titles,
             @Param("noCompany") boolean noCompany, @Param("memberScope") MemberScope memberScope,
+            @Param("lifecycleStages") List<PersonLifecycleStage> lifecycleStages,
+            @Param("noLifecycle") boolean noLifecycle,
+            @Param("leadSources") List<PersonLeadSource> leadSources,
+            @Param("noLeadSource") boolean noLeadSource,
             @Param("archived") boolean archived,
             @Param("limit") int limit, @Param("offset") int offset);
     long countPersons(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("companies") List<String> companies,
             @Param("titles") List<String> titles, @Param("noCompany") boolean noCompany,
-            @Param("memberScope") MemberScope memberScope, @Param("archived") boolean archived);
+            @Param("memberScope") MemberScope memberScope,
+            @Param("lifecycleStages") List<PersonLifecycleStage> lifecycleStages,
+            @Param("noLifecycle") boolean noLifecycle,
+            @Param("leadSources") List<PersonLeadSource> leadSources,
+            @Param("noLeadSource") boolean noLeadSource,
+            @Param("archived") boolean archived);
     /**
      * CSV export using the browser filters and member scope, excluding suspended contacts.
      * Callers pass {@code archived = false}: an export is defined as the active working set.
@@ -100,16 +112,41 @@ public interface PersonMapper {
     List<Person> getPersonsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("companies") List<String> companies, @Param("titles") List<String> titles,
             @Param("noCompany") boolean noCompany, @Param("memberScope") MemberScope memberScope,
+            @Param("lifecycleStages") List<PersonLifecycleStage> lifecycleStages,
+            @Param("noLifecycle") boolean noLifecycle,
+            @Param("leadSources") List<PersonLeadSource> leadSources,
+            @Param("noLeadSource") boolean noLeadSource,
             @Param("archived") boolean archived);
     /** Ids using the browser's filters and member scope; backs "select all matching". */
     List<Integer> getPersonIdsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("companies") List<String> companies, @Param("titles") List<String> titles,
             @Param("noCompany") boolean noCompany, @Param("memberScope") MemberScope memberScope,
+            @Param("lifecycleStages") List<PersonLifecycleStage> lifecycleStages,
+            @Param("noLifecycle") boolean noLifecycle,
+            @Param("leadSources") List<PersonLeadSource> leadSources,
+            @Param("noLeadSource") boolean noLeadSource,
             @Param("archived") boolean archived, @Param("limit") int limit);
     List<String> distinctCompanies(int workspaceId);
     List<String> distinctTitles(int workspaceId);
     boolean hasPersonWithoutCompany(int workspaceId);
     List<FacetCount> countsByOwner(@Param("workspaceId") int workspaceId);
+    /**
+     * How many active contacts sit in each lead-lifecycle stage, matching the page filter's
+     * population (suspended contacts stay administratively visible in both). Contacts outside the
+     * lifecycle are counted under the {@code __none__} key so the browser can offer them as a bucket.
+     *
+     * @param workspaceId owning workspace
+     * @return one bucket per stage
+     */
+    List<FacetCount> countsByLifecycleStage(@Param("workspaceId") int workspaceId);
+    /**
+     * How many active contacts entered through each lead source, matching the page filter's
+     * population. Contacts with no captured provenance are counted under the {@code __none__} key.
+     *
+     * @param workspaceId owning workspace
+     * @return one bucket per source
+     */
+    List<FacetCount> countsByLeadSource(@Param("workspaceId") int workspaceId);
     /** How many contacts the workspace currently holds archived; drives the browser's archived toggle. */
     long countArchivedPersons(@Param("workspaceId") int workspaceId);
     /** Ids of contacts the team has engaged (has any activity, note, or task), used as warm-intro entry points. */
@@ -133,6 +170,46 @@ public interface PersonMapper {
         @Param("id") int id,
         @Param("riskExcluded") Boolean riskExcluded,
         @Param("introExcluded") Boolean introExcluded
+    );
+    /**
+     * Replaces the whole lead-lifecycle state of one contact. Every field is written unconditionally
+     * so that leaving a stage always clears the reason and notes that belonged to it; the previous
+     * values remain readable in {@code person_lifecycle_history}.
+     *
+     * @param workspaceId owning workspace
+     * @param id contact id
+     * @param stage new stage, or {@code null} to withdraw the contact from the lifecycle
+     * @param changedAt transition timestamp; withdrawal is a transition and carries one too
+     * @param reason disqualification reason, permitted only alongside {@code DISQUALIFIED}
+     * @param notes qualification notes
+     * @return rows updated
+     */
+    int updateLifecycle(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("stage") PersonLifecycleStage stage,
+        @Param("changedAt") LocalDateTime changedAt,
+        @Param("reason") PersonDisqualificationReason reason,
+        @Param("notes") String notes
+    );
+    /**
+     * Replaces the whole source-provenance state of one contact. Every field is written
+     * unconditionally so a correction can also clear a value; the previous values remain in the
+     * audit log.
+     *
+     * @param workspaceId owning workspace
+     * @param id contact id
+     * @param source new source, or {@code null} when provenance is unknown
+     * @param detail free-text source detail, permitted only alongside a source
+     * @param referrerPersonId referring contact, permitted only for referral or partner sources
+     * @return rows updated
+     */
+    int updateProvenance(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("source") PersonLeadSource source,
+        @Param("detail") String detail,
+        @Param("referrerPersonId") Integer referrerPersonId
     );
     int updateProcessingRestrictions(
         @Param("workspaceId") int workspaceId,

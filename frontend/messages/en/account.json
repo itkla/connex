@@ -482,6 +482,8 @@
     "dealMentionDescription": "When a teammate @-mentions you in a deal's close reason.",
     "approvalRequestTitle": "Approval requests",
     "approvalRequestDescription": "When a document is sent for your approval.",
+    "approvalReminderTitle": "Approval reminders",
+    "approvalReminderDescription": "When a document awaiting your approval nears or passes its deadline.",
     "approvalDecisionTitle": "Approval decisions",
     "approvalDecisionDescription": "When your approval request is approved, rejected, or withdrawn.",
     "approvalTerminatedTitle": "Ended approval requests",

@@ -87,7 +87,8 @@ class ApprovalReconciliationSchedulerTest {
     void terminationMethodsCannotRelyOnProxiedTransactionAdvice()
             throws ReflectiveOperationException {
         AnnotationTransactionAttributeSource source = new AnnotationTransactionAttributeSource();
-        for (String name : new String[] {"terminateIfUnsatisfiable", "invalidateForPolicyChange"}) {
+        for (String name : new String[] {
+                "terminateIfUnsatisfiable", "invalidateForPolicyChange", "reconcileApproval"}) {
             Method method = java.util.Arrays.stream(
                     DocumentApprovalService.class.getDeclaredMethods())
                 .filter(candidate -> candidate.getName().equals(name))
@@ -184,7 +185,7 @@ class ApprovalReconciliationSchedulerTest {
         assertEquals(0, result.failedCount());
         verify(approvalService, times(1)).reconciliationApproverPool(7);
         for (DocumentApproval approval : approvals) {
-            verify(approvalService).terminateIfUnsatisfiable(7, approval, pool);
+            verify(approvalService).reconcileApproval(7, approval, pool);
         }
         ArgumentCaptor<TransactionDefinition> definitions =
             ArgumentCaptor.forClass(TransactionDefinition.class);

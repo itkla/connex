@@ -19,6 +19,14 @@ export type ContactsPageParams = PageParams & MemberScopeParams & {
     companies?: string[];
     titles?: string[];
     noCompany?: boolean;
+    /** Lead-lifecycle stages to include (issue #559). */
+    lifecycleStages?: ContactLifecycleStage[];
+    /** Includes contacts that are not in a lead lifecycle at all (issue #559). */
+    noLifecycle?: boolean;
+    /** Lead sources to include (issue #559). */
+    leadSources?: ContactLeadSource[];
+    /** Includes contacts whose provenance was never captured (issue #559). */
+    noLeadSource?: boolean;
     /** Selects the archived contacts instead of the active ones (issue #854). */
     archived?: boolean;
 };
@@ -214,6 +222,16 @@ export type PersonFacets = {
     owners: FacetCount[];
     /** How many contacts the workspace currently holds archived (issue #854). */
     archivedCount: number;
+    /**
+     * How many active contacts sit in each lead-lifecycle stage (issue #559). Contacts outside the
+     * lifecycle are counted under the `__none__` key.
+     */
+    lifecycleStages: FacetCount[];
+    /**
+     * How many active contacts entered through each lead source (issue #559); uncaptured
+     * provenance is counted under the `__none__` key.
+     */
+    leadSources: FacetCount[];
 };
 
 export type CompanyFacets = {
@@ -1134,6 +1152,94 @@ export type Contact = {
     provisionCeasedAt?: string | null;
     /** Set while the contact is archived (issue #854); read-only, cleared by restore. */
     archivedAt?: string | null;
+    /**
+     * Lead lifecycle (issue #559); read-only, set through the lifecycle endpoints. A null or
+     * absent stage means the contact is not in a lead lifecycle — it is a relationship, not a
+     * prospect — and is not the same as being at the start of one.
+     */
+    lifecycleStage?: ContactLifecycleStage | null;
+    lifecycleChangedAt?: string | null;
+    disqualifiedReason?: ContactDisqualificationReason | null;
+    qualificationNotes?: string | null;
+    /**
+     * Source provenance (issue #559): how the relationship originally entered Connex. Owner-workspace
+     * only, settable at creation and via the provenance endpoint. Absent means never captured.
+     */
+    leadSource?: ContactLeadSource | null;
+    leadSourceDetail?: string | null;
+    referrerPersonId?: number | null;
+};
+
+/** The closed vocabulary for how a contact originally entered Connex (issue #559). */
+export type ContactLeadSource =
+    | 'REFERRAL'
+    | 'EVENT'
+    | 'WEB'
+    | 'OUTBOUND'
+    | 'BUSINESS_CARD'
+    | 'IMPORT'
+    | 'PARTNER'
+    | 'OTHER';
+
+/** A requested replacement of a contact's source provenance; all-null clears it. */
+export type UpdateContactProvenancePayload = {
+    leadSource?: ContactLeadSource | null;
+    leadSourceDetail?: string | null;
+    referrerPersonId?: number | null;
+};
+
+/** The closed lead-lifecycle vocabulary a contact can hold (issue #559). */
+export type ContactLifecycleStage =
+    | 'NEW'
+    | 'WORKING'
+    | 'NURTURING'
+    | 'QUALIFIED'
+    | 'DISQUALIFIED'
+    | 'CONVERTED'
+    | 'RECYCLED';
+
+/** Why a contact was disqualified from its lead lifecycle (issue #559). */
+export type ContactDisqualificationReason =
+    | 'NO_BUDGET'
+    | 'NO_FIT'
+    | 'NO_AUTHORITY'
+    | 'BAD_TIMING'
+    | 'COMPETITOR'
+    | 'DUPLICATE'
+    | 'UNRESPONSIVE'
+    | 'SPAM'
+    | 'OTHER';
+
+/**
+ * A contact's current lifecycle state plus the stages it may move to next. The server owns the
+ * transition rules, so the client renders `allowedTransitions` rather than recomputing them.
+ */
+export type ContactLifecycle = {
+    personId: number | null;
+    stage: ContactLifecycleStage | null;
+    changedAt: string | null;
+    disqualifiedReason: ContactDisqualificationReason | null;
+    qualificationNotes: string | null;
+    allowedTransitions: ContactLifecycleStage[];
+};
+
+/** One entry of a contact's append-only lifecycle timeline (issue #559). */
+export type ContactLifecycleHistoryEntry = {
+    id: number;
+    personId: number;
+    fromStage: ContactLifecycleStage | null;
+    toStage: ContactLifecycleStage | null;
+    reason: ContactDisqualificationReason | null;
+    note: string | null;
+    changedById: number | null;
+    changedAt: string;
+};
+
+/** A requested lifecycle move. Withdrawal is a separate delete, never an omitted stage. */
+export type UpdateContactLifecyclePayload = {
+    stage: ContactLifecycleStage;
+    reason?: ContactDisqualificationReason | null;
+    note?: string | null;
 };
 
 export type DataSubjectRequestType = 'disclosure' | 'correction' | 'cease_use' | 'cease_provision';
@@ -1522,7 +1628,8 @@ export type DocumentApprovalStatus =
     | 'rejected'
     | 'cancelled'
     | 'invalidated'
-    | 'unsatisfiable';
+    | 'unsatisfiable'
+    | 'expired';
 
 /**
  * Why a request ended. `cancelled_legacy` only appears on rows written before outcome reasons
@@ -1536,6 +1643,7 @@ export type ApprovalOutcomeReason =
     | 'cancelled_by_admin'
     | 'policy_invalidated'
     | 'unsatisfiable'
+    | 'expired'
     | 'cancelled_legacy';
 
 /** How an approval chain runs: one step at a time, or every step at once. */
@@ -1550,13 +1658,17 @@ export type SeparationOfDuties = 'strict' | 'requester' | 'off';
 /** Whether a step is decided by named members or by anyone who can approve documents. */
 export type ApprovalApproverKind = 'user' | 'any_approver';
 
+/** What happens when an active approval step reaches its deadline. */
+export type ApprovalStepExpiryAction = 'expire' | 'escalate';
+
 export type ApprovalStepStatus =
     | 'pending'
     | 'active'
     | 'approved'
     | 'rejected'
     | 'cancelled'
-    | 'unsatisfiable';
+    | 'unsatisfiable'
+    | 'expired';
 
 export type ApprovalStepApprover = {
     approverKind: ApprovalApproverKind;
@@ -1573,6 +1685,30 @@ export type DocumentApprovalDecision = {
     decidedAt: string;
 };
 
+/** One delegation, escalation, or reassignment fact appended to a frozen approval step. */
+export type ApprovalStepAssignment = {
+    id: number;
+    assignmentKind: 'delegation' | 'escalation' | 'reassignment';
+    assignmentRound: number;
+    approverKind: ApprovalApproverKind;
+    userId?: number | null;
+    userDisplayName?: string | null;
+    delegatedByUserId?: number | null;
+    delegatedByDisplayName?: string | null;
+    createdByUserId?: number | null;
+    createdByDisplayName?: string | null;
+    comment?: string | null;
+    createdAt: string;
+};
+
+/** One server-authorized destination for delegating the current approval seat. */
+export type ApprovalDelegate = {
+    id: number;
+    username: string;
+    displayName?: string | null;
+    email: string;
+};
+
 /** One frozen step of an approval chain, with the approvals collected so far. */
 export type DocumentApprovalStep = {
     id: number;
@@ -1582,9 +1718,17 @@ export type DocumentApprovalStep = {
     approvedCount: number;
     status: ApprovalStepStatus;
     decidedAt?: string | null;
+    dueIntervalHours?: number | null;
+    onExpiry: ApprovalStepExpiryAction;
+    activatedAt?: string | null;
+    dueAt?: string | null;
+    escalatedAt?: string | null;
     satisfiable: boolean;
     unsatisfiableReason?: string | null;
+    effectiveAnyApprover: boolean;
+    effectiveApproverIds: number[];
     approvers: ApprovalStepApprover[];
+    assignments: ApprovalStepAssignment[];
     decisions: DocumentApprovalDecision[];
 };
 
@@ -1614,7 +1758,28 @@ export type ApprovalPolicyStep = {
     id?: number;
     name?: string | null;
     requiredCount: number;
+    dueIntervalHours?: number | null;
+    onExpiry: ApprovalStepExpiryAction;
     approvers: ApprovalStepApprover[];
+};
+
+/** One workspace-scoped approval step the caller can still decide. */
+export type ApprovalInboxItem = {
+    approvalId: number;
+    dealId: number;
+    dealName: string;
+    documentId: number;
+    documentTitle: string;
+    documentType: DocumentType;
+    version: number;
+    stepId: number;
+    stepOrder: number;
+    stepName?: string | null;
+    requiredCount: number;
+    dueAt?: string | null;
+    escalated: boolean;
+    requestedBy?: number | null;
+    requestedAt: string;
 };
 
 /** Declares when a generated document requires internal approval before finalization. */
@@ -2297,7 +2462,14 @@ export type ReportBucket = "day" | "week" | "month";
 
 export type ReportChartType = "bar" | "line-area" | "donut" | "funnel" | "table" | "kpi";
 
-export type ReportDataSource = "deals" | "people" | "companies" | "activities" | "tasks" | "relationships";
+export type ReportDataSource =
+    | "deals"
+    | "people"
+    | "companies"
+    | "activities"
+    | "tasks"
+    | "relationships"
+    | "documents";
 
 export type ReportMeasure =
     | "count"
@@ -2318,6 +2490,13 @@ export type ReportMeasure =
     | "reverse_intro_weighted_opportunities"
     | "employment_departure_count"
     | "employment_arrival_count"
+    | "quote_count"
+    | "quote_issue_rate"
+    | "document_to_win_rate"
+    | "approval_decision_count"
+    | "approval_cycle_days"
+    | "effective_discount_percent"
+    | "open_discount_percent"
     | "forecast_best"
     | "forecast_weighted"
     | "forecast_worst"

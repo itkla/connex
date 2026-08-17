@@ -243,6 +243,7 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("campaign_message", 90));
         raw.add(direct("campaign", 100, nullify("parent_campaign_id")));
         raw.add(direct("document_approval_decision", 104));
+        raw.add(direct("document_approval_step_assignment", 105));
         raw.add(direct("document_approval_step_approver", 106));
         raw.add(direct("document_approval_step", 108));
         raw.add(direct("document_approval", 110));
@@ -286,6 +287,7 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("saved_view", 330));
         raw.add(direct("person_edge", 340));
         raw.add(direct("person_employment", 350));
+        raw.add(direct("person_lifecycle_history", 355));
         raw.add(direct("person_share", 360));
         raw.add(direct("introduction", 370));
         raw.add(direct("warm_path_dismissal", 380));

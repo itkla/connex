@@ -1838,7 +1838,7 @@ case_smoke_credentials_require_safe_exact_schema() (
 )
 
 smoke_curl_stub() {
-    local output='' url='' argument='' body='' cookie_jar='' cookie='' data_binary=''
+    local output='' url='' argument='' body='' cookie_jar='' cookie='' data_binary='' header=''
     while [ "$#" -gt 0 ]; do
         argument="$1"
         case "$argument" in
@@ -1853,6 +1853,8 @@ smoke_curl_stub() {
                     cookie="$1"
                 elif [ "$argument" = "--data-binary" ]; then
                     data_binary="$1"
+                elif [ "$argument" = "-H" ]; then
+                    header="$1"
                 fi
                 ;;
             http://*) url="$argument" ;;
@@ -1883,7 +1885,15 @@ smoke_curl_stub() {
             grep -q 'offline-session-secret' "$cookie" || return 22
             body='<main data-app-main>dashboard</main>'
             ;;
-        "$FRONTEND_URL/api/auth/logout") body='' ;;
+        "$FRONTEND_URL/api/auth/csrf")
+            [ "$cookie" = "$SMOKE_COOKIE_JAR" ] || return 22
+            body='{"token":"offline-csrf-token","headerName":"X-CSRF-TOKEN"}'
+            ;;
+        "$FRONTEND_URL/api/auth/logout")
+            # Logout is CSRF-protected, so the smoke must present the token the csrf endpoint issued.
+            [ "$header" = "X-CSRF-TOKEN: offline-csrf-token" ] || return 22
+            body=''
+            ;;
         *) return 22 ;;
     esac
     if [ -n "${SMOKE_FAIL_AFTER_URL:-}" ] && [ "$url" = "$SMOKE_FAIL_AFTER_URL" ]; then
@@ -1891,6 +1901,8 @@ smoke_curl_stub() {
     fi
     if [ -n "$output" ] && [ "$output" != "/dev/null" ]; then
         printf '%s\n' "$body" > "$output"
+    elif [ -z "$output" ]; then
+        printf '%s' "$body"
     fi
 }
 

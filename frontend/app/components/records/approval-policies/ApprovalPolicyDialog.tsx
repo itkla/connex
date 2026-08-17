@@ -41,10 +41,12 @@ import type {
     UpdateApprovalPolicyPayload,
     WorkspaceMember,
 } from '@/app/lib/types';
-import ApprovalChainEditor, {
+import ApprovalChainEditor from './ApprovalChainEditor';
+import {
     availableApprovers,
+    dueIntervalIsValid,
     type ChainStepDraft,
-} from './ApprovalChainEditor';
+} from './approvalChainDraft';
 
 type Props = {
     open: boolean;
@@ -57,7 +59,7 @@ const DOCUMENT_TYPES: DocumentType[] = ['quote', 'proposal', 'order_form', 'cont
 const ALL_TYPES = 'all';
 
 const isDocumentType = (value: string): value is DocumentType =>
-    (DOCUMENT_TYPES as string[]).includes(value);
+    DOCUMENT_TYPES.some((documentType) => documentType === value);
 
 type Draft = {
     name: string;
@@ -78,6 +80,8 @@ const toStepDraft = (step: ApprovalPolicyStep, index: number): ChainStepDraft =>
         id: step.id,
         name: step.name ?? '',
         requiredCount: step.requiredCount,
+        dueIntervalHours: step.dueIntervalHours == null ? '' : String(step.dueIntervalHours),
+        onExpiry: step.onExpiry,
         kind: anyApprover ? 'any_approver' : 'user',
         userIds: anyApprover
             ? []
@@ -101,6 +105,10 @@ const toStepPayload = (step: ChainStepDraft): ApprovalPolicyStep => ({
     id: step.id,
     name: step.name.trim() === '' ? null : step.name.trim(),
     requiredCount: step.requiredCount,
+    dueIntervalHours: step.dueIntervalHours.trim() === ''
+        ? null
+        : Number(step.dueIntervalHours),
+    onExpiry: step.onExpiry,
     approvers:
         step.kind === 'any_approver'
             ? [{ approverKind: 'any_approver' }]
@@ -150,7 +158,9 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
     const chainIsValid = draft.steps.every(
         (step) =>
             (step.kind === 'any_approver' || step.userIds.length > 0)
-            && step.requiredCount <= availableApprovers(step),
+            && step.requiredCount <= availableApprovers(step)
+            && dueIntervalIsValid(step.dueIntervalHours)
+            && (step.onExpiry === 'expire' || step.dueIntervalHours.trim() !== ''),
     );
     const canSave = draft.name.trim() !== '' && !minTotalNeedsCurrency && chainIsValid && !saving;
 

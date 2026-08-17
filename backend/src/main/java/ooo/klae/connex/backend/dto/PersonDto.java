@@ -20,6 +20,9 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.PersonDisqualificationReason;
+import ooo.klae.connex.backend.beans.PersonLeadSource;
+import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 
@@ -86,6 +89,25 @@ public class PersonDto {
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private LocalDateTime archivedAt;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private PersonLifecycleStage lifecycleStage;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private LocalDateTime lifecycleChangedAt;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private PersonDisqualificationReason disqualifiedReason;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private String qualificationNotes;
+
+    private PersonLeadSource leadSource;
+
+    @Size(max = 255)
+    private String leadSourceDetail;
+
+    private Integer referrerPersonId;
+
     public static PersonDto from(Person p) {
         if (p == null) return null;
         return populate(new PersonDto(), p);
@@ -115,6 +137,13 @@ public class PersonDto {
         dto.setSuspendedAt(p.getSuspendedAt());
         dto.setProvisionCeasedAt(p.getProvisionCeasedAt());
         dto.setArchivedAt(p.getArchivedAt());
+        dto.setLifecycleStage(p.getLifecycleStage());
+        dto.setLifecycleChangedAt(p.getLifecycleChangedAt());
+        dto.setDisqualifiedReason(p.getDisqualifiedReason());
+        dto.setQualificationNotes(p.getQualificationNotes());
+        dto.setLeadSource(p.getLeadSource());
+        dto.setLeadSourceDetail(p.getLeadSourceDetail());
+        dto.setReferrerPersonId(p.getReferrerPersonId());
         return dto;
     }
 
@@ -133,6 +162,9 @@ public class PersonDto {
             p.setCompany(company);
         }
         p.setTitle(title);
+        p.setLeadSource(leadSource);
+        p.setLeadSourceDetail(leadSourceDetail);
+        p.setReferrerPersonId(referrerPersonId);
         p.setCreatedAt(createdAt);
         p.setUpdatedAt(updatedAt);
         p.setImageUrl(imageUrl);

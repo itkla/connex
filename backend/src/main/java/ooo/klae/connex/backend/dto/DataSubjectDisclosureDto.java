@@ -24,6 +24,7 @@ public class DataSubjectDisclosureDto {
     private List<TaskDto> tasks;
     private List<AttachmentDto> attachments;
     private List<EmploymentDto> employmentHistory;
+    private List<LifecycleTransitionDto> lifecycleHistory;
     private List<RelationshipEdgeDto> relationshipEdges;
     private List<DealAssociationDto> dealAssociations;
     private List<IntroductionDto> introductions;
@@ -46,6 +47,13 @@ public class DataSubjectDisclosureDto {
         private boolean introExcluded;
         private LocalDateTime suspendedAt;
         private LocalDateTime provisionCeasedAt;
+        private String lifecycleStage;
+        private LocalDateTime lifecycleChangedAt;
+        private String disqualifiedReason;
+        private String qualificationNotes;
+        private String leadSource;
+        private String leadSourceDetail;
+        private Integer referrerPersonId;
         private LocalDateTime createdAt;
         private LocalDateTime updatedAt;
     }
@@ -214,6 +222,19 @@ public class DataSubjectDisclosureDto {
         private LocalDateTime startedAt;
         private LocalDateTime endedAt;
         private LocalDateTime createdAt;
+    }
+
+    @Data
+    public static class LifecycleTransitionDto {
+        private long id;
+        private int workspaceId;
+        private int personId;
+        private String fromStage;
+        private String toStage;
+        private String reason;
+        private String note;
+        private Integer changedById;
+        private LocalDateTime changedAt;
     }
 
     @Data

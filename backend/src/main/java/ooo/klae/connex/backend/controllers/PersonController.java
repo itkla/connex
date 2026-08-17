@@ -16,6 +16,8 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.PersonLeadSource;
+import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.util.LikePattern;
 import ooo.klae.connex.backend.util.PageBounds;
 import ooo.klae.connex.backend.dto.ActivityDto;
@@ -40,6 +42,11 @@ import ooo.klae.connex.backend.dto.PersonFacets;
 import ooo.klae.connex.backend.dto.PersonDetailDto;
 import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.dto.PersonEvaluationDto;
+import ooo.klae.connex.backend.dto.PersonLifecycleDto;
+import ooo.klae.connex.backend.dto.PersonLifecycleHistoryDto;
+import ooo.klae.connex.backend.dto.PersonLifecycleRequest;
+import ooo.klae.connex.backend.dto.PersonLifecycleWithdrawalRequest;
+import ooo.klae.connex.backend.dto.PersonProvenanceRequest;
 import ooo.klae.connex.backend.dto.PersonOwnerDto;
 import ooo.klae.connex.backend.dto.PersonRestrictionsDto;
 import ooo.klae.connex.backend.dto.TagDto;
@@ -48,6 +55,7 @@ import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.ConnectionService;
 import ooo.klae.connex.backend.services.EmploymentService;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
+import ooo.klae.connex.backend.services.PersonLifecycleService;
 import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.storage.UploadSource;
@@ -70,6 +78,7 @@ import lombok.RequiredArgsConstructor;
 @TenantJournalAttributable
 public class PersonController {
     private final PersonService personService;
+    private final PersonLifecycleService personLifecycleService;
     private final EmploymentService employmentService;
     private final ConnectionService connectionService;
     private final BulkOperationService bulkOperationService;
@@ -132,6 +141,10 @@ public class PersonController {
         @RequestParam(defaultValue = "false") boolean noCompany,
         @RequestParam(required = false) String scope,
         @RequestParam(required = false) List<Integer> memberIds,
+        @RequestParam(required = false) List<PersonLifecycleStage> lifecycleStages,
+        @RequestParam(defaultValue = "false") boolean noLifecycle,
+        @RequestParam(required = false) List<PersonLeadSource> leadSources,
+        @RequestParam(defaultValue = "false") boolean noLeadSource,
         @RequestParam(defaultValue = "false") boolean archived
     ) {
         if (WARMTH_SORT.equalsIgnoreCase(sort)) {
@@ -141,10 +154,12 @@ public class PersonController {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
         List<PersonDto> items = personService.getPersonsPage(query, sort, dir, companies, titles, noCompany,
-            memberScope, archived, bounds.size(), bounds.offset())
+            memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource, archived,
+            bounds.size(), bounds.offset())
             .stream().map(PersonDto::from).toList();
-        return new PageResponse<>(items,
-            personService.countPersons(query, companies, titles, noCompany, memberScope, archived));
+        return new PageResponse<>(items, personService.countPersons(
+            query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
+            leadSources, noLeadSource, archived));
     }
 
     /**
@@ -165,6 +180,10 @@ public class PersonController {
         @RequestParam(defaultValue = "false") boolean noCompany,
         @RequestParam(required = false) String scope,
         @RequestParam(required = false) List<Integer> memberIds,
+        @RequestParam(required = false) List<PersonLifecycleStage> lifecycleStages,
+        @RequestParam(defaultValue = "false") boolean noLifecycle,
+        @RequestParam(required = false) List<PersonLeadSource> leadSources,
+        @RequestParam(defaultValue = "false") boolean noLeadSource,
         @RequestParam(defaultValue = "false") boolean archived
     ) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
@@ -174,10 +193,16 @@ public class PersonController {
             && (companies == null || companies.isEmpty())
             && (titles == null || titles.isEmpty())
             && !noCompany
+            && (lifecycleStages == null || lifecycleStages.isEmpty())
+            && !noLifecycle
+            && (leadSources == null || leadSources.isEmpty())
+            && !noLeadSource
             && memberScope.mode() == MemberScope.Mode.ALL_TEAM) {
             throw new BadRequestException("At least one filter is required before selecting matching contact ids");
         }
-        return personService.getMatchingPersonIds(query, companies, titles, noCompany, memberScope, archived);
+        return personService.getMatchingPersonIds(
+            query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
+            leadSources, noLeadSource, archived);
     }
 
     /**
@@ -192,7 +217,9 @@ public class PersonController {
             personService.distinctTitles(),
             personService.hasPersonWithoutCompany(),
             personService.countsByOwner(),
-            personService.countArchivedPersons()
+            personService.countArchivedPersons(),
+            personService.countsByLifecycleStage(),
+            personService.countsByLeadSource()
         );
     }
 
@@ -277,6 +304,69 @@ public class PersonController {
     public PersonDto updateRestrictions(@PathVariable int id, @Valid @RequestBody PersonRestrictionsDto dto) {
         return PersonDto.from(personService.updateProcessingRestrictions(
             id, dto.getSuspended(), dto.getProvisionCeased()));
+    }
+
+    /**
+     * PUT endpoint to replace the contact's source provenance (#559). A body with every field null
+     * clears it, recording that the origin is unknown.
+     * @param id contact id
+     * @param request requested provenance
+     * @return the updated contact
+     */
+    @PutMapping("/{id}/provenance")
+    public PersonDto updateProvenance(
+            @PathVariable int id, @Valid @RequestBody PersonProvenanceRequest request) {
+        return PersonDto.from(personService.updateProvenance(
+            id, request.getLeadSource(), request.getLeadSourceDetail(), request.getReferrerPersonId()));
+    }
+
+    /**
+     * GET endpoint for the contact's current lead-lifecycle state and its permitted next moves.
+     * @param id contact id
+     * @return current lifecycle state
+     */
+    @GetMapping("/{id}/lifecycle")
+    public PersonLifecycleDto getLifecycle(@PathVariable int id) {
+        return personLifecycleService.getLifecycle(id);
+    }
+
+    /**
+     * PUT endpoint to move a contact to a lead-lifecycle stage (#559). Requesting the stage the
+     * contact already holds updates only the accompanying reason and note.
+     * @param id contact id
+     * @param request requested stage with its reason and note
+     * @return the contact's lifecycle state after the move
+     */
+    @PutMapping("/{id}/lifecycle")
+    public PersonLifecycleDto updateLifecycle(
+            @PathVariable int id, @Valid @RequestBody PersonLifecycleRequest request) {
+        return PersonLifecycleDto.from(personLifecycleService.updateLifecycle(id, request));
+    }
+
+    /**
+     * POST endpoint to withdraw a contact from the lead lifecycle. Withdrawal is a deliberate,
+     * separate operation so that a client which omits the stage field cannot erase it by accident,
+     * and it carries its note in a body so the note never reaches a URL.
+     * @param id contact id
+     * @param request optional explanation recorded in the lifecycle history
+     * @return the contact's lifecycle state after the withdrawal
+     */
+    @PostMapping("/{id}/lifecycle/withdrawal")
+    public PersonLifecycleDto withdrawFromLifecycle(
+            @PathVariable int id,
+            @Valid @RequestBody(required = false) PersonLifecycleWithdrawalRequest request) {
+        return PersonLifecycleDto.from(personLifecycleService.withdrawFromLifecycle(
+            id, request == null ? null : request.getNote()));
+    }
+
+    /**
+     * GET endpoint for the contact's append-only lead-lifecycle timeline, most recent first.
+     * @param id contact id
+     * @return transition history
+     */
+    @GetMapping("/{id}/lifecycle/history")
+    public List<PersonLifecycleHistoryDto> getLifecycleHistory(@PathVariable int id) {
+        return personLifecycleService.getHistory(id);
     }
 
     /**

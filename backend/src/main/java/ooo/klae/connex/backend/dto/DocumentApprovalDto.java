@@ -11,7 +11,10 @@ import ooo.klae.connex.backend.beans.DocumentApproval;
  * @param documentId         the document version this approval covers
  * @param policyId           policy that triggered the request (nullable)
  * @param status             pending | approved | rejected | cancelled | invalidated | unsatisfiable
- * @param outcomeReason      stable reason for a terminal outcome
+ *                           | expired
+ * @param outcomeReason      stable reason for a terminal outcome: quorum, rejected, superseded,
+ *                           cancelled_by_requester, cancelled_by_admin, policy_invalidated,
+ *                           unsatisfiable, cancelled_legacy, or expired
  * @param outcomeDetail      bounded detail for a terminal outcome
  * @param mode               sequential | parallel, frozen from the policy at request time
  * @param separationOfDuties strict | requester | off, frozen from the policy at request time

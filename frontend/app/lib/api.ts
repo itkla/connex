@@ -2222,6 +2222,8 @@ export function exportContactsCsv(params: Types.ContactsPageParams = {}, init: R
     const query = buildQuery({
         q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany,
         scope: params.scope, memberIds: params.memberIds,
+        lifecycleStages: params.lifecycleStages, noLifecycle: params.noLifecycle,
+        leadSources: params.leadSources, noLeadSource: params.noLeadSource,
     });
     return downloadCsv(`/api/exports/persons${query}`, "contacts.csv", init);
 }
@@ -2361,7 +2363,10 @@ export function bulkChangeDealStage(ids: number[], stageId: number) {
 export function getContactIds(params: Types.ContactsPageParams = {}, init: RequestInit = {}) {
     const query = buildQuery({
         q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany,
-        scope: params.scope, memberIds: params.memberIds, archived: params.archived,
+        scope: params.scope, memberIds: params.memberIds,
+        lifecycleStages: params.lifecycleStages, noLifecycle: params.noLifecycle,
+        leadSources: params.leadSources, noLeadSource: params.noLeadSource,
+        archived: params.archived,
     });
     return getJson<number[]>(`/api/persons/ids${query}`, init);
 }
@@ -2766,6 +2771,34 @@ export async function uploadContactPicture(contactId: number, file: File, init: 
 
 export function updateContactEvaluation(id: number, payload: Types.UpdateContactEvaluationPayload) {
     return putJson<Types.Contact>(`/api/persons/${id}/evaluation`, payload);
+}
+
+/** Replaces a contact's source provenance (issue #559); an all-null body clears it. */
+export function updateContactProvenance(id: number, payload: Types.UpdateContactProvenancePayload) {
+    return putJson<Types.Contact>(`/api/persons/${id}/provenance`, payload);
+}
+
+/** The contact's current lead-lifecycle state and the moves it may make next (issue #559). */
+export function getContactLifecycle(id: number, init: RequestInit = {}) {
+    return getJson<Types.ContactLifecycle>(`/api/persons/${id}/lifecycle`, init);
+}
+
+/** Moves a contact to a lead-lifecycle stage (issue #559). */
+export function updateContactLifecycle(id: number, payload: Types.UpdateContactLifecyclePayload) {
+    return putJson<Types.ContactLifecycle>(`/api/persons/${id}/lifecycle`, payload);
+}
+
+/**
+ * Withdraws a contact from the lead lifecycle. Deliberately a separate call from
+ * {@link updateContactLifecycle} so an omitted stage can never erase the lifecycle by accident, and
+ * the note travels in the body so it never lands in a URL or an access log.
+ */
+export function withdrawContactLifecycle(id: number, note?: string) {
+    return postJson<Types.ContactLifecycle>(`/api/persons/${id}/lifecycle/withdrawal`, { note: note ?? null });
+}
+
+export function getContactLifecycleHistory(id: number, init: RequestInit = {}) {
+    return getJson<Types.ContactLifecycleHistoryEntry[]>(`/api/persons/${id}/lifecycle/history`, init);
 }
 
 export function getContactTags(id: number, init: RequestInit = {}) {
@@ -3620,6 +3653,42 @@ export function decideDocumentApproval(
 
 export function cancelDocumentApproval(dealId: number, documentId: number) {
     return postJson<Types.DocumentApproval>(`/api/deals/${dealId}/documents/${documentId}/approval/cancel`, {});
+}
+
+export function delegateDocumentApproval(
+    dealId: number,
+    documentId: number,
+    stepId: number,
+    delegateUserId: number,
+    comment?: string | null,
+) {
+    return postJson<Types.DocumentApproval>(
+        `/api/deals/${dealId}/documents/${documentId}/approval/steps/${stepId}/delegate`,
+        { delegateUserId, comment: comment ?? null },
+    );
+}
+
+export function getDocumentApprovalDelegateCandidates(
+    dealId: number,
+    documentId: number,
+    stepId: number,
+    init: RequestInit = {},
+) {
+    return getJson<Types.ApprovalDelegate[]>(
+        `/api/deals/${dealId}/documents/${documentId}/approval/steps/${stepId}/delegate-candidates`,
+        { cache: 'no-store', ...init },
+    );
+}
+
+export function getApprovalInbox(init: RequestInit = {}) {
+    return getJson<Types.ApprovalInboxItem[]>(`/api/approvals/inbox`, {
+        cache: 'no-store',
+        ...init,
+    });
+}
+
+export function getApprovalInboxResultFromCookie(cookie: string | null) {
+    return resultWithCookie<Types.ApprovalInboxItem[]>((init) => getApprovalInbox(init), cookie);
 }
 
 export function getDealLineItems(dealId: number, init: RequestInit = {}) {
