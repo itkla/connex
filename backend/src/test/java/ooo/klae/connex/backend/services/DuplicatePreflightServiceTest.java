@@ -696,6 +696,23 @@ class DuplicatePreflightServiceTest {
     }
 
     @Test
+    void emptyImportSessionsSkipTheWorkspaceScopeRead() {
+        DuplicatePreflightService.ImportPreviewSession preview =
+            service.beginImportPreview(List.of(), List.of(), "a".repeat(64));
+        service.completeImportPreview(preview, "e".repeat(64));
+
+        assertEquals("d".repeat(64), preview.reviewProof());
+        assertTrue(preview.responses().isEmpty());
+        verify(workspaceScopeControlAccess, never()).getForWorkspace(anyInt());
+        verify(identityMapper, never()).findVisiblePersonIdentityMatches(
+            anyInt(), anyString(), anyList(), anyInt());
+        verify(identityMapper, never()).findVisibleCompanyIdentityMatches(
+            anyInt(), anyString(), anyList(), anyInt());
+        verify(rateLimiter).recordPreviewResult(
+            anyString(), eq(preview.reviewProof()), anyString());
+    }
+
+    @Test
     void rejectsAnImportWhoseBoundedRowsStillExceedTheAggregateCandidateCap() {
         when(matchingService.normalizeName("Probe"))
             .thenReturn(Optional.of("probe"));
