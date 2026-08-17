@@ -1,6 +1,7 @@
 .vscode/
 PROJECT.md
-PRODUCT.md
+# root-only: scratch product notes stay untracked; the canonical guide is docs/PRODUCT.md
+/PRODUCT.md
 plans/
 .claude/
 .agents/

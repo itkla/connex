@@ -8,6 +8,8 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 The root [`/AGENTS.md`](../AGENTS.md) applies here in full. This file adds frontend-specific rules. The Golden Rules — Explore→Plan→Question→Act, match existing patterns, docs-only comments, strict types, scoped skills, and independent risk-tiered review — are not optional here.
 
+**Before writing user-facing copy, naming anything, or designing a flow, read [`docs/PRODUCT.md`](../docs/PRODUCT.md).** It is the product source of truth: positioning, the canonical EN/JA vocabulary (glossary and banned terms), voice and tone, the standard interaction moments (create/edit/confirm/empty/loading/error), and the target IA. Labels, titles, and buttons use its glossary verbatim; when it and an existing screen disagree, the guide wins.
+
 ## Stack
 
 Next.js 16 (App Router, RSC) · React 19 · TypeScript strict · Tailwind v4 · shadcn/ui on Base UI + Radix (`radix-vega` style) · `motion` · `recharts` / `d3` / `@xyflow/react` · `next-intl` · `next-themes` · `sonner` · `@heroicons/react` (Lucide fallback).
