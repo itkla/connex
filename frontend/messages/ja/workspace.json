@@ -358,6 +358,7 @@
         "actionNotePlaceholder": "メモの内容",
         "actionNoteRequired": "メモの内容を入力してください",
         "actionOwnerRequired": "割り当てる担当者を選択してください",
+        "actionResponseDueRequired": "初回応答期限を1〜8760時間の範囲で設定してください",
         "actionStageRequired": "移動先のステージを選択してください",
         "actionOwner": "担当者",
         "actionStage": "ステージ",
