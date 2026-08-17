@@ -66,6 +66,8 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "PersonMapper",
         MAPPERS + "PersonEmploymentMapper",
         MAPPERS + "PersonLifecycleHistoryMapper",
+        MAPPERS + "PersonQualificationMapper",
+        MAPPERS + "QualificationCriterionMapper",
         MAPPERS + "ProviderCaptureMapper",
         MAPPERS + "PipelineMapper",
         MAPPERS + "TagMapper",

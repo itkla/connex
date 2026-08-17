@@ -54,6 +54,7 @@ public class PersonLifecycleService {
     private final AuditService auditService;
     private final RuleTriggerPublisher ruleTriggers;
     private final LeadResponseSlaService leadResponseSla;
+    private final PersonQualificationService qualificationService;
     private final NotificationChangePublisher notificationChanges;
     private final Clock clock;
 
@@ -138,6 +139,9 @@ public class PersonLifecycleService {
         }
         PersonDisqualificationReason acceptedReason =
             requireReasonDisposition(requested, reason);
+        if (transitioning && requested == PersonLifecycleStage.QUALIFIED) {
+            requireQualificationCriteriaMet(workspaceId, personId);
+        }
         if (transitioning && requested == PersonLifecycleStage.CONVERTED) {
             requireLinkedDeal(workspaceId, personId);
         }
@@ -188,6 +192,22 @@ public class PersonLifecycleService {
                 "A disqualification reason applies only when disqualifying a contact");
         }
         return null;
+    }
+
+    /**
+     * Holds a workspace to its own stated standard: every criterion it marked required must be met
+     * before a contact can be called qualified. A workspace that configured no required criteria is
+     * unaffected, so the gate never invents a standard nobody asked for — and, like the converted
+     * gate below, it is enforced here rather than in the client so it cannot be skipped by calling
+     * the API directly.
+     */
+    private void requireQualificationCriteriaMet(int workspaceId, int personId) {
+        List<String> unmet = qualificationService.unmetRequiredCriteria(workspaceId, personId);
+        if (!unmet.isEmpty()) {
+            throw new BadRequestException(
+                "This contact does not yet meet every required qualification criterion: "
+                    + String.join(", ", unmet));
+        }
     }
 
     private void requireLinkedDeal(int workspaceId, int personId) {

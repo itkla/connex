@@ -62,6 +62,7 @@ import ooo.klae.connex.backend.services.EmploymentService;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.NoteService;
 import ooo.klae.connex.backend.services.PersonLifecycleService;
+import ooo.klae.connex.backend.services.PersonQualificationService;
 import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.ScoringService;
 import ooo.klae.connex.backend.services.TaskService;
@@ -72,6 +73,7 @@ import ooo.klae.connex.backend.util.AnalyticsPeriods.Window;
 class RecordListControllerTest {
     @Mock private PersonService personService;
     @Mock private PersonLifecycleService personLifecycleService;
+    @Mock private PersonQualificationService personQualificationService;
     @Mock private EmploymentService employmentService;
     @Mock private ConnectionService connectionService;
     @Mock private BulkOperationService bulkOperationService;
@@ -1016,8 +1018,8 @@ class RecordListControllerTest {
 
     private PersonController personController() {
         return new PersonController(
-            personService, personLifecycleService, employmentService, connectionService,
-            bulkOperationService, workspaceService, memberScopeResolver);
+            personService, personLifecycleService, personQualificationService, employmentService,
+            connectionService, bulkOperationService, workspaceService, memberScopeResolver);
     }
 
     private CompanyController companyController() {
