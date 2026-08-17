@@ -18,6 +18,8 @@ import {
     RECORD_TYPES,
     SCHEDULE_RECORD_TYPES,
     actionsFor,
+    actionWithDefaults,
+    DEFAULT_RESPONSE_DUE_HOURS,
     eventsFor,
 } from "@/app/components/settings/workflows/vocabulary";
 import type { WorkflowEditorDocument } from "@/app/components/settings/workflows/workflowEditorReducer";
@@ -461,7 +463,7 @@ function ActionFields({
     return (
         <div className="space-y-4">
             <LabeledField label={tr("actionType")}>
-                <Select value={node.config.type} onValueChange={(type) => update({ type }, "commit")} disabled={readOnly}>
+                <Select value={node.config.type} onValueChange={(type) => update(actionWithDefaults(type), "commit")} disabled={readOnly}>
                     <SelectTrigger size="sm" {...fieldProps("config.type")}><SelectValue /></SelectTrigger>
                     <SelectContent>
                         {actionsFor(recordType).map((type) => <SelectItem key={type} value={type}>{tr(`action.${type}`)}</SelectItem>)}
@@ -512,6 +514,20 @@ function ActionFields({
                             {(fields?.tags ?? []).map((tag) => <SelectItem key={tag.id} value={String(tag.id)}>{tag.name}</SelectItem>)}
                         </SelectContent>
                     </Select>
+                </LabeledField>
+            ) : null}
+            {node.config.type === "set_response_due" ? (
+                <LabeledField label={tr("respondWithin")}>
+                    <Input
+                        type="number"
+                        min={1}
+                        max={8760}
+                        value={node.config.dueInHours ?? DEFAULT_RESPONSE_DUE_HOURS}
+                        onChange={(event) => update({ ...node.config, dueInHours: Number(event.target.value) }, "transient")}
+                        onBlur={onCommitTransient}
+                        disabled={readOnly}
+                        {...fieldProps("config.dueInHours")}
+                    />
                 </LabeledField>
             ) : null}
             {node.config.type === "assign_owner" ? (

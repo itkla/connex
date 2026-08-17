@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.DealSegmentQueryRequest;
+import ooo.klae.connex.backend.beans.PersonFirstResponseState;
 import ooo.klae.connex.backend.beans.PersonLeadSource;
 import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.dto.MemberScope;
@@ -59,12 +60,14 @@ public class ExportController {
             @RequestParam(required = false) List<PersonLifecycleStage> lifecycleStages,
             @RequestParam(defaultValue = "false") boolean noLifecycle,
             @RequestParam(required = false) List<PersonLeadSource> leadSources,
-            @RequestParam(defaultValue = "false") boolean noLeadSource) {
+            @RequestParam(defaultValue = "false") boolean noLeadSource,
+            @RequestParam(required = false) List<PersonFirstResponseState> firstResponseStates,
+            @RequestParam(defaultValue = "false") boolean noFirstResponse) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
         return csv("contacts.csv", exportService.exportPersons(
             query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
-            leadSources, noLeadSource));
+            leadSources, noLeadSource, firstResponseStates, noFirstResponse));
     }
 
     /**

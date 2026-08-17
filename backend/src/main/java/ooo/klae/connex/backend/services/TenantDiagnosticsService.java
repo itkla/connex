@@ -69,7 +69,8 @@ public class TenantDiagnosticsService {
             JobRunRecorder.PROVIDER_CAPTURE,
             JobRunRecorder.OBJECT_DELETION_RETRY,
             JobRunRecorder.APPROVAL_RECONCILIATION,
-            JobRunRecorder.RELATIONSHIP_SIGNAL_RECONCILIATION);
+            JobRunRecorder.RELATIONSHIP_SIGNAL_RECONCILIATION,
+            JobRunRecorder.LEAD_RESPONSE_SLA);
     private static final Set<String> JOB_DETAIL_KEYS = Set.of(
             "phase",
             "purgedCount",

@@ -176,8 +176,55 @@ time-to-convert reporting, and it survives archive/restore of the contact.
 | 1 | Lifecycle stage, qualification/disqualification reasons, transition history, RBAC, audit, rule triggers, contact-list filtering and facets | see #559 children |
 | 2 | Lifecycle UI: stage control, disqualify dialog, history timeline, browser filter, EN/JA | see #559 children |
 | 3 | Record-level source provenance and the untrusted-intake quarantine table | deferred |
-| 4 | Routing, assignment, first-response SLA and escalation on the existing rule engine | deferred |
+| 4 | Routing, assignment, first-response SLA and escalation on the existing rule engine | ✅ |
 | 5 | Qualification criteria configuration and deterministic scoring | deferred |
 | 6 | Lifecycle reporting and attribution | deferred |
 
 Increments 3–6 are tracked as separate issues under #559 and are not blocked on further model decisions.
+
+## First-response SLA
+
+The SLA clock is state on the contact — `first_response_due_at`, `first_responded_at`,
+`first_response_breached_at` — and, like every other lifecycle column, it is readable only by the
+workspace that owns the contact.
+
+**Starting the clock is a rule action, not a workspace setting.** The `set_response_due` action puts
+a contact under a deadline a configured number of hours out; the existing condition language decides
+which leads get which deadline, so a workspace can hold inbound web leads to four hours and partner
+referrals to two days without a second configuration surface. Starting a clock on a contact that
+already has one is a no-op: the deadline describes the *first* response, and a re-firing rule must
+not buy the workspace more time.
+
+**Logging an activity against the contact stops the clock.** An activity is this product's record of
+having touched someone. That includes an activity logged by a rule's own `log_activity` action: a
+workspace that automates an acknowledgement has decided that acknowledgement is a response, and
+classifying touches by who made them would be a hidden rule nobody asked for. Interactions written by
+provider capture and bulk history import do *not* stop it: neither path models direction, so counting
+them would let the lead's own inbound message satisfy the workspace's own response deadline. A workspace whose reps reply only from a synced mailbox will
+therefore see breaches it has arguably answered — closing that needs direction on captured
+interactions, which is tracked separately.
+
+**Breaches are swept, not computed on read.** `LeadResponseSlaScheduler` marks passed deadlines and
+publishes `person.first_response_overdue`, so escalation is authored with the actions that already
+exist — notify, create a task, reassign the owner. The stamp is a guarded single statement, so two
+overlapping sweeps escalate once and a response that lands mid-sweep wins.
+
+**A restricted contact is never breached.** A contact under an APPI processing restriction —
+suspended or provision-ceased — is excluded from the sweep's selection *and* from the guarded stamp,
+so a restriction landing mid-sweep wins. Stamping one would both process a contact the workspace is
+no longer allowed to process and consume the single breach the guard permits, after which rule
+execution rejects the record as unavailable and the escalation could never fire. Excluded, the
+deadline simply stays unbreached and escalates once the restriction lifts.
+
+**A late answer keeps its breach.** The two timestamps are not mutually exclusive; erasing the breach
+to record the answer would destroy the evidence the SLA exists to produce. The queue of leads still
+waiting on somebody is the breached-and-unanswered set, which is what the browser's *Overdue* facet
+shows.
+
+**Leaving the lifecycle pass clears the clock.** Withdrawing from the lifecycle, or recycling the
+contact back to the top of it, ends the pass the deadline belonged to; the next pass gets a fresh
+clock from whichever rule puts it under an SLA again.
+
+Deliberately not built here: round-robin and capacity-aware assignment (it needs durable rotation
+state and is its own design), and elapsed time-to-first-response reporting, which belongs with
+increment 6.

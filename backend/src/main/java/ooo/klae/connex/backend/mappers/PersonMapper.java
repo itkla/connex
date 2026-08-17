@@ -7,11 +7,13 @@ import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.PersonDisqualificationReason;
+import ooo.klae.connex.backend.beans.PersonFirstResponseState;
 import ooo.klae.connex.backend.beans.PersonLeadSource;
 import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.dto.CompanyEngagementPersonDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.PersonBreachRow;
 import ooo.klae.connex.backend.dto.RelationshipEvidenceRowDto;
 import ooo.klae.connex.backend.dto.RelationshipEvidenceTotalsDto;
 import ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto;
@@ -94,6 +96,8 @@ public interface PersonMapper {
             @Param("noLifecycle") boolean noLifecycle,
             @Param("leadSources") List<PersonLeadSource> leadSources,
             @Param("noLeadSource") boolean noLeadSource,
+            @Param("firstResponseStates") List<PersonFirstResponseState> firstResponseStates,
+            @Param("noFirstResponse") boolean noFirstResponse,
             @Param("archived") boolean archived,
             @Param("limit") int limit, @Param("offset") int offset);
     long countPersons(@Param("workspaceId") int workspaceId, @Param("query") String query,
@@ -104,6 +108,8 @@ public interface PersonMapper {
             @Param("noLifecycle") boolean noLifecycle,
             @Param("leadSources") List<PersonLeadSource> leadSources,
             @Param("noLeadSource") boolean noLeadSource,
+            @Param("firstResponseStates") List<PersonFirstResponseState> firstResponseStates,
+            @Param("noFirstResponse") boolean noFirstResponse,
             @Param("archived") boolean archived);
     /**
      * CSV export using the browser filters and member scope, excluding suspended contacts.
@@ -116,6 +122,8 @@ public interface PersonMapper {
             @Param("noLifecycle") boolean noLifecycle,
             @Param("leadSources") List<PersonLeadSource> leadSources,
             @Param("noLeadSource") boolean noLeadSource,
+            @Param("firstResponseStates") List<PersonFirstResponseState> firstResponseStates,
+            @Param("noFirstResponse") boolean noFirstResponse,
             @Param("archived") boolean archived);
     /** Ids using the browser's filters and member scope; backs "select all matching". */
     List<Integer> getPersonIdsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
@@ -125,6 +133,8 @@ public interface PersonMapper {
             @Param("noLifecycle") boolean noLifecycle,
             @Param("leadSources") List<PersonLeadSource> leadSources,
             @Param("noLeadSource") boolean noLeadSource,
+            @Param("firstResponseStates") List<PersonFirstResponseState> firstResponseStates,
+            @Param("noFirstResponse") boolean noFirstResponse,
             @Param("archived") boolean archived, @Param("limit") int limit);
     List<String> distinctCompanies(int workspaceId);
     List<String> distinctTitles(int workspaceId);
@@ -147,6 +157,15 @@ public interface PersonMapper {
      * @return one bucket per source
      */
     List<FacetCount> countsByLeadSource(@Param("workspaceId") int workspaceId);
+    /**
+     * How many active contacts sit in each first-response SLA state, matching the page filter's
+     * population. Contacts that have never been put under an SLA are counted under the
+     * {@code __none__} key so the browser can offer them as a bucket.
+     *
+     * @param workspaceId owning workspace
+     * @return one bucket per state
+     */
+    List<FacetCount> countsByFirstResponseState(@Param("workspaceId") int workspaceId);
     /** How many contacts the workspace currently holds archived; drives the browser's archived toggle. */
     long countArchivedPersons(@Param("workspaceId") int workspaceId);
     /** Ids of contacts the team has engaged (has any activity, note, or task), used as warm-intro entry points. */
@@ -210,6 +229,78 @@ public interface PersonMapper {
         @Param("source") PersonLeadSource source,
         @Param("detail") String detail,
         @Param("referrerPersonId") Integer referrerPersonId
+    );
+    /**
+     * Starts a first-response SLA clock on a contact that has none, clearing nothing that exists:
+     * the {@code first_response_due_at IS NULL} guard makes a re-firing rule idempotent and stops a
+     * second rule from extending a deadline that is already running or already answered.
+     *
+     * @param workspaceId owning workspace
+     * @param id contact id
+     * @param dueAt deadline for the first response
+     * @return rows updated; zero when a clock was already set or the contact is archived
+     */
+    int startFirstResponseClock(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("dueAt") LocalDateTime dueAt
+    );
+    /**
+     * Clears the whole first-response clock, used when a contact leaves the lifecycle pass the
+     * clock belonged to. The transition itself remains in {@code person_lifecycle_history}.
+     *
+     * @param workspaceId owning workspace
+     * @param id contact id
+     * @return rows updated; zero when no clock was set
+     */
+    int clearFirstResponseClock(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    /**
+     * Records the first response against a running clock. A contact that has already been responded
+     * to is left alone, so the timestamp always describes the first response and never the latest.
+     * An existing breach is deliberately preserved: a late answer is still a late answer.
+     *
+     * @param workspaceId owning workspace
+     * @param id contact id
+     * @param respondedAt when the response was recorded
+     * @return rows updated; zero when no clock is running or a response is already recorded
+     */
+    int recordFirstResponse(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("respondedAt") LocalDateTime respondedAt
+    );
+    /**
+     * Marks a passed deadline as breached. Every condition the sweep selected on is re-asserted in
+     * the WHERE clause, so two overlapping sweeps — or a response, an archive, or a processing
+     * restriction that lands between the select and the update — can never produce a second breach,
+     * a breach on an answered contact, or a breach on a contact the workspace may no longer
+     * process.
+     *
+     * @param workspaceId owning workspace
+     * @param id contact id
+     * @param breachedAt when the breach was observed
+     * @return rows updated; zero when the contact no longer qualifies
+     */
+    int recordFirstResponseBreach(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id,
+        @Param("breachedAt") LocalDateTime breachedAt
+    );
+    /**
+     * Contacts whose first-response deadline has passed unanswered and unbreached, longest-waiting
+     * first, excluding archived and restricted contacts. Each row carries the name the breach audit
+     * entry needs, so a batch costs one query rather than one per breach. The set drains as the
+     * sweep stamps it, so no cursor is needed to make progress.
+     *
+     * @param workspaceId owning workspace
+     * @param asOf evaluation instant; deadlines at or before it have passed
+     * @param limit maximum rows to return
+     * @return breaching contacts, oldest deadline first
+     */
+    List<PersonBreachRow> findFirstResponseBreaches(
+        @Param("workspaceId") int workspaceId,
+        @Param("asOf") LocalDateTime asOf,
+        @Param("limit") int limit
     );
     int updateProcessingRestrictions(
         @Param("workspaceId") int workspaceId,

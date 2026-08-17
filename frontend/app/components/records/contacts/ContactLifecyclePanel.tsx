@@ -38,6 +38,8 @@ import { cn } from '@/lib/utils';
 type Props = {
     contactId: number;
     lifecycle: ContactLifecycle;
+    /** The contact's first-response SLA clock, absent when it was never put under one (#559). */
+    firstResponse?: FirstResponseClock;
     /** Whether the viewer may move the contact; without it the panel is read-only. */
     canEdit: boolean;
     /** Whether a deal is linked to the contact, the prerequisite for marking it converted. */
@@ -46,6 +48,13 @@ type Props = {
 };
 
 const WITHDRAW_VALUE = '__withdraw__';
+
+/** The three SLA timestamps a contact carries; all absent means no clock ever ran. */
+export type FirstResponseClock = {
+    dueAt?: string | null;
+    respondedAt?: string | null;
+    breachedAt?: string | null;
+};
 
 /**
  * The contact's current lead-lifecycle state and its stage control (issue #559).
@@ -60,17 +69,40 @@ const WITHDRAW_VALUE = '__withdraw__';
 export default function ContactLifecyclePanel({
     contactId,
     lifecycle,
+    firstResponse,
     canEdit,
     hasLinkedDeal,
     className,
 }: Props) {
     const t = useTranslations('ContactLifecycle');
+    const tsla = useTranslations('ContactResponseSla');
     const locale = useLocale();
     const router = useRouter();
     const currentStage = lifecycle.stage ?? null;
     const currentReason = lifecycle.disqualifiedReason ?? null;
     const currentNotes = lifecycle.qualificationNotes ?? null;
     const currentChangedAt = lifecycle.changedAt ?? null;
+    const slaLine = useMemo(() => {
+        const dueAt = firstResponse?.dueAt ?? null;
+        if (!dueAt) return null;
+        const respondedAt = firstResponse?.respondedAt ?? null;
+        const breachedAt = firstResponse?.breachedAt ?? null;
+        if (respondedAt) {
+            return {
+                overdue: false,
+                text: tsla(breachedAt ? 'respondedLateLine' : 'respondedLine', {
+                    when: formatDateTime(respondedAt, locale),
+                }),
+            };
+        }
+        if (breachedAt) {
+            return {
+                overdue: true,
+                text: tsla('overdueLine', { when: formatDateTime(dueAt, locale) }),
+            };
+        }
+        return { overdue: false, text: tsla('dueLine', { when: formatDateTime(dueAt, locale) }) };
+    }, [firstResponse, locale, tsla]);
 
     const [open, setOpen] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -146,6 +178,14 @@ export default function ContactLifecyclePanel({
                         {currentReason ? (
                             <p className="mt-1 text-xs text-muted-foreground">
                                 {t('reasonLine', { reason: t(`reason.${currentReason}`) })}
+                            </p>
+                        ) : null}
+                        {slaLine ? (
+                            <p className={cn(
+                                'mt-1 text-xs',
+                                slaLine.overdue ? 'text-destructive' : 'text-muted-foreground',
+                            )}>
+                                {slaLine.text}
                             </p>
                         ) : null}
                     </div>

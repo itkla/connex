@@ -360,6 +360,15 @@ connex:
         scheduling-enabled: ${CONNEX_RULES_SCHEDULING_ENABLED:true}
         evaluation-delay-ms: ${CONNEX_RULES_EVALUATION_DELAY_MS:900000}
         initial-delay-ms: ${CONNEX_RULES_INITIAL_DELAY_MS:900000}
+    # First-response SLA breach sweep. The interval bounds how late a breach is noticed, so it is
+    # deliberately shorter than the rule cadence; batch-size x max-batches caps the work one
+    # workspace can take from a single pass, and a larger backlog drains over subsequent passes.
+    lead-response-sla:
+        sweep-enabled: ${CONNEX_LEAD_RESPONSE_SLA_SWEEP_ENABLED:true}
+        sweep-delay-ms: ${CONNEX_LEAD_RESPONSE_SLA_SWEEP_DELAY_MS:300000}
+        sweep-initial-delay-ms: ${CONNEX_LEAD_RESPONSE_SLA_SWEEP_INITIAL_DELAY_MS:300000}
+        batch-size: ${CONNEX_LEAD_RESPONSE_SLA_BATCH_SIZE:200}
+        max-batches: ${CONNEX_LEAD_RESPONSE_SLA_MAX_BATCHES:10}
     workflows:
         # Rolling-deployment fence for the `document` automation record type. A binary that predates
         # document automation would attach a document run's task/activity/note to nothing and fails

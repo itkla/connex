@@ -267,6 +267,8 @@
         "actionBodyPlaceholder": "Message (optional)",
         "dueIn": "due in",
         "days": "days",
+        "respondWithin": "respond within",
+        "hours": "hours",
         "activityTypePlaceholder": "Activity type (e.g. call)",
         "activitySubjectPlaceholder": "Subject",
         "tag": "Tag",
@@ -314,7 +316,8 @@
                 "updated": "updated",
                 "job_changed": "changed jobs",
                 "owner_changed": "owner changed",
-                "lifecycle_changed": "lifecycle changed"
+                "lifecycle_changed": "lifecycle changed",
+                "first_response_overdue": "first response overdue"
             },
             "task": {
                 "created": "created",
@@ -336,6 +339,7 @@
             "remove_tag": "remove a tag",
             "create_note": "add a note",
             "assign_owner": "assign an owner",
+            "set_response_due": "set a first-response deadline",
             "change_stage": "move to a stage"
         },
         "runAs": {
@@ -354,6 +358,7 @@
         "actionNotePlaceholder": "Note text",
         "actionNoteRequired": "Add note text",
         "actionOwnerRequired": "Choose an owner to assign",
+        "actionResponseDueRequired": "Set a first-response deadline between 1 and 8760 hours",
         "actionStageRequired": "Choose a stage to move to",
         "actionOwner": "Owner",
         "actionStage": "Stage",

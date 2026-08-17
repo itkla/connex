@@ -73,6 +73,7 @@ class RuleServiceTest extends AbstractServiceTest {
             case "add_tag", "remove_tag" -> action.setTagId(1);
             case "create_note" -> action.setBody("Automated note");
             case "assign_owner" -> action.setTargetUserId(1);
+            case "set_response_due" -> action.setDueInHours(4);
             case "change_stage" -> action.setTargetStageId(1);
             default -> { }
         }
@@ -363,6 +364,37 @@ class RuleServiceTest extends AbstractServiceTest {
         bare.setType("assign_owner");
         assertThrows(BadRequestException.class,
             () -> ruleService.create(req("deal", entityChange("deal.stage_changed"), "user", bare)));
+    }
+
+    @Test
+    void create_setResponseDueWithoutHours_throws() {
+        RuleAction bare = new RuleAction();
+        bare.setType("set_response_due");
+        assertThrows(BadRequestException.class, () -> ruleService.create(
+            req("person", entityChange("person.created"), "user", bare)));
+    }
+
+    @Test
+    void create_setResponseDueBeyondAYear_throws() {
+        RuleAction tooLong = new RuleAction();
+        tooLong.setType("set_response_due");
+        tooLong.setDueInHours(24 * 365 + 1);
+        assertThrows(BadRequestException.class, () -> ruleService.create(
+            req("person", entityChange("person.created"), "user", tooLong)));
+    }
+
+    @Test
+    void create_setResponseDueOnDealRule_throws() {
+        assertThrows(BadRequestException.class, () -> ruleService.create(
+            req("deal", entityChange("deal.won"), "user", action("set_response_due"))));
+    }
+
+    @Test
+    void create_firstResponseOverdueEscalation_roundTrip() {
+        RuleDto created = ruleService.create(req(
+            "person", entityChange("person.first_response_overdue"), "user",
+            action("notify"), action("assign_owner")));
+        assertEquals(2, created.getActions().size());
     }
 
     @Test

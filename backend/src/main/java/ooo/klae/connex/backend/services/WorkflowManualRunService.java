@@ -26,6 +26,7 @@ import tools.jackson.databind.ObjectMapper;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.PersonFirstResponseState;
 import ooo.klae.connex.backend.beans.PersonLeadSource;
 import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.beans.SavedView;
@@ -360,7 +361,8 @@ public class WorkflowManualRunService {
                 "search_snapshot",
                 resolveFilterForRecordType(recordType, new WorkflowManualFilter(
                     query, null, null, null, false, null, null, null,
-                    null, null, null, null, null, null, false, null, false), requesterId),
+                    null, null, null, null, null, null, false, null, false, null, false),
+                    requesterId),
                 scope);
         }
         throw new BadRequestException("Unsupported manual workflow scope");
@@ -410,7 +412,7 @@ public class WorkflowManualRunService {
         WorkflowManualFilter resolved = filter == null
             ? new WorkflowManualFilter(
                 null, null, null, null, false, null, null, null,
-                null, null, null, null, null, null, false, null, false)
+                null, null, null, null, null, null, false, null, false, null, false)
             : filter;
         MemberScope memberScope = memberScopeResolver.resolve(
             resolved.memberScope(), resolved.memberIds(), requesterId);
@@ -425,6 +427,8 @@ public class WorkflowManualRunService {
                 Boolean.TRUE.equals(resolved.noLifecycle()),
                 resolved.leadSources(),
                 Boolean.TRUE.equals(resolved.noLeadSource()),
+                resolved.firstResponseStates(),
+                Boolean.TRUE.equals(resolved.noFirstResponse()),
                 false);
             case "company" -> companyService.getMatchingCompanyIds(
                 blankToNull(resolved.query()),
@@ -657,11 +661,12 @@ public class WorkflowManualRunService {
         if (config == null || config.isNull()) {
             return new WorkflowManualFilter(
                 null, null, null, null, false, null, null, null,
-                null, null, null, null, null, null, false, null, false);
+                null, null, null, null, null, null, false, null, false, null, false);
         }
         JsonNode filters = config.get("filters");
         List<String> lifecycle = textValues(filters, "lifecycle");
         List<String> leadSource = textValues(filters, "leadSource");
+        List<String> firstResponse = textValues(filters, "firstResponse");
         return new WorkflowManualFilter(
             text(config.get("query")),
             textValues(filters, "company"),
@@ -679,7 +684,9 @@ public class WorkflowManualRunService {
             enumValues(lifecycle, PersonLifecycleStage.class),
             containsEmptySentinel(lifecycle),
             enumValues(leadSource, PersonLeadSource.class),
-            containsEmptySentinel(leadSource));
+            containsEmptySentinel(leadSource),
+            enumValues(firstResponse, PersonFirstResponseState.class),
+            containsEmptySentinel(firstResponse));
     }
 
     /**
@@ -731,6 +738,8 @@ public class WorkflowManualRunService {
             || Boolean.TRUE.equals(filter.noLifecycle())
             || nonempty(filter.leadSources())
             || Boolean.TRUE.equals(filter.noLeadSource())
+            || nonempty(filter.firstResponseStates())
+            || Boolean.TRUE.equals(filter.noFirstResponse())
             || blankToNull(filter.memberScope()) != null;
     }
 

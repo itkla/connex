@@ -108,6 +108,15 @@ public class PersonDto {
 
     private Integer referrerPersonId;
 
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private LocalDateTime firstResponseDueAt;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private LocalDateTime firstRespondedAt;
+
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private LocalDateTime firstResponseBreachedAt;
+
     public static PersonDto from(Person p) {
         if (p == null) return null;
         return populate(new PersonDto(), p);
@@ -144,6 +153,9 @@ public class PersonDto {
         dto.setLeadSource(p.getLeadSource());
         dto.setLeadSourceDetail(p.getLeadSourceDetail());
         dto.setReferrerPersonId(p.getReferrerPersonId());
+        dto.setFirstResponseDueAt(p.getFirstResponseDueAt());
+        dto.setFirstRespondedAt(p.getFirstRespondedAt());
+        dto.setFirstResponseBreachedAt(p.getFirstResponseBreachedAt());
         return dto;
     }
 

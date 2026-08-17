@@ -50,7 +50,7 @@ import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompany
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
 import { updateContact, createContact, importBusinessCard, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkArchiveContacts, bulkRestoreContacts, bulkAssignPersonOwner, getActiveWorkspaceMembers, getContactIds, exportContactsCsv, isFieldError, uploadContactPicture } from '@/app/lib/api';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
-import { type BusinessCardImportDraft, type Contact, type ContactLeadSource, type ContactLifecycleStage, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag, type WorkspaceMember } from '@/app/lib/types';
+import { type BusinessCardImportDraft, type Contact, type ContactFirstResponseState, type ContactLeadSource, type ContactLifecycleStage, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag, type WorkspaceMember } from '@/app/lib/types';
 import TemperaturePill from '@/app/components/records/TemperaturePill';
 import CommentIndicatorChip from '@/app/components/records/comments/CommentIndicatorChip';
 import { useCommentIndicators } from '@/app/hooks/useCommentIndicators';
@@ -59,6 +59,7 @@ import { PageShell } from '@/app/components/PageShell';
 import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
 import { LIFECYCLE_NONE_KEY, LIFECYCLE_STAGES, asLifecycleStage } from '@/app/lib/contactLifecycle';
 import { LEAD_SOURCE_NONE_KEY, LEAD_SOURCES, asLeadSource } from '@/app/lib/contactProvenance';
+import { FIRST_RESPONSE_NONE_KEY, FIRST_RESPONSE_STATES, asFirstResponseState } from '@/app/lib/contactSla';
 import {
     recordDetailNavigationPath,
     recordDetailPath,
@@ -102,6 +103,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
     const ts = useTranslations('MemberScope');
     const tl = useTranslations('ContactLifecycle');
     const tp = useTranslations('ContactProvenance');
+    const tsla = useTranslations('ContactResponseSla');
     const reduce = useReducedMotion() ?? false;
     const {
         displayMode,
@@ -135,7 +137,11 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         const sources = leadSource
             .map((key) => asLeadSource(key))
             .filter((src): src is ContactLeadSource => src !== null);
-        const params: { companies?: string[]; titles?: string[]; noCompany?: boolean; scope?: 'me' | 'members' | 'unassigned'; memberIds?: number[]; lifecycleStages?: ContactLifecycleStage[]; noLifecycle?: boolean; leadSources?: ContactLeadSource[]; noLeadSource?: boolean; archived?: boolean } = {};
+        const firstResponse = filterState.firstResponse ?? [];
+        const slaStates = firstResponse
+            .map((key) => asFirstResponseState(key))
+            .filter((state): state is ContactFirstResponseState => state !== null);
+        const params: { companies?: string[]; titles?: string[]; noCompany?: boolean; scope?: 'me' | 'members' | 'unassigned'; memberIds?: number[]; lifecycleStages?: ContactLifecycleStage[]; noLifecycle?: boolean; leadSources?: ContactLeadSource[]; noLeadSource?: boolean; firstResponseStates?: ContactFirstResponseState[]; noFirstResponse?: boolean; archived?: boolean } = {};
         if (companies.length) params.companies = companies;
         if (titles.length) params.titles = titles;
         if (company.includes(FILTER_EMPTY)) params.noCompany = true;
@@ -143,6 +149,8 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         if (lifecycle.includes(FILTER_EMPTY)) params.noLifecycle = true;
         if (sources.length) params.leadSources = sources;
         if (leadSource.includes(FILTER_EMPTY)) params.noLeadSource = true;
+        if (slaStates.length) params.firstResponseStates = slaStates;
+        if (firstResponse.includes(FILTER_EMPTY)) params.noFirstResponse = true;
         if (ownerScope.mode !== 'all') params.scope = ownerScope.mode;
         if (ownerScope.mode === 'members') params.memberIds = ownerScope.memberIds;
         if (showArchived) params.archived = true;
@@ -273,8 +281,21 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         if (sourceOptions.length) {
             out.push({ key: 'leadSource', label: tp('title'), options: sourceOptions });
         }
+        const slaCounts = new Map(
+            (personFacets.firstResponseStates ?? []).map((facet) => [facet.key, facet.count]),
+        );
+        const selectedSla = new Set(filterState.firstResponse ?? []);
+        const slaOptions = FIRST_RESPONSE_STATES
+            .filter((state) => (slaCounts.get(state) ?? 0) > 0 || selectedSla.has(state))
+            .map((state) => ({ key: state as string, label: tsla(`state.${state}`) }));
+        if ((slaCounts.get(FIRST_RESPONSE_NONE_KEY) ?? 0) > 0 || selectedSla.has(FILTER_EMPTY)) {
+            slaOptions.push({ key: FILTER_EMPTY, label: tsla('state.none') });
+        }
+        if (slaOptions.length) {
+            out.push({ key: 'firstResponse', label: tsla('title'), options: slaOptions });
+        }
         return out;
-    }, [personFacets, filterState.lifecycle, filterState.leadSource, t, tl, tp]);
+    }, [personFacets, filterState.lifecycle, filterState.leadSource, filterState.firstResponse, t, tl, tp, tsla]);
 
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
     useEffect(() => { getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([])); }, []);

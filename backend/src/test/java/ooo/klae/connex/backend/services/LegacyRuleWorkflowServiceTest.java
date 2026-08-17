@@ -186,6 +186,27 @@ class LegacyRuleWorkflowServiceTest {
     }
 
     @Test
+    void aChangedResponseDeadlineIsASemanticUpdateNotANoOp() {
+        PersistedAggregate aggregate = persistedAggregate(true);
+        stubAggregate(aggregate);
+        doAnswer(invocation -> {
+            invocation.<WorkflowVersion>getArgument(0).setId(303L);
+            return null;
+        }).when(workflowVersionMapper).insert(any(WorkflowVersion.class));
+        when(ruleMapper.update(any(Rule.class))).thenReturn(1);
+        when(workflowMapper.replaceLegacyPublication(
+                any(Workflow.class), eq(303L), eq(23), eq(202L), eq(4)))
+            .thenReturn(1);
+        RuleRequest request = request("Rule", true, "user", "deal.won");
+        request.getActions().getFirst().setDueInHours(8);
+
+        service.update(7, 9, 23, request);
+
+        verify(workflowVersionMapper).insert(any(WorkflowVersion.class));
+        verify(ruleMapper).update(any(Rule.class));
+    }
+
+    @Test
     void semanticUpdatePreservesRunAsAndCreatesOneDeterministicVersion() {
         PersistedAggregate aggregate = persistedAggregate(true);
         stubAggregate(aggregate);

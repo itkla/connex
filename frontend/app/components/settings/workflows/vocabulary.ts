@@ -10,7 +10,7 @@ export const RECORD_TYPES = ["deal", "company", "person", "task", "document"];
 export const EVENTS: Record<string, string[]> = {
     deal: ["deal.created", "deal.stage_changed", "deal.updated", "deal.won", "deal.lost", "deal.owner_changed", "deal.value_changed"],
     company: ["company.created", "company.updated", "company.owner_changed"],
-    person: ["person.created", "person.updated", "person.job_changed", "person.owner_changed", "person.lifecycle_changed"],
+    person: ["person.created", "person.updated", "person.job_changed", "person.owner_changed", "person.lifecycle_changed", "person.first_response_overdue"],
     task: ["task.created", "task.completed"],
     document: ["document.approval_requested", "document.approved", "document.rejected", "document.finalized", "document.superseded"],
 };
@@ -18,7 +18,7 @@ export const EVENTS: Record<string, string[]> = {
 export const ACTIONS: Record<string, string[]> = {
     deal: ["create_task", "log_activity", "add_tag", "remove_tag", "create_note", "assign_owner", "change_stage", "notify"],
     company: ["add_tag", "remove_tag", "notify"],
-    person: ["create_task", "log_activity", "add_tag", "remove_tag", "create_note", "assign_owner", "notify"],
+    person: ["create_task", "log_activity", "add_tag", "remove_tag", "create_note", "assign_owner", "set_response_due", "notify"],
     task: ["notify"],
     document: ["notify", "create_task", "log_activity", "create_note"],
 };
@@ -65,7 +65,23 @@ export function actionsFor(recordType: string): string[] {
     return ACTIONS[recordType] ?? ["notify"];
 }
 
+/** Hours a new first-response SLA action asks for until the author changes it. */
+export const DEFAULT_RESPONSE_DUE_HOURS = 4;
+
+/**
+ * A freshly selected action of the given type, carrying any value the server requires.
+ *
+ * Selecting a type replaces the whole config, so a required field the editor only renders as a
+ * placeholder would never reach the server and the definition would be rejected on save. Both
+ * authoring surfaces build their action here so the two cannot disagree about what a new action is.
+ */
+export function actionWithDefaults(type: string): RuleAction {
+    return type === "set_response_due"
+        ? { type, dueInHours: DEFAULT_RESPONSE_DUE_HOURS }
+        : { type };
+}
+
 /** The default action appended when a step is added for a record type. */
 export function defaultAction(recordType: string): RuleAction {
-    return actionsFor(recordType).includes("notify") ? { type: "notify", title: "", body: "" } : { type: actionsFor(recordType)[0] };
+    return actionsFor(recordType).includes("notify") ? { type: "notify", title: "", body: "" } : actionWithDefaults(actionsFor(recordType)[0]);
 }

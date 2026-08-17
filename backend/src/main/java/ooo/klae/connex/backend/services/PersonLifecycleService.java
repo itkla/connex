@@ -53,6 +53,7 @@ public class PersonLifecycleService {
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
     private final RuleTriggerPublisher ruleTriggers;
+    private final LeadResponseSlaService leadResponseSla;
     private final NotificationChangePublisher notificationChanges;
     private final Clock clock;
 
@@ -151,6 +152,9 @@ public class PersonLifecycleService {
             workspaceId, personId, requested, changedAt, acceptedReason, retainedNote);
         if (transitioning) {
             recordTransition(workspaceId, personId, current, requested, acceptedReason, acceptedNote);
+            if (endsLifecyclePass(requested)) {
+                leadResponseSla.clearFirstResponseClock(workspaceId, personId);
+            }
         }
         Person after = requireOwnedPerson(workspaceId, personId);
         recordAudit(before, after, transitioning, acceptedReason, retainedNote);
@@ -159,6 +163,16 @@ public class PersonLifecycleService {
             ruleTriggers.publish(workspaceId, "person", personId, "person.lifecycle_changed");
         }
         return after;
+    }
+
+    /**
+     * Whether moving to this stage ends the lifecycle pass a first-response deadline belonged to.
+     * Withdrawing leaves the lifecycle entirely and recycling returns the contact to the top of it,
+     * so in both cases the old deadline no longer describes anything the workspace still owes; a
+     * fresh pass gets a fresh clock from whichever rule puts it under an SLA again.
+     */
+    private static boolean endsLifecyclePass(PersonLifecycleStage requested) {
+        return requested == null || requested == PersonLifecycleStage.RECYCLED;
     }
 
     private PersonDisqualificationReason requireReasonDisposition(

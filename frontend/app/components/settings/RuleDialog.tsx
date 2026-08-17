@@ -46,6 +46,8 @@ import {
     SCHEDULE_RECORD_TYPES,
     SEGMENT_RECORD_TYPES,
     actionsFor,
+    actionWithDefaults,
+    DEFAULT_RESPONSE_DUE_HOURS,
     defaultAction,
     eventsFor,
 } from "@/app/components/settings/workflows/vocabulary";
@@ -224,6 +226,11 @@ function RuleForm({
                 setError(t("actionOwnerRequired"));
                 return;
             }
+            if (action.type === "set_response_due"
+                && (!action.dueInHours || action.dueInHours < 1 || action.dueInHours > 8760)) {
+                setError(t("actionResponseDueRequired"));
+                return;
+            }
             if (action.type === "change_stage" && !action.targetStageId) {
                 setError(t("actionStageRequired"));
                 return;
@@ -238,9 +245,15 @@ function RuleForm({
                   ...(canFilterStage && targetStageId ? { targetStageId } : {}),
                   ...(throttle && throttleMinutes > 0 ? { throttleMinutes } : {}),
               };
-        const normalizedActions = actions.map((action) =>
-            action.type === "create_task" && action.dueInDays == null ? { ...action, dueInDays: 3 } : action,
-        );
+        const normalizedActions = actions.map((action) => {
+            if (action.type === "create_task" && action.dueInDays == null) {
+                return { ...action, dueInDays: 3 };
+            }
+            if (action.type === "set_response_due" && action.dueInHours == null) {
+                return { ...action, dueInHours: 4 };
+            }
+            return action;
+        });
         onSubmit({
             name: name.trim(),
             description: editing?.description,
@@ -513,7 +526,7 @@ function ActionRow({
     const t = useTranslations("WorkspaceRules");
     return (
         <div className="flex items-start gap-2 p-3">
-            <Select value={action.type} onValueChange={(type) => onChange({ type })}>
+            <Select value={action.type} onValueChange={(type) => onChange(actionWithDefaults(type))}>
                 <SelectTrigger size="sm" aria-label={t("actionType")} className="w-40 shrink-0"><SelectValue /></SelectTrigger>
                 <SelectContent>
                     {actionsFor(recordType).map((type) => (
@@ -564,6 +577,24 @@ function ActionRow({
                             className="h-9 w-16"
                         />
                         <span>{t("days")}</span>
+                    </div>
+                )}
+                {action.type === "set_response_due" && (
+                    <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                        <span>{t("respondWithin")}</span>
+                        <Input
+                            type="number"
+                            min={1}
+                            max={8760}
+                            value={action.dueInHours ?? DEFAULT_RESPONSE_DUE_HOURS}
+                            onChange={(event) => onChange({
+                                ...action,
+                                dueInHours: Math.max(1, Number(event.target.value) || DEFAULT_RESPONSE_DUE_HOURS),
+                            })}
+                            aria-label={t("respondWithin")}
+                            className="h-9 w-16"
+                        />
+                        <span>{t("hours")}</span>
                     </div>
                 )}
                 {action.type === "log_activity" && (

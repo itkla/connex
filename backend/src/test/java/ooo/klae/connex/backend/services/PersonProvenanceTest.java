@@ -125,7 +125,7 @@ class PersonProvenanceTest extends AbstractServiceTest {
             person.getId(), PersonLeadSource.WEB, null, null));
 
         assertEquals(0L, personService.countPersons(null, null, null, false,
-            MemberScope.allTeam(), null, false, List.of(PersonLeadSource.PARTNER), false, false));
+            MemberScope.allTeam(), null, false, List.of(PersonLeadSource.PARTNER), false, null, false, false));
     }
 
     @Test
@@ -135,12 +135,12 @@ class PersonProvenanceTest extends AbstractServiceTest {
         Person unsourced = newPerson(newCompany());
 
         List<Integer> fromEvents = personService.getPersonsPage(null, null, null, null, null, false,
-                MemberScope.allTeam(), null, false, List.of(PersonLeadSource.EVENT), false, false, 100, 0)
+                MemberScope.allTeam(), null, false, List.of(PersonLeadSource.EVENT), false, null, false, false, 100, 0)
             .stream().map(Person::getId).toList();
         assertEquals(List.of(sourced.getId()), fromEvents);
 
         List<Integer> unknownOrigin = personService.getPersonsPage(null, null, null, null, null, false,
-                MemberScope.allTeam(), null, false, null, true, false, 100, 0)
+                MemberScope.allTeam(), null, false, null, true, null, false, false, 100, 0)
             .stream().map(Person::getId).toList();
         assertEquals(List.of(unsourced.getId()), unknownOrigin);
 

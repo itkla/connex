@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.dto;
 
 import java.util.List;
 
+import ooo.klae.connex.backend.beans.PersonFirstResponseState;
 import ooo.klae.connex.backend.beans.PersonLeadSource;
 import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 
@@ -23,5 +24,7 @@ public record WorkflowManualFilter(
     List<PersonLifecycleStage> lifecycleStages,
     Boolean noLifecycle,
     List<PersonLeadSource> leadSources,
-    Boolean noLeadSource
+    Boolean noLeadSource,
+    List<PersonFirstResponseState> firstResponseStates,
+    Boolean noFirstResponse
 ) { }

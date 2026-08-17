@@ -37,6 +37,7 @@ public class RuleActionExecutor {
     private final ActivityService activityService;
     private final CompanyService companyService;
     private final PersonService personService;
+    private final LeadResponseSlaService leadResponseSlaService;
     private final DealService dealService;
     private final NoteService noteService;
     private final NotificationDelivery notificationDelivery;
@@ -56,6 +57,8 @@ public class RuleActionExecutor {
             case "remove_tag" -> removeTag(action, ctx);
             case "create_note" -> createNote(action, ctx);
             case "assign_owner" -> assignOwner(action, ctx);
+            case "set_response_due" ->
+                leadResponseSlaService.startFirstResponseClock(ctx.entityId(), action.getDueInHours());
             case "change_stage" -> dealService.changeStage(ctx.entityId(), action.getTargetStageId());
             case "notify" -> notify(action, ctx);
             default -> throw new BadRequestException("Unsupported action: " + action.getType());

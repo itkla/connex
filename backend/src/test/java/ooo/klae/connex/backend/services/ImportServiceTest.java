@@ -2320,7 +2320,7 @@ class ImportServiceTest extends AbstractServiceTest {
             "fill_empty"));
 
         String csv = exportService.exportPersons(
-            null, null, null, false, MemberScope.allTeam(), null, false, null, false);
+            null, null, null, false, MemberScope.allTeam(), null, false, null, false, null, false);
 
         assertTrue(csv.startsWith("id,name,email"), "header present");
         assertTrue(csv.contains("'=SUM(A1:A2)"), "formula prefixed with apostrophe");

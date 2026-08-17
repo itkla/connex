@@ -27,6 +27,10 @@ export type ContactsPageParams = PageParams & MemberScopeParams & {
     leadSources?: ContactLeadSource[];
     /** Includes contacts whose provenance was never captured (issue #559). */
     noLeadSource?: boolean;
+    /** First-response SLA states to include (issue #559). */
+    firstResponseStates?: ContactFirstResponseState[];
+    /** Includes contacts that were never put under a first-response SLA (issue #559). */
+    noFirstResponse?: boolean;
     /** Selects the archived contacts instead of the active ones (issue #854). */
     archived?: boolean;
 };
@@ -232,6 +236,11 @@ export type PersonFacets = {
      * provenance is counted under the `__none__` key.
      */
     leadSources: FacetCount[];
+    /**
+     * How many active contacts sit in each first-response SLA state (issue #559); contacts under no
+     * SLA are counted under the `__none__` key.
+     */
+    firstResponseStates: FacetCount[];
 };
 
 export type CompanyFacets = {
@@ -1168,7 +1177,18 @@ export type Contact = {
     leadSource?: ContactLeadSource | null;
     leadSourceDetail?: string | null;
     referrerPersonId?: number | null;
+    /**
+     * First-response SLA clock (issue #559), owner-workspace only. The deadline is set by the rule
+     * engine's `set_response_due` action; absent means the contact was never put under an SLA. A
+     * contact answered after its deadline carries both a response and a breach.
+     */
+    firstResponseDueAt?: string | null;
+    firstRespondedAt?: string | null;
+    firstResponseBreachedAt?: string | null;
 };
+
+/** The single first-response SLA state a contact is in, mirroring the server (issue #559). */
+export type ContactFirstResponseState = 'PENDING' | 'OVERDUE' | 'RESPONDED';
 
 /** The closed vocabulary for how a contact originally entered Connex (issue #559). */
 export type ContactLeadSource =
@@ -3648,6 +3668,7 @@ export type RuleAction = {
     activityType?: string;
     tagId?: number;
     dueInDays?: number;
+    dueInHours?: number;
     severity?: string;
     targetUserId?: number;
     targetStageId?: number;
