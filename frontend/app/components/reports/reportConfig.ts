@@ -21,7 +21,7 @@ export type ReportTemplateGroupId = 'pipeline' | 'relationships' | 'other';
 const REPORT_TEMPLATE_GROUPS: { id: Exclude<ReportTemplateGroupId, 'other'>; keys: string[] }[] = [
     {
         id: 'pipeline',
-        keys: ['sales-performance', 'pipeline-health', 'forecasting', 'quota-attainment', 'commercial-documents'],
+        keys: ['lead-lifecycle', 'sales-performance', 'pipeline-health', 'forecasting', 'quota-attainment', 'commercial-documents'],
     },
     {
         id: 'relationships',

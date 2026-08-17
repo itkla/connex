@@ -180,7 +180,7 @@ public class ReportService {
     private static final Set<String> TEMPLATE_KEYS = Set.of(
             "sales-performance", "pipeline-health", "relationship-coverage", "relationship-health",
             "forecasting", "quota-attainment", "activity-team", "network-warm-intros", "employment-moves",
-            "commercial-documents");
+            "commercial-documents", "lead-lifecycle");
 
     private final ReportMapper reportMapper;
     private final ScheduleMapper scheduleMapper;
@@ -332,6 +332,26 @@ public class ReportService {
                                         "effective_discount_percent", "none", "bar"),
                                 widget("open-discount", "Effective discount (open)", "deals",
                                         "open_discount_percent", "pipeline", "table"))),
+                template("lead-lifecycle", "Lead Lifecycle",
+                        "Where leads come from, how many qualify, how fast they are answered, "
+                            + "and what converts.",
+                        "monthly", "month", List.of(
+                                widget("lead-volume", "Leads entered", "leads",
+                                        "lead_count", "date", "line-area"),
+                                widget("lead-by-source", "Leads by source", "leads",
+                                        "lead_count", "lead_source", "donut"),
+                                widget("qualification-rate", "Qualification rate", "leads",
+                                        "qualification_rate", "none", "kpi"),
+                                widget("conversion-rate", "Conversion rate", "leads",
+                                        "conversion_rate", "none", "kpi"),
+                                widget("time-to-convert", "Time to convert", "leads",
+                                        "time_to_convert_days", "none", "kpi"),
+                                widget("first-response", "Time to first response", "leads",
+                                        "first_response_hours", "none", "kpi"),
+                                widget("breach-rate", "First-response breach rate", "leads",
+                                        "first_response_breach_rate", "date", "bar"),
+                                widget("qualified-by-owner", "Qualified by owner", "leads",
+                                        "qualified_count", "owner", "table"))),
                 template("activity-team", "Activity & Team", "Team activity and task execution.",
                         "weekly", List.of(
                                 widget("activity", "Activity volume", "activities", "count", "date", "line-area"),

@@ -116,6 +116,10 @@
         "name": "Quota Attainment",
         "description": "Owner and workspace revenue targets compared with won revenue."
       },
+      "lead-lifecycle": {
+        "name": "Lead Lifecycle",
+        "description": "Where leads come from, how many qualify, how fast they are answered, and what converts."
+      },
       "commercial-documents": {
         "name": "Quotes & Approvals",
         "description": "Quote volume, approval turnaround, and the discount actually conceded."

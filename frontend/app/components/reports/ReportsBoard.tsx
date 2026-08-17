@@ -14,6 +14,7 @@ import {
     DocumentDuplicateIcon,
     EllipsisHorizontalIcon,
     FlagIcon,
+    FunnelIcon,
     HeartIcon,
     PencilSquareIcon,
     PresentationChartLineIcon,
@@ -56,6 +57,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 const TEMPLATE_ICONS: Record<string, ComponentType<{ className?: string }>> = {
+    'lead-lifecycle': FunnelIcon,
     'sales-performance': ChartBarIcon,
     'pipeline-health': PresentationChartLineIcon,
     'forecasting': ArrowTrendingUpIcon,
