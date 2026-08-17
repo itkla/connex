@@ -44,6 +44,8 @@ import ooo.klae.connex.backend.dto.PersonDetailDto;
 import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.dto.PersonEvaluationDto;
 import ooo.klae.connex.backend.dto.PersonLifecycleDto;
+import ooo.klae.connex.backend.dto.PersonQualificationDto;
+import ooo.klae.connex.backend.dto.PersonQualificationRequest;
 import ooo.klae.connex.backend.dto.PersonLifecycleHistoryDto;
 import ooo.klae.connex.backend.dto.PersonLifecycleRequest;
 import ooo.klae.connex.backend.dto.PersonLifecycleWithdrawalRequest;
@@ -57,6 +59,7 @@ import ooo.klae.connex.backend.services.ConnectionService;
 import ooo.klae.connex.backend.services.EmploymentService;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.PersonLifecycleService;
+import ooo.klae.connex.backend.services.PersonQualificationService;
 import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.storage.UploadSource;
@@ -80,6 +83,7 @@ import lombok.RequiredArgsConstructor;
 public class PersonController {
     private final PersonService personService;
     private final PersonLifecycleService personLifecycleService;
+    private final PersonQualificationService personQualificationService;
     private final EmploymentService employmentService;
     private final ConnectionService connectionService;
     private final BulkOperationService bulkOperationService;
@@ -349,7 +353,7 @@ public class PersonController {
     @PutMapping("/{id}/lifecycle")
     public PersonLifecycleDto updateLifecycle(
             @PathVariable int id, @Valid @RequestBody PersonLifecycleRequest request) {
-        return PersonLifecycleDto.from(personLifecycleService.updateLifecycle(id, request));
+        return personLifecycleService.updateLifecycleState(id, request);
     }
 
     /**
@@ -364,8 +368,31 @@ public class PersonController {
     public PersonLifecycleDto withdrawFromLifecycle(
             @PathVariable int id,
             @Valid @RequestBody(required = false) PersonLifecycleWithdrawalRequest request) {
-        return PersonLifecycleDto.from(personLifecycleService.withdrawFromLifecycle(
-            id, request == null ? null : request.getNote()));
+        return personLifecycleService.withdrawLifecycleState(
+            id, request == null ? null : request.getNote());
+    }
+
+    /**
+     * GET endpoint for the contact's qualification criteria, answers, and deterministic scores.
+     * @param id contact id
+     * @return qualification state
+     */
+    @GetMapping("/{id}/qualification")
+    public PersonQualificationDto getQualification(@PathVariable int id) {
+        return personQualificationService.getQualification(id);
+    }
+
+    /**
+     * PUT endpoint to answer one qualification criterion for a contact (#559). An omitted answer
+     * clears the criterion back to unanswered rather than asserting anything about it.
+     * @param id contact id
+     * @param request criterion and answer
+     * @return qualification state after the answer
+     */
+    @PutMapping("/{id}/qualification")
+    public PersonQualificationDto answerQualification(
+            @PathVariable int id, @Valid @RequestBody PersonQualificationRequest request) {
+        return personQualificationService.answer(id, request);
     }
 
     /**

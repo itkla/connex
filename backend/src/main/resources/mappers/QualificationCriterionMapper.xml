@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.QualificationCriterionMapper">
+
+  <resultMap id="QualificationCriterionResult" type="QualificationCriterion">
+    <id     property="id"          column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="label"       column="label"/>
+    <result property="dimension"   column="dimension"/>
+    <result property="weight"      column="weight"/>
+    <result property="required"    column="required"/>
+    <result property="position"    column="position"/>
+    <result property="archivedAt"  column="archived_at"/>
+    <result property="createdAt"   column="created_at"/>
+    <result property="updatedAt"   column="updated_at"/>
+  </resultMap>
+
+  <sql id="criterionColumns">
+    c.id, c.workspace_id, c.label, c.dimension, c.weight, c.required, c.position,
+    c.archived_at, c.created_at, c.updated_at
+  </sql>
+
+  <!-- Ordered so the two dimensions read as two coherent lists rather than interleaving, and so a
+       workspace's own ordering decides the sequence within each. -->
+  <select id="getActive" resultMap="QualificationCriterionResult">
+    SELECT <include refid="criterionColumns"/>
+    FROM qualification_criterion c
+    WHERE c.workspace_id = #{workspaceId} AND c.archived_at IS NULL
+    ORDER BY c.dimension, c.position, c.id
+  </select>
+
+  <select id="getAll" resultMap="QualificationCriterionResult">
+    SELECT <include refid="criterionColumns"/>
+    FROM qualification_criterion c
+    WHERE c.workspace_id = #{workspaceId}
+    ORDER BY c.dimension, c.position, c.id
+  </select>
+
+  <select id="getById" resultMap="QualificationCriterionResult">
+    SELECT <include refid="criterionColumns"/>
+    FROM qualification_criterion c
+    WHERE c.workspace_id = #{workspaceId} AND c.id = #{id}
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO qualification_criterion
+      (workspace_id, label, dimension, weight, required, position)
+    VALUES
+      (#{workspaceId}, #{label}, #{dimension}, #{weight}, #{required}, #{position})
+  </insert>
+
+  <update id="update">
+    UPDATE qualification_criterion
+    SET label = #{label},
+        dimension = #{dimension},
+        weight = #{weight},
+        required = #{required},
+        position = #{position}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <update id="archive">
+    UPDATE qualification_criterion
+    SET archived_at = CURRENT_TIMESTAMP
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NULL
+  </update>
+
+  <update id="restore">
+    UPDATE qualification_criterion
+    SET archived_at = NULL
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NOT NULL
+  </update>
+</mapper>

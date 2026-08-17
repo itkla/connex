@@ -288,6 +288,8 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("person_edge", 340));
         raw.add(direct("person_employment", 350));
         raw.add(direct("person_lifecycle_history", 355));
+        raw.add(direct("person_qualification_answer", 356));
+        raw.add(direct("qualification_criterion", 357));
         raw.add(direct("person_share", 360));
         raw.add(direct("introduction", 370));
         raw.add(direct("warm_path_dismissal", 380));

@@ -54,6 +54,7 @@ public class PersonLifecycleService {
     private final AuditService auditService;
     private final RuleTriggerPublisher ruleTriggers;
     private final LeadResponseSlaService leadResponseSla;
+    private final PersonQualificationService qualificationService;
     private final NotificationChangePublisher notificationChanges;
     private final Clock clock;
 
@@ -67,6 +68,35 @@ public class PersonLifecycleService {
      * @param request requested stage with its reason and note
      * @return the contact after the move
      */
+    /**
+     * Moves a contact and returns the resulting lifecycle state, with the advertised next moves
+     * already filtered by the qualification gate.
+     *
+     * @param personId contact to move
+     * @param request requested stage with its reason and note
+     * @return lifecycle state after the move
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public PersonLifecycleDto updateLifecycleState(int personId, PersonLifecycleRequest request) {
+        Person person = updateLifecycle(personId, request);
+        return project(person.getWorkspaceId(), person);
+    }
+
+    /**
+     * Withdraws a contact and returns the resulting lifecycle state.
+     *
+     * @param personId contact to withdraw
+     * @param note optional explanation recorded with the withdrawal
+     * @return lifecycle state after the withdrawal
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public PersonLifecycleDto withdrawLifecycleState(int personId, String note) {
+        Person person = withdrawFromLifecycle(personId, note);
+        return project(person.getWorkspaceId(), person);
+    }
+
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person updateLifecycle(int personId, PersonLifecycleRequest request) {
@@ -100,7 +130,7 @@ public class PersonLifecycleService {
      */
     public PersonLifecycleDto getLifecycle(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return PersonLifecycleDto.from(requireOwnedPerson(workspaceId, personId));
+        return project(workspaceId, requireOwnedPerson(workspaceId, personId));
     }
 
     /**
@@ -138,6 +168,9 @@ public class PersonLifecycleService {
         }
         PersonDisqualificationReason acceptedReason =
             requireReasonDisposition(requested, reason);
+        if (transitioning && requested == PersonLifecycleStage.QUALIFIED) {
+            requireQualificationCriteriaMet(workspaceId, personId);
+        }
         if (transitioning && requested == PersonLifecycleStage.CONVERTED) {
             requireLinkedDeal(workspaceId, personId);
         }
@@ -175,6 +208,20 @@ public class PersonLifecycleService {
         return requested == null || requested == PersonLifecycleStage.RECYCLED;
     }
 
+    /**
+     * Projects a contact's lifecycle with the qualification gate applied, so every caller advertises
+     * the same moves the transition will actually accept.
+     *
+     * @param workspaceId owning workspace
+     * @param person contact to project
+     * @return lifecycle state
+     */
+    public PersonLifecycleDto project(int workspaceId, Person person) {
+        return PersonLifecycleDto.from(
+            person,
+            qualificationService.unmetRequiredCriteria(workspaceId, person.getId()).isEmpty());
+    }
+
     private PersonDisqualificationReason requireReasonDisposition(
             PersonLifecycleStage requested, PersonDisqualificationReason reason) {
         if (requested == PersonLifecycleStage.DISQUALIFIED) {
@@ -188,6 +235,22 @@ public class PersonLifecycleService {
                 "A disqualification reason applies only when disqualifying a contact");
         }
         return null;
+    }
+
+    /**
+     * Holds a workspace to its own stated standard: every criterion it marked required must be met
+     * before a contact can be called qualified. A workspace that configured no required criteria is
+     * unaffected, so the gate never invents a standard nobody asked for — and, like the converted
+     * gate below, it is enforced here rather than in the client so it cannot be skipped by calling
+     * the API directly.
+     */
+    private void requireQualificationCriteriaMet(int workspaceId, int personId) {
+        List<String> unmet = qualificationService.unmetRequiredCriteria(workspaceId, personId);
+        if (!unmet.isEmpty()) {
+            throw new BadRequestException(
+                "This contact does not yet meet every required qualification criterion: "
+                    + String.join(", ", unmet));
+        }
     }
 
     private void requireLinkedDeal(int workspaceId, int personId) {

@@ -101,6 +101,7 @@ const ROUTE_CASES = [
     ["/settings/membership", "redirect"],
     ["/settings/notifications", "redirect"],
     ["/settings", "redirect"],
+    ["/settings/qualification", "shell"],
     ["/settings/roles", "shell"],
     ["/settings/rules", "redirect"],
     ["/settings/security", "redirect"],

@@ -23,10 +23,16 @@ public record PersonLifecycleDto(
     /**
      * Projects the lifecycle state held on a contact.
      *
+     * <p>{@code qualifiable} removes {@code QUALIFIED} from the advertised moves when the
+     * workspace's required criteria are not met. Clients render exactly the moves listed here, so
+     * advertising one the transition will certainly reject offers the user a button whose only
+     * outcome is an error (#559).
+     *
      * @param person contact to project
+     * @param qualifiable whether every required qualification criterion is met
      * @return lifecycle state, or {@code null} when there is no contact
      */
-    public static PersonLifecycleDto from(Person person) {
+    public static PersonLifecycleDto from(Person person, boolean qualifiable) {
         if (person == null) {
             return null;
         }
@@ -37,6 +43,7 @@ public record PersonLifecycleDto(
             person.getDisqualifiedReason(),
             person.getQualificationNotes(),
             PersonLifecycleStage.allowedTransitionsFrom(person.getLifecycleStage()).stream()
+                .filter(stage -> qualifiable || stage != PersonLifecycleStage.QUALIFIED)
                 .sorted(Comparator.comparing(Enum::ordinal))
                 .toList());
     }

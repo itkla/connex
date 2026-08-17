@@ -421,6 +421,25 @@
             "OTHER": "Other"
         }
     },
+    "ContactQualification": {
+        "title": "Qualification",
+        "noCriteria": "No qualification criteria are configured for this workspace yet.",
+        "required": "Required",
+        "unanswered": "{count} unanswered",
+        "blocked": "This contact cannot be qualified until every required criterion is met.",
+        "loadFailed": "Couldn't load this contact's qualification. Refresh to try again.",
+        "toastFailed": "Couldn't record that answer.",
+        "dimension": {
+            "FIT": "Fit",
+            "ENGAGEMENT": "Engagement"
+        },
+        "answer": {
+            "unanswered": "Not asked",
+            "MET": "Met",
+            "NOT_MET": "Not met",
+            "UNKNOWN": "Unknown"
+        }
+    },
     "ContactResponseSla": {
         "title": "First response",
         "state": {
