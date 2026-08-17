@@ -1243,6 +1243,77 @@ export type ContactLifecycle = {
     allowedTransitions: ContactLifecycleStage[];
 };
 
+/** The two axes a lead is assessed on, kept separate on purpose (issue #559). */
+export type QualificationDimension = 'FIT' | 'ENGAGEMENT';
+
+/**
+ * How a contact stands against one criterion. `UNKNOWN` is a real answer — the team asked and could
+ * not find out — which is different from the criterion having no answer at all.
+ */
+export type QualificationAnswer = 'MET' | 'NOT_MET' | 'UNKNOWN';
+
+/** One workspace-authored qualification question (issue #559). */
+export type QualificationCriterion = {
+    id: number;
+    workspaceId: number;
+    label: string;
+    dimension: QualificationDimension;
+    weight: number;
+    required: boolean;
+    position: number;
+    archivedAt?: string | null;
+};
+
+/** A criterion paired with this contact's answer to it. */
+export type ContactQualificationCriterion = {
+    criterionId: number;
+    label: string;
+    dimension: QualificationDimension;
+    weight: number;
+    required: boolean;
+    answer: QualificationAnswer | null;
+    answeredById: number | null;
+    answeredAt: string | null;
+};
+
+/**
+ * A contact's deterministic score on one dimension.
+ *
+ * `percent` is `null` when the workspace configured no criteria for the dimension — which is not
+ * zero. A workspace that never wrote a fit question has not judged the contact a bad fit, and
+ * rendering 0% would show an assessment nobody made.
+ */
+export type ContactQualificationScore = {
+    dimension: QualificationDimension;
+    percent: number | null;
+    metWeight: number;
+    totalWeight: number;
+    unansweredCount: number;
+    unmetRequiredLabels: string[];
+};
+
+/** A contact's full qualification picture; `qualifiable` is the server's own gate verdict. */
+export type ContactQualification = {
+    criteria: ContactQualificationCriterion[];
+    scores: ContactQualificationScore[];
+    qualifiable: boolean;
+};
+
+/** A requested answer; omitting `answer` clears the criterion back to unanswered. */
+export type AnswerContactQualificationPayload = {
+    criterionId: number;
+    answer?: QualificationAnswer | null;
+};
+
+/** A requested criterion definition (issue #559). */
+export type QualificationCriterionPayload = {
+    label: string;
+    dimension: QualificationDimension;
+    weight?: number;
+    required?: boolean;
+    position?: number;
+};
+
 /** One entry of a contact's append-only lifecycle timeline (issue #559). */
 export type ContactLifecycleHistoryEntry = {
     id: number;

@@ -2799,6 +2799,47 @@ export function withdrawContactLifecycle(id: number, note?: string) {
     return postJson<Types.ContactLifecycle>(`/api/persons/${id}/lifecycle/withdrawal`, { note: note ?? null });
 }
 
+/** The contact's qualification criteria, answers, and deterministic scores (issue #559). */
+export function getContactQualification(id: number, init: RequestInit = {}) {
+    return getJson<Types.ContactQualification>(`/api/persons/${id}/qualification`, init);
+}
+
+/** Answers one qualification criterion; omitting the answer clears it back to unanswered. */
+export function answerContactQualification(
+    id: number,
+    payload: Types.AnswerContactQualificationPayload,
+) {
+    return putJson<Types.ContactQualification>(`/api/persons/${id}/qualification`, payload);
+}
+
+/** The workspace's qualification criteria (issue #559). */
+export function getQualificationCriteria(includeArchived = false, init: RequestInit = {}) {
+    return getJson<Types.QualificationCriterion[]>(
+        `/api/qualification-criteria${includeArchived ? '?includeArchived=true' : ''}`,
+        init,
+    );
+}
+
+export function createQualificationCriterion(payload: Types.QualificationCriterionPayload) {
+    return postJson<Types.QualificationCriterion>('/api/qualification-criteria', payload);
+}
+
+export function updateQualificationCriterion(
+    id: number,
+    payload: Types.QualificationCriterionPayload,
+) {
+    return putJson<Types.QualificationCriterion>(`/api/qualification-criteria/${id}`, payload);
+}
+
+/** Archives a criterion. There is no hard delete: answers already given must survive. */
+export function archiveQualificationCriterion(id: number) {
+    return deleteJson<void>(`/api/qualification-criteria/${id}`);
+}
+
+export function restoreQualificationCriterion(id: number) {
+    return postJson<void>(`/api/qualification-criteria/${id}/restore`, {});
+}
+
 export function getContactLifecycleHistory(id: number, init: RequestInit = {}) {
     return getJson<Types.ContactLifecycleHistoryEntry[]>(`/api/persons/${id}/lifecycle/history`, init);
 }

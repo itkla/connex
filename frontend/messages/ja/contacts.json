@@ -421,6 +421,24 @@
             "OTHER": "その他"
         }
     },
+    "ContactQualification": {
+        "title": "評価",
+        "noCriteria": "このワークスペースには評価基準がまだ設定されていません。",
+        "required": "必須",
+        "unanswered": "未回答 {count} 件",
+        "blocked": "必須の評価基準をすべて満たすまで、この連絡先は「見込みあり」にできません。",
+        "toastFailed": "回答を記録できませんでした。",
+        "dimension": {
+            "FIT": "適合度",
+            "ENGAGEMENT": "関与度"
+        },
+        "answer": {
+            "unanswered": "未確認",
+            "MET": "満たす",
+            "NOT_MET": "満たさない",
+            "UNKNOWN": "不明"
+        }
+    },
     "ContactResponseSla": {
         "title": "初回応答",
         "state": {
