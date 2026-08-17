@@ -353,7 +353,7 @@ public class PersonController {
     @PutMapping("/{id}/lifecycle")
     public PersonLifecycleDto updateLifecycle(
             @PathVariable int id, @Valid @RequestBody PersonLifecycleRequest request) {
-        return PersonLifecycleDto.from(personLifecycleService.updateLifecycle(id, request));
+        return personLifecycleService.updateLifecycleState(id, request);
     }
 
     /**
@@ -368,8 +368,8 @@ public class PersonController {
     public PersonLifecycleDto withdrawFromLifecycle(
             @PathVariable int id,
             @Valid @RequestBody(required = false) PersonLifecycleWithdrawalRequest request) {
-        return PersonLifecycleDto.from(personLifecycleService.withdrawFromLifecycle(
-            id, request == null ? null : request.getNote()));
+        return personLifecycleService.withdrawLifecycleState(
+            id, request == null ? null : request.getNote());
     }
 
     /**

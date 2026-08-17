@@ -68,6 +68,35 @@ public class PersonLifecycleService {
      * @param request requested stage with its reason and note
      * @return the contact after the move
      */
+    /**
+     * Moves a contact and returns the resulting lifecycle state, with the advertised next moves
+     * already filtered by the qualification gate.
+     *
+     * @param personId contact to move
+     * @param request requested stage with its reason and note
+     * @return lifecycle state after the move
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public PersonLifecycleDto updateLifecycleState(int personId, PersonLifecycleRequest request) {
+        Person person = updateLifecycle(personId, request);
+        return project(person.getWorkspaceId(), person);
+    }
+
+    /**
+     * Withdraws a contact and returns the resulting lifecycle state.
+     *
+     * @param personId contact to withdraw
+     * @param note optional explanation recorded with the withdrawal
+     * @return lifecycle state after the withdrawal
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public PersonLifecycleDto withdrawLifecycleState(int personId, String note) {
+        Person person = withdrawFromLifecycle(personId, note);
+        return project(person.getWorkspaceId(), person);
+    }
+
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person updateLifecycle(int personId, PersonLifecycleRequest request) {
@@ -101,7 +130,7 @@ public class PersonLifecycleService {
      */
     public PersonLifecycleDto getLifecycle(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return PersonLifecycleDto.from(requireOwnedPerson(workspaceId, personId));
+        return project(workspaceId, requireOwnedPerson(workspaceId, personId));
     }
 
     /**
@@ -177,6 +206,20 @@ public class PersonLifecycleService {
      */
     private static boolean endsLifecyclePass(PersonLifecycleStage requested) {
         return requested == null || requested == PersonLifecycleStage.RECYCLED;
+    }
+
+    /**
+     * Projects a contact's lifecycle with the qualification gate applied, so every caller advertises
+     * the same moves the transition will actually accept.
+     *
+     * @param workspaceId owning workspace
+     * @param person contact to project
+     * @return lifecycle state
+     */
+    public PersonLifecycleDto project(int workspaceId, Person person) {
+        return PersonLifecycleDto.from(
+            person,
+            qualificationService.unmetRequiredCriteria(workspaceId, person.getId()).isEmpty());
     }
 
     private PersonDisqualificationReason requireReasonDisposition(

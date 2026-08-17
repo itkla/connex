@@ -24,7 +24,8 @@ import { cn } from '@/lib/utils';
 
 type Props = {
     contactId: number;
-    qualification: ContactQualification;
+    /** `null` when the qualification could not be read; the panel says so rather than vanishing. */
+    qualification: ContactQualification | null;
     /** Whether the viewer may answer; without it the panel is a read-only record of the assessment. */
     canEdit: boolean;
     className?: string;
@@ -33,6 +34,11 @@ type Props = {
 const DIMENSIONS: QualificationDimension[] = ['FIT', 'ENGAGEMENT'];
 const ANSWERS: QualificationAnswer[] = ['MET', 'NOT_MET', 'UNKNOWN'];
 const UNANSWERED_VALUE = '__unanswered__';
+
+/** Narrows a select value to the closed answer vocabulary instead of asserting it. */
+function asAnswer(value: string): QualificationAnswer | null {
+    return ANSWERS.find((answer) => answer === value) ?? null;
+}
 
 /**
  * The contact's qualification: the workspace's own questions, this contact's answers, and the two
@@ -58,22 +64,24 @@ export default function ContactQualificationPanel({
     const byDimension = useMemo(() => new Map(
         DIMENSIONS.map((dimension) => [
             dimension,
-            qualification.criteria.filter((criterion) => criterion.dimension === dimension),
+            (qualification?.criteria ?? []).filter((criterion) => criterion.dimension === dimension),
         ]),
-    ), [qualification.criteria]);
+    ), [qualification]);
 
     const scoreOf = useCallback(
         (dimension: QualificationDimension): ContactQualificationScore | undefined =>
-            qualification.scores.find((score) => score.dimension === dimension),
-        [qualification.scores],
+            qualification?.scores.find((score) => score.dimension === dimension),
+        [qualification],
     );
 
     const answer = async (criterionId: number, value: string) => {
+        const narrowed = asAnswer(value);
+        if (value !== UNANSWERED_VALUE && narrowed === null) return;
         setSaving(criterionId);
         try {
             await answerContactQualification(contactId, {
                 criterionId,
-                answer: value === UNANSWERED_VALUE ? null : (value as QualificationAnswer),
+                answer: value === UNANSWERED_VALUE ? null : narrowed,
             });
             router.refresh();
         } catch (err) {
@@ -82,6 +90,17 @@ export default function ContactQualificationPanel({
             setSaving(null);
         }
     };
+
+    if (qualification === null) {
+        return (
+            <div className={cn('mt-6', className)}>
+                <SectionHeader title={t('title')} />
+                <div className="overflow-hidden rounded-2xl border border-border bg-card px-6 py-4 xl:px-4">
+                    <p className="text-xs text-muted-foreground">{t('loadFailed')}</p>
+                </div>
+            </div>
+        );
+    }
 
     if (qualification.criteria.length === 0) {
         return (

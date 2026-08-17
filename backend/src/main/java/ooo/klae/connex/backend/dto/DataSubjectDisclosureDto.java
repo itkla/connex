@@ -25,6 +25,7 @@ public class DataSubjectDisclosureDto {
     private List<AttachmentDto> attachments;
     private List<EmploymentDto> employmentHistory;
     private List<LifecycleTransitionDto> lifecycleHistory;
+    private List<QualificationAnswerDto> qualificationAnswers;
     private List<RelationshipEdgeDto> relationshipEdges;
     private List<DealAssociationDto> dealAssociations;
     private List<IntroductionDto> introductions;
@@ -238,6 +239,23 @@ public class DataSubjectDisclosureDto {
         private String note;
         private Integer changedById;
         private LocalDateTime changedAt;
+    }
+
+    /**
+     * One qualification answer recorded about the subject (#559). The criterion's own question text
+     * travels with the answer, because "MET" discloses nothing on its own — the subject is entitled
+     * to know what was asked as well as what was concluded.
+     */
+    @Data
+    public static class QualificationAnswerDto {
+        private int workspaceId;
+        private int personId;
+        private int criterionId;
+        private String criterionLabel;
+        private String dimension;
+        private String answer;
+        private Integer answeredById;
+        private LocalDateTime answeredAt;
     }
 
     @Data

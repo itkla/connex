@@ -43,6 +43,12 @@ import type { QualificationCriterion, QualificationDimension } from "@/app/lib/t
 import { cn } from "@/lib/utils";
 
 const DIMENSIONS: QualificationDimension[] = ["FIT", "ENGAGEMENT"];
+const DRAFT_ROW_ID = -1;
+
+/** Narrows a select value to the closed dimension vocabulary instead of asserting it. */
+function asDimension(value: string): QualificationDimension | null {
+    return DIMENSIONS.find((dimension) => dimension === value) ?? null;
+}
 
 /** Reads the catalog without touching component state, so effects stay free of direct setState. */
 async function readCriteria(): Promise<{ criteria?: QualificationCriterion[]; denied?: boolean }> {
@@ -63,6 +69,7 @@ type Draft = {
     label: string;
     weight: number;
     required: boolean;
+    position: number;
 };
 
 /**
@@ -146,10 +153,20 @@ export default function QualificationCriteriaPanel() {
      * participates in the shares while it is being typed.
      */
     const rowsFor = useCallback((dimension: QualificationDimension) => {
-        const existing = active.filter((criterion) => criterion.dimension === dimension);
+        const edited = active.map((criterion) =>
+            draft && draft.id === criterion.id
+                ? {
+                    ...criterion,
+                    label: draft.label,
+                    dimension: draft.dimension,
+                    weight: draft.weight,
+                    required: draft.required,
+                }
+                : criterion);
+        const existing = edited.filter((criterion) => criterion.dimension === dimension);
         const pending = draft && draft.dimension === dimension && draft.id === null
             ? [{
-                id: -1,
+                id: DRAFT_ROW_ID,
                 workspaceId: 0,
                 label: draft.label,
                 dimension,
@@ -158,11 +175,7 @@ export default function QualificationCriteriaPanel() {
                 position: Number.MAX_SAFE_INTEGER,
             } satisfies QualificationCriterion]
             : [];
-        const merged = [...existing, ...pending].map((criterion) =>
-            draft && draft.id === criterion.id
-                ? { ...criterion, weight: draft.weight, required: draft.required, label: draft.label }
-                : criterion);
-        const ordered = [...merged].sort((a, b) => {
+        const ordered = [...existing, ...pending].sort((a, b) => {
             if (a.required !== b.required) return a.required ? -1 : 1;
             if (a.position !== b.position) return a.position - b.position;
             return a.id - b.id;
@@ -180,6 +193,7 @@ export default function QualificationCriteriaPanel() {
                 dimension: draft.dimension,
                 weight: draft.weight,
                 required: draft.required,
+                position: draft.position,
             };
             const saved = draft.id === null
                 ? await createQualificationCriterion(payload)
@@ -247,6 +261,7 @@ export default function QualificationCriteriaPanel() {
                         label: "",
                         weight: DEFAULT_WEIGHT,
                         required: false,
+                        position: 0,
                     })}
                 >
                     <PlusIcon className="size-4" />
@@ -281,6 +296,7 @@ export default function QualificationCriteriaPanel() {
                                 label: "",
                                 weight: DEFAULT_WEIGHT,
                                 required: false,
+                                position: 0,
                             })}
                         >
                             <PlusIcon className="size-4" />
@@ -330,7 +346,7 @@ export default function QualificationCriteriaPanel() {
                                             {t(`dimensionEmpty.${dimension}`)}
                                         </li>
                                     ) : null}
-                                    {rows.map(({ criterion, share }) => (
+                                    {rows.filter(({ criterion }) => criterion.id !== DRAFT_ROW_ID).map(({ criterion, share }) => (
                                         draft && draft.id === criterion.id ? (
                                             <li key={criterion.id} className="px-6 py-4">
                                                 <DraftFields
@@ -391,6 +407,7 @@ export default function QualificationCriteriaPanel() {
                                                                         label: criterion.label,
                                                                         weight: criterion.weight,
                                                                         required: criterion.required,
+                                                                        position: criterion.position,
                                                                     })}
                                                                 >
                                                                     <PencilSquareIcon className="size-4" />
@@ -424,6 +441,7 @@ export default function QualificationCriteriaPanel() {
                                                 label: "",
                                                 weight: DEFAULT_WEIGHT,
                                                 required: false,
+                                                position: 0,
                                             })}
                                         >
                                             <PlusIcon className="size-4" />
@@ -437,7 +455,7 @@ export default function QualificationCriteriaPanel() {
                                         <DraftFields
                                             draft={draft}
                                             saving={saving}
-                                            share={rows.find((row) => row.criterion.id === -1)?.share ?? 0}
+                                            share={rows.find((row) => row.criterion.id === DRAFT_ROW_ID)?.share ?? 0}
                                             labelRef={labelRef}
                                             onChange={setDraft}
                                             onCommit={commit}
@@ -515,7 +533,11 @@ function DraftFields({
         <div
             className="space-y-3"
             onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
+                if (
+                    event.key === "Enter"
+                    && !event.shiftKey
+                    && event.target instanceof HTMLInputElement
+                ) {
                     event.preventDefault();
                     onCommit();
                 }
@@ -557,10 +579,10 @@ function DraftFields({
                     <Label htmlFor="qualification-dimension">{t("dimensionField")}</Label>
                     <Select
                         value={draft.dimension}
-                        onValueChange={(value) => onChange({
-                            ...draft,
-                            dimension: value as QualificationDimension,
-                        })}
+                        onValueChange={(value) => {
+                            const dimension = asDimension(value);
+                            if (dimension) onChange({ ...draft, dimension });
+                        }}
                     >
                         <SelectTrigger id="qualification-dimension" size="sm">
                             <SelectValue />

@@ -78,7 +78,10 @@ export default async function ContactPage({ params }: ContactPageProps) {
         getEffectivePermissionsFromCookie(cookie),
         getContactLifecycle(id, init).catch(() => null),
         getContactLifecycleHistory(id, init).catch(() => []),
-        getContactQualification(id, init).catch(() => null),
+        getContactQualification(id, init).then(
+            (loaded) => ({ loaded }),
+            () => ({ failed: true as const }),
+        ),
     ]);
     if (contactAccess.kind === "forbidden") {
         return <AccessDeniedPage />;
@@ -321,10 +324,10 @@ export default async function ContactPage({ params }: ContactPageProps) {
                             />
                         ) : null}
 
-                        {ownsContact && qualification ? (
+                        {ownsContact ? (
                             <ContactQualificationPanel
                                 contactId={contact.id}
-                                qualification={qualification}
+                                qualification={"loaded" in qualification ? qualification.loaded : null}
                                 canEdit={effectivePermissions.includes("PERSON_UPDATE")
                                     && !contact.archivedAt
                                     && !contact.suspendedAt

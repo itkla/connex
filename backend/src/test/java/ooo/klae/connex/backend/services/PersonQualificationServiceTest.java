@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -133,6 +134,22 @@ class PersonQualificationServiceTest extends AbstractServiceTest {
             person.getId(), stage(PersonLifecycleStage.QUALIFIED));
 
         assertEquals(PersonLifecycleStage.QUALIFIED, qualified.getLifecycleStage());
+    }
+
+    @Test
+    void anUnreachableQualifiedMoveIsNotAdvertised() {
+        Person person = enterLifecycle(newPerson(newCompany()));
+        QualificationCriterion required =
+            criterion("Confirmed budget", QualificationDimension.FIT, 1, true);
+
+        assertFalse(lifecycleService.getLifecycle(person.getId()).allowedTransitions()
+                .contains(PersonLifecycleStage.QUALIFIED),
+            "offering a move the gate will certainly reject is offering an error");
+
+        answer(person, required, QualificationAnswer.MET);
+
+        assertTrue(lifecycleService.getLifecycle(person.getId()).allowedTransitions()
+            .contains(PersonLifecycleStage.QUALIFIED));
     }
 
     @Test

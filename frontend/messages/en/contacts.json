@@ -427,6 +427,7 @@
         "required": "Required",
         "unanswered": "{count} unanswered",
         "blocked": "This contact cannot be qualified until every required criterion is met.",
+        "loadFailed": "Couldn't load this contact's qualification. Refresh to try again.",
         "toastFailed": "Couldn't record that answer.",
         "dimension": {
             "FIT": "Fit",
