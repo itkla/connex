@@ -650,6 +650,7 @@ public class LegacyRuleWorkflowService {
             && Objects.equals(first.getActivityType(), second.getActivityType())
             && Objects.equals(first.getTagId(), second.getTagId())
             && Objects.equals(first.getDueInDays(), second.getDueInDays())
+            && Objects.equals(first.getDueInHours(), second.getDueInHours())
             && Objects.equals(first.getSeverity(), second.getSeverity())
             && Objects.equals(first.getTargetUserId(), second.getTargetUserId())
             && Objects.equals(first.getTargetStageId(), second.getTargetStageId());

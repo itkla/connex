@@ -46,6 +46,8 @@ import {
     SCHEDULE_RECORD_TYPES,
     SEGMENT_RECORD_TYPES,
     actionsFor,
+    actionWithDefaults,
+    DEFAULT_RESPONSE_DUE_HOURS,
     defaultAction,
     eventsFor,
 } from "@/app/components/settings/workflows/vocabulary";
@@ -524,7 +526,7 @@ function ActionRow({
     const t = useTranslations("WorkspaceRules");
     return (
         <div className="flex items-start gap-2 p-3">
-            <Select value={action.type} onValueChange={(type) => onChange({ type })}>
+            <Select value={action.type} onValueChange={(type) => onChange(actionWithDefaults(type))}>
                 <SelectTrigger size="sm" aria-label={t("actionType")} className="w-40 shrink-0"><SelectValue /></SelectTrigger>
                 <SelectContent>
                     {actionsFor(recordType).map((type) => (
@@ -584,8 +586,11 @@ function ActionRow({
                             type="number"
                             min={1}
                             max={8760}
-                            value={action.dueInHours ?? 4}
-                            onChange={(event) => onChange({ ...action, dueInHours: Math.max(1, Number(event.target.value) || 4) })}
+                            value={action.dueInHours ?? DEFAULT_RESPONSE_DUE_HOURS}
+                            onChange={(event) => onChange({
+                                ...action,
+                                dueInHours: Math.max(1, Number(event.target.value) || DEFAULT_RESPONSE_DUE_HOURS),
+                            })}
                             aria-label={t("respondWithin")}
                             className="h-9 w-16"
                         />

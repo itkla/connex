@@ -98,7 +98,7 @@ export default function ContactLifecyclePanel({
         if (breachedAt) {
             return {
                 overdue: true,
-                text: tsla('overdueLine', { when: formatDateTime(breachedAt, locale) }),
+                text: tsla('overdueLine', { when: formatDateTime(dueAt, locale) }),
             };
         }
         return { overdue: false, text: tsla('dueLine', { when: formatDateTime(dueAt, locale) }) };

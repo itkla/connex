@@ -65,7 +65,23 @@ export function actionsFor(recordType: string): string[] {
     return ACTIONS[recordType] ?? ["notify"];
 }
 
+/** Hours a new first-response SLA action asks for until the author changes it. */
+export const DEFAULT_RESPONSE_DUE_HOURS = 4;
+
+/**
+ * A freshly selected action of the given type, carrying any value the server requires.
+ *
+ * Selecting a type replaces the whole config, so a required field the editor only renders as a
+ * placeholder would never reach the server and the definition would be rejected on save. Both
+ * authoring surfaces build their action here so the two cannot disagree about what a new action is.
+ */
+export function actionWithDefaults(type: string): RuleAction {
+    return type === "set_response_due"
+        ? { type, dueInHours: DEFAULT_RESPONSE_DUE_HOURS }
+        : { type };
+}
+
 /** The default action appended when a step is added for a record type. */
 export function defaultAction(recordType: string): RuleAction {
-    return actionsFor(recordType).includes("notify") ? { type: "notify", title: "", body: "" } : { type: actionsFor(recordType)[0] };
+    return actionsFor(recordType).includes("notify") ? { type: "notify", title: "", body: "" } : actionWithDefaults(actionsFor(recordType)[0]);
 }
