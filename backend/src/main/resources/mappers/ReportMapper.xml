@@ -552,26 +552,26 @@
     </choose>
   </sql>
 
-  <!-- Lead-lifecycle reporting (#559 increment 6). Volume, qualification, and conversion are read
-       from the append-only person_lifecycle_history, which increment 1 built for exactly this: a
-       contact's current stage cannot tell you it was ever qualified, only where it ended up.
-       First-response measures read the SLA columns on the contact, which hold one clock per
-       lifecycle pass. -->
-  <sql id="leadEventDate">
-    <choose>
-      <when test="query.measure == 'first_response_hours' or query.measure == 'first_response_breach_rate'">person.first_response_started_at</when>
-      <otherwise>history.changed_at</otherwise>
-    </choose>
-  </sql>
+  <!-- Lead-lifecycle reporting (#559 increment 6).
 
+       The unit of analysis is the lifecycle pass, not the contact and not a transition row. Every
+       measure ranges and groups on the pass's entry, so a period's counts and the rates derived
+       from them describe one cohort and visibly divide into each other: "of the leads that arrived
+       in March, this many qualified, which is this rate". Reporting the other way — outcomes this
+       period over arrivals this period — moves with intake volume rather than performance and can
+       exceed 100% whenever a cycle spans the boundary, which for this product's cycle lengths is
+       most of the time.
+
+       A recent cohort has not matured and will read low. That is inherent to cohort measurement and
+       is left visible rather than hidden behind an invented maturation window; lead_count sits
+       beside every rate so the cohort's size is never in doubt. -->
   <sql id="localizedLeadDate">
     CASE
       <foreach item="segment" collection="query.offsets">
-        WHEN <include refid="leadEventDate"/> &gt;= #{segment.startUtc}
-          AND <include refid="leadEventDate"/> &lt; #{segment.endUtc}
-        THEN TIMESTAMPADD(MINUTE, #{segment.offsetMinutes}, <include refid="leadEventDate"/>)
+        WHEN pass.entered_at &gt;= #{segment.startUtc} AND pass.entered_at &lt; #{segment.endUtc}
+        THEN TIMESTAMPADD(MINUTE, #{segment.offsetMinutes}, pass.entered_at)
       </foreach>
-      ELSE <include refid="leadEventDate"/>
+      ELSE pass.entered_at
     END
   </sql>
 
@@ -610,48 +610,29 @@
            </choose> AS unit,
            <choose>
              <when test="query.measure == 'lead_count'">COUNT(*)</when>
-             <when test="query.measure == 'qualified_count'">SUM(CASE WHEN history.to_stage = 'QUALIFIED' THEN 1 ELSE 0 END)</when>
-             <when test="query.measure == 'converted_count'">SUM(CASE WHEN history.to_stage = 'CONVERTED' THEN 1 ELSE 0 END)</when>
-             <when test="query.measure == 'disqualified_count'">SUM(CASE WHEN history.to_stage = 'DISQUALIFIED' THEN 1 ELSE 0 END)</when>
-             <when test="query.measure == 'qualification_rate'">100.0 * SUM(CASE WHEN history.to_stage = 'QUALIFIED' THEN 1 ELSE 0 END) / NULLIF(SUM(CASE WHEN history.to_stage = 'NEW' THEN 1 ELSE 0 END), 0)</when>
-             <when test="query.measure == 'conversion_rate'">100.0 * SUM(CASE WHEN history.to_stage = 'CONVERTED' THEN 1 ELSE 0 END) / NULLIF(SUM(CASE WHEN history.to_stage = 'NEW' THEN 1 ELSE 0 END), 0)</when>
-             <when test="query.measure == 'time_to_convert_days'">AVG(CASE WHEN history.to_stage = 'CONVERTED' THEN DATEDIFF(history.changed_at, entered.first_entered_at) END)</when>
-             <when test="query.measure == 'first_response_hours'">AVG(TIMESTAMPDIFF(HOUR, person.first_response_started_at, person.first_responded_at))</when>
-             <when test="query.measure == 'first_response_breach_rate'">100.0 * SUM(CASE WHEN person.first_response_breached_at IS NOT NULL THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0)</when>
+             <when test="query.measure == 'qualified_count'">SUM(CASE WHEN pass.qualified_at IS NOT NULL THEN 1 ELSE 0 END)</when>
+             <when test="query.measure == 'converted_count'">SUM(CASE WHEN pass.converted_at IS NOT NULL THEN 1 ELSE 0 END)</when>
+             <when test="query.measure == 'disqualified_count'">SUM(CASE WHEN pass.disqualified_at IS NOT NULL THEN 1 ELSE 0 END)</when>
+             <when test="query.measure == 'qualification_rate'">100.0 * SUM(CASE WHEN pass.qualified_at IS NOT NULL THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0)</when>
+             <when test="query.measure == 'conversion_rate'">100.0 * SUM(CASE WHEN pass.converted_at IS NOT NULL THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0)</when>
+             <when test="query.measure == 'time_to_convert_days'">AVG(CASE WHEN pass.converted_at IS NOT NULL THEN DATEDIFF(pass.converted_at, pass.entered_at) END)</when>
+             <!-- Averaged in seconds: truncating each lead to whole hours first would report every
+                  response inside an hour as zero, in the measure whose entire point is speed. -->
+             <when test="query.measure == 'first_response_hours'">AVG(CASE WHEN pass.first_responded_at IS NOT NULL THEN TIMESTAMPDIFF(SECOND, pass.first_response_started_at, pass.first_responded_at) END) / 3600.0</when>
+             <!-- Denominator is the clocks whose outcome is observable: a deadline that has not yet
+                  passed cannot have breached, and counting it would let starting new clocks lower
+                  the reported breach rate. -->
+             <when test="query.measure == 'first_response_breach_rate'">100.0 * SUM(CASE WHEN pass.first_response_breached_at IS NOT NULL THEN 1 ELSE 0 END) / NULLIF(SUM(CASE WHEN pass.first_response_due_at IS NOT NULL AND (pass.first_responded_at IS NOT NULL OR pass.first_response_due_at &lt;= #{query.endUtc}) THEN 1 ELSE 0 END), 0)</when>
              <otherwise>COUNT(*)</otherwise>
            </choose> AS value
-    <choose>
-      <when test="query.measure == 'first_response_hours' or query.measure == 'first_response_breach_rate'">
-        FROM person
-        WHERE person.workspace_id = #{query.workspaceId}
-          AND person.archived_at IS NULL
-          AND person.suspended_at IS NULL
-          AND person.first_response_started_at IS NOT NULL
-          <if test="query.measure == 'first_response_hours'">
-            AND person.first_responded_at IS NOT NULL
-          </if>
-      </when>
-      <otherwise>
-        FROM person_lifecycle_history history
-        JOIN person ON person.id = history.person_id
-          AND person.workspace_id = #{query.workspaceId}
-        LEFT JOIN (
-          SELECT entry.workspace_id, entry.person_id, MIN(entry.changed_at) AS first_entered_at
-          FROM person_lifecycle_history entry
-          WHERE entry.workspace_id = #{query.workspaceId} AND entry.to_stage = 'NEW'
-          GROUP BY entry.workspace_id, entry.person_id
-        ) entered ON entered.workspace_id = history.workspace_id
-          AND entered.person_id = history.person_id
-        WHERE history.workspace_id = #{query.workspaceId}
-          AND person.archived_at IS NULL
-          AND person.suspended_at IS NULL
-          <if test="query.measure == 'lead_count'">
-            AND history.to_stage = 'NEW'
-          </if>
-      </otherwise>
-    </choose>
-      AND <include refid="leadEventDate"/> &gt;= #{query.startUtc}
-      AND <include refid="leadEventDate"/> &lt; #{query.endUtc}
+    FROM person_lifecycle_pass pass
+    JOIN person ON person.id = pass.person_id AND person.workspace_id = #{query.workspaceId}
+    WHERE pass.workspace_id = #{query.workspaceId}
+      AND person.archived_at IS NULL
+      AND person.suspended_at IS NULL
+      AND person.provision_ceased_at IS NULL
+      AND pass.entered_at &gt;= #{query.startUtc}
+      AND pass.entered_at &lt; #{query.endUtc}
     <if test="query.ownerIds != null and !query.ownerIds.isEmpty()">
       AND person.owner_id IN
       <foreach item="id" collection="query.ownerIds" open="(" separator="," close=")">#{id}</foreach>
@@ -667,6 +648,9 @@
           <foreach item="id" collection="query.tagIds" open="(" separator="," close=")">#{id}</foreach>)
     </if>
     GROUP BY group_key, group_label
+    <!-- A group with nothing to measure emits no row, so the caller's undefined-when-empty handling
+         applies instead of a zero being published as if it were a measurement. -->
+    HAVING value IS NOT NULL
     ORDER BY group_key
   </select>
 

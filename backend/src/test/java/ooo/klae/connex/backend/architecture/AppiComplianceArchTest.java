@@ -85,7 +85,7 @@ class AppiComplianceArchTest {
                 violations.add("blank allowlist rationale " + exception.getKey());
             }
         }
-        assertEquals(15, enrollments.size(),
+        assertEquals(16, enrollments.size(),
             "The APPI restriction sweep must retain every reviewed namespace, including "
                 + "identity collision and employment projection readers.");
         assertTrue(violations.isEmpty(),

@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.dto.PersonBreachRow;
+import ooo.klae.connex.backend.mappers.PersonLifecyclePassMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -49,6 +50,7 @@ public class LeadResponseSlaService {
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
     private final RuleTriggerPublisher ruleTriggers;
+    private final PersonLifecyclePassMapper passMapper;
     private final NotificationChangePublisher notificationChanges;
     private final Clock clock;
 
@@ -73,6 +75,7 @@ public class LeadResponseSlaService {
         if (personMapper.startFirstResponseClock(workspaceId, personId, startedAt, dueAt) == 0) {
             return false;
         }
+        passMapper.syncFirstResponse(workspaceId, personId);
         auditService.record("person.first_response_sla", "person", personId, person.getName(),
             "Started the first-response SLA for " + person.getName(),
             Map.of("firstResponseDueAt", Map.of("from", "none", "to", dueAt.toString())));
@@ -94,6 +97,7 @@ public class LeadResponseSlaService {
      */
     public void recordFirstResponse(int workspaceId, int personId) {
         if (personMapper.recordFirstResponse(workspaceId, personId, now()) > 0) {
+            passMapper.syncFirstResponse(workspaceId, personId);
             notificationChanges.publish(workspaceId, "person", personId);
         }
     }
@@ -148,6 +152,7 @@ public class LeadResponseSlaService {
         if (personMapper.recordFirstResponseBreach(workspaceId, personId, breachedAt) == 0) {
             return false;
         }
+        passMapper.syncFirstResponse(workspaceId, personId);
         String name = breaching.name() == null ? "contact " + personId : breaching.name();
         auditService.record("person.first_response_breached", "person", personId, name,
             "First-response SLA breached for " + name,

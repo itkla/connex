@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.PersonLifecyclePassMapper">
+
+  <resultMap id="PersonLifecyclePassResult" type="PersonLifecyclePass">
+    <id     property="id"                      column="id"/>
+    <result property="workspaceId"             column="workspace_id"/>
+    <result property="personId"                column="person_id"/>
+    <result property="enteredAt"               column="entered_at"/>
+    <result property="qualifiedAt"             column="qualified_at"/>
+    <result property="convertedAt"             column="converted_at"/>
+    <result property="disqualifiedAt"          column="disqualified_at"/>
+    <result property="endedAt"                 column="ended_at"/>
+    <result property="firstResponseStartedAt"  column="first_response_started_at"/>
+    <result property="firstRespondedAt"        column="first_responded_at"/>
+    <result property="firstResponseDueAt"      column="first_response_due_at"/>
+    <result property="firstResponseBreachedAt" column="first_response_breached_at"/>
+  </resultMap>
+
+  <select id="getOpenPass" resultMap="PersonLifecyclePassResult">
+    SELECT * FROM person_lifecycle_pass
+    WHERE workspace_id = #{workspaceId} AND person_id = #{personId} AND ended_at IS NULL
+    ORDER BY entered_at DESC, id DESC
+    LIMIT 1
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO person_lifecycle_pass (workspace_id, person_id, entered_at)
+    VALUES (#{workspaceId}, #{personId}, #{enteredAt})
+  </insert>
+
+  <!-- COALESCE keeps the first occurrence: re-reaching a stage within one pass is the same cohort
+       event, and overwriting would move the pass's latency to the last attempt. -->
+  <update id="stampMilestone">
+    UPDATE person_lifecycle_pass
+    SET
+      <choose>
+        <when test="stage == 'QUALIFIED'">qualified_at = COALESCE(qualified_at, #{at})</when>
+        <when test="stage == 'CONVERTED'">converted_at = COALESCE(converted_at, #{at})</when>
+        <otherwise>disqualified_at = COALESCE(disqualified_at, #{at})</otherwise>
+      </choose>
+    WHERE workspace_id = #{workspaceId} AND person_id = #{personId} AND ended_at IS NULL
+  </update>
+
+  <update id="closeOpenPass">
+    UPDATE person_lifecycle_pass
+    SET ended_at = #{endedAt}
+    WHERE workspace_id = #{workspaceId} AND person_id = #{personId} AND ended_at IS NULL
+  </update>
+
+  <!-- Reads the contact's live clock rather than taking values from the caller, so the pass can
+       never disagree with the record it summarises. The restriction fences are defence in depth:
+       every caller already refuses a restricted contact, and copying its response outcome here
+       would be processing a record the workspace has stopped processing. -->
+  <update id="syncFirstResponse">
+    UPDATE person_lifecycle_pass pass
+    JOIN person ON person.workspace_id = pass.workspace_id AND person.id = pass.person_id
+    SET pass.first_response_started_at = person.first_response_started_at,
+        pass.first_responded_at = person.first_responded_at,
+        pass.first_response_due_at = person.first_response_due_at,
+        pass.first_response_breached_at = person.first_response_breached_at
+    WHERE pass.workspace_id = #{workspaceId}
+      AND pass.person_id = #{personId}
+      AND pass.ended_at IS NULL
+      AND person.suspended_at IS NULL
+      AND person.provision_ceased_at IS NULL
+  </update>
+</mapper>

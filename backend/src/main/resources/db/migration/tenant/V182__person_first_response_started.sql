@@ -9,9 +9,12 @@
 -- know, and inventing one — created_at, the deadline minus an assumed window — would put fabricated
 -- durations into the very report that exists to measure real ones. Existing clocks therefore report
 -- no elapsed time, and every clock started from here on reports a true one.
+--
+-- Deliberately no CHECK pairing this with the deadline. During a rolling deploy a pre-V182 binary
+-- still clears a clock by nulling due/responded/breached without knowing about this column, and a
+-- constraint requiring a deadline whenever a start exists would make the database reject that
+-- write. The service maintains the pairing; the schema does not need to make a mixed-version
+-- rollout impossible to hold it.
 ALTER TABLE person
     ADD COLUMN first_response_started_at DATETIME NULL
-        COMMENT 'When the first-response clock started; NULL for clocks predating this column',
-    -- A start only means anything alongside the deadline it was measured against.
-    ADD CONSTRAINT chk_person_first_response_started CHECK (
-        first_response_started_at IS NULL OR first_response_due_at IS NOT NULL);
+        COMMENT 'When the first-response clock started; NULL for clocks predating this column';
