@@ -196,9 +196,11 @@ already has one is a no-op: the deadline describes the *first* response, and a r
 not buy the workspace more time.
 
 **Logging an activity against the contact stops the clock.** An activity is this product's record of
-having touched someone. Interactions written by provider capture and bulk history import do not stop
-it: neither path models direction, so counting them would let the lead's own inbound message satisfy
-the workspace's own response deadline. A workspace whose reps reply only from a synced mailbox will
+having touched someone. That includes an activity logged by a rule's own `log_activity` action: a
+workspace that automates an acknowledgement has decided that acknowledgement is a response, and
+classifying touches by who made them would be a hidden rule nobody asked for. Interactions written by
+provider capture and bulk history import do *not* stop it: neither path models direction, so counting
+them would let the lead's own inbound message satisfy the workspace's own response deadline. A workspace whose reps reply only from a synced mailbox will
 therefore see breaches it has arguably answered — closing that needs direction on captured
 interactions, which is tracked separately.
 
