@@ -43,6 +43,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowTriggerOutbox;
@@ -95,6 +97,8 @@ class WorkflowTriggerExactlyOnceIntegrationTest extends AbstractServiceTest {
     @MockitoSpyBean private RuleActionExecutor actionExecutor;
 
     private final List<Integer> createdCompanyIds = new ArrayList<>();
+    private final List<Integer> createdDealIds = new ArrayList<>();
+    private final List<Integer> createdPipelineIds = new ArrayList<>();
 
     @Test
     void companyUpdatedDuplicateDeliveryReplayAndSchedulerRestartExecuteOnce() throws Exception {
@@ -226,6 +230,24 @@ class WorkflowTriggerExactlyOnceIntegrationTest extends AbstractServiceTest {
     }
 
     @Test
+    void documentApprovedCanonicalRunReachesActionOnce() {
+        String title = "Document ownership " + unique();
+        WorkflowDto workflow = createEnabledWorkflow(title, "document", "document.approved");
+        int documentId = createDocument();
+        clearInvocations(actionExecutor);
+
+        publishEntityChange("document", documentId, "document.approved");
+        WorkflowTriggerOutbox outbox = latestOutbox(workflow.id(), "document.approved");
+        drainSchedulerWork();
+        workflowRuntimeService.dispatch(entityDispatch(outbox));
+        drainSchedulerWork();
+
+        assertEquals("document", outbox.getRecordType());
+        assertEquals(documentId, outbox.getRecordId());
+        assertSingleCanonicalEffect(workflow.id(), title);
+    }
+
+    @Test
     void companyUpdatedLegacyOwnerDuplicateDeliveryAndReplayExecuteOnce() {
         String title = "Legacy ownership " + unique();
         WorkflowDto workflow = createEnabledWorkflow(title);
@@ -247,11 +269,15 @@ class WorkflowTriggerExactlyOnceIntegrationTest extends AbstractServiceTest {
     }
 
     private WorkflowDto createEnabledWorkflow(String title) {
+        return createEnabledWorkflow(title, "company", "company.updated");
+    }
+
+    private WorkflowDto createEnabledWorkflow(String title, String recordType, String event) {
         WorkflowCreateRequest request = new WorkflowCreateRequest();
         request.setName(title);
-        request.setRecordType("company");
+        request.setRecordType(recordType);
         request.setExecutionMode("user");
-        request.setDefinition(objectMapper.valueToTree(definition(title)));
+        request.setDefinition(objectMapper.valueToTree(definition(title, event)));
         request.setCanvas(objectMapper.valueToTree(canvas()));
         WorkflowDto created = workflowService.create(request);
         WorkflowPublishRequest publication = new WorkflowPublishRequest();
@@ -271,13 +297,42 @@ class WorkflowTriggerExactlyOnceIntegrationTest extends AbstractServiceTest {
         return company;
     }
 
+    /**
+     * A committed draft document on a committed deal. The row is written directly because this test
+     * runs without a surrounding transaction and only needs a valid subject for the record guard.
+     */
+    private int createDocument() {
+        Pipeline pipeline = newPipeline();
+        createdPipelineIds.add(pipeline.getId());
+        Deal deal = newDeal(pipeline, newStage(pipeline, 0), createCompany());
+        createdDealIds.add(deal.getId());
+        jdbcTemplate.update(
+            "INSERT INTO deal_document"
+                + " (workspace_id, deal_id, type, locale, status, version, title, content, currency)"
+                + " VALUES (?, ?, 'quote', 'en', 'draft', 1, 'Quote', '{}', 'JPY')",
+            workspace.getId(), deal.getId());
+        Integer documentId = jdbcTemplate.queryForObject(
+            "SELECT id FROM deal_document WHERE workspace_id = ? AND deal_id = ?",
+            Integer.class, workspace.getId(), deal.getId());
+        assertNotNull(documentId);
+        return documentId;
+    }
+
     private void publishCompanyUpdated(int companyId) {
+        publishEntityChange("company", companyId, "company.updated");
+    }
+
+    private void publishEntityChange(String recordType, int recordId, String event) {
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         transaction.executeWithoutResult(status -> ruleTriggerPublisher.publish(
-            workspace.getId(), "company", companyId, "company.updated"));
+            workspace.getId(), recordType, recordId, event));
     }
 
     private WorkflowTriggerOutbox latestOutbox(int workflowId) {
+        return latestOutbox(workflowId, "company.updated");
+    }
+
+    private WorkflowTriggerOutbox latestOutbox(int workflowId, String event) {
         Long id = jdbcTemplate.queryForObject(
             "SELECT id FROM workflow_trigger_outbox"
                 + " WHERE workspace_id = ? AND workflow_id = ?"
@@ -288,7 +343,7 @@ class WorkflowTriggerExactlyOnceIntegrationTest extends AbstractServiceTest {
         assertNotNull(id);
         WorkflowTriggerOutbox outbox = outboxMapper.getById(workspace.getId(), id);
         assertNotNull(outbox);
-        assertEquals("company.updated", outbox.getTriggerEvent());
+        assertEquals(event, outbox.getTriggerEvent());
         return outbox;
     }
 
@@ -466,10 +521,10 @@ class WorkflowTriggerExactlyOnceIntegrationTest extends AbstractServiceTest {
         return value == null ? 0 : value;
     }
 
-    private static WorkflowDefinition definition(String title) {
+    private static WorkflowDefinition definition(String title, String event) {
         RuleTrigger trigger = new RuleTrigger();
         trigger.setType("entity_change");
-        trigger.setEvents(List.of("company.updated"));
+        trigger.setEvents(List.of(event));
         RuleAction action = new RuleAction();
         action.setType("notify");
         action.setTitle(title);
@@ -514,6 +569,19 @@ class WorkflowTriggerExactlyOnceIntegrationTest extends AbstractServiceTest {
                 "workflow_run", "workflow_trigger_outbox", "workflow_runtime_workspace",
                 "rule_execution", "job_run", "workflow_version", "workflow", "rule")) {
             drain(TenantLifecycleRegistry.require(table));
+        }
+        for (int dealId : createdDealIds) {
+            jdbcTemplate.update(
+                "DELETE FROM deal WHERE workspace_id = ? AND id = ?",
+                workspace.getId(), dealId);
+        }
+        for (int pipelineId : createdPipelineIds) {
+            jdbcTemplate.update(
+                "DELETE FROM stage WHERE workspace_id = ? AND pipeline_id = ?",
+                workspace.getId(), pipelineId);
+            jdbcTemplate.update(
+                "DELETE FROM pipeline WHERE workspace_id = ? AND id = ?",
+                workspace.getId(), pipelineId);
         }
         for (int companyId : createdCompanyIds) {
             jdbcTemplate.update(

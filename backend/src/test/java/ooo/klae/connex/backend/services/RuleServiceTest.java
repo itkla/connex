@@ -507,6 +507,44 @@ class RuleServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void create_rejectsUnsupportedActionForDocumentRecordType() {
+        assertThrows(BadRequestException.class,
+            () -> ruleService.create(
+                req("document", entityChange("document.approved"), "user", action("add_tag"))));
+        assertThrows(BadRequestException.class,
+            () -> ruleService.create(
+                req("document", entityChange("document.approved"), "user", action("change_stage"))));
+    }
+
+    @Test
+    void create_documentNotifyRule_allowed() {
+        RuleDto created = ruleService.create(
+            req("document", entityChange("document.approved", "document.rejected"),
+                "user", action("notify")));
+
+        assertEquals("document", created.getRecordType());
+        assertEquals(
+            List.of("document.approved", "document.rejected"), created.getTrigger().getEvents());
+    }
+
+    @Test
+    void preview_documentRecordType_throws() {
+        RulePreviewRequest request = new RulePreviewRequest();
+        request.setRecordType("document");
+        SegmentDefinition documentCondition = new SegmentDefinition();
+        documentCondition.setMatch("all");
+        SegmentCondition byName = new SegmentCondition();
+        byName.setType("field");
+        byName.setField("name");
+        byName.setOp("contains");
+        byName.setValue("anything");
+        documentCondition.setConditions(List.of(byName));
+        request.setCondition(documentCondition);
+
+        assertThrows(BadRequestException.class, () -> ruleService.preview(request));
+    }
+
+    @Test
     void preview_emptyCondition_throws() {
         RulePreviewRequest request = new RulePreviewRequest();
         request.setRecordType("company");

@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -39,6 +40,7 @@ import ooo.klae.connex.backend.dto.WorkflowManualConfirmRequest;
 import ooo.klae.connex.backend.dto.WorkflowManualPreparationDto;
 import ooo.klae.connex.backend.dto.WorkflowManualPrepareRequest;
 import ooo.klae.connex.backend.dto.WorkflowManualScope;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowOperationsMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
@@ -181,6 +183,37 @@ class WorkflowManualRunServiceTest {
         assertEquals(List.of("scope_empty"), result.blockers());
         verify(dealService).getMatchingDealIds(
             null, null, null, null, null, false, List.of("open"), null, null);
+    }
+
+    @Test
+    void manualRunRefusesARecordTypeThisSurfaceCannotScope() {
+        Workflow workflow = new Workflow();
+        workflow.setId(11);
+        workflow.setWorkspaceId(7);
+        workflow.setName("Document workflow");
+        workflow.setEnabled(true);
+        workflow.setRuntimeOwner("canonical");
+        workflow.setActiveVersionId(19L);
+        when(workflowMapper.getById(7, 11)).thenReturn(workflow);
+        WorkflowVersion version = new WorkflowVersion();
+        version.setId(19L);
+        version.setWorkflowId(11);
+        version.setWorkspaceId(7);
+        version.setVersionNumber(1);
+        version.setRecordType("document");
+        version.setExecutionMode("user");
+        version.setRunAsUserId(17);
+        when(workflowVersionMapper.getById(7, 11, 19L)).thenReturn(version);
+
+        BadRequestException failure = assertThrows(
+            BadRequestException.class,
+            () -> service.prepare(
+                11,
+                new WorkflowManualPrepareRequest(
+                    "record", new WorkflowManualScope.SingleRecord(91))));
+
+        assertEquals("Unsupported workflow record type", failure.getMessage());
+        verify(operationsMapper, never()).insertInvocation(any());
     }
 
     private void stubSavedView(String configJson) throws Exception {

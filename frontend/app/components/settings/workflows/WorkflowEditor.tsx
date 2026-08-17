@@ -515,6 +515,7 @@ function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
                 open={simulationOpen}
                 records={editor.simulationRecords}
                 loading={editor.simulationLoading}
+                supported={editor.simulationSupported}
                 result={editor.simulation}
                 diagnosticMessage={diagnosticMessage}
                 onOpenChange={setSimulationOpen}

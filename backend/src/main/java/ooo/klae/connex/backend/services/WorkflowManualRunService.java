@@ -65,6 +65,7 @@ public class WorkflowManualRunService {
         "succeeded", "failed", "partial", "cancelled", "expired");
     private static final Set<String> SOURCE_SURFACES = Set.of(
         "record", "record_list", "saved_view", "search", "command_palette");
+    private static final Set<String> RECORD_TYPES = Set.of("company", "person", "deal");
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     private final WorkflowMapper workflowMapper;
@@ -98,6 +99,7 @@ public class WorkflowManualRunService {
         String sourceSurface = requireSourceSurface(request.sourceSurface());
         Workflow workflow = requireWorkflow(workspaceId, workflowId);
         WorkflowVersion version = requireActiveVersion(workspaceId, workflow);
+        requireManualRunnable(version.getRecordType());
         ResolvedScope resolved = resolveScope(
             request.scope(), sourceSurface, requesterId, version.getRecordType());
         WorkflowDefinition definition = canonicalizer.parseDefinition(version.getDefinitionJson());
@@ -782,6 +784,18 @@ public class WorkflowManualRunService {
             throw new BadRequestException("Unsupported manual workflow source surface");
         }
         return normalized;
+    }
+
+    /**
+     * Refuses a manual run for a record type this surface cannot scope. Only filter-shaped scopes
+     * reach {@code resolveFilterForRecordType}, so a directly enumerated selection would otherwise
+     * carry an unsupported record type all the way to the {@code workflow_invocation} check
+     * constraint and surface as a server error instead of a rejected request.
+     */
+    private static void requireManualRunnable(String recordType) {
+        if (!RECORD_TYPES.contains(recordType)) {
+            throw new BadRequestException("Unsupported workflow record type");
+        }
     }
 
     private static String requireQuery(String value) {

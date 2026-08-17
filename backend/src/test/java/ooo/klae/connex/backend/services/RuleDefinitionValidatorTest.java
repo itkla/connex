@@ -46,7 +46,15 @@ class RuleDefinitionValidatorTest {
 
     @BeforeEach
     void setUp() {
-        validator = new RuleDefinitionValidator(segmentService, workspaceService, BEAN_VALIDATOR);
+        validator = validatorWithDocumentFence(true);
+    }
+
+    private RuleDefinitionValidator validatorWithDocumentFence(boolean open) {
+        return new RuleDefinitionValidator(
+            segmentService,
+            workspaceService,
+            BEAN_VALIDATOR,
+            new WorkflowDocumentAutomationGate(open));
     }
 
     @AfterAll
@@ -283,6 +291,128 @@ class RuleDefinitionValidatorTest {
         verify(workspaceService, never()).requirePermission(any());
     }
 
+    @Test
+    void documentEntityChangeRuleIsAccepted() {
+        RuleRequest request = request(
+            " Document ", entityChange("document.approved"), "user", action("notify"));
+
+        assertDoesNotThrow(() -> validator.validate(request));
+
+        verify(segmentService, never()).validate(any(), any());
+    }
+
+    @Test
+    void documentRuleRejectsUnknownEvent() {
+        RuleRequest request = request(
+            "document", entityChange("document.sent"), "user", action("notify"));
+
+        BadRequestException exception = assertThrows(BadRequestException.class,
+            () -> validator.validate(request));
+
+        assertEquals("Unsupported event for document: document.sent", exception.getMessage());
+    }
+
+    @Test
+    void documentRuleRejectsCondition() {
+        RuleRequest request = request(
+            "document", entityChange("document.approved"), "user", action("notify"));
+        request.setCondition(condition());
+
+        BadRequestException exception = assertThrows(BadRequestException.class,
+            () -> validator.validate(request));
+
+        assertEquals(
+            "WHEN conditions are not supported for record type: document", exception.getMessage());
+        verify(segmentService, never()).validate(any(), any());
+    }
+
+    @Test
+    void documentRuleRejectsScheduleTrigger() {
+        RuleRequest request = request("document", schedule("daily"), "user", action("notify"));
+        request.setCondition(condition());
+
+        BadRequestException exception = assertThrows(BadRequestException.class,
+            () -> validator.validate(request));
+
+        assertEquals(
+            "WHEN conditions are not supported for record type: document", exception.getMessage());
+
+        RuleRequest withoutCondition = request(
+            "document", schedule("daily"), "user", action("notify"));
+
+        BadRequestException scheduleFailure = assertThrows(BadRequestException.class,
+            () -> validator.validate(withoutCondition));
+
+        assertEquals(
+            "Schedule rules are not supported for record type: document",
+            scheduleFailure.getMessage());
+    }
+
+    @Test
+    void documentRuleRejectsChangeStageAndTagActions() {
+        for (String type : List.of("change_stage", "assign_owner", "add_tag", "remove_tag")) {
+            RuleRequest request = request(
+                "document", entityChange("document.approved"), "user", action(type));
+
+            BadRequestException exception = assertThrows(BadRequestException.class,
+                () -> validator.validate(request),
+                () -> type + " must not be available to document rules");
+
+            assertEquals(
+                "'" + type + "' actions are not supported for document rules",
+                exception.getMessage());
+        }
+    }
+
+    @Test
+    void documentRuleAcceptsCreateTaskLogActivityCreateNoteAndNotify() {
+        RuleRequest request = request(
+            "document",
+            entityChange("document.finalized"),
+            "user",
+            action("create_task"), action("log_activity"), action("create_note"), action("notify"));
+
+        Set<Permission> required = validator.validateForMutation(request);
+
+        assertEquals(
+            Set.of(Permission.TASK_CREATE, Permission.ACTIVITY_CREATE, Permission.NOTE_CREATE),
+            required);
+    }
+
+    @Test
+    void closedDocumentFenceRefusesEveryDocumentDefinition() {
+        RuleDefinitionValidator fenced = validatorWithDocumentFence(false);
+
+        for (RuleAction action : List.of(
+                action("notify"), action("create_task"),
+                action("log_activity"), action("create_note"))) {
+            RuleRequest request = request(
+                "document", entityChange("document.approved"), "user", action);
+
+            BadRequestException exception = assertThrows(BadRequestException.class,
+                () -> fenced.validateForMutation(request),
+                () -> action.getType() + " must stay fenced until the deployment opens it");
+
+            assertEquals("Invalid record type: document", exception.getMessage());
+        }
+
+        verify(workspaceService, never()).requirePermission(any());
+    }
+
+    @Test
+    void closedDocumentFenceLeavesEveryOtherRecordTypeAuthorable() {
+        RuleDefinitionValidator fenced = validatorWithDocumentFence(false);
+
+        for (String recordType : List.of("deal", "company", "person", "task")) {
+            RuleRequest request = request(
+                recordType, entityChange(recordType + ".created"), "user", action("notify"));
+
+            assertDoesNotThrow(
+                () -> fenced.validateForMutation(request),
+                () -> recordType + " must remain authorable behind the document fence");
+        }
+    }
+
     private void assertStructurallyInvalid(RuleRequest request) {
         BadRequestException exception = assertThrows(
             BadRequestException.class, () -> validator.validate(request));
@@ -320,6 +450,8 @@ class RuleDefinitionValidatorTest {
         switch (type.trim().toLowerCase()) {
             case "create_task", "notify" -> action.setTitle("title");
             case "add_tag" -> action.setTagId(1);
+            case "log_activity" -> action.setActivityType("call");
+            case "create_note" -> action.setBody("body");
             default -> { }
         }
         return action;

@@ -286,7 +286,8 @@
             "deal": "案件",
             "company": "会社",
             "person": "連絡先",
-            "task": "タスク"
+            "task": "タスク",
+            "document": "ドキュメント"
         },
         "cadence": {
             "hourly": "時間",
@@ -318,6 +319,13 @@
             "task": {
                 "created": "作成",
                 "completed": "完了"
+            },
+            "document": {
+                "approval_requested": "承認申請",
+                "approved": "承認",
+                "rejected": "却下",
+                "finalized": "確定",
+                "superseded": "差し替え"
             }
         },
         "action": {
@@ -566,6 +574,8 @@
             "description": "保存済みの下書きを1件のレコードに対して評価します。実際の実行は行いません。",
             "previewOnlyTitle": "プレビューのみ — ワークフローは実行されません",
             "previewOnlyBody": "実行履歴の書き込み、レコードの変更、通知の送信を行わずに、登録条件、権限、分岐、ブロッカーを確認します。",
+            "unsupportedTitle": "ドキュメントのワークフローはプレビューできません",
+            "unsupportedBody": "ドキュメントのワークフローは案件のドキュメント1件を対象に実行されますが、ドキュメントは検索ではなく案件から開くため、ここで対象を選ぶことができません。ワークフローを公開し、実行履歴でご確認ください。",
             "recordLabel": "プレビューするレコード",
             "recordPlaceholder": "表示権限のあるレコードを検索",
             "recordEmpty": "表示できるレコードが見つかりません",

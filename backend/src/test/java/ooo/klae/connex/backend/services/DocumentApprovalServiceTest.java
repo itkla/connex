@@ -14,13 +14,16 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
@@ -67,6 +70,7 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
     @Autowired PlatformTransactionManager transactionManager;
     @MockitoSpyBean WorkspaceService workspaceService;
     @MockitoSpyBean DealDocumentMapper documentMapper;
+    @MockitoSpyBean RuleTriggerPublisher ruleTriggers;
 
     /**
      * Drops the MyBatis session cache. The suite runs one transaction per test, so a write made with
@@ -868,7 +872,7 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
 
         assertTrue(approvalService.terminateIfUnsatisfiable(workspace.getId(), approval));
 
-        org.mockito.InOrder order = inOrder(workspaceService, documentMapper);
+        InOrder order = inOrder(workspaceService, documentMapper);
         order.verify(workspaceService)
             .lockApprovalReconciliationAuthorizationRoot(workspace.getId());
         order.verify(workspaceService).getMembers(workspace.getId());
@@ -2242,5 +2246,103 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         approvalService.decide(deal.getId(), doc.id(), "approved", null, null);
         authenticateAs(currentUser, workspace.getId());
         assertEquals("final", documentService.updateStatus(deal.getId(), doc.id(), "final").status());
+    }
+
+    @Test
+    void requestApprovalPublishesApprovalRequestedTrigger() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        clearInvocations(ruleTriggers);
+
+        approvalService.requestApproval(deal.getId(), doc.id(), null);
+
+        verify(ruleTriggers).publish(
+            workspace.getId(), "document", doc.id(), "document.approval_requested");
+    }
+
+    @Test
+    void finalApprovalPublishesApprovedTrigger() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        approvalService.requestApproval(deal.getId(), doc.id(), null);
+        authenticateAs(approver(), workspace.getId());
+        clearInvocations(ruleTriggers);
+
+        approvalService.decide(deal.getId(), doc.id(), "approved", null, null);
+
+        verify(ruleTriggers).publish(
+            workspace.getId(), "document", doc.id(), "document.approved");
+    }
+
+    @Test
+    void partialQuorumApprovalPublishesNoTrigger() {
+        User first = approver();
+        User second = approver();
+        chainPolicy("sequential", step(2, "Two of us", first, second));
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        approvalService.requestApproval(deal.getId(), doc.id(), null);
+        authenticateAs(first, workspace.getId());
+        clearInvocations(ruleTriggers);
+
+        assertEquals("pending",
+            approvalService.decide(deal.getId(), doc.id(), "approved", null, null).status());
+
+        verify(ruleTriggers, never()).publish(anyInt(), anyString(), anyInt(), anyString());
+    }
+
+    @Test
+    void rejectionPublishesRejectedTrigger() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        approvalService.requestApproval(deal.getId(), doc.id(), null);
+        authenticateAs(approver(), workspace.getId());
+        clearInvocations(ruleTriggers);
+
+        approvalService.decide(deal.getId(), doc.id(), "rejected", null, null);
+
+        verify(ruleTriggers).publish(
+            workspace.getId(), "document", doc.id(), "document.rejected");
+    }
+
+    @Test
+    void cancelPublishesNoTrigger() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        approvalService.requestApproval(deal.getId(), doc.id(), null);
+        clearInvocations(ruleTriggers);
+
+        assertEquals("cancelled", approvalService.cancel(deal.getId(), doc.id()).status());
+
+        verify(ruleTriggers, never()).publish(anyInt(), anyString(), anyInt(), anyString());
+    }
+
+    @Test
+    void policyInvalidationPublishesNoTrigger() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(deal.getId(), doc.id(), null);
+        DocumentApproval approval = approvalMapper.getById(workspace.getId(), requested.id());
+        clearInvocations(ruleTriggers);
+
+        approvalService.invalidateForPolicyChange(workspace.getId(), approval, "tightened");
+
+        assertEquals("invalidated",
+            approvalService.getForDocument(deal.getId(), doc.id()).getFirst().status());
+        verify(ruleTriggers, never()).publish(anyInt(), anyString(), anyInt(), anyString());
+    }
+
+    @Test
+    void triggerPublishesAfterDocumentStatusWrite() {
+        Deal deal = jpyDeal();
+        DealDocumentDto doc = generate(deal);
+        clearInvocations(ruleTriggers, documentMapper);
+
+        approvalService.requestApproval(deal.getId(), doc.id(), null);
+
+        InOrder order = inOrder(documentMapper, ruleTriggers);
+        order.verify(documentMapper).updateStatus(workspace.getId(), doc.id(), "pending_approval");
+        order.verify(ruleTriggers).publish(
+            workspace.getId(), "document", doc.id(), "document.approval_requested");
     }
 }

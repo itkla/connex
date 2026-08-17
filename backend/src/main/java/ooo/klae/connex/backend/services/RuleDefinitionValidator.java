@@ -26,19 +26,26 @@ import ooo.klae.connex.backend.exceptions.WorkflowDefinitionValidationException;
 import ooo.klae.connex.backend.services.WorkspaceService.Role;
 import ooo.klae.connex.backend.tenant.Permission;
 
-/** Validates and normalizes the shared semantic definition used by automation rules. */
+/**
+ * Validates and normalizes the shared semantic definition used by automation rules. Every path that
+ * authors, publishes, manually runs, simulates, or revalidates a definition passes through here, so
+ * {@link WorkflowDocumentAutomationGate} refusing {@code document} here closes the rolling-deployment
+ * fence for every one of them.
+ */
 @Component
 @RequiredArgsConstructor
 public class RuleDefinitionValidator {
 
-    private static final Set<String> RECORD_TYPES = Set.of("company", "person", "deal", "task");
+    private static final Set<String> RECORD_TYPES = Set.of(
+        "company", "person", "deal", "task", "document");
     private static final Set<String> TRIGGER_TYPES = Set.of("entity_change", "schedule");
     private static final Set<String> EXECUTION_MODES = Set.of("user", "system");
     private static final Set<String> ACTION_TYPES = Set.of(
         "create_task", "log_activity", "add_tag", "remove_tag", "create_note",
         "assign_owner", "change_stage", "notify");
     private static final Set<String> CADENCES = Set.of("hourly", "daily", "weekly");
-    private static final Set<String> ENTITY_CHANGE_RECORD_TYPES = Set.of("deal", "company", "person", "task");
+    private static final Set<String> ENTITY_CHANGE_RECORD_TYPES = Set.of(
+        "deal", "company", "person", "task", "document");
     private static final Set<String> SEGMENT_RECORD_TYPES = Set.of("company", "person", "deal");
     private static final Set<String> DEAL_EVENTS = Set.of(
         "deal.created", "deal.stage_changed", "deal.updated", "deal.won", "deal.lost",
@@ -49,19 +56,23 @@ public class RuleDefinitionValidator {
         "person.created", "person.updated", "person.job_changed", "person.owner_changed",
         "person.lifecycle_changed");
     private static final Set<String> TASK_EVENTS = Set.of("task.created", "task.completed");
+    private static final Set<String> DOCUMENT_EVENTS = Set.of(
+        "document.approval_requested", "document.approved", "document.rejected",
+        "document.finalized", "document.superseded");
     private static final Map<String, Set<String>> ACTION_RECORD_TYPES = Map.of(
-        "create_task", Set.of("person", "deal"),
-        "log_activity", Set.of("person", "deal"),
+        "create_task", Set.of("person", "deal", "document"),
+        "log_activity", Set.of("person", "deal", "document"),
         "add_tag", Set.of("company", "person", "deal"),
         "remove_tag", Set.of("company", "person", "deal"),
-        "create_note", Set.of("person", "deal"),
+        "create_note", Set.of("person", "deal", "document"),
         "assign_owner", Set.of("person", "deal"),
         "change_stage", Set.of("deal"),
-        "notify", Set.of("company", "person", "deal", "task"));
+        "notify", Set.of("company", "person", "deal", "task", "document"));
 
     private final SegmentService segmentService;
     private final WorkspaceService workspaceService;
     private final Validator beanValidator;
+    private final WorkflowDocumentAutomationGate documentAutomationGate;
 
     String validatePreview(RulePreviewRequest request) {
         String recordType = normalize(request.getRecordType());
@@ -235,7 +246,8 @@ public class RuleDefinitionValidator {
         actions.forEach(this::requireStructurallyValid);
 
         String recordType = normalize(recordTypeValue);
-        if (!RECORD_TYPES.contains(recordType)) {
+        if (!RECORD_TYPES.contains(recordType)
+                || !documentAutomationGate.permits(recordType)) {
             throw invalid(
                 WorkflowDiagnosticCode.RECORD_TYPE_INVALID,
                 "Invalid record type: " + recordTypeValue,
@@ -365,7 +377,7 @@ public class RuleDefinitionValidator {
             if (!ENTITY_CHANGE_RECORD_TYPES.contains(recordType)) {
                 throw invalid(
                     WorkflowDiagnosticCode.ENTITY_CHANGE_RECORD_TYPE_UNSUPPORTED,
-                    "Entity-change rules are only supported for deal and company records",
+                    "Entity-change rules are not supported for record type: " + recordType,
                     trigger.nodeId(), "config.type", Map.of("recordType", recordType));
             }
             if (value.getEvents() == null || value.getEvents().isEmpty()) {
@@ -379,6 +391,7 @@ public class RuleDefinitionValidator {
                 case "company" -> COMPANY_EVENTS;
                 case "person" -> PERSON_EVENTS;
                 case "task" -> TASK_EVENTS;
+                case "document" -> DOCUMENT_EVENTS;
                 default -> Set.of();
             };
             for (String event : value.getEvents()) {

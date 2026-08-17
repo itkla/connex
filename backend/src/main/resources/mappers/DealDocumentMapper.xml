@@ -50,6 +50,11 @@
     FOR UPDATE
   </select>
 
+  <select id="findDealIdById" resultType="java.lang.Integer">
+    SELECT deal_id FROM deal_document
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
   <select id="maxVersion" resultType="java.lang.Integer">
     SELECT MAX(version) FROM deal_document WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId}
   </select>

@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.WorkflowDiagnosticCode;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.mappers.DealDocumentMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 
@@ -24,6 +25,9 @@ import ooo.klae.connex.backend.notifications.NotificationDelivery;
  * Performs a single rule {@link RuleAction} within an already-established automation context (the
  * caller has installed the security + tenant context). Each action delegates to the existing
  * tenant- and RBAC-enforcing service, so an actor lacking the action's permission fails the action.
+ *
+ * <p>A {@code document} run's subject is a {@code deal_document} row, which no record-attaching
+ * action can hold directly, so those actions attach to the document's parent deal instead.
  */
 @Component
 @RequiredArgsConstructor
@@ -37,6 +41,7 @@ public class RuleActionExecutor {
     private final NoteService noteService;
     private final NotificationDelivery notificationDelivery;
     private final TagMapper tagMapper;
+    private final DealDocumentMapper documentMapper;
 
     private static final DateTimeFormatter TIMESTAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
@@ -80,8 +85,8 @@ public class RuleActionExecutor {
         task.setAssignedTo(assignee);
         if ("person".equals(ctx.recordType())) {
             task.setPerson(person(ctx.entityId()));
-        } else if ("deal".equals(ctx.recordType())) {
-            task.setDeal(deal(ctx.entityId()));
+        } else if (attachesToDeal(ctx)) {
+            task.setDeal(deal(dealIdFor(ctx)));
         }
         taskService.create(task);
     }
@@ -93,8 +98,8 @@ public class RuleActionExecutor {
         activity.setNotes(action.getBody());
         if ("person".equals(ctx.recordType())) {
             activity.setPerson(person(ctx.entityId()));
-        } else if ("deal".equals(ctx.recordType())) {
-            activity.setDeal(deal(ctx.entityId()));
+        } else if (attachesToDeal(ctx)) {
+            activity.setDeal(deal(dealIdFor(ctx)));
         }
         activityService.create(activity);
     }
@@ -128,8 +133,8 @@ public class RuleActionExecutor {
         note.setContent(action.getBody());
         if ("person".equals(ctx.recordType())) {
             note.setPerson(person(ctx.entityId()));
-        } else if ("deal".equals(ctx.recordType())) {
-            note.setDeal(deal(ctx.entityId()));
+        } else if (attachesToDeal(ctx)) {
+            note.setDeal(deal(dealIdFor(ctx)));
         }
         noteService.create(note);
     }
@@ -149,6 +154,29 @@ public class RuleActionExecutor {
         notification.setDedupeKey(ctx.notificationDedupeKey());
         notification.setTriggeredAt(LocalDateTime.now().format(TIMESTAMP));
         notificationDelivery.deliver(notification);
+    }
+
+    private static boolean attachesToDeal(AutomationActionContext ctx) {
+        return "deal".equals(ctx.recordType()) || "document".equals(ctx.recordType());
+    }
+
+    /**
+     * The deal an attaching action targets: the run's own record for a deal run, and the parent deal
+     * of the subject document for a document run. A document whose parent vanished after the trigger
+     * was published fails the action closed with the same fixed code as the record guard.
+     */
+    private int dealIdFor(AutomationActionContext ctx) {
+        if (!"document".equals(ctx.recordType())) {
+            return ctx.entityId();
+        }
+        Integer dealId = documentMapper.findDealIdById(ctx.workspaceId(), ctx.entityId());
+        if (dealId == null) {
+            throw new WorkflowExecutionException(
+                "record_unavailable",
+                "The workflow record is no longer available for automation.",
+                true);
+        }
+        return dealId;
     }
 
     private static Person person(int id) {

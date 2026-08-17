@@ -14,6 +14,7 @@ import {
     WORKFLOW_RUN_STATUS_CLASS,
     WorkflowRunStatusIcon,
 } from "@/app/components/settings/workflows/workflowRunStatus";
+import { RECORD_TYPES } from "@/app/components/settings/workflows/vocabulary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -123,7 +124,7 @@ export default function WorkflowRunsDialog({
     const targetLabel = (run: WorkflowRunSummary) => {
         if (!run.trigger || run.trigger.recordId == null) return t("runs.scheduledTarget");
         const type = run.trigger.recordType;
-        const record = type === "company" || type === "person" || type === "deal" || type === "task"
+        const record = type != null && RECORD_TYPES.includes(type)
             ? tr(`record.${type}`)
             : t("runs.recordFallback");
         return t("runs.target", { record, id: run.trigger.recordId });

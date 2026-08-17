@@ -286,7 +286,8 @@
             "deal": "deal",
             "company": "company",
             "person": "contact",
-            "task": "task"
+            "task": "task",
+            "document": "document"
         },
         "cadence": {
             "hourly": "hour",
@@ -318,6 +319,13 @@
             "task": {
                 "created": "created",
                 "completed": "completed"
+            },
+            "document": {
+                "approval_requested": "approval requested",
+                "approved": "approved",
+                "rejected": "rejected",
+                "finalized": "finalized",
+                "superseded": "superseded"
             }
         },
         "action": {
@@ -566,6 +574,8 @@
             "description": "Evaluate the saved draft against one record without executing it.",
             "previewOnlyTitle": "Preview only — no workflow will run",
             "previewOnlyBody": "Connex checks enrollment, permissions, branches, and blockers without writing a run, changing a record, or sending a notification.",
+            "unsupportedTitle": "Preview is not available for document workflows",
+            "unsupportedBody": "A document workflow runs against one document of a deal, and documents are reached from their deal rather than from search, so there is no way to choose the subject here. Publish the workflow and read its run history instead.",
             "recordLabel": "Record to preview",
             "recordPlaceholder": "Search permission-visible records",
             "recordEmpty": "No visible records found",

@@ -85,6 +85,7 @@ public class DocumentApprovalService {
     private final AuditService auditService;
     private final NotificationPreferenceService notificationPreferenceService;
     private final NotificationDelivery notificationDelivery;
+    private final RuleTriggerPublisher ruleTriggers;
     private final ObjectMapper objectMapper;
     private final ApprovalStepEligibility eligibility = new ApprovalStepEligibility();
 
@@ -216,6 +217,7 @@ public class DocumentApprovalService {
         auditService.record("document_approval.request", "deal", dealId, deal.getName(),
             "Requested approval for " + document.getType() + " v" + document.getVersion()
                 + (policy == null ? "" : " under policy " + policy.getName()), null);
+        ruleTriggers.publish(workspaceId, "document", documentId, "document.approval_requested");
         notifyStepApprovers(workspaceId, deal, document, approval, opened, actor, pool, null, null);
         return toDto(requireApproval(workspaceId, approval.getId()), document, pool);
     }
@@ -351,6 +353,11 @@ public class DocumentApprovalService {
                 ? "Recorded an approval for " + subject + ", which is still awaiting other approvers"
                 : (approved ? "Approved " : "Rejected ") + subject,
             PENDING.equals(outcome) ? null : auditService.singleChange("status", PENDING, outcome));
+        if (APPROVED.equals(outcome)) {
+            ruleTriggers.publish(workspaceId, "document", documentId, "document.approved");
+        } else if (REJECTED.equals(outcome)) {
+            ruleTriggers.publish(workspaceId, "document", documentId, "document.rejected");
+        }
         return toDto(requireApprovalForUpdate(workspaceId, approval.getId()), document, pool);
     }
 
