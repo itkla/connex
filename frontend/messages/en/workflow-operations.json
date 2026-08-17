@@ -351,6 +351,7 @@
       "remove_tag": "Remove tag",
       "create_note": "Create note",
       "assign_owner": "Assign owner",
+      "set_response_due": "Set first-response deadline",
       "change_stage": "Change stage",
       "notify": "Create notification"
     },

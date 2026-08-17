@@ -1,0 +1,310 @@
+package ooo.klae.connex.backend.services;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+
+import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.PersonDisqualificationReason;
+import ooo.klae.connex.backend.beans.PersonFirstResponseState;
+import ooo.klae.connex.backend.beans.PersonLifecycleStage;
+import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.FacetCount;
+import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.PersonLifecycleRequest;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.ShareMapper;
+import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
+
+/**
+ * The first-response SLA clock, the breach sweep, and the browser state it feeds (#559,
+ * increment 4b of {@code docs/LEAD_LIFECYCLE.md}). Verifies the idempotency guards each write
+ * depends on, that a breach escalates through the rule engine exactly once, that a late answer
+ * keeps its breach as evidence, and that the clock stays inside the owning workspace.
+ */
+class LeadResponseSlaServiceTest extends AbstractServiceTest {
+
+    @Autowired LeadResponseSlaService slaService;
+    @Autowired LeadResponseSlaScheduler slaScheduler;
+    @Autowired PersonLifecycleService lifecycleService;
+    @Autowired PersonService personService;
+    @Autowired ActivityService activityService;
+    @Autowired ShareMapper shareMapper;
+    @Autowired JdbcTemplate jdbcTemplate;
+    @MockitoBean RuleTriggerPublisher ruleTriggers;
+    @MockitoBean NotificationChangePublisher notificationChanges;
+
+    @Test
+    void startingTheClockSetsADeadlineAndNeverExtendsARunningOne() {
+        Person person = newPerson(newCompany());
+
+        assertTrue(slaService.startFirstResponseClock(person.getId(), 4));
+        Person under = personMapper.getPersonById(workspace.getId(), person.getId());
+        assertNotNull(under.getFirstResponseDueAt());
+        assertNull(under.getFirstRespondedAt());
+        assertNull(under.getFirstResponseBreachedAt());
+
+        assertFalse(slaService.startFirstResponseClock(person.getId(), 100));
+        assertEquals(under.getFirstResponseDueAt(),
+            personMapper.getPersonById(workspace.getId(), person.getId()).getFirstResponseDueAt());
+    }
+
+    @Test
+    void aClockRequiresAPositiveBoundedDeadline() {
+        Person person = newPerson(newCompany());
+
+        assertThrows(BadRequestException.class,
+            () -> slaService.startFirstResponseClock(person.getId(), null));
+        assertThrows(BadRequestException.class,
+            () -> slaService.startFirstResponseClock(person.getId(), 0));
+        assertThrows(BadRequestException.class,
+            () -> slaService.startFirstResponseClock(person.getId(), 24 * 365 + 1));
+
+        assertNull(personMapper.getPersonById(workspace.getId(), person.getId())
+            .getFirstResponseDueAt());
+    }
+
+    @Test
+    void loggingAnActivityRecordsTheFirstResponseAndOnlyTheFirst() {
+        Person person = newPerson(newCompany());
+        slaService.startFirstResponseClock(person.getId(), 4);
+
+        logActivity(person, "Called back");
+        Person answered = personMapper.getPersonById(workspace.getId(), person.getId());
+        assertNotNull(answered.getFirstRespondedAt());
+
+        logActivity(person, "Called again");
+        assertEquals(answered.getFirstRespondedAt(),
+            personMapper.getPersonById(workspace.getId(), person.getId()).getFirstRespondedAt());
+    }
+
+    @Test
+    void anActivityOnAContactUnderNoSlaLeavesTheClockColumnsAlone() {
+        Person person = newPerson(newCompany());
+
+        logActivity(person, "Coffee");
+
+        Person after = personMapper.getPersonById(workspace.getId(), person.getId());
+        assertNull(after.getFirstResponseDueAt());
+        assertNull(after.getFirstRespondedAt());
+    }
+
+    @Test
+    void thePassedDeadlineBreachesOnceAndEscalatesThroughTheRuleEngine() {
+        Person person = newPerson(newCompany());
+        slaService.startFirstResponseClock(person.getId(), 4);
+        expireDeadline(person);
+
+        assertEquals(List.of(person.getId()), slaService.findBreaches(workspace.getId(), 0, 50));
+        assertTrue(slaService.recordBreach(workspace.getId(), person.getId()));
+
+        assertNotNull(personMapper.getPersonById(workspace.getId(), person.getId())
+            .getFirstResponseBreachedAt());
+        verify(ruleTriggers).publish(
+            workspace.getId(), "person", person.getId(), "person.first_response_overdue");
+
+        assertTrue(slaService.findBreaches(workspace.getId(), 0, 50).isEmpty());
+        assertFalse(slaService.recordBreach(workspace.getId(), person.getId()));
+        verify(ruleTriggers).publish(
+            workspace.getId(), "person", person.getId(), "person.first_response_overdue");
+    }
+
+    @Test
+    void aResponseThatLandsBeforeTheSweepPreventsTheBreach() {
+        Person person = newPerson(newCompany());
+        slaService.startFirstResponseClock(person.getId(), 4);
+        expireDeadline(person);
+        logActivity(person, "Answered just in time to matter");
+
+        assertTrue(slaService.findBreaches(workspace.getId(), 0, 50).isEmpty());
+        assertFalse(slaService.recordBreach(workspace.getId(), person.getId()));
+
+        assertNull(personMapper.getPersonById(workspace.getId(), person.getId())
+            .getFirstResponseBreachedAt());
+        verify(ruleTriggers, never()).publish(
+            workspace.getId(), "person", person.getId(), "person.first_response_overdue");
+    }
+
+    @Test
+    void aLateAnswerIsRecordedWithoutErasingTheBreachItArrivedAfter() {
+        Person person = newPerson(newCompany());
+        slaService.startFirstResponseClock(person.getId(), 4);
+        expireDeadline(person);
+        slaService.recordBreach(workspace.getId(), person.getId());
+
+        logActivity(person, "Finally called");
+
+        Person late = personMapper.getPersonById(workspace.getId(), person.getId());
+        assertNotNull(late.getFirstRespondedAt());
+        assertNotNull(late.getFirstResponseBreachedAt());
+        assertEquals(List.of(person.getId()), filteredIds(PersonFirstResponseState.RESPONDED, false));
+        assertTrue(filteredIds(PersonFirstResponseState.OVERDUE, false).isEmpty());
+    }
+
+    @Test
+    void theSweepDrainsTheBacklogAndStopsWhenNothingIsOverdue() {
+        Person first = newPerson(newCompany());
+        Person second = newPerson(newCompany());
+        Person answered = newPerson(newCompany());
+        List.of(first, second, answered).forEach(p -> slaService.startFirstResponseClock(p.getId(), 4));
+        expireDeadline(first);
+        expireDeadline(second);
+        expireDeadline(answered);
+        logActivity(answered, "Handled");
+
+        LeadResponseSlaScheduler.BatchResult result = slaScheduler.sweepBatches(workspace.getId());
+
+        assertEquals(2, result.attemptedCount());
+        assertEquals(0, result.failedCount());
+        assertNotNull(personMapper.getPersonById(workspace.getId(), first.getId())
+            .getFirstResponseBreachedAt());
+        assertNotNull(personMapper.getPersonById(workspace.getId(), second.getId())
+            .getFirstResponseBreachedAt());
+        assertNull(personMapper.getPersonById(workspace.getId(), answered.getId())
+            .getFirstResponseBreachedAt());
+
+        assertEquals(0, slaScheduler.sweepBatches(workspace.getId()).attemptedCount());
+    }
+
+    @Test
+    void leavingTheLifecyclePassClearsTheClockItBelongedTo() {
+        Person withdrawn = enterLifecycle(newPerson(newCompany()));
+        slaService.startFirstResponseClock(withdrawn.getId(), 4);
+        expireDeadline(withdrawn);
+        slaService.recordBreach(workspace.getId(), withdrawn.getId());
+
+        lifecycleService.withdrawFromLifecycle(withdrawn.getId(), "not a prospect after all");
+
+        Person cleared = personMapper.getPersonById(workspace.getId(), withdrawn.getId());
+        assertNull(cleared.getFirstResponseDueAt());
+        assertNull(cleared.getFirstRespondedAt());
+        assertNull(cleared.getFirstResponseBreachedAt());
+    }
+
+    @Test
+    void recyclingAContactStartsItsNextPassWithoutTheOldDeadline() {
+        Person person = enterLifecycle(newPerson(newCompany()));
+        slaService.startFirstResponseClock(person.getId(), 4);
+        lifecycleService.updateLifecycle(person.getId(), request(PersonLifecycleStage.DISQUALIFIED));
+        lifecycleService.updateLifecycle(person.getId(), request(PersonLifecycleStage.RECYCLED));
+
+        assertNull(personMapper.getPersonById(workspace.getId(), person.getId())
+            .getFirstResponseDueAt());
+        assertTrue(slaService.startFirstResponseClock(person.getId(), 8));
+    }
+
+    @Test
+    void aSharedInContactKeepsItsSlaInsideTheOwningWorkspace() {
+        Person person = newPerson(newCompany());
+        slaService.startFirstResponseClock(person.getId(), 4);
+        expireDeadline(person);
+        slaService.recordBreach(workspace.getId(), person.getId());
+
+        Workspace grantee = siblingWorkspace();
+        shareMapper.sharePerson(
+            person.getId(), workspace.getId(), grantee.getId(), currentUser.getId(), false);
+        User outsider = newUser();
+        workspaceMapper.addMember(grantee.getId(), outsider.getId(), "owner");
+        authenticateAs(outsider, grantee.getId());
+
+        Person shared = personMapper.getPersonById(grantee.getId(), person.getId());
+        assertNotNull(shared, "the share itself must still be visible");
+        assertNull(shared.getFirstResponseDueAt());
+        assertNull(shared.getFirstRespondedAt());
+        assertNull(shared.getFirstResponseBreachedAt());
+
+        assertThrows(ResourceNotFoundException.class,
+            () -> slaService.startFirstResponseClock(person.getId(), 4));
+        assertEquals(0L, personService.countPersons(null, null, null, false,
+            MemberScope.allTeam(), null, false, null, false,
+            List.of(PersonFirstResponseState.OVERDUE), false, false));
+        assertTrue(slaService.findBreaches(grantee.getId(), 0, 50).isEmpty());
+    }
+
+    @Test
+    void theBrowserFiltersEachSlaStateSeparately() {
+        Person pending = newPerson(newCompany());
+        Person overdue = newPerson(newCompany());
+        Person responded = newPerson(newCompany());
+        Person none = newPerson(newCompany());
+        slaService.startFirstResponseClock(pending.getId(), 4);
+        slaService.startFirstResponseClock(overdue.getId(), 4);
+        slaService.startFirstResponseClock(responded.getId(), 4);
+        expireDeadline(overdue);
+        slaService.recordBreach(workspace.getId(), overdue.getId());
+        logActivity(responded, "Replied");
+
+        assertEquals(List.of(pending.getId()), filteredIds(PersonFirstResponseState.PENDING, false));
+        assertEquals(List.of(overdue.getId()), filteredIds(PersonFirstResponseState.OVERDUE, false));
+        assertEquals(List.of(responded.getId()), filteredIds(PersonFirstResponseState.RESPONDED, false));
+        assertTrue(filteredIds(null, true).contains(none.getId()));
+        assertFalse(filteredIds(null, true).contains(pending.getId()));
+
+        Map<String, Long> facets = personService.countsByFirstResponseState().stream()
+            .collect(Collectors.toMap(FacetCount::getKey, FacetCount::getCount));
+        assertEquals(1L, facets.get(PersonFirstResponseState.PENDING.name()));
+        assertEquals(1L, facets.get(PersonFirstResponseState.OVERDUE.name()));
+        assertEquals(1L, facets.get(PersonFirstResponseState.RESPONDED.name()));
+        assertTrue(facets.getOrDefault("__none__", 0L) >= 1L);
+    }
+
+    private List<Integer> filteredIds(PersonFirstResponseState state, boolean noFirstResponse) {
+        return personService.getPersonsPage(null, null, null, null, null, false,
+                MemberScope.allTeam(), null, false, null, false,
+                state == null ? null : List.of(state), noFirstResponse, false, 100, 0)
+            .stream().map(Person::getId).toList();
+    }
+
+    private Workspace siblingWorkspace() {
+        Workspace sibling = new Workspace();
+        sibling.setName("Sibling " + unique());
+        sibling.setSlug("sibling-" + unique());
+        sibling.setOrgId(workspaceMapper.getOrgId(workspace.getId()));
+        workspaceMapper.insert(sibling);
+        return sibling;
+    }
+
+    private void logActivity(Person person, String subject) {
+        Activity activity = new Activity();
+        activity.setType("call");
+        activity.setSubject(subject);
+        activity.setPerson(person);
+        activityService.create(activity);
+    }
+
+    private void expireDeadline(Person person) {
+        jdbcTemplate.update(
+            "UPDATE person SET first_response_due_at = ? WHERE workspace_id = ? AND id = ?",
+            java.sql.Timestamp.valueOf("2020-01-01 00:00:00"), workspace.getId(), person.getId());
+    }
+
+    private Person enterLifecycle(Person person) {
+        return lifecycleService.updateLifecycle(person.getId(), request(PersonLifecycleStage.NEW));
+    }
+
+    private static PersonLifecycleRequest request(PersonLifecycleStage stage) {
+        PersonLifecycleRequest request = new PersonLifecycleRequest();
+        request.setStage(stage);
+        if (stage == PersonLifecycleStage.DISQUALIFIED) {
+            request.setReason(PersonDisqualificationReason.NO_FIT);
+        }
+        return request;
+    }
+}

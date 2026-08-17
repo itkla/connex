@@ -267,6 +267,8 @@
         "actionBodyPlaceholder": "メッセージ（任意）",
         "dueIn": "期限",
         "days": "日後",
+        "respondWithin": "初回応答期限",
+        "hours": "時間以内",
         "activityTypePlaceholder": "活動の種類（例: 電話）",
         "activitySubjectPlaceholder": "件名",
         "tag": "タグ",
@@ -314,7 +316,8 @@
                 "updated": "更新",
                 "job_changed": "転職",
                 "owner_changed": "担当者変更",
-                "lifecycle_changed": "ライフサイクル変更"
+                "lifecycle_changed": "ライフサイクル変更",
+                "first_response_overdue": "初回応答期限超過"
             },
             "task": {
                 "created": "作成",
@@ -336,6 +339,7 @@
             "remove_tag": "タグを削除",
             "create_note": "メモを追加",
             "assign_owner": "担当者を割り当て",
+            "set_response_due": "初回応答期限を設定",
             "change_stage": "ステージを移動"
         },
         "runAs": {

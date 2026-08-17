@@ -421,6 +421,19 @@
             "OTHER": "Other"
         }
     },
+    "ContactResponseSla": {
+        "title": "First response",
+        "state": {
+            "none": "No SLA",
+            "PENDING": "Due",
+            "OVERDUE": "Overdue",
+            "RESPONDED": "Answered"
+        },
+        "dueLine": "First response due {when}",
+        "overdueLine": "First response overdue since {when}",
+        "respondedLine": "First response {when}",
+        "respondedLateLine": "First response {when}, after the deadline"
+    },
     "ContactProvenance": {
         "title": "Source",
         "notCaptured": "How this relationship began was never recorded.",

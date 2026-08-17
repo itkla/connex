@@ -514,6 +514,20 @@ function ActionFields({
                     </Select>
                 </LabeledField>
             ) : null}
+            {node.config.type === "set_response_due" ? (
+                <LabeledField label={tr("respondWithin")}>
+                    <Input
+                        type="number"
+                        min={1}
+                        max={8760}
+                        value={node.config.dueInHours ?? 4}
+                        onChange={(event) => update({ ...node.config, dueInHours: Number(event.target.value) }, "transient")}
+                        onBlur={onCommitTransient}
+                        disabled={readOnly}
+                        {...fieldProps("config.dueInHours")}
+                    />
+                </LabeledField>
+            ) : null}
             {node.config.type === "assign_owner" ? (
                 <LabeledField label={tr("actionOwner")}>
                     <Select

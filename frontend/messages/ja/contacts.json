@@ -421,6 +421,19 @@
             "OTHER": "その他"
         }
     },
+    "ContactResponseSla": {
+        "title": "初回応答",
+        "state": {
+            "none": "SLAなし",
+            "PENDING": "期限内",
+            "OVERDUE": "期限超過",
+            "RESPONDED": "対応済み"
+        },
+        "dueLine": "初回応答期限: {when}",
+        "overdueLine": "初回応答が {when} から期限超過",
+        "respondedLine": "初回応答: {when}",
+        "respondedLateLine": "初回応答: {when}（期限超過後）"
+    },
     "ContactProvenance": {
         "title": "獲得元",
         "notCaptured": "この関係の始まりは記録されていません。",

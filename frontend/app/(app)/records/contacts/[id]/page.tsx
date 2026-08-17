@@ -305,6 +305,11 @@ export default async function ContactPage({ params }: ContactPageProps) {
                             <ContactLifecyclePanel
                                 contactId={contact.id}
                                 lifecycle={lifecycle}
+                                firstResponse={{
+                                    dueAt: contact.firstResponseDueAt,
+                                    respondedAt: contact.firstRespondedAt,
+                                    breachedAt: contact.firstResponseBreachedAt,
+                                }}
                                 canEdit={effectivePermissions.includes("PERSON_UPDATE")
                                     && !contact.archivedAt
                                     && !contact.suspendedAt

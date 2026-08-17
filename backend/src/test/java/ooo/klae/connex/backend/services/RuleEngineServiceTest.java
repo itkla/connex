@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -455,6 +456,24 @@ class RuleEngineServiceTest extends AbstractServiceTest {
         assertEquals(1, matchedExecutions(rule.getId()));
         assertEquals(router.getId(),
             personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
+    }
+
+    @Test
+    void setResponseDue_action_startsTheFirstResponseClock() {
+        Person person = newPerson(newCompany());
+        assertNull(personMapper.getPersonById(workspace.getId(), person.getId())
+            .getFirstResponseDueAt());
+        RuleAction sla = new RuleAction();
+        sla.setType("set_response_due");
+        sla.setDueInHours(4);
+        RuleDto rule = entityChangeRule("person", sla, null, "person.lifecycle_changed");
+
+        ruleEngineService.onEntityChange(
+            workspace.getId(), "person", person.getId(), "person.lifecycle_changed");
+
+        assertEquals(1, matchedExecutions(rule.getId()));
+        assertNotNull(personMapper.getPersonById(workspace.getId(), person.getId())
+            .getFirstResponseDueAt());
     }
 
     @Test

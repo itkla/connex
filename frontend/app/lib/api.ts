@@ -2224,6 +2224,7 @@ export function exportContactsCsv(params: Types.ContactsPageParams = {}, init: R
         scope: params.scope, memberIds: params.memberIds,
         lifecycleStages: params.lifecycleStages, noLifecycle: params.noLifecycle,
         leadSources: params.leadSources, noLeadSource: params.noLeadSource,
+        firstResponseStates: params.firstResponseStates, noFirstResponse: params.noFirstResponse,
     });
     return downloadCsv(`/api/exports/persons${query}`, "contacts.csv", init);
 }
@@ -2366,6 +2367,7 @@ export function getContactIds(params: Types.ContactsPageParams = {}, init: Reque
         scope: params.scope, memberIds: params.memberIds,
         lifecycleStages: params.lifecycleStages, noLifecycle: params.noLifecycle,
         leadSources: params.leadSources, noLeadSource: params.noLeadSource,
+        firstResponseStates: params.firstResponseStates, noFirstResponse: params.noFirstResponse,
         archived: params.archived,
     });
     return getJson<number[]>(`/api/persons/ids${query}`, init);
