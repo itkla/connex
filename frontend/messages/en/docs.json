@@ -3482,7 +3482,7 @@
     },
     "DocsSettings": {
         "title": "Settings & administration",
-        "description": "Members, roles and permissions, rules and automation, notification settings, and audit logs.",
+        "description": "Members, roles and permissions, workflows and automation, notification settings, and audit logs.",
         "lead": "Administration controls who can do what, automates routine work, and keeps a record of every change.",
         "articles": {
             "members-and-roles": {
