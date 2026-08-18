@@ -75,7 +75,7 @@
       "separator": "、",
       "parameter": "{key}：{value}",
       "references": "参照元：{references}",
-      "typeRelationshipTemperature": "関係性の温度",
+      "typeRelationshipTemperature": "温度感",
       "typeCloseOverdue": "予定クローズ日を超過",
       "typeClosingSoonQuiet": "クローズ間近だが最近の動きが少ない",
       "typeStalled": "案件の動きが停滞",

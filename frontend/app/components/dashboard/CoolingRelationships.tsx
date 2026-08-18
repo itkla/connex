@@ -7,7 +7,7 @@ import { CalendarDaysIcon, CheckIcon } from '@heroicons/react/24/outline';
 
 import type { Contact, RelationshipTemperature } from '@/app/lib/types';
 import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
-import TemperaturePill from '@/app/components/records/TemperaturePill';
+import WarmthPill from '@/app/components/records/WarmthPill';
 import { createTask } from '@/app/lib/api';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -92,7 +92,7 @@ export default function CoolingRelationships({
                                         </p>
                                     </div>
                                 </Link>
-                                <TemperaturePill temp={temp} />
+                                <WarmthPill temp={temp} />
                                 <button
                                     type="button"
                                     onClick={() => schedule({ contact, temp })}

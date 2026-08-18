@@ -39,7 +39,7 @@ describe('record detail grammar', () => {
         const related = source.indexOf('section="related"');
         const files = source.indexOf('section="files"');
         const history = source.indexOf('section="history"');
-        const chip = source.indexOf('<TemperatureEvidenceChip');
+        const chip = source.indexOf('<WarmthEvidenceChip');
         const evaluation = source.indexOf('<EngineEvaluationPanel');
         const identityClose = source.indexOf('</RecordDetailSection>', source.indexOf('section="identity"'));
 
@@ -73,7 +73,7 @@ describe('record detail grammar', () => {
         const related = source.indexOf('section="related"');
         const files = source.indexOf('section="files"');
         const history = source.indexOf('section="history"');
-        const chip = source.indexOf('<TemperatureEvidenceChip');
+        const chip = source.indexOf('<WarmthEvidenceChip');
         const sparkline = source.indexOf('<EngagementSparkline');
         const identityClose = source.indexOf('</RecordDetailSection>', source.indexOf('section="identity"'));
 

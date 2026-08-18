@@ -26,8 +26,8 @@
         "noActiveDeals": "No active deals.",
         "connections": "Connections",
         "timeline": "Timeline",
-        "processingSuspended": "Processing suspended",
-        "provisionCeased": "Provision ceased",
+        "processingSuspended": "On hold — privacy request",
+        "provisionCeased": "Sharing stopped — privacy request",
         "owner": "Owner",
         "ownerUnassigned": "Unassigned"
     },
@@ -162,7 +162,7 @@
         "entityLabel": "contact",
         "toastRemovedFromCompany": "Removed {contactName} from {companyName}",
         "toastFailedRemoveFromCompany": "Couldn't remove from the company",
-        "restrictions": "Processing restrictions",
+        "restrictions": "Privacy hold",
         "assignOwner": "Assign owner",
         "toastOwnerAssigned": "Owner updated",
         "toastOwnerFailed": "Couldn't update the owner",
@@ -367,17 +367,17 @@
         "toastFailedRemove": "Failed to remove tag"
     },
     "ContactRestrictions": {
-        "title": "Processing restrictions",
-        "description": "APPI cease-of-use controls for {name}. Restricted contacts stay visible for management but stop being processed.",
-        "suspendLabel": "Suspend processing",
+        "title": "Privacy hold",
+        "description": "Use this when {name} asks to limit how their data is used. The record stays visible so you can manage it, and Connex stops using it in the ways you choose below.",
+        "suspendLabel": "Put on hold",
         "suspendHint": "Stops scoring, automation, suggestions, AI features, and exports for this contact.",
-        "provisionLabel": "Cease third-party provision",
-        "provisionHint": "Blocks new workspace shares and excludes this contact from AI provider calls.",
-        "provisionWarning": "Saving revokes every existing workspace share of this contact immediately.",
+        "provisionLabel": "Stop sharing outside this workspace",
+        "provisionHint": "Blocks new shares with other workspaces and keeps this contact out of AI features.",
+        "provisionWarning": "Saving immediately ends every share of this contact with another workspace.",
         "cancel": "Cancel",
         "save": "Save",
-        "toastSaved": "Restrictions updated.",
-        "toastFailed": "Restrictions could not be updated."
+        "toastSaved": "Privacy hold saved",
+        "toastFailed": "Couldn't save the privacy hold"
     },
     "ContactLifecycle": {
         "title": "Lead lifecycle",

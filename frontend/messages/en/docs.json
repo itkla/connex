@@ -37,7 +37,7 @@
                     {
                         "type": "prose",
                         "text": [
-                            "Connex is a CRM built around one simple idea: your relationships have a temperature, and that temperature changes over time. Instead of leaving your contacts as a flat, static list, Connex quietly keeps track of how warm each relationship is, gives you a heads-up when one is starting to cool, and shows you the friendliest way to reach anyone you want to meet.",
+                            "Connex is a CRM built around one simple idea: your relationships have a warmth to them, and that warmth changes over time. Instead of leaving your contacts as a flat, static list, Connex quietly keeps track of how warm each relationship is, gives you a heads-up when one is starting to cool, and shows you the friendliest way to reach anyone you want to meet.",
                             "Everything you do lives inside your own workspace, and what you can see, edit, and share follows your role on the team. You are always working in your own space, with your own people."
                         ]
                     },
@@ -244,7 +244,7 @@
                         "items": [
                             {
                                 "question": "Do I have to set the warmth score myself?",
-                                "answer": "No. Connex works out the temperature for you from the notes, activities, and meetings you already log. There is nothing to fill in by hand."
+                                "answer": "No. Connex works out warmth for you from the notes, activities, and meetings you already log. There is nothing to fill in by hand."
                             },
                             {
                                 "question": "Where does everything I add live?",
@@ -452,7 +452,7 @@
                         "items": [
                             {
                                 "title": "Warmth scoring",
-                                "description": "Contacts and companies get a relationship temperature you can sort and filter by."
+                                "description": "Contacts and companies get a warmth score you can sort and filter by."
                             },
                             {
                                 "title": "Tags",
@@ -653,7 +653,7 @@
                             },
                             {
                                 "title": "Warmth",
-                                "description": "A color-coded temperature pill with a score and the days left before it cools."
+                                "description": "A color-coded warmth pill with a score and the days left before it cools."
                             },
                             {
                                 "title": "Connections",
@@ -1140,12 +1140,12 @@
         "lead": "This is what sets Connex apart. Relationships are scored, watched for decay, and mapped into a graph you can traverse.",
         "articles": {
             "warmth-and-temperature": {
-                "title": "Warmth & temperature",
-                "description": "How relationship temperature is scored and what the bands mean.",
+                "title": "Warmth",
+                "description": "How warmth is scored and what the bands mean.",
                 "blocks": [
                     {
                         "type": "prose",
-                        "text": "Ever wish you could glance at your contacts and instantly know which relationships are thriving and which need a little love? That is exactly what temperature does. Every relationship in Connex carries a warmth reading that goes up when you are in regular, meaningful contact and drifts down when things go quiet. It rolls up into four simple bands, so you can scan a whole list and know where you stand at a glance."
+                        "text": "Ever wish you could glance at your contacts and instantly know which relationships are thriving and which need a little love? That is exactly what warmth does. Every relationship in Connex carries a warmth reading that goes up when you are in regular, meaningful contact and drifts down when things go quiet. It rolls up into four simple bands, so you can scan a whole list and know where you stand at a glance."
                     },
                     {
                         "type": "illustration",
@@ -1182,7 +1182,7 @@
                         "type": "callout",
                         "variant": "note",
                         "title": "You never set this by hand",
-                        "body": "There is nothing to fill in. Connex works out the temperature for you from the things you already track: your notes, activities, meetings, and tasks. Just keep working normally and the score keeps itself current."
+                        "body": "There is nothing to fill in. Connex works out warmth for you from the things you already track: your notes, activities, meetings, and tasks. Just keep working normally and the score keeps itself current."
                     },
                     {
                         "type": "callout",
@@ -1370,7 +1370,7 @@
                             },
                             {
                                 "question": "Can I stop a particular contact being sent to an AI provider?",
-                                "answer": "Yes. Restricting processing for a contact excludes them from AI features and clears anything already generated that involved them."
+                                "answer": "Yes. Putting a contact on privacy hold excludes them from AI features and clears anything already generated about them."
                             },
                             {
                                 "question": "Does it write in Japanese?",
@@ -1383,13 +1383,13 @@
                         "title": "Keep going",
                         "items": [
                             {
-                                "title": "Warmth & temperature",
+                                "title": "Warmth",
                                 "description": "The computed signals the AI explanations sit on top of.",
                                 "href": "/docs/relationship-intelligence/warmth-and-temperature"
                             },
                             {
                                 "title": "Privacy and data requests",
-                                "description": "Restricting processing for a contact, and what that clears.",
+                                "description": "Putting a contact on privacy hold, and what that clears.",
                                 "href": "/docs/settings/privacy-and-data-requests"
                             }
                         ]
@@ -4160,7 +4160,7 @@
             },
             "privacy-and-data-requests": {
                 "title": "Privacy & data requests",
-                "description": "Handling a request from someone whose data you hold, and restricting processing for a contact.",
+                "description": "Handling a request from someone whose data you hold, and putting a contact on privacy hold.",
                 "blocks": [
                     {
                         "type": "prose",
@@ -4183,8 +4183,8 @@
                                 "description": "Connex assembles what it holds about a person into a single disclosure, so answering an access request is not a manual search across screens."
                             },
                             {
-                                "title": "Restrictions on a contact",
-                                "description": "Suspending processing stops scoring, automation, suggestions, AI features and exports for that contact. Ceasing third-party provision blocks new sharing and excludes them from AI entirely."
+                                "title": "Privacy hold on a contact",
+                                "description": "Putting a contact on privacy hold stops scoring, automation, suggestions, AI features and exports for them. Stopping sharing blocks new shares with other workspaces and keeps them out of AI entirely."
                             },
                             {
                                 "title": "An audit trail you cannot rewrite",
@@ -4195,8 +4195,8 @@
                     {
                         "type": "callout",
                         "variant": "note",
-                        "title": "Restricting a contact clears what AI already wrote",
-                        "body": "When you suspend processing or cease third-party provision for a contact, anything AI previously generated that involved them is purged, and future AI features exclude them. This happens as part of applying the restriction rather than as a separate cleanup you have to remember."
+                        "title": "Putting a contact on privacy hold clears what AI already wrote",
+                        "body": "When you put a contact on privacy hold or stop sharing them, anything AI generated about them earlier is deleted, and future AI features leave them out. It happens as part of applying the hold, not as a separate cleanup you have to remember."
                     },
                     {
                         "type": "featureList",
@@ -4225,7 +4225,7 @@
                         "type": "callout",
                         "variant": "warning",
                         "title": "Finish outstanding requests before removing a workspace",
-                        "body": "Tearing down a workspace or an organisation is refused while a data subject request is still open against it. That is deliberate: it stops a request being made unanswerable by deleting the evidence. Close out the request first, then tear down."
+                        "body": "Deleting a workspace or an organisation is refused while a privacy request against it is still open. That is deliberate: it stops a request being made unanswerable by deleting the evidence. Close the request out first, then delete."
                     },
                     {
                         "type": "faq",
@@ -4236,7 +4236,7 @@
                                 "answer": "Organisation administrators. Acting on one asks you to confirm with a passkey first, because the actions are not reversible."
                             },
                             {
-                                "question": "Does restricting a contact delete them?",
+                                "question": "Does a privacy hold delete the contact?",
                                 "answer": "No. They stay in your CRM, but Connex stops scoring, suggesting, automating and exporting them. Deletion is a separate decision."
                             },
                             {
@@ -4320,7 +4320,7 @@
                             },
                             {
                                 "title": "Warmth colors",
-                                "description": "Each relationship temperature, hot, warm, cool, and cold, has its own color and dot, so you can scan a list and know where things stand."
+                                "description": "Each warmth band — hot, warm, cool, and cold — has its own color and dot, so you can scan a list and know where things stand."
                             },
                             {
                                 "title": "Chart colors",
@@ -4630,7 +4630,7 @@
                             },
                             {
                                 "title": "Warmth",
-                                "description": "A color-coded temperature pill shows how warm the relationship is and how many days before it starts to cool."
+                                "description": "A color-coded warmth pill shows how warm the relationship is and how many days before it starts to cool."
                             },
                             {
                                 "title": "Timeline",
@@ -4672,7 +4672,7 @@
             },
             "log-activity-and-warmth": {
                 "title": "Log a meeting and watch warmth rise",
-                "description": "Record an interaction and see how it lifts a relationship's temperature.",
+                "description": "Record an interaction and see how it lifts a relationship's warmth.",
                 "blocks": [
                     {
                         "type": "prose",
@@ -4711,7 +4711,7 @@
                     },
                     {
                         "type": "prose",
-                        "text": "You never set warmth by hand. Connex reads it from the things you log: your calls, meetings, notes, and follow-ups. The moment your activity is saved, it counts as recent, meaningful contact, and the relationship's warmth ticks upward. You will see it on the contact's profile as a color-coded temperature pill with a score and the days left before it starts to cool."
+                        "text": "You never set warmth by hand. Connex reads it from the things you log: your calls, meetings, notes, and follow-ups. The moment your activity is saved, it counts as recent, meaningful contact, and the relationship's warmth ticks upward. You will see it on the contact's profile as a color-coded warmth pill with a score and the days left before it starts to cool."
                     },
                     {
                         "type": "illustration",
@@ -4729,7 +4729,7 @@
                         "title": "Keep going",
                         "items": [
                             {
-                                "title": "Warmth & temperature",
+                                "title": "Warmth",
                                 "description": "What each band means and how the score keeps itself current.",
                                 "href": "/docs/relationship-intelligence/warmth-and-temperature"
                             },
@@ -5028,7 +5028,7 @@
                             },
                             {
                                 "title": "Build the audience",
-                                "description": "Use the segment builder to describe who should receive it. Estimate the audience to see how many people are included, and how many were left out because of consent, suppression, or a processing restriction."
+                                "description": "Use the segment builder to describe who should receive it. Estimate the audience to see how many people are included, and how many were left out because they opted out, are marked do not contact, or are on privacy hold."
                             },
                             {
                                 "title": "Freeze a snapshot",
@@ -5057,7 +5057,7 @@
                         "items": [
                             {
                                 "title": "Only people, and only the willing",
-                                "description": "Only person audiences can be sent to. Anyone who has unsubscribed, been suppressed, or had processing restricted is excluded, and the estimate tells you how many that was."
+                                "description": "Only contact audiences can be sent to. Anyone who has unsubscribed, is marked do not contact, or is on privacy hold is excluded, and the estimate tells you how many that was."
                             },
                             {
                                 "title": "One message per person per day",
@@ -5065,11 +5065,11 @@
                             },
                             {
                                 "title": "Unsubscribes are automatic",
-                                "description": "Connex gives every recipient their own unsubscribe token, but it only reaches them if the message body includes the unsubscribe placeholder, so put it in every template you write. Unsubscribing suppresses that person and withdraws consent immediately, and it applies to future campaigns too."
+                                "description": "Connex gives every recipient their own unsubscribe token, but it only reaches them if the message body includes the unsubscribe placeholder, so put it in every template you write. Unsubscribing marks that contact do not contact and withdraws their consent immediately, and it applies to future campaigns too."
                             },
                             {
-                                "title": "Bounces and complaints suppress",
-                                "description": "When your email provider reports a hard bounce or a spam complaint, Connex suppresses that address and revokes consent without anyone having to act. This needs an email provider that sends those reports back; on a plain mail server no such report ever arrives and nothing is suppressed."
+                                "title": "Bounces and complaints stop future sends",
+                                "description": "When your email provider reports a hard bounce or a spam complaint, Connex marks that address do not contact and revokes consent without anyone having to act. This needs an email provider that sends those reports back; on a plain mail server no such report ever arrives, so nothing changes."
                             }
                         ]
                     },
@@ -5111,7 +5111,7 @@
                             },
                             {
                                 "question": "Why did far fewer people receive it than my audience showed?",
-                                "answer": "Check the skip reasons on the send. The usual causes are people with no address on that channel, the one-message-per-day cap, or consent and suppression."
+                                "answer": "Check the skip reasons on the send. The usual causes are people with no address on that channel, the one-message-per-day cap, or an opt-out or a do-not-contact mark."
                             },
                             {
                                 "question": "Is the Exports tab a download?",
@@ -5759,7 +5759,7 @@
                             ],
                             [
                                 "A test email works but real mail does not",
-                                "The transport is fine. Look at the per-flow switches and at whether the recipient is suppressed or unsubscribed."
+                                "The transport is fine. Look at the per-flow switches and at whether the recipient is marked do not contact or unsubscribed."
                             ]
                         ]
                     },
@@ -5767,7 +5767,7 @@
                         "type": "callout",
                         "variant": "note",
                         "title": "Bounces are only handled for campaigns",
-                        "body": "Bounce and complaint handling, suppression lists and unsubscribes exist for marketing campaigns, and only when your administrator has connected an email provider that reports receipts. Invitations, notifications, reports and password mail have none of that: they are sent, and if they fail, the failure is only visible in your operator's logs."
+                        "body": "Bounce and complaint handling, do-not-contact lists and unsubscribes exist for marketing campaigns, and only when your administrator has connected an email provider that reports receipts. Invitations, notifications, reports and password mail have none of that: they are sent, and if they fail, the failure is only visible in your operator's logs."
                     },
                     {
                         "type": "cards",

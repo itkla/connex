@@ -17,7 +17,7 @@
         "emptyMissingEvidenceTitle": "Relationship evidence is missing",
         "emptyMissingEvidenceHint": "Add direct connections or employment history so Connex can identify credible introduction paths.",
         "emptyPolicyExclusionTitle": "Introduction policy excludes the available paths",
-        "emptyPolicyExclusionHint": "The available contacts or paths are restricted, dismissed, already recorded, or excluded from introductions.",
+        "emptyPolicyExclusionHint": "The contacts or paths here are on privacy hold, dismissed, already recorded, or excluded from introductions.",
         "emptyInsufficientStrengthTitle": "No path is strong enough yet",
         "emptyInsufficientStrengthHint": "Connex found relationship signals, but none currently meet the eligibility and strength rules for a recommendation.",
         "emptyUnavailableTitle": "Introduction data is unavailable",

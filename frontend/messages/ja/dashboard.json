@@ -41,7 +41,7 @@
     "empty": "現在、冷え込みつつある会社はありません。"
   },
   "WarmthDistribution": {
-    "empty": "温度データがまだありません"
+    "empty": "温度感のデータはまだありません"
   },
   "ClosingSoonDeals": {
     "empty": "今週クローズ予定の案件はありません。"

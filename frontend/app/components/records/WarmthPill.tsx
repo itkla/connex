@@ -8,7 +8,7 @@ import { useLiveNow } from '@/app/hooks/useNow';
 import { formatRelativeTime, warmthDotClass, warmthSurfaceClasses } from '@/app/lib/utils';
 import type { RelationshipTemperature } from '@/app/lib/types';
 
-type TemperaturePillProps = {
+type WarmthPillProps = {
     temp?: RelationshipTemperature | null;
     withTooltip?: boolean;
 };
@@ -20,7 +20,7 @@ type TemperaturePillProps = {
  * recorded interactions — a score without evidence would be a fabricated judgement. Shared by the
  * records tables, dashboard cooling feed, and contact-detail evidence entry points.
  */
-export default function TemperaturePill({ temp, withTooltip = true }: TemperaturePillProps) {
+export default function WarmthPill({ temp, withTooltip = true }: WarmthPillProps) {
     const t = useTranslations('Temperature');
     const locale = useLocale();
     const now = useLiveNow();

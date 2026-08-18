@@ -11,7 +11,7 @@ import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { useMemo } from 'react';
 
-import TemperaturePill from '@/app/components/records/TemperaturePill';
+import WarmthPill from '@/app/components/records/WarmthPill';
 import ProviderCaptureEvidence from '@/app/components/activity/ProviderCaptureEvidence';
 import type {
     RelationshipEvidence,
@@ -124,7 +124,7 @@ export default function RelationshipEvidencePanel({
                     </h2>
                     <p className="mt-1 text-sm text-foreground">{t('subtitle')}</p>
                 </div>
-                <TemperaturePill temp={temperature} />
+                <WarmthPill temp={temperature} />
             </div>
 
             {!hasHistory ? (

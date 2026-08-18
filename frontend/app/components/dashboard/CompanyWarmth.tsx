@@ -3,7 +3,7 @@ import { useTranslations } from 'next-intl';
 
 import type { Company, RelationshipTemperature } from '@/app/lib/types';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
-import TemperaturePill from '@/app/components/records/TemperaturePill';
+import WarmthPill from '@/app/components/records/WarmthPill';
 
 export type CompanyWarmthItem = { company: Company; temp: RelationshipTemperature };
 
@@ -36,7 +36,7 @@ export default function CompanyWarmth({ items }: { items: CompanyWarmthItem[] })
                                     ) : null}
                                 </div>
                             </Link>
-                            <TemperaturePill temp={temp} />
+                            <WarmthPill temp={temp} />
                         </li>
                     ))}
                 </ul>

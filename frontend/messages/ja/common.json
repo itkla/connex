@@ -254,7 +254,7 @@
     "cold": "コールド",
     "noHistory": "履歴なし",
     "noHistoryTooltip": "この関係を評価するには、やり取りの履歴がまだ足りません。",
-    "tooltip": "温度 {score}% · 最終接触 {lastTouch}",
+    "tooltip": "温度感 {score}% · 最終接触 {lastTouch}",
     "goesCold": "{when} に冷め込み"
   },
   "CommonBreadcrumb": {

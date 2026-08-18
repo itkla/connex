@@ -56,7 +56,7 @@
     "emptyBody": "As you add deals and log activity, this page fills in with revenue trends, win rates, pipeline value, and team momentum.",
     "emptyCreateDeal": "Create a deal",
     "emptySetupPipeline": "Set up a pipeline",
-    "warmthTitle": "Relationship warmth",
+    "warmthTitle": "Warmth",
     "warmthSubtitle": "Distribution across bands, now",
     "warmthInfo": "Contacts and companies by warmth band (hot / warm / cool / cold), scored from interaction recency and frequency. Trend counts contacts rising, steady, or cooling.",
     "decayTitle": "Cooling soon",
@@ -155,7 +155,7 @@
     "introOpportunitiesTooltip": "Suggested introductions you're positioned to make because you know both sides."
   },
   "AnalyticsWarmth": {
-    "empty": "No relationship scores yet",
+    "empty": "No warmth data yet",
     "contacts": "Contacts",
     "companies": "Companies",
     "trendLabel": "Trend",

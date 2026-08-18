@@ -52,7 +52,7 @@ import QuickEditSheet, { type ContactDraft } from '@/app/components/records/cont
 import { updateContact, createContact, importBusinessCard, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkArchiveContacts, bulkRestoreContacts, bulkAssignPersonOwner, getActiveWorkspaceMembers, getContactIds, exportContactsCsv, isFieldError, uploadContactPicture } from '@/app/lib/api';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import { type BusinessCardImportDraft, type Contact, type ContactFirstResponseState, type ContactLeadSource, type ContactLifecycleStage, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag, type WorkspaceMember } from '@/app/lib/types';
-import TemperaturePill from '@/app/components/records/TemperaturePill';
+import WarmthPill from '@/app/components/records/WarmthPill';
 import CommentIndicatorChip from '@/app/components/records/comments/CommentIndicatorChip';
 import { useCommentIndicators } from '@/app/hooks/useCommentIndicators';
 import { PageHeader } from '@/app/components/PageHeader';
@@ -660,7 +660,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
             label: t('columnWarmth'),
             getSortValue: (c) => showArchived ? null : tempByContactId.get(c.id)?.score ?? null,
             sortable: false,
-            render: (c) => <TemperaturePill temp={showArchived ? undefined : tempByContactId.get(c.id)} />,
+            render: (c) => <WarmthPill temp={showArchived ? undefined : tempByContactId.get(c.id)} />,
         },
         {
             key: 'email',

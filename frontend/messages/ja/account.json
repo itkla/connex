@@ -338,7 +338,7 @@
       "no_match": "完全一致する連絡先なし",
       "multiple_matches": "完全一致する連絡先が複数",
       "invalid_identity": "識別情報が無効または不足",
-      "restricted_person": "連絡先はアーカイブ済み、または処理が制限されています",
+      "restricted_person": "連絡先がアーカイブ済み、またはプライバシー保護のため利用停止中です",
       "approval_required": "承認が必要"
     },
     "untitled": "取り込まれたやり取り",

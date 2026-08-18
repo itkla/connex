@@ -7,7 +7,7 @@ import { CheckCircleIcon, FireIcon, ExclamationTriangleIcon } from "@heroicons/r
 import type { DealRiskFactorCode, DealRiskLevel, RelationshipTemperature } from "@/app/lib/types";
 import { cn } from "@/lib/utils";
 import { formatCompactCurrency } from "@/app/lib/utils";
-import TemperaturePill from "@/app/components/records/TemperaturePill";
+import WarmthPill from "@/app/components/records/WarmthPill";
 
 /** A relationship that is cooling and needs a touch, joined to its contact. */
 export type CoolingItem = {
@@ -120,7 +120,7 @@ export default function NeedsYou({ cooling, risks }: { cooling: CoolingItem[]; r
                                             {t("coldIn", { count: c.temp.daysUntilCold })}
                                         </span>
                                     ) : (
-                                        <TemperaturePill temp={c.temp} />
+                                        <WarmthPill temp={c.temp} />
                                     )}
                                 </Link>
                             </li>
