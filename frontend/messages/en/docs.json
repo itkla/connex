@@ -115,7 +115,7 @@
                 "blocks": [
                     {
                         "type": "prose",
-                        "text": "The sidebar on the left splits Connex into a few clear areas: Overview, Records, Activity, Library, and Team. The bar across the top holds search, along with a button to hide or show the sidebar. The workspace you are in is shown at the top of the sidebar itself. On most detail pages a back button takes you straight to the list you came from."
+                        "text": "The sidebar on the left splits Connex into a few clear areas: Overview, Records, Marketing, Activity, Library, Workspace, and Help & resources. The bar across the top holds search, along with a button to hide or show the sidebar. The workspace you are in is shown at the top of the sidebar itself. On most detail pages a back button takes you straight to the list you came from."
                     },
                     {
                         "type": "shortcuts",
@@ -5229,7 +5229,7 @@
                                 "Shipped and on."
                             ],
                             [
-                                "Tenant diagnostics",
+                                "Workspace diagnostics",
                                 "Shipped and on. A read-only health page for your workspace, and an organisation-wide view for administrators."
                             ],
                             [
