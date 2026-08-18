@@ -180,17 +180,18 @@ The top-level IA contract. **This section is normative target state** — the st
 
 The "Overview" section is dissolved; "Overview" survives nowhere as a page name. Route prefixes follow the groups (Intelligence, Insights, and so on), with permanent redirects from every old path.
 
-**Admin and personal homes:**
+**Settings — one home for every scope** (amended 2026-08-18 by the founder's decision in #1340, superseding the earlier three-shells prescription):
 
-- **One workspace-admin home: Settings** — including one merged surface for members and roles; there is no separate standalone users page.
-- **One org-admin home: Organization** — administrators, allowed domains, SSO, AI policy, data requests, organization audit.
-- **One personal home: Account** — profile, security, connections, personal notification preferences.
-- Duplicated concepts are always scope-labeled: "Workspace audit log" vs "Organization audit log", and likewise for diagnostics and allowed domains.
+- **One visible Settings experience at `/settings`** holds every settings and administration job, in scope-labeled groups: Personal, Workspace · {workspace name}, and Organization · {organization name}. Account and Organization no longer exist as competing settings shells. Permission and ownership scopes stay distinct and fail closed — the shell only presents them coherently, and a group is visible only when relevant and authorized.
+- **Exactly one canonical destination per settings job**, with one stable deep link: add a teammate, roles, invitations, allowed domains per scope, audit per scope, diagnostics per scope, provider connections, notification preferences and defaults, email delivery, approval policies, workflow configuration. Duplicated concepts are always scope-labeled: "Workspace audit log" vs "Organization audit log", and likewise for diagnostics and allowed domains.
+- **Capability-managed destinations never silently vanish or teleport**: they stay discoverable and explain their state in place ("Managed by your Connex instance", "Ask a workspace administrator", "Not enabled for this deployment").
+- **Contextual links from feature surfaces are shortcuts into Settings**, never additional configuration implementations.
+- Desktop uses searchable vertical grouped navigation; mobile uses drill-down navigation; nothing uses a horizontally scrolling destination dump.
 
 **Notifications and email:**
 
 - One notifications inbox, top level, with a visible path to its preferences.
-- Preference pages are scope-labeled: personal notification preferences live under Account; workspace notification defaults live under Settings.
-- One email settings page with clear sections — sending setup, and deliverability/diagnostics — not parallel "Email" and "Delivery" pages.
+- Preference pages are scope-labeled inside Settings: personal notification preferences under Personal; workspace notification defaults under Workspace.
+- Email and Delivery merge into one Workspace → Communications destination with clear sections — sending setup, sender identity, test delivery, deliverability and health — with instance-managed state visible rather than a disappearing tab.
 
 **One name per destination**, verbatim across sidebar, command palette, page title, browser tab, breadcrumb, and docs — and every cross-surface link (notification, calendar entry, stat tile, signal reference) lands on an existing route with the referenced item in view.
