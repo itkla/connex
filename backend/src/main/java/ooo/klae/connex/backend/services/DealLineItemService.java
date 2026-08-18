@@ -247,13 +247,13 @@ public class DealLineItemService {
 
     private Deal requireDeal(int workspaceId, int dealId) {
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
-        if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        if (deal == null) throw new ResourceNotFoundException("Deal not found");
         return deal;
     }
 
     private Deal requireDealForUpdate(int workspaceId, int dealId) {
         Deal deal = dealMapper.getDealByIdForUpdate(workspaceId, dealId);
-        if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        if (deal == null) throw new ResourceNotFoundException("Deal not found");
         return deal;
     }
 

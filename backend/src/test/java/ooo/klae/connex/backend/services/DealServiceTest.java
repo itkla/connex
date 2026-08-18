@@ -729,7 +729,11 @@ class DealServiceTest extends AbstractServiceTest {
 
     @Test
     void getDealSummary_throwsWhenDealMissing() {
-        assertThrows(ResourceNotFoundException.class, () -> dealService.getDealSummary(-1));
+        ResourceNotFoundException failure = assertThrows(
+            ResourceNotFoundException.class,
+            () -> dealService.getDealSummary(-1));
+
+        assertEquals("Deal not found", failure.getMessage());
     }
 
     @Test

@@ -243,7 +243,7 @@ public class PersonQualificationService {
                 || person.getArchivedAt() != null
                 || person.getSuspendedAt() != null
                 || person.getProvisionCeasedAt() != null) {
-            throw new ResourceNotFoundException("Person not found with id: " + personId);
+            throw new ResourceNotFoundException("Contact not found");
         }
         return person;
     }
@@ -251,7 +251,7 @@ public class PersonQualificationService {
     private Person requireOwnedPerson(int workspaceId, int personId) {
         Person person = personMapper.getPersonById(workspaceId, personId);
         if (person == null || person.getWorkspaceId() != workspaceId) {
-            throw new ResourceNotFoundException("Person not found with id: " + personId);
+            throw new ResourceNotFoundException("Contact not found");
         }
         return person;
     }

@@ -70,7 +70,7 @@ public class DealBriefAssembler {
     public BriefAssembly assemble(int workspaceId, int dealId) {
         Deal deal = dealService.getDealById(dealId);
         if (deal == null) {
-            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+            throw new ResourceNotFoundException("Deal not found");
         }
         DealSummaryDto summary = dealService.getDealSummary(dealId);
         List<DealStageHistory> stageHistory = safeList(dealService.getStageHistory(dealId));

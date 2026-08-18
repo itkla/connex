@@ -161,7 +161,7 @@ public class PersonLifecycleService {
                 || before.getArchivedAt() != null
                 || before.getSuspendedAt() != null
                 || before.getProvisionCeasedAt() != null) {
-            throw new ResourceNotFoundException("Person not found with id: " + personId);
+            throw new ResourceNotFoundException("Contact not found");
         }
         PersonLifecycleStage current = before.getLifecycleStage();
         boolean transitioning = current != requested;
@@ -377,7 +377,7 @@ public class PersonLifecycleService {
     private Person requireOwnedPerson(int workspaceId, int personId) {
         Person person = personMapper.getPersonById(workspaceId, personId);
         if (person == null || person.getWorkspaceId() != workspaceId) {
-            throw new ResourceNotFoundException("Person not found with id: " + personId);
+            throw new ResourceNotFoundException("Contact not found");
         }
         return person;
     }

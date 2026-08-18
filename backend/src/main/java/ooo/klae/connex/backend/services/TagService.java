@@ -119,7 +119,7 @@ public class TagService {
     public List<Tag> getTagsByDealId(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (!dealMapper.exists(workspaceId, dealId)) {
-            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+            throw new ResourceNotFoundException("Deal not found");
         }
         return tagMapper.getTagsByDealId(workspaceService.getCurrentWorkspaceId(), dealId);
     }

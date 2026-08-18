@@ -37,7 +37,7 @@ public class DealLineItemRequest {
     @DecimalMin(value = "0", message = "quantity must not be negative")
     private BigDecimal quantity;
 
-    @Pattern(regexp = "amount|percent", message = "discountType must be amount or percent")
+    @Pattern(regexp = "amount|percent", message = "Choose either an amount or a percentage discount.")
     private String discountType;
 
     @DecimalMin(value = "0", message = "discountValue must not be negative")

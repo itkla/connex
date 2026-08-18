@@ -377,7 +377,11 @@ class CompanyServiceTest extends AbstractServiceTest {
 
     @Test
     void getPersonsByCompanyId_throwsWhenCompanyMissing() {
-        assertThrows(ResourceNotFoundException.class, () -> companyService.getPersonsByCompanyId(-1, 100));
+        ResourceNotFoundException failure = assertThrows(
+            ResourceNotFoundException.class,
+            () -> companyService.getPersonsByCompanyId(-1, 100));
+
+        assertEquals("Company not found", failure.getMessage());
     }
 
     @Test

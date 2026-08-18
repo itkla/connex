@@ -303,9 +303,9 @@ class DealControllerTest {
     }
 
     @Test
-    void missingDealReturnsExistingPlainTextNotFoundResponse() throws Exception {
+    void missingDealReturnsStructuredNotFoundResponse() throws Exception {
         when(dealService.updateName(42, "Missing"))
-            .thenThrow(new ResourceNotFoundException("Deal not found with id: 42"));
+            .thenThrow(new ResourceNotFoundException("Deal not found"));
 
         mockMvc.perform(put("/api/deals/42/name")
                 .with(csrf().asHeader())
@@ -314,7 +314,8 @@ class DealControllerTest {
                     {"name":"Missing"}
                     """))
             .andExpect(status().isNotFound())
-            .andExpect(content().string("Deal not found with id: 42"));
+            .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
+            .andExpect(jsonPath("$.message").value("Deal not found"));
     }
 
     @Test

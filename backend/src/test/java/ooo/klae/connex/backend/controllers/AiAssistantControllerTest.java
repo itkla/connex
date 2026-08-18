@@ -443,7 +443,8 @@ class AiAssistantControllerTest {
 
         mockMvc.perform(get("/api/ai/assistant/sessions/42"))
             .andExpect(status().isForbidden())
-            .andExpect(content().string("AI assistant session is not accessible"));
+            .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+            .andExpect(jsonPath("$.message").value("AI assistant session is not accessible"));
         mockMvc.perform(post("/api/ai/assistant/sessions/43/messages")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"content\":\"Hello\"}"))
@@ -451,7 +452,8 @@ class AiAssistantControllerTest {
             .andExpect(jsonPath("$.message").value("Archived sessions cannot accept messages"));
         mockMvc.perform(delete("/api/ai/assistant/sessions/44"))
             .andExpect(status().isForbidden())
-            .andExpect(content().string("AI assistant session is not accessible"));
+            .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+            .andExpect(jsonPath("$.message").value("AI assistant session is not accessible"));
     }
 
     @Test
@@ -464,7 +466,8 @@ class AiAssistantControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"content\":\"Question\"}"))
             .andExpect(status().isNotFound())
-            .andExpect(content().string("AI assistant session is not accessible"));
+            .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
+            .andExpect(jsonPath("$.message").value("AI assistant session is not accessible"));
     }
 
     private AiChatSessionDetailDto detail() {

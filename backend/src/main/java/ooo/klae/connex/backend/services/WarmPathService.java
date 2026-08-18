@@ -722,7 +722,7 @@ public class WarmPathService {
 
     private void requireOwnedPerson(int workspaceId, int personId) {
         if (!personMapper.existsOwned(workspaceId, personId)) {
-            throw new ResourceNotFoundException("Person not found with id: " + personId);
+            throw new ResourceNotFoundException("Contact not found");
         }
     }
 

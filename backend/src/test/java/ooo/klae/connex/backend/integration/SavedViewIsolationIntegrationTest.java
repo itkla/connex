@@ -78,7 +78,8 @@ class SavedViewIsolationIntegrationTest {
                 .header("X-Workspace-Id", workspaceA.getId())
                 .session(recipientSession))
             .andExpect(status().isNotFound())
-            .andExpect(content().string("Saved view not found"));
+            .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
+            .andExpect(jsonPath("$.message").value("Saved view not found"));
         mockMvc.perform(get("/api/saved-views/{id}", sharedId)
                 .header("X-Workspace-Id", workspaceA.getId())
                 .session(recipientSession))
@@ -102,7 +103,8 @@ class SavedViewIsolationIntegrationTest {
                 .header("X-Workspace-Id", workspaceB.getId())
                 .session(outsiderSession))
             .andExpect(status().isNotFound())
-            .andExpect(content().string("Saved view not found"));
+            .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
+            .andExpect(jsonPath("$.message").value("Saved view not found"));
         mockMvc.perform(get("/api/saved-views/{id}", sharedId)
                 .header("X-Workspace-Id", workspaceB.getId())
                 .session(ownerSession))

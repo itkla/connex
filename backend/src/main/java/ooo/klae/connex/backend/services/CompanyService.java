@@ -149,7 +149,7 @@ public class CompanyService {
     public CompanyEngagementDto getCompanyEngagement(int companyId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (!companyMapper.exists(workspaceId, companyId)) {
-            throw new ResourceNotFoundException("Company not found with id: " + companyId);
+            throw new ResourceNotFoundException("Company not found");
         }
         CompanyEngagementCountsDto counts = companyMapper.getCompanyEngagementCounts(workspaceId, companyId);
         List<CompanyEngagementUserDto> users = companyMapper.getCompanyEngagementUsers(
@@ -203,7 +203,7 @@ public class CompanyService {
     public CompanyTimelineData getCompanyTimeline(int companyId, int limit) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (!companyMapper.exists(workspaceId, companyId)) {
-            throw new ResourceNotFoundException("Company not found with id: " + companyId);
+            throw new ResourceNotFoundException("Company not found");
         }
         int currentUserId = workspaceService.getCurrentUserId();
         List<Task> tasks = referenceService.hydrateTasks(
@@ -351,7 +351,7 @@ public class CompanyService {
     public Company getCompanyById(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company company = companyMapper.getCompanyById(workspaceId, id);
-        if (company == null) throw new ResourceNotFoundException("Company not found with id: " + id);
+        if (company == null) throw new ResourceNotFoundException("Company not found");
         return company;
     }
 
@@ -361,7 +361,7 @@ public class CompanyService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company company = companyMapper.getOwnedCompanyByIdForUpdate(workspaceId, id);
         if (company == null) {
-            throw new ResourceNotFoundException("Company not found with id: " + id);
+            throw new ResourceNotFoundException("Company not found");
         }
         return company;
     }
@@ -528,11 +528,11 @@ public class CompanyService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         duplicateDecisionLockService.lockCurrentOrganization();
         if (companyMapper.lockById(workspaceId, id) == null) {
-            throw new ResourceNotFoundException("Company not found with id: " + id);
+            throw new ResourceNotFoundException("Company not found");
         }
         Company before = requireOwnedCompany(workspaceId, id);
         if (companyMapper.archive(workspaceId, id) != 1) {
-            throw new ResourceNotFoundException("Company not found with id: " + id);
+            throw new ResourceNotFoundException("Company not found");
         }
         Company after = requireArchivedCompany(workspaceId, id);
         auditService.record("company.archive", "company", id, before.getName(),
@@ -556,11 +556,11 @@ public class CompanyService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         duplicateDecisionLockService.lockCurrentOrganization();
         if (companyMapper.lockById(workspaceId, id) == null) {
-            throw new ResourceNotFoundException("Company not found with id: " + id);
+            throw new ResourceNotFoundException("Company not found");
         }
         Company before = requireArchivedCompany(workspaceId, id);
         if (companyMapper.restore(workspaceId, id) != 1) {
-            throw new ResourceNotFoundException("Company not found with id: " + id);
+            throw new ResourceNotFoundException("Company not found");
         }
         Company after = requireOwnedCompany(workspaceId, id);
         identityIntakeService.recordCompany(
@@ -577,7 +577,7 @@ public class CompanyService {
     private Company requireArchivedCompany(int workspaceId, int id) {
         Company company = companyMapper.getOwnedArchivedCompanyById(workspaceId, id);
         if (company == null) {
-            throw new ResourceNotFoundException("Company not found with id: " + id);
+            throw new ResourceNotFoundException("Company not found");
         }
         return company;
     }
@@ -599,7 +599,7 @@ public class CompanyService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company company = requireOwnedCompany(workspaceId, companyId);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
-        if (tag == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
+        if (tag == null) throw new ResourceNotFoundException("Tag not found");
         if (companyMapper.addTag(workspaceId, companyId, tagId) != 1) {
             return false;
         }
@@ -725,13 +725,13 @@ public class CompanyService {
 
     private Company requireCompany(int workspaceId, int companyId) {
         Company company = companyMapper.getCompanyById(workspaceId, companyId);
-        if (company == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
+        if (company == null) throw new ResourceNotFoundException("Company not found");
         return company;
     }
 
     private Company requireOwnedCompany(int workspaceId, int companyId) {
         if (!companyMapper.existsOwned(workspaceId, companyId)) {
-            throw new ResourceNotFoundException("Company not found with id: " + companyId);
+            throw new ResourceNotFoundException("Company not found");
         }
         return requireCompany(workspaceId, companyId);
     }

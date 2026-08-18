@@ -166,7 +166,7 @@ public class ConnectionService {
 
     private Person requirePerson(int workspaceId, int personId) {
         Person person = personMapper.getPersonById(workspaceId, personId);
-        if (person == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
+        if (person == null) throw new ResourceNotFoundException("Contact not found");
         return person;
     }
 
