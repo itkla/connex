@@ -18,8 +18,8 @@ import {
     QuickEditField,
     QuickEditRecordCard,
     QuickEditSheetShell,
-    quickEditErrorId,
 } from '@/app/components/records/quick-edit/QuickEditSheetShell';
+import { quickEditErrorId } from '@/app/hooks/useFieldErrors';
 import { useCompanySearch } from '@/app/hooks/useCompanySearch';
 import { toastError } from '@/app/lib/toast';
 import { actualValueForOutcome } from '@/app/components/records/deals/dealOutcome';

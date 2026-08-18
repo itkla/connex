@@ -14,8 +14,8 @@ import {
     QuickEditMediaUpload,
     QuickEditRecordCard,
     QuickEditSheetShell,
-    quickEditErrorId,
 } from '@/app/components/records/quick-edit/QuickEditSheetShell';
+import { quickEditErrorId } from '@/app/hooks/useFieldErrors';
 
 export type ContactDraft = {
     name: string;

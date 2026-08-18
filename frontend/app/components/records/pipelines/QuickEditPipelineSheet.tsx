@@ -14,8 +14,8 @@ import {
     QuickEditField,
     QuickEditRecordCard,
     QuickEditSheetShell,
-    quickEditErrorId,
 } from '@/app/components/records/quick-edit/QuickEditSheetShell';
+import { quickEditErrorId } from '@/app/hooks/useFieldErrors';
 
 export type StageKind = 'normal' | 'won' | 'lost';
 

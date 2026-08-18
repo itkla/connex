@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useReducer, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState, type RefObject, useMemo } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import {
     ArchiveBoxArrowDownIcon,
@@ -168,6 +168,7 @@ export default function ReportDocumentBoard({
 }) {
     const t = useTranslations('Reports');
     const locale = useLocale();
+    const snapshotDateFormatter = useMemo(() => new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }), [locale]);
     const { activeWorkspace } = useWorkspace();
     const [reportState, dispatchReport] = useReducer(liveReportReducer, { status: 'loading' });
     const [snapshots, setSnapshots] = useState<ReportSnapshotSummary[]>(initialSnapshots);
@@ -605,7 +606,7 @@ export default function ReportDocumentBoard({
                 selectedItems={snapshotPendingDelete !== null ? [snapshotPendingDelete] : []}
                 entityLabel={t('document.snapshotEntityLabel')}
                 getDisplayName={(snapshot) => t('document.snapshotNamed', {
-                    date: new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(new Date(snapshot.generatedAt)),
+                    date: snapshotDateFormatter.format(new Date(snapshot.generatedAt)),
                 })}
                 isDeleting={deletingSnapshotId !== null}
                 confirmDelete={confirmDeleteSnapshot}

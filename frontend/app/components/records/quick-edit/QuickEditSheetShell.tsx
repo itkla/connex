@@ -1,6 +1,7 @@
 'use client';
 
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { quickEditErrorId } from '@/app/hooks/useFieldErrors';
 import { motion, useReducedMotion } from 'motion/react';
 import { Loader2Icon } from 'lucide-react';
 import { CameraIcon } from '@heroicons/react/24/outline';
@@ -204,11 +205,6 @@ type QuickEditFieldProps = {
     className?: string;
     children: ReactNode;
 };
-
-/** The id a field's inline validation message renders under, for the control's `aria-describedby`. */
-export function quickEditErrorId(htmlFor: string): string {
-    return `${htmlFor}-error`;
-}
 
 /** Label-over-control field wrapper that fixes the sheet's form rhythm, required marker, and error line. */
 export function QuickEditField({ label, htmlFor, required, error, className, children }: QuickEditFieldProps) {
