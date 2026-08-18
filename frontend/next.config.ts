@@ -26,8 +26,6 @@ const nextConfig: NextConfig = {
     : {}),
   async redirects() {
     return [
-      // The help-centre article moved with the rules-to-workflows migration (#1341). Keep the old
-      // path resolving permanently so shared and bookmarked deep links do not 404.
       {
         source: "/docs/settings/rules-and-automation",
         destination: "/docs/settings/workflows-and-automation",

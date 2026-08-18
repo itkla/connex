@@ -461,7 +461,8 @@ function InvocationSummary({
                         {exceptionalRecords.slice(0, 50).map((record) => (
                             <li key={record.recordId} className="grid gap-2 px-3 py-2.5 text-sm sm:grid-cols-[auto_minmax(0,1fr)_auto]">
                                 <span className="truncate text-muted-foreground">
-                                    {sampledLabels.get(record.recordId) ?? recordTypeLabel}
+                                    {sampledLabels.get(record.recordId)
+                                        ?? t("manual.recordFallbackWithId", { type: recordTypeLabel, id: record.recordId })}
                                 </span>
                                 <span className="text-foreground">
                                     {record.reasonCode ? <ManualReason code={record.reasonCode} /> : t(`status.${record.status}`)}
