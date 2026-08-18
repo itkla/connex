@@ -1107,6 +1107,19 @@ function isStringRecord(value: unknown): value is Record<string, string> {
     );
 }
 
+/**
+ * An error response body: string metadata keys, plus either flat string field errors or a nested
+ * `fieldErrors` envelope — the envelope keeps a field literally named "message" or "code" from
+ * colliding with the reserved metadata keys.
+ */
+function isErrorRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asString(value: unknown): string | undefined {
+    return typeof value === "string" ? value : undefined;
+}
+
 async function getApiError(res: Response): Promise<ApiError> {
     const text = await res.text().catch(() => "");
 
@@ -1117,16 +1130,20 @@ async function getApiError(res: Response): Promise<ApiError> {
     try {
         const data = JSON.parse(text) as unknown;
 
-        if (isStringRecord(data)) {
-            const { message, error, code, correlationId, ...fieldErrors } = data;
-            const fields = Object.keys(fieldErrors).length > 0 ? fieldErrors : undefined;
+        if (isErrorRecord(data)) {
+            const { message, error, code, correlationId, fieldErrors, ...rest } = data;
+            const flat = Object.fromEntries(
+                Object.entries(rest).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+            );
+            const enveloped = isStringRecord(fieldErrors) ? fieldErrors : undefined;
+            const fields = enveloped ?? (Object.keys(flat).length > 0 ? flat : undefined);
 
             return new ApiError(
-                message ?? error ?? "Please fix the highlighted fields.",
+                asString(message) ?? asString(error) ?? "Please fix the highlighted fields.",
                 res.status,
-                code,
+                asString(code),
                 fields,
-                correlationId,
+                asString(correlationId),
             );
         }
 
