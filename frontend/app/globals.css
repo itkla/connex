@@ -198,7 +198,6 @@
   --risk-low: oklch(0.68 0.04 255);
   --radius: 0.625rem;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   /* Motion system (D3) — three speeds, two characters; the law is frontend/AGENTS.md §14.
      Tailwind has no duration namespace, so durations are consumed as duration-(--motion-micro);
      the easings ship as ease-hand / ease-calm via @theme inline. Timing is theme-independent. */
@@ -600,7 +599,7 @@
 
   .react-flow__node,
   .react-flow__edge {
-    transition: opacity 0.25s ease;
+    transition: opacity var(--motion-standard) ease;
   }
   .react-flow__node .map-warmth {
     transition: background-color 0.22s ease-out, border-color 0.22s ease-out, transform 0.15s ease-out;
@@ -637,7 +636,7 @@
 }
 @media (prefers-reduced-motion: no-preference) {
   .map-node-label {
-    transition: opacity 0.15s ease;
+    transition: opacity var(--motion-micro) ease;
   }
 }
 
