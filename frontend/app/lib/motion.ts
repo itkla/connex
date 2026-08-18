@@ -10,16 +10,32 @@ import type { Transition } from 'motion/react';
  * `--motion-standard`, `--motion-expressive`, `--motion-ease-hand`, `--motion-ease-calm`) so a
  * JS-driven surface and its CSS neighbor agree. Changing one without the other is drift; the
  * contract is `frontend/AGENTS.md` §14.
+ *
+ * Each speed ships in **two units, because the two JS animation APIs disagree**: `motion/react`
+ * transitions take seconds, while the Web Animations API (`Element.animate`) and React style
+ * objects take milliseconds. Handing one the other's number animates a surface a thousand times
+ * too fast or too slow, so pick by the API you are calling, never by which name is shorter. The
+ * millisecond values are canonical — the seconds are derived by exact division, which keeps them
+ * free of the float error `0.15 * 1000` would introduce.
  */
 
-/** Feedback speed (150ms): hover, toggle, press, menu pop-in. Mirrors `--motion-micro`. */
-export const durationMicro = 0.15;
+/** Feedback speed for `Element.animate` and style objects (ms): hover, toggle, press, menu pop-in. */
+export const durationMicroMs = 150;
 
-/** Surface speed (250ms): overlays, entrances, surfaces taking or releasing focus. Mirrors `--motion-standard`. */
-export const durationStandard = 0.25;
+/** Surface speed for `Element.animate` and style objects (ms): overlays and entrances. */
+export const durationStandardMs = 250;
 
-/** The rare, memorable speed (400ms): page/section arrival, celebration. Mirrors `--motion-expressive`. */
-export const durationExpressive = 0.4;
+/** The rare, memorable speed for `Element.animate` and style objects (ms): page arrival, celebration. */
+export const durationExpressiveMs = 400;
+
+/** Feedback speed for `motion/react` (seconds): hover, toggle, press, menu pop-in. Mirrors `--motion-micro`. */
+export const durationMicro = durationMicroMs / 1000;
+
+/** Surface speed for `motion/react` (seconds): overlays, entrances, surfaces taking or releasing focus. Mirrors `--motion-standard`. */
+export const durationStandard = durationStandardMs / 1000;
+
+/** The rare, memorable speed for `motion/react` (seconds): page arrival, celebration. Mirrors `--motion-expressive`. */
+export const durationExpressive = durationExpressiveMs / 1000;
 
 /**
  * The house "jiggle": a lively, bouncy spring that overshoots then settles, giving elements a tactile,
