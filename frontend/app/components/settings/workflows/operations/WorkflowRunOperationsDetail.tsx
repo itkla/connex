@@ -39,6 +39,7 @@ import type {
     WorkflowRunDetail,
 } from "@/app/lib/types";
 import { offeredWorkflowRetryStep } from "@/app/lib/workflowOperations";
+import WorkflowRunReference from "@/app/components/settings/workflows/WorkflowRunReference";
 import {
     formatWorkflowRunDateTime,
     normalizeWorkflowRunDateTime,
@@ -138,7 +139,7 @@ function operationsDetailReducer(
     }
 }
 
-/** Canonical and legacy run evidence with operational state and bounded intervention controls. */
+/** One run's recorded path, the workflow's operational state, and bounded intervention controls. */
 export default function WorkflowRunOperationsDetail({ workflowId, runKey }: { workflowId: number; runKey: string }) {
     const t = useTranslations("WorkflowOperations");
     const tw = useTranslations("WorkspaceWorkflows");
@@ -232,7 +233,7 @@ export default function WorkflowRunOperationsDetail({ workflowId, runKey }: { wo
                                 {run.status === "partial" ? tw("runs.legacyPartial") : tw(`runs.status.${normalizedStatus}`)}
                             </Badge>
                             {run.version ? <Badge variant="outline">{tw("versionShort", { number: run.version.number })}</Badge> : null}
-                            <Badge variant="outline" className="font-mono">{run.runKey}</Badge>
+                            <WorkflowRunReference runKey={run.runKey} />
                         </div>
                         <h1 className="text-3xl font-bold tracking-tight text-foreground">{workflow.name}</h1>
                         <p className="text-sm text-muted-foreground">
@@ -464,17 +465,11 @@ function WorkflowHealth({ operations }: { operations: WorkflowOperationsDetail }
                     </li>
                 ))}
             </ul>
-            <dl className="grid grid-cols-2 gap-3 border-t border-border pt-3 text-xs">
-                <div>
-                    <dt className="text-muted-foreground">{t("health.activeVersion")}</dt>
-                    <dd className="mt-1 font-medium text-foreground">
-                        {operations.activeVersion ? t("health.version", { number: operations.activeVersion.number }) : t("health.none")}
-                    </dd>
-                </div>
-                <div>
-                    <dt className="text-muted-foreground">{t("health.runtimeOwner")}</dt>
-                    <dd className="mt-1 font-medium text-foreground">{t(`runtimeOwner.${operations.workflow.runtimeOwner}`)}</dd>
-                </div>
+            <dl className="border-t border-border pt-3 text-xs">
+                <dt className="text-muted-foreground">{t("health.activeVersion")}</dt>
+                <dd className="mt-1 font-medium text-foreground">
+                    {operations.activeVersion ? t("health.version", { number: operations.activeVersion.number }) : t("health.none")}
+                </dd>
             </dl>
         </section>
     );

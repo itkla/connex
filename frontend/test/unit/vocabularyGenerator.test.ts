@@ -213,8 +213,8 @@ describe("vocabulary generator", () => {
         expect(scopeCovers("global", "contacts.json", "Contacts")).toBe(true);
         expect(scopeCovers({ namespaces: ["contacts.json"] }, "contacts.json", "Contacts")).toBe(true);
         expect(scopeCovers({ namespaces: ["contacts.json"] }, "deals.json", "DealsPage")).toBe(false);
-        expect(scopeCovers({ namespaces: ["workspace.json#WorkspaceRules"] }, "workspace.json", "WorkspaceRules")).toBe(true);
-        expect(scopeCovers({ namespaces: ["workspace.json#WorkspaceRules"] }, "workspace.json", "WorkspaceSso")).toBe(false);
+        expect(scopeCovers({ namespaces: ["workspace.json#WorkflowAuthoring"] }, "workspace.json", "WorkflowAuthoring")).toBe(true);
+        expect(scopeCovers({ namespaces: ["workspace.json#WorkflowAuthoring"] }, "workspace.json", "WorkspaceSso")).toBe(false);
         expect(scopeCovers({ excludeNamespaces: ["contacts.json"] }, "contacts.json", "Contacts")).toBe(false);
         expect(scopeCovers({ excludeNamespaces: ["contacts.json"] }, "deals.json", "DealsPage")).toBe(true);
     });

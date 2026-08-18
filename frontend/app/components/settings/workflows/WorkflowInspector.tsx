@@ -259,7 +259,7 @@ function TriggerFields({
     onCommitTransient: () => void;
 }) {
     const t = useTranslations("WorkspaceWorkflows");
-    const tr = useTranslations("WorkspaceRules");
+    const tr = useTranslations("WorkflowAuthoring");
     const isSchedule = node.config.type === "schedule";
     const recordType = document.recordType ?? "deal";
     const selectedEvents = new Set(node.config.events ?? []);
@@ -447,7 +447,7 @@ function ActionFields({
     onNodeChange: (node: WorkflowNode, mode: ChangeMode) => void;
     onCommitTransient: () => void;
 }) {
-    const tr = useTranslations("WorkspaceRules");
+    const tr = useTranslations("WorkflowAuthoring");
     const update = (config: RuleAction, mode: ChangeMode) => onNodeChange({ ...node, config }, mode);
     const textInput = (field: "title" | "body" | "activityType", placeholder: string, maximum: number) => (
         <Input

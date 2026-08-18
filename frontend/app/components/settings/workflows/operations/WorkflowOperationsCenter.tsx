@@ -30,6 +30,7 @@ import {
     WORKFLOW_RUN_STATUS_CLASS,
     WorkflowRunStatusIcon,
 } from "@/app/components/settings/workflows/workflowRunStatus";
+import { workflowRunNumber } from "@/app/components/settings/workflows/workflowRunKey";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -344,7 +345,7 @@ function RunRow({ item, locale }: { item: WorkflowOperationsRunItem; locale: str
                     </div>
                     <p className="text-xs text-muted-foreground">
                         {t("runs.runMeta", {
-                            runKey: item.run.runKey,
+                            run: workflowRunNumber(item.run.runKey),
                             version: item.run.version?.number ?? 0,
                         })}
                     </p>

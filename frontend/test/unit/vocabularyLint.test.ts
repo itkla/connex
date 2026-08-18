@@ -7,12 +7,12 @@ import {
     BASELINE_HIGH_WATER_MARK,
     baselineEntries,
     describeViolation,
-    EXCLUDED_SURFACES,
     isAllowedSurface,
-    isExcludedSurface,
+    isWorkflowSurface,
     loadBaseline,
     loadVocabularyModel,
     messageEntries,
+    namespaceOf,
     parseBaselineEntry,
     scanMessageCatalogs,
     scopeCovers,
@@ -99,13 +99,19 @@ describe("message catalogue vocabulary", () => {
         expect(removed, "rewritten copy: drop these from AT_A_GLANCE_SURFACES").toEqual([]);
     });
 
-    it("never baselines an out-of-scope surface", () => {
-        const overlapping = baseline
+    it("scans the workflow seam and holds it at an empty baseline", () => {
+        const scanned = messageEntries().filter((entry) => isWorkflowSurface(entry.file, entry.namespace));
+        const flagged = violations
+            .filter((violation) => isWorkflowSurface(violation.file, namespaceOf(violation.keyPath)))
+            .map(describeViolation);
+        const baselined = baseline
             .map(parseBaselineEntry)
-            .filter((entry) => isExcludedSurface(entry.file, entry.namespace))
+            .filter((entry) => isWorkflowSurface(entry.file, entry.namespace))
             .map((entry) => `${entry.locale}/${entry.file}:${entry.keyPath}`);
 
-        expect(overlapping).toEqual([]);
+        expect(scanned.length).toBeGreaterThan(0);
+        expect(flagged, "the workflow seam is swept, never baselined").toEqual([]);
+        expect(baselined).toEqual([]);
     });
 
     it("exempts a compliance surface only for the terms §4 notes there", () => {
@@ -140,13 +146,16 @@ describe("message catalogue vocabulary", () => {
         ]));
     });
 
-    it("leaves the workflow seam WS5 owns out of scope", () => {
-        const suppressed = suppressedMatches((entry) => isExcludedSurface(entry.file, entry.namespace));
+    it("bans the automation object's former name on the workflow seam only", () => {
+        const named = model.terms.filter((term) => term.term === "rule" || term.term === "ルール");
 
-        expect(EXCLUDED_SURFACES).toContain("workflow-operations.json");
-        expect(EXCLUDED_SURFACES).toContain("workspace.json#WorkspaceRules");
-        expect(suppressed.length).toBeGreaterThan(0);
-        expect(violations.filter((violation) => suppressed.includes(violation.entry))).toEqual([]);
+        expect(named.map((term) => term.id).sort()).toEqual(["en:rule", "ja:ルール"]);
+        for (const term of named) {
+            expect(scopeCovers(term.scope, "workflow-operations.json", "WorkflowOperations"), term.id).toBe(true);
+            expect(scopeCovers(term.scope, "workspace.json", "WorkflowAuthoring"), term.id).toBe(true);
+            expect(scopeCovers(term.scope, "workspace.json", "WorkspaceWorkflows"), term.id).toBe(true);
+            expect(scopeCovers(term.scope, "settings.json", "SettingsRetention"), term.id).toBe(false);
+        }
     });
 
     it("baselines each banned term separately, so a second term on a flagged string still fails", () => {

@@ -44,14 +44,16 @@ export const LOCALES = ["en", "ja"];
 export const ALLOWED_SURFACES = ["legal.json", "organization.json#OrgDataRequests"];
 
 /**
- * Message surfaces outside the gate's scope. WS5 owns the workflow seam exclusively, so
- * its namespaces are excluded until that workstream lands; folding them back in is part
- * of WS5's completion.
+ * The workflow seam: every namespace that names the automation object. §4's automation row
+ * governs these surfaces, so `rule` — and its Japanese rendering — is banned here as the
+ * name of that object. §4's one sanctioned use of the word lives on the legacy-automations
+ * migration screen, which is not one of these namespaces and whose sanctioned wording
+ * ("legacy automations") carries no banned term of its own.
  */
-export const EXCLUDED_SURFACES = [
+export const WORKFLOW_SURFACES = [
     "workflow-operations.json",
+    "workspace.json#WorkflowAuthoring",
     "workspace.json#WorkflowsLayout",
-    "workspace.json#WorkspaceRules",
     "workspace.json#WorkspaceWorkflows",
 ];
 
@@ -208,8 +210,9 @@ export const CURATED_DECISIONS = {
         reason: "§4 sanctions teammate in informal prose; only labels must say member.",
     },
     "rule (except as \"legacy automations\" inside the one migration screen while it exists)": {
-        decision: "skip",
-        reason: "§4 sanctions rule on the legacy-automations migration screen, and rule is correct in non-automation senses such as retention rules.",
+        decision: "ban",
+        scope: { namespaces: WORKFLOW_SURFACES },
+        reason: "§4 bans rule as the name of the automation object, so the ban covers the workflow namespaces where every use names it; elsewhere rule keeps its non-automation senses such as retention rules, and the sanctioned migration-screen wording is \"legacy automations\", which carries no banned term.",
     },
     "warm path (as a label)": {
         decision: "ban",
@@ -338,9 +341,10 @@ export const CURATED_DECISIONS = {
 
 /**
  * Japanese renderings of banned English terms that §4 states in English only. Each key
- * must be an §4 item, so the rendering stays attributable to the glossary. A rendering
- * may narrow its pattern where the katakana word also carries an ordinary product sense.
- * @type {Record<string, {term: string, reason: string, pattern?: SerializedPattern}>}
+ * must be an §4 item, so the rendering stays attributable to the glossary. A rendering may
+ * narrow its pattern where the katakana word also carries an ordinary product sense, and
+ * may narrow its scope where the English item it renders is itself scoped.
+ * @type {Record<string, {term: string, reason: string, pattern?: SerializedPattern, scope?: TermScope}>}
  */
 export const JAPANESE_RENDERINGS = {
     deterministic: {
@@ -367,6 +371,11 @@ export const JAPANESE_RENDERINGS = {
     "token budget": {
         term: "トークン予算",
         reason: "§4 bans the LLM-internals term, and the JA catalogs state it directly rather than in human terms.",
+    },
+    "rule (except as \"legacy automations\" inside the one migration screen while it exists)": {
+        term: "ルール",
+        scope: { namespaces: WORKFLOW_SURFACES },
+        reason: "ルール is the ordinary Japanese word for a rule in any sense, so the ban follows the English item onto the workflow namespaces, where it can only name the automation object.",
     },
 };
 
@@ -790,7 +799,7 @@ export function buildVocabularyModel(markdown) {
             id,
             term: rendering.term,
             locale: "ja",
-            scope: "global",
+            scope: rendering.scope ?? "global",
             allowFiles: [],
             canonicalExceptions: built.canonicalExceptions,
             narrowed: rendering.pattern !== undefined,
@@ -882,7 +891,6 @@ export function atAGlanceEntries() {
     const found = [];
     for (const entry of messageEntries()) {
         if (entry.locale !== "en") continue;
-        if (isExcludedSurface(entry.file, entry.namespace)) continue;
         if (!/at a glance/i.test(entry.value)) continue;
         found.push(`${entry.locale}/${entry.file}:${entry.keyPath}`);
     }
@@ -921,13 +929,14 @@ export function isAllowedSurface(file, namespace) {
 }
 
 /**
- * Whether a surface belongs to the workflow seam WS5 owns, which the gate does not scan.
+ * Whether a surface belongs to the workflow seam, where §4's automation row governs the
+ * word the seam is named after.
  * @param {string} file
  * @param {string} namespace
  * @returns {boolean}
  */
-export function isExcludedSurface(file, namespace) {
-    return matchesAnySurface(EXCLUDED_SURFACES, file, namespace);
+export function isWorkflowSurface(file, namespace) {
+    return matchesAnySurface(WORKFLOW_SURFACES, file, namespace);
 }
 
 /**
@@ -1026,10 +1035,10 @@ export function messageEntries() {
  */
 
 /**
- * Scans the message catalogs for banned terms, honouring the WS5 exclusions, each term's
- * scope, and the §4 compliance carve-outs it records in `allowFiles`. English patterns
- * run against both catalogs — a Latin term such as `ESP` or `RBAC` appears verbatim in
- * Japanese copy — while Japanese patterns run against the Japanese catalog only.
+ * Scans every message catalog for banned terms, honouring each term's scope and the §4
+ * compliance carve-outs it records in `allowFiles`. English patterns run against both
+ * catalogs — a Latin term such as `ESP` or `RBAC` appears verbatim in Japanese copy —
+ * while Japanese patterns run against the Japanese catalog only.
  * @param {VocabularyModel} model
  * @returns {Violation[]}
  */
@@ -1037,7 +1046,6 @@ export function scanMessageCatalogs(model) {
     const compiled = model.terms.map((term) => ({ term, expression: new RegExp(term.pattern.source, term.pattern.flags) }));
     const violations = [];
     for (const entry of messageEntries()) {
-        if (isExcludedSurface(entry.file, entry.namespace)) continue;
         for (const { term, expression } of compiled) {
             if (term.locale === "ja" && entry.locale !== "ja") continue;
             if (!scopeCovers(term.scope, entry.file, entry.namespace)) continue;
