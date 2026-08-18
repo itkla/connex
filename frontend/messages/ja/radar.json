@@ -1,10 +1,10 @@
 {
   "Radar": {
     "metadata": {
-      "title": "リレーションシップ・レーダー",
+      "title": "レーダー",
       "description": "現在の根拠とともに優先順位付けされた関係性シグナルを確認できます。"
     },
-    "title": "リレーションシップ・レーダー",
+    "title": "レーダー",
     "description": "冷え込みつつある関係、案件リスク、紹介ルートを、根拠に基づく一つの優先リストで確認します。",
     "summary": {
       "headline": "{count, plural, =0 {対応が必要なシグナルはありません} other {対応が必要なシグナル：#件}}",
@@ -29,7 +29,7 @@
       "high": "優先度：高",
       "medium": "優先度：中",
       "cooling": "冷え込み中",
-      "opportunity": "機会"
+      "opportunity": "紹介の候補"
     },
     "state": {
       "active": "対応中",
@@ -94,7 +94,7 @@
       "parameterSeverity": "深刻度",
       "parameterBridgePersonId": "橋渡し役",
       "parameterBridgeName": "橋渡し役の名前",
-      "parameterReachType": "機会の種類",
+      "parameterReachType": "候補の種類",
       "parameterEvidenceType": "経路の根拠",
       "parameterEvidenceCompany": "共通の会社",
       "parameterOverlapStartYear": "在籍重複の開始年",
@@ -123,7 +123,7 @@
       "high": "高",
       "medium": "中",
       "low": "低",
-      "opportunity": "機会",
+      "opportunity": "紹介の候補",
       "connection": "確認済みのつながり",
       "colleagues": "現在の同僚",
       "former_colleagues": "以前の同僚",
@@ -175,7 +175,7 @@
       "snoozing": "スヌーズ中…"
     },
     "task": {
-      "defaultDescription": "リレーションシップ・レーダーの「{subject}」をフォローアップ",
+      "defaultDescription": "レーダーの「{subject}」をフォローアップ",
       "warmPathDescription": "{bridge} に {subject} への紹介を依頼する"
     },
     "snooze": {
@@ -205,7 +205,7 @@
       "body": "取得済みの結果は表示しています。現在のデータを取得できなかった種別：{families}。"
     },
     "unavailable": {
-      "title": "リレーションシップ・レーダーを利用できません",
+      "title": "レーダーを利用できません",
       "body": "現在のシグナルデータを取得できなかった種別：{families}。",
       "routeBody": "現在のシグナルデータを取得できませんでした。再試行して確認してください。"
     }

@@ -437,7 +437,7 @@
                             },
                             {
                                 "title": "Deals",
-                                "description": "Opportunities moving through a pipeline, each with a value, an owner, and an outcome."
+                                "description": "Deals moving through a pipeline, each with a value, an owner, and an outcome."
                             },
                             {
                                 "title": "Pipelines",
@@ -498,7 +498,7 @@
                             },
                             {
                                 "title": "Deals & pipelines",
-                                "description": "Opportunities moving through the stages you set up.",
+                                "description": "Deals moving through the stages you set up.",
                                 "href": "/docs/records/deals-and-pipelines"
                             },
                             {
@@ -752,7 +752,7 @@
             },
             "deals-and-pipelines": {
                 "title": "Deals & pipelines",
-                "description": "Opportunities moving through stages, and the pipelines that shape them.",
+                "description": "Deals moving through stages, and the pipelines that shape them.",
                 "blocks": [
                     {
                         "type": "prose",
@@ -810,7 +810,7 @@
                                 "description": "Give the deal one owner and as many collaborators as you like."
                             },
                             {
-                                "title": "People",
+                                "title": "Contacts",
                                 "description": "Link the contacts involved, each with the role they play in the deal."
                             },
                             {

@@ -167,7 +167,7 @@
     "placeholderPhone": "+1 555 123 4567",
     "labelAddress": "住所",
     "placeholderAddress": "123 Main St",
-    "labelContacts": "担当者",
+    "labelContacts": "連絡先",
     "contactsOptional": "任意",
     "contactsCount": "{count} 件を追加予定",
     "addContact": "担当者を追加",

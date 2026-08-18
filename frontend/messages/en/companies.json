@@ -167,7 +167,7 @@
     "placeholderPhone": "+1 555 123 4567",
     "labelAddress": "Address",
     "placeholderAddress": "123 Main St",
-    "labelContacts": "People",
+    "labelContacts": "Contacts",
     "contactsOptional": "Optional",
     "contactsCount": "{count} to add",
     "addContact": "Add a person",
