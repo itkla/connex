@@ -1,5 +1,5 @@
 import DiagnosticsPanelSkeleton from "@/app/components/diagnostics/DiagnosticsPanelSkeleton";
 
 export default function WorkspaceDiagnosticsLoading() {
-    return <DiagnosticsPanelSkeleton />;
+    return <DiagnosticsPanelSkeleton scope="workspace" />;
 }
