@@ -36,7 +36,7 @@ For components that clearly extend an existing page/component pattern, or minor 
 
 ## Design system — honor every source of truth
 
-1. **Reuse `components/ui` first.** The shadcn/Base UI primitives there already cover most needs (button, dialog, input, select, combobox, chart, sheet, …). Never hand-roll a primitive that exists. Extend via variants (`class-variance-authority`) and `cn`.
+1. **Reuse `components/ui` first.** The shadcn/Base UI primitives there already cover most needs (button, split button, icon button, segmented control, dialog, input, select, combobox, chart, sheet, …). Never hand-roll a primitive that exists. Extend via variants (`class-variance-authority`) and `cn`.
 2. **Tokens only — `app/globals.css`.** Use the CSS variables / `@theme` tokens. No arbitrary hex or px. This includes domain tokens:
    - `--warmth-hot` / `--warmth-warm` / `--warmth-cool` / `--warmth-cold` for relationship temperature.
    - `--chart-*` (`chart-1..5`, `chart-won/lost/open`, `chart-grid/axis/stroke`) for data viz — use these with recharts/d3, not raw colors.
@@ -168,6 +168,17 @@ Section rhythm (`gap-10` between stacked children) and page gutter/padding come 
 
 **Destructive confirms.** `app/components/records/DeleteRecordDialog.tsx` is the only delete confirmation. It owns the grammar — title "Delete {object}?", a body naming the object and ending "This can't be undone.", destructive "Delete" — from `RecordsDeleteDialog` in `messages/{en,ja}/records.json`. A surface contributes an `entityLabel`, an optional `getDisplayName`, and any surface-specific consequence or preview through `details`; it never restates the grammar. "Delete permanently" plus typed confirmation is reserved for organization-level permanent deletion (`OrganizationLifecyclePanel`).
 
+**Buttons — the D4 system.** [`docs/PRODUCT.md`](../docs/PRODUCT.md) §6 "Buttons" is the law; `components/ui` is the only place it is implemented. Reuse, do not restyle:
+
+- **`Button`** (`components/ui/button.tsx`) is pill-shaped in every standalone size and carries the context height scale on `size`: **`page`** (`h-9`, page-header action cluster), **`dialog`** (`h-9`, dialog and drawer footers), **`toolbar`** (`h-8`, browser toolbars), **`inline`** (`h-6`, inside a row, cell, or card), plus their `icon-` forms. The heights are read off the reference pages, not invented; `page` and `dialog` stay separate names because they are separate laws even where the number agrees today. The legacy `default`/`sm`/`xs`/`lg`/`icon*` names resolve to the same heights so nothing broke when the tiers landed, and the gate below burns them down.
+- **Menu triggers are always chevroned.** Pass `menu` — the primitive draws and rotates the chevron. An action-looking button never surprises with a menu. Ellipsis overflow triggers are the exception the glyph already covers, and the filter-pill layer (`pillClass`, `RecordsSortMenu`, `ColumnVisibilityMenu`) is a distinct control family whose convergence is [#509](https://github.com/itkla/connex/issues/509) Phase 3.
+- **`IconButton`** (`components/ui/icon-button.tsx`) is the only way to ship an icon-only button: `label` is both the accessible name and the tooltip, so they cannot drift. It forwards every prop, so it composes as the child of a `DropdownMenuTrigger asChild` exactly as `Button` does.
+- **`SplitButton`** (`components/ui/split-button.tsx`) is one capsule — primary verb, inset hairline divider, chevron menu — not a `ButtonGroup` assembled by hand. `RecordsActions` is the reference call site.
+- **`SegmentedControl`** (`components/ui/segmented-control.tsx`) is the only mode/view switch. Never a row of toggle buttons, never a second hand-rolled track. `SortToggle`, `DensityToggle`, the calendar `ViewSwitcher`, and the analytics `RangeControl` are thin naming layers over it.
+- **One primary action per view region.** A page header, an empty state, and a dialog footer are three regions; two `variant="brand"` buttons inside one of them is the bug.
+
+The denominator is `lint/ad-hoc-button-baseline.json`, enforced by `test/unit/adHocButtons.test.ts` over `lint/adHocButtons.mjs`. It reports three idioms — a raw `<button>` painting its own button surface, a `<Button>` `className` re-deciding radius or height, and a `size` outside the context tiers — and behaves exactly like the motion gate: the ledger only shrinks, a file that reaches zero leaves it, and `BASELINE_HIGH_WATER_MARK` rises only in a commit that widens the scanner. `SYSTEM_SURFACES` is the permanent opposite list: the primitives that decide the shape and must never appear in the ledger.
+
 **Validation.** Create and edit paths both validate inline: `useFieldErrors` holds the messages, the control gets `aria-invalid` and `aria-describedby`, and the message renders under the field (`fieldErrorClass` for the ring, `QuickEditField`'s `error` inside a quick-edit drawer). A required field is marked with the quick-edit `text-destructive` asterisk. A toast is for the outcome of a request, never for a field the user can fix in front of them.
 
 **Motion (§14).** Expressive in memorable moments (page/section entrance via `Rise`, Peek, palette, Quick Create, drag/drop, meaningful completion); quiet and fast in repeated operations (table edit, filter/sort, bulk review, notification processing). *The first interaction may delight; the fiftieth must not irritate.* Repeated chrome (`PageShell`, `PageHeader`) carries no motion of its own — the page entrance owns it. Every animation honors `prefers-reduced-motion`. The speeds, characters, techniques, and responsiveness contract are law in [§14 Motion](#motion--the-d3-contract-14).
@@ -182,6 +193,7 @@ Section rhythm (`gap-10` between stacked children) and page gutter/padding come 
 - [ ] Title is a `PageHeader` (canon size) with actions in the cluster slot; no bare `<h1>`.
 - [ ] Loading, empty, error, and permission states all present and use the shared components.
 - [ ] Cards only for genuine semantic units; open sections otherwise; no card-in-card.
+- [ ] Buttons come from `components/ui` at a context `size` tier; menu triggers carry `menu`; icon-only buttons are `IconButton`s; mode switches are `SegmentedControl`s; one primary action per region.
 - [ ] Comfortable spacing by default; any density is an explicit, reversible work mode.
 - [ ] Overlay weight matches edit complexity (inline → dialog/sheet → page).
 - [ ] Motion restrained in repeated operations; every timing names a `--motion-*` token; reduced-motion path verified in the browser (§14).

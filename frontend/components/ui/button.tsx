@@ -127,7 +127,7 @@ function Button({
             <ChevronDownIcon
               data-icon="inline-end"
               aria-hidden="true"
-              className="size-3.5 opacity-70 transition-transform duration-(--motion-micro) group-aria-expanded/button:rotate-180 group-data-[state=open]/button:rotate-180 motion-reduce:transition-none"
+              className="size-3.5 opacity-70 transition-transform duration-(--motion-micro) group-data-[size=inline]/button:size-3 group-data-[size=xs]/button:size-3 group-aria-expanded/button:rotate-180 group-data-[state=open]/button:rotate-180 motion-reduce:transition-none"
             />
           ) : null}
         </>

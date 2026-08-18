@@ -3,7 +3,18 @@
 import * as React from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { useTheme } from "next-themes";
-import { MoonIcon, SunIcon } from "@heroicons/react/24/outline";
+import {
+  ArrowDownTrayIcon,
+  ArrowUpTrayIcon,
+  Bars2Icon,
+  Bars3Icon,
+  EllipsisVerticalIcon,
+  MoonIcon,
+  PlusIcon,
+  SunIcon,
+  Squares2X2Icon,
+  TableCellsIcon,
+} from "@heroicons/react/24/outline";
 
 import { cn } from "@/lib/utils";
 import { PageShell } from "@/app/components/PageShell";
@@ -16,6 +27,9 @@ import {
   springSnappy,
 } from "@/app/lib/motion";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { SplitButton } from "@/components/ui/split-button";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -164,9 +178,18 @@ const RHYTHM: { label: string; token: string; size: string }[] = [
 const NAV = [
   { id: "foundations", label: "Foundations" },
   { id: "layout", label: "Layout" },
+  { id: "buttons", label: "Buttons" },
   { id: "overlays", label: "Overlays" },
   { id: "motion", label: "Motion" },
 ];
+
+/** The D4 context height scale, read off the live reference pages. */
+const BUTTON_CONTEXTS = [
+  { size: "page", height: "h-9", use: "Page-header action cluster" },
+  { size: "dialog", height: "h-9", use: "Dialog and drawer footers" },
+  { size: "toolbar", height: "h-8", use: "Browser toolbars and filter rows" },
+  { size: "inline", height: "h-6", use: "Inside a row, cell, or card" },
+] as const;
 
 function useMounted(): boolean {
   return React.useSyncExternalStore(
@@ -288,6 +311,8 @@ function CssMotionDemo({ label, spec, style }: { label: string; spec: string; st
 
 export default function DesignSystemPage() {
   const [paletteOpen, setPaletteOpen] = React.useState(false);
+  const [demoView, setDemoView] = React.useState<"grid" | "table">("grid");
+  const [demoDensity, setDemoDensity] = React.useState<"comfortable" | "compact">("comfortable");
   const shortcutPlatform = useShortcutPlatform();
 
   React.useEffect(() => {
@@ -466,6 +491,122 @@ export default function DesignSystemPage() {
                 <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">gap-10</code> between
                 sections. This very page is wrapped in one.
               </p>
+            </div>
+          </Section>
+
+          <Section
+            id="buttons"
+            title="Buttons"
+            description="Pill-shaped, one height per context, chevroned menu triggers, circular tooltipped icon buttons, one capsule for a split, a segmented control for mode switching, and exactly one primary action per region. Everything here is a variant of the same primitive."
+          >
+            <div className="flex flex-col gap-3">
+              <SubHeading>Context height scale</SubHeading>
+              <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6">
+                {BUTTON_CONTEXTS.map((context) => (
+                  <div key={context.size} className="flex flex-wrap items-center gap-4">
+                    <Button variant="outline" size={context.size}>
+                      {context.size}
+                    </Button>
+                    <span className="font-mono text-xs text-muted-foreground">{context.height}</span>
+                    <span className="text-xs text-muted-foreground">{context.use}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <SubHeading>Menu triggers &amp; icon buttons</SubHeading>
+              <div className="flex flex-wrap items-center gap-3">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="toolbar" menu>
+                      Columns
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    <DropdownMenuItem>Name</DropdownMenuItem>
+                    <DropdownMenuItem>Owner</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <IconButton variant="outline" size="icon-toolbar" label="More actions">
+                      <EllipsisVerticalIcon className="size-4" />
+                    </IconButton>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem>Assign owner</DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem variant="destructive">Delete</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <span className="text-xs text-muted-foreground">
+                  <code className="rounded bg-muted px-1 py-0.5 font-mono">menu</code> draws the chevron ·
+                  IconButton makes the tooltip mandatory
+                </span>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <SubHeading>Split button</SubHeading>
+              <div className="flex flex-wrap items-center gap-3">
+                <SplitButton
+                  label="New contact"
+                  icon={<PlusIcon className="size-4" />}
+                  onClick={() => {}}
+                  menuLabel="More actions"
+                >
+                  <DropdownMenuItem>
+                    <ArrowUpTrayIcon className="size-4" />
+                    Import
+                  </DropdownMenuItem>
+                  <DropdownMenuItem>
+                    <ArrowDownTrayIcon className="size-4" />
+                    Export current view
+                  </DropdownMenuItem>
+                </SplitButton>
+                <SplitButton
+                  variant="outline"
+                  size="toolbar"
+                  label="Save"
+                  onClick={() => {}}
+                  menuLabel="More save options"
+                >
+                  <DropdownMenuItem>Save as new view</DropdownMenuItem>
+                </SplitButton>
+                <span className="text-xs text-muted-foreground">
+                  One capsule: pill caps outside, a straight seam inside, an inset hairline divider, and a
+                  press dip that moves the whole shape.
+                </span>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <SubHeading>Segmented control</SubHeading>
+              <div className="flex flex-wrap items-center gap-3">
+                <SegmentedControl
+                  ariaLabel="View"
+                  value={demoView}
+                  onChange={setDemoView}
+                  options={[
+                    { value: "grid", icon: <Squares2X2Icon className="size-4" />, ariaLabel: "Grid view" },
+                    { value: "table", icon: <TableCellsIcon className="size-4" />, ariaLabel: "Table view" },
+                  ]}
+                />
+                <SegmentedControl
+                  ariaLabel="Density"
+                  value={demoDensity}
+                  onChange={setDemoDensity}
+                  options={[
+                    { value: "comfortable", label: "Comfortable", icon: <Bars2Icon className="size-4" /> },
+                    { value: "compact", label: "Compact", icon: <Bars3Icon className="size-4" /> },
+                  ]}
+                />
+                <span className="text-xs text-muted-foreground">
+                  One travelling thumb on <code className="rounded bg-muted px-1 py-0.5 font-mono">springSnappy</code>{" "}
+                  · arrow keys move the selection
+                </span>
+              </div>
             </div>
           </Section>
 
