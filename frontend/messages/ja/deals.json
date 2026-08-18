@@ -46,7 +46,7 @@
         "factorChipCloseOverdue": "完了予定日を超過",
         "factorChipClosingSoonQuiet": "まもなく完了・停滞",
         "factorChipStalled": "停滞",
-        "factorChipStakeholderCold": "関係者の温度低下",
+        "factorChipStakeholderCold": "関係者の温度感が低下",
         "factorChipNoStakeholders": "関係者なし"
     },
     "DealsPage": {

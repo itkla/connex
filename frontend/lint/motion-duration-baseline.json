@@ -68,7 +68,7 @@
     "app/components/records/RecordStickyContext.tsx": 1,
     "app/components/records/RecordsRenderView.tsx": 4,
     "app/components/records/SegmentBuilder.tsx": 1,
-    "app/components/records/TemperatureEvidenceChip.tsx": 1,
+    "app/components/records/WarmthEvidenceChip.tsx": 1,
     "app/components/records/approval-policies/ApprovalChainEditor.tsx": 1,
     "app/components/records/comments/CommentComposer.tsx": 2,
     "app/components/records/comments/CommentRow.tsx": 2,

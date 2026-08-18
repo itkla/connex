@@ -5,7 +5,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { useReducedMotion } from 'motion/react';
 
 import RelationshipEvidencePanel from '@/app/components/records/RelationshipEvidencePanel';
-import TemperaturePill from '@/app/components/records/TemperaturePill';
+import WarmthPill from '@/app/components/records/WarmthPill';
 import { useLiveNow } from '@/app/hooks/useNow';
 import type { RelationshipEvidence } from '@/app/lib/types';
 import { formatRelativeTime } from '@/app/lib/utils';
@@ -19,10 +19,10 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/h
 import { cn } from '@/lib/utils';
 
 /**
- * Record-detail entry point that reuses {@link TemperaturePill}: hover shows a short warmth
+ * Record-detail entry point that reuses {@link WarmthPill}: hover shows a short warmth
  * summary, click opens Relationship Evidence in a dialog that mirrors the page panel chrome.
  */
-export default function TemperatureEvidenceChip({
+export default function WarmthEvidenceChip({
     evidence,
 }: {
     evidence: RelationshipEvidence;
@@ -59,7 +59,7 @@ export default function TemperatureEvidenceChip({
                                 !reduceMotion && 'active:scale-[0.97]',
                             )}
                         >
-                            <TemperaturePill temp={temperature} withTooltip={false} />
+                            <WarmthPill temp={temperature} withTooltip={false} />
                         </button>
                     }
                 />

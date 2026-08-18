@@ -126,7 +126,7 @@
       },
       "relationship-coverage": {
         "name": "関係性カバレッジ",
-        "description": "温度分布とアカウントのカバレッジ。"
+        "description": "温度感の分布とアカウントのカバレッジ。"
       },
       "relationship-health": {
         "name": "関係性の健全性",

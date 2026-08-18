@@ -88,7 +88,7 @@
     "cooling": {
       "label": "冷めかけ／冷たい",
       "labelNot": "冷めかけ／冷たくない",
-      "description": "関係の温度が低い、または下降傾向です。"
+      "description": "温度感がクールかコールド、または下降傾向です。"
     },
     "no_activity": {
       "label": "最近の活動なし",
@@ -140,27 +140,27 @@
     "warmth_hot": {
       "label": "ホット",
       "labelNot": "ホットでない",
-      "description": "関係の温度がホットです。"
+      "description": "温度感がホットです。"
     },
     "warmth_warm": {
       "label": "ウォーム",
       "labelNot": "ウォームでない",
-      "description": "関係の温度がウォームです。"
+      "description": "温度感がウォームです。"
     },
     "warmth_cool": {
       "label": "クール",
       "labelNot": "クールでない",
-      "description": "関係の温度がクールです。"
+      "description": "温度感がクールです。"
     },
     "warmth_cold": {
       "label": "コールド",
       "labelNot": "コールドでない",
-      "description": "関係の温度がコールドです。"
+      "description": "温度感がコールドです。"
     },
     "warmth_rising": {
       "label": "上昇中",
       "labelNot": "上昇していない",
-      "description": "関係の温度が上昇傾向です。"
+      "description": "温度感が上昇傾向です。"
     },
     "going_cold": {
       "label": "まもなく冷却",

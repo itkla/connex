@@ -88,7 +88,7 @@
     "cooling": {
       "label": "Cooling or cold",
       "labelNot": "Not cooling or cold",
-      "description": "Relationship temperature is cool, cold, or trending down."
+      "description": "Warmth is cool, cold, or trending down."
     },
     "no_activity": {
       "label": "No recent activity",
@@ -140,27 +140,27 @@
     "warmth_hot": {
       "label": "Hot",
       "labelNot": "Not hot",
-      "description": "Relationship warmth is hot."
+      "description": "Warmth is hot."
     },
     "warmth_warm": {
       "label": "Warm",
       "labelNot": "Not warm",
-      "description": "Relationship warmth is warm."
+      "description": "Warmth is warm."
     },
     "warmth_cool": {
       "label": "Cool",
       "labelNot": "Not cool",
-      "description": "Relationship warmth is cool."
+      "description": "Warmth is cool."
     },
     "warmth_cold": {
       "label": "Cold",
       "labelNot": "Not cold",
-      "description": "Relationship warmth is cold."
+      "description": "Warmth is cold."
     },
     "warmth_rising": {
       "label": "Warming up",
       "labelNot": "Not warming up",
-      "description": "Relationship warmth is trending up."
+      "description": "Warmth is trending up."
     },
     "going_cold": {
       "label": "Going cold soon",

@@ -61,7 +61,7 @@ import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
 import { type Company, type CompaniesPageParams, type CompanyEngagement, type CompanyFacets, type CreateCompanyPayload, type UpdateCompanyPayload, type User, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields, type RuleBuilderOptions, type Tag, type WorkspaceMember } from '@/app/lib/types';
-import TemperaturePill from '@/app/components/records/TemperaturePill';
+import WarmthPill from '@/app/components/records/WarmthPill';
 import CommentIndicatorChip from '@/app/components/records/comments/CommentIndicatorChip';
 import { useCommentIndicators } from '@/app/hooks/useCommentIndicators';
 import { PageHeader } from '@/app/components/PageHeader';
@@ -686,7 +686,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
             label: t('columnWarmth'),
             getSortValue: (c) => showArchived ? null : tempByCompanyId.get(c.id)?.score ?? null,
             sortable: false,
-            render: (c) => <TemperaturePill temp={showArchived ? undefined : tempByCompanyId.get(c.id)} />,
+            render: (c) => <WarmthPill temp={showArchived ? undefined : tempByCompanyId.get(c.id)} />,
         },
         {
             key: 'owner',

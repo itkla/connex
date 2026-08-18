@@ -49,7 +49,7 @@ import Attachments from "@/app/components/attachments/Attachments";
 import CommentsSection from "@/app/components/records/comments/CommentsSection";
 import CustomFieldRows from "@/app/components/records/CustomFieldRows";
 import RecordDetailSection from "@/app/components/records/RecordDetailSection";
-import TemperatureEvidenceChip from "@/app/components/records/TemperatureEvidenceChip";
+import WarmthEvidenceChip from "@/app/components/records/WarmthEvidenceChip";
 
 type CompanyPageProps = {
     params: Promise<{ id: number }>;
@@ -153,7 +153,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                                             </Link>
                                         ) : null}
                                         {evidence ? (
-                                            <TemperatureEvidenceChip evidence={evidence} />
+                                            <WarmthEvidenceChip evidence={evidence} />
                                         ) : null}
                                     </h3>
                                 </div>
