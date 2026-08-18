@@ -13,7 +13,7 @@
     "columnLastLogin": "最終ログイン",
     "columnMemberSince": "登録日",
     "neverLoggedIn": "なし",
-    "emptyTitle": "まだ誰も表示されていません",
+    "emptyTitle": "メンバーはまだいません",
     "emptyBody": "このワークスペースを利用できる人がここに並びます。ワークスペース設定から、一緒に働くメンバーを招待してください。",
     "emptyCta": "メンバーを招待",
     "entityLabel": "ユーザー"
@@ -35,7 +35,7 @@
     "notesCount": "メモ{count}件",
     "timeline": "タイムライン",
     "emptyActivity": "まだアクティビティはありません",
-    "emptyActivityBody": "この人が記録したタスク・アクティビティ・メモが、このタイムラインに表示されます。",
+    "emptyActivityBody": "このメンバーが記録したタスク・アクティビティ・メモが、このタイムラインに表示されます。",
     "performance": "パフォーマンス",
     "performanceWindow": "過去90日間",
     "wonDeals": "成約した案件",
