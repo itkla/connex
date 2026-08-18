@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/app/lib/api";
 import { type MessageTranslator, toastApiError, userMessageFor } from "@/app/lib/errorMessages";
-import { isAuthPath, redirectToSignIn, resetRedirectMemoForTests, signInHref } from "@/app/lib/sessionExpiry";
+import { isAuthPath, redirectToSignIn, resetRedirectMemoForTests, sameOriginPath, signInHref } from "@/app/lib/sessionExpiry";
 import { toastError } from "@/app/lib/toast";
 
 vi.mock("@/app/lib/toast", () => ({
@@ -180,6 +180,14 @@ describe("expired sessions", () => {
         resetRedirectMemoForTests();
     });
 
+    it("returns the user to the fragment they were on", () => {
+        vi.stubGlobal("window", {
+            location: { pathname: "/records/deals/7", search: "", hash: "#deal-documents", assign },
+        });
+        expect(userMessageFor(new ApiError("Request failed (401)", 401), t)).toBeNull();
+        expect(assign).toHaveBeenCalledWith("/auth/login?redirect=%2Frecords%2Fdeals%2F7%23deal-documents");
+    });
+
     it("shares one navigation across concurrent failures", () => {
         const first = new ApiError("Request failed (401)", 401, undefined, undefined, undefined, true);
         const second = new ApiError("Request failed (401)", 401, undefined, undefined, undefined, true);
@@ -222,6 +230,42 @@ describe("expired sessions", () => {
         expect(assign).not.toHaveBeenCalled();
         expect(message?.description).toBe("You've been signed out. Sign in again to continue.");
         expect(message?.description).not.toContain("401");
+    });
+});
+
+describe("the sign-in return address is reduced to a same-origin path", () => {
+    const ORIGIN = "https://app.connex.test";
+
+    beforeEach(() => {
+        vi.stubGlobal("window", { location: { origin: ORIGIN, pathname: "/dashboard", search: "", assign } });
+    });
+
+    it("keeps a plain path with query and fragment", () => {
+        expect(sameOriginPath("/records/deals/7?view=all#deal-documents"))
+            .toBe("/records/deals/7?view=all#deal-documents");
+    });
+
+    it("refuses another origin outright", () => {
+        expect(sameOriginPath("https://evil.example/records/deals")).toBeNull();
+    });
+
+    it("refuses what the URL parser forgives before resolving", () => {
+        expect(sameOriginPath("/\t/evil.example")).toBeNull();
+        expect(sameOriginPath("/\n/evil.example")).toBeNull();
+        expect(sameOriginPath("//evil.example/path")).toBeNull();
+    });
+
+    it("refuses a same-origin address that reconstructs protocol-relative", () => {
+        expect(sameOriginPath(`${ORIGIN}//evil.example/path`)).toBeNull();
+    });
+
+    it("accepts the same-origin absolute form of an ordinary path", () => {
+        expect(sameOriginPath(`${ORIGIN}/records/contacts?view=all`)).toBe("/records/contacts?view=all");
+    });
+
+    it("refuses nothing-values and unparseable input", () => {
+        expect(sameOriginPath(null)).toBeNull();
+        expect(sameOriginPath("")).toBeNull();
     });
 });
 

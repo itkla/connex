@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { sameOriginPath } from "@/app/lib/sessionExpiry";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { useTranslations } from "next-intl";
 import {
@@ -71,24 +72,6 @@ function pickFieldErrors(errors?: Record<string, string>): FieldErrors {
 
 function isSsoEnforcedError(err: ApiError): boolean {
     return err.status === 403 && err.code === SSO_ENFORCED_CODE;
-}
-
-/**
- * Reduces a caller-supplied return address to a same-origin path, or null when it isn't one. The
- * URL parser is the arbiter — pattern checks miss what parsing forgives, like the tab and newline
- * characters browsers strip before resolving `/\t/evil.com` into a protocol-relative address.
- * @param candidate the requested post-sign-in destination
- * @returns the path, query, and fragment to navigate to, or null when the address must not be used
- */
-function sameOriginPath(candidate: string | null): string | null {
-    if (!candidate) return null;
-    try {
-        const url = new URL(candidate, window.location.origin);
-        if (url.origin !== window.location.origin) return null;
-        return `${url.pathname}${url.search}${url.hash}`;
-    } catch {
-        return null;
-    }
 }
 
 export function AuthForm({

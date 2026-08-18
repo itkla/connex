@@ -22,11 +22,34 @@ export function isSessionExpired(error: unknown): boolean {
  * parameter the route guard sets so both entry points land on one convention.
  * @param pathname the path the user is on
  * @param search the query string the user is on, including the leading `?`
+ * @param hash the fragment the user is on, including the leading `#`, when there is one
  * @returns a relative sign-in address carrying the return path
  */
-export function signInHref(pathname: string, search: string): string {
-    const params = new URLSearchParams({ [RETURN_PATH_PARAM]: `${pathname}${search}` });
+export function signInHref(pathname: string, search: string, hash = ""): string {
+    const params = new URLSearchParams({ [RETURN_PATH_PARAM]: `${pathname}${search}${hash}` });
     return `${SIGN_IN_PATH}?${params.toString()}`;
+}
+
+/**
+ * Reduces a caller-supplied return address to a same-origin path, or null when it isn't one. The
+ * URL parser is the arbiter — pattern checks miss what parsing forgives, like the tab and newline
+ * characters browsers strip before resolving `/\t/evil.com` into a protocol-relative address. The
+ * reconstructed path must start with exactly one slash: an absolute same-origin address like
+ * `https://origin//evil.example/x` parses to a protocol-relative pathname that would leave the
+ * origin when navigated to, so it is refused even though its origin matched.
+ * @param candidate the requested post-sign-in destination
+ * @returns the path, query, and fragment to navigate to, or null when the address must not be used
+ */
+export function sameOriginPath(candidate: string | null): string | null {
+    if (!candidate) return null;
+    try {
+        const url = new URL(candidate, window.location.origin);
+        if (url.origin !== window.location.origin) return null;
+        if (url.pathname.startsWith("//")) return null;
+        return `${url.pathname}${url.search}${url.hash}`;
+    } catch {
+        return null;
+    }
 }
 
 /**
@@ -58,11 +81,11 @@ export function resetRedirectMemoForTests(): void {
 export function redirectToSignIn(): boolean {
     if (typeof window === "undefined") return false;
 
-    const { pathname, search } = window.location;
+    const { pathname, search, hash } = window.location;
     if (isAuthPath(pathname)) return false;
     if (redirecting) return true;
 
     redirecting = true;
-    window.location.assign(signInHref(pathname, search));
+    window.location.assign(signInHref(pathname, search, hash));
     return true;
 }
