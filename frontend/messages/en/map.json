@@ -5,13 +5,13 @@
         "emptyBody": "Add companies and contacts to see how your network connects and grows over time.",
         "emptyCta": "Add a company",
         "limitTitle": "This map is too large to render safely",
-        "limitBody": "Use record search and filters to explore this workspace while a larger graph view is prepared."
+        "limitBody": "Use record search and filters to explore this workspace while a larger map view is prepared."
     },
     "CompanyNode": {
-        "title": "Company Node"
+        "title": "Company"
     },
     "ContactNode": {
-        "title": "Contact Node"
+        "title": "Contact"
     },
     "Legend": {
         "title": "Legend",

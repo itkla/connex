@@ -1137,7 +1137,7 @@
     "DocsRelationshipIntelligence": {
         "title": "Relationship intelligence",
         "description": "Warmth scoring, decay prediction, connections, and employment history: the heart of Connex.",
-        "lead": "This is what sets Connex apart. Relationships are scored, watched for decay, and mapped into a graph you can traverse.",
+        "lead": "This is what sets Connex apart. Relationships are scored, watched for decay, and drawn into a map you can explore.",
         "articles": {
             "warmth-and-temperature": {
                 "title": "Warmth",
@@ -1233,7 +1233,7 @@
             },
             "connections-and-employment": {
                 "title": "Connections & employment",
-                "description": "The relationship graph and how job history keeps context when people move.",
+                "description": "The relationship map and how job history keeps context when people move.",
                 "blocks": [
                     {
                         "type": "prose",
@@ -1401,7 +1401,7 @@
     "DocsOverviewSuite": {
         "title": "Overview suite",
         "description": "Analytics, the relationship map, calendar, introductions, and intro paths.",
-        "lead": "The overview suite turns your records into insight: charts, a live relationship graph, and tools for engineering introductions.",
+        "lead": "The overview suite turns your records into insight: charts, a live relationship map, and tools for engineering introductions.",
         "articles": {
             "analytics": {
                 "title": "Analytics",
@@ -1516,7 +1516,7 @@
             },
             "relationship-map": {
                 "title": "Relationship map",
-                "description": "An interactive graph of people, companies, and how they connect.",
+                "description": "An interactive map of people, companies, and how they connect.",
                 "blocks": [
                     {
                         "type": "prose",
@@ -1556,16 +1556,16 @@
                         "columns": 2,
                         "items": [
                             {
-                                "title": "Expand a node",
+                                "title": "Expand a company or contact",
                                 "description": "Click any company or contact to open a card with the details, like industry, revenue, recent engagement, and contact info."
                             },
                             {
                                 "title": "Hover to trace",
-                                "description": "Hover a node to light up its whole chain, everyone above and below it, while the rest fades back."
+                                "description": "Hover anyone on the map to light up their whole chain, everyone above and below them, while the rest fades back."
                             },
                             {
                                 "title": "Drag to reposition",
-                                "description": "Grab any node and move it. The map gently rearranges itself so it stays balanced."
+                                "description": "Grab anything on the map and move it. The map gently rearranges itself so it stays balanced."
                             },
                             {
                                 "title": "Zoom and fit",
@@ -1573,7 +1573,7 @@
                             },
                             {
                                 "title": "Legend",
-                                "description": "Open the legend in the corner for a full key to node types, connections, and deal statuses."
+                                "description": "Open the legend in the corner for a full key to what the map shows, how connections are drawn, and deal statuses."
                             }
                         ]
                     },
@@ -1584,7 +1584,7 @@
                         "items": [
                             {
                                 "title": "Warmth at a glance",
-                                "description": "Each node is tinted by how warm the relationship is, hot to cold. Contacts you've been active with get a solid green outline; quiet ones get a dashed one."
+                                "description": "Everyone on the map is tinted by how warm the relationship is, hot to cold. Contacts you've been active with get a solid green outline; quiet ones get a dashed one."
                             },
                             {
                                 "title": "What the lines mean",
