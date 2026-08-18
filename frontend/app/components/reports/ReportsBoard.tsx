@@ -25,6 +25,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 import Rise from '@/app/components/motion/Rise';
+import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import AskConnexComposer from '@/app/components/reports/AskConnexComposer';
 import {
@@ -258,35 +259,30 @@ export default function ReportsBoard({
         <>
             <PageShell tier="wide">
                 <Rise>
-                    <header className="flex flex-wrap items-end justify-between gap-5">
-                        <div>
-                            <p className="mb-2 text-xs font-medium uppercase tracking-[0.12em] text-brand-dark">
-                                {t('landing.eyebrow')}
-                            </p>
-                            <h1 className="text-4xl font-extrabold tracking-tight text-foreground">{t('landing.title')}</h1>
-                            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                                {t('landing.subtitle')}
-                            </p>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                            {canReadGoals ? (
-                                <Button asChild variant="outline">
-                                    <Link href="/overview/reports/goals">
-                                        <FlagIcon />
-                                        {t('landing.manageGoals')}
-                                    </Link>
-                                </Button>
-                            ) : null}
-                            {!composerAvailable && canCreateReports ? (
-                                <Button asChild variant="brand">
-                                    <Link href="/overview/reports/new">
-                                        <PencilSquareIcon />
-                                        {t('landing.newReport')}
-                                    </Link>
-                                </Button>
-                            ) : null}
-                        </div>
-                    </header>
+                    <PageHeader
+                        title={t('landing.title')}
+                        description={t('landing.subtitle')}
+                        actions={(
+                            <>
+                                {canReadGoals ? (
+                                    <Button asChild variant="outline">
+                                        <Link href="/overview/reports/goals">
+                                            <FlagIcon />
+                                            {t('landing.manageGoals')}
+                                        </Link>
+                                    </Button>
+                                ) : null}
+                                {!composerAvailable && canCreateReports ? (
+                                    <Button asChild variant="brand">
+                                        <Link href="/overview/reports/new">
+                                            <PencilSquareIcon />
+                                            {t('landing.newReport')}
+                                        </Link>
+                                    </Button>
+                                ) : null}
+                            </>
+                        )}
+                    />
                 </Rise>
 
                 {composerAvailable && canCreateReports ? (

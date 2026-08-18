@@ -461,20 +461,17 @@ export default function FilesBrowser() {
     return (
         <PageShell tier="wide">
             <Rise>
-                <PageHeader
-                    title={t('title')}
-                    description={t('subtitle')}
-                    actions={
-                        facets && facets.total > 0 ? (
-                            <div className="text-right tabular-nums">
-                                <div className="text-sm font-medium text-foreground">{t('count', { count: facets.total })}</div>
-                                <div className="text-xs text-muted-foreground">
-                                    {t('totalSize', { size: formatFileSize(facets.totalSize) })}
-                                </div>
-                            </div>
-                        ) : undefined
-                    }
-                />
+                <div className="flex flex-col gap-3">
+                    <PageHeader title={t('title')} description={t('subtitle')} />
+                    {facets && facets.total > 0 ? (
+                        <p className="text-xs tabular-nums text-muted-foreground">
+                            {t('countAndSize', {
+                                count: facets.total,
+                                size: formatFileSize(facets.totalSize),
+                            })}
+                        </p>
+                    ) : null}
+                </div>
             </Rise>
 
             {isEmptyLibrary ? (

@@ -24,7 +24,6 @@
       "requestFailed": "The request could not be completed."
     },
     "landing": {
-      "eyebrow": "Workspace intelligence",
       "title": "Reports",
       "subtitle": "Turn deterministic CRM figures into a review-ready narrative with charts, recommendations, an appendix, and traceable sources.",
       "newReport": "New report",
