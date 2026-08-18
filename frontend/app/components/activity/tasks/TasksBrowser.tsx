@@ -724,6 +724,11 @@ export default function TasksBrowser({
             icon={isCompletedQueue ? CheckCircleIcon : CheckIcon}
             title={t(`emptyQueue_${queue}` as 'emptyQueue_myOpen')}
             body={t('emptyQueueBody')}
+            action={
+                <Button variant="outline" onClick={() => setQueue(queue === 'allOpen' ? 'completed' : 'allOpen')}>
+                    {queue === 'allOpen' ? t('emptyQueueShowCompleted') : t('emptyQueueShowAllOpen')}
+                </Button>
+            }
         />
     );
     const activeDimensionCount =
