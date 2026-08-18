@@ -27,6 +27,10 @@ import { join, relative, resolve, sep } from "node:path";
  *    instead of three. Widening added three findings and no new files; tokenizing the surfaces
  *    this workstream had already touched removed eight, so the mark **fell**.
  *
+ * 3. 231 → 227 (lowered). WS8's button system replaced four hand-timed surfaces with the
+ *    primitives: the records split button, the dashboard and deal-document menu triggers, and the
+ *    analytics range control, whose thumb now rides `SegmentedControl`'s shared spring.
+ *
  * Widening the scanner is the only sanctioned reason to raise the mark. New debt is not — and when
  * a widening commit also pays debt down, the mark follows the lower total, as in (2).
  *
@@ -67,10 +71,13 @@ export const TOKENIZED_SURFACES = [
     "components/ui/drawer.tsx",
     "components/ui/dropdown-menu.tsx",
     "components/ui/hover-card.tsx",
+    "components/ui/icon-button.tsx",
     "components/ui/message-scroller.tsx",
     "components/ui/popover.tsx",
     "components/ui/responsive-dialog.tsx",
+    "components/ui/segmented-control.tsx",
     "components/ui/select.tsx",
+    "components/ui/split-button.tsx",
     "components/ui/tabs.tsx",
     "components/ui/tooltip.tsx",
 ];
@@ -208,4 +215,4 @@ export function loadBaseline() {
  * It may fall. It rises only in a commit that widens what the scanner catches — never to make room
  * for new debt.
  */
-export const BASELINE_HIGH_WATER_MARK = 231;
+export const BASELINE_HIGH_WATER_MARK = 227;
