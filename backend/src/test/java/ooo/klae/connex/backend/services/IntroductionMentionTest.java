@@ -60,6 +60,7 @@ class IntroductionMentionTest extends AbstractServiceTest {
         assertEquals(currentUser.getId(), notification.getActorId());
         assertEquals("introduction", notification.getSourceType());
         assertEquals(dto.getId(), notification.getSourceId());
+        assertEquals("/overview/introductions", notification.getActionUrl());
         assertEquals("introduction.mention:" + dto.getId() + ":" + mentioned.getId(), notification.getDedupeKey());
     }
 

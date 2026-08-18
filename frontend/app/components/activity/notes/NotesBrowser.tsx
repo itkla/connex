@@ -35,6 +35,7 @@ import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatDate } from '@/app/lib/utils';
 import { deriveNoteTitle, noteSnippet } from '@/app/lib/noteText';
 import { recordDetailNavigationPath } from '@/app/lib/recordReturnPath';
+import { NOTE_URL_KEY } from '@/app/hooks/listStateUrl';
 import { useRecordReturnScroll } from '@/app/hooks/useRecordReturnSelection';
 import type { Contact, Deal, Note, User } from '@/app/lib/types';
 
@@ -76,7 +77,7 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
     const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
 
     useEffect(() => {
-        const noteParam = new URLSearchParams(window.location.search).get('note');
+        const noteParam = new URLSearchParams(window.location.search).get(NOTE_URL_KEY);
         if (noteParam && /^\d+$/.test(noteParam)) {
             router.replace(`/activity/notes/${noteParam}`);
         }

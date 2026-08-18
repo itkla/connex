@@ -12,6 +12,32 @@ export const MAX_URL_PAGE_SIZE = 100;
  * SavedViewsBar — a third list-state writer alongside the query/sort and facet-filter writers. */
 export const SAVED_VIEW_URL_KEY = 'sv';
 
+/** URL query key that deep-links one task, read by the tasks browser and the record timelines. */
+export const TASK_URL_KEY = 'task';
+
+/** URL query key that deep-links one note, read by the notes browser and the record timelines. */
+export const NOTE_URL_KEY = 'note';
+
+/** URL query key that deep-links one activity, read by the activities browser and the record timelines. */
+export const ACTIVITY_URL_KEY = 'activity';
+
+/** URL query key that deep-links one record comment, read by the record comments section. */
+export const COMMENT_URL_KEY = 'comment';
+
+/**
+ * The canonical record deep-link query keys, keyed by the record kind each one addresses. Every
+ * producer — a backend notification `actionUrl`, a calendar event href, an in-app link — emits these
+ * exact keys, because they are what the consuming browser or record surface reads. Mirrored by the
+ * shared route fixture in `backend/src/test/resources/frontend-route-manifest.json` so both planes
+ * fail loudly when a producer and its consumer drift apart (#1338).
+ */
+export const DEEP_LINK_URL_KEYS = {
+    task: TASK_URL_KEY,
+    note: NOTE_URL_KEY,
+    activity: ACTIVITY_URL_KEY,
+    comment: COMMENT_URL_KEY,
+} as const;
+
 /** Normalizes a URL-supplied list query so empty and whitespace-only values share one canonical form. */
 export function parseListQuery(value: string | null): string {
     return value?.trim() ?? '';

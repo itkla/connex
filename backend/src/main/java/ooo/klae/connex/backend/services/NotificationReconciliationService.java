@@ -1070,7 +1070,7 @@ public class NotificationReconciliationService {
         }
         notification.setTitle(CRITICAL.equals(severity) ? "Task overdue" : "Task due soon");
         notification.setBody(candidate.getTaskLabel() + " — Due " + candidate.getDueDate());
-        notification.setActionUrl("/activity/tasks?taskId=" + candidate.getTaskId());
+        notification.setActionUrl("/activity/tasks?task=" + candidate.getTaskId());
         notification.setData(json(Map.of(
             "taskId", candidate.getTaskId(),
             "task", candidate.getTaskLabel(),

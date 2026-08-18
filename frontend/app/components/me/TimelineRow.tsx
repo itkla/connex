@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { deleteActivity, deleteNote, deleteTask } from '@/app/lib/api';
+import { ACTIVITY_URL_KEY, NOTE_URL_KEY, TASK_URL_KEY } from '@/app/hooks/listStateUrl';
 import EditTaskSheet from '@/app/components/activity/tasks/EditTaskSheet';
 import EditActivitySheet from '@/app/components/activity/activities/EditActivitySheet';
 import NoteDialog from '@/app/components/activity/notes/NoteDialog';
@@ -45,6 +46,20 @@ const CHIP_LABEL_KEY: Record<TimelineEntry['kind'], 'chipTask' | 'chipActivity' 
     note: 'chipNote',
     lifecycle: 'chipLifecycle',
 };
+
+/**
+ * The deep link that addresses one timeline entry, or null for entries no producer links to.
+ *
+ * Task, activity, and note notifications all land on a record page carrying the canonical param key
+ * their standalone browser reads, so a row highlights itself by comparing the arriving value with its
+ * own id — the same contract the record comment deep link follows.
+ */
+function entryDeepLink(entry: TimelineEntry): { key: string; id: number } | null {
+    if (entry.kind === 'task') return { key: TASK_URL_KEY, id: entry.task.id };
+    if (entry.kind === 'activity') return { key: ACTIVITY_URL_KEY, id: entry.activity.id };
+    if (entry.kind === 'note') return { key: NOTE_URL_KEY, id: entry.note.id };
+    return null;
+}
 
 function entryDate(entry: TimelineEntry, locale: string): string {
     return entry.sortAt
@@ -84,7 +99,8 @@ export default function TimelineRow({
     const rowRef = useRef<HTMLLIElement>(null);
     const searchParams = useSearchParams();
     const reduceMotion = useReducedMotion();
-    const isHighlighted = entry.kind === 'note' && searchParams.get('note') === String(entry.note.id);
+    const deepLink = entryDeepLink(entry);
+    const isHighlighted = deepLink !== null && searchParams.get(deepLink.key) === String(deepLink.id);
     const isLifecycle = entry.kind === 'lifecycle';
     const noteOpen = editOpen && entry.kind === 'note';
     const personSearch = useContactTargetSearch(

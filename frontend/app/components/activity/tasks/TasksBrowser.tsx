@@ -53,7 +53,7 @@ import Rise from '@/app/components/motion/Rise';
 import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import { deleteTask, getTaskById, updateTask } from '@/app/lib/api';
-import { parseDeepLinkId } from '@/app/hooks/listStateUrl';
+import { parseDeepLinkId, TASK_URL_KEY } from '@/app/hooks/listStateUrl';
 import { useOwnedUrlParams } from '@/app/hooks/useOwnedUrlParams';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { useScopedViewPreference } from '@/app/hooks/useScopedViewPreference';
@@ -288,10 +288,10 @@ export default function TasksBrowser({
 
     const searchParams = useSearchParams();
     const [deepLinkSettled, setDeepLinkSettled] = useState(
-        () => parseDeepLinkId(searchParams.get('task')) === null,
+        () => parseDeepLinkId(searchParams.get(TASK_URL_KEY)) === null,
     );
     useEffect(() => {
-        const taskId = parseDeepLinkId(searchParams.get('task'));
+        const taskId = parseDeepLinkId(searchParams.get(TASK_URL_KEY));
         if (taskId === null) return;
         getTaskById(taskId)
             .then(setEditingTask)
@@ -299,7 +299,10 @@ export default function TasksBrowser({
             .finally(() => setDeepLinkSettled(true));
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
-    useOwnedUrlParams({ task: editingTask ? String(editingTask.id) : undefined }, deepLinkSettled);
+    useOwnedUrlParams(
+        { [TASK_URL_KEY]: editingTask ? String(editingTask.id) : undefined },
+        deepLinkSettled,
+    );
 
     useEffect(() => () => timers.current.forEach((id) => window.clearTimeout(id)), []);
 

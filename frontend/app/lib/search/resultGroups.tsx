@@ -121,7 +121,7 @@ export function buildSearchGroups(results: SearchResults | null, t: SearchTransl
     }));
     addGroup("pipelines", t("groupPipelines"), results.pipelines, (p) => ({
         key: `pipeline-${p.id}`,
-        href: `/records/pipelines/${p.id}`,
+        href: "/records/pipelines",
         icon: FunnelIcon,
         label: p.name,
     }));

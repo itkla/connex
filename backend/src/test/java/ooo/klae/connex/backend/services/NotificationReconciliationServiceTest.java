@@ -120,7 +120,49 @@ class NotificationReconciliationServiceTest {
         verify(dispatcher).dispatch(captor.capture());
         assertEquals(NotificationReconciliationService.CRITICAL, captor.getValue().getSeverity());
         assertNull(captor.getValue().getContextType());
-        assertEquals("/activity/tasks?taskId=91", captor.getValue().getActionUrl());
+        assertEquals("/activity/tasks?task=91", captor.getValue().getActionUrl());
+    }
+
+    @Test
+    void reconciliationTaskReminderUsesCanonicalTaskQueryParameter() {
+        NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
+        PreferenceMapper preferenceMapper = Mockito.mock(PreferenceMapper.class);
+        NotificationDispatcher dispatcher = Mockito.mock(NotificationDispatcher.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC);
+
+        TaskReminderCandidate candidate = new TaskReminderCandidate();
+        candidate.setWorkspaceId(7);
+        candidate.setTaskId(91);
+        candidate.setTaskLabel("Send proposal");
+        candidate.setDueDate("2026-06-23");
+        candidate.setRecipientId(42);
+        candidate.setRecipientTimezone("Asia/Tokyo");
+
+        when(notificationMapper.findWorkspaceRecipientIds(7)).thenReturn(List.of(42));
+        when(notificationMapper.findReminderNotifications(7, 42)).thenReturn(List.of());
+        when(preferenceMapper.findByWorkspaceAndChannel(7, "in_app")).thenReturn(List.of());
+        when(notificationMapper.findTaskReminderCandidates(7)).thenReturn(List.of(candidate));
+        when(notificationMapper.findDealReminderCandidates(7)).thenReturn(List.of());
+
+        NotificationReconciliationService service = new NotificationReconciliationService(
+            notificationMapper,
+            Mockito.mock(DuplicateDecisionLockService.class),
+            preferenceMapper,
+            wrap(dispatcher, notificationMapper, preferenceMapper),
+            stateVersions(notificationMapper),
+            new NotificationProperties(),
+            Mockito.mock(ScoringService.class),
+            Mockito.mock(IntroductionService.class),
+            noRiskService(),
+            clock,
+            new ObjectMapper()
+        );
+
+        service.reconcileWorkspace(7, true);
+
+        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
+        verify(dispatcher).dispatch(captor.capture());
+        assertEquals("/activity/tasks?task=91", captor.getValue().getActionUrl());
     }
 
     @Test
