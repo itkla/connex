@@ -585,7 +585,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                                 onDelete={onDelete ? () => onDelete(item) : undefined}
                             />
                         )}
-                        detailPath={(item) => `/records/pipelines/${item.id}`}
+                        onRowClick={quickEditOne}
                         displayMode={displayMode}
                         selectedIds={selectedIds}
                         onSelectedIdsChange={setSelectedIds}
