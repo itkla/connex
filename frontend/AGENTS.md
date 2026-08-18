@@ -120,6 +120,7 @@ Section rhythm (`gap-10` between stacked children) and page gutter/padding come 
 
 - Connex is **bilingual: English and Japanese.** Every user-facing string goes through `next-intl` — add keys to **both** `messages/en` and `messages/ja`. Never hardcode copy.
 - Supported locales and the default live in `i18n/config.ts`; request message loading lives in `i18n/request.ts`. Use the Japanese font (`--font-noto-sans-jp`) where JA renders; don't assume Latin-only text widths in layouts.
+- **The banned-terms gate is generated from [`docs/PRODUCT.md`](../docs/PRODUCT.md) §4, not hand-written.** `lint/vocabulary.mjs` parses the glossary into `lint/vocabulary.generated.json`; `test/unit/vocabularyLint.test.ts` scans every string value in `messages/{en,ja}/*.json` against it, in error mode, against the shrinking baseline in `lint/vocabulary-baseline.json`. To fix copy, edit the string **and delete its baseline entry** — the baseline never grows. To change what is banned, edit §4 and run `node scripts/generate-vocabulary.mjs`; a §4 item whose ban needs meaning analysis must get an explicit ban or skip with a reason in `CURATED_DECISIONS`. Compliance surfaces (`legal.json`, `organization.json` `OrgDataRequests.*`) are exempt; the workflow namespaces are out of scope until WS5 (#1339) lands.
 
 ## Accessibility
 
@@ -164,6 +165,7 @@ This repo uses **pnpm** — don't run `npm install` or reintroduce `package-lock
 - Lint: `pnpm lint`
 - Typecheck: `pnpm exec tsc --noEmit`
 - Unit tests: `pnpm test` (vitest; `pnpm test:watch` for watch mode)
+- Regenerate the banned-terms model after editing `docs/PRODUCT.md` §4: `node scripts/generate-vocabulary.mjs`
 - E2E tests: `pnpm e2e` (Playwright; needs the full stack running — see [`docs/FRONTEND_TESTING.md`](../docs/FRONTEND_TESTING.md))
 
 Unit tests cover pure logic only; the browser verification in the Definition of Done remains the gate for everything the harness doesn't cover.
