@@ -591,11 +591,12 @@ This is the single most common support-flow mistake, so internalize it before th
 
 | The user is looking at | They can quote | Where it comes from |
 |---|---|---|
-| A broken **page** (render/boundary failure) | **`Reference: <digest>`** — a Next.js server digest | The error screen renders it in monospace, `select-all`. **This is the only correlation-like identifier any Connex UI shows.** |
+| A broken **page** (render/boundary failure) | **`Reference: <digest>`** — a Next.js server digest | The error screen renders it in monospace, `select-all`. **This is the only correlation-like identifier shown outside the admin diagnostics panels.** |
 | A raw API `500` (curl, devtools, an integration) | `correlationId` in the JSON body, and the `X-Correlation-Id` response header | The catch-all exception handler and the correlation filter |
 
-**No screen renders the correlation ID.** The frontend parses it into `ApiError.correlationId` and
-then never displays it. So a user reporting a broken page will hand you a **digest**, not a
+**No everyday screen renders the correlation ID.** The frontend parses it into `ApiError.correlationId`
+and displays it only in the workspace/organization diagnostics and mail-deliverability panels (as
+"Reference ID"). So a user reporting a broken page will hand you a **digest**, not a
 correlation ID — asking them for a correlation ID will produce confusion, not an identifier.
 
 When the frontend error boundary fires, it best-effort reports to `POST /api/client-errors`. The

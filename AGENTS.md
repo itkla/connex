@@ -234,3 +234,4 @@ Treat GitHub as the system of record. For any tracked piece of work:
 
 - `frontend/AGENTS.md` — Next.js 16, design system, components, verify loop.
 - `backend/AGENTS.md` — Spring Boot / Java 26, layering, tenancy/RBAC, verify loop.
+- [`docs/PRODUCT.md`](docs/PRODUCT.md) — the product source of truth: positioning, canonical vocabulary (EN/JA glossary and banned terms), voice and tone, standard interaction moments, and the target IA. **Required reading before writing user-facing copy, naming anything, or designing a flow.**
