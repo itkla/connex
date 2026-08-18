@@ -185,6 +185,9 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
                 <Rise delay={0.12}>
                     {searching ? (
                         <div className="space-y-2 rounded-2xl border border-border bg-card p-4" aria-busy>
+                            <span role="status" aria-live="polite" className="sr-only">
+                                {t('searchRunning')}
+                            </span>
                             {Array.from({ length: 6 }, (_, row) => (
                                 <Skeleton key={row} className="h-9 w-full rounded-lg" />
                             ))}

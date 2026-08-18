@@ -9,6 +9,7 @@
     "sectionCatalog": "カタログ",
     "catalogCount": "{count}件",
     "searchPlaceholder": "商品を検索",
+    "searchRunning": "商品を検索しています",
     "searchFailed": "商品を検索できませんでした",
     "retrySearch": "もう一度試す",
     "emptyTitle": "カタログを作成",
