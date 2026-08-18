@@ -32,9 +32,9 @@
         "ownerUnassigned": "Unassigned"
     },
     "ContactConnections": {
-        "warmPath": "Warm intro path",
+        "warmPath": "Intro path",
         "alreadyKnown": "Your team already knows {name}.",
-        "noPath": "No warm path yet — add connections to map a route.",
+        "noPath": "No intro path yet — add connections to map a route.",
         "empty": "No connections yet.",
         "addPlaceholder": "Connect a contact…",
         "noContacts": "No contacts found",

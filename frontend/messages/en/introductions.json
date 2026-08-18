@@ -80,10 +80,10 @@
         "acceptTaskDescription": "Ask {bridge} to introduce you to {target}",
         "acceptToast": "Task created — you'll ask for an intro to {name}",
         "acceptFailed": "Couldn't create the follow-up task",
-        "pathsEmptyTitle": "No warm paths right now",
+        "pathsEmptyTitle": "No intro paths right now",
         "pathsEmptyHint": "When a contact you're close with can introduce you to someone you've gone quiet with — or haven't met yet — the path will show up here.",
-        "pathsErrorTitle": "Couldn't load warm paths",
-        "pathsErrorHint": "Something went wrong while loading warm paths. Your data is untouched — try again in a moment."
+        "pathsErrorTitle": "Couldn't load intro paths",
+        "pathsErrorHint": "Something went wrong while loading intro paths. Your data is untouched — try again in a moment."
     },
     "IntroRationale": {
         "label": "AI insight",

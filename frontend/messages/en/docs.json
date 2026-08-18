@@ -23,7 +23,7 @@
     },
     "DocsHome": {
         "title": "Connex documentation",
-        "lead": "Connex is a relationship-intelligence CRM: it scores how warm each relationship is, predicts when one is cooling, and surfaces the warmest path to any introduction. These docs walk every capability, from the big fundamentals down to the small interface details."
+        "lead": "Connex is a relationship-intelligence CRM: it scores how warm each relationship is, predicts when one is cooling, and surfaces the strongest intro path to anyone you want to reach. These docs walk every capability, from the big fundamentals down to the small interface details."
     },
     "DocsGettingStarted": {
         "title": "Getting started",
@@ -657,7 +657,7 @@
                             },
                             {
                                 "title": "Connections",
-                                "description": "How you're related (colleague, friend, and more) and the shortest warm-intro path to reach them."
+                                "description": "How you're related (colleague, friend, and more) and the shortest intro path to reach them."
                             },
                             {
                                 "title": "Activity timeline",
@@ -743,7 +743,7 @@
                                 "answer": "Yes. Connex keeps a 'recently moved' feed of contacts who changed companies recently, so you can reach out at the right moment."
                             },
                             {
-                                "question": "What does the warm-intro path show?",
+                                "question": "What does the intro path show?",
                                 "answer": "It's the shortest chain of people you know that reaches someone you'd like to meet. It also tells you when you already know them directly, or when there's no path to them right now."
                             }
                         ]
@@ -1259,7 +1259,7 @@
                         "title": "Keep exploring",
                         "items": [
                             {
-                                "title": "Warm-intro paths",
+                                "title": "Intro paths",
                                 "description": "Find the strongest person to introduce you to someone you want to reach.",
                                 "href": "/docs/overview-suite/warm-intro-paths"
                             },
@@ -1400,7 +1400,7 @@
     },
     "DocsOverviewSuite": {
         "title": "Overview suite",
-        "description": "Analytics, the relationship map, calendar, introductions, and warm-intro paths.",
+        "description": "Analytics, the relationship map, calendar, introductions, and intro paths.",
         "lead": "The overview suite turns your records into insight: charts, a live relationship graph, and tools for engineering introductions.",
         "articles": {
             "analytics": {
@@ -1607,7 +1607,7 @@
                         "title": "Related reading",
                         "items": [
                             {
-                                "title": "Warm-intro paths",
+                                "title": "Intro paths",
                                 "description": "Turn the same map into the strongest route to a contact you want to reach.",
                                 "href": "/docs/overview-suite/warm-intro-paths"
                             },
@@ -1779,17 +1779,17 @@
                 ]
             },
             "warm-intro-paths": {
-                "title": "Warm-intro paths",
+                "title": "Intro paths",
                 "description": "Reverse-introduction search for the strongest path to any target.",
                 "blocks": [
                     {
                         "type": "prose",
-                        "text": "Warm-intro paths flip the usual question around. Instead of asking who can reach someone, Connex looks at the people your team already knows and finds pairs you're perfectly placed to introduce, because you know both of them but they don't yet know each other. Each pair comes with a score and a short reason. You'll find them on the introductions page, and as a quick set of top opportunities on your dashboard."
+                        "text": "Intro paths flip the usual question around. Instead of asking who can reach someone, Connex looks at the people your team already knows and finds pairs you're perfectly placed to introduce, because you know both of them but they don't yet know each other. Each pair comes with a score and a short reason. You'll find them on the introductions page, and as a quick set of top suggestions on your dashboard."
                     },
                     {
                         "type": "illustration",
                         "name": "warm-intro-path",
-                        "caption": "A warm path from you to the person you want to meet"
+                        "caption": "An intro path from you to the person you want to meet"
                     },
                     {
                         "type": "featureList",
@@ -4839,16 +4839,16 @@
                 "blocks": [
                     {
                         "type": "prose",
-                        "text": "The warmest way to reach someone new is through a person you both trust. In this tutorial you will open the Introductions tool, find a warm path between two people in your network, and make the introduction. By the end you will know how to spot the strongest connector for any pairing and record the intro so it becomes part of your history."
+                        "text": "The warmest way to reach someone new is through a person you both trust. In this tutorial you will open the Introductions tool, find an intro path between two people in your network, and make the introduction. By the end you will know how to spot the strongest connector for any pairing and record the intro so it becomes part of your history."
                     },
                     {
                         "type": "illustration",
                         "name": "warm-intro-path",
-                        "caption": "A warm path from you to the person you want to reach, through someone you both know."
+                        "caption": "An intro path from you to the person you want to reach, through someone you both know."
                     },
                     {
                         "type": "prose",
-                        "text": "A warm path is simply the chain of trust that gets you to someone. Instead of a cold message to a stranger, Connex looks at the people you already know and finds pairs you are perfectly placed to introduce, because you know both of them but they do not yet know each other. Each suggested pair comes with a match strength and a short reason, so you can see at a glance why it is a good introduction to make."
+                        "text": "An intro path is simply the chain of trust that gets you to someone. Instead of a cold message to a stranger, Connex looks at the people you already know and finds pairs you are perfectly placed to introduce, because you know both of them but they do not yet know each other. Each suggested pair comes with a match strength and a short reason, so you can see at a glance why it is a good introduction to make."
                     },
                     {
                         "type": "steps",
@@ -4863,8 +4863,8 @@
                                 "description": "Under Intros to make you will see pairs of people you are well placed to connect. Each one is someone your team has actually engaged with, so every suggestion is a person you can credibly introduce."
                             },
                             {
-                                "title": "Read the warm path",
-                                "description": "Every suggestion shows a match strength, either Strong, Good, or Fair, along with a short reason such as shared connections or a shared employer. That reason is the warm path itself, the honest answer to why these two belong together."
+                                "title": "Read the intro path",
+                                "description": "Every suggestion shows a match strength, either Strong, Good, or Fair, along with a short reason such as shared connections or a shared employer. That reason is the intro path itself, the honest answer to why these two belong together."
                             },
                             {
                                 "title": "Search for a specific person",
@@ -4905,7 +4905,7 @@
                         "title": "Keep exploring",
                         "items": [
                             {
-                                "title": "Warm-intro paths",
+                                "title": "Intro paths",
                                 "description": "A deeper look at how Connex finds the strongest path to any person.",
                                 "href": "/docs/overview-suite/warm-intro-paths"
                             },
@@ -5151,7 +5151,7 @@
                     {
                         "type": "prose",
                         "text": [
-                            "Connex is a relationship-intelligence CRM. It keeps companies, contacts and deals, scores how warm each relationship is, warns you when one is cooling, and works out the friendliest route to an introduction. On top of that sit reports, documents, campaigns and a set of optional AI features.",
+                            "Connex is a relationship-intelligence CRM. It keeps companies, contacts and deals, scores how warm each relationship is, warns you when one is cooling, and works out the strongest intro path to anyone you want to reach. On top of that sit reports, documents, campaigns and a set of optional AI features.",
                             "This page describes the state of the product rather than how to use it. If you are evaluating Connex, or you are responsible for it inside your organisation, start here."
                         ]
                     },
@@ -5239,7 +5239,7 @@
                                 "Shipped and on."
                             ],
                             [
-                                "Warm introduction paths",
+                                "Intro paths",
                                 "Shipped and on."
                             ],
                             [
