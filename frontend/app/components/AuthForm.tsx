@@ -73,6 +73,24 @@ function isSsoEnforcedError(err: ApiError): boolean {
     return err.status === 403 && err.code === SSO_ENFORCED_CODE;
 }
 
+/**
+ * Reduces a caller-supplied return address to a same-origin path, or null when it isn't one. The
+ * URL parser is the arbiter — pattern checks miss what parsing forgives, like the tab and newline
+ * characters browsers strip before resolving `/\t/evil.com` into a protocol-relative address.
+ * @param candidate the requested post-sign-in destination
+ * @returns the path, query, and fragment to navigate to, or null when the address must not be used
+ */
+function sameOriginPath(candidate: string | null): string | null {
+    if (!candidate) return null;
+    try {
+        const url = new URL(candidate, window.location.origin);
+        if (url.origin !== window.location.origin) return null;
+        return `${url.pathname}${url.search}${url.hash}`;
+    } catch {
+        return null;
+    }
+}
+
 export function AuthForm({
     mode,
     redirectUrl,
@@ -122,7 +140,7 @@ export function AuthForm({
 
     function routeAfterAuth() {
         const hasWorkspace = /(?:^|;\s*)connex_workspace=/.test(document.cookie);
-        const safeRedirect = redirectUrl && /^\/(?![/\\])/.test(redirectUrl) ? redirectUrl : null;
+        const safeRedirect = sameOriginPath(redirectUrl);
         if (safeRedirect) {
             router.push(safeRedirect);
         } else if (!hasWorkspace) {
