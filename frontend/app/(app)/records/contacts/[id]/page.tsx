@@ -21,8 +21,7 @@ import ContactConnections from "@/app/components/records/contacts/ContactConnect
 import ContactStatCard from "@/app/components/records/contacts/ContactStatCard";
 import { companyDealsHref } from "@/app/components/records/deals/dealLinks";
 import WarmthEvidenceChip from "@/app/components/records/WarmthEvidenceChip";
-import NewActivityDialog from "@/app/components/records/contacts/NewActivityDialog";
-import NewTaskDialog from "@/app/components/records/contacts/NewTaskDialog";
+import { RecordActivityComposer, RecordTaskComposer } from "@/app/components/records/RecordComposers";
 import TagEditor from "@/app/components/records/contacts/TagEditor";
 import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/ui/avatar";
 import InfoRow from "@/app/components/me/InfoRow";
@@ -324,10 +323,12 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                     value={activities.length}
                                     subtitle={notes.length > 0 ? t("notesCount", { count: notes.length }) : undefined}
                                     addAction={
-                                        <NewActivityDialog
-                                            contactId={contact.id}
-                                            contactName={contact.name}
-                                            companyId={contact.companyId ?? contact.company?.id}
+                                        <RecordActivityComposer
+                                            anchor={{
+                                                kind: "person",
+                                                person: contact,
+                                                companyId: contact.companyId ?? contact.company?.id ?? null,
+                                            }}
                                             currentUserId={currentUser.id}
                                         />
                                     }
@@ -338,10 +339,12 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                     value={tasks.length}
                                     subtitle={tasks.length > 0 ? t("openCount", { count: openTasks }) : undefined}
                                     addAction={
-                                        <NewTaskDialog
-                                            contactId={contact.id}
-                                            contactName={contact.name}
-                                            companyId={contact.companyId ?? contact.company?.id}
+                                        <RecordTaskComposer
+                                            anchor={{
+                                                kind: "person",
+                                                person: contact,
+                                                companyId: contact.companyId ?? contact.company?.id ?? null,
+                                            }}
                                             currentUserId={currentUser.id}
                                         />
                                     }

@@ -70,7 +70,12 @@
     "followUp_today": "Today",
     "followUp_tomorrow": "Tomorrow",
     "followUp_inThreeDays": "In 3 days",
-    "followUp_nextWeek": "Next week"
+    "followUp_nextWeek": "Next week",
+    "triggerAdd": "Log activity",
+    "toastLinkFailed": "Activity logged, but the contact couldn't be added to the deal",
+    "toastFailedLoadLinks": "Couldn't load the records you can link to",
+    "noCompanyForDeals": "This contact has no company yet, so there are no deals to link.",
+    "noCompanyForPeople": "This deal has no company yet, so there are no contacts to link."
   },
   "ActivityNotes": {
     "title": "Notes",
@@ -263,7 +268,12 @@
     "create": "Create",
     "toastDescriptionRequired": "Description is required",
     "toastCreated": "Task created",
-    "toastFailedCreate": "Couldn't create the task"
+    "toastFailedCreate": "Couldn't create the task",
+    "triggerAdd": "Add task",
+    "toastLinkFailed": "Task created, but the contact couldn't be added to the deal",
+    "toastFailedLoadLinks": "Couldn't load the records you can link to",
+    "noCompanyForDeals": "This contact has no company yet, so there are no deals to link.",
+    "noCompanyForPeople": "This deal has no company yet, so there are no contacts to link."
   },
   "ActivityEditActivitySheet": {
     "title": "Edit activity",
@@ -342,10 +352,8 @@
     "toastHexCopyFailed": "Couldn't copy color",
     "toastDeleted": "Deleted tag {name}",
     "toastFailedDelete": "Failed to delete tag",
-    "deleteTitle": "Delete this tag?",
-    "deleteBody": "{name} will be removed from every contact, company, and deal it's on. This can't be undone.",
-    "confirmDelete": "Delete tag",
-    "cancel": "Cancel"
+    "entityLabel": "tag",
+    "deleteDetails": "It also comes off every contact, company, and deal it is on."
   },
   "ActivityLibraryTagDialog": {
     "titleCreate": "New tag",

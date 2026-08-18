@@ -310,11 +310,11 @@
     "clearAll": "Clear all"
   },
   "RecordsDeleteDialog": {
-    "titleSingle": "Delete {entityLabel}",
-    "titleMultiple": "Delete {count} {entityLabel}s",
-    "descriptionNamed": "Are you sure you want to delete \"{name}\"? This action cannot be undone.",
-    "descriptionSingle": "Are you sure you want to delete this {entityLabel}? This action cannot be undone.",
-    "descriptionMultiple": "Are you sure you want to delete these {count} {entityLabel}s? This action cannot be undone.",
+    "titleSingle": "Delete {entityLabel}?",
+    "titleMultiple": "Delete {count} {entityLabel}s?",
+    "descriptionNamed": "\"{name}\" will be deleted. This can't be undone.",
+    "descriptionSingle": "This {entityLabel} will be deleted. This can't be undone.",
+    "descriptionMultiple": "These {count} {entityLabel}s will be deleted. This can't be undone.",
     "cancel": "Cancel",
     "delete": "Delete"
   },

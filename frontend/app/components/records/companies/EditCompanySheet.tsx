@@ -46,6 +46,7 @@ export default function EditCompanySheet({
     const [logoFile, setLogoFile] = useState<File | null>(null);
     const [isSaving, setIsSaving] = useState(false);
     const cfRef = useRef<CustomFieldsEditHandle>(null);
+    const [customFieldsDirty, setCustomFieldsDirty] = useState(false);
 
     const handleOpenChange = (next: boolean) => {
         onOpenChange(next);
@@ -127,7 +128,15 @@ export default function EditCompanySheet({
             updateLogoFile={(_id, file) => setLogoFile(file)}
             isSaving={isSaving}
             saveEdits={saveEdits}
-            customFieldsSlot={<CustomFieldsEditSection ref={cfRef} entityType="company" entityId={company.id} />}
+            customFieldsDirty={customFieldsDirty}
+            customFieldsSlot={(
+                <CustomFieldsEditSection
+                    ref={cfRef}
+                    entityType="company"
+                    entityId={company.id}
+                    onDirtyChange={setCustomFieldsDirty}
+                />
+            )}
         />
     );
 }

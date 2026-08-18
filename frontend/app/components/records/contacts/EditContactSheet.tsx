@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { toastError, toastInfo, toastSuccess } from '@/app/lib/toast';
 
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
@@ -40,16 +41,20 @@ export default function EditContactSheet({
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [isSaving, setIsSaving] = useState(false);
     const cfRef = useRef<CustomFieldsEditHandle>(null);
+    const [customFieldsDirty, setCustomFieldsDirty] = useState(false);
+    const { fieldErrors, setFieldErrors, reset: resetFieldErrors, clearError } = useFieldErrors();
 
     const handleOpenChange = (next: boolean) => {
         onOpenChange(next);
         if (!next) {
             setDraft(toDraft(contact));
             setImageFile(null);
+            resetFieldErrors();
         }
     };
 
     const saveEdits = async () => {
+        resetFieldErrors();
         const original = toDraft(contact);
         const textChanged = diffDraft(original, draft);
         const pictureChanged = imageFile !== null;
@@ -62,7 +67,8 @@ export default function EditContactSheet({
         }
 
         if (!draft.name.trim()) {
-            toastError(t('toastNameRequired'));
+            setFieldErrors({ name: t('toastNameRequired') });
+            requestAnimationFrame(() => document.getElementById(`name-${contact.id}`)?.focus());
             return;
         }
 
@@ -115,12 +121,24 @@ export default function EditContactSheet({
             selectedIds={new Set([contact.id])}
             selectedContacts={[contact]}
             drafts={{ [contact.id]: draft }}
-            updateDraft={(_id, patch) => setDraft((prev) => ({ ...prev, ...patch }))}
+            updateDraft={(_id, patch) => {
+                for (const key of Object.keys(patch)) clearError(key);
+                setDraft((prev) => ({ ...prev, ...patch }));
+            }}
             imageFiles={{ [contact.id]: imageFile }}
             updateImageFile={(_id, file) => setImageFile(file)}
             isSaving={isSaving}
             saveEdits={saveEdits}
-            customFieldsSlot={<CustomFieldsEditSection ref={cfRef} entityType="person" entityId={contact.id} />}
+            fieldErrors={{ [contact.id]: fieldErrors }}
+            customFieldsDirty={customFieldsDirty}
+            customFieldsSlot={(
+                <CustomFieldsEditSection
+                    ref={cfRef}
+                    entityType="person"
+                    entityId={contact.id}
+                    onDirtyChange={setCustomFieldsDirty}
+                />
+            )}
         />
     );
 }

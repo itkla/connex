@@ -20,15 +20,7 @@ import type {
     WorkspaceMember,
 } from '@/app/lib/types';
 import { Button } from '@/components/ui/button';
-import {
-    Dialog,
-    DialogClose,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
+import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 
 type LoadOutcome<T> = { ok: true; data: T } | { ok: false };
 
@@ -165,25 +157,20 @@ export default function ScheduleManager({
                 onRequestDelete={requestDelete}
             />
 
-            <Dialog
+            <DeleteRecordDialog
                 open={deleteOpen && canManage && schedule !== null}
                 onOpenChange={(next) => !next && !deleting && setDeleteOpen(false)}
-            >
-                <DialogContent showCloseButton={false}>
-                    <DialogHeader>
-                        <DialogTitle>{t('schedule.deleteTitle')}</DialogTitle>
-                        <DialogDescription>{t('schedule.deleteBody', { name: reportName })}</DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button variant="outline" disabled={deleting}>{t('common.cancel')}</Button>
-                        </DialogClose>
-                        <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>
-                            {deleting ? t('common.deleting') : t('schedule.delete')}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+                selectedIds={new Set(schedule ? [schedule.id] : [])}
+                selectedItems={schedule ? [schedule] : []}
+                entityLabel={t('schedule.entityLabel')}
+                details={(
+                    <p className="text-sm text-muted-foreground">
+                        {t('schedule.deleteDetails', { name: reportName })}
+                    </p>
+                )}
+                isDeleting={deleting}
+                confirmDelete={confirmDelete}
+            />
         </>
     );
 }

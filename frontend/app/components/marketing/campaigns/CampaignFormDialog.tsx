@@ -1,6 +1,6 @@
 "use client";
 
-import { type Dispatch, type FormEvent, type SetStateAction, useState } from "react";
+import { type Dispatch, type FormEvent, type SetStateAction, useMemo, useState } from "react";
 import {
     ResponsiveDialog,
     ResponsiveDialogContent,
@@ -23,7 +23,9 @@ import { DialogStatusCover } from "@/components/ui/dialog-status-cover";
 import { cn } from "@/lib/utils";
 import { type CampaignPayload, type CampaignStatus } from "@/app/lib/types";
 import { isFieldError } from "@/app/lib/api";
+import ConfirmDiscardDialog from "@/app/components/ConfirmDiscardDialog";
 import { useFieldErrors } from "@/app/hooks/useFieldErrors";
+import { useUnsavedChangesGuard } from "@/app/hooks/useUnsavedChangesGuard";
 import {
     MegaphoneIcon,
     FlagIcon,
@@ -97,15 +99,24 @@ export default function CampaignFormDialog({
                 ? "success"
                 : "idle";
 
+    const snapshot = useMemo(() => JSON.stringify(payload), [payload]);
+    const [openedSnapshot, setOpenedSnapshot] = useState<string | null>(() => (open ? snapshot : null));
     const [wasOpen, setWasOpen] = useState(open);
     if (open !== wasOpen) {
         setWasOpen(open);
+        setOpenedSnapshot(open ? snapshot : null);
         if (open) resetFieldErrors();
     }
 
+    const dirty = !isSubmitting
+        && !isSuccess
+        && openedSnapshot !== null
+        && snapshot !== openedSnapshot;
+    const guard = useUnsavedChangesGuard({ isDirty: dirty, onClose: () => onOpenChange(false) });
+
     const handleOpenChange = (next: boolean) => {
         if (!next && isSubmitting) return;
-        onOpenChange(next);
+        guard.onOpenChange(next);
     };
 
     const handleSubmit = async (e: FormEvent) => {
@@ -128,6 +139,7 @@ export default function CampaignFormDialog({
     };
 
     return (
+        <>
         <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
             <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-lg">
                 <DialogStatusCover status={status} />
@@ -373,5 +385,11 @@ export default function CampaignFormDialog({
                 </ResponsiveDialogFooter>
             </ResponsiveDialogContent>
         </ResponsiveDialog>
+        <ConfirmDiscardDialog
+            open={guard.confirm.open}
+            onKeepEditing={guard.confirm.onKeepEditing}
+            onDiscard={guard.confirm.onDiscard}
+        />
+        </>
     );
 }

@@ -17,14 +17,12 @@
     "common": {
       "cancel": "Cancel",
       "delete": "Delete",
-      "deleting": "Deleting…",
       "edit": "Edit",
       "retry": "Retry",
       "saving": "Saving…",
       "requestFailed": "The request could not be completed."
     },
     "landing": {
-      "eyebrow": "Workspace intelligence",
       "title": "Reports",
       "subtitle": "Turn deterministic CRM figures into a review-ready narrative with charts, recommendations, an appendix, and traceable sources.",
       "newReport": "New report",
@@ -53,8 +51,8 @@
       "noDescription": "No description",
       "updated": "Updated {date}",
       "actions": "Actions for {name}",
-      "deleteTitle": "Delete report?",
-      "deleteBody": "{name} and all of its frozen snapshots will be permanently deleted.",
+      "entityLabel": "report",
+      "deleteDetails": "Its frozen snapshots go with it.",
       "deleted": "Deleted {name}"
     },
     "composer": {
@@ -208,8 +206,8 @@
       "live": "Live report",
       "deleteSnapshot": "Delete snapshot",
       "deleteSnapshotNamed": "Delete snapshot from {date}",
-      "deleteSnapshotTitle": "Delete snapshot?",
-      "deleteSnapshotConfirm": "This frozen snapshot will be permanently deleted. This cannot be undone.",
+      "snapshotNamed": "Snapshot from {date}",
+      "snapshotEntityLabel": "snapshot",
       "export": "Export",
       "exporting": "Exporting…",
       "csv": "CSV",
@@ -432,8 +430,8 @@
       "deleted": "Delivery schedule deleted",
       "conflict": "This schedule changed while you were editing. The latest version has been loaded.",
       "delete": "Delete schedule",
-      "deleteTitle": "Delete delivery schedule?",
-      "deleteBody": "Scheduled delivery for {name} will be permanently removed.",
+      "entityLabel": "delivery schedule",
+      "deleteDetails": "Scheduled delivery for {name} stops.",
       "validation": {
         "recipients": "Choose at least one active workspace member.",
         "recipientLimit": "Choose no more than 100 recipients.",
@@ -469,8 +467,8 @@
       "created": "Goal created",
       "updated": "Goal updated",
       "deleted": "Goal deleted",
-      "deleteTitle": "Delete goal?",
-      "deleteBody": "The revenue target for {scope} will be permanently deleted.",
+      "entityLabel": "goal",
+      "deleteDetails": "This is the revenue target for {scope}.",
       "emptyTitle": "No revenue goals yet",
       "emptyBody": "Create a target to add deterministic attainment figures to monthly or quarterly reports.",
       "loadErrorTitle": "Goals could not be loaded",

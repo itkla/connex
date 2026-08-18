@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useReducer, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState, type RefObject, useMemo } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import {
     ArchiveBoxArrowDownIcon,
@@ -49,15 +49,7 @@ import type {
     ReportSnapshotSummary,
 } from '@/app/lib/types';
 import { Button } from '@/components/ui/button';
-import {
-    Dialog,
-    DialogClose,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
+import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -176,6 +168,7 @@ export default function ReportDocumentBoard({
 }) {
     const t = useTranslations('Reports');
     const locale = useLocale();
+    const snapshotDateFormatter = useMemo(() => new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }), [locale]);
     const { activeWorkspace } = useWorkspace();
     const [reportState, dispatchReport] = useReducer(liveReportReducer, { status: 'loading' });
     const [snapshots, setSnapshots] = useState<ReportSnapshotSummary[]>(initialSnapshots);
@@ -606,29 +599,18 @@ export default function ReportDocumentBoard({
                 ) : null}
             </div>
 
-            <Dialog
+            <DeleteRecordDialog
                 open={snapshotPendingDelete !== null}
                 onOpenChange={(open) => !open && deletingSnapshotId === null && setSnapshotPendingDelete(null)}
-            >
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>{t('document.deleteSnapshotTitle')}</DialogTitle>
-                        <DialogDescription>{t('document.deleteSnapshotConfirm')}</DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button variant="outline" disabled={deletingSnapshotId !== null}>{t('common.cancel')}</Button>
-                        </DialogClose>
-                        <Button
-                            variant="destructive"
-                            onClick={confirmDeleteSnapshot}
-                            disabled={deletingSnapshotId !== null}
-                        >
-                            {deletingSnapshotId !== null ? t('common.deleting') : t('common.delete')}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+                selectedIds={new Set(snapshotPendingDelete !== null ? [snapshotPendingDelete.id] : [])}
+                selectedItems={snapshotPendingDelete !== null ? [snapshotPendingDelete] : []}
+                entityLabel={t('document.snapshotEntityLabel')}
+                getDisplayName={(snapshot) => t('document.snapshotNamed', {
+                    date: snapshotDateFormatter.format(new Date(snapshot.generatedAt)),
+                })}
+                isDeleting={deletingSnapshotId !== null}
+                confirmDelete={confirmDeleteSnapshot}
+            />
         </div>
     );
 }

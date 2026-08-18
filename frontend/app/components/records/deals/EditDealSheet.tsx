@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { useTranslations } from 'next-intl';
 
+import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
 import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
 import { actualValueForOutcome } from '@/app/components/records/deals/dealOutcome';
@@ -67,13 +67,16 @@ export default function EditDealSheet({
     const [stageOptionsByPipeline, setStageOptionsByPipeline] = useState(stagesByPipeline);
     const [stageLoadRevision, setStageLoadRevision] = useState(0);
     const cfRef = useRef<CustomFieldsEditHandle>(null);
+    const [customFieldsDirty, setCustomFieldsDirty] = useState(false);
     const pipelinesLoaded = useRef(false);
+    const { fieldErrors, setFieldErrors, reset: resetFieldErrors, clearError } = useFieldErrors();
 
-    const wasOpen = useRef(open);
-    useEffect(() => {
-        if (open && !wasOpen.current) setDraft(toDraft(deal));
-        wasOpen.current = open;
-    }, [open, deal]);
+    const [wasOpen, setWasOpen] = useState(open);
+    if (open !== wasOpen) {
+        setWasOpen(open);
+        resetFieldErrors();
+        if (open) setDraft(toDraft(deal));
+    }
 
     useEffect(() => {
         if (!open || pipelinesLoaded.current) return;
@@ -122,12 +125,18 @@ export default function EditDealSheet({
     }, [open, draft.pipeline, stageOptionsByPipeline, stageLoadRevision, t]);
 
     const saveEdits = async () => {
+        resetFieldErrors();
         if (!draft.name.trim()) {
-            toast.error(t('nameRequired'));
+            setFieldErrors({ name: t('nameRequired') });
+            requestAnimationFrame(() => document.getElementById(`deal-name-${deal.id}`)?.focus());
             return;
         }
         if (!draft.pipeline || !draft.stage) {
-            toast.error(t('pipelineStageRequired'));
+            setFieldErrors(draft.pipeline
+                ? { stage: t('pipelineStageRequired') }
+                : { pipeline: t('pipelineStageRequired') });
+            requestAnimationFrame(() =>
+                document.getElementById(draft.pipeline ? `deal-stage-${deal.id}` : `deal-pipeline-${deal.id}`)?.focus());
             return;
         }
 
@@ -152,12 +161,24 @@ export default function EditDealSheet({
             selectedIds={new Set([deal.id])}
             selectedDeals={[deal]}
             drafts={{ [deal.id]: draft }}
-            updateDraft={(_id, patch) => setDraft((prev) => ({ ...prev, ...patch }))}
+            updateDraft={(_id, patch) => {
+                for (const key of Object.keys(patch)) clearError(key);
+                setDraft((prev) => ({ ...prev, ...patch }));
+            }}
             pipelines={pipelineOptions}
             stagesByPipeline={stageOptionsByPipeline}
             isSaving={isSaving}
             saveEdits={saveEdits}
-            customFieldsSlot={<CustomFieldsEditSection ref={cfRef} entityType="deal" entityId={deal.id} />}
+            fieldErrors={{ [deal.id]: fieldErrors }}
+            customFieldsDirty={customFieldsDirty}
+            customFieldsSlot={(
+                <CustomFieldsEditSection
+                    ref={cfRef}
+                    entityType="deal"
+                    entityId={deal.id}
+                    onDirtyChange={setCustomFieldsDirty}
+                />
+            )}
         />
     );
 }

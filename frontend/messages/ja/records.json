@@ -310,11 +310,11 @@
     "clearAll": "すべてクリア"
   },
   "RecordsDeleteDialog": {
-    "titleSingle": "{entityLabel} を削除",
-    "titleMultiple": "{count} 件の {entityLabel} を削除",
-    "descriptionNamed": "「{name}」を削除してもよろしいですか？この操作は取り消せません。",
-    "descriptionSingle": "この {entityLabel} を削除してもよろしいですか？この操作は取り消せません。",
-    "descriptionMultiple": "これら {count} 件の {entityLabel} を削除してもよろしいですか？この操作は取り消せません。",
+    "titleSingle": "{entityLabel} を削除しますか？",
+    "titleMultiple": "{count} 件の {entityLabel} を削除しますか？",
+    "descriptionNamed": "「{name}」を削除します。この操作は取り消せません。",
+    "descriptionSingle": "この {entityLabel} を削除します。この操作は取り消せません。",
+    "descriptionMultiple": "これら {count} 件の {entityLabel} を削除します。この操作は取り消せません。",
     "cancel": "キャンセル",
     "delete": "削除"
   },

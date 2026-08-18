@@ -1,5 +1,6 @@
 'use client';
 
+import { type ReactNode } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Loader2Icon } from 'lucide-react';
@@ -13,10 +14,18 @@ type Props<T> = {
     selectedItems: T[];
     entityLabel: string;
     getDisplayName?: (item: T) => string;
+    /** Surface-specific consequence or preview shown under the shared body — never a second grammar. */
+    details?: ReactNode;
     isDeleting: boolean;
     confirmDelete: () => void;
 };
 
+/**
+ * The one destructive confirmation: "Delete {object}?", a body naming what goes and ending
+ * "This can't be undone.", and a destructive "Delete". Surfaces add facts through `details`
+ * rather than rewriting the grammar; "Delete permanently" is reserved for organization-level
+ * permanent deletion, which asks for typed confirmation of its own.
+ */
 export default function DeleteRecordDialog<T>({
     open,
     onOpenChange,
@@ -24,6 +33,7 @@ export default function DeleteRecordDialog<T>({
     selectedItems,
     entityLabel,
     getDisplayName,
+    details,
     isDeleting,
     confirmDelete,
 }: Props<T>) {
@@ -45,6 +55,7 @@ export default function DeleteRecordDialog<T>({
                                 : t('descriptionMultiple', { count, entityLabel })}
                     </DialogDescription>
                 </DialogHeader>
+                {details}
                 <DialogFooter>
                     <DialogClose asChild>
                         <Button variant="outline" disabled={isDeleting}>{t('cancel')}</Button>

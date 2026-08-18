@@ -25,6 +25,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 import Rise from '@/app/components/motion/Rise';
+import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import AskConnexComposer from '@/app/components/reports/AskConnexComposer';
 import {
@@ -39,15 +40,7 @@ import { toastError, toastSuccess } from '@/app/lib/toast';
 import type { ReportDefinition, ReportTemplate } from '@/app/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-    Dialog,
-    DialogClose,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
+import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -266,35 +259,30 @@ export default function ReportsBoard({
         <>
             <PageShell tier="wide">
                 <Rise>
-                    <header className="flex flex-wrap items-end justify-between gap-5">
-                        <div>
-                            <p className="mb-2 text-xs font-medium uppercase tracking-[0.12em] text-brand-dark">
-                                {t('landing.eyebrow')}
-                            </p>
-                            <h1 className="text-4xl font-extrabold tracking-tight text-foreground">{t('landing.title')}</h1>
-                            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                                {t('landing.subtitle')}
-                            </p>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                            {canReadGoals ? (
-                                <Button asChild variant="outline">
-                                    <Link href="/overview/reports/goals">
-                                        <FlagIcon />
-                                        {t('landing.manageGoals')}
-                                    </Link>
-                                </Button>
-                            ) : null}
-                            {!composerAvailable && canCreateReports ? (
-                                <Button asChild variant="brand">
-                                    <Link href="/overview/reports/new">
-                                        <PencilSquareIcon />
-                                        {t('landing.newReport')}
-                                    </Link>
-                                </Button>
-                            ) : null}
-                        </div>
-                    </header>
+                    <PageHeader
+                        title={t('landing.title')}
+                        description={t('landing.subtitle')}
+                        actions={(
+                            <>
+                                {canReadGoals ? (
+                                    <Button asChild variant="outline">
+                                        <Link href="/overview/reports/goals">
+                                            <FlagIcon />
+                                            {t('landing.manageGoals')}
+                                        </Link>
+                                    </Button>
+                                ) : null}
+                                {!composerAvailable && canCreateReports ? (
+                                    <Button asChild variant="brand">
+                                        <Link href="/overview/reports/new">
+                                            <PencilSquareIcon />
+                                            {t('landing.newReport')}
+                                        </Link>
+                                    </Button>
+                                ) : null}
+                            </>
+                        )}
+                    />
                 </Rise>
 
                 {composerAvailable && canCreateReports ? (
@@ -394,22 +382,17 @@ export default function ReportsBoard({
                 )}
             </PageShell>
 
-            <Dialog open={deleting !== null} onOpenChange={(open) => !open && setDeleting(null)}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>{t('landing.deleteTitle')}</DialogTitle>
-                        <DialogDescription>{t('landing.deleteBody', { name: deleting?.name ?? '' })}</DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button variant="outline" disabled={busy}>{t('common.cancel')}</Button>
-                        </DialogClose>
-                        <Button variant="destructive" onClick={confirmDelete} disabled={busy}>
-                            {busy ? t('common.deleting') : t('common.delete')}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            <DeleteRecordDialog
+                open={deleting !== null}
+                onOpenChange={(open) => !open && setDeleting(null)}
+                selectedIds={new Set(deleting ? [deleting.id] : [])}
+                selectedItems={deleting ? [deleting] : []}
+                entityLabel={t('landing.entityLabel')}
+                getDisplayName={(report) => report.name}
+                details={<p className="text-sm text-muted-foreground">{t('landing.deleteDetails')}</p>}
+                isDeleting={busy}
+                confirmDelete={confirmDelete}
+            />
         </>
     );
 }

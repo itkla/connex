@@ -25,15 +25,6 @@ import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
-    Dialog,
-    DialogClose,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
-import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
@@ -67,6 +58,7 @@ import {
 import { parseDeepLinkId } from '@/app/hooks/listStateUrl';
 import { useOwnedUrlParams } from '@/app/hooks/useOwnedUrlParams';
 import Rise from '@/app/components/motion/Rise';
+import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
 import { type ColumnDef } from '@/app/components/records/types';
 import {
@@ -469,20 +461,17 @@ export default function FilesBrowser() {
     return (
         <PageShell tier="wide">
             <Rise>
-                <PageHeader
-                    title={t('title')}
-                    description={t('subtitle')}
-                    actions={
-                        facets && facets.total > 0 ? (
-                            <div className="text-right tabular-nums">
-                                <div className="text-sm font-medium text-foreground">{t('count', { count: facets.total })}</div>
-                                <div className="text-xs text-muted-foreground">
-                                    {t('totalSize', { size: formatFileSize(facets.totalSize) })}
-                                </div>
-                            </div>
-                        ) : undefined
-                    }
-                />
+                <div className="flex flex-col gap-3">
+                    <PageHeader title={t('title')} description={t('subtitle')} />
+                    {facets && facets.total > 0 ? (
+                        <p className="text-xs tabular-nums text-muted-foreground">
+                            {t('countAndSize', {
+                                count: facets.total,
+                                size: formatFileSize(facets.totalSize),
+                            })}
+                        </p>
+                    ) : null}
+                </div>
             </Rise>
 
             {isEmptyLibrary ? (
@@ -622,54 +611,37 @@ export default function FilesBrowser() {
                 </>
             )}
 
-            <Dialog open={!!deleting} onOpenChange={(open) => !open && setDeleting(null)}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>{t('deleteTitle')}</DialogTitle>
-                        <DialogDescription>{t('deleteBody', { name: deleting?.fileName ?? '' })}</DialogDescription>
-                    </DialogHeader>
-                    {deleting && (
-                        <div className="flex items-center gap-3 rounded-xl bg-muted px-4 py-3 ring-1 ring-border">
-                            <FileGlyph attachment={deleting} kind={classifyKind(deleting.contentType, deleting.fileName)} />
-                            <div className="min-w-0">
-                                <p className="truncate text-sm font-medium text-foreground">{deleting.fileName}</p>
-                                <p className="truncate text-xs tabular-nums text-muted-foreground">
-                                    {formatFileSize(deleting.size)}
-                                </p>
-                            </div>
+            <DeleteRecordDialog
+                open={!!deleting}
+                onOpenChange={(open) => !open && setDeleting(null)}
+                selectedIds={new Set(deleting ? [deleting.id] : [])}
+                selectedItems={deleting ? [deleting] : []}
+                entityLabel={t('entityLabel')}
+                getDisplayName={(item) => item.fileName}
+                details={deleting ? (
+                    <div className="flex items-center gap-3 rounded-xl bg-muted px-4 py-3 ring-1 ring-border">
+                        <FileGlyph attachment={deleting} kind={classifyKind(deleting.contentType, deleting.fileName)} />
+                        <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-foreground">{deleting.fileName}</p>
+                            <p className="truncate text-xs tabular-nums text-muted-foreground">
+                                {formatFileSize(deleting.size)}
+                            </p>
                         </div>
-                    )}
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button type="button" variant="outline" disabled={busy}>
-                                {t('cancel')}
-                            </Button>
-                        </DialogClose>
-                        <Button type="button" variant="destructive" onClick={handleDelete} disabled={busy}>
-                            {busy ? <Loader2Icon className="size-4 animate-spin" /> : t('confirmDelete')}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+                    </div>
+                ) : undefined}
+                isDeleting={busy}
+                confirmDelete={handleDelete}
+            />
 
-            <Dialog open={bulkDeleting} onOpenChange={(open) => !open && !bulkBusy && setBulkDeleting(false)}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>{t('bulkDeleteTitle')}</DialogTitle>
-                        <DialogDescription>{t('bulkDeleteBody', { count: selectedIds.size })}</DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button type="button" variant="outline" disabled={bulkBusy}>
-                                {t('cancel')}
-                            </Button>
-                        </DialogClose>
-                        <Button type="button" variant="destructive" onClick={bulkDelete} disabled={bulkBusy}>
-                            {bulkBusy ? <Loader2Icon className="size-4 animate-spin" /> : t('confirmDelete')}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            <DeleteRecordDialog
+                open={bulkDeleting}
+                onOpenChange={(open) => !open && !bulkBusy && setBulkDeleting(false)}
+                selectedIds={selectedIds}
+                selectedItems={[]}
+                entityLabel={t('entityLabel')}
+                isDeleting={bulkBusy}
+                confirmDelete={bulkDelete}
+            />
 
             <FileDetailSheet
                 attachment={detailFile}

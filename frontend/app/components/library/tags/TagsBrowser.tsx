@@ -14,7 +14,6 @@ import {
     MagnifyingGlassIcon,
 } from '@heroicons/react/24/outline';
 import { PlusIcon } from '@heroicons/react/24/solid';
-import { Loader2Icon } from 'lucide-react';
 
 import { SearchField, FilterBar, SortToggle, type FilterChipData } from '@/app/components/filters';
 import { Button } from '@/components/ui/button';
@@ -25,15 +24,6 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogDescription,
-    DialogFooter,
-    DialogClose,
-} from '@/components/ui/dialog';
 
 import { deleteTag } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -41,6 +31,7 @@ import { compareByColor, copyToClipboard, readableTextColor } from '@/app/lib/ut
 import type { Tag } from '@/app/lib/types';
 import Rise from '@/app/components/motion/Rise';
 import TagDialog from '@/app/components/library/tags/TagDialog';
+import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import { EmptyState } from '@/app/components/EmptyState';
@@ -249,15 +240,15 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
                 onSaved={handleSaved}
             />
 
-            <Dialog open={!!deletingTag} onOpenChange={(open) => !open && setDeletingTag(null)}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>{t('deleteTitle')}</DialogTitle>
-                        <DialogDescription>
-                            {t('deleteBody', { name: deletingTag?.name ?? '' })}
-                        </DialogDescription>
-                    </DialogHeader>
-                    {deletingTag && (
+            <DeleteRecordDialog
+                open={!!deletingTag}
+                onOpenChange={(open) => !open && setDeletingTag(null)}
+                selectedIds={new Set(deletingTag ? [deletingTag.id] : [])}
+                selectedItems={deletingTag ? [deletingTag] : []}
+                entityLabel={t('entityLabel')}
+                getDisplayName={(tag) => tag.name}
+                details={deletingTag ? (
+                    <div className="grid gap-3">
                         <div className="flex items-center justify-center rounded-xl bg-muted px-4 py-5 ring-1 ring-border">
                             <span
                                 className="inline-flex max-w-full items-center rounded-4xl px-3 py-1 text-sm font-medium"
@@ -269,19 +260,12 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
                                 <span className="truncate">{deletingTag.name}</span>
                             </span>
                         </div>
-                    )}
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button type="button" variant="outline" disabled={deleting}>
-                                {t('cancel')}
-                            </Button>
-                        </DialogClose>
-                        <Button type="button" variant="destructive" onClick={handleDelete} disabled={deleting}>
-                            {deleting ? <Loader2Icon className="size-4 animate-spin" /> : t('confirmDelete')}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+                        <p className="text-sm text-muted-foreground">{t('deleteDetails')}</p>
+                    </div>
+                ) : undefined}
+                isDeleting={deleting}
+                confirmDelete={handleDelete}
+            />
         </PageShell>
     );
 }

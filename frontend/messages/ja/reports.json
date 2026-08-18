@@ -17,14 +17,12 @@
     "common": {
       "cancel": "キャンセル",
       "delete": "削除",
-      "deleting": "削除中…",
       "edit": "編集",
       "retry": "再試行",
       "saving": "保存中…",
       "requestFailed": "リクエストを完了できませんでした。"
     },
     "landing": {
-      "eyebrow": "ワークスペースインテリジェンス",
       "title": "レポート",
       "subtitle": "確定的なCRM数値を、グラフ、推奨事項、データ付録、追跡可能な出典を備えたレビュー用の文章に変換します。",
       "newReport": "新規レポート",
@@ -53,8 +51,8 @@
       "noDescription": "説明なし",
       "updated": "{date} に更新",
       "actions": "{name} の操作",
-      "deleteTitle": "レポートを削除しますか？",
-      "deleteBody": "{name} とすべての確定スナップショットが完全に削除されます。",
+      "entityLabel": "レポート",
+      "deleteDetails": "確定スナップショットも一緒に削除されます。",
       "deleted": "{name} を削除しました"
     },
     "composer": {
@@ -208,8 +206,8 @@
       "live": "ライブレポート",
       "deleteSnapshot": "スナップショットを削除",
       "deleteSnapshotNamed": "{date}のスナップショットを削除",
-      "deleteSnapshotTitle": "スナップショットを削除しますか？",
-      "deleteSnapshotConfirm": "この確定スナップショットは完全に削除されます。この操作は元に戻せません。",
+      "snapshotNamed": "{date}のスナップショット",
+      "snapshotEntityLabel": "スナップショット",
       "export": "エクスポート",
       "exporting": "エクスポート中…",
       "csv": "CSV",
@@ -432,8 +430,8 @@
       "deleted": "配信スケジュールを削除しました",
       "conflict": "編集中にスケジュールが変更されました。最新の内容を読み込みました。",
       "delete": "スケジュールを削除",
-      "deleteTitle": "配信スケジュールを削除しますか？",
-      "deleteBody": "{name} の予約配信が完全に削除されます。",
+      "entityLabel": "配信スケジュール",
+      "deleteDetails": "{name} の予約配信が止まります。",
       "validation": {
         "recipients": "有効なワークスペースメンバーを1人以上選択してください。",
         "recipientLimit": "受信者は100人以内で選択してください。",
@@ -469,8 +467,8 @@
       "created": "目標を作成しました",
       "updated": "目標を更新しました",
       "deleted": "目標を削除しました",
-      "deleteTitle": "目標を削除しますか？",
-      "deleteBody": "{scope} の売上目標が完全に削除されます。",
+      "entityLabel": "目標",
+      "deleteDetails": "{scope} の売上目標です。",
       "emptyTitle": "売上目標はまだありません",
       "emptyBody": "月次または四半期レポートに確定的な達成率を追加する目標を作成してください。",
       "loadErrorTitle": "目標を読み込めませんでした",
