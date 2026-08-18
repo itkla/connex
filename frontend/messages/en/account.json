@@ -338,7 +338,7 @@
       "no_match": "No exact contact",
       "multiple_matches": "Multiple exact contacts",
       "invalid_identity": "Invalid or missing identity",
-      "restricted_person": "Contact is archived or processing-restricted",
+      "restricted_person": "Contact is archived or on privacy hold",
       "approval_required": "Approval required"
     },
     "untitled": "Captured interaction",

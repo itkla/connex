@@ -4184,7 +4184,7 @@
                             },
                             {
                                 "title": "Restrictions on a contact",
-                                "description": "Suspending processing stops scoring, automation, suggestions, AI features and exports for that contact. Ceasing third-party provision blocks new sharing and excludes them from AI entirely."
+                                "description": "Putting a contact on privacy hold stops scoring, automation, suggestions, AI features and exports for them. Stopping sharing blocks new shares with other workspaces and keeps them out of AI entirely."
                             },
                             {
                                 "title": "An audit trail you cannot rewrite",
@@ -4196,7 +4196,7 @@
                         "type": "callout",
                         "variant": "note",
                         "title": "Restricting a contact clears what AI already wrote",
-                        "body": "When you suspend processing or cease third-party provision for a contact, anything AI previously generated that involved them is purged, and future AI features exclude them. This happens as part of applying the restriction rather than as a separate cleanup you have to remember."
+                        "body": "When you put a contact on privacy hold or stop sharing them, anything AI generated about them earlier is deleted, and future AI features leave them out. It happens as part of applying the hold, not as a separate cleanup you have to remember."
                     },
                     {
                         "type": "featureList",
@@ -4225,7 +4225,7 @@
                         "type": "callout",
                         "variant": "warning",
                         "title": "Finish outstanding requests before removing a workspace",
-                        "body": "Tearing down a workspace or an organisation is refused while a data subject request is still open against it. That is deliberate: it stops a request being made unanswerable by deleting the evidence. Close out the request first, then tear down."
+                        "body": "Deleting a workspace or an organisation is refused while a privacy request against it is still open. That is deliberate: it stops a request being made unanswerable by deleting the evidence. Close the request out first, then delete."
                     },
                     {
                         "type": "faq",
@@ -5028,7 +5028,7 @@
                             },
                             {
                                 "title": "Build the audience",
-                                "description": "Use the segment builder to describe who should receive it. Estimate the audience to see how many people are included, and how many were left out because of consent, suppression, or a processing restriction."
+                                "description": "Use the segment builder to describe who should receive it. Estimate the audience to see how many people are included, and how many were left out because they opted out, are marked do not contact, or are on privacy hold."
                             },
                             {
                                 "title": "Freeze a snapshot",
@@ -5057,7 +5057,7 @@
                         "items": [
                             {
                                 "title": "Only people, and only the willing",
-                                "description": "Only person audiences can be sent to. Anyone who has unsubscribed, been suppressed, or had processing restricted is excluded, and the estimate tells you how many that was."
+                                "description": "Only contact audiences can be sent to. Anyone who has unsubscribed, is marked do not contact, or is on privacy hold is excluded, and the estimate tells you how many that was."
                             },
                             {
                                 "title": "One message per person per day",
@@ -5065,11 +5065,11 @@
                             },
                             {
                                 "title": "Unsubscribes are automatic",
-                                "description": "Connex gives every recipient their own unsubscribe token, but it only reaches them if the message body includes the unsubscribe placeholder, so put it in every template you write. Unsubscribing suppresses that person and withdraws consent immediately, and it applies to future campaigns too."
+                                "description": "Connex gives every recipient their own unsubscribe token, but it only reaches them if the message body includes the unsubscribe placeholder, so put it in every template you write. Unsubscribing marks that contact do not contact and withdraws their consent immediately, and it applies to future campaigns too."
                             },
                             {
-                                "title": "Bounces and complaints suppress",
-                                "description": "When your email provider reports a hard bounce or a spam complaint, Connex suppresses that address and revokes consent without anyone having to act. This needs an email provider that sends those reports back; on a plain mail server no such report ever arrives and nothing is suppressed."
+                                "title": "Bounces and complaints stop future sends",
+                                "description": "When your email provider reports a hard bounce or a spam complaint, Connex marks that address do not contact and revokes consent without anyone having to act. This needs an email provider that sends those reports back; on a plain mail server no such report ever arrives, so nothing changes."
                             }
                         ]
                     },
@@ -5111,7 +5111,7 @@
                             },
                             {
                                 "question": "Why did far fewer people receive it than my audience showed?",
-                                "answer": "Check the skip reasons on the send. The usual causes are people with no address on that channel, the one-message-per-day cap, or consent and suppression."
+                                "answer": "Check the skip reasons on the send. The usual causes are people with no address on that channel, the one-message-per-day cap, or an opt-out or a do-not-contact mark."
                             },
                             {
                                 "question": "Is the Exports tab a download?",
@@ -5759,7 +5759,7 @@
                             ],
                             [
                                 "A test email works but real mail does not",
-                                "The transport is fine. Look at the per-flow switches and at whether the recipient is suppressed or unsubscribed."
+                                "The transport is fine. Look at the per-flow switches and at whether the recipient is marked do not contact or unsubscribed."
                             ]
                         ]
                     },
@@ -5767,7 +5767,7 @@
                         "type": "callout",
                         "variant": "note",
                         "title": "Bounces are only handled for campaigns",
-                        "body": "Bounce and complaint handling, suppression lists and unsubscribes exist for marketing campaigns, and only when your administrator has connected an email provider that reports receipts. Invitations, notifications, reports and password mail have none of that: they are sent, and if they fail, the failure is only visible in your operator's logs."
+                        "body": "Bounce and complaint handling, do-not-contact lists and unsubscribes exist for marketing campaigns, and only when your administrator has connected an email provider that reports receipts. Invitations, notifications, reports and password mail have none of that: they are sent, and if they fail, the failure is only visible in your operator's logs."
                     },
                     {
                         "type": "cards",

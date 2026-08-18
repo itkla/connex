@@ -17,7 +17,7 @@
         "emptyMissingEvidenceTitle": "関係性の根拠が不足しています",
         "emptyMissingEvidenceHint": "信頼できる紹介ルートを特定できるよう、直接のつながりや職歴を追加してください。",
         "emptyPolicyExclusionTitle": "紹介ポリシーにより利用可能なルートが除外されています",
-        "emptyPolicyExclusionHint": "利用可能な連絡先またはルートは、制限、非表示、記録済み、または紹介対象外に設定されています。",
+        "emptyPolicyExclusionHint": "対象となる連絡先やルートが、プライバシー保護のため利用停止中、非表示、記録済み、または紹介対象外になっています。",
         "emptyInsufficientStrengthTitle": "十分に強いルートがまだありません",
         "emptyInsufficientStrengthHint": "関係性のシグナルはありますが、現在は紹介候補の適格性と強度の基準を満たしていません。",
         "emptyUnavailableTitle": "紹介データを利用できません",
