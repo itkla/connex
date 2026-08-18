@@ -15,8 +15,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 
 import type { User } from "@/app/lib/types";
-import { ApiError } from "@/app/lib/api";
-import { toastError } from "@/app/lib/toast";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import ActionOverlayHost from "@/app/components/actions/ActionOverlayHost";
 
@@ -131,6 +130,7 @@ export function ActionProvider({ user, children }: { user: User | null; children
     const pathname = usePathname() ?? "";
     const locale = useLocale();
     const t = useTranslations("Actions");
+    const showApiError = useApiErrorToast("Actions");
     const { activeWorkspace, switching } = useWorkspace();
     const activeUserId = user?.id ?? null;
     const activeWorkspaceId = activeWorkspace?.id ?? null;
@@ -325,15 +325,14 @@ export function ActionProvider({ user, children }: { user: User | null; children
                 });
                 return { status: "completed" };
             } catch (error) {
-                const message = error instanceof ApiError ? error.message : translate("feedback.runFailed");
-                toastError(message);
+                showApiError(error, "feedback.runFailed");
                 return { status: "failed", error };
             } finally {
                 pendingRef.current.delete(id);
                 setPendingIds(new Set(pendingRef.current));
             }
         },
-        [router, openOverlay, closeOverlay, translate],
+        [router, openOverlay, closeOverlay, showApiError, translate],
     );
 
     const getAction = useCallback((id: ActionId) => registryMapRef.current.get(id), []);

@@ -15,8 +15,9 @@ import {
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { useFieldErrors } from "@/app/hooks/useFieldErrors";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
-import { toastError, toastSuccess } from "@/app/lib/toast";
+import { toastSuccess } from "@/app/lib/toast";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -54,6 +55,7 @@ function initial(name: string) {
 
 export default function OrgMembersPanel({ currentUserId }: { currentUserId: number | null }) {
     const t = useTranslations("OrgMembers");
+    const showApiError = useApiErrorToast("OrgMembers");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { activeWorkspace } = useWorkspace();
     const orgId = activeWorkspace?.orgId ?? null;
@@ -89,7 +91,7 @@ export default function OrgMembersPanel({ currentUserId }: { currentUserId: numb
             } catch (err) {
                 if (cancelled) return;
                 if (err instanceof ApiError && err.status === 403) setAccessDenied(true);
-                else toastError(err instanceof Error ? err.message : String(err));
+                else showApiError(err);
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -97,7 +99,7 @@ export default function OrgMembersPanel({ currentUserId }: { currentUserId: numb
         return () => {
             cancelled = true;
         };
-    }, [orgId]);
+    }, [orgId, showApiError]);
 
     async function changeRole(userId: number, next: OrgRole) {
         if (!orgId) return;
@@ -108,7 +110,7 @@ export default function OrgMembersPanel({ currentUserId }: { currentUserId: numb
             toastSuccess(t("roleUpdatedToast"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : String(err));
+                showApiError(err);
             }
         } finally {
             setBusy(null);
@@ -125,7 +127,7 @@ export default function OrgMembersPanel({ currentUserId }: { currentUserId: numb
             setRemoveTarget(null);
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : String(err));
+                showApiError(err);
             }
         } finally {
             setIsRemoving(false);
@@ -142,7 +144,7 @@ export default function OrgMembersPanel({ currentUserId }: { currentUserId: numb
             toastSuccess(t("addedToast"));
         } catch (err) {
             if (err instanceof ApiError && err.fieldErrors) setFieldErrors(err.fieldErrors);
-            else if (!handlePasskeyStepUpError(err)) toastError(err instanceof Error ? err.message : String(err));
+            else if (!handlePasskeyStepUpError(err)) showApiError(err);
         } finally {
             setAdding(false);
         }

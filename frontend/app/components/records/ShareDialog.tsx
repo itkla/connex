@@ -17,7 +17,8 @@ import { fieldInputClass } from '@/components/ui/dialog-status-cover';
 import { cn } from '@/lib/utils';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { getShares, shareRecord, unshareRecord } from '@/app/lib/api';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { toastSuccess } from '@/app/lib/toast';
 import type { Share } from '@/app/lib/types';
 
 type Props = {
@@ -30,6 +31,7 @@ type Props = {
 
 export default function ShareDialog({ type, entityId, entityName, open, onOpenChange }: Props) {
     const t = useTranslations('ShareDialog');
+    const showApiError = useApiErrorToast('ShareDialog');
     const { workspaces, activeWorkspaceId } = useWorkspace();
     const [shares, setShares] = useState<Share[]>([]);
     const [loading, setLoading] = useState(true);
@@ -46,7 +48,7 @@ export default function ShareDialog({ type, entityId, entityName, open, onOpenCh
                 const loaded = await getShares(type, entityId);
                 if (!cancelled) setShares(loaded);
             } catch (err) {
-                if (!cancelled) toastError(err instanceof Error ? err.message : t('loadFailed'));
+                if (!cancelled) showApiError(err, 'loadFailed');
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -54,7 +56,7 @@ export default function ShareDialog({ type, entityId, entityName, open, onOpenCh
         return () => {
             cancelled = true;
         };
-    }, [open, type, entityId, t]);
+    }, [entityId, open, showApiError, t, type]);
 
     const sharedIds = new Set(shares.map((s) => s.workspaceId));
     const targets = workspaces.filter((w) => w.id !== activeWorkspaceId && !sharedIds.has(w.id));
@@ -70,7 +72,7 @@ export default function ShareDialog({ type, entityId, entityName, open, onOpenCh
             setTarget('');
             toastSuccess(t('shared'));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('shareFailed'));
+            showApiError(err, 'shareFailed');
         } finally {
             setSharing(false);
         }
@@ -83,7 +85,7 @@ export default function ShareDialog({ type, entityId, entityName, open, onOpenCh
             setShares((prev) => prev.filter((s) => s.workspaceId !== workspaceId));
             toastSuccess(t('revoked'));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('revokeFailed'));
+            showApiError(err, 'revokeFailed');
         } finally {
             setBusyWorkspaceId(null);
         }

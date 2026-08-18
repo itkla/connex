@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
 import { ChatBubbleLeftRightIcon, PencilSquareIcon, CalendarIcon, Bars3BottomLeftIcon, UserIcon, BriefcaseIcon, CheckCircleIcon, ClockIcon } from '@heroicons/react/24/outline';
 
@@ -40,7 +40,8 @@ import {
 } from '@/components/ui/dialog-status-cover';
 import { cn } from '@/lib/utils';
 
-import { ApiError, createActivity, createTask, isFieldError } from '@/app/lib/api';
+import { createActivity, createTask, isFieldError } from '@/app/lib/api';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { toMysqlDateTime } from '@/app/lib/utils';
 import { isSubmitShortcut } from '@/app/lib/submitShortcut';
@@ -250,6 +251,7 @@ export function ActivityDialogForm({
 }: ActivityDialogFormProps) {
     const router = useRouter();
     const t = useTranslations('ActivityCreateDialog');
+    const showApiError = useApiErrorToast('ActivityCreateDialog');
 
     const [type, setType] = useState<ActivityType>(() => defaultType ?? ACTIVITY_TYPES[0]);
     const [subject, setSubject] = useState(() => defaultSubject);
@@ -366,8 +368,7 @@ export function ActivityDialogForm({
                 } catch (taskErr) {
                     if (requestInit?.signal?.aborted) return;
                     setFollowUpFailed(true);
-                    const message = taskErr instanceof ApiError ? taskErr.message : t('toastFollowUpFailed');
-                    toastError(message);
+                    showApiError(taskErr, 'toastFollowUpFailed');
                     router.refresh();
                     return;
                 }
@@ -388,9 +389,7 @@ export function ActivityDialogForm({
                 }
                 return;
             }
-            const message =
-                err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('toastFailedCreate');
-            toastError(message);
+            showApiError(err, 'toastFailedCreate');
         } finally {
             if (!requestInit?.signal?.aborted) {
                 setSubmitting(false);

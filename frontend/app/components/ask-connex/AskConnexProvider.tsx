@@ -16,6 +16,7 @@ import { useRouter } from 'next/navigation';
 
 import AskConnexDrawer from '@/app/components/ask-connex/AskConnexDrawer';
 import { useActions } from '@/app/hooks/useActions';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { usePermissionCheck } from '@/app/hooks/usePermissions';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
@@ -205,6 +206,13 @@ export function useAskConnex(): AskConnexContextValue {
 /** Owns Ask Connex continuity, transcript, accepted-turn reconciliation, and responsive surfaces. */
 export default function AskConnexProvider({ children }: { children: ReactNode }) {
     const t = useTranslations('AskConnex');
+    const showApiError = useApiErrorToast('AskConnex');
+    const deferApiError = useCallback(
+        (error: unknown, fallbackKey?: string) => {
+            window.setTimeout(() => showApiError(error, fallbackKey), 0);
+        },
+        [showApiError],
+    );
     const tDisclosure = useTranslations('Assistant.disclosure');
     const router = useRouter();
     const { context } = useActions();
@@ -616,9 +624,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             }
             setSubmissionBlocked(true);
             dispatchTurn({ type: 'status', status: 'failed', reason: 'reconciliation_failed' });
-            deferredErrorToast(error instanceof ApiError ? error.message : t('toast.requestFailed'));
+            deferApiError(error, 'toast.requestFailed');
         }
-    }, [absorbTurnPartial, clearActiveSession, pollDurableTurn, refreshSessions, refreshTranscript, resetStream, t, turnKey]);
+    }, [absorbTurnPartial, clearActiveSession, deferApiError, pollDurableTurn, refreshSessions, refreshTranscript, resetStream, t, turnKey]);
 
     useEffect(() => {
         sessionEpochRef.current++;
@@ -698,7 +706,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 if (error instanceof ApiError && error.status === 403) {
                     setUnavailableReason(error.message);
                     setLoadState('forbidden');
-                    deferredErrorToast(error.message);
+                    deferApiError(error);
                     return;
                 }
                 const nextError = error instanceof ApiError
@@ -706,13 +714,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     : new Error(t('toast.requestFailed'));
                 setLoadError(nextError);
                 setLoadState('error');
-                deferredErrorToast(nextError.message);
+                deferApiError(error, 'toast.requestFailed');
             }
         };
 
         void initialize();
         return () => controller.abort();
-    }, [activeWorkspaceId, clearActiveSession, followTurn, identity, refreshSessions, refreshTranscript, reloadVersion, resetStream, sessionKey, sharePermission, switching, t, turnKey, userId]);
+    }, [activeWorkspaceId, clearActiveSession, deferApiError, followTurn, identity, refreshSessions, refreshTranscript, reloadVersion, resetStream, sessionKey, sharePermission, switching, t, turnKey, userId]);
 
     const selectSession = useCallback(async (session: AiChatSession) => {
         if (working) return;
@@ -749,10 +757,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             } else {
                 setLoadError(error instanceof ApiError ? error : new Error(t('toast.requestFailed')));
                 setLoadState('error');
-                deferredErrorToast(error instanceof ApiError ? error.message : t('toast.requestFailed'));
+                deferApiError(error, 'toast.requestFailed');
             }
         }
-    }, [clearActiveSession, refreshTranscript, resetStream, sessionKey, t, turnKey, working]);
+    }, [clearActiveSession, deferApiError, refreshTranscript, resetStream, sessionKey, t, turnKey, working]);
 
     const newChat = useCallback(() => {
         if (working) return;
@@ -863,10 +871,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             return true;
         } catch (error) {
             if (signal.aborted || activeSessionRef.current?.id !== sessionId) return false;
-            toastError(error instanceof ApiError ? error.message : t('toast.requestFailed'));
+            showApiError(error, 'toast.requestFailed');
             return false;
         }
-    }, [activeSession, refreshCollaboration, sharePermission, t]);
+    }, [activeSession, refreshCollaboration, sharePermission, showApiError, t]);
 
     const inviteParticipant = useCallback(async (targetUserId: number): Promise<boolean> => {
         if (!activeSession?.ownedByCurrentUser || activeSession.visibility !== 'shared') return false;
@@ -884,10 +892,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             return true;
         } catch (error) {
             if (signal.aborted || activeSessionRef.current?.id !== sessionId) return false;
-            toastError(error instanceof ApiError ? error.message : t('toast.requestFailed'));
+            showApiError(error, 'toast.requestFailed');
             return false;
         }
-    }, [activeSession, t]);
+    }, [activeSession, showApiError, t]);
 
     const joinInvitation = useCallback(async (invitation: AiChatSession) => {
         if (working) return;
@@ -906,9 +914,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         } catch (error) {
             if (signal.aborted
                     || (activeSessionRef.current?.id ?? null) !== selectedSessionId) return;
-            toastError(error instanceof ApiError ? error.message : t('toast.requestFailed'));
+            showApiError(error, 'toast.requestFailed');
         }
-    }, [selectSession, t, working]);
+    }, [selectSession, showApiError, t, working]);
 
     const leaveSession = useCallback(async () => {
         if (!activeSession || activeSession.ownedByCurrentUser || working) return;
@@ -923,9 +931,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             toastSuccess(t('toast.left'));
         } catch (error) {
             if (signal.aborted || activeSessionRef.current?.id !== sessionId) return;
-            toastError(error instanceof ApiError ? error.message : t('toast.requestFailed'));
+            showApiError(error, 'toast.requestFailed');
         }
-    }, [activeSession, newChat, t, working]);
+    }, [activeSession, newChat, showApiError, t, working]);
 
     const removeParticipant = useCallback(async (targetUserId: number) => {
         if (!activeSession?.ownedByCurrentUser) return;
@@ -939,9 +947,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             toastSuccess(t('toast.participantRemoved'));
         } catch (error) {
             if (signal.aborted || activeSessionRef.current?.id !== sessionId) return;
-            toastError(error instanceof ApiError ? error.message : t('toast.requestFailed'));
+            showApiError(error, 'toast.requestFailed');
         }
-    }, [activeSession, t]);
+    }, [activeSession, showApiError, t]);
 
     const ensureSession = useCallback(async (signal: AbortSignal): Promise<AiChatSession> => {
         if (activeSession !== null) return activeSession;
@@ -1060,11 +1068,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         } catch (error) {
             if (!(error instanceof AskConnexFileRemovalError)) return;
             setFileAttachments(error.attachments);
-            toastError(error.cause instanceof ApiError
-                ? error.cause.message
-                : t('upload.removeFailed'));
+            showApiError(error.cause, 'upload.removeFailed');
         }
-    }, [activeSession, fileAttachments, fileOperationPending, t]);
+    }, [activeSession, fileAttachments, fileOperationPending, showApiError]);
 
     const renameSession = useCallback(async (title: string): Promise<boolean> => {
         if (!activeSession?.ownedByCurrentUser) return false;
@@ -1080,10 +1086,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             return true;
         } catch (error) {
             if (signal.aborted || activeSessionRef.current?.id !== sessionId) return false;
-            toastError(error instanceof ApiError ? error.message : t('toast.requestFailed'));
+            showApiError(error, 'toast.requestFailed');
             return false;
         }
-    }, [activeSession, t]);
+    }, [activeSession, showApiError, t]);
 
     const archiveSession = useCallback(async () => {
         if (!activeSession?.ownedByCurrentUser || working) return;
@@ -1098,9 +1104,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             newChat();
         } catch (error) {
             if (signal.aborted || activeSessionRef.current?.id !== sessionId) return;
-            toastError(error instanceof ApiError ? error.message : t('toast.requestFailed'));
+            showApiError(error, 'toast.requestFailed');
         }
-    }, [activeSession, newChat, t, working]);
+    }, [activeSession, newChat, showApiError, t, working]);
 
     const performToolAction = useCallback(async (
         toolCallId: number,
@@ -1216,7 +1222,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     setLoadState('ready');
                 } catch (error) {
                     if (!activeSignal.aborted) {
-                        toastError(error instanceof ApiError ? error.message : t('toast.requestFailed'));
+                        showApiError(error, 'toast.requestFailed');
                     }
                     return;
                 }
@@ -1265,12 +1271,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             } else {
                 setSubmissionBlocked(true);
             }
-            dispatchTurn({
-                type: 'status',
-                status: 'failed',
-                reason: error instanceof ApiError ? error.message : 'request_failed',
-            });
-            toastError(error instanceof ApiError ? error.message : t('toast.requestFailed'));
+            dispatchTurn({ type: 'status', status: 'failed', reason: 'request_failed' });
+            showApiError(error, 'toast.requestFailed');
             if (session !== null) {
                 try {
                     await refreshTranscript(session.id, activeSignal, true);
@@ -1280,7 +1282,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             submittingRef.current = false;
             setSubmitting(false);
         }
-    }, [activeSession, composer, context.record, fileContextCount, fileOperationPending, followTurn, permission, refreshTranscript, resetStream, sessionKey, submissionBlocked, t, turn.phase, turnKey, unavailableReason, userDisplayName, userId]);
+    }, [activeSession, composer, context.record, fileContextCount, fileOperationPending, followTurn, permission, refreshTranscript, resetStream, sessionKey, showApiError, submissionBlocked, t, turn.phase, turnKey, unavailableReason, userDisplayName, userId]);
 
     const cancelTurn = useCallback(async () => {
         const signal = identityControllerRef.current?.signal;

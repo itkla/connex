@@ -37,8 +37,8 @@ import {
 } from '@/components/ui/dialog-status-cover';
 import { cn } from '@/lib/utils';
 import { isSubmitShortcut } from '@/app/lib/submitShortcut';
-import { toastError } from '@/app/lib/toast';
-import { createProduct, updateProduct, ApiError } from '@/app/lib/api';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { createProduct, updateProduct } from '@/app/lib/api';
 import { CURRENCY_CODES } from '@/app/lib/currencies';
 import type { BillingFrequency, CreateProductPayload, Product } from '@/app/lib/types';
 
@@ -86,6 +86,7 @@ function toDraft(product?: Product | null): Draft {
  */
 export default function ProductDialog({ open, onOpenChange, mode, product, onSaved }: Props) {
     const t = useTranslations('ProductDialog');
+    const showApiError = useApiErrorToast('ProductDialog');
     const [draft, setDraft] = useState<Draft>(() => toDraft(product));
     const [saving, setSaving] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
@@ -126,7 +127,7 @@ export default function ProductDialog({ open, onOpenChange, mode, product, onSav
                 onOpenChange(false);
             }, 700);
         } catch (err) {
-            toastError(err instanceof ApiError ? err.message : t('saveFailed'));
+            showApiError(err, 'saveFailed');
         } finally {
             setSaving(false);
         }

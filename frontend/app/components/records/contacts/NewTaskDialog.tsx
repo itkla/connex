@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { toast } from 'sonner';
 import { PlusIcon } from '@heroicons/react/24/solid';
 import { Loader2Icon } from 'lucide-react';
 
@@ -22,7 +21,8 @@ import { Label } from '@/components/ui/label';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import { ENTITY_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
 
-import { ApiError, addDealPerson, createTask, getCompanyDeals, getUsers } from '@/app/lib/api';
+import { addDealPerson, createTask, getCompanyDeals, getUsers } from '@/app/lib/api';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Deal, User } from '@/app/lib/types';
 import { Select, SelectItem, SelectContent, SelectValue, SelectTrigger } from '@/components/ui/select';
@@ -48,6 +48,7 @@ export default function NewTaskDialog({
 }) {
     const router = useRouter();
     const t = useTranslations('ContactsNewTaskDialog');
+    const showApiError = useApiErrorToast('ContactsNewTaskDialog');
     const controlled = openProp !== undefined;
     const [internalOpen, setInternalOpen] = useState(false);
     const open = controlled ? openProp : internalOpen;
@@ -75,7 +76,7 @@ export default function NewTaskDialog({
     async function handleSubmit(e: React.SubmitEvent<HTMLFormElement>) {
         e.preventDefault();
         if (!description.trim()) {
-            toast.error(t('toastDescriptionRequired'));
+            toastError(t('toastDescriptionRequired'));
             return;
         }
         setSubmitting(true);
@@ -97,8 +98,7 @@ export default function NewTaskDialog({
             router.refresh();
             setTimeout(() => setOpen(false), 900);
         } catch (err) {
-            const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('toastFailedCreate');
-            toastError(message);
+            showApiError(err, 'toastFailedCreate');
         } finally {
             setSubmitting(false);
         }
@@ -120,15 +120,14 @@ export default function NewTaskDialog({
             })
             .catch((err) => {
                 if (!active) return;
-                const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('toastFailedLoadDeals');
-                toastError(message);
+                showApiError(err, 'toastFailedLoadDeals');
                 setDeals([]);
                 setLoadedCompanyId(cid);
             });
         return () => {
             active = false;
         };
-    }, [open, companyId, t]);
+    }, [companyId, open, showApiError, t]);
 
     const status = resolveDialogStatus({ isLoading: submitting, isSuccess: succeeded });
 

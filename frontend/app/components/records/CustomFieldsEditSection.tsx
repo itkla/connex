@@ -14,8 +14,8 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ApiError, getEntityCustomFields, updateEntityCustomFields } from "@/app/lib/api";
-import { toastError } from "@/app/lib/toast";
+import { getEntityCustomFields, updateEntityCustomFields } from "@/app/lib/api";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import type { CustomFieldCellValue, CustomFieldEntityType, CustomFieldEntry } from "@/app/lib/types";
 
 /** Imperative handle a record edit sheet uses to commit custom-field edits on Save. */
@@ -44,6 +44,7 @@ export function CustomFieldsEditSection({
     ref?: React.Ref<CustomFieldsEditHandle>;
 }) {
     const t = useTranslations("RecordCustomFields");
+    const showApiError = useApiErrorToast("RecordCustomFields");
     const [entries, setEntries] = useState<CustomFieldEntry[]>([]);
     const [draft, setDraft] = useState<Record<number, CustomFieldCellValue>>({});
 
@@ -78,13 +79,13 @@ export function CustomFieldsEditSection({
                         setEntries(saved);
                         setDraft(Object.fromEntries(saved.map((entry) => [entry.definitionId, entry.value])));
                     } catch (err) {
-                        toastError(err instanceof ApiError ? err.message : t("saveFailed"));
+                        showApiError(err, "saveFailed");
                         throw err;
                     }
                 },
             };
         },
-        [entries, draft, entityType, entityId, t],
+        [entries, draft, entityType, entityId, showApiError],
     );
 
     if (entries.length === 0) return null;

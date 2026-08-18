@@ -14,6 +14,7 @@ import {
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useLiveNow } from '@/app/hooks/useNow';
 import { acceptWarmPath, dismissIntroSuggestion, dismissWarmPath, recordIntroduction } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -144,6 +145,7 @@ export default function IntroductionsBoard({
     contacts: Contact[];
 }) {
     const t = useTranslations('Introductions');
+    const showApiError = useApiErrorToast('Introductions');
     const reduce = useReducedMotion() ?? false;
     const router = useRouter();
     const [retrying, startRetry] = useTransition();
@@ -254,7 +256,7 @@ export default function IntroductionsBoard({
             toastSuccess(t('recordedToast', { a: suggestion.personAName, b: suggestion.personBName }));
         } catch (err) {
             restoreSuggestion(suggestion, index);
-            toastError(err instanceof Error ? err.message : t('recordFailed'));
+            showApiError(err, 'recordFailed');
         }
     };
 
@@ -268,7 +270,7 @@ export default function IntroductionsBoard({
             });
         } catch (err) {
             restoreSuggestion(suggestion, index);
-            toastError(err instanceof Error ? err.message : t('dismissFailed'));
+            showApiError(err, 'dismissFailed');
         }
     };
 
@@ -307,7 +309,7 @@ export default function IntroductionsBoard({
             toastSuccess(t('acceptToast', { name: path.targetName }));
         } catch (err) {
             restorePathRow(path, index);
-            toastError(err instanceof Error ? err.message : t('acceptFailed'));
+            showApiError(err, 'acceptFailed');
             throw err;
         }
     };
@@ -319,7 +321,7 @@ export default function IntroductionsBoard({
             await dismissWarmPath({ targetPersonId: path.targetId });
         } catch (err) {
             restorePathRow(path, index);
-            toastError(err instanceof Error ? err.message : t('dismissFailed'));
+            showApiError(err, 'dismissFailed');
             throw err;
         }
     };
@@ -352,7 +354,7 @@ export default function IntroductionsBoard({
             await dismissWarmPath({ targetPersonId: path.targetId, bridgePersonId: bridge.personId });
         } catch (err) {
             restoreAvenue(path, rowIndex, bridge, bridgeIndex);
-            toastError(err instanceof Error ? err.message : t('dismissFailed'));
+            showApiError(err, 'dismissFailed');
             throw err;
         }
     };
@@ -364,7 +366,7 @@ export default function IntroductionsBoard({
             removeSuggestion(personAId, personBId);
             toastSuccess(t('recordedManualToast'));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('recordFailed'));
+            showApiError(err, 'recordFailed');
             throw err;
         }
     };

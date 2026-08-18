@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
 import { ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline';
@@ -27,7 +26,8 @@ import RecordSelect from '@/app/components/records/RecordSelect';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useDealTargetSearch } from '@/app/hooks/useRecordTargetSearch';
 
-import { ApiError, getCompanyPeople, getUsers, updateTask } from '@/app/lib/api';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { getCompanyPeople, getUsers, updateTask } from '@/app/lib/api';
 import { type Contact, type Deal, type Task, type UpdateTaskPayload, type User } from '@/app/lib/types';
 import { calendarDateInputValue } from '@/app/lib/utils';
 
@@ -68,6 +68,7 @@ export default function EditTaskSheet({
 }) {
     const router = useRouter();
     const t = useTranslations('ActivityEditTaskSheet');
+    const showApiError = useApiErrorToast('ActivityEditTaskSheet');
     const [draft, setDraft] = useState<TaskDraft>(() => toDraft(task));
     const [users, setUsers] = useState<User[]>([]);
     const [contacts, setContacts] = useState<Contact[]>([]);
@@ -94,7 +95,7 @@ export default function EditTaskSheet({
 
     const saveUpdates = async () => {
         if (!draft.description.trim()) {
-            toast.error(t('descriptionRequired'));
+            toastError(t('descriptionRequired'));
             return;
         }
         setIsSaving(true);
@@ -112,8 +113,7 @@ export default function EditTaskSheet({
             handleOpenChange(false);
             router.refresh();
         } catch (err) {
-            const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('updateFailed');
-            toastError(message);
+            showApiError(err, 'updateFailed');
         } finally {
             setIsSaving(false);
         }

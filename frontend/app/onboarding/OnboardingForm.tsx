@@ -7,11 +7,11 @@ import { motion, useReducedMotion } from "motion/react";
 import { ArrowRightIcon } from "@heroicons/react/20/solid";
 
 import {
-    ApiError,
     createWorkspace,
     logout,
     WorkspaceSelectionUnavailableError,
 } from "@/app/lib/api";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { parseInviteInput } from "@/app/lib/inviteInput";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
@@ -20,6 +20,7 @@ const EASE = [0.23, 1, 0.32, 1] as const;
 
 export default function OnboardingForm() {
     const t = useTranslations("Onboarding");
+    const showApiError = useApiErrorToast("Onboarding");
     const router = useRouter();
     const reduce = useReducedMotion();
     const [name, setName] = useState("");
@@ -51,7 +52,7 @@ export default function OnboardingForm() {
                 window.location.replace("/dashboard");
                 return;
             }
-            toastError(err instanceof ApiError ? err.message : t("createFailed"));
+            showApiError(err, "createFailed");
             setSubmitting(false);
         }
     }

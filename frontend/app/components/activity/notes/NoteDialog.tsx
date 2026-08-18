@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
 import { BriefcaseIcon, LockClosedIcon, UserIcon, UsersIcon, XMarkIcon } from '@heroicons/react/24/outline';
 
@@ -34,7 +34,8 @@ import { InputGroupAddon } from '@/components/ui/input-group';
 import { DialogStatusCover, resolveDialogStatus } from '@/components/ui/dialog-status-cover';
 import { cn } from '@/lib/utils';
 
-import { ApiError, createNote, updateNote, isFieldError } from '@/app/lib/api';
+import { createNote, updateNote, isFieldError } from '@/app/lib/api';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { DRAFT_VERSIONS } from '@/app/lib/formDrafts';
@@ -474,6 +475,7 @@ export function NoteDialogForm({
 }: FormProps) {
     const router = useRouter();
     const t = useTranslations('ActivityNotesDialog');
+    const showApiError = useApiErrorToast('ActivityNotesDialog');
     const isEdit = note !== null;
 
     const [title, setTitle] = useState(() => note?.title ?? defaultTitle);
@@ -655,11 +657,7 @@ export function NoteDialogForm({
                 }
                 return;
             }
-            const message =
-                err instanceof ApiError ? err.message :
-                err instanceof Error ? err.message :
-                isEdit ? t('toastFailedSave') : t('toastFailedCreate');
-            toastError(message);
+            showApiError(err, isEdit ? 'toastFailedSave' : 'toastFailedCreate');
         } finally {
             if (!requestInit?.signal?.aborted) {
                 setSubmitting(false);

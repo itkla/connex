@@ -3,8 +3,8 @@
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { toast } from 'sonner';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { toastError, toastInfo, toastSuccess } from '@/app/lib/toast';
 
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
 import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
@@ -35,6 +35,7 @@ export default function EditContactSheet({
 }) {
     const router = useRouter();
     const t = useTranslations('ContactsEditSheet');
+    const showApiError = useApiErrorToast('ContactsEditSheet');
     const [draft, setDraft] = useState<ContactDraft>(() => toDraft(contact));
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [isSaving, setIsSaving] = useState(false);
@@ -55,13 +56,13 @@ export default function EditContactSheet({
         const customChanged = cfRef.current?.hasChanges() ?? false;
 
         if (!textChanged && !pictureChanged && !customChanged) {
-            toast.info(t('toastNoChanges'));
+            toastInfo(t('toastNoChanges'));
             handleOpenChange(false);
             return;
         }
 
         if (!draft.name.trim()) {
-            toast.error(t('toastNameRequired'));
+            toastError(t('toastNameRequired'));
             return;
         }
 
@@ -100,7 +101,7 @@ export default function EditContactSheet({
                 toastError(t('toastPartiallySaved'));
                 router.refresh();
             } else {
-                toastError(err instanceof Error ? err.message : t('toastFailedSave'));
+                showApiError(err, 'toastFailedSave');
             }
         } finally {
             setIsSaving(false);
