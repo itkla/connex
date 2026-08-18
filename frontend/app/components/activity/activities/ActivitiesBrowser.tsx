@@ -42,7 +42,7 @@ import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import { deleteActivity, getActivityById } from '@/app/lib/api';
 import { isProviderOwnedActivity } from '@/app/lib/connectedCapture';
-import { parseDeepLinkId } from '@/app/hooks/listStateUrl';
+import { ACTIVITY_URL_KEY, parseDeepLinkId } from '@/app/hooks/listStateUrl';
 import { useOwnedUrlParams } from '@/app/hooks/useOwnedUrlParams';
 import { recordDetailNavigationPath } from '@/app/lib/recordReturnPath';
 import { useRecordReturnScroll } from '@/app/hooks/useRecordReturnSelection';
@@ -159,10 +159,10 @@ export default function ActivitiesBrowser({
 
     const searchParams = useSearchParams();
     const [deepLinkSettled, setDeepLinkSettled] = useState(
-        () => parseDeepLinkId(searchParams.get('activity')) === null,
+        () => parseDeepLinkId(searchParams.get(ACTIVITY_URL_KEY)) === null,
     );
     useEffect(() => {
-        const activityId = parseDeepLinkId(searchParams.get('activity'));
+        const activityId = parseDeepLinkId(searchParams.get(ACTIVITY_URL_KEY));
         if (activityId === null) return;
         getActivityById(activityId)
             .then((activity) => {
@@ -174,7 +174,10 @@ export default function ActivitiesBrowser({
             .finally(() => setDeepLinkSettled(true));
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
-    useOwnedUrlParams({ activity: editing ? String(editing.id) : undefined }, deepLinkSettled);
+    useOwnedUrlParams(
+        { [ACTIVITY_URL_KEY]: editing ? String(editing.id) : undefined },
+        deepLinkSettled,
+    );
 
     const typeCounts = useMemo(() => {
         const counts: Record<Filter, number> = { all: 0, Call: 0, Email: 0, Meeting: 0, Note: 0, Other: 0 };

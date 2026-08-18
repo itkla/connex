@@ -1,4 +1,5 @@
 import type { Task, Activity, Deal, Note, Contact } from '@/app/lib/types';
+import { NOTE_URL_KEY, TASK_URL_KEY } from '@/app/hooks/listStateUrl';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 import { isDealClosed } from '@/app/components/records/deals/dealOutcome';
 import { noteContentToPlainText } from '@/app/lib/references';
@@ -162,7 +163,7 @@ export function buildEvents(data: CalendarData): CalendarEvent[] {
             startMs: ms,
             allDay: true,
             dayKey: dayKeyFromMs(ms),
-            href: '/activity/tasks',
+            href: `/activity/tasks?${TASK_URL_KEY}=${task.id}`,
             draggable: true,
             raw: task,
         });
@@ -216,7 +217,7 @@ export function buildEvents(data: CalendarData): CalendarEvent[] {
             startMs: ms,
             allDay: false,
             dayKey: dayKeyFromMs(ms),
-            href: `/activity/notes?id=${note.id}`,
+            href: `/activity/notes?${NOTE_URL_KEY}=${note.id}`,
             draggable: false,
             raw: note,
         });

@@ -23,6 +23,7 @@ import {
 } from '@/app/lib/api';
 import { normalizeNoteImageSource } from '@/app/components/activity/notes/editor/noteImageSource';
 import type { DraftKeyParts } from '@/app/lib/formDrafts';
+import { COMMENT_URL_KEY } from '@/app/hooks/listStateUrl';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import type {
     RecordComment,
@@ -90,7 +91,7 @@ export default function CommentsSection({
     const fetchGeneration = useRef(0);
     const reactionBusyIds = useRef<Set<number>>(new Set());
 
-    const highlightedCommentId = searchParams.get('comment');
+    const highlightedCommentId = searchParams.get(COMMENT_URL_KEY);
     const linkedThreadParam = searchParams.get('thread');
     const linkedThreadFetched = useRef(false);
     const appendedThreadId = useRef<number | null>(null);
