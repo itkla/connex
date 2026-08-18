@@ -21,7 +21,10 @@ import {
     pipelineDealsHref,
 } from "@/app/components/records/deals/dealLinks";
 import { buildEvents, type CalendarEvent, type CalendarEventKind } from "@/app/lib/calendar";
-import type { Activity, Deal, Note, Task } from "@/app/lib/types";
+import { recentRecordHref } from "@/app/lib/recentRecords";
+import { savedViewHref } from "@/app/lib/savedViewLink";
+import { SAVED_VIEW_URL_KEY } from "@/app/hooks/listStateUrl";
+import type { Activity, Deal, Note, SavedView, SavedViewRecordType, Task } from "@/app/lib/types";
 
 const SHARED_MANIFEST_PATH = path.join(
     process.cwd(),
@@ -192,6 +195,39 @@ describe("deep-link producers emit the consumers' canonical params", () => {
         expect(resolveShippedRoute(href)).toBe("/records/deals");
         expect(queryOf(href).get(DEAL_PIPELINE_FILTER_KEY)).toBe("3");
     });
+
+    it.each(["company", "person", "deal"] as const)(
+        "links a pinned %s saved view to its records browser",
+        (recordType: SavedViewRecordType) => {
+            const view: SavedView = {
+                id: 5,
+                workspaceId: 2,
+                recordType,
+                name: "Warm accounts",
+                visibility: "private",
+                ownerUserId: 1,
+                ownedByCurrentUser: true,
+                config: {},
+                position: 0,
+                pinned: true,
+                pinPosition: 0,
+                default: false,
+                createdAt: "2026-03-01 09:00:00",
+                updatedAt: "2026-03-01 09:00:00",
+            };
+            const href = savedViewHref(view);
+
+            expect(matchesShippedRoute(href)).toBe(true);
+            expect(queryOf(href).get(SAVED_VIEW_URL_KEY)).toBe("2:5");
+        },
+    );
+
+    it.each(["company", "person", "deal"] as const)(
+        "links a recent %s to its record detail route",
+        (recordType) => {
+            expect(matchesShippedRoute(recentRecordHref(recordType, 42))).toBe(true);
+        },
+    );
 
     it("resolves every record-scoped notification deep link the backend emits", () => {
         const links = [
