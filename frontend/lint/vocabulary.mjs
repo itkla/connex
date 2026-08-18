@@ -64,8 +64,21 @@ const NOTE_SURFACES = [
     "records.json",
 ];
 
-/** Namespace files that carry marketing-delivery surfaces, where JA must not say 抑制. */
-const MARKETING_SURFACES = ["campaigns.json", "unsubscribe.json"];
+/**
+ * Namespace files that carry marketing-delivery surfaces, where JA must not say 抑制.
+ * The public docs describe the same delivery behaviour, so they carry the term too.
+ */
+const MARKETING_SURFACES = ["campaigns.json", "docs.json", "unsubscribe.json"];
+
+/**
+ * Surfaces where the assistant speaks about its own replies, and where §4 replaces
+ * "turn" with "answer". The strings live in the shared and organization catalogs as well
+ * as the assistant's own namespace.
+ */
+const ASSISTANT_SURFACES = ["assistant.json", "common.json#AskConnex", "organization.json#OrgAi"];
+
+/** Surfaces where "Relationship Radar" would be the everyday label rather than prose. */
+const RADAR_LABEL_SURFACES = ["actions.json", "radar.json"];
 
 /**
  * @typedef {"en" | "ja"} TermLocale
@@ -95,6 +108,7 @@ const MARKETING_SURFACES = ["campaigns.json", "unsubscribe.json"];
  * @property {TermScope} scope
  * @property {Surface[]} allowFiles
  * @property {string[]} canonicalExceptions
+ * @property {boolean} narrowed
  * @property {SerializedPattern} pattern
  * @property {string[]} sources
  */
@@ -144,8 +158,9 @@ export const CURATED_DECISIONS = {
         reason: "§4's generator note keeps the bare metric name banned and excepts the canonical 温度感／温度帯 carriers instead of dropping the ban.",
     },
     "Relationship Radar as the everyday label": {
-        decision: "skip",
-        reason: "§4 sanctions the full name as an occasional label in onboarding and marketing prose, which a catalog value cannot be told apart from an everyday label.",
+        decision: "ban",
+        scope: { namespaces: RADAR_LABEL_SURFACES },
+        reason: "§4 sanctions the full name only in onboarding and marketing prose, so the ban narrows to the Radar surfaces themselves, where any use is the everyday label.",
     },
     "Profile (for this page)": {
         decision: "skip",
@@ -156,16 +171,19 @@ export const CURATED_DECISIONS = {
         reason: "account is correct for sign-in and billing senses; only the Company record must not be called one.",
     },
     "アカウント": {
-        decision: "skip",
-        reason: "アカウント is the canonical Japanese word for a sign-in account; only the Company record must not be called one.",
+        decision: "ban",
+        pattern: { source: "アーカイブ済みアカウント", flags: "u" },
+        reason: "アカウント is the canonical Japanese word for a sign-in account, so the ban narrows to the archived-company label, where it names the Company record.",
     },
     "People (as a label for contact lists)": {
-        decision: "skip",
-        reason: "§4 sanctions person/people inside explanatory prose; only contact-list labels must say Contact.",
+        decision: "ban",
+        pattern: { source: "^People$", flags: "u" },
+        reason: "§4 sanctions person/people inside explanatory prose, so the ban narrows to a value that is nothing but the word — a label.",
     },
     "opportunity as a countable UI noun (intro suggestions are \"suggested intros\")": {
-        decision: "skip",
-        reason: "banned only as a countable UI noun, which needs grammatical analysis of the surrounding sentence.",
+        decision: "ban",
+        pattern: { source: "\\bOpportunit(?:y|ies)\\b", flags: "u" },
+        reason: "banned as a countable UI noun, so the ban narrows to the capitalised label form and leaves lower-case prose alone.",
     },
     "商談 except as an example stage name": {
         decision: "skip",
@@ -208,7 +226,11 @@ export const CURATED_DECISIONS = {
         decision: "skip",
         reason: "Note is the canonical record name; the activity-type fold is a picker and read-time rename, not a string the gate can identify by value.",
     },
-    "to-do / todo as a standalone noun": {
+    "to-do": {
+        decision: "skip",
+        reason: "\"To do\" is the sanctioned kanban column name; standalone-noun usage needs grammatical analysis.",
+    },
+    "todo as a standalone noun": {
         decision: "skip",
         reason: "\"To do\" is the sanctioned kanban column name; standalone-noun usage needs grammatical analysis.",
     },
@@ -242,7 +264,7 @@ export const CURATED_DECISIONS = {
     },
     "\"at a glance\" on more than one surface": {
         decision: "skip",
-        reason: "banned only as a phrase repeated across surfaces, which is a cross-file count rather than a value match.",
+        reason: "banned as a repetition across surfaces rather than as a value, so the ratchet over AT_A_GLANCE_SURFACES enforces it instead of a pattern.",
     },
     "Overview as a page name": {
         decision: "skip",
@@ -282,8 +304,13 @@ export const CURATED_DECISIONS = {
     },
     "turn": {
         decision: "ban",
-        scope: { namespaces: ["assistant.json"] },
+        scope: { namespaces: ASSISTANT_SURFACES },
         reason: "§4 bans turn in the assistant, where the word for a reply is \"answer\"; elsewhere turn is an ordinary English verb.",
+    },
+    "Assigned to": {
+        decision: "ban",
+        pattern: { source: "\\bAssigned\\s+to\\b", flags: "u" },
+        reason: "§4's Never say governs labels while prose may vary, so the ban narrows to the capitalised label form and leaves \"assigned to you\" alone.",
     },
     "register": {
         decision: "skip",
@@ -309,13 +336,35 @@ export const CURATED_DECISIONS = {
 
 /**
  * Japanese renderings of banned English terms that §4 states in English only. Each key
- * must be an §4 item, so the rendering stays attributable to the glossary.
- * @type {Record<string, {term: string, reason: string}>}
+ * must be an §4 item, so the rendering stays attributable to the glossary. A rendering
+ * may narrow its pattern where the katakana word also carries an ordinary product sense.
+ * @type {Record<string, {term: string, reason: string, pattern?: SerializedPattern}>}
  */
 export const JAPANESE_RENDERINGS = {
     deterministic: {
         term: "決定論的",
         reason: "#1323 gate 1 requires the JA pattern for the term §4 bans in English; §5 requires JA to be authored natively rather than left untranslated.",
+    },
+    slug: {
+        term: "スラッグ",
+        reason: "the JA catalogs carry the banned engineering term as a katakana loan, which §5 rules out in favour of a native phrasing.",
+    },
+    node: {
+        term: "ノード",
+        reason: "the JA catalogs carry the banned engineering term as a katakana loan; it is unrelated to the separate ノート note ban.",
+    },
+    graph: {
+        term: "グラフ",
+        pattern: { source: "(?:リレーションシップ|関係性?)の?グラフ|グラフ表示", flags: "u" },
+        reason: "グラフ is also the ordinary Japanese word for a chart, which §4 sanctions, so the ban narrows to the relationship-graph sense the English term carries.",
+    },
+    "correlation ID": {
+        term: "相関ID",
+        reason: "§4 replaces the concept with 参照コード, so the JA rendering of the banned term is banned with it.",
+    },
+    "token budget": {
+        term: "トークン予算",
+        reason: "§4 bans the LLM-internals term, and the JA catalogs state it directly rather than in human terms.",
     },
 };
 
@@ -370,8 +419,13 @@ export function glossaryRows(section) {
         .split("\n")
         .map((line) => line.trim())
         .filter((line) => line.startsWith("|") && !/^\|[\s|-]+\|$/.test(line))
-        .map(tableCells)
-        .filter((cells) => cells.length === 4);
+        .map((line) => {
+            const cells = tableCells(line);
+            if (cells.length !== 4) {
+                throw new Error(`docs/PRODUCT.md §4 has a glossary row with ${cells.length} cells instead of 4: ${line}`);
+            }
+            return cells;
+        });
     const [header, ...body] = rows;
     if (!header || header[0] !== "Concept" || header[3] !== "Never say (on product surfaces)") {
         throw new Error("docs/PRODUCT.md §4 no longer opens with the expected glossary table header");
@@ -402,7 +456,10 @@ function neverSayItems(cell) {
         current += character;
     }
     items.push(current);
-    return items.map((item) => item.trim()).filter((item) => item.length > 0);
+    return items
+        .flatMap((item) => (item.includes("(") ? [item] : item.split(/\s+\/\s+/)))
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0);
 }
 
 /**
@@ -416,13 +473,16 @@ export function bannedListEntries(section) {
     if (marker < 0) {
         throw new Error(`docs/PRODUCT.md §4 no longer contains the "${BANNED_LIST_MARKER}" list`);
     }
-    const list = lines.slice(marker + 1).find((line) => line.includes("·"));
-    if (!list) {
+    const list = lines.slice(marker + 1).filter((line) => line.includes("·"));
+    if (list.length === 0) {
         throw new Error("docs/PRODUCT.md §4 no longer states the banned terms as a `·`-separated list");
     }
-    return list.split("·").map((chunk) => {
+    return list.flatMap((line) => line.split("·")).map((chunk) => {
         const text = chunk.trim();
         const terms = [...text.matchAll(CODE_SPAN)].map((match) => match[1]);
+        if (terms.length === 0) {
+            throw new Error(`docs/PRODUCT.md §4 lists "${text}" as banned without naming a term in backticks`);
+        }
         const outside = text.replace(CODE_SPAN, " ").replace(/[\s/]+/g, " ").trim();
         return { text, terms, qualified: outside.length > 0 };
     });
@@ -544,15 +604,56 @@ export function overlappingCanonicalTerms(term, canonical, minOverlap) {
 }
 
 /**
- * Builds the pattern for an English term: word-bounded, case-insensitive, and tolerant
- * of a plural. Word boundaries already stop an English term from matching inside a
- * longer canonical term, so no canonical exception is needed.
+ * The regular English forms of a word. §4 bans a term, not one spelling of it, so the
+ * generated pattern accepts the term's inflections — "Purging" and "purged" are the same
+ * violation as "purge". Stems that are ordinary words on their own ("project" behind
+ * "projection", "admit" behind "admitted") are never accepted bare.
+ * @param {string} word
+ * @returns {string[]}
+ */
+export function inflections(word) {
+    const forms = new Set([word]);
+    const lower = word.toLowerCase();
+    const sibilant = /(?:s|x|z|ch|sh)$/;
+    if (lower.endsWith("e")) {
+        forms.add(`${word}s`).add(`${word}d`).add(`${word.slice(0, -1)}ing`);
+    } else if (/[^aeiou]y$/.test(lower)) {
+        forms.add(`${word.slice(0, -1)}ies`);
+    } else if (lower.endsWith("ion")) {
+        const stem = word.slice(0, -3);
+        forms.add(`${word}s`).add(`${stem}es`).add(`${stem}ed`).add(`${stem}ing`);
+    } else if (/([bdglmnprt])\1ed$/.test(lower)) {
+        const stem = word.slice(0, -3);
+        forms.add(`${stem}s`).add(`${stem}${stem.slice(-1)}ing`);
+    } else if (lower.endsWith("ed")) {
+        const stem = word.slice(0, -2);
+        forms.add(`${stem}s`).add(`${stem}ing`);
+        if (sibilant.test(stem.toLowerCase())) forms.add(`${stem}es`);
+    } else {
+        forms.add(`${word}s`).add(`${word}es`).add(`${word}ed`).add(`${word}ing`);
+        if (/[aeiou][bdglmnprt]$/.test(lower)) {
+            forms.add(`${word}${word.slice(-1)}ed`).add(`${word}${word.slice(-1)}ing`);
+        }
+    }
+    return [...forms].sort((left, right) => right.length - left.length || (left < right ? -1 : 1));
+}
+
+/**
+ * Builds the pattern for an English term: word-bounded, case-insensitive, and matching
+ * the inflections of its last word. Word boundaries already stop an English term from
+ * matching inside a longer canonical term, so no canonical exception is needed.
  * @param {string} term
  * @returns {{pattern: SerializedPattern, canonicalExceptions: string[]}}
  */
 function englishPattern(term) {
-    const body = escapeRegExp(term).replace(/\s+/g, "\\s+");
-    return { pattern: { source: `\\b${body}(?:e?s)?\\b`, flags: "iu" }, canonicalExceptions: [] };
+    const words = term.split(/\s+/);
+    const lead = words.slice(0, -1).map(escapeRegExp).join("\\s+");
+    const forms = inflections(words[words.length - 1]).map(escapeRegExp);
+    const tail = forms.length > 1 ? `(?:${forms.join("|")})` : forms[0];
+    return {
+        pattern: { source: `\\b${lead.length > 0 ? `${lead}\\s+` : ""}${tail}\\b`, flags: "iu" },
+        canonicalExceptions: [],
+    };
 }
 
 /**
@@ -640,6 +741,7 @@ export function buildVocabularyModel(markdown) {
             scope: curated?.scope ?? "global",
             allowFiles: curated?.allowFiles ?? [],
             canonicalExceptions: built.canonicalExceptions,
+            narrowed: curated?.pattern !== undefined,
             pattern: built.pattern,
             sources: [item.source],
         });
@@ -653,7 +755,9 @@ export function buildVocabularyModel(markdown) {
             );
         }
         const id = `ja:${rendering.term}`;
-        const built = japanesePattern(rendering.term, canonical.ja);
+        const built = rendering.pattern
+            ? { pattern: rendering.pattern, canonicalExceptions: [] }
+            : japanesePattern(rendering.term, canonical.ja);
         terms.set(id, {
             id,
             term: rendering.term,
@@ -661,6 +765,7 @@ export function buildVocabularyModel(markdown) {
             scope: "global",
             allowFiles: [],
             canonicalExceptions: built.canonicalExceptions,
+            narrowed: rendering.pattern !== undefined,
             pattern: built.pattern,
             sources: [`${source.source} (Japanese rendering)`],
         });
@@ -691,6 +796,66 @@ export function loadVocabularyModel() {
  */
 export function loadBaseline() {
     return JSON.parse(readFileSync(BASELINE_PATH, "utf8"));
+}
+
+/**
+ * The largest the baseline may ever be. Fixing copy lowers it; nothing else may raise
+ * it, so the WS3 burndown cannot be undone by re-baselining. Widening the rules — a new
+ * §4 ban, a wider inflection, a newly scanned surface — legitimately surfaces violations
+ * that were always there, and may raise this number **in the same commit that widens
+ * them**, never on its own.
+ */
+export const BASELINE_HIGH_WATER_MARK = 317;
+
+/**
+ * The surfaces that still say "at a glance". §4 allows the phrase on one surface only,
+ * and that is a count across files rather than something a pattern can see in a value,
+ * so this list ratchets the same way the baseline does: entries leave it when the copy
+ * is rewritten, and none may be added.
+ */
+export const AT_A_GLANCE_SURFACES = [
+    "en/analytics.json:AnalyticsLayout.description",
+    "en/analytics.json:AnalyticsPage.overviewTitle",
+    "en/analytics.json:AnalyticsPage.subtitle",
+    "en/calendar.json:CalendarLayout.description",
+    "en/campaigns.json:CampaignDetail.glanceTitle",
+    "en/dashboard.json:DashboardLayout.description",
+    "en/docs.json:DocsActivity.articles.calendar-events.blocks[0].text",
+    "en/docs.json:DocsActivity.articles.calendar-events.blocks[1].items[0].description",
+    "en/docs.json:DocsActivity.articles.tasks.blocks[3].items[2].title",
+    "en/docs.json:DocsDashboard.articles.home-dashboard.blocks[1].caption",
+    "en/docs.json:DocsDashboard.articles.home-dashboard.blocks[2].title",
+    "en/docs.json:DocsData.articles.filters-and-bulk.blocks[1].items[3].description",
+    "en/docs.json:DocsLibrary.articles.files.blocks[2].items[5].title",
+    "en/docs.json:DocsLibrary.articles.tags.blocks[1].items[0].description",
+    "en/docs.json:DocsOverviewSuite.articles.analytics.blocks[0].text",
+    "en/docs.json:DocsOverviewSuite.articles.analytics.blocks[3].items[3].description",
+    "en/docs.json:DocsOverviewSuite.articles.introductions.blocks[1].items[1].description",
+    "en/docs.json:DocsOverviewSuite.articles.relationship-map.blocks[4].items[0].title",
+    "en/docs.json:DocsPreferences.articles.tips-and-quirks.blocks[1].items[3].description",
+    "en/docs.json:DocsRecords.articles.deals-and-pipelines.blocks[2].items[3].title",
+    "en/docs.json:DocsRecords.articles.deals-and-pipelines.blocks[5].text",
+    "en/docs.json:DocsRecords.articles.deals-and-pipelines.blocks[6].items[1].description",
+    "en/docs.json:DocsRecords.articles.table-and-grid.blocks[2].items[2].description",
+    "en/docs.json:DocsRelationshipIntelligence.articles.warmth-and-temperature.blocks[0].text",
+    "en/docs.json:DocsSettings.articles.audit-logs.blocks[5].title",
+    "en/docs.json:DocsSettings.articles.rules-and-automation.blocks[5].items[2].question",
+    "en/docs.json:DocsTutorials.articles.add-your-first-company.blocks[1].caption",
+    "en/docs.json:DocsTutorials.articles.build-your-pipeline.blocks[3].items[0].description",
+    "en/docs.json:DocsTutorials.articles.request-a-warm-intro.blocks[2].text",
+    "en/me.json:MeLayout.description",
+];
+
+/**
+ * The message entries that still carry the phrase §4 restricts to one surface.
+ * @returns {string[]}
+ */
+export function atAGlanceEntries() {
+    return messageEntries()
+        .filter((entry) => entry.locale === "en" && !isExcludedSurface(entry.file, entry.namespace))
+        .filter((entry) => /at a glance/i.test(entry.value))
+        .map((entry) => `${entry.locale}/${entry.file}:${entry.keyPath}`)
+        .sort();
 }
 
 /**
@@ -765,19 +930,35 @@ function isMessageTree(value) {
 }
 
 /**
- * @param {Record<string, unknown>} tree
- * @param {string} prefix
+ * Flattens a message catalog to its string leaves. Arrays are message content too — the
+ * public docs read theirs through `t.raw()` and render them as prose — so an array item
+ * is keyed `${keyPath}[${index}]` and scanned like any other value.
+ * @param {unknown} value
+ * @param {string} keyPath
  * @returns {[string, string][]}
  */
-function flattenEntries(tree, prefix) {
-    return Object.entries(tree).flatMap(([key, value]) => {
-        if (isMessageTree(value)) return flattenEntries(value, `${prefix}${key}.`);
-        return typeof value === "string" ? [[`${prefix}${key}`, value]] : [];
-    });
+function flattenEntries(value, keyPath) {
+    if (typeof value === "string") return [[keyPath, value]];
+    if (Array.isArray(value)) return value.flatMap((item, index) => flattenEntries(item, `${keyPath}[${index}]`));
+    if (isMessageTree(value)) {
+        return Object.entries(value).flatMap(([key, child]) =>
+            flattenEntries(child, keyPath.length > 0 ? `${keyPath}.${key}` : key));
+    }
+    return [];
 }
 
 /**
- * Every string value of every message catalog the gate covers.
+ * The next-intl namespace a key path belongs to.
+ * @param {string} keyPath
+ * @returns {string}
+ */
+export function namespaceOf(keyPath) {
+    return keyPath.split(".")[0].split("[")[0];
+}
+
+/**
+ * Every string value of every message catalog the gate covers, including the strings
+ * inside arrays.
  * @returns {MessageEntry[]}
  */
 export function messageEntries() {
@@ -794,7 +975,7 @@ export function messageEntries() {
                 return flattenEntries(parsed, "").map(([keyPath, value]) => ({
                     locale,
                     file,
-                    namespace: keyPath.split(".")[0],
+                    namespace: namespaceOf(keyPath),
                     keyPath,
                     value,
                 }));
@@ -876,5 +1057,5 @@ export function parseBaselineEntry(entry) {
     if (!locale || !file || !keyPath) {
         throw new Error(`"${entry}" is not a <locale>/<file>:<key path> baseline entry`);
     }
-    return { locale, file, namespace: keyPath.split(".")[0], keyPath };
+    return { locale, file, namespace: namespaceOf(keyPath), keyPath };
 }

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+    AT_A_GLANCE_SURFACES,
     ALLOWED_SURFACES,
+    atAGlanceEntries,
+    BASELINE_HIGH_WATER_MARK,
     baselineEntries,
     describeViolation,
     EXCLUDED_SURFACES,
@@ -63,6 +66,28 @@ describe("message catalogue vocabulary", () => {
 
         const keys = new Set(messageEntries().map((entry) => `${entry.locale}/${entry.file}:${entry.keyPath}`));
         expect(baseline.filter((entry) => !keys.has(entry))).toEqual([]);
+    });
+
+    it("never grows past the committed high-water mark", () => {
+        expect(baseline.length, `raise BASELINE_HIGH_WATER_MARK only in the commit that widens the rules. ${BURN_DOWN}`)
+            .toBeLessThanOrEqual(BASELINE_HIGH_WATER_MARK);
+    });
+
+    it("scans the strings inside arrays, not only the object leaves", () => {
+        const entries = messageEntries();
+        const inArrays = entries.filter((entry) => entry.keyPath.includes("["));
+
+        expect(inArrays.length).toBeGreaterThan(1000);
+        expect(baseline.some((entry) => entry.includes("["))).toBe(true);
+    });
+
+    it("lets the phrase §4 restricts to one surface only shrink", () => {
+        const glances = atAGlanceEntries();
+        const added = glances.filter((entry) => !AT_A_GLANCE_SURFACES.includes(entry));
+        const removed = AT_A_GLANCE_SURFACES.filter((entry) => !glances.includes(entry));
+
+        expect(added, "§4 allows \"at a glance\" on one surface; do not add another").toEqual([]);
+        expect(removed, "rewritten copy: drop these from AT_A_GLANCE_SURFACES").toEqual([]);
     });
 
     it("never baselines an allowlisted or out-of-scope surface", () => {

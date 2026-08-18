@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+    bannedListEntries,
     buildVocabularyModel,
     canonicalTerms,
     CURATED_DECISIONS,
+    inflections,
     JAPANESE_RENDERINGS,
     loadVocabularyModel,
     overlappingCanonicalTerms,
@@ -29,6 +31,14 @@ function bannedTerm(id: string) {
     const term = committed.terms.find((candidate) => candidate.id === id);
     if (!term) throw new Error(`the generated model no longer bans ${id}`);
     return term;
+}
+
+const GLOSSARY_ROW = "| Task ownership | **Assignee** | **担当者** | Assigned to |";
+
+function mutate(replacement: string, target: string = GLOSSARY_ROW): string {
+    const guide = readProductGuide();
+    if (!guide.includes(target)) throw new Error(`docs/PRODUCT.md no longer contains ${target}`);
+    return guide.replace(target, replacement);
 }
 
 describe("vocabulary generator", () => {
@@ -121,9 +131,56 @@ describe("vocabulary generator", () => {
     });
 
     it("still matches its own term after the canonical exceptions are applied", () => {
-        for (const term of committed.terms) {
+        for (const term of committed.terms.filter((entry) => !entry.narrowed)) {
             expect(expression(term.pattern).test(term.term)).toBe(true);
         }
+    });
+
+    it("documents a reason for every narrowed pattern", () => {
+        const reasons = new Map<string, string>();
+        for (const item of items) {
+            if (Object.hasOwn(CURATED_DECISIONS, item.text)) reasons.set(item.term, CURATED_DECISIONS[item.text].reason);
+        }
+        for (const rendering of Object.values(JAPANESE_RENDERINGS)) reasons.set(rendering.term, rendering.reason);
+
+        const narrowed = committed.terms.filter((term) => term.narrowed);
+        expect(narrowed.length).toBeGreaterThan(0);
+        for (const term of narrowed) {
+            expect(reasons.get(term.term), term.id).toBeTruthy();
+        }
+    });
+
+    it("never bans and skips the same term", () => {
+        const banned = new Set(committed.terms.map((term) => term.id));
+        expect(committed.skipped.filter((skip) => banned.has(skip.id)).map((skip) => skip.id)).toEqual([]);
+    });
+
+    it("matches the inflections of an English term without accepting a bare stem", () => {
+        expect(inflections("purge")).toEqual(expect.arrayContaining(["purge", "purges", "purged", "purging"]));
+        expect(inflections("admitted")).toEqual(expect.arrayContaining(["admitted", "admits", "admitting"]));
+        expect(inflections("admitted")).not.toContain("admit");
+        expect(inflections("suppression")).toEqual(expect.arrayContaining(["suppression", "suppressed", "suppressing"]));
+        expect(inflections("suppression")).not.toContain("suppress");
+        expect(inflections("rewrap")).toEqual(expect.arrayContaining(["rewrapped", "rewrapping"]));
+        expect(inflections("idempotency")).toContain("idempotencies");
+    });
+
+    it("fails closed on a glossary row that is not four cells", () => {
+        expect(() => buildVocabularyModel(mutate("| Task ownership | **Assignee** | **担当者** |")))
+            .toThrow(/glossary row with 3 cells/);
+    });
+
+    it("fails closed on a banned-list entry that names no term", () => {
+        expect(() => buildVocabularyModel(mutate("`tenant` · nothing in particular ·", "`tenant` ·")))
+            .toThrow(/without naming a term in backticks/);
+    });
+
+    it("reads every line of the banned-terms list, not only the first", () => {
+        const extended = mutate("`preflight` · `idempotency`\n\n`sharding` · `quorum`", "`preflight` · `idempotency`");
+        const texts = bannedListEntries(vocabularySection(extended)).map((entry) => entry.text);
+
+        expect(texts).toContain("`tenant`");
+        expect(texts).toContain("`sharding`");
     });
 
     it("never matches a canonical term of the same locale", () => {

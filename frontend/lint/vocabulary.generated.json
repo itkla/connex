@@ -7,9 +7,10 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": true,
             "pattern": {
-                "source": "\\bAssigned\\s+to(?:e?s)?\\b",
-                "flags": "iu"
+                "source": "\\bAssigned\\s+to\\b",
+                "flags": "u"
             },
             "sources": [
                 "§4 glossary row \"Task ownership\""
@@ -22,12 +23,29 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bESP(?:e?s)?\\b",
+                "source": "\\b(?:ESPing|ESPed|ESPes|ESPs|ESP)\\b",
                 "flags": "iu"
             },
             "sources": [
                 "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:People",
+            "term": "People",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": true,
+            "pattern": {
+                "source": "^People$",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"Person record\""
             ]
         },
         {
@@ -37,8 +55,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bRBAC(?:e?s)?\\b",
+                "source": "\\b(?:RBACing|RBACed|RBACes|RBACs|RBAC)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -52,6 +71,7 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": true,
             "pattern": {
                 "source": "\\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\\b",
                 "flags": "u"
@@ -61,14 +81,36 @@
             ]
         },
         {
+            "id": "en:Relationship Radar",
+            "term": "Relationship Radar",
+            "locale": "en",
+            "scope": {
+                "namespaces": [
+                    "actions.json",
+                    "radar.json"
+                ]
+            },
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\bRelationship\\s+(?:Radarring|Radaring|Radarred|Radared|Radares|Radars|Radar)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 glossary row \"The signals triage surface\""
+            ]
+        },
+        {
             "id": "en:admitted",
             "term": "admitted",
             "locale": "en",
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\badmitted(?:e?s)?\\b",
+                "source": "\\b(?:admitting|admitted|admits)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -82,8 +124,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bcanonical(?:e?s)?\\b",
+                "source": "\\b(?:canonicalling|canonicaling|canonicalled|canonicaled|canonicales|canonicals|canonical)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -101,8 +144,9 @@
                 "organization.json#OrgDataRequests"
             ],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bcease\\s+of\\s+use(?:e?s)?\\b",
+                "source": "\\bcease\\s+of\\s+(?:using|used|uses|use)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -116,8 +160,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bconsent\\s+access(?:e?s)?\\b",
+                "source": "\\bconsent\\s+(?:accessing|accessed|accesses|accesss|access)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -131,8 +176,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bconsent\\s+and\\s+suppression(?:e?s)?\\b",
+                "source": "\\bconsent\\s+and\\s+(?:suppressions|suppressing|suppression|suppressed|suppresses)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -146,8 +192,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bcontext\\s+space(?:e?s)?\\b",
+                "source": "\\bcontext\\s+(?:spacing|spaced|spaces|space)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -161,8 +208,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bcorrelation\\s+ID(?:e?s)?\\b",
+                "source": "\\bcorrelation\\s+(?:IDDing|IDDed|IDing|IDed|IDes|IDs|ID)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -180,8 +228,9 @@
                 "organization.json#OrgDataRequests"
             ],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bdata\\s+subject(?:e?s)?\\b",
+                "source": "\\bdata\\s+(?:subjecting|subjected|subjectes|subjects|subject)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -195,8 +244,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bdemask(?:e?s)?\\b",
+                "source": "\\b(?:demasking|demasked|demaskes|demasks|demask)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -210,8 +260,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bdeterministic(?:e?s)?\\b",
+                "source": "\\b(?:deterministicing|deterministiced|deterministices|deterministics|deterministic)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -225,8 +276,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\begress(?:e?s)?\\b",
+                "source": "\\b(?:egressing|egressed|egresses|egresss|egress)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -240,8 +292,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bepoch(?:e?s)?\\b",
+                "source": "\\b(?:epoching|epoched|epoches|epochs|epoch)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -255,8 +308,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bgraph(?:e?s)?\\b",
+                "source": "\\b(?:graphing|graphed|graphes|graphs|graph)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -270,8 +324,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bhash(?:e?s)?\\b",
+                "source": "\\b(?:hashing|hashed|hashes|hashs|hash)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -285,8 +340,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bidempotency(?:e?s)?\\b",
+                "source": "\\b(?:idempotencies|idempotency)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -300,8 +356,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\binvocation(?:e?s)?\\b",
+                "source": "\\b(?:invocations|invocating|invocation|invocated|invocates)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -315,8 +372,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\blegacy\\s+runtime(?:e?s)?\\b",
+                "source": "\\blegacy\\s+(?:runtiming|runtimed|runtimes|runtime)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -330,8 +388,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bmutation(?:e?s)?\\b",
+                "source": "\\b(?:mutations|mutating|mutation|mutated|mutates)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -345,8 +404,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bnode(?:e?s)?\\b",
+                "source": "\\b(?:noding|noded|nodes|node)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -360,12 +420,29 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bopaque\\s+identifier(?:e?s)?\\b",
+                "source": "\\bopaque\\s+(?:identifierring|identifiering|identifierred|identifiered|identifieres|identifiers|identifier)\\b",
                 "flags": "iu"
             },
             "sources": [
                 "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:opportunity",
+            "term": "opportunity",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": true,
+            "pattern": {
+                "source": "\\bOpportunit(?:y|ies)\\b",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"Deal record\""
             ]
         },
         {
@@ -375,8 +452,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bpredicate(?:e?s)?\\b",
+                "source": "\\b(?:predicating|predicated|predicates|predicate)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -390,8 +468,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bpreflight(?:e?s)?\\b",
+                "source": "\\b(?:preflighting|preflighted|preflightes|preflights|preflight)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -408,8 +487,9 @@
                 "organization.json#OrgDataRequests"
             ],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bprocessing\\s+restrictions(?:e?s)?\\b",
+                "source": "\\bprocessing\\s+(?:restrictionsing|restrictionsed|restrictionses|restrictionss|restrictions)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -426,8 +506,9 @@
                 "organization.json#OrgDataRequests"
             ],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bprocessing\\s+suspended(?:e?s)?\\b",
+                "source": "\\bprocessing\\s+(?:suspending|suspended|suspends)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -441,8 +522,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bprojected(?:e?s)?\\b",
+                "source": "\\b(?:projecting|projected|projects)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -456,8 +538,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bprojection(?:e?s)?\\b",
+                "source": "\\b(?:projections|projecting|projection|projected|projectes)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -471,8 +554,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bprovider\\s+egress(?:e?s)?\\b",
+                "source": "\\bprovider\\s+(?:egressing|egressed|egresses|egresss|egress)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -489,8 +573,9 @@
                 "organization.json#OrgDataRequests"
             ],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bprovision\\s+ceased(?:e?s)?\\b",
+                "source": "\\bprovision\\s+(?:ceasing|ceased|ceases|ceass)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -504,8 +589,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bpurge(?:e?s)?\\b",
+                "source": "\\b(?:purging|purged|purges|purge)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -520,8 +606,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\brelationship\\s+score(?:e?s)?\\b",
+                "source": "\\brelationship\\s+(?:scoring|scored|scores|score)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -535,8 +622,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\brelationship\\s+temperature(?:e?s)?\\b",
+                "source": "\\brelationship\\s+(?:temperaturing|temperatured|temperatures|temperature)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -550,8 +638,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\brewrap(?:e?s)?\\b",
+                "source": "\\b(?:rewrapping|rewraping|rewrapped|rewraped|rewrapes|rewraps|rewrap)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -565,8 +654,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bruntime(?:e?s)?\\b",
+                "source": "\\b(?:runtiming|runtimed|runtimes|runtime)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -580,8 +670,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bslug(?:e?s)?\\b",
+                "source": "\\b(?:slugging|slugged|sluging|sluged|sluges|slugs|slug)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -595,8 +686,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bsuppression(?:e?s)?\\b",
+                "source": "\\b(?:suppressions|suppressing|suppression|suppressed|suppresses)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -610,8 +702,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\btear\\s+down(?:e?s)?\\b",
+                "source": "\\btear\\s+(?:downing|downed|downes|downs|down)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -625,8 +718,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bteardown(?:e?s)?\\b",
+                "source": "\\b(?:teardowning|teardowned|teardownes|teardowns|teardown)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -641,8 +735,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\btemperature\\s+band(?:e?s)?\\b",
+                "source": "\\btemperature\\s+(?:banding|banded|bandes|bands|band)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -656,8 +751,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\btenant(?:e?s)?\\b",
+                "source": "\\b(?:tenanting|tenanted|tenantes|tenants|tenant)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -676,8 +772,9 @@
                 "organization.json#OrgDataRequests"
             ],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bthird-party\\s+provision(?:e?s)?\\b",
+                "source": "\\bthird-party\\s+(?:provisions|provising|provision|provised|provises)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -691,8 +788,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\btoken\\s+budget(?:e?s)?\\b",
+                "source": "\\btoken\\s+(?:budgetting|budgeting|budgetted|budgeted|budgetes|budgets|budget)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -706,8 +804,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\btraversal(?:e?s)?\\b",
+                "source": "\\b(?:traversalling|traversaling|traversalled|traversaled|traversales|traversals|traversal)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -720,13 +819,16 @@
             "locale": "en",
             "scope": {
                 "namespaces": [
-                    "assistant.json"
+                    "assistant.json",
+                    "common.json#AskConnex",
+                    "organization.json#OrgAi"
                 ]
             },
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bturn(?:e?s)?\\b",
+                "source": "\\b(?:turning|turned|turnes|turns|turn)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -740,12 +842,29 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
-                "source": "\\bwarm\\s+path(?:e?s)?\\b",
+                "source": "\\bwarm\\s+(?:pathing|pathed|pathes|paths|path)\\b",
                 "flags": "iu"
             },
             "sources": [
                 "§4 glossary row \"The route through the network\""
+            ]
+        },
+        {
+            "id": "ja:アカウント",
+            "term": "アカウント",
+            "locale": "ja",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": true,
+            "pattern": {
+                "source": "アーカイブ済みアカウント",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"Company record\""
             ]
         },
         {
@@ -755,6 +874,7 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
                 "source": "ウォームパス",
                 "flags": "u"
@@ -764,18 +884,67 @@
             ]
         },
         {
+            "id": "ja:グラフ",
+            "term": "グラフ",
+            "locale": "ja",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": true,
+            "pattern": {
+                "source": "(?:リレーションシップ|関係性?)の?グラフ|グラフ表示",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list (Japanese rendering)"
+            ]
+        },
+        {
+            "id": "ja:スラッグ",
+            "term": "スラッグ",
+            "locale": "ja",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "スラッグ",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list (Japanese rendering)"
+            ]
+        },
+        {
             "id": "ja:テナント",
             "term": "テナント",
             "locale": "ja",
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
                 "source": "テナント",
                 "flags": "u"
             },
             "sources": [
                 "§4 glossary row \"The admin level above workspaces\""
+            ]
+        },
+        {
+            "id": "ja:トークン予算",
+            "term": "トークン予算",
+            "locale": "ja",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "トークン予算",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list (Japanese rendering)"
             ]
         },
         {
@@ -794,6 +963,7 @@
             },
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
                 "source": "ノート",
                 "flags": "u"
@@ -803,12 +973,29 @@
             ]
         },
         {
+            "id": "ja:ノード",
+            "term": "ノード",
+            "locale": "ja",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "ノード",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list (Japanese rendering)"
+            ]
+        },
+        {
             "id": "ja:パージ",
             "term": "パージ",
             "locale": "ja",
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
                 "source": "パージ",
                 "flags": "u"
@@ -824,6 +1011,7 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
                 "source": "マイページ",
                 "flags": "u"
@@ -839,6 +1027,7 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
                 "source": "取引先",
                 "flags": "u"
@@ -854,11 +1043,13 @@
             "scope": {
                 "namespaces": [
                     "campaigns.json",
+                    "docs.json",
                     "unsubscribe.json"
                 ]
             },
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
                 "source": "抑制",
                 "flags": "u"
@@ -874,6 +1065,7 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
                 "source": "決定論的",
                 "flags": "u"
@@ -889,6 +1081,7 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
                 "source": "温かい経路",
                 "flags": "u"
@@ -907,6 +1100,7 @@
                 "温度帯",
                 "温度感"
             ],
+            "narrowed": false,
             "pattern": {
                 "source": "温度(?!帯|感)",
                 "flags": "u"
@@ -922,12 +1116,29 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
                 "source": "温度バンド",
                 "flags": "u"
             },
             "sources": [
                 "§4 glossary row \"The relationship metric (the differentiator)\""
+            ]
+        },
+        {
+            "id": "ja:相関ID",
+            "term": "相関ID",
+            "locale": "ja",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "相関ID",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"Support reference on failures\" (Japanese rendering)"
             ]
         },
         {
@@ -940,6 +1151,7 @@
                 "温度帯",
                 "温度感"
             ],
+            "narrowed": false,
             "pattern": {
                 "source": "関係の温度(?!帯|感)",
                 "flags": "u"
@@ -955,6 +1167,7 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
+            "narrowed": false,
             "pattern": {
                 "source": "関係スコア",
                 "flags": "u"
@@ -973,6 +1186,7 @@
                 "温度帯",
                 "温度感"
             ],
+            "narrowed": false,
             "pattern": {
                 "source": "関係性の温度(?!帯|感)",
                 "flags": "u"
@@ -1002,30 +1216,12 @@
             ]
         },
         {
-            "id": "en:People",
-            "term": "People",
-            "locale": "en",
-            "reason": "§4 sanctions person/people inside explanatory prose; only contact-list labels must say Contact.",
-            "sources": [
-                "§4 glossary row \"Person record\""
-            ]
-        },
-        {
             "id": "en:Profile",
             "term": "Profile",
             "locale": "en",
             "reason": "Profile is correct for the account and member profile surfaces; only the My Work page must not be called one.",
             "sources": [
                 "§4 glossary row \"The personal work page\""
-            ]
-        },
-        {
-            "id": "en:Relationship Radar",
-            "term": "Relationship Radar",
-            "locale": "en",
-            "reason": "§4 sanctions the full name as an occasional label in onboarding and marketing prose, which a catalog value cannot be told apart from an everyday label.",
-            "sources": [
-                "§4 glossary row \"The signals triage surface\""
             ]
         },
         {
@@ -1059,7 +1255,7 @@
             "id": "en:at a glance",
             "term": "at a glance",
             "locale": "en",
-            "reason": "banned only as a phrase repeated across surfaces, which is a cross-file count rather than a value match.",
+            "reason": "banned as a repetition across surfaces rather than as a value, so the ratchet over AT_A_GLANCE_SURFACES enforces it instead of a pattern.",
             "sources": [
                 "§4 glossary row \"Home / metrics / documents split\""
             ]
@@ -1098,15 +1294,6 @@
             "reason": "Note is the canonical name of the standalone record; only the Comment concept must not be called a note.",
             "sources": [
                 "§4 glossary row \"Discussion on a record\""
-            ]
-        },
-        {
-            "id": "en:opportunity",
-            "term": "opportunity",
-            "locale": "en",
-            "reason": "banned only as a countable UI noun, which needs grammatical analysis of the surrounding sentence.",
-            "sources": [
-                "§4 glossary row \"Deal record\""
             ]
         },
         {
@@ -1164,8 +1351,17 @@
             ]
         },
         {
-            "id": "en:to-do / todo",
-            "term": "to-do / todo",
+            "id": "en:to-do",
+            "term": "to-do",
+            "locale": "en",
+            "reason": "\"To do\" is the sanctioned kanban column name; standalone-noun usage needs grammatical analysis.",
+            "sources": [
+                "§4 glossary row \"Task and its kinds\""
+            ]
+        },
+        {
+            "id": "en:todo",
+            "term": "todo",
             "locale": "en",
             "reason": "\"To do\" is the sanctioned kanban column name; standalone-noun usage needs grammatical analysis.",
             "sources": [
@@ -1179,15 +1375,6 @@
             "reason": "§4 sanctions user in auth, sign-in, and session contexts, which a catalog value cannot be classified into.",
             "sources": [
                 "§4 glossary row \"A person in a workspace\""
-            ]
-        },
-        {
-            "id": "ja:アカウント",
-            "term": "アカウント",
-            "locale": "ja",
-            "reason": "アカウント is the canonical Japanese word for a sign-in account; only the Company record must not be called one.",
-            "sources": [
-                "§4 glossary row \"Company record\""
             ]
         },
         {
