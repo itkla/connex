@@ -6,6 +6,7 @@ import { Tabs as TabsPrimitive } from "radix-ui"
 import { motion, useReducedMotion } from "motion/react"
 
 import { cn } from "@/lib/utils"
+import { instant, springSnappy } from "@/app/lib/motion"
 
 type TabsContextValue = { activeValue: string | undefined; layoutId: string }
 
@@ -111,11 +112,7 @@ function TabsTrigger({
             "absolute inset-0 rounded-full bg-background shadow-sm",
             "group-data-[variant=line]/tabs-list:inset-x-1 group-data-[variant=line]/tabs-list:inset-y-auto group-data-[variant=line]/tabs-list:bottom-0 group-data-[variant=line]/tabs-list:h-0.5 group-data-[variant=line]/tabs-list:rounded-full group-data-[variant=line]/tabs-list:bg-foreground group-data-[variant=line]/tabs-list:shadow-none"
           )}
-          transition={
-            reduce
-              ? { duration: 0 }
-              : { type: "spring", stiffness: 520, damping: 42 }
-          }
+          transition={reduce ? instant : springSnappy}
         />
       )}
       <span className="relative z-10 inline-flex items-center gap-1.5">
