@@ -26,7 +26,7 @@ A feature that shows a signal but offers no action breaks the loop. A feature th
 - **Not a generic database.** Screens are opinionated about relationships and next actions, not neutral tables of rows. If a surface could belong to any record-keeping tool, it is underdesigned for Connex.
 - **Not a compliance console.** Connex is rigorously compliant under the hood (APPI, tenant isolation, auditability), but compliance is plumbing the everyday user should feel as safety, not read as statute. Legal machinery surfaces only on the pages built for it (see principle 3).
 - **Not a dense admin shell.** Configuration exists to serve selling and relationship work, not the other way around. Admin surfaces are visited occasionally by a minority of users; they never set the tone of the product.
-- **Not an autonomous actor. AI proposes; the user applies.** Every AI output in Connex — briefs, risk rationales, intro suggestions, assistant answers — is a proposal a person can inspect, question, and ignore. When the assistant offers to change a record, it prepares a validated proposal and shows exactly what would change; nothing is applied until the user explicitly applies it. Automation (workflows) acts only within rules a person explicitly built, reviewed, and turned on. We never claim "AI never touches records" — the truthful promise is confirm-before-apply.
+- **Not an autonomous actor. AI proposes; the user applies.** Every AI output in Connex — briefs, risk rationales, intro suggestions, assistant answers — is a proposal a person can inspect, question, and ignore. When the assistant offers to change an existing record, it prepares a validated proposal and shows exactly what would change; nothing is changed until the user explicitly applies it. The one deliberate exception: when the user directly asks the assistant to add something small — log an activity, create a task or note, add a tag — it does so immediately, says so, and the addition can be undone. Automation (workflows) acts only within rules a person explicitly built, reviewed, and turned on. We never claim "AI never touches records" — the truthful promise is that AI acts only on your ask, shows its work, and every write is either confirm-before-apply or announced and undoable.
 
 ## 2. Who it's for
 
@@ -66,7 +66,7 @@ Numbered and testable. Cite them by number in reviews.
 
 ## 4. Vocabulary
 
-**This section is the canonical glossary — the single source of truth for product terms.** There is no other glossary file. The CI banned-terms lint over the product's message catalogs (EN and JA patterns) is **generated from this section**: edit here, and the gate follows. Labels, columns, titles, and buttons use these terms verbatim; prose may vary naturally around them. "Never say" applies to product surfaces — code, schema, logs, and engineering docs keep their own names.
+**This section is the canonical glossary — the single source of truth for product terms.** There is no other glossary file. The CI banned-terms lint over the product's message catalogs (EN and JA patterns) is **generated from this section**: edit here, and the gate follows. (The generator and CI gate land with the copy workstream of the product-overhaul program, #1323; until they exist, reviewers enforce this section by hand.) Labels, columns, titles, and buttons use these terms verbatim; prose may vary naturally around them. "Never say" applies to product surfaces — code, schema, logs, and engineering docs keep their own names.
 
 | Concept | EN | JA | Never say (on product surfaces) |
 |---|---|---|---|
@@ -85,7 +85,7 @@ Numbered and testable. Cite them by number in reviews.
 | The route through the network | **intro path** | **紹介ルート** | warm path (as a label); ウォームパス, 温かい経路 |
 | Standalone linked note record | **Note** | **メモ** | ノート |
 | Discussion on a record | **Comment** | **コメント** | note (for comments) |
-| Free-text activity logging | Log it as an activity of type **Other** — there is no activity type named "Note"; the only two writing surfaces are Notes (records) and Comments (discussion) | 種別は**その他** | Note (as an activity type) |
+| Free-text activity logging | Log it as an activity of type **Other** — the only two writing surfaces are Notes (records) and Comments (discussion). The shipped activity type "Note" folds into **Other**: relabeled with history preserved, never deleted or destructively remapped | 種別は**その他** | Note (as an activity type) |
 | Task and its kinds | **task**; **follow-up task** as a qualified kind of task; **To do** only as a kanban column name | **タスク**／**フォローアップタスク**；列名は現行訳（「未着手」等）を維持 | to-do / todo as a standalone noun |
 | Task ownership | **Assignee** | **担当者** | Assigned to |
 | Record ownership | **Owner** (qualify roles: "Workspace owner", "Organization owner") | **担当者**（ロールは**オーナー**） | — |
@@ -146,7 +146,7 @@ The canonical behavior for each recurring moment. **This section is normative ta
 
 **Confirming destructive actions.** A small centered dialog, one grammar: title "Delete \<object\>?", body names the specific object and ends "This can't be undone." (JA 「この操作は取り消せません。」), confirm button "Delete" in the destructive style. "Archive" needs no undo warning — it is recoverable and says so. "Delete permanently" is reserved for organization-level permanent deletion, which additionally requires typed confirmation.
 
-**Success and failure feedback.** Every failure speaks the §5 error dialect, localized, selected from the error's meaning — raw backend or exception text never reaches the user. Server errors append "Reference: {id}" so support can find the incident. A signed-out or expired session is never an error toast: the product takes the user to sign in and returns them to where they were.
+**Success and failure feedback.** Every failure speaks the §5 error dialect, localized, selected from the error's meaning — raw backend or exception text never reaches the user. Server errors append "Reference: {id}" so support can find the incident. (Today only full-page error screens render a reference; the change that brings it to toasts must update the support-identifier table in [`INTERNAL_OPERATIONS_RUNBOOK.md`](INTERNAL_OPERATIONS_RUNBOOK.md) in the same PR — the two contracts move together.) A signed-out or expired session is never an error toast: the product takes the user to sign in and returns them to where they were.
 
 **Empty states.** The shared empty-state component, always with three parts: what this place is, why it's empty right now, and one inviting action — "No contacts yet. Contacts are the people your team knows — add your first one or import a CSV." First-run and no-filter-matches are distinct states with distinct copy; filtered-empty offers "Clear filters". A brand-new workspace gets a guided journey: import a CSV, scan business cards, or add a first contact — and on to the first warmth insight.
 
@@ -158,7 +158,7 @@ The canonical behavior for each recurring moment. **This section is normative ta
 
 **Permission denied.** Page-level: a calm explanation with a way back and, where useful, who to ask. Inline/toast: "You don't have permission to do that here. Ask a workspace admin." Never a permission constant, never a bare 403. If a whole surface is unavailable to a role, prefer not rendering the entry point over showing a locked door.
 
-**AI moments.** AI proposes; the user applies: assistant-prepared record changes are validated proposals that show exactly what would change and wait for explicit confirmation. Every AI surface names its evidence and how fresh it is — or plainly says it can't. Transparency stays in plain register: the assistant discloses "Chats here belong to this workspace — its admins can see them, even after you leave." once per session list (not per chat); card scanning says "The card image is sent to your organization's AI provider for reading — check the details before saving." Deeper guarantees live in docs and admin AI settings, not in everyday copy.
+**AI moments.** AI proposes; the user applies: assistant-prepared changes to existing records are validated proposals that show exactly what would change and wait for explicit confirmation; small additions the user directly asked for (an activity, task, note, or tag) apply immediately, are announced, and can be undone. Every AI surface names its evidence and how fresh it is — or plainly says it can't. Transparency stays in plain register: the assistant discloses "Chats here belong to this workspace — its admins can see them, even after you leave." once per session list (not per chat); card scanning tells the truth about where reading happens — "Cards are read on this Connex instance when possible; otherwise the image is sent to your organization's AI provider — check the details before saving." Deeper guarantees live in docs and admin AI settings, not in everyday copy.
 
 ## 7. Where things live
 
