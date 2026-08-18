@@ -244,7 +244,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const [loadError, setLoadError] = useState<Error | null>(null);
     const [composer, setComposer] = useState('');
     const [fileAttachments, setFileAttachments] = useState<AskConnexFileAttachment[]>([]);
-    const [unavailableReason, setUnavailableReason] = useState<string | null>(null);
+    const [featureUnavailable, setFeatureUnavailable] = useState(false);
     const [submissionBlocked, setSubmissionBlocked] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [reloadVersion, setReloadVersion] = useState(0);
@@ -537,7 +537,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setComposer('');
         setFileAttachments([]);
         setSubmissionBlocked(false);
-        setUnavailableReason(null);
+        setFeatureUnavailable(false);
         submittingRef.current = false;
         setSubmitting(false);
         resetStream();
@@ -655,7 +655,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             setFreshMessageIds(new Set());
             setComposer('');
             setFileAttachments([]);
-            setUnavailableReason(null);
+            setFeatureUnavailable(false);
             setSubmissionBlocked(false);
             submittingRef.current = false;
             setSubmitting(false);
@@ -704,7 +704,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     return;
                 }
                 if (error instanceof ApiError && error.status === 403) {
-                    setUnavailableReason(error.message);
+                    setFeatureUnavailable(true);
                     setLoadState('forbidden');
                     deferApiError(error);
                     return;
@@ -1188,7 +1188,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             !activeSignal
             || activeSignal.aborted
             || permission !== 'granted'
-            || unavailableReason !== null
+            || featureUnavailable
             || submissionBlocked
             || submittingRef.current
             || turn.phase === 'accepted'
@@ -1267,7 +1267,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         } catch (error) {
             if (activeSignal.aborted) return;
             if (error instanceof ApiError && error.status === 403) {
-                setUnavailableReason(error.message);
+                setFeatureUnavailable(true);
             } else {
                 setSubmissionBlocked(true);
             }
@@ -1282,7 +1282,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             submittingRef.current = false;
             setSubmitting(false);
         }
-    }, [activeSession, composer, context.record, fileContextCount, fileOperationPending, followTurn, permission, refreshTranscript, resetStream, sessionKey, showApiError, submissionBlocked, t, turn.phase, turnKey, unavailableReason, userDisplayName, userId]);
+    }, [activeSession, composer, context.record, fileContextCount, fileOperationPending, followTurn, permission, refreshTranscript, resetStream, sessionKey, showApiError, submissionBlocked, t, turn.phase, turnKey, featureUnavailable, userDisplayName, userId]);
 
     const cancelTurn = useCallback(async () => {
         const signal = identityControllerRef.current?.signal;
@@ -1315,17 +1315,17 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         if (permission === 'unavailable') {
             return { title: t('unavailable.lookupTitle'), body: t('unavailable.lookupBody') };
         }
-        if (unavailableReason !== null) {
+        if (featureUnavailable) {
             return {
                 title: t('unavailable.featureTitle'),
-                body: t('unavailable.featureBody', { reason: unavailableReason }),
+                body: t('unavailable.featureBody'),
             };
         }
         if (submissionBlocked) {
             return { title: t('unavailable.uncertainTitle'), body: t('unavailable.uncertainBody') };
         }
         return null;
-    }, [permission, submissionBlocked, t, unavailableReason]);
+    }, [permission, submissionBlocked, t, featureUnavailable]);
 
     const starterPrompts = useMemo(
         () => starterPromptKeys(implicitContext?.kind ?? null).map((key) => t(key)),
