@@ -135,15 +135,17 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<Map<String, String>> validation(MethodArgumentNotValidException ex) {
-        Map<String, String> errors = new LinkedHashMap<>();
+    public ResponseEntity<Map<String, Object>> validation(MethodArgumentNotValidException ex) {
+        Map<String, String> fieldErrors = new LinkedHashMap<>();
         ex.getBindingResult().getFieldErrors().forEach(err ->
-            errors.put(err.getField(), Objects.requireNonNullElse(
+            fieldErrors.put(err.getField(), Objects.requireNonNullElse(
                 err.getDefaultMessage(), "Invalid value"))
         );
-        errors.put("code", "VALIDATION_FAILED");
-        errors.put("message", "Please fix the highlighted fields");
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errors);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("code", "VALIDATION_FAILED");
+        body.put("message", "Please fix the highlighted fields");
+        body.put("fieldErrors", fieldErrors);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
     }
 
     /**

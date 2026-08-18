@@ -264,7 +264,7 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
-    void validationReturnsStableCodeAndFlatFieldErrors() {
+    void validationReturnsStableCodeAndEnvelopedFieldErrors() {
         BeanPropertyBindingResult bindingResult =
             new BeanPropertyBindingResult(new Object(), "request");
         bindingResult.addError(new FieldError(
@@ -272,13 +272,34 @@ class GlobalExceptionHandlerTest {
         MethodArgumentNotValidException failure = new MethodArgumentNotValidException(
             mock(MethodParameter.class), bindingResult);
 
-        ResponseEntity<Map<String, String>> response = handler.validation(failure);
+        ResponseEntity<Map<String, Object>> response = handler.validation(failure);
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
         assertEquals(Map.of(
             "code", "VALIDATION_FAILED",
             "message", "Please fix the highlighted fields",
-            "discountType", "Choose either an amount or a percentage discount."),
+            "fieldErrors", Map.of(
+                "discountType", "Choose either an amount or a percentage discount.")),
+            response.getBody());
+    }
+
+    @Test
+    void validationKeepsAConstraintErrorOnAFieldNamedMessage() {
+        BeanPropertyBindingResult bindingResult =
+            new BeanPropertyBindingResult(new Object(), "request");
+        bindingResult.addError(new FieldError(
+            "request", "message", "Keep the message under 2,000 characters."));
+        MethodArgumentNotValidException failure = new MethodArgumentNotValidException(
+            mock(MethodParameter.class), bindingResult);
+
+        ResponseEntity<Map<String, Object>> response = handler.validation(failure);
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals(Map.of(
+            "code", "VALIDATION_FAILED",
+            "message", "Please fix the highlighted fields",
+            "fieldErrors", Map.of(
+                "message", "Keep the message under 2,000 characters.")),
             response.getBody());
     }
 
