@@ -31,8 +31,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -65,6 +67,11 @@ import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.NullifyReference;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.TableLifecycle;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
+/**
+ * Differential evidence for workflow ownership cutover. The P matrix drives
+ * {@link WorkflowRuntimeService} as the engine-core parity seam; {@link ProductionPathParity}
+ * separately drives durable intake and leased outbox delivery as production-path parity.
+ */
 @Import(WorkflowEngineParityIntegrationTest.FixedDedupeConfiguration.class)
 @TestPropertySource(properties = {
     "connex.workflows.runtime.enabled=true",
@@ -77,9 +84,14 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
     private static final int MAX_SCHEDULER_DRAIN_CYCLES = 32;
     private static final Instant OCCURRED_AT = Instant.parse("2026-08-03T12:34:00Z");
     private static final int NORMALIZED_SUBJECT_ID = 0;
+    private static final String NORMALIZED_TRIGGER_KEY = "trigger-key";
+    private static final String NORMALIZED_DEDUPE_KEY = "dedupe-key";
 
     @Autowired private RuleService ruleService;
+    @Autowired private SegmentService segmentService;
     @Autowired private WorkflowRuntimeService workflowRuntimeService;
+    @Autowired private WorkflowTriggerIntake workflowTriggerIntake;
+    @Autowired private WorkflowDedupeKey workflowDedupeKey;
     @Autowired private WorkflowRuntimeOwnershipService ownershipService;
     @Autowired private WorkflowRuntimeClaimTransaction claimTransaction;
     @Autowired private WorkflowTriggerOutboxWorker outboxWorker;
@@ -90,6 +102,7 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
     @Autowired private LegacyWorkflowBackfillTransaction backfillTransaction;
     @Autowired private TenantTeardownTenantTransaction tenantTeardownTransaction;
     @Autowired private TenantWorkScope tenantWorkScope;
+    @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private ObjectMapper objectMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
     @MockitoBean private AuditService auditService;
@@ -171,16 +184,28 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
         dispatchEntity(subject("deal", legacyMatch.getId()), "deal.updated", "p3-match-left");
         dispatchEntity(subject("deal", legacyMiss.getId()), "deal.updated", "p3-miss-left");
         drainSchedulerWork();
-        EffectSnapshot legacyMatched = snapshot(subject("deal", legacyMatch.getId()), rule);
-        EffectSnapshot legacyMissed = snapshot(subject("deal", legacyMiss.getId()), rule);
+        EffectSnapshot legacyMatched = snapshot(
+            subject("deal", legacyMatch.getId()),
+            rule,
+            entityTrigger("deal.updated", "p3-match-left", OCCURRED_AT));
+        EffectSnapshot legacyMissed = snapshot(
+            subject("deal", legacyMiss.getId()),
+            rule,
+            entityTrigger("deal.updated", "p3-miss-left", OCCURRED_AT));
         cutOver(rule.getId());
         dispatchEntity(
             subject("deal", canonicalMatch.getId()), "deal.updated", "p3-match-right");
         dispatchEntity(
             subject("deal", canonicalMiss.getId()), "deal.updated", "p3-miss-right");
         drainSchedulerWork();
-        EffectSnapshot canonicalMatched = snapshot(subject("deal", canonicalMatch.getId()), rule);
-        EffectSnapshot canonicalMissed = snapshot(subject("deal", canonicalMiss.getId()), rule);
+        EffectSnapshot canonicalMatched = snapshot(
+            subject("deal", canonicalMatch.getId()),
+            rule,
+            entityTrigger("deal.updated", "p3-match-right", OCCURRED_AT));
+        EffectSnapshot canonicalMissed = snapshot(
+            subject("deal", canonicalMiss.getId()),
+            rule,
+            entityTrigger("deal.updated", "p3-miss-right", OCCURRED_AT));
 
         assertParity(legacyMatched, canonicalMatched);
         assertEffectsParity(legacyMissed, canonicalMissed);
@@ -215,16 +240,28 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
         dispatchEntity(
             subject("deal", legacyMiss.getId()), "deal.stage_changed", "p4-miss-left");
         drainSchedulerWork();
-        EffectSnapshot legacyMatched = snapshot(subject("deal", legacyMatch.getId()), rule);
-        EffectSnapshot legacyMissed = snapshot(subject("deal", legacyMiss.getId()), rule);
+        EffectSnapshot legacyMatched = snapshot(
+            subject("deal", legacyMatch.getId()),
+            rule,
+            entityTrigger("deal.stage_changed", "p4-match-left", OCCURRED_AT));
+        EffectSnapshot legacyMissed = snapshot(
+            subject("deal", legacyMiss.getId()),
+            rule,
+            entityTrigger("deal.stage_changed", "p4-miss-left", OCCURRED_AT));
         cutOver(rule.getId());
         dispatchEntity(
             subject("deal", canonicalMatch.getId()), "deal.stage_changed", "p4-match-right");
         dispatchEntity(
             subject("deal", canonicalMiss.getId()), "deal.stage_changed", "p4-miss-right");
         drainSchedulerWork();
-        EffectSnapshot canonicalMatched = snapshot(subject("deal", canonicalMatch.getId()), rule);
-        EffectSnapshot canonicalMissed = snapshot(subject("deal", canonicalMiss.getId()), rule);
+        EffectSnapshot canonicalMatched = snapshot(
+            subject("deal", canonicalMatch.getId()),
+            rule,
+            entityTrigger("deal.stage_changed", "p4-match-right", OCCURRED_AT));
+        EffectSnapshot canonicalMissed = snapshot(
+            subject("deal", canonicalMiss.getId()),
+            rule,
+            entityTrigger("deal.stage_changed", "p4-miss-right", OCCURRED_AT));
 
         assertParity(legacyMatched, canonicalMatched);
         assertParity(legacyMissed, canonicalMissed);
@@ -251,18 +288,28 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
         dispatchEntity(
             subject("person", legacySuspended.getId()), "person.updated", "p5-stop-left");
         drainSchedulerWork();
-        EffectSnapshot legacyLive = snapshot(subject("person", legacyActive.getId()), rule);
+        EffectSnapshot legacyLive = snapshot(
+            subject("person", legacyActive.getId()),
+            rule,
+            entityTrigger("person.updated", "p5-live-left", OCCURRED_AT));
         EffectSnapshot legacyStopped = snapshot(
-            subject("person", legacySuspended.getId()), rule);
+            subject("person", legacySuspended.getId()),
+            rule,
+            entityTrigger("person.updated", "p5-stop-left", OCCURRED_AT));
         cutOver(rule.getId());
         dispatchEntity(
             subject("person", canonicalActive.getId()), "person.updated", "p5-live-right");
         dispatchEntity(
             subject("person", canonicalSuspended.getId()), "person.updated", "p5-stop-right");
         drainSchedulerWork();
-        EffectSnapshot canonicalLive = snapshot(subject("person", canonicalActive.getId()), rule);
+        EffectSnapshot canonicalLive = snapshot(
+            subject("person", canonicalActive.getId()),
+            rule,
+            entityTrigger("person.updated", "p5-live-right", OCCURRED_AT));
         EffectSnapshot canonicalStopped = snapshot(
-            subject("person", canonicalSuspended.getId()), rule);
+            subject("person", canonicalSuspended.getId()),
+            rule,
+            entityTrigger("person.updated", "p5-stop-right", OCCURRED_AT));
 
         assertParity(legacyLive, canonicalLive);
         assertEffectsParity(legacyStopped, canonicalStopped);
@@ -305,14 +352,22 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
         dispatchEntity(legacyLive, "document.finalized", "p6-live-left");
         dispatchEntity(legacyGone, "document.finalized", "p6-gone-left");
         drainSchedulerWork();
-        EffectSnapshot legacyAttached = snapshot(legacyLive, rule);
-        EffectSnapshot legacyFailed = snapshot(legacyGone, rule);
+        EffectSnapshot legacyAttached = snapshot(
+            legacyLive, rule, entityTrigger("document.finalized", "p6-live-left", OCCURRED_AT));
+        EffectSnapshot legacyFailed = snapshot(
+            legacyGone, rule, entityTrigger("document.finalized", "p6-gone-left", OCCURRED_AT));
         cutOver(rule.getId());
         dispatchEntity(canonicalLive, "document.finalized", "p6-live-right");
         dispatchEntity(canonicalGone, "document.finalized", "p6-gone-right");
         drainSchedulerWork();
-        EffectSnapshot canonicalAttached = snapshot(canonicalLive, rule);
-        EffectSnapshot canonicalFailed = snapshot(canonicalGone, rule);
+        EffectSnapshot canonicalAttached = snapshot(
+            canonicalLive,
+            rule,
+            entityTrigger("document.finalized", "p6-live-right", OCCURRED_AT));
+        EffectSnapshot canonicalFailed = snapshot(
+            canonicalGone,
+            rule,
+            entityTrigger("document.finalized", "p6-gone-right", OCCURRED_AT));
 
         assertParity(legacyAttached, canonicalAttached);
         assertEquals(1, legacyAttached.tasks().size());
@@ -338,14 +393,16 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
         dispatchEntity(legacy, "company.updated", "p7-left-one", OCCURRED_AT);
         dispatchEntity(legacy, "company.updated", "p7-left-two", OCCURRED_AT.plusSeconds(30));
         drainSchedulerWork();
-        EffectSnapshot legacySnapshot = snapshot(legacy, rule);
+        EffectSnapshot legacySnapshot = snapshot(
+            legacy, rule, entityTrigger("company.updated", "p7-left-one", OCCURRED_AT));
         cutOver(rule.getId());
         Subject canonical = subject("company", canonicalCompany.getId());
         dispatchEntity(canonical, "company.updated", "p7-right-one", OCCURRED_AT);
         dispatchEntity(
             canonical, "company.updated", "p7-right-two", OCCURRED_AT.plusSeconds(30));
         drainSchedulerWork();
-        EffectSnapshot canonicalSnapshot = snapshot(canonical, rule);
+        EffectSnapshot canonicalSnapshot = snapshot(
+            canonical, rule, entityTrigger("company.updated", "p7-right-one", OCCURRED_AT));
 
         assertParity(legacySnapshot, canonicalSnapshot);
         assertEquals(1, legacySnapshot.runOutcome().rowCount());
@@ -473,7 +530,8 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
             "person.updated");
 
         assertParity(snapshots.legacy(), snapshots.canonical());
-        assertTrue(snapshots.legacy().responseDueSet());
+        assertEquals(
+            Long.valueOf(4 * 60 * 60L), snapshots.legacy().responseDueDurationSeconds());
     }
 
     @Test
@@ -517,22 +575,142 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
         RuleDto rule = scheduleRule(
             List.of(addTag(tag.getId())), fieldCondition("industry", "equals", industry),
             "user");
+        TriggerExpectation trigger = scheduleTrigger("daily", "p10-daily");
         clearInvocations(actionExecutor);
 
         dispatchSchedule("weekly", "p10-wrong-left");
-        dispatchSchedule("daily", "p10-daily-left");
-        dispatchSchedule("daily", "p10-daily-left");
-        EffectSnapshot legacy = snapshot(subject("company", legacyCompany.getId()), rule);
+        dispatchSchedule(trigger.event(), trigger.key());
+        dispatchSchedule(trigger.event(), trigger.key());
+        EffectSnapshot legacy = snapshot(
+            subject("company", legacyCompany.getId()), rule, trigger);
+        assertEquals(1, workspaceRuleExecutionCount());
+        assertEquals(0, workspaceWorkflowRunCount());
+        assertEquals(1, totalActionInvocationCount());
         cutOver(rule.getId());
         Company canonicalCompany = createCompany(industry);
         dispatchSchedule("weekly", "p10-wrong-right");
-        dispatchSchedule("daily", "p10-daily-right");
-        dispatchSchedule("daily", "p10-daily-right");
-        EffectSnapshot canonical = snapshot(subject("company", canonicalCompany.getId()), rule);
+        dispatchSchedule(trigger.event(), trigger.key());
+        dispatchSchedule(trigger.event(), trigger.key());
+        EffectSnapshot canonical = snapshot(
+            subject("company", canonicalCompany.getId()), rule, trigger);
 
         assertParity(legacy, canonical);
         assertEquals(1, legacy.runOutcome().rowCount());
         assertEquals(1, legacy.actionInvocationCount());
+        assertEquals(1, workspaceRuleExecutionCount());
+        assertEquals(1, workspaceWorkflowRunCount());
+        assertEquals(2, totalActionInvocationCount());
+    }
+
+    /**
+     * Production-path parity representatives driven through durable candidate intake, leased
+     * {@link WorkflowTriggerOutboxDeliveryService} delivery, and the durable run worker.
+     */
+    @Nested
+    class ProductionPathParity {
+
+        @Test
+        void matchedEntityChangeHasParityForBothOwners() {
+            Company legacyCompany = createCompany();
+            Company canonicalCompany = createCompany();
+            Tag tag = createTag();
+            RuleDto rule = entityRule(
+                "company", "company.updated", List.of(addTag(tag.getId())), null,
+                null, null, "user");
+            TriggerExpectation legacyTrigger = entityTrigger(
+                "company.updated", "outbox-match-left", OCCURRED_AT);
+            TriggerExpectation canonicalTrigger = entityTrigger(
+                "company.updated", "outbox-match-right", OCCURRED_AT);
+            clearInvocations(actionExecutor);
+
+            assertEquals(
+                new WorkflowDispatchResult(1, 0, 0, 0),
+                enqueueEntity(subject("company", legacyCompany.getId()), legacyTrigger));
+            drainSchedulerWork();
+            EffectSnapshot legacy = snapshot(
+                subject("company", legacyCompany.getId()), rule, legacyTrigger);
+            cutOver(rule.getId());
+            assertEquals(
+                new WorkflowDispatchResult(1, 0, 0, 0),
+                enqueueEntity(subject("company", canonicalCompany.getId()), canonicalTrigger));
+            drainSchedulerWork();
+            EffectSnapshot canonical = snapshot(
+                subject("company", canonicalCompany.getId()), rule, canonicalTrigger);
+
+            assertParity(legacy, canonical);
+            assertEquals(2, completedOutboxCount(rule.getId()));
+        }
+
+        @Test
+        void unlistedEntityChangeIsFilteredForBothOwners() {
+            Company legacyCompany = createCompany();
+            Company canonicalCompany = createCompany();
+            Tag tag = createTag();
+            RuleDto rule = entityRule(
+                "company", "company.created", List.of(addTag(tag.getId())), null,
+                null, null, "user");
+            TriggerExpectation legacyTrigger = entityTrigger(
+                "company.updated", "outbox-unlisted-left", OCCURRED_AT);
+            TriggerExpectation canonicalTrigger = entityTrigger(
+                "company.updated", "outbox-unlisted-right", OCCURRED_AT);
+            clearInvocations(actionExecutor);
+
+            assertEquals(
+                WorkflowDispatchResult.empty(),
+                enqueueEntity(subject("company", legacyCompany.getId()), legacyTrigger));
+            drainSchedulerWork();
+            EffectSnapshot legacy = snapshot(
+                subject("company", legacyCompany.getId()), rule, legacyTrigger);
+            cutOver(rule.getId());
+            assertEquals(
+                WorkflowDispatchResult.empty(),
+                enqueueEntity(subject("company", canonicalCompany.getId()), canonicalTrigger));
+            drainSchedulerWork();
+            EffectSnapshot canonical = snapshot(
+                subject("company", canonicalCompany.getId()), rule, canonicalTrigger);
+
+            assertParity(legacy, canonical);
+            assertEquals(new EffectSnapshot.RunOutcome(List.of(), 0), legacy.runOutcome());
+            assertEquals(0, totalActionInvocationCount());
+            assertEquals(0, outboxCount(rule.getId()));
+        }
+
+        @Test
+        void scheduleHasParityForBothOwnersThroughProductionPaging() {
+            String industry = "Outbox-" + unique();
+            Company legacyCompany = createCompany(industry);
+            Tag tag = createTag();
+            RuleDto rule = scheduleRule(
+                List.of(addTag(tag.getId())), fieldCondition("industry", "equals", industry),
+                "user");
+            TriggerExpectation legacyTrigger = scheduleTrigger(
+                "daily", "outbox-schedule-left");
+            clearInvocations(actionExecutor);
+
+            assertEquals(
+                new WorkflowDispatchResult(1, 0, 0, 0),
+                enqueueSchedule(legacyTrigger));
+            drainSchedulerWork();
+            EffectSnapshot legacy = snapshot(
+                subject("company", legacyCompany.getId()), rule, legacyTrigger);
+            updateCompanyIndustry(legacyCompany, "Retired-" + unique());
+            cutOver(rule.getId());
+            Company canonicalCompany = createCompany(industry);
+            TriggerExpectation canonicalTrigger = scheduleTrigger(
+                "daily", "outbox-schedule-right");
+            assertEquals(
+                new WorkflowDispatchResult(1, 0, 0, 0),
+                enqueueSchedule(canonicalTrigger));
+            drainSchedulerWork();
+            EffectSnapshot canonical = snapshot(
+                subject("company", canonicalCompany.getId()), rule, canonicalTrigger);
+
+            assertParity(legacy, canonical);
+            assertEquals(2, completedOutboxCount(rule.getId()));
+            assertEquals(1, workspaceRuleExecutionCount());
+            assertEquals(1, workspaceWorkflowRunCount());
+            assertEquals(2, totalActionInvocationCount());
+        }
     }
 
     @Nested
@@ -555,12 +733,18 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
             Subject legacySubject = subject("deal", pair.legacy().getId());
             dispatchEntity(legacySubject, "deal.updated", "d1-left");
             drainSchedulerWork();
-            EffectSnapshot legacy = snapshot(legacySubject, rule);
+            EffectSnapshot legacy = snapshot(
+                legacySubject,
+                rule,
+                entityTrigger("deal.updated", "d1-left", OCCURRED_AT));
             cutOver(rule.getId());
             Subject canonicalSubject = subject("deal", pair.canonical().getId());
             dispatchEntity(canonicalSubject, "deal.updated", "d1-right");
             drainSchedulerWork();
-            EffectSnapshot canonical = snapshot(canonicalSubject, rule);
+            EffectSnapshot canonical = snapshot(
+                canonicalSubject,
+                rule,
+                entityTrigger("deal.updated", "d1-right", OCCURRED_AT));
 
             assertEquals(List.of("partial"), legacy.runOutcome().statuses());
             assertEquals(List.of("intervention_required"), canonical.runOutcome().statuses());
@@ -589,12 +773,18 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
             Subject legacySubject = subject("company", legacyCompany.getId());
             dispatchEntity(legacySubject, "company.updated", "d2-left");
             drainSchedulerWork();
-            EffectSnapshot legacy = snapshot(legacySubject, rule);
+            EffectSnapshot legacy = snapshot(
+                legacySubject,
+                rule,
+                entityTrigger("company.updated", "d2-left", OCCURRED_AT));
             cutOver(rule.getId());
             Subject canonicalSubject = subject("company", canonicalCompany.getId());
             dispatchEntity(canonicalSubject, "company.updated", "d2-right");
             drainSchedulerWork();
-            EffectSnapshot canonical = snapshot(canonicalSubject, rule);
+            EffectSnapshot canonical = snapshot(
+                canonicalSubject,
+                rule,
+                entityTrigger("company.updated", "d2-right", OCCURRED_AT));
 
             assertEquals(1, legacy.notifications().size());
             assertEquals("Second notification", legacy.notifications().getFirst().title());
@@ -623,12 +813,18 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
             Subject legacySubject = subject("company", legacyCompany.getId());
             dispatchEntity(legacySubject, "company.updated", "d3-left");
             drainSchedulerWork();
-            EffectSnapshot legacy = snapshot(legacySubject, rule);
+            EffectSnapshot legacy = snapshot(
+                legacySubject,
+                rule,
+                entityTrigger("company.updated", "d3-left", OCCURRED_AT));
             cutOver(rule.getId());
             Subject canonicalSubject = subject("company", canonicalCompany.getId());
             dispatchEntity(canonicalSubject, "company.updated", "d3-right");
             drainSchedulerWork();
-            EffectSnapshot canonical = snapshot(canonicalSubject, rule);
+            EffectSnapshot canonical = snapshot(
+                canonicalSubject,
+                rule,
+                entityTrigger("company.updated", "d3-right", OCCURRED_AT));
 
             assertEquals(List.of("partial"), legacy.runOutcome().statuses());
             assertEquals(List.of("intervention_required"), canonical.runOutcome().statuses());
@@ -653,12 +849,18 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
             Subject legacySubject = subject("deal", pair.legacy().getId());
             dispatchEntity(legacySubject, "deal.updated", "d4-left");
             drainSchedulerWork();
-            EffectSnapshot legacy = snapshot(legacySubject, rule);
+            EffectSnapshot legacy = snapshot(
+                legacySubject,
+                rule,
+                entityTrigger("deal.updated", "d4-left", OCCURRED_AT));
             cutOver(rule.getId());
             Subject canonicalSubject = subject("deal", pair.canonical().getId());
             dispatchEntity(canonicalSubject, "deal.updated", "d4-right");
             drainSchedulerWork();
-            EffectSnapshot canonical = snapshot(canonicalSubject, rule);
+            EffectSnapshot canonical = snapshot(
+                canonicalSubject,
+                rule,
+                entityTrigger("deal.updated", "d4-right", OCCURRED_AT));
 
             assertEquals(List.of("partial"), legacy.runOutcome().statuses());
             assertEquals(List.of("intervention_required"), canonical.runOutcome().statuses());
@@ -669,33 +871,55 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
                 canonicalFailureCode(rule, pair.canonical().getId()));
         }
 
-        /** The test seam caps canonical enrollment at 128 while legacy enumerates every match. */
+        /** The test seam accepts 128 canonical enrollments and rejects 129 with its fixed cap. */
         @Test
-        void d5ScheduleEnrollmentAboveTheBoundRunsOnlyOnLegacy() {
+        void d5ScheduleEnrollmentPinsTheExactCanonicalBound() {
             String industry = "Overflow-" + unique();
             List<Company> companies = new ArrayList<>();
             for (int index = 0; index < 129; index++) {
                 companies.add(createCompany(industry));
             }
+            Company overflow = companies.getLast();
             Tag tag = createTag();
+            SegmentDefinition condition = fieldCondition("industry", "equals", industry);
             RuleDto rule = scheduleRule(
-                List.of(addTag(tag.getId())), fieldCondition("industry", "equals", industry),
-                "user");
+                List.of(addTag(tag.getId())), condition, "user");
             clearInvocations(actionExecutor);
 
             WorkflowDispatchResult legacyResult = dispatchSchedule("daily", "d5-left");
             assertEquals(0, legacyResult.candidates());
             assertEquals(129, matchedExecutionCount(rule.getId()));
             assertEquals(129, actionInvocationCount("company", companies));
+            updateCompanyIndustry(overflow, "Outside-" + unique());
             cutOver(rule.getId());
             clearInvocations(actionExecutor);
 
-            WorkflowDispatchResult canonicalResult = dispatchSchedule("daily", "d5-right");
+            assertEquals(
+                128,
+                segmentService.evaluate(
+                    workspace.getId(), currentUser.getId(), "company", condition).size());
+            WorkflowDispatchResult boundaryResult = dispatchSchedule(
+                "daily", "d5-boundary-128");
 
-            assertEquals(1, canonicalResult.candidates());
-            assertEquals(0, canonicalResult.started());
-            assertEquals(1, canonicalResult.rejected());
-            assertEquals(0, workflowRunCount(rule.getId()));
+            assertEquals(
+                new WorkflowDispatchResult(1, 128, 0, 0), boundaryResult);
+            assertEquals(128, workflowRunCount(rule.getId()));
+            assertEquals(128, workflowRunCount(rule.getId(), "succeeded"));
+            assertEquals(128, actionInvocationCount("company", companies));
+
+            updateCompanyIndustry(overflow, industry);
+            clearInvocations(actionExecutor);
+            assertEquals(
+                129,
+                segmentService.evaluate(
+                    workspace.getId(), currentUser.getId(), "company", condition).size());
+            WorkflowDispatchResult overflowResult = dispatchSchedule(
+                "daily", "d5-overflow-129");
+
+            assertEquals(
+                new WorkflowDispatchResult(1, 0, 0, 1), overflowResult);
+            assertEquals(128, workflowRunCount(rule.getId()));
+            assertEquals(128, workflowRunCount(rule.getId(), "succeeded"));
             assertEquals(0, actionInvocationCount("company", companies));
         }
 
@@ -718,12 +942,18 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
             Subject legacySubject = subject("company", legacyCompany.getId());
             dispatchEntity(legacySubject, "company.updated", "d6-left");
             drainSchedulerWork();
-            EffectSnapshot legacy = snapshot(legacySubject, rule);
+            EffectSnapshot legacy = snapshot(
+                legacySubject,
+                rule,
+                entityTrigger("company.updated", "d6-left", OCCURRED_AT));
             cutOver(rule.getId());
             Subject canonicalSubject = subject("company", canonicalCompany.getId());
             dispatchEntity(canonicalSubject, "company.updated", "d6-right");
             drainSchedulerWork();
-            EffectSnapshot canonical = snapshot(canonicalSubject, rule);
+            EffectSnapshot canonical = snapshot(
+                canonicalSubject,
+                rule,
+                entityTrigger("company.updated", "d6-right", OCCURRED_AT));
 
             assertEffectsParity(legacy, canonical);
             assertEquals(List.of("skipped"), legacy.runOutcome().statuses());
@@ -758,12 +988,18 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
             Subject legacySubject = subject("person", legacyPerson.getId());
             dispatchEntity(legacySubject, "person.updated", "d7-left");
             drainSchedulerWork();
-            EffectSnapshot legacy = snapshot(legacySubject, rule);
+            EffectSnapshot legacy = snapshot(
+                legacySubject,
+                rule,
+                entityTrigger("person.updated", "d7-left", OCCURRED_AT));
             cutOver(rule.getId());
             Subject canonicalSubject = subject("person", canonicalPerson.getId());
             dispatchEntity(canonicalSubject, "person.updated", "d7-right");
             drainSchedulerWork();
-            EffectSnapshot canonical = snapshot(canonicalSubject, rule);
+            EffectSnapshot canonical = snapshot(
+                canonicalSubject,
+                rule,
+                entityTrigger("person.updated", "d7-right", OCCURRED_AT));
 
             assertEquals(List.of("succeeded"), legacy.runOutcome().statuses());
             assertEquals(List.of("intervention_required"), canonical.runOutcome().statuses());
@@ -787,6 +1023,22 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
                 List.of(notifyAction("Null condition")));
             backfillTransaction.backfillWorkspace(null, workspace.getId());
             Workflow workflow = requireWorkflow(rule.getId());
+            assertEquals("legacy", workflow.getRuntimeOwner());
+            clearInvocations(actionExecutor);
+
+            WorkflowDispatchResult legacyResult = dispatchSchedule("daily", "d8-left");
+
+            assertEquals(WorkflowDispatchResult.empty(), legacyResult);
+            assertEquals(0, ruleExecutionCount(rule.getId()));
+            assertEquals(0, workflowRunCount(rule.getId()));
+            assertEquals(
+                0,
+                count(
+                    "SELECT COUNT(*) FROM notification"
+                        + " WHERE workspace_id = ? AND recipient_id = ?"
+                        + " AND type = 'rule' AND title = 'Null condition'",
+                    workspace.getId(), currentUser.getId()));
+            assertEquals(0, totalActionInvocationCount());
 
             WorkflowDefinitionValidationException failure = assertThrows(
                 WorkflowDefinitionValidationException.class,
@@ -805,16 +1057,22 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
         }
     }
 
+    /** Drives the exhaustive parity matrix through the engine-core dispatch seam. */
     private PairedSnapshots pairedSnapshots(
             RuleDto rule, Subject legacySubject, Subject canonicalSubject, String event) {
+        TriggerExpectation legacyTrigger = entityTrigger(
+            event, "legacy-" + unique(), OCCURRED_AT);
+        TriggerExpectation canonicalTrigger = entityTrigger(
+            event, "canonical-" + unique(), OCCURRED_AT);
         clearInvocations(actionExecutor);
-        dispatchEntity(legacySubject, event, "legacy-" + unique());
+        dispatchEntity(legacySubject, legacyTrigger.event(), legacyTrigger.key());
         drainSchedulerWork();
-        EffectSnapshot legacy = snapshot(legacySubject, rule);
+        EffectSnapshot legacy = snapshot(legacySubject, rule, legacyTrigger);
         cutOver(rule.getId());
-        dispatchEntity(canonicalSubject, event, "canonical-" + unique());
+        dispatchEntity(canonicalSubject, canonicalTrigger.event(), canonicalTrigger.key());
         drainSchedulerWork();
-        return new PairedSnapshots(legacy, snapshot(canonicalSubject, rule));
+        return new PairedSnapshots(
+            legacy, snapshot(canonicalSubject, rule, canonicalTrigger));
     }
 
     private void assertActionParity(
@@ -932,7 +1190,30 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
         return result;
     }
 
-    private EffectSnapshot snapshot(Subject subject, RuleDto rule) {
+    private WorkflowDispatchResult enqueueEntity(
+            Subject subject, TriggerExpectation trigger) {
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        WorkflowDispatchResult result = transaction.execute(status -> workflowTriggerIntake.enqueue(
+            new WorkflowTriggerDispatch.EntityChange(
+                workspace.getId(),
+                subject.recordType(),
+                subject.recordId(),
+                trigger.event(),
+                trigger.key(),
+                requireOccurredAt(trigger))));
+        if (result == null) {
+            throw new AssertionError("Durable entity trigger intake returned no result");
+        }
+        return result;
+    }
+
+    private WorkflowDispatchResult enqueueSchedule(TriggerExpectation trigger) {
+        return workflowTriggerIntake.enqueue(new WorkflowTriggerDispatch.ScheduleTick(
+            workspace.getId(), trigger.event(), trigger.key()));
+    }
+
+    private EffectSnapshot snapshot(
+            Subject subject, RuleDto rule, TriggerExpectation trigger) {
         Workflow workflow = requireWorkflow(rule.getId());
         List<Integer> tagIds = switch (subject.recordType()) {
             case "company" -> tagMapper.getTagsByCompanyId(
@@ -1012,28 +1293,43 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
                 || "document".equals(subject.recordType())
             ? dealMapper.getDealById(workspace.getId(), attachmentDealId)
             : null;
-        Person person = "person".equals(subject.recordType())
-            ? personMapper.getPersonById(workspace.getId(), subject.recordId())
-            : null;
-        List<String> statuses = new ArrayList<>();
-        statuses.addAll(jdbcTemplate.queryForList(
-            "SELECT status FROM rule_execution"
+        Long responseDueDurationSeconds = responseDueDurationSeconds(subject);
+        List<LedgerRow> ledgerRows = new ArrayList<>();
+        ledgerRows.addAll(jdbcTemplate.query(
+            "SELECT status, dedupe_key FROM rule_execution"
                 + " WHERE workspace_id = ? AND rule_id = ?"
                 + " AND trigger_entity_type = ? AND trigger_entity_id = ? ORDER BY id",
-            String.class,
+            (result, row) -> new LedgerRow(
+                WorkflowRunReadService.normalizeLegacyStatus(result.getString("status")),
+                trigger.type(),
+                trigger.event(),
+                trigger.key(),
+                result.getString("dedupe_key")),
             workspace.getId(),
             rule.getId(),
             subject.recordType(),
-            subject.recordId()).stream().map(WorkflowRunReadService::normalizeLegacyStatus).toList());
-        statuses.addAll(jdbcTemplate.queryForList(
-            "SELECT status FROM workflow_run"
+            subject.recordId()));
+        ledgerRows.addAll(jdbcTemplate.query(
+            "SELECT status, trigger_type, trigger_event, trigger_key, dedupe_key"
+                + " FROM workflow_run"
                 + " WHERE workspace_id = ? AND workflow_id = ?"
                 + " AND record_type = ? AND record_id = ? ORDER BY id",
-            String.class,
+            (result, row) -> new LedgerRow(
+                result.getString("status"),
+                result.getString("trigger_type"),
+                result.getString("trigger_event"),
+                result.getString("trigger_key"),
+                result.getString("dedupe_key")),
             workspace.getId(),
             workflow.getId(),
             subject.recordType(),
             subject.recordId()));
+        String expectedDedupeKey = expectedDedupeKey(rule, subject, trigger);
+        List<EffectSnapshot.LedgerIdentity> ledgerIdentities = ledgerRows.stream()
+            .map(row -> normalizedLedgerIdentity(row, trigger, expectedDedupeKey))
+            .toList();
+        List<String> statuses = new ArrayList<>(
+            ledgerRows.stream().map(LedgerRow::status).toList());
         statuses.sort(String::compareTo);
         return new EffectSnapshot(
             tagIds,
@@ -1043,9 +1339,68 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
             notificationEffects,
             deal == null ? null : deal.getOwnerId(),
             deal == null ? null : deal.getStageId(),
-            person != null && person.getFirstResponseDueAt() != null,
+            responseDueDurationSeconds,
+            ledgerIdentities,
             new EffectSnapshot.RunOutcome(statuses, statuses.size()),
             actionInvocationCount(subject.recordType(), subject.recordId()));
+    }
+
+    private String expectedDedupeKey(
+            RuleDto rule, Subject subject, TriggerExpectation trigger) {
+        if ("entity_change".equals(trigger.type())) {
+            return workflowDedupeKey.entityChange(
+                rule.getId(),
+                subject.recordType(),
+                subject.recordId(),
+                trigger.event(),
+                trigger.key(),
+                requireOccurredAt(trigger),
+                rule.getTrigger().getThrottleMinutes());
+        }
+        if ("schedule".equals(trigger.type())) {
+            return workflowDedupeKey.schedule(
+                rule.getId(),
+                subject.recordType(),
+                subject.recordId(),
+                trigger.event(),
+                trigger.key());
+        }
+        throw new AssertionError("Unsupported parity trigger type " + trigger.type());
+    }
+
+    private static Instant requireOccurredAt(TriggerExpectation trigger) {
+        Instant occurredAt = trigger.occurredAt();
+        if (occurredAt == null) {
+            throw new AssertionError("Entity trigger expectation has no occurrence time");
+        }
+        return occurredAt;
+    }
+
+    private static EffectSnapshot.LedgerIdentity normalizedLedgerIdentity(
+            LedgerRow row, TriggerExpectation trigger, String expectedDedupeKey) {
+        assertEquals(trigger.type(), row.triggerType(), "ledger trigger type");
+        assertEquals(trigger.event(), row.triggerEvent(), "ledger trigger event");
+        assertEquals(trigger.key(), row.triggerKey(), "ledger trigger key");
+        assertEquals(expectedDedupeKey, row.dedupeKey(), "ledger dedupe key");
+        return new EffectSnapshot.LedgerIdentity(
+            trigger.type(),
+            trigger.event(),
+            NORMALIZED_TRIGGER_KEY,
+            NORMALIZED_DEDUPE_KEY);
+    }
+
+    private Long responseDueDurationSeconds(Subject subject) {
+        if (!"person".equals(subject.recordType())) {
+            return null;
+        }
+        List<Long> durations = jdbcTemplate.query(
+            "SELECT TIMESTAMPDIFF(SECOND, first_response_started_at,"
+                + " first_response_due_at) FROM person"
+                + " WHERE workspace_id = ? AND id = ?",
+            (result, row) -> result.getObject(1, Long.class),
+            workspace.getId(),
+            subject.recordId());
+        return durations.isEmpty() ? null : durations.getFirst();
     }
 
     private static long dueDateOffset(String dueDate, LocalDate today) {
@@ -1083,6 +1438,18 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
             .sum();
     }
 
+    private int totalActionInvocationCount() {
+        return (int) mockingDetails(actionExecutor).getInvocations().stream()
+            .filter(invocation -> "execute".equals(invocation.getMethod().getName()))
+            .count();
+    }
+
+    private int ruleExecutionCount(int ruleId) {
+        return count(
+            "SELECT COUNT(*) FROM rule_execution WHERE workspace_id = ? AND rule_id = ?",
+            workspace.getId(), ruleId);
+    }
+
     private int matchedExecutionCount(int ruleId) {
         return count(
             "SELECT COUNT(*) FROM rule_execution"
@@ -1094,6 +1461,42 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
         Workflow workflow = requireWorkflow(ruleId);
         return count(
             "SELECT COUNT(*) FROM workflow_run WHERE workspace_id = ? AND workflow_id = ?",
+            workspace.getId(), workflow.getId());
+    }
+
+    private int workflowRunCount(int ruleId, String status) {
+        Workflow workflow = requireWorkflow(ruleId);
+        return count(
+            "SELECT COUNT(*) FROM workflow_run"
+                + " WHERE workspace_id = ? AND workflow_id = ? AND status = ?",
+            workspace.getId(), workflow.getId(), status);
+    }
+
+    private int workspaceRuleExecutionCount() {
+        return count(
+            "SELECT COUNT(*) FROM rule_execution WHERE workspace_id = ?",
+            workspace.getId());
+    }
+
+    private int workspaceWorkflowRunCount() {
+        return count(
+            "SELECT COUNT(*) FROM workflow_run WHERE workspace_id = ?",
+            workspace.getId());
+    }
+
+    private int outboxCount(int ruleId) {
+        Workflow workflow = requireWorkflow(ruleId);
+        return count(
+            "SELECT COUNT(*) FROM workflow_trigger_outbox"
+                + " WHERE workspace_id = ? AND workflow_id = ?",
+            workspace.getId(), workflow.getId());
+    }
+
+    private int completedOutboxCount(int ruleId) {
+        Workflow workflow = requireWorkflow(ruleId);
+        return count(
+            "SELECT COUNT(*) FROM workflow_trigger_outbox"
+                + " WHERE workspace_id = ? AND workflow_id = ? AND status = 'completed'",
             workspace.getId(), workflow.getId());
     }
 
@@ -1116,21 +1519,32 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
         return value == null ? 0 : value;
     }
 
+    /**
+     * Drains outbox delivery and run execution to quiescence. Runs execute a bounded few per sweep,
+     * so wide fan-outs legitimately need many sweeps: the drain fails only after
+     * {@link #MAX_SCHEDULER_DRAIN_CYCLES} consecutive sweeps make no progress, naming the stuck
+     * work, so a genuine deadlock still fails fast while a 128-run enrollment simply keeps sweeping.
+     */
     private void drainSchedulerWork() {
-        for (int cycle = 0; cycle < MAX_SCHEDULER_DRAIN_CYCLES; cycle++) {
+        SchedulerWorkState previous = null;
+        int stalledCycles = 0;
+        while (true) {
             makeRetryRunsDue();
             processOneSchedulerClaim();
             SchedulerWorkState state = schedulerWorkState();
             if (state.quiescent()) {
                 return;
             }
+            stalledCycles = state.equals(previous) ? stalledCycles + 1 : 0;
+            previous = state;
+            if (stalledCycles >= MAX_SCHEDULER_DRAIN_CYCLES) {
+                throw new IllegalStateException(
+                    "Workflow scheduler work made no progress for "
+                        + MAX_SCHEDULER_DRAIN_CYCLES
+                        + " cycles; pending outbox=" + state.pendingOutbox()
+                        + "; stuck runs=" + state.nonterminalRuns());
+            }
         }
-        SchedulerWorkState state = schedulerWorkState();
-        throw new IllegalStateException(
-            "Workflow scheduler work did not quiesce within "
-                + MAX_SCHEDULER_DRAIN_CYCLES
-                + " cycles; pending outbox=" + state.pendingOutbox()
-                + "; stuck runs=" + state.nonterminalRuns());
     }
 
     private void makeRetryRunsDue() {
@@ -1180,9 +1594,13 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
 
     private Company createCompany(String industry) {
         Company company = createCompany();
+        updateCompanyIndustry(company, industry);
+        return company;
+    }
+
+    private void updateCompanyIndustry(Company company, String industry) {
         company.setIndustry(industry);
         assertEquals(1, companyMapper.update(company));
-        return company;
     }
 
     private Person createPerson(Company company) {
@@ -1269,6 +1687,15 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
 
     private static Subject subject(String recordType, int recordId, int attachmentDealId) {
         return new Subject(recordType, recordId, attachmentDealId);
+    }
+
+    private static TriggerExpectation entityTrigger(
+            String event, String key, Instant occurredAt) {
+        return new TriggerExpectation("entity_change", event, key, occurredAt);
+    }
+
+    private static TriggerExpectation scheduleTrigger(String cadence, String bucketKey) {
+        return new TriggerExpectation("schedule", cadence, bucketKey, null);
     }
 
     private static RuleAction addTag(int tagId) {
@@ -1390,6 +1817,21 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
     }
 
     private record Subject(String recordType, int recordId, Integer attachmentDealId) { }
+
+    private record TriggerExpectation(
+        String type,
+        String event,
+        String key,
+        Instant occurredAt
+    ) { }
+
+    private record LedgerRow(
+        String status,
+        String triggerType,
+        String triggerEvent,
+        String triggerKey,
+        String dedupeKey
+    ) { }
 
     private record PairedSnapshots(EffectSnapshot legacy, EffectSnapshot canonical) { }
 

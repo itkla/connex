@@ -887,7 +887,7 @@ not the production path and must not be used as evidence for cadence-bucket pari
 | Retry | None | At most 3 attempts for classified transient database failures, subject to action retry safety |
 | Transaction boundary | All actions in one execution block | One node effect and checkpoint per `REQUIRES_NEW`, `READ_COMMITTED` transaction |
 | Traversal bound | At most 16 flattened actions | At most 50 traversed nodes |
-| Delay and branches | Cannot be projected | Supported, but a workflow using either can no longer roll back to the legacy engine |
+| Delays and non-legacy/arbitrary branching | Cannot be projected | Supported, but a workflow using either can no longer roll back to the legacy engine |
 
 Both engines call the same `RuleActionExecutor`, so a successfully admitted action has the same
 mechanics. The material differences are admission, transaction boundaries, retry, and what happens

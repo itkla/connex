@@ -120,7 +120,20 @@ class WorkflowLegacyOwnedUnderCanonicalGateIntegrationTest extends AbstractServi
 
         publishCompanyUpdated(company.getId());
         WorkflowTriggerOutbox outbox = latestOutbox(rule.getId());
+        WorkflowWorkClaim abandoned = abandonNextTriggerLease();
+        assertEquals(outbox.getId(), abandoned.id());
+        assertEquals("leased", outboxStatus(outbox.getId()));
+        assertEquals(1, outboxDeliveryAttemptCount(outbox.getId()));
+        assertEquals(
+            1,
+            jdbcTemplate.update(
+                "UPDATE workflow_trigger_outbox"
+                    + " SET lease_until = DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 1 SECOND)"
+                    + " WHERE workspace_id = ? AND id = ? AND status = 'leased'",
+                workspace.getId(),
+                outbox.getId()));
         drainSchedulerWork();
+        assertEquals(2, outboxDeliveryAttemptCount(outbox.getId()));
         workflowRuntimeService.dispatch(entityDispatch(outbox));
         workflowRuntimeService.dispatch(entityDispatch(outbox));
         drainSchedulerWork();
@@ -339,6 +352,14 @@ class WorkflowLegacyOwnedUnderCanonicalGateIntegrationTest extends AbstractServi
             outboxId);
     }
 
+    private int outboxDeliveryAttemptCount(long outboxId) {
+        return count(
+            "SELECT delivery_attempt_count FROM workflow_trigger_outbox"
+                + " WHERE workspace_id = ? AND id = ?",
+            workspace.getId(),
+            outboxId);
+    }
+
     private int count(String sql, Object... arguments) {
         Integer value = jdbcTemplate.queryForObject(sql, Integer.class, arguments);
         return value == null ? 0 : value;
@@ -351,6 +372,15 @@ class WorkflowLegacyOwnedUnderCanonicalGateIntegrationTest extends AbstractServi
             }
         }
         throw new IllegalStateException("Workflow scheduler work did not drain within its bound");
+    }
+
+    private WorkflowWorkClaim abandonNextTriggerLease() {
+        WorkflowWorkClaim claim = tenantWorkScope.inWorkspace(
+            workspace.getId(), () -> claimTransaction.claimNext(workspace.getId()));
+        if (claim == null || claim.kind() != WorkflowWorkClaim.Kind.TRIGGER) {
+            throw new AssertionError("Expected a durable trigger lease to abandon");
+        }
+        return claim;
     }
 
     private boolean processOneSchedulerClaim() {

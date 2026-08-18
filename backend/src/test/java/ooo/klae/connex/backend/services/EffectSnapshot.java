@@ -11,7 +11,8 @@ record EffectSnapshot(
     List<NotificationEffect> notifications,
     Integer dealOwnerId,
     Integer dealStageId,
-    boolean responseDueSet,
+    Long responseDueDurationSeconds,
+    List<LedgerIdentity> ledgerIdentities,
     RunOutcome runOutcome,
     int actionInvocationCount
 ) {
@@ -22,6 +23,7 @@ record EffectSnapshot(
         activities = List.copyOf(activities);
         notes = List.copyOf(notes);
         notifications = List.copyOf(notifications);
+        ledgerIdentities = List.copyOf(ledgerIdentities);
     }
 
     record TaskEffect(
@@ -56,6 +58,14 @@ record EffectSnapshot(
         String actorLabel,
         String sourceType,
         Integer sourceId
+    ) { }
+
+    /** Trigger and dedupe fields validated exactly before phase-specific values are normalized. */
+    record LedgerIdentity(
+        String triggerType,
+        String triggerEvent,
+        String triggerKey,
+        String dedupeKey
     ) { }
 
     record RunOutcome(List<String> statuses, int rowCount) {

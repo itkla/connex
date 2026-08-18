@@ -32,8 +32,12 @@ final class WorkflowParityTestSupport {
             () -> assertEquals(
                 legacy.dealStageId(), canonical.dealStageId(), "deal stage effect"),
             () -> assertEquals(
-                legacy.responseDueSet(),
-                canonical.responseDueSet(),
-                "first-response due effect"));
+                legacy.responseDueDurationSeconds(),
+                canonical.responseDueDurationSeconds(),
+                "first-response SLA duration"),
+            () -> assertEquals(
+                legacy.ledgerIdentities(),
+                canonical.ledgerIdentities(),
+                "normalized ledger trigger and dedupe identity"));
     }
 }
