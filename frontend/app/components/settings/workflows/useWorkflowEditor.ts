@@ -201,7 +201,7 @@ export function useWorkflowEditor({
         } catch {
             if (!signal?.aborted
                 && loadGeneration === versionsLoadGenerationRef.current
-                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) toastError(t("versions.loadFailed"));
+                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) toastError(t("versions.loadFailed"), { description: t("versions.loadFailedBody") });
         } finally {
             if (!signal?.aborted
                 && loadGeneration === versionsLoadGenerationRef.current
@@ -462,7 +462,7 @@ export function useWorkflowEditor({
             reconcileServerWorkflow(serverWorkflow);
         } catch {
             if (recoveryGeneration === conflictRecoveryGenerationRef.current
-                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) toastError(t("conflict.loadFailed"));
+                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) toastError(t("conflict.loadFailed"), { description: t("conflict.loadFailedBody") });
         }
     }, [activeWorkspaceId, isCurrentWorkflow, reconcileServerWorkflow, scopeReady, t, workflow]);
 
@@ -526,7 +526,7 @@ export function useWorkflowEditor({
                 : isCurrentWorkspace(workspaceId) && creationContinuation === creationContinuationRef.current;
             if (!currentScope || actionGeneration !== busyActionGenerationRef.current) return;
             if (error instanceof ApiError && error.status === 409) await beginConflictRecovery();
-            else toastError(t("saveFailed"));
+            else toastError(t("saveFailed"), { description: t("saveFailedBody") });
         } finally {
             const creationContinuationCurrent = creationContinuation === creationContinuationRef.current;
             if (!workflow && !creationCompleted && creationContinuationCurrent) creationLockRef.current = false;
@@ -562,7 +562,7 @@ export function useWorkflowEditor({
         } catch {
             if (documentGeneration === documentGenerationRef.current
                 && actionGeneration === busyActionGenerationRef.current
-                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) toastError(t("validationFailed"));
+                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) toastError(t("validationFailed"), { description: t("validationFailedBody") });
         } finally {
             if (actionGeneration === busyActionGenerationRef.current
                 && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setBusyAction(null);
@@ -596,7 +596,7 @@ export function useWorkflowEditor({
             if (actionGeneration !== busyActionGenerationRef.current
                 || !isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
             if (error instanceof ApiError && error.status === 409) await beginConflictRecovery();
-            else toastError(t("publishFailed"));
+            else toastError(t("publishFailed"), { description: t("publishFailedBody") });
         } finally {
             if (actionGeneration === busyActionGenerationRef.current
                 && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setBusyAction(null);
@@ -626,7 +626,7 @@ export function useWorkflowEditor({
             toastSuccess(t(updated.enabled ? "enabled" : "disabled"));
         } catch {
             if (actionGeneration === busyActionGenerationRef.current
-                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) toastError(t("lifecycleFailed"));
+                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) toastError(t("lifecycleFailed"), { description: t("lifecycleFailedBody") });
         } finally {
             if (actionGeneration === busyActionGenerationRef.current
                 && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setBusyAction(null);
@@ -654,7 +654,7 @@ export function useWorkflowEditor({
                 || simulationGeneration !== simulationGenerationRef.current
                 || !isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
             if (error instanceof ApiError && error.status === 409) await beginConflictRecovery();
-            else toastError(t("simulation.failed"));
+            else toastError(t("simulation.failed"), { description: t("simulation.failedBody") });
         } finally {
             if (simulationGeneration === simulationGenerationRef.current
                 && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setSimulationLoadState("idle");

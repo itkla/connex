@@ -1,6 +1,6 @@
-import { redirect } from "next/navigation";
+import { permanentRedirect } from "next/navigation";
 
-/** Rules moved to the workflows surface; keep old bookmarks working. */
+/** Automation lives on the workflows surface; this path stays a permanent redirect for old bookmarks. */
 export default function RulesSettingsPage() {
-    redirect("/workflows");
+    permanentRedirect("/workflows");
 }

@@ -19,6 +19,7 @@ import WorkflowVersionsDialog from "@/app/components/settings/workflows/Workflow
 import { useWorkflowEditor } from "@/app/components/settings/workflows/useWorkflowEditor";
 import { useWorkflowWorkspaceAccess } from "@/app/components/settings/workflows/useWorkflowWorkspaceAccess";
 import { workflowDelayDiagnostics } from "@/app/components/settings/workflows/workflowGraph";
+import { workflowRunReferenceParts } from "@/app/components/settings/workflows/workflowRunKey";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import {
     getCompanies,
@@ -75,7 +76,7 @@ export default function WorkflowEditor({ workflowId }: { workflowId?: number }) 
 
 function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
     const t = useTranslations("WorkspaceWorkflows");
-    const tr = useTranslations("WorkspaceRules");
+    const tr = useTranslations("WorkflowAuthoring");
     const router = useRouter();
     const searchParams = useSearchParams();
     const isNarrow = useSyncExternalStore(
@@ -121,7 +122,7 @@ function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
         }).then((run) => {
             if (!controller.signal.aborted) inspectRun(run);
         }).catch(() => {
-            if (!controller.signal.aborted) toastError(t("runs.detailFailed"));
+            if (!controller.signal.aborted) toastError(t("runs.detailFailed"), { description: t("runs.detailFailedBody") });
         });
         return () => controller.abort();
     }, [activeWorkspaceId, inspectRun, loadedWorkflow, requestedRunKey, t]);
@@ -180,7 +181,7 @@ function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
             })
             .catch(() => {
                 if (!controller.signal.aborted) {
-                    toastError(t("fieldsLoadFailed"));
+                    toastError(t("fieldsLoadFailed"), { description: t("fieldsLoadFailedBody") });
                 }
             });
         return () => controller.abort();
@@ -377,7 +378,6 @@ function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
                 activeVersionNumber={editor.activeVersionNumber}
                 hasActiveVersion={editor.workflow?.activeVersionId != null}
                 enabled={editor.workflow?.enabled ?? false}
-                runtimeOwner={editor.workflow?.runtimeOwner ?? "legacy"}
                 executionMode={editor.history.present.executionMode}
                 archived={editor.workflow?.archivedAt != null}
                 dirty={editor.dirty}
@@ -422,7 +422,12 @@ function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
                     <EyeIcon className="size-4" />
                     <span className="font-medium">
                         {editor.inspection.kind === "run"
-                            ? t("inspection.run", { runKey: editor.inspection.run.runKey })
+                            ? t(
+                                workflowRunReferenceParts(editor.inspection.run.runKey).earlier
+                                    ? "inspection.legacyRun"
+                                    : "inspection.run",
+                                { run: workflowRunReferenceParts(editor.inspection.run.runKey).number },
+                            )
                             : t("inspection.version", { number: editor.inspection.version.versionNumber })}
                     </span>
                     <span className="text-muted-foreground">{t("inspection.readOnly")}</span>

@@ -594,12 +594,17 @@ This is the single most common support-flow mistake, so internalize it before th
 | A broken **page** (render/boundary failure) | **`Reference: <digest>`** — a Next.js server digest | The error screen renders it in monospace, `select-all`. This is the page identifier; it is NOT the API correlation ID. |
 | A failed **in-app action** (an error toast) | **`Reference: <correlationId>`** appended to the toast body | The API error mapper (`frontend/app/lib/errorMessages.ts`) appends it whenever the response carried a correlation id — today only the catch-all 500 handler emits one |
 | A raw API `500` (curl, devtools, an integration) | `correlationId` in the JSON body, and the `X-Correlation-Id` response header | The catch-all exception handler and the correlation filter |
+| A **workflow run** they are asking about | a **run reference** — `canonical-<id>` or `legacy-<id>` — from the "copy the run reference" button beside "Run #N" / "Earlier run #N" | `WorkflowInterventionService`/`WorkflowRunReadService` mint it; the UI shows only the number. Look it up in workflow operations at `/workflows/<workflowId>/runs/<runKey>`, **not** in the correlation logs — it is not a correlation ID |
 
 **Which identifier you get depends on what broke.** A failed action (toast) hands you the API
 correlation ID as `Reference: <id>`; the admin diagnostics and mail-deliverability panels show the
 same id as "Reference ID". A broken **page** hands you a Next.js **digest** — also labeled
-`Reference:` — which is not a correlation ID and cannot be looked up as one. Distinguish them by
-what the user was doing: an action that failed → correlation ID; a page that wouldn't render → digest.
+`Reference:` — which is not a correlation ID and cannot be looked up as one. A **run reference** is
+a third thing again: it names a stored workflow run, not an incident, so it resolves in workflow
+operations and never in the correlation logs. Distinguish them by what the user was doing: an action
+that failed → correlation ID; a page that wouldn't render → digest; a workflow run they want traced
+→ run reference. The two run sequences are independent, so always take the prefix with the number —
+`canonical-42` and `legacy-42` are different runs.
 
 When the frontend error boundary fires, it best-effort reports to `POST /api/client-errors`. The
 digest, message, and stack remain only in the local log sink and never enter the database or bundle:

@@ -268,7 +268,7 @@ export default function WorkflowManualRunLauncher({
                     ) : null}
 
                     {phase === "complete" && result && preparation ? (
-                        <InvocationSummary result={result} workflowId={preparation.workflowId} />
+                        <InvocationSummary result={result} preparation={preparation} />
                     ) : null}
                 </div>
 
@@ -383,9 +383,8 @@ function PreparationSummary({ preparation }: { preparation: WorkflowManualPrepar
                     <h3 className="text-sm font-semibold text-foreground">{t("manual.samplesTitle")}</h3>
                     <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border">
                         {preparation.samples.map((sample) => (
-                            <li key={sample.recordId} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                                <span className="truncate text-foreground">{sample.label}</span>
-                                <span className="font-mono text-xs text-muted-foreground">#{sample.recordId}</span>
+                            <li key={sample.recordId} className="truncate px-3 py-2 text-sm text-foreground">
+                                {sample.label}
                             </li>
                         ))}
                     </ul>
@@ -406,8 +405,21 @@ function PreparationSummary({ preparation }: { preparation: WorkflowManualPrepar
     );
 }
 
-function InvocationSummary({ result, workflowId }: { result: WorkflowInvocationResult; workflowId: number }) {
+function InvocationSummary({
+    result,
+    preparation,
+}: {
+    result: WorkflowInvocationResult;
+    preparation: WorkflowManualPreparation;
+}) {
     const t = useTranslations("WorkflowOperations");
+    const sampledLabels = useMemo(
+        () => new Map(preparation.samples.map((sample) => [sample.recordId, sample.label])),
+        [preparation.samples],
+    );
+    const recordTypeLabel = t.has(`data.${preparation.recordType}`)
+        ? t(`data.${preparation.recordType}`)
+        : t("manual.recordFallback");
     const totals = [
         ["queued", result.queuedCount],
         ["running", result.runningCount],
@@ -448,12 +460,14 @@ function InvocationSummary({ result, workflowId }: { result: WorkflowInvocationR
                     <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border">
                         {exceptionalRecords.slice(0, 50).map((record) => (
                             <li key={record.recordId} className="grid gap-2 px-3 py-2.5 text-sm sm:grid-cols-[auto_minmax(0,1fr)_auto]">
-                                <span className="font-mono text-xs text-muted-foreground">#{record.recordId}</span>
+                                <span className="truncate text-muted-foreground">
+                                    {sampledLabels.get(record.recordId) ?? recordTypeLabel}
+                                </span>
                                 <span className="text-foreground">
                                     {record.reasonCode ? <ManualReason code={record.reasonCode} /> : t(`status.${record.status}`)}
                                 </span>
                                 {record.runKey ? (
-                                    <Link className="text-brand hover:text-brand-hover" href={`/workflows/${workflowId}/runs/${encodeURIComponent(record.runKey)}`}>
+                                    <Link className="text-brand hover:text-brand-hover" href={`/workflows/${preparation.workflowId}/runs/${encodeURIComponent(record.runKey)}`}>
                                         {t("manual.viewRun")}
                                     </Link>
                                 ) : null}

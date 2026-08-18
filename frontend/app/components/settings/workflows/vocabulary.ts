@@ -1,9 +1,9 @@
 import type { RuleAction } from "@/app/lib/types";
 
 /**
- * The rule-engine authoring vocabulary, shared by the legacy RuleDialog and the workflows editor
- * so the two surfaces can never drift. Mirrors the server-side validation in RuleService — a
- * change here must stay within what the backend accepts.
+ * The authoring vocabulary shared by every workflow surface, so the editor, the inspector, and
+ * the run history can never drift. Mirrors the server-side validation in RuleService — a change
+ * here must stay within what the backend accepts.
  */
 export const RECORD_TYPES = ["deal", "company", "person", "task", "document"];
 

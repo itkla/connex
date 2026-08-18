@@ -91,7 +91,7 @@
     },
     "description": {
       "record": {
-        "runWorkflow": "Freeze this exact record scope and start a new workflow run."
+        "runWorkflow": "Pick this record, review the selection, and start a workflow run."
       },
       "utility": {
         "exportCurrentCompanies": "Download all companies matching this view's search, filters, and segment.",

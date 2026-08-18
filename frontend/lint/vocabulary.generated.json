@@ -648,6 +648,29 @@
             ]
         },
         {
+            "id": "en:rule",
+            "term": "rule",
+            "locale": "en",
+            "scope": {
+                "namespaces": [
+                    "workflow-operations.json",
+                    "workspace.json#WorkflowAuthoring",
+                    "workspace.json#WorkflowsLayout",
+                    "workspace.json#WorkspaceWorkflows"
+                ]
+            },
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:ruling|ruled|rules|rule)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 glossary row \"The automation object\""
+            ]
+        },
+        {
             "id": "en:runtime",
             "term": "runtime",
             "locale": "en",
@@ -1022,6 +1045,29 @@
             ]
         },
         {
+            "id": "ja:ルール",
+            "term": "ルール",
+            "locale": "ja",
+            "scope": {
+                "namespaces": [
+                    "workflow-operations.json",
+                    "workspace.json#WorkflowAuthoring",
+                    "workspace.json#WorkflowsLayout",
+                    "workspace.json#WorkspaceWorkflows"
+                ]
+            },
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "ルール",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"The automation object\" (Japanese rendering)"
+            ]
+        },
+        {
             "id": "ja:取引先",
             "term": "取引先",
             "locale": "ja",
@@ -1322,15 +1368,6 @@
             "reason": "banned only when unglossed in headline copy; whether a gloss follows lives in neighbouring keys, not in the value.",
             "sources": [
                 "§4 glossary row \"APPI use-limitation state\""
-            ]
-        },
-        {
-            "id": "en:rule",
-            "term": "rule",
-            "locale": "en",
-            "reason": "§4 sanctions rule on the legacy-automations migration screen, and rule is correct in non-automation senses such as retention rules.",
-            "sources": [
-                "§4 glossary row \"The automation object\""
             ]
         },
         {

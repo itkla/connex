@@ -118,7 +118,6 @@ export const RAW_ERROR_TOAST_EXCLUSIONS = [
     "app/components/settings/MembersPanel.tsx",
     "app/components/settings/QualificationCriteriaPanel.tsx",
     "app/components/settings/RolesPanel.tsx",
-    "app/components/settings/RulesPanel.tsx",
     "app/components/settings/SsoPanel.tsx",
     "app/components/settings/WorkspaceIdentityPanel.tsx",
 ];
@@ -130,7 +129,7 @@ export const RAW_ERROR_TOAST_EXCLUSIONS = [
  */
 export const EXCLUSION_BASELINE = {
     sonnerImports: 13,
-    rawErrorToasts: 77,
+    rawErrorToasts: 76,
 };
 
 const SONNER_IMPORT_MESSAGE =

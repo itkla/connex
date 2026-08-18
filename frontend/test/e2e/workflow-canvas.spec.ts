@@ -553,7 +553,7 @@ test.describe("workflow canvas", () => {
 
         if (validationValid === null) throw new Error("Workflow validation did not complete");
         if (validationValid) {
-            await expect(page.getByText("Validation passed. This saved revision is ready to publish.", { exact: true })).toHaveCount(0);
+            await expect(page.getByText("All checks passed. This saved draft is ready to publish.", { exact: true })).toHaveCount(0);
         } else {
             await expect(page.locator("#workflow-validation-title")).toHaveCount(0);
         }
@@ -685,7 +685,7 @@ test.describe("workflow canvas", () => {
         const save = page.getByRole("button", { name: "Save draft" });
         await expect(save).toBeDisabled();
         await dragConnection(page, yesHandle, conditionInput, false);
-        await expect(page.getByText("That branch cannot connect to this node.")).toBeVisible();
+        await expect(page.getByText("That branch can't connect to this step.")).toBeVisible();
         await expect(save).toBeDisabled();
 
         await dragConnection(page, yesHandle, noEndInput, true);

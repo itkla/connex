@@ -127,7 +127,7 @@ export function WorkflowSimulationEvidence({
     diagnosticMessage: (diagnostic: { code: WorkflowDiagnosticCode; params: Record<string, string> }) => string;
 }) {
     const t = useTranslations("WorkspaceWorkflows");
-    const tr = useTranslations("WorkspaceRules");
+    const tr = useTranslations("WorkflowAuthoring");
     return (
         <div className="space-y-3" aria-live="polite">
             <Badge variant="outline">{t(`simulation.result.${result.result}`)}</Badge>

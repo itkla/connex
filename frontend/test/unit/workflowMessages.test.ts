@@ -8,7 +8,7 @@ const WORKFLOW_COMPONENTS_ROOT = resolve("app/components/settings/workflows");
 const LOCALES = ["en", "ja"] as const;
 const NAMESPACE_FILES = {
     WorkflowOperations: "workflow-operations.json",
-    WorkspaceRules: "workspace.json",
+    WorkflowAuthoring: "workspace.json",
     WorkspaceWorkflows: "workspace.json",
 } as const;
 
