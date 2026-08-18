@@ -29,6 +29,7 @@ const CONFLICT_KEY = "ApiErrors.conflict";
 const TOO_MANY_REQUESTS_KEY = "ApiErrors.tooManyRequests";
 const OFFLINE_KEY = "ApiErrors.offline";
 const SERVER_ERROR_KEY = "ApiErrors.serverError";
+const SESSION_EXPIRED_KEY = "ApiErrors.sessionExpired";
 const REFERENCE_KEY = "ApiErrors.reference";
 
 /**
@@ -69,7 +70,9 @@ function descriptionFor(error: unknown, t: MessageTranslator): string {
  * fail-safe generic — and an unrecognized failure still yields sound copy.
  *
  * A lost session is not a failure to report: it sends the user to sign in, remembering where they
- * were, and reports nothing.
+ * were, and reports nothing. Where that navigation cannot happen — an authentication page is already
+ * showing, or this is running on the server — the user is told plainly instead of being left in
+ * silence.
  * @param error a rejected request's reason
  * @param t a translator bound to the message root
  * @param fallbackKey the caller's own title key naming the operation, resolved from the message root
@@ -80,15 +83,13 @@ export function userMessageFor(
     t: MessageTranslator,
     fallbackKey?: string,
 ): UserFacingMessage | null {
-    if (isSessionExpired(error)) {
-        redirectToSignIn();
-        return null;
-    }
+    const expired = isSessionExpired(error);
+    if (expired && redirectToSignIn()) return null;
 
     const hasFallback = fallbackKey !== undefined && fallbackKey !== "" && t.has(fallbackKey);
     return {
         title: hasFallback ? t(fallbackKey) : t(GENERIC_TITLE_KEY),
-        description: descriptionFor(error, t),
+        description: expired ? t(SESSION_EXPIRED_KEY) : descriptionFor(error, t),
     };
 }
 

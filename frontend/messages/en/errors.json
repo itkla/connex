@@ -9,6 +9,7 @@
     "tooManyRequests": "That's a lot of requests at once. Wait a moment and try again.",
     "offline": "We couldn't reach Connex. Check your connection and try again.",
     "serverError": "Something went wrong on our side. Nothing was lost — try again in a moment.",
+    "sessionExpired": "You've been signed out. Sign in again to continue.",
     "identityCollisionReportTimeout": "That report is taking longer than expected. Try again in a moment.",
     "reference": "Reference: {id}"
   },

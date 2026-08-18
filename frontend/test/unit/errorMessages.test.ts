@@ -201,6 +201,15 @@ describe("expired sessions", () => {
         expect(toastError).not.toHaveBeenCalled();
         expect(assign).toHaveBeenCalledTimes(1);
     });
+
+    it("says so plainly where it cannot redirect, rather than failing in silence", () => {
+        vi.stubGlobal("window", { location: { pathname: "/auth/forgot-password", search: "", assign } });
+        const message = userMessageFor(new ApiError("Request failed (401)", 401), t);
+
+        expect(assign).not.toHaveBeenCalled();
+        expect(message?.description).toBe("You've been signed out. Sign in again to continue.");
+        expect(message?.description).not.toContain("401");
+    });
 });
 
 describe("redirectToSignIn", () => {
