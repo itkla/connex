@@ -3,6 +3,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 /**
  * Stands in for the goals board: the eyebrow/title/subtitle header with its create action, then the
  * goals table — a titled card header over the column row and the goal rows beneath it.
+ *
+ * Both the create button and the trailing actions column are drawn because `GOAL_MANAGE` is the
+ * common case; a reader without it sees one control settle away rather than the whole table shifting.
  */
 export default function GoalsLoading() {
     return (
@@ -27,6 +30,7 @@ export default function GoalsLoading() {
                         {['w-16', 'w-14', 'w-20', 'w-16', 'w-12', 'w-14'].map((width) => (
                             <Skeleton key={width} className={`h-3 ${width}`} />
                         ))}
+                        <Skeleton className="ml-auto h-3 w-16" />
                     </div>
 
                     {Array.from({ length: 5 }, (_, row) => (
@@ -38,8 +42,12 @@ export default function GoalsLoading() {
                             <Skeleton className="h-3.5 w-20" />
                             <Skeleton className="h-3.5 w-28" />
                             <Skeleton className="h-3.5 w-24" />
-                            <Skeleton className="ml-auto h-4 w-20" />
+                            <Skeleton className="h-4 w-20" />
                             <Skeleton className="h-3.5 w-10" />
+                            <div className="ml-auto flex items-center gap-1">
+                                <Skeleton className="size-8 rounded-full" />
+                                <Skeleton className="size-8 rounded-full" />
+                            </div>
                         </div>
                     ))}
                 </section>

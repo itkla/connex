@@ -9,7 +9,7 @@
         {
             "route": "/account/connections/reviews",
             "kind": "resolver-redirect",
-            "reason": "A stable address for the capture review queue. It resolves the reader's own connected provider and redirects into /account/connections, whose skeleton already stands in for the panel it lands on."
+            "reason": "A stable address for the capture review queue. It resolves the reader's own connected provider and redirects into /account/connections, whose skeleton already stands in for the panel it lands on; its only non-redirect outcome is CapabilityUnavailablePage, a terminal explanation that no skeleton should promise."
         },
         {
             "route": "/organization",

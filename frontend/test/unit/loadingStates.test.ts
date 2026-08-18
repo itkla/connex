@@ -87,6 +87,45 @@ function pageShellTier(source: string): string | null {
     return /<PageShell\s+tier="([a-z]+)"/.exec(source)?.[1] ?? null;
 }
 
+const SKELETON_PRIMITIVE = "@/components/ui/skeleton";
+
+/** Every module specifier a source file imports from. */
+function importSources(source: string): string[] {
+    return [...source.matchAll(/from\s+["']([^"']+)["']/g)].map((match) => match[1]);
+}
+
+/**
+ * The shared skeletons and every module that must render them.
+ *
+ * A route's `loading.tsx` and the client component it stands in for both draw the first load: the
+ * route paints while the server resolves, the component paints while its own fetch resolves. When
+ * they hold separate copies of the markup the reader watches one set of bones swap for another, so
+ * each pair here imports a single module instead. Re-forking one of these is the regression this
+ * guards.
+ */
+const SHARED_SKELETON_CONSUMERS: Record<string, string[]> = {
+    "@/app/components/organization/OrganizationOverviewSkeleton": [
+        "app/(app)/organization/overview/loading.tsx",
+        "app/components/organization/OrganizationOverviewPanel.tsx",
+    ],
+    "@/app/components/settings/QualificationCriteriaSkeleton": [
+        "app/(app)/settings/qualification/loading.tsx",
+        "app/components/settings/QualificationCriteriaPanel.tsx",
+    ],
+    "@/app/components/settings/workflows/operations/WorkflowRunDetailSkeleton": [
+        "app/(app)/workflows/[workflowId]/runs/[runKey]/loading.tsx",
+        "app/components/settings/workflows/operations/WorkflowRunOperationsDetail.tsx",
+    ],
+    "@/app/components/settings/workflows/recipes/WorkflowRecipeDetailSkeleton": [
+        "app/(app)/workflows/recipes/[recipeKey]/loading.tsx",
+        "app/components/settings/workflows/recipes/WorkflowRecipeGallery.tsx",
+    ],
+    "@/app/components/diagnostics/DiagnosticsPanelSkeleton": [
+        "app/(app)/organization/diagnostics/loading.tsx",
+        "app/(app)/settings/diagnostics/loading.tsx",
+    ],
+};
+
 const ledger = readLedger();
 const excepted = new Map(ledger.exceptions.map((entry) => [entry.route, entry]));
 const skeletonRoutes = SHIPPED_APP_ROUTES.filter((route) => ownsSkeleton(route));
@@ -178,8 +217,8 @@ describe("loading skeletons mirror rather than decorate", () => {
 
     it("builds every skeleton out of the shared Skeleton primitive", () => {
         const handRolled = skeletonRoutes.filter((route) => {
-            const source = readRouteFile(route, "loading.tsx");
-            return !/components\/ui\/skeleton/.test(source) && !/Skeleton"?;?$/m.test(source);
+            const sources = importSources(readRouteFile(route, "loading.tsx"));
+            return !sources.includes(SKELETON_PRIMITIVE) && !sources.some((source) => source.endsWith("Skeleton"));
         });
 
         expect(handRolled, "reuse @/components/ui/skeleton or a shared *Skeleton component").toEqual([]);
@@ -194,6 +233,52 @@ describe("loading skeletons mirror rather than decorate", () => {
         });
 
         expect(doubled, "a layout that owns the shell leaves its children's skeletons shell-free").toEqual([]);
+    });
+
+    it("keeps a route and the component it stands in for on one set of bones", () => {
+        const missing: string[] = [];
+        const forked: string[] = [];
+
+        for (const [module, consumers] of Object.entries(SHARED_SKELETON_CONSUMERS)) {
+            const componentPath = path.join(process.cwd(), `${module.replace("@/", "")}.tsx`);
+            if (!existsSync(componentPath)) {
+                missing.push(module);
+                continue;
+            }
+            for (const consumer of consumers) {
+                const consumerPath = path.join(process.cwd(), consumer);
+                if (!existsSync(consumerPath)) {
+                    missing.push(consumer);
+                    continue;
+                }
+                if (!importSources(readFileSync(consumerPath, "utf8")).includes(module)) {
+                    forked.push(`${consumer} no longer renders ${module}`);
+                }
+            }
+        }
+
+        expect(missing, "the shared-skeleton ledger names a module that no longer exists").toEqual([]);
+        expect(
+            forked,
+            "a consumer dropped the shared skeleton; re-forking it makes the reader watch bones swap for bones",
+        ).toEqual([]);
+    });
+
+    it("lets no consumer of a shared skeleton define a second one locally", () => {
+        const localCopies: string[] = [];
+
+        for (const consumers of Object.values(SHARED_SKELETON_CONSUMERS)) {
+            for (const consumer of consumers) {
+                const consumerPath = path.join(process.cwd(), consumer);
+                if (!existsSync(consumerPath)) continue;
+                const source = readFileSync(consumerPath, "utf8");
+                if (/\nfunction \w*(?:Detail|Overview|Panel|Criteria)Skeleton\(/.test(source)) {
+                    localCopies.push(consumer);
+                }
+            }
+        }
+
+        expect(localCopies, "delete the local skeleton and render the shared one instead").toEqual([]);
     });
 
     it("agrees with its page about the shell tier", () => {
