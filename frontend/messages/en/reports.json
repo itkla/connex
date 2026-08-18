@@ -124,11 +124,11 @@
       },
       "relationship-coverage": {
         "name": "Relationship Coverage",
-        "description": "Warmth distribution and account coverage."
+        "description": "Warmth distribution and company coverage."
       },
       "relationship-health": {
         "name": "Relationship Health",
-        "description": "Cooling accounts, coverage gaps, and single-threaded deal risk."
+        "description": "Cooling companies, coverage gaps, and single-threaded deal risk."
       },
       "network-warm-intros": {
         "name": "Network & Warm Introductions",
@@ -136,7 +136,7 @@
       },
       "employment-moves": {
         "name": "Employment Moves",
-        "description": "Track contact departures and arrivals to surface relationship risk and new-account opportunities."
+        "description": "Track contact departures and arrivals to surface relationship risk and new openings at the companies they join."
       },
       "activity-team": {
         "name": "Activity & Team",
@@ -264,8 +264,8 @@
       "snapshotForbiddenBody": "Ask a workspace admin if you need access to this report.",
       "viewLiveReport": "View live report",
       "figureBasis": {
-        "wonRevenue": "Won revenue · closed in period · current owner · workspace deals only · archived account names retained",
-        "openPipeline": "Open pipeline · expected to close in period · current owner · workspace deals only · archived account names retained",
+        "wonRevenue": "Won revenue · closed in period · current owner · workspace deals only · archived company names retained",
+        "openPipeline": "Open pipeline · expected to close in period · current owner · workspace deals only · archived company names retained",
         "forecastWeighted": "Weighted forecast · expected to close in period · all-history stage rates · current owner · workspace deals only"
       }
     },
@@ -314,7 +314,7 @@
       "single_threaded_deal_count": "Single-threaded deal count",
       "single_threaded_deal_value": "Single-threaded deal value",
       "warm_intro_opportunity_value": "Warm-intro opportunity value",
-      "warm_intro_reachable_account_count": "Warm-intro reachable accounts",
+      "warm_intro_reachable_account_count": "Companies reachable by intro",
       "reverse_intro_weighted_opportunities": "Weighted reverse-intro opportunities",
       "employment_departure_count": "Employment departures",
       "employment_arrival_count": "Employment arrivals",
