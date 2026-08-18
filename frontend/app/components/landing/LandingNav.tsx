@@ -17,7 +17,7 @@ function ThemeToggle() {
             type="button"
             onClick={() => setTheme(next)}
             aria-label={t("toggleLightDarkMode", { mode: next })}
-            className="inline-flex size-9 items-center justify-center rounded-full border border-border text-foreground transition active:scale-[0.95]"
+            className="inline-flex size-9 items-center justify-center rounded-full border border-border text-foreground transition-transform duration-(--motion-micro) active:scale-[0.95] motion-reduce:active:scale-100"
         >
             <MoonIcon className="size-5 dark:hidden" />
             <SunIcon className="hidden size-5 dark:block" />
@@ -79,7 +79,7 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
                     </Link>
                     <Link
                         href={ctaHref}
-                        className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.97]"
+                        className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground transition-[transform,background-color] duration-(--motion-micro) ease-out hover:bg-brand-hover active:scale-[0.97]"
                     >
                         {ctaLabel}
                     </Link>
@@ -93,7 +93,7 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
                         onClick={() => setOpen((o) => !o)}
                         aria-expanded={open}
                         aria-label={t("navMenu")}
-                        className="inline-flex size-9 items-center justify-center rounded-full border border-border text-foreground transition active:scale-[0.95]"
+                        className="inline-flex size-9 items-center justify-center rounded-full border border-border text-foreground transition-transform duration-(--motion-micro) active:scale-[0.95] motion-reduce:active:scale-100"
                     >
                         {open ? <XMarkIcon className="size-5" /> : <Bars3Icon className="size-5" />}
                     </button>
@@ -101,7 +101,7 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
             </nav>
 
             {open && (
-                <div className="border-t border-border bg-background px-6 py-4 duration-200 animate-in fade-in-0 slide-in-from-top-2 motion-reduce:animate-none! md:hidden">
+                <div className="border-t border-border bg-background px-6 py-4 duration-(--motion-micro) animate-in fade-in-0 slide-in-from-top-2 motion-reduce:animate-none! md:hidden">
                     <div className="flex flex-col gap-1">
                         {links.map((link) =>
                             link.route ? (
@@ -134,7 +134,7 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
                         <Link
                             href={ctaHref}
                             onClick={() => setOpen(false)}
-                            className="mt-2 rounded-full bg-brand px-4 py-3 text-center text-base font-semibold text-brand-foreground transition active:scale-[0.98]"
+                            className="mt-2 rounded-full bg-brand px-4 py-3 text-center text-base font-semibold text-brand-foreground transition-transform duration-(--motion-micro) active:scale-[0.98] motion-reduce:active:scale-100"
                         >
                             {ctaLabel}
                         </Link>
