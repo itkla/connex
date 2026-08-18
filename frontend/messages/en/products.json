@@ -9,7 +9,6 @@
     "sectionCatalog": "Catalog",
     "catalogCount": "{count, plural, one {# item} other {# items}}",
     "searchPlaceholder": "Search products",
-    "searching": "Searching products…",
     "searchFailed": "Couldn't search products",
     "retrySearch": "Try again",
     "emptyTitle": "Build your catalog",

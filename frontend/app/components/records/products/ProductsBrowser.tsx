@@ -27,6 +27,7 @@ import ProductDialog from '@/app/components/records/products/ProductDialog';
 import { EmptyState } from '@/app/components/EmptyState';
 import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
+import { Skeleton } from '@/components/ui/skeleton';
 import { deleteProduct, exportProductsCsv, getProducts } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatCurrency, formatDate } from '@/app/lib/utils';
@@ -183,8 +184,10 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
 
                 <Rise delay={0.12}>
                     {searching ? (
-                        <div role="status" aria-live="polite" className="rounded-2xl border border-border bg-card px-6 py-16 text-center text-sm text-muted-foreground">
-                            {t('searching')}
+                        <div className="space-y-2 rounded-2xl border border-border bg-card p-4" aria-busy>
+                            {Array.from({ length: 6 }, (_, row) => (
+                                <Skeleton key={row} className="h-9 w-full rounded-lg" />
+                            ))}
                         </div>
                     ) : searchFailed ? (
                         <div role="status" aria-live="polite" className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card px-6 py-16 text-center text-sm text-muted-foreground">
