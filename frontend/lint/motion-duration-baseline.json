@@ -97,7 +97,7 @@
     "app/components/settings/workflows/WorkflowNode.tsx": 2,
     "app/components/users/UserPerformance.tsx": 1,
     "app/design-system/page.tsx": 3,
-    "app/globals.css": 10,
+    "app/globals.css": 13,
     "app/onboarding/OnboardingForm.tsx": 1,
     "app/page.tsx": 3,
     "app/sso/link/SsoLinkForm.tsx": 7,

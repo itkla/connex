@@ -4,8 +4,8 @@ import { describe, expect, it } from "vitest";
 
 import {
     BASELINE_HIGH_WATER_MARK,
+    describeFile,
     loadBaseline,
-    scanFile,
     scanMotionDurations,
     TOKENIZED_SURFACES,
 } from "@/lint/motionDurations.mjs";
@@ -14,16 +14,16 @@ const found = scanMotionDurations();
 const baseline: Record<string, number> = loadBaseline();
 
 const BURN_DOWN =
-    "The ledger only shrinks: put the surface on --motion-micro / --motion-standard / --motion-expressive " +
-    "(or their app/lib/motion.ts mirrors) and lower or delete its entry in frontend/lint/motion-duration-baseline.json.";
+    "Each finding names the mirror its idiom needs — seconds and milliseconds are not interchangeable. " +
+    "The ledger only shrinks: lower or delete the entry in frontend/lint/motion-duration-baseline.json.";
 
 describe("motion timing tokens", () => {
     it("finds no hard-coded duration in a file outside the committed ledger", () => {
         const added = Object.keys(found)
             .filter((file) => !(file in baseline))
-            .map((file) => `${file} (${scanFile(file).join(", ")})`);
+            .flatMap((file) => describeFile(file));
 
-        expect(added, `${added.length} file(s) hard-code a timing. ${BURN_DOWN}`).toEqual([]);
+        expect(added, `${added.length} hard-coded timing(s). ${BURN_DOWN}`).toEqual([]);
     });
 
     it("holds no ledger entry that grew", () => {
@@ -56,8 +56,8 @@ describe("motion timing tokens", () => {
 
 describe("tokenized surfaces", () => {
     it("carries no hard-coded timing on any shared primitive the motion system owns", () => {
-        const regressed = TOKENIZED_SURFACES.filter((file) => (found[file] ?? 0) > 0).map(
-            (file) => `${file} (${scanFile(file).join(", ")})`
+        const regressed = TOKENIZED_SURFACES.filter((file) => (found[file] ?? 0) > 0).flatMap(
+            (file) => describeFile(file)
         );
 
         expect(
