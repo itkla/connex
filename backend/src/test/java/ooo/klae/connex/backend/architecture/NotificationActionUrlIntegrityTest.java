@@ -6,8 +6,10 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
@@ -48,16 +50,19 @@ import com.sun.source.util.SourcePositions;
 import com.sun.source.util.TreeScanner;
 import com.sun.source.util.Trees;
 
+import ooo.klae.connex.backend.observability.RequestPathRedactor;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /**
  * Ensures every backend-produced notification action URL targets a shipped frontend route and uses
  * only canonical deep-link query parameters. The gate resolves literal-prefixed concatenations,
- * same-file variable assignments, switch alternatives, and same-file helper returns, then fails
- * closed when a producer cannot be reduced to those forms. DTO package calls are excluded because
- * they copy an already-produced notification into an outbound representation rather than construct
- * a notification destination.
+ * variable assignments scoped to the enclosing method (with class-field initializers as the only
+ * fallback), switch alternatives, and same-file helper returns resolved in the helper's own scope;
+ * method parameters never resolve, so caller-supplied URLs fail closed, as does anything else that
+ * cannot be reduced to those forms. DTO package calls are excluded because they copy an
+ * already-produced notification into an outbound representation rather than construct a
+ * notification destination.
  */
 class NotificationActionUrlIntegrityTest {
 
@@ -91,7 +96,7 @@ class NotificationActionUrlIntegrityTest {
             producerCalls += calls.size();
             UrlExpressionResolver resolver = new UrlExpressionResolver(parsed.unit());
             for (ActionUrlCall call : calls) {
-                Set<String> shapes = resolver.resolve(call.argument());
+                Set<String> shapes = resolver.resolve(call.argument(), call.scope());
                 for (String shape : shapes) {
                     validateShape(
                         sourcePath + ":" + call.line(), call.argument().toString(), shape,
@@ -105,6 +110,20 @@ class NotificationActionUrlIntegrityTest {
             "Notification action URLs must target shipped routes and canonical parameters. "
                 + "Make each URL statically resolvable or register its route shape explicitly: "
                 + violations);
+    }
+
+    @Test
+    void telemetryRouteVocabularyCoversEveryShippedAppRoute() throws Exception {
+        RouteManifest manifest = loadManifest(repositoryRoot());
+        List<String> unknown = new ArrayList<>();
+        for (String route : manifest.routes()) {
+            String concrete = route.replaceAll("\\[[^]/]+\\]", "123");
+            if (RequestPathRedactor.UNKNOWN_ROUTE.equals(RequestPathRedactor.redact(concrete))) {
+                unknown.add(route);
+            }
+        }
+        assertTrue(unknown.isEmpty(),
+            "RequestPathRedactor's route vocabulary is missing shipped app routes: " + unknown);
     }
 
     private static RouteManifest loadManifest(Path repositoryRoot) throws IOException {
@@ -165,6 +184,18 @@ class NotificationActionUrlIntegrityTest {
     private static List<ActionUrlCall> actionUrlCalls(ParsedSource parsed) {
         List<ActionUrlCall> calls = new ArrayList<>();
         new TreeScanner<Void, Void>() {
+            private final Deque<MethodTree> enclosing = new ArrayDeque<>();
+
+            @Override
+            public Void visitMethod(MethodTree method, Void unused) {
+                enclosing.push(method);
+                try {
+                    return super.visitMethod(method, unused);
+                } finally {
+                    enclosing.pop();
+                }
+            }
+
             @Override
             public Void visitMethodInvocation(MethodInvocationTree invocation, Void unused) {
                 if (isSetActionUrl(invocation)) {
@@ -173,7 +204,8 @@ class NotificationActionUrlIntegrityTest {
                     long position = parsed.positions().getStartPosition(parsed.unit(), invocation);
                     long line = position < 0 || parsed.unit().getLineMap() == null
                         ? -1 : parsed.unit().getLineMap().getLineNumber(position);
-                    calls.add(new ActionUrlCall(invocation.getArguments().getFirst(), line));
+                    calls.add(new ActionUrlCall(
+                        invocation.getArguments().getFirst(), line, enclosing.peek()));
                 }
                 return super.visitMethodInvocation(invocation, unused);
             }
@@ -285,33 +317,37 @@ class NotificationActionUrlIntegrityTest {
             this.unit = unit;
         }
 
-        private Set<String> resolve(ExpressionTree expression) {
-            return resolve(expression, new HashSet<>());
+        private Set<String> resolve(ExpressionTree expression, MethodTree scope) {
+            return resolve(expression, scope, new HashSet<>());
         }
 
-        private Set<String> resolve(ExpressionTree expression, Set<String> visiting) {
+        private Set<String> resolve(
+            ExpressionTree expression,
+            MethodTree scope,
+            Set<String> visiting
+        ) {
             if (expression instanceof ParenthesizedTree parenthesized) {
-                return resolve(parenthesized.getExpression(), visiting);
+                return resolve(parenthesized.getExpression(), scope, visiting);
             }
             if (expression instanceof LiteralTree literal) {
                 return resolveLiteral(literal);
             }
             if (expression instanceof BinaryTree binary && binary.getKind() == Tree.Kind.PLUS) {
                 return concatenate(
-                    resolve(binary.getLeftOperand(), visiting),
-                    resolve(binary.getRightOperand(), visiting));
+                    resolve(binary.getLeftOperand(), scope, visiting),
+                    resolve(binary.getRightOperand(), scope, visiting));
             }
             if (expression instanceof IdentifierTree identifier) {
-                return resolveVariable(identifier.getName().toString(), visiting);
+                return resolveVariable(identifier.getName().toString(), scope, visiting);
             }
             if (expression instanceof ConditionalExpressionTree conditional) {
                 Set<String> alternatives = new TreeSet<>(
-                    resolve(conditional.getTrueExpression(), visiting));
-                alternatives.addAll(resolve(conditional.getFalseExpression(), visiting));
+                    resolve(conditional.getTrueExpression(), scope, visiting));
+                alternatives.addAll(resolve(conditional.getFalseExpression(), scope, visiting));
                 return alternatives;
             }
             if (expression instanceof SwitchExpressionTree switchExpression) {
-                return resolveSwitch(switchExpression, visiting);
+                return resolveSwitch(switchExpression, scope, visiting);
             }
             if (expression instanceof MethodInvocationTree invocation) {
                 return resolveHelper(invocation, visiting);
@@ -330,22 +366,41 @@ class NotificationActionUrlIntegrityTest {
             return Set.of(DYNAMIC);
         }
 
-        private Set<String> resolveVariable(String name, Set<String> visiting) {
+        private Set<String> resolveVariable(String name, MethodTree scope, Set<String> visiting) {
+            if (scope != null && isParameter(scope, name)) {
+                return Set.of(DYNAMIC);
+            }
             String visitKey = "variable:" + name;
             if (!visiting.add(visitKey)) {
                 return Set.of(DYNAMIC);
             }
-            List<ExpressionTree> values = variableValues(name);
+            List<ExpressionTree> values = variableValues(name, scope);
             Set<String> resolved = new TreeSet<>();
             for (ExpressionTree value : values) {
-                resolved.addAll(resolve(value, visiting));
+                resolved.addAll(resolve(value, scope, visiting));
             }
             visiting.remove(visitKey);
             return resolved.isEmpty() ? Set.of(DYNAMIC) : resolved;
         }
 
-        private List<ExpressionTree> variableValues(String name) {
+        private static boolean isParameter(MethodTree scope, String name) {
+            return scope.getParameters().stream()
+                .anyMatch(parameter -> parameter.getName().contentEquals(name));
+        }
+
+        private List<ExpressionTree> variableValues(String name, MethodTree scope) {
             List<ExpressionTree> values = new ArrayList<>();
+            Tree searchRoot = scope == null ? unit : scope.getBody();
+            if (searchRoot != null) {
+                collectAssignments(name, searchRoot, values);
+            }
+            if (values.isEmpty() && scope != null) {
+                collectFieldInitializers(name, values);
+            }
+            return values;
+        }
+
+        private static void collectAssignments(String name, Tree root, List<ExpressionTree> values) {
             new TreeScanner<Void, Void>() {
                 @Override
                 public Void visitVariable(VariableTree variable, Void unused) {
@@ -362,11 +417,27 @@ class NotificationActionUrlIntegrityTest {
                     }
                     return super.visitAssignment(assignment, unused);
                 }
-            }.scan(unit, null);
-            return values;
+            }.scan(root, null);
         }
 
-        private String assignedName(ExpressionTree variable) {
+        private void collectFieldInitializers(String name, List<ExpressionTree> values) {
+            new TreeScanner<Void, Void>() {
+                @Override
+                public Void visitMethod(MethodTree method, Void unused) {
+                    return null;
+                }
+
+                @Override
+                public Void visitVariable(VariableTree variable, Void unused) {
+                    if (variable.getName().contentEquals(name) && variable.getInitializer() != null) {
+                        values.add(variable.getInitializer());
+                    }
+                    return super.visitVariable(variable, unused);
+                }
+            }.scan(unit, null);
+        }
+
+        private static String assignedName(ExpressionTree variable) {
             if (variable instanceof IdentifierTree identifier) {
                 return identifier.getName().toString();
             }
@@ -378,13 +449,14 @@ class NotificationActionUrlIntegrityTest {
 
         private Set<String> resolveSwitch(
             SwitchExpressionTree switchExpression,
+            MethodTree scope,
             Set<String> visiting
         ) {
             Set<String> alternatives = new TreeSet<>();
             for (CaseTree caseTree : switchExpression.getCases()) {
                 Tree body = caseTree.getBody();
                 if (body instanceof ExpressionTree expression) {
-                    alternatives.addAll(resolve(expression, visiting));
+                    alternatives.addAll(resolve(expression, scope, visiting));
                     continue;
                 }
                 List<ExpressionTree> yielded = new ArrayList<>();
@@ -396,7 +468,7 @@ class NotificationActionUrlIntegrityTest {
                     }
                 }.scan(caseTree, null);
                 for (ExpressionTree expression : yielded) {
-                    alternatives.addAll(resolve(expression, visiting));
+                    alternatives.addAll(resolve(expression, scope, visiting));
                 }
             }
             return alternatives.isEmpty() ? Set.of(DYNAMIC) : alternatives;
@@ -411,27 +483,30 @@ class NotificationActionUrlIntegrityTest {
             if (!visiting.add(visitKey)) {
                 return Set.of(DYNAMIC);
             }
-            List<ExpressionTree> returns = methodReturns(methodName);
             Set<String> resolved = new TreeSet<>();
-            for (ExpressionTree expression : returns) {
-                resolved.addAll(resolve(expression, visiting));
+            for (MethodTree method : namedMethods(methodName)) {
+                List<ExpressionTree> returns = new ArrayList<>();
+                new ReturnExpressionScanner(returns).scan(method.getBody(), null);
+                for (ExpressionTree expression : returns) {
+                    resolved.addAll(resolve(expression, method, visiting));
+                }
             }
             visiting.remove(visitKey);
             return resolved.isEmpty() ? Set.of(DYNAMIC) : resolved;
         }
 
-        private List<ExpressionTree> methodReturns(String methodName) {
-            List<ExpressionTree> values = new ArrayList<>();
+        private List<MethodTree> namedMethods(String methodName) {
+            List<MethodTree> methods = new ArrayList<>();
             new TreeScanner<Void, Void>() {
                 @Override
                 public Void visitMethod(MethodTree method, Void unused) {
                     if (method.getName().contentEquals(methodName) && method.getBody() != null) {
-                        new ReturnExpressionScanner(values).scan(method.getBody(), null);
+                        methods.add(method);
                     }
                     return super.visitMethod(method, unused);
                 }
             }.scan(unit, null);
-            return values;
+            return methods;
         }
 
         private Set<String> concatenate(Set<String> left, Set<String> right) {
@@ -473,7 +548,7 @@ class NotificationActionUrlIntegrityTest {
         }
     }
 
-    private record ActionUrlCall(ExpressionTree argument, long line) {}
+    private record ActionUrlCall(ExpressionTree argument, long line, MethodTree scope) {}
 
     private record ParsedSource(CompilationUnitTree unit, SourcePositions positions) {}
 
