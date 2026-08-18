@@ -7,7 +7,7 @@ import {
     ChevronDownIcon,
     ChevronUpIcon,
     ChevronUpDownIcon,
-    InboxIcon,
+    MagnifyingGlassIcon,
     PencilSquareIcon,
     TrashIcon,
     XMarkIcon,
@@ -113,7 +113,12 @@ interface Props<T extends { id: SelectionId; name?: string }> {
     };
     sortState?: { key: string | null; direction: SortDirection; onSortChange: (key: string) => void };
     sortOptions?: { key: string; label: string }[];
-    emptyState?: ReactNode;
+    /**
+     * The first-run empty state for this record type: what the place is, why it is empty, and one
+     * inviting action. Required, because a browser that arrives with nothing has to teach — the
+     * no-filter-matches state is a separate presentation this view owns.
+     */
+    emptyState: ReactNode;
     filtersActive?: boolean;
     onClearFilters?: () => void;
     loading?: boolean;
@@ -506,28 +511,29 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     }
 
     if (pagedData.length === 0) {
-        if (!filtersActive && emptyState !== undefined) {
+        if (filtersActive) {
             return (
                 <>
-                    {emptyState}
+                    <EmptyState
+                        tone="muted"
+                        icon={MagnifyingGlassIcon}
+                        title={t('noResults')}
+                        body={t('noResultsBody')}
+                        action={
+                            onClearFilters ? (
+                                <Button variant="outline" onClick={onClearFilters}>
+                                    {t('clearFilters')}
+                                </Button>
+                            ) : undefined
+                        }
+                    />
                     {selectionBar}
                 </>
             );
         }
         return (
             <>
-                <EmptyState
-                    tone={filtersActive ? 'muted' : 'brand'}
-                    icon={InboxIcon}
-                    title={filtersActive ? t('noResults') : t('emptyState')}
-                    action={
-                        filtersActive && onClearFilters ? (
-                            <Button variant="outline" onClick={onClearFilters}>
-                                {t('clearFilters')}
-                            </Button>
-                        ) : undefined
-                    }
-                />
+                {emptyState}
                 {selectionBar}
             </>
         );

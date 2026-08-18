@@ -232,6 +232,18 @@ export default function FilesBrowser() {
         setTagIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
     const isEmptyLibrary = facets !== null && facets.total === 0;
+    const libraryEmptyState = (
+        <EmptyState
+            icon={FolderOpenIcon}
+            title={t('emptyTitle')}
+            body={t('emptyBody')}
+            action={
+                <Button asChild variant="brand">
+                    <Link href="/records/companies">{t('emptyCta')}</Link>
+                </Button>
+            }
+        />
+    );
     const filtersActive =
         query.trim() !== '' || kind !== 'all' || source !== 'all' || tagIds.length > 0 || orphaned;
 
@@ -474,18 +486,7 @@ export default function FilesBrowser() {
             </Rise>
 
             {isEmptyLibrary ? (
-                <Rise delay={0.06}>
-                    <EmptyState
-                        icon={FolderOpenIcon}
-                        title={t('emptyTitle')}
-                        body={t('emptyBody')}
-                        action={
-                            <Button asChild variant="brand">
-                                <Link href="/records/companies">{t('emptyCta')}</Link>
-                            </Button>
-                        }
-                    />
-                </Rise>
+                <Rise delay={0.06}>{libraryEmptyState}</Rise>
             ) : (
                 <>
                     <Rise delay={0.06}>
@@ -606,6 +607,7 @@ export default function FilesBrowser() {
                         entityLabel={t('entityLabel')}
                         selectionActions={selectionActions}
                         loading={loading}
+                        emptyState={libraryEmptyState}
                         filtersActive={filtersActive}
                         onClearFilters={clearFilters}
                         pagination={{

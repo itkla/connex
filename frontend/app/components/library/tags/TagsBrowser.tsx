@@ -11,6 +11,7 @@ import {
     TagIcon,
     EllipsisHorizontalIcon,
     ClipboardIcon,
+    MagnifyingGlassIcon,
 } from '@heroicons/react/24/outline';
 import { PlusIcon } from '@heroicons/react/24/solid';
 import { Loader2Icon } from 'lucide-react';
@@ -42,6 +43,7 @@ import Rise from '@/app/components/motion/Rise';
 import TagDialog from '@/app/components/library/tags/TagDialog';
 import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
+import { EmptyState } from '@/app/components/EmptyState';
 
 type Props = { tags: Tag[] };
 type SortKey = 'color' | 'name';
@@ -195,15 +197,28 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
             <Rise delay={0.12}>
             {!hasTags ? (
                 <EmptyState
+                    icon={TagIcon}
                     title={t('emptyTitle')}
                     body={t('emptyBody')}
-                    cta={t('createFirst')}
-                    onCreate={openCreate}
+                    action={
+                        <Button onClick={openCreate} variant="brand">
+                            <PlusIcon strokeWidth={2.5} />
+                            {t('createFirst')}
+                        </Button>
+                    }
                 />
             ) : noResults ? (
-                <div className="rounded-2xl border border-border bg-card px-6 py-20 text-center">
-                    <p className="text-sm text-muted-foreground">{t('noResults', { query: query.trim() })}</p>
-                </div>
+                <EmptyState
+                    tone="muted"
+                    icon={MagnifyingGlassIcon}
+                    title={t('noResultsTitle')}
+                    body={t('noResults', { query: query.trim() })}
+                    action={
+                        <Button variant="outline" onClick={() => setQuery('')}>
+                            {tf('clearAll')}
+                        </Button>
+                    }
+                />
             ) : (
                 <ul className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
                     <AnimatePresence mode="popLayout" initial={false}>
@@ -376,31 +391,5 @@ function AddTile({
                 <span className="text-sm font-medium">{label}</span>
             </motion.button>
         </motion.li>
-    );
-}
-
-function EmptyState({
-    title,
-    body,
-    cta,
-    onCreate,
-}: {
-    title: string;
-    body: string;
-    cta: string;
-    onCreate: () => void;
-}) {
-    return (
-        <div className="rounded-2xl border border-border bg-card px-6 py-20 text-center">
-            <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-dark">
-                <TagIcon className="size-7" />
-            </div>
-            <h2 className="mt-5 text-lg font-semibold text-foreground">{title}</h2>
-            <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">{body}</p>
-            <Button onClick={onCreate} variant="brand" className="mt-6">
-                <PlusIcon strokeWidth={2.5} />
-                {cta}
-            </Button>
-        </div>
     );
 }

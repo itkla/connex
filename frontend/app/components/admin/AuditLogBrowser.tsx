@@ -6,6 +6,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
     ClipboardDocumentListIcon,
     FunnelIcon,
+    MagnifyingGlassIcon,
 } from "@heroicons/react/24/outline";
 import {
     PlusIcon,
@@ -25,6 +26,8 @@ import {
     ArrowPathIcon,
 } from "@heroicons/react/20/solid";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/app/components/EmptyState";
 import { getAuditLogs } from "@/app/lib/api";
 import Rise from "@/app/components/motion/Rise";
 import { PageHeader } from "@/app/components/PageHeader";
@@ -505,7 +508,7 @@ export default function AuditLogBrowser({
                 )}
 
                 {entries.length === 0 ? (
-                    <EmptyState title={t("emptyAllTitle")} body={t("emptyAllBody")} />
+                    <EmptyState icon={ClipboardDocumentListIcon} title={t("emptyAllTitle")} body={t("emptyAllBody")} />
                 ) : (
                     <Rise delay={0.12} className="flex flex-col gap-6">
                     <FilterBar
@@ -599,17 +602,23 @@ export default function AuditLogBrowser({
                     {filtered.length === 0 ? (
                         hasActiveFilters && hasMore ? (
                             <EmptyState
+                                tone="muted"
+                                icon={MagnifyingGlassIcon}
                                 title={t("noMatchesTitle")}
                                 body={t("noMatchesMoreBody", { loaded: entries.length })}
-                                muted
                             />
                         ) : (
                             <EmptyState
+                                tone="muted"
+                                icon={MagnifyingGlassIcon}
                                 title={t("noMatchesTitle")}
                                 body={t("noMatchesBody")}
-                                muted
-                                actionLabel={t("clearAll")}
-                                onAction={clearAll}
+                                action={
+                                    <Button variant="outline" onClick={clearAll}>
+                                        <FunnelIcon className="size-4" />
+                                        {t("clearAll")}
+                                    </Button>
+                                }
                             />
                         )
                     ) : (
@@ -1105,44 +1114,5 @@ function ValueChip({ value, tone, empty }: { value: unknown; tone: "old" | "new"
         >
             {text}
         </span>
-    );
-}
-
-function EmptyState({
-    title,
-    body,
-    muted,
-    actionLabel,
-    onAction,
-}: {
-    title: string;
-    body: string;
-    muted?: boolean;
-    actionLabel?: string;
-    onAction?: () => void;
-}) {
-    return (
-        <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border/70 bg-card/40 py-20 text-center">
-            <span
-                className={cn(
-                    "grid size-12 place-items-center rounded-full",
-                    muted ? "bg-muted text-muted-foreground" : "bg-brand-light text-brand-dark",
-                )}
-            >
-                <ClipboardDocumentListIcon className="size-6" />
-            </span>
-            <p className="mt-4 text-sm font-medium text-foreground">{title}</p>
-            <p className="mt-1 max-w-xs text-sm text-muted-foreground">{body}</p>
-            {actionLabel && onAction && (
-                <button
-                    type="button"
-                    onClick={onAction}
-                    className="mt-4 inline-flex h-8 items-center gap-1.5 rounded-full bg-muted px-3.5 text-xs font-medium text-foreground ring-1 ring-border outline-none transition hover:bg-accent active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-brand/40"
-                >
-                    <FunnelIcon className="size-3.5" />
-                    {actionLabel}
-                </button>
-            )}
-        </div>
     );
 }

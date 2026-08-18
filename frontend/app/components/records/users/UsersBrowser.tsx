@@ -1,14 +1,16 @@
 "use client";
 
 import { useMemo } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { Squares2X2Icon, TableCellsIcon } from "@heroicons/react/24/outline";
+import { Squares2X2Icon, TableCellsIcon, UserGroupIcon } from "@heroicons/react/24/outline";
 import { EyeIcon } from "@heroicons/react/24/solid";
 import { useReducedMotion } from "motion/react";
 import { Button } from "@/components/ui/button";
 
 import RecordsRenderView from "@/app/components/records/RecordsRenderView";
+import { EmptyState } from "@/app/components/EmptyState";
 import Rise from "@/app/components/motion/Rise";
 import RecordsSortMenu from "@/app/components/records/RecordsSortMenu";
 import { SearchField, FilterBar, SegmentedToggle, type FilterChipData } from "@/app/components/filters";
@@ -165,6 +167,18 @@ export default function UsersBrowser({ users }: { users: User[] }) {
                         onSelectedIdsChange={setSelectedIds}
                         entityLabel={t("entityLabel")}
                         selectionActions={selectionActions}
+                        emptyState={
+                            <EmptyState
+                                icon={UserGroupIcon}
+                                title={t("emptyTitle")}
+                                body={t("emptyBody")}
+                                action={
+                                    <Button asChild variant="brand">
+                                        <Link href="/settings/members">{t("emptyCta")}</Link>
+                                    </Button>
+                                }
+                            />
+                        }
                         filtersActive={hasActiveFilters}
                         onClearFilters={clearAll}
                         sortState={sortState}

@@ -36,6 +36,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
+import { EmptyState } from '@/app/components/EmptyState';
 import {
     RecordActionMenuTrigger,
     RecordContextMenu,
@@ -676,8 +677,7 @@ export default function TasksBrowser({
     const isCompletedQueue = queue === 'completed';
     const dimensionsActive =
         assigneeFilter.size > 0 || personFilter.size > 0 || dealFilter.size > 0 || companyFilter.size > 0;
-    const emptyMessage = query.trim() || dimensionsActive ? t('emptyFiltered') : t(`emptyQueue_${queue}` as 'emptyQueue_myOpen');
-
+    const filteredEmpty = query.trim() !== '' || dimensionsActive;
     const labelFor = (options: { value: string; label: string }[], value: string) =>
         options.find((o) => o.value === value)?.label ?? value;
     const chips: FilterChipData[] = [
@@ -694,6 +694,38 @@ export default function TasksBrowser({
         setDealFilter(new Set());
         setCompanyFilter(new Set());
     };
+    const taskEmptyState = !hasAnyTasks ? (
+        <EmptyState
+            icon={CheckCircleIcon}
+            title={t('emptyFirstRunTitle')}
+            body={t('emptyFirstRunBody')}
+            action={
+                <Button variant="brand" onClick={() => setCreating(true)}>
+                    <PlusIcon strokeWidth={2.5} />
+                    {t('new')}
+                </Button>
+            }
+        />
+    ) : filteredEmpty ? (
+        <EmptyState
+            tone="muted"
+            icon={MagnifyingGlassIcon}
+            title={t('emptyFilteredTitle')}
+            body={t('emptyFiltered')}
+            action={
+                <Button variant="outline" onClick={clearAllFilters}>
+                    {tf('clearAll')}
+                </Button>
+            }
+        />
+    ) : (
+        <EmptyState
+            tone="muted"
+            icon={isCompletedQueue ? CheckCircleIcon : CheckIcon}
+            title={t(`emptyQueue_${queue}` as 'emptyQueue_myOpen')}
+            body={t('emptyQueueBody')}
+        />
+    );
     const activeDimensionCount =
         assigneeFilter.size + personFilter.size + dealFilter.size + companyFilter.size;
     const taskFilterSections: TaskFilterSheetSection[] = [
@@ -973,11 +1005,7 @@ export default function TasksBrowser({
                                 </FilterBar>
 
                                 {isEmpty ? (
-                                    <TaskEmptyState
-                                        filtered={!!query.trim()}
-                                        completed={isCompletedQueue}
-                                        message={emptyMessage}
-                                    />
+                                    taskEmptyState
                                 ) : isCompletedQueue ? (
                                     <div className="overflow-hidden rounded-2xl border border-border bg-card">
                                         <ul className="divide-y divide-border">
@@ -1398,17 +1426,5 @@ function TaskRow({
                 </div>
             </motion.li>
         </RecordContextMenu>
-    );
-}
-
-function TaskEmptyState({ filtered, completed, message }: { filtered: boolean; completed: boolean; message: string }) {
-    const Icon = completed ? CheckCircleIcon : filtered ? MagnifyingGlassIcon : CheckIcon;
-    return (
-        <div className="rounded-2xl border border-border bg-card px-6 py-20 text-center">
-            <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-dark">
-                <Icon className="size-7" strokeWidth={1.75} />
-            </div>
-            <p className="mx-auto mt-5 max-w-sm text-sm font-medium text-foreground">{message}</p>
-        </div>
     );
 }

@@ -62,13 +62,16 @@
         "touchDaysAgo": "{count, plural, =0 {touched today} one {last touch # day ago} other {last touch # days ago}}"
     },
     "MeActivityList": {
-        "empty": "No activities logged yet."
+        "emptyTitle": "No activity logged yet",
+        "empty": "Calls, meetings, and emails you log on records appear here, newest first."
     },
     "MeNoteList": {
-        "empty": "No notes authored yet."
+        "emptyTitle": "No notes yet",
+        "empty": "Notes you write on a contact, company, or deal collect here — open a record and add the first one."
     },
     "MeTaskList": {
-        "empty": "No tasks assigned to you yet."
+        "emptyTitle": "No tasks assigned to you",
+        "empty": "Tasks someone assigns you show up here, soonest due first."
     },
     "MeTimeline": {
         "completed": "Completed",

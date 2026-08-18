@@ -1,9 +1,8 @@
-// NOTE: not used in /me page anymore, but might be used in other pages so im keeping it
-
 import { getLocale, getTranslations } from "next-intl/server";
+import { BoltIcon } from "@heroicons/react/24/outline";
 
 import { type Activity } from "@/app/lib/types";
-import EmptyState from "./EmptyState";
+import { EmptyState } from "@/app/components/EmptyState";
 import { timeOf, formatShortDate } from "@/app/lib/utils";
 
 export default async function ActivityList({ activities }: { activities: Activity[] }) {
@@ -11,7 +10,15 @@ export default async function ActivityList({ activities }: { activities: Activit
     const locale = await getLocale();
 
     if (activities.length === 0) {
-        return <EmptyState message={t("empty")} />;
+        return (
+            <EmptyState
+                variant="inline"
+                tone="muted"
+                icon={BoltIcon}
+                title={t("emptyTitle")}
+                body={t("empty")}
+            />
+        );
     }
 
     const sorted = [...activities].sort(

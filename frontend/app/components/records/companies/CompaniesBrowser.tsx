@@ -10,7 +10,7 @@ import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import { PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
+import { PencilIcon, EllipsisVerticalIcon, EyeIcon, PlusIcon } from '@heroicons/react/24/solid';
 import { ArchiveBoxIcon, ArchiveBoxArrowDownIcon, BuildingOffice2Icon } from '@heroicons/react/24/outline';
 import {
     Squares2X2Icon,
@@ -20,6 +20,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import { EmptyState } from '@/app/components/EmptyState';
 import DensityToggle from '@/app/components/records/DensityToggle';
 import { useRecordDensity } from '@/app/hooks/useRecordDensity';
 import { useInlineEdit } from '@/app/hooks/useInlineEdit';
@@ -1150,6 +1151,19 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                         gridClassName="grid grid-cols-1 gap-3"
                         entityLabel={t('entityLabel')}
                         selectionActions={selectionActions}
+                        emptyState={
+                            <EmptyState
+                                icon={BuildingOffice2Icon}
+                                title={t('emptyTitle')}
+                                body={t('emptyBody')}
+                                action={
+                                    <Button variant="brand" onClick={openNewDialog}>
+                                        <PlusIcon strokeWidth={2.5} />
+                                        {t('emptyCta')}
+                                    </Button>
+                                }
+                            />
+                        }
                         filtersActive={hasActiveFiltersOrScope}
                         onClearFilters={clearFiltersAndScope}
                         sortState={{ key: sortKey, direction: sortDirection, onSortChange }}

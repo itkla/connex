@@ -175,7 +175,6 @@
     "en/organization.json:OrgOverview.lifecycleDescription#tenant",
     "en/organization.json:OrgOverview.lifecycleTitle#teardown",
     "en/organization.json:OrgOverview.slugLabel#slug",
-    "en/products.json:ProductsBrowser.empty#deterministic",
     "en/radar.json:Radar.actions.createTaskPathUnavailableNamed#warm path",
     "en/radar.json:Radar.actions.warmPathTaskPermissionDenied#warm path",
     "en/radar.json:Radar.description#warm path",

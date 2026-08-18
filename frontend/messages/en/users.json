@@ -13,6 +13,9 @@
     "columnLastLogin": "Last login",
     "columnMemberSince": "Member since",
     "neverLoggedIn": "Never",
+    "emptyTitle": "No one here yet",
+    "emptyBody": "Everyone with access to this workspace appears here. Invite the people you work with from workspace settings.",
+    "emptyCta": "Invite a member",
     "entityLabel": "user"
   },
   "UsersPage": {
@@ -32,6 +35,7 @@
     "notesCount": "{count} notes",
     "timeline": "Timeline",
     "emptyActivity": "No activity yet",
+    "emptyActivityBody": "Tasks, activities, and notes this person records will appear on this timeline.",
     "performance": "Performance",
     "performanceWindow": "Last 90 days",
     "wonDeals": "Won deals",

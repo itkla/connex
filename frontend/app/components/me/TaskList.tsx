@@ -1,9 +1,8 @@
-// NOTE: not used in /me page anymore, but might be used in other pages so im keeping it
-
 import { getLocale, getTranslations } from "next-intl/server";
+import { CheckCircleIcon } from "@heroicons/react/24/outline";
 
 import { type Task } from "@/app/lib/types";
-import EmptyState from "./EmptyState";
+import { EmptyState } from "@/app/components/EmptyState";
 import NoteContent from "@/app/components/activity/notes/NoteContent";
 import { timeOf, formatShortDate } from "@/app/lib/utils";
 
@@ -12,7 +11,15 @@ export default async function TaskList({ tasks }: { tasks: Task[] }) {
     const locale = await getLocale();
 
     if (tasks.length === 0) {
-        return <EmptyState message={t("empty")} />;
+        return (
+            <EmptyState
+                variant="inline"
+                tone="muted"
+                icon={CheckCircleIcon}
+                title={t("emptyTitle")}
+                body={t("empty")}
+            />
+        );
     }
 
     // sort by completed status, then by due date, then by created at
