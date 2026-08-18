@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { isSessionExpired } from '@/app/lib/sessionExpiry';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
 import { ClipboardDocumentCheckIcon, Bars3BottomLeftIcon, CalendarIcon, UserCircleIcon, UserIcon, BriefcaseIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
@@ -374,7 +375,7 @@ export function TaskDialogForm({
                 }
                 return;
             }
-            if (failureMessage) toastError(failureMessage);
+            if (failureMessage && !isSessionExpired(err)) toastError(failureMessage);
             else showApiError(err, 'toastFailedCreate');
         } finally {
             if (!requestInit?.signal?.aborted) {
