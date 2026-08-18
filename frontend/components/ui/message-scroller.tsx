@@ -428,7 +428,7 @@ function MessageScrollerButton({
       data-slot="message-scroller-button"
       data-active="false"
       tabIndex={-1}
-      className={cn("absolute right-4 bottom-4 z-10 inline-flex size-8 items-center justify-center rounded-full border border-border bg-background text-foreground opacity-0 shadow-sm transition-[opacity,background-color,color,transform] duration-150 ease-(--ease-out) data-[active=false]:pointer-events-none data-[active=true]:opacity-100 hover:bg-accent hover:text-accent-foreground active:scale-[0.97] motion-reduce:active:scale-100 motion-reduce:transition-none", className)}
+      className={cn("absolute right-4 bottom-4 z-10 inline-flex size-8 items-center justify-center rounded-full border border-border bg-background text-foreground opacity-0 shadow-sm transition-[opacity,background-color,color,transform] duration-(--motion-micro) ease-(--ease-out) data-[active=false]:pointer-events-none data-[active=true]:opacity-100 hover:bg-accent hover:text-accent-foreground active:scale-[0.97] motion-reduce:active:scale-100 motion-reduce:transition-none", className)}
       onClick={(event) => {
         context.scrollToEnd()
         onClick?.(event)

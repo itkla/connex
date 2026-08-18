@@ -112,7 +112,6 @@ function ResponsiveDialog({ open, onOpenChange, onCloseComplete, children }: Res
           onOpenChange={handleOpenChange}
           onOpenChangeComplete={handleOpenChangeComplete}
           swipeDirection="down"
-          motionClassName="duration-200"
         >
           {children}
         </Drawer>

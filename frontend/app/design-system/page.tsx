@@ -590,7 +590,7 @@ export default function DesignSystemPage() {
           <Section
             id="motion"
             title="Motion"
-            description="One source of truth in app/lib/motion.ts. Springs give physics; the --ease-* CSS tokens give consistent curves. Everything falls back to instant under prefers-reduced-motion. Click any tile."
+            description="Three speeds and two characters, defined once in app/globals.css and mirrored in app/lib/motion.ts. Springs give physics; the easing tokens give consistent curves. Everything falls back to instant under prefers-reduced-motion. Click any tile."
           >
             <div className="flex flex-col gap-3">
               <SubHeading>Springs</SubHeading>
@@ -605,30 +605,41 @@ export default function DesignSystemPage() {
               <SubHeading>Easings</SubHeading>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <CssMotionDemo
+                  label="--motion-ease-hand"
+                  spec="ease-hand · press, pop-in"
+                  style={{ transition: "transform 600ms var(--motion-ease-hand)" }}
+                />
+                <CssMotionDemo
+                  label="--motion-ease-calm"
+                  spec="ease-calm · state changes"
+                  style={{ transition: "transform 600ms var(--motion-ease-calm)" }}
+                />
+                <CssMotionDemo
                   label="--ease-out"
                   spec="enter / exit"
                   style={{ transition: "transform 600ms var(--ease-out)" }}
-                />
-                <CssMotionDemo
-                  label="--ease-in-out"
-                  spec="on-screen movement"
-                  style={{ transition: "transform 600ms var(--ease-in-out)" }}
-                />
-                <CssMotionDemo
-                  label="--ease-drawer"
-                  spec="sheet slides"
-                  style={{ transition: "transform 600ms var(--ease-drawer)" }}
                 />
               </div>
             </div>
 
             <div className="flex flex-col gap-3">
-              <SubHeading>Durations</SubHeading>
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                <CssMotionDemo label="durationFast" spec="150ms · tooltips" style={{ transition: "transform 150ms var(--ease-out)" }} />
-                <CssMotionDemo label="durationBase" spec="200ms · dropdowns" style={{ transition: "transform 200ms var(--ease-out)" }} />
-                <CssMotionDemo label="durationSlow" spec="300ms · modals" style={{ transition: "transform 300ms var(--ease-out)" }} />
-                <CssMotionDemo label="durationReveal" spec="450ms · reveals" style={{ transition: "transform 450ms var(--ease-out)" }} />
+              <SubHeading>Speeds</SubHeading>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <CssMotionDemo
+                  label="--motion-micro"
+                  spec="150ms · hover, toggle, press, menus"
+                  style={{ transition: "transform var(--motion-micro) var(--motion-ease-hand)" }}
+                />
+                <CssMotionDemo
+                  label="--motion-standard"
+                  spec="250ms · overlays, entrances"
+                  style={{ transition: "transform var(--motion-standard) var(--motion-ease-calm)" }}
+                />
+                <CssMotionDemo
+                  label="--motion-expressive"
+                  spec="400ms · rare, memorable"
+                  style={{ transition: "transform var(--motion-expressive) var(--ease-out)" }}
+                />
               </div>
             </div>
           </Section>
