@@ -94,6 +94,19 @@ function importSources(source: string): string[] {
     return [...source.matchAll(/from\s+["']([^"']+)["']/g)].map((match) => match[1]);
 }
 
+type SharedSkeletonConsumer = {
+    /** Repo-relative path of the module that must render the shared skeleton. */
+    file: string;
+    /** The specifier that module imports it by — alias from a route, relative from a sibling. */
+    specifier: string;
+};
+
+type SharedSkeleton = {
+    /** Repo-relative path of the skeleton component itself. */
+    component: string;
+    consumers: SharedSkeletonConsumer[];
+};
+
 /**
  * The shared skeletons and every module that must render them.
  *
@@ -103,28 +116,77 @@ function importSources(source: string): string[] {
  * each pair here imports a single module instead. Re-forking one of these is the regression this
  * guards.
  */
-const SHARED_SKELETON_CONSUMERS: Record<string, string[]> = {
-    "@/app/components/organization/OrganizationOverviewSkeleton": [
-        "app/(app)/organization/overview/loading.tsx",
-        "app/components/organization/OrganizationOverviewPanel.tsx",
-    ],
-    "@/app/components/settings/QualificationCriteriaSkeleton": [
-        "app/(app)/settings/qualification/loading.tsx",
-        "app/components/settings/QualificationCriteriaPanel.tsx",
-    ],
-    "@/app/components/settings/workflows/operations/WorkflowRunDetailSkeleton": [
-        "app/(app)/workflows/[workflowId]/runs/[runKey]/loading.tsx",
-        "app/components/settings/workflows/operations/WorkflowRunOperationsDetail.tsx",
-    ],
-    "@/app/components/settings/workflows/recipes/WorkflowRecipeDetailSkeleton": [
-        "app/(app)/workflows/recipes/[recipeKey]/loading.tsx",
-        "app/components/settings/workflows/recipes/WorkflowRecipeGallery.tsx",
-    ],
-    "@/app/components/diagnostics/DiagnosticsPanelSkeleton": [
-        "app/(app)/organization/diagnostics/loading.tsx",
-        "app/(app)/settings/diagnostics/loading.tsx",
-    ],
-};
+const SHARED_SKELETONS: SharedSkeleton[] = [
+    {
+        component: "app/components/organization/OrganizationOverviewSkeleton.tsx",
+        consumers: [
+            {
+                file: "app/(app)/organization/overview/loading.tsx",
+                specifier: "@/app/components/organization/OrganizationOverviewSkeleton",
+            },
+            {
+                file: "app/components/organization/OrganizationOverviewPanel.tsx",
+                specifier: "@/app/components/organization/OrganizationOverviewSkeleton",
+            },
+        ],
+    },
+    {
+        component: "app/components/settings/QualificationCriteriaSkeleton.tsx",
+        consumers: [
+            {
+                file: "app/(app)/settings/qualification/loading.tsx",
+                specifier: "@/app/components/settings/QualificationCriteriaSkeleton",
+            },
+            {
+                file: "app/components/settings/QualificationCriteriaPanel.tsx",
+                specifier: "@/app/components/settings/QualificationCriteriaSkeleton",
+            },
+        ],
+    },
+    {
+        component: "app/components/settings/workflows/operations/WorkflowRunDetailSkeleton.tsx",
+        consumers: [
+            {
+                file: "app/(app)/workflows/[workflowId]/runs/[runKey]/loading.tsx",
+                specifier: "@/app/components/settings/workflows/operations/WorkflowRunDetailSkeleton",
+            },
+            {
+                file: "app/components/settings/workflows/operations/WorkflowRunOperationsDetail.tsx",
+                specifier: "@/app/components/settings/workflows/operations/WorkflowRunDetailSkeleton",
+            },
+        ],
+    },
+    {
+        component: "app/components/settings/workflows/recipes/WorkflowRecipeDetailSkeleton.tsx",
+        consumers: [
+            {
+                file: "app/(app)/workflows/recipes/[recipeKey]/loading.tsx",
+                specifier: "@/app/components/settings/workflows/recipes/WorkflowRecipeDetailSkeleton",
+            },
+            {
+                file: "app/components/settings/workflows/recipes/WorkflowRecipeGallery.tsx",
+                specifier: "@/app/components/settings/workflows/recipes/WorkflowRecipeDetailSkeleton",
+            },
+        ],
+    },
+    {
+        component: "app/components/diagnostics/DiagnosticsPanelSkeleton.tsx",
+        consumers: [
+            {
+                file: "app/(app)/organization/diagnostics/loading.tsx",
+                specifier: "@/app/components/diagnostics/DiagnosticsPanelSkeleton",
+            },
+            {
+                file: "app/(app)/settings/diagnostics/loading.tsx",
+                specifier: "@/app/components/diagnostics/DiagnosticsPanelSkeleton",
+            },
+            {
+                file: "app/components/diagnostics/DiagnosticsPanel.tsx",
+                specifier: "./DiagnosticsPanelSkeleton",
+            },
+        ],
+    },
+];
 
 const ledger = readLedger();
 const excepted = new Map(ledger.exceptions.map((entry) => [entry.route, entry]));
@@ -149,9 +211,10 @@ describe("route loading skeletons", () => {
 
     it("names only shipped routes, once each, in order", () => {
         const routes = ledger.exceptions.map((entry) => entry.route);
+        const shipped = new Set<string>(SHIPPED_APP_ROUTES);
 
         expect(routes).toEqual([...new Set(routes)].sort());
-        expect(routes.filter((route) => !SHIPPED_APP_ROUTES.includes(route as never))).toEqual([]);
+        expect(routes.filter((route) => !shipped.has(route))).toEqual([]);
     });
 
     it("never grows past the committed high-water mark", () => {
@@ -239,20 +302,19 @@ describe("loading skeletons mirror rather than decorate", () => {
         const missing: string[] = [];
         const forked: string[] = [];
 
-        for (const [module, consumers] of Object.entries(SHARED_SKELETON_CONSUMERS)) {
-            const componentPath = path.join(process.cwd(), `${module.replace("@/", "")}.tsx`);
-            if (!existsSync(componentPath)) {
-                missing.push(module);
+        for (const shared of SHARED_SKELETONS) {
+            if (!existsSync(path.join(process.cwd(), shared.component))) {
+                missing.push(shared.component);
                 continue;
             }
-            for (const consumer of consumers) {
-                const consumerPath = path.join(process.cwd(), consumer);
+            for (const consumer of shared.consumers) {
+                const consumerPath = path.join(process.cwd(), consumer.file);
                 if (!existsSync(consumerPath)) {
-                    missing.push(consumer);
+                    missing.push(consumer.file);
                     continue;
                 }
-                if (!importSources(readFileSync(consumerPath, "utf8")).includes(module)) {
-                    forked.push(`${consumer} no longer renders ${module}`);
+                if (!importSources(readFileSync(consumerPath, "utf8")).includes(consumer.specifier)) {
+                    forked.push(`${consumer.file} no longer renders ${shared.component}`);
                 }
             }
         }
@@ -264,16 +326,24 @@ describe("loading skeletons mirror rather than decorate", () => {
         ).toEqual([]);
     });
 
+    it("pairs every shared skeleton with more than one consumer", () => {
+        const lonely = SHARED_SKELETONS
+            .filter((shared) => shared.consumers.length < 2)
+            .map((shared) => shared.component);
+
+        expect(lonely, "a skeleton with one consumer is not shared; inline it or record its second reader").toEqual([]);
+    });
+
     it("lets no consumer of a shared skeleton define a second one locally", () => {
         const localCopies: string[] = [];
 
-        for (const consumers of Object.values(SHARED_SKELETON_CONSUMERS)) {
-            for (const consumer of consumers) {
-                const consumerPath = path.join(process.cwd(), consumer);
+        for (const shared of SHARED_SKELETONS) {
+            for (const consumer of shared.consumers) {
+                const consumerPath = path.join(process.cwd(), consumer.file);
                 if (!existsSync(consumerPath)) continue;
                 const source = readFileSync(consumerPath, "utf8");
                 if (/\nfunction \w*(?:Detail|Overview|Panel|Criteria)Skeleton\(/.test(source)) {
-                    localCopies.push(consumer);
+                    localCopies.push(consumer.file);
                 }
             }
         }
