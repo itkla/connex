@@ -405,12 +405,12 @@ class AiAssistantControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"title\":\"   \"}"))
             .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.title").exists());
+            .andExpect(jsonPath("$.fieldErrors.title").exists());
         mockMvc.perform(post("/api/ai/assistant/sessions/42/messages")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"content\":\"\"}"))
             .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.content").exists());
+            .andExpect(jsonPath("$.fieldErrors.content").exists());
         mockMvc.perform(post("/api/ai/assistant/sessions/42/turns")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"content\":\"Question\",\"pageContext\":[{\"kind\":\"contact\",\"id\":0}]}"))

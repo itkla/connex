@@ -174,10 +174,10 @@ class SavedViewControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"recordType\":\"\",\"name\":\"\",\"position\":-1}"))
             .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.recordType").exists())
-            .andExpect(jsonPath("$.name").exists())
-            .andExpect(jsonPath("$.config").exists())
-            .andExpect(jsonPath("$.position").exists());
+            .andExpect(jsonPath("$.fieldErrors.recordType").exists())
+            .andExpect(jsonPath("$.fieldErrors.name").exists())
+            .andExpect(jsonPath("$.fieldErrors.config").exists())
+            .andExpect(jsonPath("$.fieldErrors.position").exists());
 
         mockMvc.perform(put("/api/saved-views/42/pin")
                 .contentType(MediaType.APPLICATION_JSON)

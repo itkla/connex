@@ -151,7 +151,7 @@ class DealControllerTest {
                     }
                     """))
             .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.duplicateReviewToken").exists());
+            .andExpect(jsonPath("$.fieldErrors.duplicateReviewToken").exists());
 
         verifyNoInteractions(dealService);
     }
@@ -235,7 +235,7 @@ class DealControllerTest {
                     {"won":false,"reason":"cancelled","actualValue":-12.34}
                     """))
             .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.actualValue").exists());
+            .andExpect(jsonPath("$.fieldErrors.actualValue").exists());
 
         verifyNoInteractions(dealService);
     }
@@ -265,7 +265,7 @@ class DealControllerTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(body))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.name").exists());
+                .andExpect(jsonPath("$.fieldErrors.name").exists());
         }
 
         verifyNoInteractions(dealService);
@@ -284,7 +284,7 @@ class DealControllerTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(body))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.value").exists());
+                .andExpect(jsonPath("$.fieldErrors.value").exists());
         }
 
         verifyNoInteractions(dealService);
