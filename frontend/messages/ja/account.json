@@ -467,7 +467,7 @@
     "relationshipTitle": "関係のナッジ",
     "relationshipDescription": "進行中の案件の関係者と連絡が途絶えたとき。",
     "mentionTitle": "メンション",
-    "mentionDescription": "メンバーがノートであなたをメンションしたとき。",
+    "mentionDescription": "メンバーがメモであなたをメンションしたとき。",
     "commentMentionTitle": "コメントのメンション",
     "commentMentionDescription": "メンバーがレコードのコメントであなたをメンションしたとき。",
     "commentReplyTitle": "コメントへの返信",

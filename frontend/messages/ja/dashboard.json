@@ -21,7 +21,7 @@
     "companyWarmth": "会社の温度感",
     "warmthDistribution": "温度感の分布",
     "closingSoon": "まもなくクローズ",
-    "recentNotes": "最近のノート",
+    "recentNotes": "最近のメモ",
     "notifications": "通知",
     "quickActions": "クイックアクション",
     "captureAttention": {
@@ -88,7 +88,7 @@
       },
       "interactions": {
         "title": "接点を記録する",
-        "body": "アクティビティ、共有ノート、紐づけたタスクを根拠として、Connex が関係の温度感を読み取ります。",
+        "body": "アクティビティ、共有メモ、紐づけたタスクを根拠として、Connex が関係の温度感を読み取ります。",
         "cta": "アクティビティを記録",
         "done": "接点を記録済み"
       },
@@ -191,21 +191,21 @@
   "DashboardQuickCreate": {
     "new": "新規",
     "newTask": "新しいタスク",
-    "newNote": "新しいノート",
+    "newNote": "新しいメモ",
     "taskTitle": "新しいタスク",
     "taskDescription": "自分に割り当てるタスクを作成します。",
-    "noteTitle": "新しいノート",
+    "noteTitle": "新しいメモ",
     "noteDescription": "メモを残しましょう。",
     "descriptionField": "説明",
     "descriptionPlaceholder": "何をしますか？",
     "dueDate": "期日",
-    "contentField": "ノート",
+    "contentField": "メモ",
     "contentPlaceholder": "メモを入力…",
     "cancel": "キャンセル",
     "create": "作成",
     "view": "表示",
     "taskCreated": "タスクを作成しました",
-    "noteCreated": "ノートを作成しました",
+    "noteCreated": "メモを作成しました",
     "descriptionRequired": "説明を入力してください。",
     "contentRequired": "内容を入力してください。",
     "failed": "問題が発生しました。"
