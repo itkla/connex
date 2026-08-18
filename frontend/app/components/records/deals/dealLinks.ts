@@ -15,10 +15,11 @@ export const DEAL_PIPELINE_FILTER_KEY = 'pipeline';
  * Href for the deals browser pre-filtered to one company's deals.
  *
  * @param companyId - the company whose deals should be listed, or null/undefined for a contact with
- *   no company, which lands on the unfiltered browser rather than a filter that matches nothing
+ *   no company, which yields no link at all — an unfiltered browser would show the whole workspace's
+ *   deals under a tile that counted only this record's
  */
-export function companyDealsHref(companyId: number | null | undefined): string {
-    if (companyId == null) return DEALS_BROWSER_PATH;
+export function companyDealsHref(companyId: number | null | undefined): string | undefined {
+    if (companyId == null) return undefined;
     return `${DEALS_BROWSER_PATH}?${DEAL_COMPANY_FILTER_KEY}=${companyId}`;
 }
 
