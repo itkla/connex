@@ -383,11 +383,11 @@
     "turnStreaming": "Writing…",
     "turnResolved": "Answer ready",
     "turnCancelled": "Response stopped",
-    "turnFailed": "The assistant could not complete this turn.",
+    "turnFailed": "The assistant couldn't finish this answer.",
     "turnImageUnsupported": "This assistant model can’t read images. Remove the image or choose an image-capable model.",
-    "budgetExhausted": "The organization daily AI token budget is exhausted.",
-    "toolResultBudgetExhausted": "This turn ran out of context space while gathering relationship data. Try a more focused record set or date range.",
-    "turnTimedOut": "This turn timed out before it could finish.",
+    "budgetExhausted": "Your organization's daily AI limit has been reached. Try again later.",
+    "toolResultBudgetExhausted": "This answer needed more relationship data than it could hold at once. Try a narrower set of records or a shorter date range.",
+    "turnTimedOut": "This answer timed out before it could finish.",
     "toolCards": {
       "outcome": "Outcome",
       "recordLink": "Open {target}",
@@ -492,8 +492,8 @@
       "lookupBody": "Connex could not confirm whether your role can use the assistant. Try again after permissions reload.",
       "featureTitle": "Ask Connex is unavailable",
       "featureBody": "The assistant can't be used in this workspace right now. Ask a workspace admin if you need access.",
-      "uncertainTitle": "This turn needs reconciliation",
-      "uncertainBody": "Connex did not receive a reliable turn response, so sending again is blocked to prevent a duplicate. Start a new chat or refresh this session."
+      "uncertainTitle": "We're not sure this answer went through",
+      "uncertainBody": "Connex didn't get a clear response back, so sending again is blocked to avoid a duplicate. Start a new chat or refresh this one."
     },
     "toast": {
       "archived": "Chat archived",
@@ -505,7 +505,7 @@
       "left": "Left shared chat",
       "participantRemoved": "Participant removed",
       "requestFailed": "Ask Connex request failed",
-      "turnFailed": "Ask Connex could not complete the turn",
+      "turnFailed": "Ask Connex couldn't finish that answer",
       "turnTimedOut": "Ask Connex timed out",
       "cancelFailed": "The response could not be stopped",
       "toolActionRefreshFailed": "The action completed, but its latest status could not be loaded"

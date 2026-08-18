@@ -16,11 +16,15 @@ import { NoAccessCard, EmptyRow, ListCard } from "@/app/components/organization/
 
 const PAGE_SIZE = 30;
 
-function humanizeAction(action: string) {
-    return action
-        .split(".")
-        .map((part) => part.replace(/_/g, " "))
-        .join(" · ");
+/**
+ * Last-resort label for an audit action Connex has no sentence for yet: one readable phrase in
+ * sentence case rather than the raw dotted code.
+ */
+function titleCaseAction(action: string) {
+    const words = action.split(/[._]/).filter(Boolean);
+    if (words.length === 0) return action;
+    const [first, ...rest] = words;
+    return [first.charAt(0).toUpperCase() + first.slice(1), ...rest].join(" ");
 }
 
 function relativeTime(iso: string, locale: string, now: number) {
@@ -48,6 +52,11 @@ export default function OrgAuditPanel() {
     const [loadError, setLoadError] = useState(false);
     const [loadingMore, setLoadingMore] = useState(false);
     const [hasMore, setHasMore] = useState(false);
+
+    const actionLabel = (action: string) => {
+        const key = `action.${action}`;
+        return t.has(key) ? t(key) : titleCaseAction(action);
+    };
 
     useEffect(() => {
         if (!orgId) return;
@@ -115,10 +124,10 @@ export default function OrgAuditPanel() {
                             <li key={entry.id} className="flex items-start justify-between gap-4 px-4 py-3">
                                 <div className="min-w-0 flex-1">
                                     <p className="truncate text-sm font-medium text-foreground">
-                                        {entry.summary || humanizeAction(entry.action)}
+                                        {entry.summary || actionLabel(entry.action)}
                                     </p>
                                     <p className="truncate text-xs text-muted-foreground">
-                                        {humanizeAction(entry.action)} ·{" "}
+                                        {actionLabel(entry.action)} ·{" "}
                                         {entry.currentActorLabel || entry.actorLabel || t("actorSystem")}
                                     </p>
                                 </div>

@@ -21,8 +21,8 @@
     "nameHint": "組織およびワークスペースの画面全体に表示される名前が更新されます。",
     "nameRequired": "組織名を入力してください。",
     "nameTooLong": "128文字以内で入力してください。",
-    "slugLabel": "組織スラッグ",
-    "slugHint": "固定識別子のため、ここでは変更できません。",
+    "slugLabel": "組織ID（リンクに使用）",
+    "slugHint": "リンクに使われるIDです。ここでは変更できません。",
     "save": "変更を保存",
     "saving": "保存中",
     "saved": "組織設定を更新しました。",
@@ -95,7 +95,7 @@
     "irreversibleTitle": "この操作は取り消せません。",
     "workspaceRetention": "ワークスペースのレコードと管理対象ファイルは削除されます。改ざん防止された監査メタデータ、および完了または拒否済みの組織レベルの開示等請求記録は、ワークスペースと人物へのリンクを解除して保持されます。バックアップ内のコピーはバックアップ保持方針に従って期限後に消去されます。",
     "organizationRetention": "組織内の全ワークスペース、メンバーシップ、設定、テナントレコード、管理対象ファイル、完了または拒否済みの開示等請求記録は削除されます。改ざん防止された監査メタデータは、削除済み組織へのリンクを解除して保持されます。バックアップ内のコピーはバックアップ保持方針に従って期限後に消去されます。",
-    "confirmationLabel": "確認のため {slug} を正確に入力してください",
+    "confirmationLabel": "確認のため {id} を正確に入力してください",
     "confirmationHint": "大文字と小文字を区別します。空白は自動的に削除されません。",
     "refusedTitle": "削除を拒否しました",
     "workspaceOpenObligation": "このワークスペースに未完了の開示等請求があります。請求を完了または拒否にしてから、もう一度削除してください。",
@@ -111,16 +111,16 @@
     "title": "AIプロバイダー",
     "subtitle": "組織で利用するAIプロバイダーを設定します（BYOP）。Connexは可能な範囲でテキスト内の識別情報をマスキングし、すべての外部リクエストを監査します。名刺の代替読み取りを含む画像機能では、マスキングできない画像データがメタデータを除去したうえで送信されます。ここでプロバイダーを設定して有効化するまで、AI機能は無効のままです。",
     "workspaceEnableTitle": "このワークスペースでAIを有効にする",
-    "workspaceEnableDescription": "このワークスペースの緊急停止設定はメンバーのAI権限より優先され、実行中のアシスタントターンを次の安全確認で停止します。",
-    "assistantMaxSteps": "ターンごとのアシスタントステップ数",
-    "assistantMaxStepsDescription": "Ask Connexの各ターンを1〜12回のモデルまたはツールステップに制限します。",
+    "workspaceEnableDescription": "このワークスペースの緊急停止設定はメンバーの AI 権限より優先され、実行中のアシスタントの回答を次の安全確認で停止します。",
+    "assistantMaxSteps": "回答ごとのアシスタントステップ数",
+    "assistantMaxStepsDescription": "Ask Connex の各回答を 1〜12 回のモデルまたはツールステップに制限します。",
     "saveWorkspaceControls": "ワークスペース設定を保存",
     "governanceSaved": "ワークスペースのAI設定を保存しました。",
     "governanceSaveFailed": "ワークスペースのAI設定を保存できませんでした。",
-    "dailyBudgetTitle": "組織の日次トークン予算",
+    "dailyBudgetTitle": "組織の 1 日あたりの AI 利用上限",
     "dailyBudgetDescription": "UTC日単位の共有上限をデータベースで管理し、この組織の全Connexサーバーとワークスペースに適用します。",
     "dailyTokenLimit": "トークン上限",
-    "dailyTokenLimitHint": "0にすると無制限です。実行中の呼び出しはプロバイダーへの送信前に保守的な上限を予約します。",
+    "dailyTokenLimitHint": "0 にすると無制限です。実行中の呼び出しは、プロバイダーへの送信前に余裕を持った上限を確保します。",
     "tokensUsed": "本日の使用量",
     "tokensRemaining": "残り",
     "unlimited": "無制限",
@@ -220,7 +220,61 @@
     "actorSystem": "システム",
     "colEvent": "イベント",
     "colActor": "実行者",
-    "colWhen": "日時"
+    "colWhen": "日時",
+    "action": {
+      "org": {
+        "create": "組織を作成しました",
+        "rename": "組織名を変更しました",
+        "member": {
+          "set": "組織管理者の権限を変更しました",
+          "remove": "組織管理者を解除しました",
+          "founding_owner": "設立時のオーナーを記録しました"
+        },
+        "allowed_domain": {
+          "add": "許可メールドメインを追加しました",
+          "remove": "許可メールドメインを削除しました"
+        },
+        "sso_config": {
+          "save": "シングルサインオンの設定を保存しました"
+        },
+        "sso_user": {
+          "provision": "シングルサインオンでメンバーのアカウントを作成しました"
+        },
+        "workspace_member": {
+          "sso_provision": "シングルサインオンでワークスペースのメンバーに追加しました"
+        },
+        "federated_identity": {
+          "link": "シングルサインオンのIDを連携しました"
+        },
+        "login": {
+          "federated_link": "連携済みのシングルサインオンIDでサインインしました"
+        },
+        "ai_provider": {
+          "save": "AIプロバイダーの設定を保存しました",
+          "revoke": "AIプロバイダーの認証情報を失効させました",
+          "zdr_attest": "AIプロバイダーがデータを保持しないことを確認しました"
+        },
+        "ai_budget": {
+          "save": "1日あたりのAI利用上限を保存しました"
+        },
+        "workspace": {
+          "create": "ワークスペースを作成しました",
+          "export": "ワークスペースのデータを書き出しました"
+        },
+        "support_bundle": {
+          "completed": "サポート用データを作成しました",
+          "download": "サポート用データをダウンロードしました"
+        }
+      },
+      "tenant": {
+        "organization": {
+          "teardown": "組織を削除しました"
+        },
+        "workspace": {
+          "teardown": "ワークスペースを削除しました"
+        }
+      }
+    }
   },
   "OrgDataRequests": {
     "title": "開示等請求",
