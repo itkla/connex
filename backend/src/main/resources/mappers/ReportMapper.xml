@@ -623,10 +623,12 @@
                   response inside an hour as zero, in the measure whose entire point is speed. -->
              <when test="query.measure == 'first_response_hours'">AVG(CASE WHEN pass.first_responded_at IS NOT NULL THEN TIMESTAMPDIFF(SECOND, pass.first_response_started_at, pass.first_responded_at) END) / 3600.0</when>
              <!-- Numerator and denominator share one observation instant — the end of the reported
-                  period. A clock whose deadline falls after it cannot have breached yet, so counting
-                  it would let starting new clocks lower the rate; and a breach recorded after it
-                  belongs to a later period, so counting that would push the rate above 100%. -->
-             <when test="query.measure == 'first_response_breach_rate'">100.0 * SUM(CASE WHEN pass.first_response_breached_at IS NOT NULL AND pass.first_response_breached_at &lt; #{query.endUtc} THEN 1 ELSE 0 END) / NULLIF(SUM(CASE WHEN pass.first_response_due_at IS NOT NULL AND (pass.first_responded_at IS NOT NULL OR pass.first_response_due_at &lt;= #{query.endUtc}) THEN 1 ELSE 0 END), 0)</when>
+                  period, half-open like every other boundary here. A clock whose deadline falls
+                  after it cannot have breached yet, so counting it would let starting new clocks
+                  lower the rate; a breach or a response recorded after it belongs to a later period,
+                  so admitting either would put the two sides on different clocks and let the rate
+                  exceed 100%. -->
+             <when test="query.measure == 'first_response_breach_rate'">100.0 * SUM(CASE WHEN pass.first_response_breached_at IS NOT NULL AND pass.first_response_breached_at &lt; #{query.endUtc} THEN 1 ELSE 0 END) / NULLIF(SUM(CASE WHEN pass.first_response_due_at IS NOT NULL AND (pass.first_responded_at &lt; #{query.endUtc} OR pass.first_response_due_at &lt; #{query.endUtc}) THEN 1 ELSE 0 END), 0)</when>
              <otherwise>COUNT(*)</otherwise>
            </choose> AS value
     FROM person_lifecycle_pass pass

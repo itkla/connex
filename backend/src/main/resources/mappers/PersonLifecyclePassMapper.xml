@@ -55,10 +55,25 @@
       AND pass.ended_at IS NULL
   </update>
 
+  <!-- Closing a pass that never reached a milestone is itself that pass's first decisive outcome,
+       so it re-snapshots the owner on the same rule as stampMilestone: whoever held the contact when
+       its fate was decided keeps the credit, rather than whoever happened to own it at entry. -->
   <update id="closeOpenPass">
-    UPDATE person_lifecycle_pass
-    SET ended_at = #{endedAt}
-    WHERE workspace_id = #{workspaceId} AND person_id = #{personId} AND ended_at IS NULL
+    UPDATE person_lifecycle_pass pass
+    JOIN person ON person.workspace_id = pass.workspace_id AND person.id = pass.person_id
+    SET pass.ended_at = #{endedAt},
+        pass.owner_id = CASE
+          WHEN pass.qualified_at IS NULL AND pass.converted_at IS NULL AND pass.disqualified_at IS NULL
+          THEN person.owner_id ELSE pass.owner_id END
+    WHERE pass.workspace_id = #{workspaceId}
+      AND pass.person_id = #{personId}
+      AND pass.ended_at IS NULL
+  </update>
+
+  <!-- Account-wide by design: permanent erasure must reach every workspace's reference to the
+       account, so this statement is deliberately unscoped and exempted in TenantScopeInterceptor. -->
+  <update id="clearOwnerAnywhere">
+    UPDATE person_lifecycle_pass SET owner_id = NULL WHERE owner_id = #{userId}
   </update>
 
   <!-- Reads the contact's live clock rather than taking values from the caller, so the pass can
@@ -77,5 +92,10 @@
       AND pass.ended_at IS NULL
       AND person.suspended_at IS NULL
       AND person.provision_ceased_at IS NULL
+      -- The clock must provably belong to this pass. A contact can be put under an SLA before it
+      -- enters the lifecycle at all, and copying that clock onto a pass opened afterwards would
+      -- credit the new lead with a response to the old one.
+      AND person.first_response_started_at IS NOT NULL
+      AND person.first_response_started_at &gt;= pass.entered_at
   </update>
 </mapper>

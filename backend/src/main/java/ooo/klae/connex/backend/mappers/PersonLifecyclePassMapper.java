@@ -46,6 +46,15 @@ public interface PersonLifecyclePassMapper {
         @Param("endedAt") LocalDateTime endedAt);
 
     /**
+     * Clears every historical owner reference to one account across all workspaces, for permanent
+     * erasure. The pass keeps its outcome; only the person it was credited to is removed.
+     *
+     * @param userId account being erased
+     * @return rows updated
+     */
+    int clearOwnerAnywhere(@Param("userId") int userId);
+
+    /**
      * Copies the contact's live first-response clock onto its open pass, so the outcome survives the
      * clock being cleared when the pass ends.
      *

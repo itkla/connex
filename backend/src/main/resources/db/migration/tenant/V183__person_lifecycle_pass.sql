@@ -113,10 +113,13 @@ SET pass.owner_id = person.owner_id,
     pass.first_response_breached_at = person.first_response_breached_at
 WHERE pass.ended_at IS NULL
   AND person.first_response_due_at IS NOT NULL
-  -- ...but only when the clock actually belongs to this pass. A contact recycled after being
+  -- ...but only when the clock provably belongs to this pass. A contact recycled after being
   -- answered carries a clock from its previous pass, and attaching that to the pass now open would
-  -- report a response that arrived months before the lead it is credited to.
-  AND COALESCE(person.first_response_started_at, person.first_response_due_at) >= pass.entered_at;
+  -- report a response that arrived months before the lead it is credited to. A clock whose start is
+  -- unknown — every clock predating V182 — cannot be attributed truthfully at all, so it is left
+  -- off rather than guessed at from its deadline.
+  AND person.first_response_started_at IS NOT NULL
+  AND person.first_response_started_at >= pass.entered_at;
 
 -- Every backfilled pass takes the contact's current owner as its accountable owner: the owner at
 -- the time of each historical outcome was never recorded, and the live owner is the only honest

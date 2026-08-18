@@ -256,6 +256,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "AiChatMapper.clearTurnRequestersAnywhere",
         MAPPERS + "CompanyMapper.clearOwnershipAnywhere",
         MAPPERS + "PersonMapper.clearOwnershipAnywhere",
+        MAPPERS + "PersonLifecyclePassMapper.clearOwnerAnywhere",
         MAPPERS + "DealMapper.clearOwnershipAnywhere",
         MAPPERS + "DealMapper.removeCollaboratorAnywhere",
         MAPPERS + "DealDuplicateReviewProofMapper.deleteForActorAnywhere",
