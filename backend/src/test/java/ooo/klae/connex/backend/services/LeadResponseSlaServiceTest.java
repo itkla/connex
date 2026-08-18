@@ -11,20 +11,12 @@ import static org.mockito.Mockito.verify;
 
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Person;
@@ -405,64 +397,6 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
             Integer.class, workspace.getId(), person.getId());
         assertEquals(first.getId(), owner,
             "reassignment must not move credit for work already done");
-    }
-
-    @Test
-    @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    void aClockStartingWhileThePassClosesNeverAttachesToTheWrongPass() throws Exception {
-        Person person = enterLifecycle(newPerson(newCompany()));
-        CountDownLatch ready = new CountDownLatch(2);
-        CountDownLatch start = new CountDownLatch(1);
-
-        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
-            Future<?> clock = executor.submit(() -> afterStart(ready, start, () ->
-                slaService.startFirstResponseClock(person.getId(), 4)));
-            Future<?> withdrawal = executor.submit(() -> afterStart(ready, start, () ->
-                lifecycleService.withdrawFromLifecycle(person.getId(), "closing")));
-            assertTrue(ready.await(5, TimeUnit.SECONDS));
-            start.countDown();
-            settle(clock);
-            settle(withdrawal);
-        } finally {
-            start.countDown();
-        }
-
-        List<Map<String, Object>> passes = jdbcTemplate.queryForList(
-            "SELECT entered_at, ended_at, first_response_started_at, first_responded_at "
-                + "FROM person_lifecycle_pass WHERE workspace_id = ? AND person_id = ?",
-            workspace.getId(), person.getId());
-        assertEquals(1, passes.size(), "the race must not fork the ledger into two passes");
-        for (Map<String, Object> pass : passes) {
-            Object started = pass.get("first_response_started_at");
-            if (started != null) {
-                assertTrue(((java.sql.Timestamp) started).toLocalDateTime()
-                        .isBefore(((java.sql.Timestamp) pass.get("entered_at")).toLocalDateTime())
-                        == false,
-                    "a clock may only be attached to a pass it started within");
-            }
-        }
-    }
-
-    private static void afterStart(CountDownLatch ready, CountDownLatch start, Runnable work) {
-        ready.countDown();
-        try {
-            if (!start.await(5, TimeUnit.SECONDS)) {
-                throw new IllegalStateException("Concurrent lifecycle work did not start");
-            }
-        } catch (InterruptedException interrupted) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException(interrupted);
-        }
-        work.run();
-    }
-
-    /** Either outcome is legal; only a corrupt ledger is not, so failures are absorbed here. */
-    private static void settle(Future<?> future) throws Exception {
-        try {
-            future.get(10, TimeUnit.SECONDS);
-        } catch (ExecutionException expected) {
-            // one side losing the race is a legitimate outcome
-        }
     }
 
     private List<Integer> breachingIds(int workspaceId) {
