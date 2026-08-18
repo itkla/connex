@@ -26,7 +26,7 @@ A feature that shows a signal but offers no action breaks the loop. A feature th
 - **Not a generic database.** Screens are opinionated about relationships and next actions, not neutral tables of rows. If a surface could belong to any record-keeping tool, it is underdesigned for Connex.
 - **Not a compliance console.** Connex is rigorously compliant under the hood (APPI, tenant isolation, auditability), but compliance is plumbing the everyday user should feel as safety, not read as statute. Legal machinery surfaces only on the pages built for it (see principle 3).
 - **Not a dense admin shell.** Configuration exists to serve selling and relationship work, not the other way around. Admin surfaces are visited occasionally by a minority of users; they never set the tone of the product.
-- **Not an autonomous actor. AI proposes; the user applies.** Every AI output in Connex — briefs, risk rationales, intro suggestions, assistant answers — is a proposal a person can inspect, question, and ignore. When the assistant offers to change an existing record, it prepares a validated proposal and shows exactly what would change; nothing is changed until the user explicitly applies it. The one deliberate exception: when the user directly asks the assistant to add something small — log an activity, create a task or note, add a tag — it does so immediately, says so, and the addition can be undone. Automation (workflows) acts only within rules a person explicitly built, reviewed, and turned on. We never claim "AI never touches records" — the truthful promise is that AI acts only on your ask, shows its work, and every write is either confirm-before-apply or announced and undoable.
+- **Not an autonomous actor. AI proposes; the user applies.** Every AI output in Connex — briefs, risk rationales, intro suggestions, assistant answers — is a proposal a person can inspect, question, and ignore. When the assistant offers to change an existing record, it prepares a validated proposal and shows exactly what would change; nothing is changed until the user explicitly applies it. The one deliberate exception: while answering a request, the assistant may immediately add something small — log an activity, create a task or note, add a tag — and always says so; activities, tasks, and notes offer a short undo window, and a tag is removed the same way any tag is. Automation (workflows) acts only within rules a person explicitly built, reviewed, and turned on. We never claim "AI never touches records" — the truthful promise is that every AI write is announced, and either confirmed by the user first or plainly reversible on the record.
 
 ## 2. Who it's for
 
@@ -70,14 +70,14 @@ Numbered and testable. Cite them by number in reviews.
 
 | Concept | EN | JA | Never say (on product surfaces) |
 |---|---|---|---|
-| The relationship metric (the differentiator) | **Warmth**; bands: **warmth band** (hot / warm / cool / cold); trend: "warmth is cooling" | **温度感**; bands: **温度帯**（ホット／ウォーム／クール／コールド） | relationship temperature, temperature band, relationship score; 温度バンド, 関係の温度, 関係性の温度, 関係スコア |
+| The relationship metric (the differentiator) | **Warmth**; bands: **warmth band** (hot / warm / cool / cold); trend: "warmth is cooling" | **温度感**; bands: **温度帯**（ホット／ウォーム／クール／コールド） | relationship temperature, temperature band, relationship score; 温度バンド, 関係の温度, 関係性の温度, 関係スコア, 温度 alone as the metric name |
 | The signals triage surface | **Radar** ("Relationship Radar" only as an occasional full name in onboarding/marketing prose) | **レーダー** | Relationship Radar as the everyday label |
 | The personal work page | **My Work** — your tasks, your relationships, your follow-ups | **マイワーク** | Profile (for this page); マイページ |
 | Company record | **Company** | **会社** | account (for the record); アカウント, 取引先 |
 | Person record | **Contact** (labels, columns, counts, search groups); "person/people" only inside explanatory prose | **連絡先**; 文中の「人」は可 | People (as a label for contact lists) |
 | Deal record | **Deal** | **案件** | opportunity as a countable UI noun (intro suggestions are "suggested intros"); 商談 except as an example stage name |
 | Where records live and are shared | **workspace** | **ワークスペース** | organization (for workspace scope), team (as a scope; fine informally for the humans), tenant |
-| The admin level above workspaces | **Organization** (only on organization-admin surfaces) | **組織** | tenant; テナント |
+| The admin level above workspaces | **Organization** (as a destination or section name, only on organization-admin surfaces; fine in prose stating a genuinely organization-scoped fact — "your organization's AI provider") | **組織** | tenant; テナント |
 | A person in a workspace | **member** | **メンバー** | user (except auth/sign-in/session contexts), teammate (as a label; fine in informal prose) |
 | Org-level admin | **organization administrator** | **組織管理者** | — |
 | The automation object | **workflow**; **automation** only as the category noun; **recipe** for a pre-built template | **ワークフロー**／**自動化**（総称）／**レシピ** | rule (except as "legacy automations" inside the one migration screen while it exists), canonical, runtime, legacy runtime |
@@ -85,7 +85,7 @@ Numbered and testable. Cite them by number in reviews.
 | The route through the network | **intro path** | **紹介ルート** | warm path (as a label); ウォームパス, 温かい経路 |
 | Standalone linked note record | **Note** | **メモ** | ノート |
 | Discussion on a record | **Comment** | **コメント** | note (for comments) |
-| Free-text activity logging | Log it as an activity of type **Other** — the only two writing surfaces are Notes (records) and Comments (discussion). The shipped activity type "Note" folds into **Other**: relabeled with history preserved, never deleted or destructively remapped | 種別は**その他** | Note (as an activity type) |
+| Free-text activity logging | Log it as an activity of type **Other** — the only two writing surfaces are Notes (records) and Comments (discussion). The shipped activity type "Note" folds into **Other**: it leaves the composer pickers and filter rows, and existing "Note" activities display as "Other" — a read-time fold; history preserved, nothing deleted | 種別は**その他** | Note (as an activity type) |
 | Task and its kinds | **task**; **follow-up task** as a qualified kind of task; **To do** only as a kanban column name | **タスク**／**フォローアップタスク**；列名は現行訳（「未着手」等）を維持 | to-do / todo as a standalone noun |
 | Task ownership | **Assignee** | **担当者** | Assigned to |
 | Record ownership | **Owner** (qualify roles: "Workspace owner", "Organization owner") | **担当者**（ロールは**オーナー**） | — |
@@ -102,6 +102,8 @@ Numbered and testable. Cite them by number in reviews.
 **Banned on all product surfaces** (allowed in code, logs, and engineering docs; allowed on compliance surfaces — the organization data-requests admin tooling, admin compliance settings, and legal pages — only where noted):
 
 `tenant` · `teardown` · `deterministic` · `canonical` / `legacy` (as runtime taxonomy) · `predicate` · `node` / `graph` / `traversal` · `slug` · `ESP` · `RBAC` / permission constants (`RULE_MANAGE` etc.) · `epoch` · `data subject` (compliance surfaces: allowed) · `cease of use` / `third-party provision` (compliance surfaces: allowed) · `suppression` · `purge` · `token budget` / `context space` · `turn` (assistant: say "answer") · `egress` / `provider egress` · `projected` / `projection` · `admitted` · `opaque identifier` · `preflight` · `idempotency` · `hash` · `invocation` · `mutation` · `register` (as a noun for a list) · `demask` / `rewrap` · `correlation ID` (say "Reference") · raw ids in copy (`contact #42`) · raw enum/code/camelCase fallbacks (`Retention rule: {code}`) · HTTP status codes shown to users (`Request failed (403)`)
+
+Generator note: where a banned term is a substring of a canonical term (温度 alone inside 温度感／温度帯), the generated pattern must except the canonical usages rather than dropping the ban.
 
 ## 5. Voice & tone
 
@@ -122,7 +124,7 @@ Connex sounds like a competent, calm colleague: plain, direct, specific, never b
    - Never "Failed to X", never "Could not X".
 
 4. **Numbers, dates, and limits in human terms.**
-   - ✗ "The organization daily AI token budget is exhausted." → ✓ "Your organization's daily AI limit has been reached. It resets tomorrow."
+   - ✗ "The organization daily AI token budget is exhausted." → ✓ "Your organization's daily AI limit has been reached. Try again later."
 
 5. **Warm precision in empty and quiet states — explain, then invite.** Never a bare "nothing here"; never a machine enumerating its own rules.
    - ✗ "No current relationship signals meet the deterministic detector rules." → ✓ "Radar is clear — nothing in your logged activity needs attention right now."
@@ -130,7 +132,7 @@ Connex sounds like a competent, calm colleague: plain, direct, specific, never b
 6. **Transparency without the policy register.** Users deserve the truth about data in one short human sentence, not a clause.
    - ✗ "…your sessions are retained and become accessible to workspace administrators." → ✓ "Chats here belong to this workspace — its admins can see them, even after you leave."
 
-7. **JA register: 丁寧だが役所的でない.** です・ます throughout product copy; native words over katakana loans (紹介ルート not ウォームパス; メモ not ノート; 削除・消去 not パージ); statutory compounds (利用停止, 第三者提供停止) only on compliance surfaces or in parentheses after the plain phrasing. Use 削除 for deleting records and 消去 for erasing captured data — both are sanctioned, in their own contexts. Translate meaning, not words: JA is re-authored from the meaning of the final English, never patched word-by-word — and if the EN source is engineering prose, fix the EN first, then write the JA fresh.
+7. **JA register: 丁寧だが役所的でない.** です・ます throughout product copy; native words over katakana loans wherever a native word reads naturally (紹介ルート not ウォームパス; メモ not ノート; 削除・消去 not パージ) — the glossary's katakana entries (ワークスペース, メンバー, レーダーなど) are the settled exceptions; statutory compounds (利用停止, 第三者提供停止) only on compliance surfaces or in parentheses after the plain phrasing. Use 削除 for deleting records and 消去 for erasing captured data — both are sanctioned, in their own contexts. Translate meaning, not words: JA is re-authored from the meaning of the final English, never patched word-by-word — and if the EN source is engineering prose, fix the EN first, then write the JA fresh.
 
 8. **Create verbs are positional.** "New \<object\>" for page-level creation, "Add \<object\>" for attaching to the current record. JA: 「新規〜」／「〜を追加」. Settings panels save with "Save changes"; dialogs with "Save"; settings toasts say "\<Object\> saved", record toasts "\<Object\> created/deleted".
 
@@ -146,7 +148,7 @@ The canonical behavior for each recurring moment. **This section is normative ta
 
 **Confirming destructive actions.** A small centered dialog, one grammar: title "Delete \<object\>?", body names the specific object and ends "This can't be undone." (JA 「この操作は取り消せません。」), confirm button "Delete" in the destructive style. "Archive" needs no undo warning — it is recoverable and says so. "Delete permanently" is reserved for organization-level permanent deletion, which additionally requires typed confirmation.
 
-**Success and failure feedback.** Every failure speaks the §5 error dialect, localized, selected from the error's meaning — raw backend or exception text never reaches the user. Server errors append "Reference: {id}" so support can find the incident. (Today only full-page error screens render a reference; the change that brings it to toasts must update the support-identifier table in [`INTERNAL_OPERATIONS_RUNBOOK.md`](INTERNAL_OPERATIONS_RUNBOOK.md) in the same PR — the two contracts move together.) A signed-out or expired session is never an error toast: the product takes the user to sign in and returns them to where they were.
+**Success and failure feedback.** Every failure speaks the §5 error dialect, localized, selected from the error's meaning — raw backend or exception text never reaches the user. Server errors append "Reference: {id}" so support can find the incident. (Today references are rendered only by full-page error screens and the admin diagnostics panels — the panels still say "Reference ID {id}" and need aligning to "Reference: {id}"; the change that brings references to error toasts must update the support-identifier table in [`INTERNAL_OPERATIONS_RUNBOOK.md`](INTERNAL_OPERATIONS_RUNBOOK.md) in the same PR — the two contracts move together.) A signed-out or expired session is never an error toast: the product takes the user to sign in and returns them to where they were.
 
 **Empty states.** The shared empty-state component, always with three parts: what this place is, why it's empty right now, and one inviting action — "No contacts yet. Contacts are the people your team knows — add your first one or import a CSV." First-run and no-filter-matches are distinct states with distinct copy; filtered-empty offers "Clear filters". A brand-new workspace gets a guided journey: import a CSV, scan business cards, or add a first contact — and on to the first warmth insight.
 
@@ -158,7 +160,7 @@ The canonical behavior for each recurring moment. **This section is normative ta
 
 **Permission denied.** Page-level: a calm explanation with a way back and, where useful, who to ask. Inline/toast: "You don't have permission to do that here. Ask a workspace admin." Never a permission constant, never a bare 403. If a whole surface is unavailable to a role, prefer not rendering the entry point over showing a locked door.
 
-**AI moments.** AI proposes; the user applies: assistant-prepared changes to existing records are validated proposals that show exactly what would change and wait for explicit confirmation; small additions the user directly asked for (an activity, task, note, or tag) apply immediately, are announced, and can be undone. Every AI surface names its evidence and how fresh it is — or plainly says it can't. Transparency stays in plain register: the assistant discloses "Chats here belong to this workspace — its admins can see them, even after you leave." once per session list (not per chat); card scanning tells the truth about where reading happens — "Cards are read on this Connex instance when possible; otherwise the image is sent to your organization's AI provider — check the details before saving." Deeper guarantees live in docs and admin AI settings, not in everyday copy.
+**AI moments.** AI proposes; the user applies: assistant-prepared changes to existing records are validated proposals that show exactly what would change and wait for explicit confirmation; small additions made while answering (an activity, task, note, or tag) apply immediately and are announced — activities, tasks, and notes with a short undo window, a tag removed the same way it was added. Every AI surface names its evidence and how fresh it is — or plainly says it can't. Transparency stays in plain register: the assistant discloses "Chats here belong to this workspace — its admins can see them, even after you leave." once per session list (not per chat); card scanning tells the truth about where reading happens and what is kept — "Cards are read on Connex's own servers when possible; otherwise the image is sent to your organization's AI provider. A copy of the card is saved with the contact — check the details before saving." Deeper guarantees live in docs and admin AI settings, not in everyday copy.
 
 ## 7. Where things live
 

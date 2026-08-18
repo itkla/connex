@@ -76,7 +76,7 @@ Section rhythm (`gap-10` between stacked children) and page gutter/padding come 
 
 **Density & work modes (§2).** Comfortable is the baseline. Compactness is user-selected, scoped, reversible, and persistent — only in explicit bounded work modes (tables, bulk cleanup, imports, pipeline review). Cards, forms, Home, dashboards, detail pages, and mobile never inherit table density.
 
-**Overlay selection (§11/§12).** Inline edit for simple reversible fields; dialog/sheet for focused creation and small multi-field edits; a dedicated page/workspace for complex or consequential work. Reach for the lightest surface the job allows — a modal is rarely the first answer.
+**Overlay selection (§11/§12).** The operation → surface mapping is product law in [`../docs/PRODUCT.md`](../docs/PRODUCT.md) §6: create = centered dialog (builder artifacts via instant-create), edit = right drawer, inspect/peek = drawer or anchored popover with a path to the full page, confirm = small dialog, author = dedicated full page; on mobile these render as bottom sheets per the responsive-dialog rule. Inline edit remains right for simple reversible fields; per-surface deviations are documented decisions, not drift.
 
 **Motion (§14).** Expressive in memorable moments (page/section entrance via `Rise`, Peek, palette, Quick Create, drag/drop, meaningful completion); quiet and fast in repeated operations (table edit, filter/sort, bulk review, notification processing). *The first interaction may delight; the fiftieth must not irritate.* Repeated chrome (`PageShell`, `PageHeader`) carries no motion of its own — the page entrance owns it. Every animation honors `prefers-reduced-motion`.
 
