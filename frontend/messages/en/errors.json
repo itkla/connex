@@ -1,4 +1,17 @@
 {
+  "ApiErrors": {
+    "title": "Couldn't complete that",
+    "generic": "Something went wrong. Nothing was lost — try again.",
+    "invalid": "Some of what you entered can't be accepted. Check the details and try again.",
+    "forbidden": "You don't have permission to do that here. Ask a workspace admin.",
+    "notFound": "That record is no longer available.",
+    "conflict": "Someone else changed this just now. Reload and try again.",
+    "tooManyRequests": "That's a lot of requests at once. Wait a moment and try again.",
+    "offline": "We couldn't reach Connex. Check your connection and try again.",
+    "serverError": "Something went wrong on our side. Nothing was lost — try again in a moment.",
+    "identityCollisionReportTimeout": "That report is taking longer than expected. Try again in a moment.",
+    "reference": "Reference: {id}"
+  },
   "ErrorState": {
     "title": "Something went wrong",
     "body": "We couldn't load this page. The issue is usually temporary.",
