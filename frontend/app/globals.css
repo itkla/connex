@@ -64,6 +64,8 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  --ease-hand: var(--motion-ease-hand);
+  --ease-calm: var(--motion-ease-calm);
 }
 
 @media print {
@@ -196,8 +198,14 @@
   --risk-low: oklch(0.68 0.04 255);
   --radius: 0.625rem;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
-  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  /* Motion system (D3) — three speeds, two characters; the law is frontend/AGENTS.md §14.
+     Tailwind has no duration namespace, so durations are consumed as duration-(--motion-micro);
+     the easings ship as ease-hand / ease-calm via @theme inline. Timing is theme-independent. */
+  --motion-micro: 150ms;
+  --motion-standard: 250ms;
+  --motion-expressive: 400ms;
+  --motion-ease-hand: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --motion-ease-calm: cubic-bezier(0.32, 0.72, 0, 1);
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
@@ -429,7 +437,7 @@
     @apply absolute top-1 left-0 flex size-5 items-center justify-center rounded text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 hover:bg-accent hover:text-foreground;
   }
   .note-prose :where(.note-toggle-chevron svg) {
-    @apply transition-transform duration-150;
+    @apply transition-transform duration-(--motion-micro) motion-reduce:transition-none;
   }
   .note-prose :where(.note-toggle[data-open="true"] .note-toggle-chevron svg) {
     @apply rotate-90;
@@ -447,7 +455,7 @@
     @apply z-20 flex items-center;
   }
   .note-drag-handle-grip {
-    @apply flex size-8 cursor-grab items-center justify-center rounded-md text-muted-foreground/50 transition-[color,background-color,transform] duration-150 ease-out active:cursor-grabbing active:scale-[0.97];
+    @apply flex size-8 cursor-grab items-center justify-center rounded-md text-muted-foreground/50 transition-[color,background-color,transform] duration-(--motion-micro) ease-out active:cursor-grabbing active:scale-[0.97] motion-reduce:active:scale-100;
   }
   @media (hover: hover) and (pointer: fine) {
     .note-drag-handle-grip:hover {
@@ -591,7 +599,7 @@
 
   .react-flow__node,
   .react-flow__edge {
-    transition: opacity 0.25s ease;
+    transition: opacity var(--motion-standard) ease;
   }
   .react-flow__node .map-warmth {
     transition: background-color 0.22s ease-out, border-color 0.22s ease-out, transform 0.15s ease-out;
@@ -628,7 +636,7 @@
 }
 @media (prefers-reduced-motion: no-preference) {
   .map-node-label {
-    transition: opacity 0.15s ease;
+    transition: opacity var(--motion-micro) ease;
   }
 }
 

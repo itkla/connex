@@ -225,7 +225,7 @@ export default function QuickCreateLauncher({ compact = false }: { compact?: boo
             whileTap={reduceMotion ? undefined : { scale: 0.95 }}
             transition={reduceMotion ? instant : springJiggle}
             className={cn(
-                'inline-flex items-center justify-center rounded-xl bg-brand text-brand-foreground shadow-sm transition-colors duration-150 hover:bg-brand-hover hover:shadow',
+                'inline-flex items-center justify-center rounded-xl bg-brand text-brand-foreground shadow-sm transition-colors duration-(--motion-micro) hover:bg-brand-hover hover:shadow',
                 compact ? 'mx-auto size-9' : 'w-full gap-2 px-3 py-2.5 text-sm font-semibold',
             )}
         >
@@ -254,9 +254,9 @@ export default function QuickCreateLauncher({ compact = false }: { compact?: boo
                     <DrawerContent
                         showCloseButton={false}
                         className={cn(
-                            'gap-0 p-0 transition-[transform,max-height,width,margin,border-radius] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
+                            'gap-0 p-0 transition-[transform,max-height,width,margin,border-radius] duration-(--motion-standard) ease-calm',
                             expanded
-                                ? 'h-[100dvh] max-h-[100dvh] w-full rounded-t-2xl'
+                                ? 'h-[100dvh] max-h-[100dvh] w-full rounded-t-2xl data-ending-style:duration-(--motion-standard)'
                                 : 'mb-3 max-h-[82dvh] w-[calc(100%-1.5rem)] rounded-3xl',
                         )}
                     >
@@ -427,7 +427,7 @@ function TypeSelector({
                         variants={reduceMotion ? undefined : SELECTOR_ITEM_VARIANTS}
                         whileTap={reduceMotion ? undefined : { scale: 0.97 }}
                         transition={reduceMotion ? instant : springJiggle}
-                        className="group flex items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors duration-150 hover:bg-muted focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                        className="group flex items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors duration-(--motion-micro) hover:bg-muted focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                     >
                         <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground ring-1 ring-border transition-colors group-hover:bg-brand-light group-hover:text-brand-dark group-hover:ring-transparent group-focus-visible:bg-brand-light group-focus-visible:text-brand-dark">
                             {Icon ? <Icon className="size-4" /> : null}

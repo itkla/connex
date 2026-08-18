@@ -160,7 +160,7 @@ function Sparkline({
                     <span
                         key={index}
                         className={cn(
-                            'min-w-0 flex-1 transition-colors duration-150',
+                            'min-w-0 flex-1 transition-colors duration-(--motion-micro)',
                             value === 0 ? 'opacity-0' : lit ? 'bg-brand-dark dark:bg-brand' : 'bg-foreground/20',
                         )}
                         style={{ height: `${Math.max(6, Math.round((value / peak) * 100))}%` }}
@@ -778,7 +778,7 @@ export function RangeCalendar({
                                         <button
                                             type="button"
                                             aria-label={labels.zoomMonths}
-                                            className="-mx-1 rounded-md px-1 text-[0.9375rem] font-semibold tracking-tight text-foreground transition-colors duration-150 hover:text-brand-dark focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none dark:hover:text-brand"
+                                            className="-mx-1 rounded-md px-1 text-[0.9375rem] font-semibold tracking-tight text-foreground transition-colors duration-(--motion-micro) hover:text-brand-dark focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none dark:hover:text-brand"
                                             onClick={() => changeZoom('month', anchorMonth, true)}
                                         >
                                             {panel.caption}
@@ -788,7 +788,7 @@ export function RangeCalendar({
                                         type="button"
                                         aria-label={labels.zoomYears}
                                         disabled={zoom === 'year'}
-                                        className="-mx-1 rounded-md px-1 text-[0.9375rem] tracking-tight text-muted-foreground tabular-nums transition-colors duration-150 hover:text-brand-dark focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none dark:hover:text-brand"
+                                        className="-mx-1 rounded-md px-1 text-[0.9375rem] tracking-tight text-muted-foreground tabular-nums transition-colors duration-(--motion-micro) hover:text-brand-dark focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none dark:hover:text-brand"
                                         onClick={() => changeZoom('year', anchorMonth, true)}
                                     >
                                         {panel.year}
@@ -867,7 +867,7 @@ function CellGrid({
                                     <span
                                         aria-hidden
                                         className={cn(
-                                            'pointer-events-none absolute inset-x-0 inset-y-0.5 transition-colors duration-150',
+                                            'pointer-events-none absolute inset-x-0 inset-y-0.5 transition-colors duration-(--motion-micro)',
                                             cell.member ? MEMBER_HEAT[level] : IDLE_HEAT[level],
                                             caps.start && 'rounded-l-lg',
                                             caps.end && 'rounded-r-lg',
@@ -904,7 +904,7 @@ function CellGrid({
                                         ) : null}
                                         <span
                                             className={cn(
-                                                'relative text-[0.8125rem] tabular-nums transition-colors duration-150',
+                                                'relative text-[0.8125rem] tabular-nums transition-colors duration-(--motion-micro)',
                                                 cell.endpoint
                                                     ? 'font-semibold text-brand-foreground'
                                                     : cell.muted

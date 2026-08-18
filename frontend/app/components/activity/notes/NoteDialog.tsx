@@ -225,9 +225,9 @@ function ScopedNoteDialog({
                 <DrawerContent
                     showCloseButton={false}
                     className={cn(
-                        'gap-0 p-0 pt-[env(safe-area-inset-top)] transition-[transform,height,max-height,width,max-width,border-radius] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none',
+                        'gap-0 p-0 pt-[env(safe-area-inset-top)] transition-[transform,height,max-height,width,max-width,border-radius] duration-(--motion-standard) ease-calm motion-reduce:transition-none',
                         expanded
-                            ? 'h-[100dvh] max-h-[100dvh] w-full max-w-none rounded-none'
+                            ? 'h-[100dvh] max-h-[100dvh] w-full max-w-none rounded-none data-ending-style:duration-(--motion-standard)'
                             : 'h-[min(82dvh,48rem)] max-h-[min(82dvh,48rem)] w-full sm:max-w-6xl',
                     )}
                 >
@@ -694,7 +694,7 @@ export function NoteDialogForm({
                         compact
                             ? 'gap-5'
                             : cn(
-                                'mx-auto w-full gap-6 transition-[max-width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none',
+                                'mx-auto w-full gap-6 transition-[max-width] duration-(--motion-standard) ease-calm motion-reduce:transition-none',
                                 contentWidth === 'wide' ? 'max-w-5xl' : 'max-w-3xl',
                             ),
                     )}

@@ -19,7 +19,12 @@ import {
 type CapturedProps = Record<string, unknown>;
 type DynamicModule = { default: ComponentType<CapturedProps> };
 
-const MOBILE_DRAWER_EXIT_DURATION_MS = 200;
+/**
+ * An arbitrary slice of the retention window, used to split fake-timer advances either side of
+ * `OVERLAY_MAX_EXIT_DURATION_MS`. It is not any surface's real exit duration — those are the
+ * `--motion-*` tokens — so it must stay strictly between zero and the retention backstop.
+ */
+const RETENTION_PARTITION_MS = 200;
 
 type CaptureState = {
     nextDynamicIndex: number;
@@ -1222,7 +1227,7 @@ describe('Radar action integration', () => {
         await host.show(null, null);
         expect(vi.getTimerCount()).toBe(0);
         await act(async () => {
-            vi.advanceTimersByTime(OVERLAY_MAX_EXIT_DURATION_MS + MOBILE_DRAWER_EXIT_DURATION_MS);
+            vi.advanceTimersByTime(OVERLAY_MAX_EXIT_DURATION_MS + RETENTION_PARTITION_MS);
         });
         expect(captures.dynamicUnmounts.get(0) ?? 0).toBe(before);
         if (pendingFrame === null) throw new Error('Terminal fallback frame was not scheduled');
@@ -1232,11 +1237,11 @@ describe('Radar action integration', () => {
         });
         expect(vi.getTimerCount()).toBe(1);
         await act(async () => {
-            vi.advanceTimersByTime(MOBILE_DRAWER_EXIT_DURATION_MS);
+            vi.advanceTimersByTime(RETENTION_PARTITION_MS);
         });
         expect(captures.dynamicUnmounts.get(0) ?? 0).toBe(before);
         await act(async () => {
-            vi.advanceTimersByTime(OVERLAY_MAX_EXIT_DURATION_MS - MOBILE_DRAWER_EXIT_DURATION_MS);
+            vi.advanceTimersByTime(OVERLAY_MAX_EXIT_DURATION_MS - RETENTION_PARTITION_MS);
         });
         expect(captures.dynamicUnmounts.get(0) ?? 0).toBe(before + 1);
         expect(cancelFrame).toHaveBeenCalledWith(41);

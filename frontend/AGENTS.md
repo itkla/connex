@@ -41,7 +41,7 @@ For components that clearly extend an existing page/component pattern, or minor 
    - `--warmth-hot` / `--warmth-warm` / `--warmth-cool` / `--warmth-cold` for relationship temperature.
    - `--chart-*` (`chart-1..5`, `chart-won/lost/open`, `chart-grid/axis/stroke`) for data viz — use these with recharts/d3, not raw colors.
    - `--sidebar-*`, semantic `--background/--foreground/--muted/--accent/--destructive`, etc.
-3. **Motion presets — `app/lib/motion.ts`.** Use the shared named springs/easings (`springJiggle` — the house bouncy "jiggle", `springSnappy`, `springSmooth`, `easeOut`, `instant`) instead of ad-hoc `{ type: 'spring', … }` literals, so motion feels consistent. Always pair with a `useReducedMotion()` fallback (`instant`).
+3. **Motion tokens — `app/globals.css` and `app/lib/motion.ts`.** Timings and curves are tokens like every other design value: three speeds (`--motion-micro`, `--motion-standard`, `--motion-expressive`) and two characters (`ease-hand`, `ease-calm`) beside the neutral `--ease-out`, mirrored for JS by `durationMicro/Standard/Expressive` (seconds, for `motion/react`), `durationMicroMs/StandardMs/ExpressiveMs` (milliseconds, for `Element.animate` and style objects), and `easeHand`/`easeCalm`/`easeOut`. Use the shared named springs (`springJiggle` — the house bouncy "jiggle", `springSnappy`, `springSmooth`, `easeOut`, `instant`) instead of ad-hoc `{ type: 'spring', … }` literals. Always pair with a `useReducedMotion()` fallback (`instant`). The full contract is [§14 Motion](#motion--the-d3-contract-14).
 4. **`emil-design-eng`** for the feel and the invisible details.
 5. **Live reference pages** — match these in look and behavior for any new UI:
    - `app/(app)/overview/analytics`
@@ -50,6 +50,90 @@ For components that clearly extend an existing page/component pattern, or minor 
    - `app/(app)/library/*` (files, tags)
 
 When in doubt, open a reference page and mirror it.
+
+## Motion — the D3 contract (§14)
+
+[`docs/PRODUCT.md`](../docs/PRODUCT.md) §3 principle 7 and §6 "Motion" are the product law — *motion responds, never delays*. This section is the mechanism that makes it enforceable: the tokens, when each is spent, the character rules, the responsiveness contract, and the technique catalog. Motion that removing would cost no meaning is decoration; delete it instead of tuning it.
+
+### The three speeds
+
+Timings are tokens, exactly like color. They are declared once in `app/globals.css` and mirrored in `app/lib/motion.ts` so a CSS surface and a `motion` surface can never disagree.
+
+**Each speed ships in two units, and they are not interchangeable.** `motion/react` transitions take seconds (`durationMicro` = 0.15); the Web Animations API (`Element.animate`) and React style objects take milliseconds (`durationMicroMs` = 150). Pick by the API you are calling — passing one the other's number animates the surface a thousand times too fast or too slow. The millisecond values are canonical and the seconds derive from them by exact division, so the pair can never drift.
+
+| Token | JS mirror | Value | Spend it on |
+|---|---|---|---|
+| `--motion-micro` | `durationMicro` | 150ms | Feedback: hover, toggle, press, focus rings, chips, and anchored popups appearing under the cursor — menus, popovers, tooltips, selects, comboboxes, hover cards. |
+| `--motion-standard` | `durationStandard` | 250ms | Surfaces that take or release focus: dialogs, drawers, bottom sheets, backdrops, and in-page section reveals. |
+| `--motion-expressive` | `durationExpressive` | 400ms | Rare and memorable: page arrival (`Rise`), a completed multi-step flow, genuine celebration. If a screen spends this more than once, it has spent it wrong. |
+
+Page arrival is expressive; a section revealing *within* an already-arrived page is standard. Only `Rise` spends expressive by default.
+
+Durations are consumed as `duration-(--motion-micro)`, not `duration-150`. Tailwind v4.3 *does* have a `--transition-duration-*` theme namespace that would give shorter `duration-micro` utilities, and that is a legitimate alternative — this file deliberately does not use it. Plain `:root` variables keep the whole motion family under one `--motion-*` prefix (durations and easings alike), keep one name per token instead of a Tailwind-facing `--transition-duration-micro` beside a JS-facing `durationMicro`, and are always emitted: `@theme` variables are tree-shaken when no generated utility references them, which would silently drop a token that raw CSS or `getComputedStyle` reads. The easings *are* registered in Tailwind's `--ease-*` namespace through `@theme inline`, mirroring how `--warmth-*` is exposed as `--color-warmth-*`. A literal `duration-0` is not a timing choice — it is the reduced-motion escape hatch — and stays legal.
+
+**Exits are faster than entrances, and the scale encodes it:** a surface that enters at `standard` leaves at `micro`. Which variant carries it depends on the *exit mechanism*, not on the library: a keyframe `animate-out` exit is retimed with `data-closed:duration-(--motion-micro)` (Radix menus and Base UI popups both use `data-closed`), while a CSS-transition exit is retimed with `data-ending-style:duration-(--motion-micro)` (the Base UI drawer). `micro` is the floor — feedback-scale motion needs no exit variant.
+
+**One exception, by product decision: a sheet in its full-viewport presentation exits at `standard`.** A surface translating the height of the phone reads as a jump-cut at 150ms. Both expandable mobile sheets — Quick Create (`QuickCreateLauncher.tsx`) and the note editor (`NoteDialog.tsx`) — open collapsed and expand on a pull, so the override is **conditional on that expanded state**, sitting in the `expanded` branch of the class expression rather than on the base string: `data-ending-style:duration-(--motion-standard)`. Collapsed, the same sheet is a partial-height surface and inherits the micro exit. Side sheets and partial-height drawers (the workflow editor, record peek, the shared `ResponsiveDialog`) always keep it. The rule: exits are micro, except a surface presenting at full viewport, which exits at standard — and a surface that can be both must switch with its presentation.
+
+### The two characters
+
+| Token | Utility | JS mirror | Character |
+|---|---|---|---|
+| `--motion-ease-hand` | `ease-hand` | `easeHand` | `cubic-bezier(0.34, 1.56, 0.64, 1)` — overshoots, then settles. The CSS stand-in for `springJiggle` on anything answering the user's hand: press, hover pop, menu entrance, stagger. |
+| `--motion-ease-calm` | `ease-calm` | `easeCalm` | `cubic-bezier(0.32, 0.72, 0, 1)` — decisive deceleration, no overshoot. State changes and surfaces sliding into place: dialogs, drawers, backdrops, layout settling. |
+
+A third curve predates these two and stays: **`--ease-out` / `easeOut`** (`cubic-bezier(0.23, 1, 0.32, 1)`), the house override of Tailwind's weak default `ease-out`. It is the neutral arrival curve — `Rise`, the range calendar, scroll affordances — and sits between the two characters: stronger than a browser default, without `ease-hand`'s overshoot. Reach for `ease-hand` or `ease-calm` when the motion has a character to state; `ease-out` when it simply needs to arrive well. Do not add a fourth.
+
+Springs are for the hand; easing is for state. In JS, reach for the springs first (`springJiggle` playful, `springSnappy` precise, `springSmooth` gliding) — a spring reacts to interruption, an easing curve does not, and anything the user can grab, drag, or spam should react. Use `easeHand`/`easeCalm` where CSS owns the transition or where a spring would fight a measured layout. **Overshoot belongs on entrances only** — an exit that grows before it leaves reads as a glitch, so scope `ease-hand` to the open state (`data-open:ease-hand`) and let exits run calm.
+
+Celebration is rare and earned. Confetti-grade motion needs a reason a user would name.
+
+### The responsiveness contract
+
+Non-negotiable, and reviewable line by line:
+
+1. **Acknowledge input within 100ms.** The press state, the focus ring, the pending row — something changes before any request resolves. Nothing may wait on the network to admit it was clicked.
+2. **Motion accompanies the result; it never precedes it.** No animation plays *while* the app decides. The content arrives, and the motion carries it in.
+3. **Nothing blocking runs past ~300ms.** `expressive` is 400ms because it is never blocking. If the user must wait for it, it is the wrong speed.
+4. **Exits are faster than entrances** — micro, except full-viewport translates, which exit at standard (above). Leaving is not a performance; closing is a decision the user already made.
+5. **`prefers-reduced-motion` is honored everywhere.** See below — it is a hard gate, not a nice-to-have.
+6. **Motion is never a loading strategy.** A spinner masquerading as personality is still a spinner. Skeletons that mirror the destination's real layout carry loading (PRODUCT.md §6); motion carries arrival.
+
+### Reduced motion
+
+Every animation degrades. The conventions already in the codebase, applied consistently:
+
+- **CSS animations** (`animate-in` / `animate-out` on Radix and Base UI popups) — add **`motion-reduce:animate-none!`**, with the important modifier. The plain form does not work. `data-open:animate-in` compiles to `.cls:where([data-state="open"])` — the same (0,1,0) as `.cls` inside the media query, and Tailwind emits the `motion-reduce` rule **first**, so the animation wins on source order. The raw-Radix idiom `data-[state=open]:animate-in` is worse: `.cls[data-state="open"]` is (0,2,0) and outranks the guard outright. `!` settles both cases. Both libraries read the computed animation and unmount immediately when it is `none`, so the overlay still closes.
+- **CSS transitions** — add `motion-reduce:transition-none`. This one needs no `!`: Tailwind sorts variant-carrying utilities after bare `transition-*`.
+- **Transform-only feedback** (press dips, `active:scale-*`) — keep the color/opacity change and drop the movement: `motion-safe:active:translate-y-px`, or a `motion-reduce:active:scale-100` counterpart.
+- **JS motion** — `const reduce = useReducedMotion() ?? false`, then the `instant` preset (or a plain wrapper, as `Rise` does).
+
+What "degrades" means: **drop movement and position changes — translate, scale, rotate, parallax, layout springs — and keep brief opacity or color where it still aids comprehension.** A crossfade tells the user the content changed; a slide is what makes them ill. `QuickCreateLauncher`'s reduced-motion path is the reference: no slide, no blur, no height spring, but a 0.12s opacity crossfade so the view swap is still legible. What is never acceptable is running the *same* movement faster — reduced motion is not a speed setting.
+
+Verify it, don't assert it: emulate `prefers-reduced-motion: reduce` in the browser and confirm the surface still opens, closes, and unmounts.
+
+### The technique catalog
+
+**The signature technique is the morph** — an element that continues across surfaces keeps its identity instead of being replaced. The shipped examples are the reference implementations; copy their shape rather than inventing a fourth:
+
+- **Search ↔ palette morph** — `app/components/GlobalSearch.tsx`. The inline search pill and the centered command palette share `layoutId="global-search-pill"` with `springSnappy`, so the pill *becomes* the palette. Reduced motion swaps the transition for `instant`.
+- **Quick Create morph** — `app/components/actions/QuickCreateLauncher.tsx` (`MorphingBody`). The type selector and the create form crossfade and slide while the drawer's height springs to the measured height of the active view, so the swap reads as one surface reshaping rather than two panels appearing. The first sizing is instant so it never competes with the drawer's own entrance.
+- **Drawer-to-drawer** — the rule that keeps the two above honest: **two drawers never transition at once.** On mobile the Quick Create selector and every create dialog are Base UI drawers, so a hand-off waits for the first to finish closing before the second opens — overlapping sheets desynchronize the shared backdrop and flick the new dialog straight back down. The mechanism is `lib/overlay-lifecycle.ts` (`createCloseCompletionGate`, wired through `ResponsiveDialog`'s `onCloseComplete`, with `OVERLAY_MAX_EXIT_DURATION_MS` as the backstop for surfaces that never report). When a hand-off *doesn't* need a different drawer, don't sequence — keep one drawer open and morph its contents.
+- **Shared-indicator morph** — `components/ui/tabs.tsx`. One `layoutId` pill travels between triggers on `springSnappy` instead of fading in and out per tab.
+
+Beyond the morphs: `Rise` (`app/components/motion/Rise.tsx`) owns page arrival at the expressive speed with a ~60ms stagger — repeated chrome adds none of its own. Navigation between routes belongs to the page entrance, not to per-component animation.
+
+### The rule, and the gate
+
+**New or changed motion on a surface you touch uses the tokens.** No `duration-150`, no `duration-[220ms]`, no `transition-duration: 300ms`, no `transition: transform 0.7s`, no `animationDuration={500}`, no `duration: 0.25` in a `motion` transition — name a token. Where a shipped value is genuinely off-scale, retime it to the nearest token and say so in the PR; do not add a fourth speed.
+
+`test/unit/motionDurations.test.ts` (over `lint/motionDurations.mjs`) enforces this. It reads every `.css`, `.js`, `.jsx`, `.ts`, and `.tsx` file under `app/`, `components/`, and `lib/`, and reports four idioms — the Tailwind `duration-*` utility; any `transition`/`animation` declaration, shorthand or `-duration` longhand, counted **once per time literal** so a three-part shorthand reports three; a `duration:` field in a `motion` or Web Animations options object; and a camelCase `animationDuration`/`transitionDuration` prop. Every finding names the mirror its idiom needs, because seconds and milliseconds are not interchangeable. It fails on any file outside the committed ledger in `lint/motion-duration-baseline.json`.
+
+Each of those rules exists because its absence hid real debt: the first version saw only the longhand, so a stylesheet with a dozen shorthand timings satisfied the `TOKENIZED_SURFACES` zero-assertion vacuously; the second read no `.js`/`.jsx` and scored a three-timing declaration as one. When you find a hole, widen the scanner and take the number the wider rule reports.
+
+The ledger is a **burndown**: counts may only fall, a file that reaches zero is deleted from it, and `BASELINE_HIGH_WATER_MARK` follows the resulting total. It rises only in the same commit that widens what the scanner catches — never to accommodate new debt — and if that commit also pays debt down, the mark falls with it. `TOKENIZED_SURFACES` is the opposite list — the shared primitives that carry the system for every overlay, menu, and press in the product. They must stay at zero and must never reappear in the ledger.
+
+Pair every motion change with the **`review-animations`** skill (mandatory with `emil-design-eng`) and record the result on the PR.
 
 ## Product grammar
 
@@ -78,7 +162,7 @@ Section rhythm (`gap-10` between stacked children) and page gutter/padding come 
 
 **Overlay selection (§11/§12).** The operation → surface mapping is product law in [`../docs/PRODUCT.md`](../docs/PRODUCT.md) §6: create = centered dialog (builder artifacts via instant-create), edit = right drawer, inspect/peek = drawer or anchored popover with a path to the full page, confirm = small dialog, author = dedicated full page; on mobile these render as bottom sheets per the responsive-dialog rule. Inline edit remains right for simple reversible fields; per-surface deviations are documented decisions, not drift.
 
-**Motion (§14).** Expressive in memorable moments (page/section entrance via `Rise`, Peek, palette, Quick Create, drag/drop, meaningful completion); quiet and fast in repeated operations (table edit, filter/sort, bulk review, notification processing). *The first interaction may delight; the fiftieth must not irritate.* Repeated chrome (`PageShell`, `PageHeader`) carries no motion of its own — the page entrance owns it. Every animation honors `prefers-reduced-motion`.
+**Motion (§14).** Expressive in memorable moments (page/section entrance via `Rise`, Peek, palette, Quick Create, drag/drop, meaningful completion); quiet and fast in repeated operations (table edit, filter/sort, bulk review, notification processing). *The first interaction may delight; the fiftieth must not irritate.* Repeated chrome (`PageShell`, `PageHeader`) carries no motion of its own — the page entrance owns it. Every animation honors `prefers-reduced-motion`. The speeds, characters, techniques, and responsiveness contract are law in [§14 Motion](#motion--the-d3-contract-14).
 
 **Mobile (§12).** Same capability semantics, different presentation: task-adaptive lists and focused sheets, not desktop card stacks or horizontally scrolled tables. Generous touch targets; one task at a time; defer complex authoring until a real mobile job justifies it.
 
@@ -92,7 +176,7 @@ Section rhythm (`gap-10` between stacked children) and page gutter/padding come 
 - [ ] Cards only for genuine semantic units; open sections otherwise; no card-in-card.
 - [ ] Comfortable spacing by default; any density is an explicit, reversible work mode.
 - [ ] Overlay weight matches edit complexity (inline → dialog/sheet → page).
-- [ ] Motion restrained in repeated operations; reduced-motion path verified.
+- [ ] Motion restrained in repeated operations; every timing names a `--motion-*` token; reduced-motion path verified in the browser (§14).
 - [ ] Only design tokens for color/spacing; verified in light + dark.
 - [ ] EN + JA keys added for every new string; verified at representative desktop and mobile widths.
 
