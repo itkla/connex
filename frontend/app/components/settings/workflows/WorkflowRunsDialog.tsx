@@ -16,7 +16,7 @@ import {
 } from "@/app/components/settings/workflows/workflowRunStatus";
 import { RECORD_TYPES } from "@/app/components/settings/workflows/vocabulary";
 import WorkflowRunReference from "@/app/components/settings/workflows/WorkflowRunReference";
-import { workflowRunNumber } from "@/app/components/settings/workflows/workflowRunKey";
+import { workflowRunReferenceParts } from "@/app/components/settings/workflows/workflowRunKey";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -103,7 +103,7 @@ export default function WorkflowRunsDialog({
             });
             if (!controller.signal.aborted) setSelected(detail);
         } catch {
-            if (!controller.signal.aborted) toastError(t("runs.detailFailed"));
+            if (!controller.signal.aborted) toastError(t("runs.detailFailed"), { description: t("runs.detailFailedBody") });
         } finally {
             if (!controller.signal.aborted) setDetailLoadState("idle");
         }
@@ -117,7 +117,7 @@ export default function WorkflowRunsDialog({
             setRuns((current) => [...current, ...page.items]);
             setNextCursor(page.nextCursor);
         } catch {
-            toastError(t("runs.moreFailed"));
+            toastError(t("runs.moreFailed"), { description: t("runs.moreFailedBody") });
         } finally {
             setMoreLoading(false);
         }
@@ -143,7 +143,12 @@ export default function WorkflowRunsDialog({
                     <DialogTitle>{selected ? t("runs.detailTitle") : t("runs.title")}</DialogTitle>
                     <DialogDescription>
                         {selected
-                            ? t("runs.detailDescription", { run: workflowRunNumber(selected.runKey) })
+                            ? t(
+                                workflowRunReferenceParts(selected.runKey).earlier
+                                    ? "runs.legacyDetailDescription"
+                                    : "runs.detailDescription",
+                                { run: workflowRunReferenceParts(selected.runKey).number },
+                            )
                             : t("runs.description", { name: workflowName })}
                     </DialogDescription>
                 </DialogHeader>

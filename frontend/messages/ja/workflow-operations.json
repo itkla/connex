@@ -11,7 +11,7 @@
     },
     "errors": {
       "title": "ワークフローの運用状況を読み込めませんでした",
-      "body": "表示が古いわけではなく、数値を取得できませんでした。もう一度お試しください。",
+      "body": "数値を補って表示してはいません。取得できなかっただけです。もう一度お試しください。",
       "mutationTitle": "変更を適用できませんでした",
       "mutationBody": "変更は行われていません。最新の状態に更新してから、もう一度お試しください。"
     },
@@ -43,6 +43,7 @@
       "loadMore": "さらに読み込む",
       "loadingMore": "読み込み中",
       "runMeta": "実行 #{run} · バージョン {version}",
+      "legacyRunMeta": "以前の実行 #{run} · バージョン {version}",
       "failureCategory": "理由: {category}",
       "recipeOrigin": "レシピから作成"
     },
@@ -144,7 +145,7 @@
     "reason": {
       "actor_unavailable": "このワークフローの実行者となるメンバーが見つかりません。",
       "actor_inactive": "このワークフローの実行者となるメンバーは現在無効です。",
-      "permission_denied": "この操作を行う権限がありません。ワークスペース管理者にご相談ください。",
+      "permission_denied": "このワークフローの実行者が、このステップに必要な権限を失いました。",
       "action_permission_missing": "このワークフローの実行者には、このステップに必要な権限がありません。",
       "reference_unavailable": "このステップが参照しているタグ・ステージ・メンバーのいずれかが見つかりません。",
       "record_unavailable": "この実行の対象レコードが削除されたか、閲覧できなくなっています。",
@@ -193,6 +194,7 @@
       "expires": "確認の有効期限",
       "actionsTitle": "実行される内容と、再試行の可否",
       "unknownAction": "ワークフローのアクション",
+      "recordFallback": "レコード",
       "expectedSkipsTitle": "スキップされる見込みのレコード",
       "samplesTitle": "対象レコードの一部",
       "blockersTitle": "開始する前に解消してください",

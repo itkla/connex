@@ -158,7 +158,7 @@ export default function WorkflowsPanel() {
             } catch (error) {
                 if (!active || controller.signal.aborted) return;
                 if (error instanceof ApiError && error.status === 403) updatePanelState({ accessDenied: true });
-                else toastError(t("loadFailed"));
+                else toastError(t("loadFailed"), { description: t("loadFailedBody") });
             } finally {
                 if (active && !controller.signal.aborted && scopeRef.current.activeWorkspaceId === workspaceId) {
                     updatePanelState({ loading: false });
@@ -196,7 +196,7 @@ export default function WorkflowsPanel() {
                     item.id === workflow.id ? { ...item, enabled: workflow.enabled } : item
                 )),
             }));
-            toastError(t("lifecycleFailed"));
+            toastError(t("lifecycleFailed"), { description: t("lifecycleFailedBody") });
         } finally {
             if (isPanelActive(workspaceId)) updatePanelState({ pendingId: null });
         }
@@ -222,7 +222,7 @@ export default function WorkflowsPanel() {
             }));
         } catch {
             if (!isPanelActive(workspaceId)) return;
-            toastError(t("lifecycleFailed"));
+            toastError(t("lifecycleFailed"), { description: t("lifecycleFailedBody") });
         } finally {
             if (isPanelActive(workspaceId)) updatePanelState({ pendingId: null });
         }
@@ -248,7 +248,7 @@ export default function WorkflowsPanel() {
             toastSuccess(t(workflow.intakePausedAt ? "resumed" : "paused"));
         } catch {
             if (!isPanelActive(workspaceId)) return;
-            toastError(t("lifecycleFailed"));
+            toastError(t("lifecycleFailed"), { description: t("lifecycleFailedBody") });
         } finally {
             if (isPanelActive(workspaceId)) updatePanelState({ pendingId: null });
         }

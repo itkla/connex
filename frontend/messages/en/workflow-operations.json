@@ -11,7 +11,7 @@
     },
     "errors": {
       "title": "Couldn't load workflow operations",
-      "body": "Nothing here is out of date — the numbers just didn't arrive. Try again.",
+      "body": "No numbers were made up — they just didn't arrive. Try again.",
       "mutationTitle": "Couldn't apply that change",
       "mutationBody": "Nothing was changed. Refresh to see the current state, then try again."
     },
@@ -43,6 +43,7 @@
       "loadMore": "Load more",
       "loadingMore": "Loading more",
       "runMeta": "Run #{run} · version {version}",
+      "legacyRunMeta": "Earlier run #{run} · version {version}",
       "failureCategory": "Reason: {category}",
       "recipeOrigin": "From a recipe"
     },
@@ -144,7 +145,7 @@
     "reason": {
       "actor_unavailable": "The member this workflow runs as is no longer available.",
       "actor_inactive": "The member this workflow runs as is no longer active.",
-      "permission_denied": "You don't have permission to do that here. Ask a workspace admin.",
+      "permission_denied": "The member this workflow runs as lost a permission this step needed.",
       "action_permission_missing": "The member this workflow runs as can't do what this step needs.",
       "reference_unavailable": "Something this step points to — a tag, a stage, or a member — is gone.",
       "record_unavailable": "The record this run was for is gone, or you can no longer see it.",
@@ -193,6 +194,7 @@
       "expires": "Review expires",
       "actionsTitle": "What will happen, and what can be retried",
       "unknownAction": "Workflow action",
+      "recordFallback": "Record",
       "expectedSkipsTitle": "Records Connex expects to skip",
       "samplesTitle": "A sample of the records",
       "blockersTitle": "Fix these before starting",
