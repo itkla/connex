@@ -11,6 +11,7 @@
     "serverError": "Something went wrong on our side. Nothing was lost — try again in a moment.",
     "sessionExpired": "You've been signed out. Sign in again to continue.",
     "identityCollisionReportTimeout": "That report is taking longer than expected. Try again in a moment.",
+    "sharePrivacyHold": "This contact asked not to be shared outside this workspace, so new shares are blocked.",
     "reference": "Reference: {id}"
   },
   "ErrorState": {

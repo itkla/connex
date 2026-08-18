@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.UUID;
@@ -174,7 +173,7 @@ class DealAnalyticsIntegrationTest {
     }
 
     @Test
-    void windowValidationReturnsPlainTextBadRequests() throws Exception {
+    void windowValidationReturnsStructuredBadRequests() throws Exception {
         RequestContextHolder.resetRequestAttributes();
         Workspace workspace = newWorkspace();
         User user = newMember(workspace);
@@ -186,7 +185,8 @@ class DealAnalyticsIntegrationTest {
                 .param("granularity", "day")
                 .session(session))
             .andExpect(status().isBadRequest())
-            .andExpect(content().string("from and to must be provided together"));
+            .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
+            .andExpect(jsonPath("$.message").value("from and to must be provided together"));
 
         mockMvc.perform(get("/api/deals/kpis")
                 .header("X-Workspace-Id", workspace.getId())
@@ -195,7 +195,8 @@ class DealAnalyticsIntegrationTest {
                 .param("granularity", "day")
                 .session(session))
             .andExpect(status().isBadRequest())
-            .andExpect(content().string("from must be an ISO date in yyyy-MM-dd format"));
+            .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
+            .andExpect(jsonPath("$.message").value("from must be an ISO date in yyyy-MM-dd format"));
 
         mockMvc.perform(get("/api/deals/kpis")
                 .header("X-Workspace-Id", workspace.getId())
@@ -204,7 +205,8 @@ class DealAnalyticsIntegrationTest {
                 .param("granularity", "day")
                 .session(session))
             .andExpect(status().isBadRequest())
-            .andExpect(content().string("to must be an ISO date in yyyy-MM-dd format"));
+            .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
+            .andExpect(jsonPath("$.message").value("to must be an ISO date in yyyy-MM-dd format"));
 
         mockMvc.perform(get("/api/deals/kpis")
                 .header("X-Workspace-Id", workspace.getId())
@@ -213,7 +215,8 @@ class DealAnalyticsIntegrationTest {
                 .param("granularity", "day")
                 .session(session))
             .andExpect(status().isBadRequest())
-            .andExpect(content().string("from must be on or before to"));
+            .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
+            .andExpect(jsonPath("$.message").value("from must be on or before to"));
 
         mockMvc.perform(get("/api/deals/pipeline-value")
                 .header("X-Workspace-Id", workspace.getId())
@@ -221,7 +224,8 @@ class DealAnalyticsIntegrationTest {
                 .param("to", "2026-01-01")
                 .session(session))
             .andExpect(status().isBadRequest())
-            .andExpect(content().string("from and to must span 731 days or fewer"));
+            .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
+            .andExpect(jsonPath("$.message").value("from and to must span 731 days or fewer"));
 
         mockMvc.perform(get("/api/activities/volume")
                 .header("X-Workspace-Id", workspace.getId())
@@ -230,7 +234,9 @@ class DealAnalyticsIntegrationTest {
                 .param("granularity", "day")
                 .session(session))
             .andExpect(status().isBadRequest())
-            .andExpect(content().string("granularity produces more than 120 calendar buckets"));
+            .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
+            .andExpect(jsonPath("$.message").value(
+                "granularity produces more than 120 calendar buckets"));
 
         mockMvc.perform(get("/api/deals/kpis")
                 .header("X-Workspace-Id", workspace.getId())
@@ -238,7 +244,8 @@ class DealAnalyticsIntegrationTest {
                 .param("to", "2026-01-31")
                 .session(session))
             .andExpect(status().isBadRequest())
-            .andExpect(content().string("granularity is required"));
+            .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
+            .andExpect(jsonPath("$.message").value("granularity is required"));
 
         mockMvc.perform(get("/api/deals/kpis")
                 .header("X-Workspace-Id", workspace.getId())
@@ -247,7 +254,9 @@ class DealAnalyticsIntegrationTest {
                 .param("granularity", "quarter")
                 .session(session))
             .andExpect(status().isBadRequest())
-            .andExpect(content().string("granularity must be one of: day, week, month"));
+            .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
+            .andExpect(jsonPath("$.message").value(
+                "granularity must be one of: day, week, month"));
 
         mockMvc.perform(get("/api/activities/leaderboard")
                 .header("X-Workspace-Id", workspace.getId())

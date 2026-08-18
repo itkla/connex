@@ -108,7 +108,7 @@ public class NoteService {
     public List<Note> getNotesByDealId(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (!dealMapper.exists(workspaceId, dealId)) {
-            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+            throw new ResourceNotFoundException("Deal not found");
         }
         int currentUserId = workspaceService.getCurrentUserId();
         return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByDealId(workspaceId, dealId, currentUserId));
@@ -293,11 +293,11 @@ public class NoteService {
     private void requireLinkedRecordsVisible(int workspaceId, Note note) {
         if (note.getPerson() != null && note.getPerson().getId() > 0
                 && !personMapper.exists(workspaceId, note.getPerson().getId())) {
-            throw new ResourceNotFoundException("Person not found with id: " + note.getPerson().getId());
+            throw new ResourceNotFoundException("Contact not found");
         }
         if (note.getDeal() != null && note.getDeal().getId() > 0
                 && !dealMapper.exists(workspaceId, note.getDeal().getId())) {
-            throw new ResourceNotFoundException("Deal not found with id: " + note.getDeal().getId());
+            throw new ResourceNotFoundException("Deal not found");
         }
     }
 

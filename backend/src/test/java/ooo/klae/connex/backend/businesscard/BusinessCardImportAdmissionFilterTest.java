@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.verify;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -86,6 +88,10 @@ class BusinessCardImportAdmissionFilterTest {
         filter.doFilter(request, response, chain);
 
         assertEquals(400, response.getStatus());
+        assertJsonRejection(
+            response,
+            "BUSINESS_CARD_INVALID_IDEMPOTENCY_KEY",
+            "The idempotency key is invalid");
         assertNull(chain.getRequest());
         assertFalse(request.bodyAccessed());
     }
@@ -101,6 +107,10 @@ class BusinessCardImportAdmissionFilterTest {
         filter.doFilter(request, response, chain);
 
         assertEquals(429, response.getStatus());
+        assertJsonRejection(
+            response,
+            "BUSINESS_CARD_RATE_LIMITED",
+            "Too many business-card requests");
         assertNull(chain.getRequest());
         assertFalse(request.bodyAccessed());
     }
@@ -130,6 +140,10 @@ class BusinessCardImportAdmissionFilterTest {
         filter.doFilter(request, response, chain);
 
         assertEquals(403, response.getStatus());
+        assertJsonRejection(
+            response,
+            "BUSINESS_CARD_CAPABILITY_UNAVAILABLE",
+            "Business-card operations are unavailable");
         assertNull(chain.getRequest());
         assertFalse(request.bodyAccessed());
         verify(rateLimiter, never()).requireImportAdmissionAllowed(9);
@@ -147,6 +161,10 @@ class BusinessCardImportAdmissionFilterTest {
         filter.doFilter(request, response, chain);
 
         assertEquals(429, response.getStatus());
+        assertJsonRejection(
+            response,
+            "BUSINESS_CARD_RATE_LIMITED",
+            "Too many business-card requests");
         assertNull(chain.getRequest());
         assertFalse(request.bodyAccessed());
     }
@@ -163,6 +181,10 @@ class BusinessCardImportAdmissionFilterTest {
         filter.doFilter(request, response, chain);
 
         assertEquals(403, response.getStatus());
+        assertJsonRejection(
+            response,
+            "BUSINESS_CARD_CAPABILITY_UNAVAILABLE",
+            "Business-card operations are unavailable");
         assertNull(chain.getRequest());
         assertFalse(request.bodyAccessed());
         verify(rateLimiter, never()).requireScanAdmissionAllowed(9);
@@ -180,6 +202,10 @@ class BusinessCardImportAdmissionFilterTest {
         filter.doFilter(request, response, chain);
 
         assertEquals(403, response.getStatus());
+        assertJsonRejection(
+            response,
+            "BUSINESS_CARD_PERMISSION_DENIED",
+            "Business-card permission is required");
         assertNull(chain.getRequest());
         assertFalse(request.bodyAccessed());
         verify(rateLimiter, never()).requireScanAdmissionAllowed(9);
@@ -199,6 +225,10 @@ class BusinessCardImportAdmissionFilterTest {
         filter.doFilter(request, response, chain);
 
         assertEquals(403, response.getStatus());
+        assertJsonRejection(
+            response,
+            "BUSINESS_CARD_PERMISSION_DENIED",
+            "Business-card permission is required");
         assertNull(chain.getRequest());
         assertFalse(request.bodyAccessed());
         verify(rateLimiter, never()).requireScanAdmissionAllowed(9);
@@ -217,6 +247,10 @@ class BusinessCardImportAdmissionFilterTest {
         filter.doFilter(request, response, chain);
 
         assertEquals(403, response.getStatus());
+        assertJsonRejection(
+            response,
+            "BUSINESS_CARD_WORKSPACE_REQUIRED",
+            "A workspace is required for business-card operations");
         assertNull(chain.getRequest());
         assertFalse(request.bodyAccessed());
         verify(rateLimiter, never()).requireScanAdmissionAllowed(9);
@@ -234,6 +268,10 @@ class BusinessCardImportAdmissionFilterTest {
         filter.doFilter(request, response, chain);
 
         assertEquals(429, response.getStatus());
+        assertJsonRejection(
+            response,
+            "BUSINESS_CARD_RATE_LIMITED",
+            "Too many business-card requests");
         assertNull(chain.getRequest());
         assertFalse(request.bodyAccessed());
     }
@@ -250,6 +288,10 @@ class BusinessCardImportAdmissionFilterTest {
         filter.doFilter(request, response, chain);
 
         assertEquals(429, response.getStatus());
+        assertJsonRejection(
+            response,
+            "BUSINESS_CARD_RATE_LIMITED",
+            "Too many business-card requests");
         assertNull(chain.getRequest());
         assertFalse(request.bodyAccessed());
     }
@@ -270,6 +312,18 @@ class BusinessCardImportAdmissionFilterTest {
             request.addHeader("Idempotency-Key", idempotencyKey);
         }
         return request;
+    }
+
+    private static void assertJsonRejection(
+            MockHttpServletResponse response,
+            String code,
+            String error) throws Exception {
+        assertNotNull(response.getContentType());
+        assertTrue(MediaType.parseMediaType(response.getContentType())
+            .isCompatibleWith(MediaType.APPLICATION_JSON));
+        assertEquals(
+            "{\"error\":\"" + error + "\",\"code\":\"" + code + "\"}",
+            response.getContentAsString());
     }
 
     private static final class TrackingMultipartRequest extends MockHttpServletRequest {

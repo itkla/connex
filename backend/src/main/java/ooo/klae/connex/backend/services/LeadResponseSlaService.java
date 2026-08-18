@@ -192,7 +192,7 @@ public class LeadResponseSlaService {
                 || person.getArchivedAt() != null
                 || person.getSuspendedAt() != null
                 || person.getProvisionCeasedAt() != null) {
-            throw new ResourceNotFoundException("Person not found with id: " + personId);
+            throw new ResourceNotFoundException("Contact not found");
         }
         return person;
     }
@@ -203,7 +203,7 @@ public class LeadResponseSlaService {
                 || person.getArchivedAt() != null
                 || person.getSuspendedAt() != null
                 || person.getProvisionCeasedAt() != null) {
-            throw new ResourceNotFoundException("Person not found with id: " + personId);
+            throw new ResourceNotFoundException("Contact not found");
         }
         return person;
     }

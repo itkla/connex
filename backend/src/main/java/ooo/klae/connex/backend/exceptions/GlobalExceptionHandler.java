@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.exceptions;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 
 import org.springframework.context.i18n.LocaleContextHolder;
 
@@ -57,8 +58,9 @@ public class GlobalExceptionHandler {
     private final TenantContext tenantContext;
 
     @ExceptionHandler(ResourceNotFoundException.class)
-    public ResponseEntity<String> notFound(ResourceNotFoundException ex) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
+    public ResponseEntity<Map<String, String>> notFound(ResourceNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+            .body(codedError(ex.getCode(), ex.getMessage()));
     }
 
     @ExceptionHandler(BusinessCardImportResultGoneException.class)
@@ -69,8 +71,9 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(BadRequestException.class)
-    public ResponseEntity<String> badRequest(BadRequestException ex) {
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ex.getMessage());
+    public ResponseEntity<Map<String, String>> badRequest(BadRequestException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+            .body(codedError(ex.getCode(), ex.getMessage()));
     }
 
     @ExceptionHandler(NativeConnectException.class)
@@ -98,8 +101,9 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(ForbiddenException.class)
-    public ResponseEntity<String> forbidden(ForbiddenException ex) {
-        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ex.getMessage());
+    public ResponseEntity<Map<String, String>> forbidden(ForbiddenException ex) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+            .body(codedError(ex.getCode(), ex.getMessage()));
     }
 
     @ExceptionHandler(RecentAuthenticationRequiredException.class)
@@ -131,12 +135,17 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<Map<String, String>> validation(MethodArgumentNotValidException ex) {
-        Map<String, String> errors = new LinkedHashMap<>();
+    public ResponseEntity<Map<String, Object>> validation(MethodArgumentNotValidException ex) {
+        Map<String, String> fieldErrors = new LinkedHashMap<>();
         ex.getBindingResult().getFieldErrors().forEach(err ->
-            errors.put(err.getField(), err.getDefaultMessage())
+            fieldErrors.put(err.getField(), Objects.requireNonNullElse(
+                err.getDefaultMessage(), "Invalid value"))
         );
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errors);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("code", "VALIDATION_FAILED");
+        body.put("message", "Please fix the highlighted fields");
+        body.put("fieldErrors", fieldErrors);
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
     }
 
     /**
@@ -160,8 +169,9 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(TooManyRequestsException.class)
-    public ResponseEntity<String> tooManyRequests(TooManyRequestsException ex) {
-        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(ex.getMessage());
+    public ResponseEntity<Map<String, String>> tooManyRequests(TooManyRequestsException ex) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+            .body(codedError(ex.getCode(), ex.getMessage()));
     }
 
     @ExceptionHandler(SecretUnavailableException.class)
@@ -311,6 +321,10 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<String> authenticationError(AuthenticationException ex) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Authentication failed");
+    }
+
+    private static Map<String, String> codedError(String code, String message) {
+        return Map.of("code", code, "message", Objects.requireNonNullElse(message, "Request failed"));
     }
 
     private static boolean hasCause(Throwable throwable, Class<? extends Throwable> type) {

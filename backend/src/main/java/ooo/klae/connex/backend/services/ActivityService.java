@@ -304,7 +304,7 @@ public class ActivityService {
 
     private void requireDealExists(int workspaceId, Integer dealId) {
         if (dealId != null && !dealMapper.exists(workspaceId, dealId)) {
-            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+            throw new ResourceNotFoundException("Deal not found");
         }
     }
 

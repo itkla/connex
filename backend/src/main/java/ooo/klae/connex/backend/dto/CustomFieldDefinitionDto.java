@@ -46,10 +46,12 @@ public class CustomFieldDefinitionDto {
     private String label;
 
     @NotBlank
-    @Pattern(regexp = "^(text|textarea|number|date|boolean|select|url)$", message = "unsupported field type")
+    @Pattern(regexp = "^(text|textarea|number|date|boolean|select|url)$", message = "Choose a supported field type.")
     private String fieldType;
 
-    @Pattern(regexp = "^(standard|sensitive|special_care)$", message = "must be standard, sensitive, or special_care")
+    @Pattern(
+        regexp = "^(standard|sensitive|special_care)$",
+        message = "Choose how sensitive this field's data is.")
     private String dataClassification;
 
     @Valid

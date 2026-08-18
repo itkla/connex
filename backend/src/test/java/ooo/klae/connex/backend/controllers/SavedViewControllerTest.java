@@ -120,7 +120,8 @@ class SavedViewControllerTest {
                     }
                     """))
             .andExpect(status().isBadRequest())
-            .andExpect(content().string(
+            .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
+            .andExpect(jsonPath("$.message").value(
                 "A user cannot have more than 100 saved views per record type in a workspace"));
     }
 
@@ -173,10 +174,10 @@ class SavedViewControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"recordType\":\"\",\"name\":\"\",\"position\":-1}"))
             .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.recordType").exists())
-            .andExpect(jsonPath("$.name").exists())
-            .andExpect(jsonPath("$.config").exists())
-            .andExpect(jsonPath("$.position").exists());
+            .andExpect(jsonPath("$.fieldErrors.recordType").exists())
+            .andExpect(jsonPath("$.fieldErrors.name").exists())
+            .andExpect(jsonPath("$.fieldErrors.config").exists())
+            .andExpect(jsonPath("$.fieldErrors.position").exists());
 
         mockMvc.perform(put("/api/saved-views/42/pin")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -194,7 +195,8 @@ class SavedViewControllerTest {
 
         mockMvc.perform(get("/api/saved-views/42"))
             .andExpect(status().isNotFound())
-            .andExpect(content().string("Saved view not found"));
+            .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
+            .andExpect(jsonPath("$.message").value("Saved view not found"));
     }
 
     @Test
@@ -210,23 +212,28 @@ class SavedViewControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"recordType\":\"company\",\"name\":\"View\",\"config\":{\"version\":1}}"))
             .andExpect(status().isNotFound())
-            .andExpect(content().string("Saved view not found"));
+            .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
+            .andExpect(jsonPath("$.message").value("Saved view not found"));
         mockMvc.perform(delete("/api/saved-views/42"))
             .andExpect(status().isNotFound())
-            .andExpect(content().string("Saved view not found"));
+            .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
+            .andExpect(jsonPath("$.message").value("Saved view not found"));
         mockMvc.perform(put("/api/saved-views/42/pin")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}"))
             .andExpect(status().isNotFound())
-            .andExpect(content().string("Saved view not found"));
+            .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
+            .andExpect(jsonPath("$.message").value("Saved view not found"));
         mockMvc.perform(delete("/api/saved-views/42/pin"))
             .andExpect(status().isNotFound())
-            .andExpect(content().string("Saved view not found"));
+            .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
+            .andExpect(jsonPath("$.message").value("Saved view not found"));
         mockMvc.perform(put("/api/saved-views/defaults/company")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"savedViewId\":42}"))
             .andExpect(status().isNotFound())
-            .andExpect(content().string("Saved view not found"));
+            .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
+            .andExpect(jsonPath("$.message").value("Saved view not found"));
     }
 
     private SavedView view() throws Exception {

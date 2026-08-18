@@ -178,7 +178,7 @@ public class DealService {
     private Deal requireDeal(int workspaceId, int id) {
         Deal deal = dealMapper.getDealById(workspaceId, id);
         if (deal == null) {
-            throw new ResourceNotFoundException("Deal not found with id: " + id);
+            throw new ResourceNotFoundException("Deal not found");
         }
         return deal;
     }
@@ -186,7 +186,7 @@ public class DealService {
     private Deal requireDealForUpdate(int workspaceId, int id) {
         Deal deal = dealMapper.getDealByIdForUpdate(workspaceId, id);
         if (deal == null) {
-            throw new ResourceNotFoundException("Deal not found with id: " + id);
+            throw new ResourceNotFoundException("Deal not found");
         }
         return deal;
     }
@@ -863,7 +863,7 @@ public class DealService {
     public Deal getDealById(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, id);
-        if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
+        if (deal == null) throw new ResourceNotFoundException("Deal not found");
         return hydrateReferences(workspaceId, deal);
     }
 
@@ -922,7 +922,7 @@ public class DealService {
     public List<DealStageHistory> getStageHistory(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, id) == null) {
-            throw new ResourceNotFoundException("Deal not found with id: " + id);
+            throw new ResourceNotFoundException("Deal not found");
         }
         return dealStageHistoryService.getHistory(id);
     }
@@ -937,7 +937,7 @@ public class DealService {
     public DealSummaryDto getDealSummary(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, id);
-        if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
+        if (deal == null) throw new ResourceNotFoundException("Deal not found");
 
         return toDealSummary(workspaceId, deal);
     }
@@ -1172,7 +1172,7 @@ public class DealService {
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal before = dealMapper.getDealById(workspaceId, id);
-        if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
+        if (before == null) throw new ResourceNotFoundException("Deal not found");
         dealMapper.updateExpectedCloseDate(workspaceId, id, expectedCloseDate);
         Deal after = dealMapper.getDealById(workspaceId, id);
         auditService.record("deal.update", "deal", id, after.getName(),
@@ -1222,7 +1222,7 @@ public class DealService {
     public Deal reopen(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal before = dealMapper.getDealById(workspaceId, id);
-        if (before == null) throw new ResourceNotFoundException("Deal not found with id: " + id);
+        if (before == null) throw new ResourceNotFoundException("Deal not found");
         Boolean previousOutcome = before.getWon();
         Deal deal = mutableCopy(before);
         boolean wasClosed = previousOutcome != null;
@@ -1259,7 +1259,7 @@ public class DealService {
     public List<CustomFieldEntryDto> getCustomFields(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, dealId) == null) {
-            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+            throw new ResourceNotFoundException("Deal not found");
         }
         return customFieldValueService.getForEntity("deal", dealId);
     }
@@ -1272,7 +1272,7 @@ public class DealService {
     public List<CustomFieldEntryDto> updateCustomFields(int dealId, Map<Integer, Object> values) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, dealId) == null) {
-            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+            throw new ResourceNotFoundException("Deal not found");
         }
         return customFieldValueService.applyValues("deal", dealId, values);
     }
@@ -1285,7 +1285,7 @@ public class DealService {
     public List<CustomFieldEntryDto> updateCustomField(int dealId, int definitionId, Object value) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, dealId) == null) {
-            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+            throw new ResourceNotFoundException("Deal not found");
         }
         return customFieldValueService.applyValue("deal", dealId, definitionId, value);
     }
@@ -1338,7 +1338,7 @@ public class DealService {
      */
     public List<Tag> getTagsByDealId(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found");
         return tagMapper.getTagsByDealId(workspaceId, dealId);
     }
 
@@ -1352,9 +1352,9 @@ public class DealService {
     public boolean addTag(int dealId, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
-        if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        if (deal == null) throw new ResourceNotFoundException("Deal not found");
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
-        if (tag == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
+        if (tag == null) throw new ResourceNotFoundException("Tag not found");
         if (dealMapper.addTag(workspaceId, dealId, tagId) != 1) {
             return false;
         }
@@ -1373,7 +1373,7 @@ public class DealService {
     public void removeTag(int dealId, int tagId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
-        if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        if (deal == null) throw new ResourceNotFoundException("Deal not found");
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
         dealMapper.removeTag(workspaceId, dealId, tagId);
         String tagName = tag != null ? tag.getName() : "#" + tagId;
@@ -1389,7 +1389,7 @@ public class DealService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) {
-            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+            throw new ResourceNotFoundException("Deal not found");
         }
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
         if (dealMapper.removeTag(workspaceId, dealId, tagId) != 1) {
@@ -1408,7 +1408,7 @@ public class DealService {
      */
     public List<DealPerson> getPeopleByDealId(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found");
         return dealMapper.getDealPeopleByDealId(workspaceId, dealId);
     }
 
@@ -1431,9 +1431,9 @@ public class DealService {
     public void addPerson(int dealId, int personId, String role) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
-        if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        if (deal == null) throw new ResourceNotFoundException("Deal not found");
         Person person = personMapper.getPersonById(workspaceId, personId);
-        if (person == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
+        if (person == null) throw new ResourceNotFoundException("Contact not found");
         dealMapper.addPerson(workspaceId, dealId, personId, role);
         String label = contactLabel(person.getName(), role);
         auditService.record("deal.addPerson", "deal", dealId, deal.getName(),
@@ -1451,7 +1451,7 @@ public class DealService {
     public void updatePersonRole(int dealId, int personId, String role) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
-        if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        if (deal == null) throw new ResourceNotFoundException("Deal not found");
         DealPerson existing = dealMapper.getDealPeopleByDealId(workspaceId, dealId).stream()
             .filter(dp -> dp.getPerson() != null && dp.getPerson().getId() == personId)
             .findFirst().orElse(null);
@@ -1473,7 +1473,7 @@ public class DealService {
     public void removePerson(int dealId, int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
-        if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        if (deal == null) throw new ResourceNotFoundException("Deal not found");
         Person person = personMapper.getPersonById(workspaceId, personId);
         dealMapper.removePerson(workspaceId, dealId, personId);
         String name = person != null ? person.getName() : "#" + personId;
@@ -1493,7 +1493,7 @@ public class DealService {
     public List<Tag> replaceTags(int dealId, List<Integer> tagIds) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
-        if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        if (deal == null) throw new ResourceNotFoundException("Deal not found");
         List<String> before = tagMapper.getTagsByDealId(workspaceId, dealId).stream().map(Tag::getName).toList();
         dealMapper.clearTags(workspaceId, dealId);
         if (tagIds != null && !tagIds.isEmpty()) dealMapper.insertTags(workspaceId, dealId, tagIds);
@@ -1515,7 +1515,7 @@ public class DealService {
     public List<DealPerson> replacePeople(int dealId, List<DealPerson> people) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
-        if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        if (deal == null) throw new ResourceNotFoundException("Deal not found");
         List<String> before = dealMapper.getDealPeopleByDealId(workspaceId, dealId).stream().map(DealService::personLabel).toList();
         dealMapper.clearPeople(workspaceId, dealId);
         if (people != null) {
@@ -1524,7 +1524,7 @@ public class DealService {
                     throw new BadRequestException("Each deal contact must include a person");
                 }
                 if (personMapper.getPersonById(workspaceId, dealPerson.getPerson().getId()) == null) {
-                    throw new ResourceNotFoundException("Person not found with id: " + dealPerson.getPerson().getId());
+                    throw new ResourceNotFoundException("Contact not found");
                 }
                 dealMapper.addPerson(
                     workspaceId,
@@ -1564,7 +1564,7 @@ public class DealService {
      */
     public List<Activity> getActivitiesByDealId(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found");
         return referenceService.hydrateActivities(workspaceId, activityMapper.getActivitiesByDealId(workspaceId, dealId));
     }
 
@@ -1575,7 +1575,7 @@ public class DealService {
      */
     public List<Note> getNotesByDealId(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found");
         return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByDealId(workspaceId, dealId, workspaceService.getCurrentUserId()));
     }
 
@@ -1586,7 +1586,7 @@ public class DealService {
      */
     public List<Task> getTasksByDealId(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found");
         return referenceService.hydrateTasks(workspaceId, taskMapper.getTasksByDealId(workspaceId, dealId));
     }
 
@@ -1640,13 +1640,13 @@ public class DealService {
             int workspaceId, int dealId, int stageId, boolean requireStableSourceStage) {
         Deal discovered = requireDeal(workspaceId, dealId);
         Stage stage = pipelineMapper.getVisibleStageById(workspaceId, stageId);
-        if (stage == null) throw new ResourceNotFoundException("Stage not found with id: " + stageId);
+        if (stage == null) throw new ResourceNotFoundException("Stage not found");
         List<Deal> lockedDeals = lockDealMoveRows(
             workspaceId, dealId, discovered.getStageId(), stageId);
         Deal locked = lockedDeals.stream()
             .filter(deal -> deal.getId() == dealId)
             .findFirst()
-            .orElseThrow(() -> new ResourceNotFoundException("Deal not found with id: " + dealId));
+            .orElseThrow(() -> new ResourceNotFoundException("Deal not found"));
         if (requireStableSourceStage
                 && !Objects.equals(discovered.getStageId(), locked.getStageId())) {
             throw new ConflictException("Deal stage changed while preparing the mutation");
@@ -1667,7 +1667,7 @@ public class DealService {
         Deal before = lockedDeals.stream()
             .filter(deal -> deal.getId() == dealId)
             .findFirst()
-            .orElseThrow(() -> new ResourceNotFoundException("Deal not found with id: " + dealId));
+            .orElseThrow(() -> new ResourceNotFoundException("Deal not found"));
         Boolean previousOutcome = before.getWon();
         Integer stagePipelineId = stage.getPipeline() != null ? stage.getPipeline().getId() : null;
         if (!Objects.equals(before.getPipelineId(), stagePipelineId)) {
@@ -1758,7 +1758,7 @@ public class DealService {
     public Deal updateOwner(int dealId, Integer ownerId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
-        if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        if (deal == null) throw new ResourceNotFoundException("Deal not found");
         if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
         dealMapper.updateOwner(workspaceId, dealId, ownerId);
         if (ownerId != null) {
@@ -1784,7 +1784,7 @@ public class DealService {
     public Deal updateRiskExcluded(int dealId, boolean riskExcluded) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
-        if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        if (deal == null) throw new ResourceNotFoundException("Deal not found");
         dealMapper.updateRiskExcluded(workspaceId, dealId, riskExcluded);
         auditService.record("deal.updateEvaluation", "deal", dealId, deal.getName(),
             (riskExcluded ? "Excluded " + deal.getName() + " from" : "Included " + deal.getName() + " in")
@@ -1796,7 +1796,7 @@ public class DealService {
     public List<User> getCollaborators(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, dealId) == null) {
-            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+            throw new ResourceNotFoundException("Deal not found");
         }
         return dealMapper.getCollaborators(workspaceId, dealId);
     }
@@ -1806,7 +1806,7 @@ public class DealService {
     public List<User> replaceCollaborators(int dealId, List<Integer> userIds) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
-        if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        if (deal == null) throw new ResourceNotFoundException("Deal not found");
         List<Integer> normalized = userIds == null ? List.of() : userIds.stream().distinct().toList();
         for (Integer userId : normalized) {
             if (userId == null) throw new BadRequestException("Collaborator IDs cannot be null");

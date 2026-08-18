@@ -836,7 +836,11 @@ class PersonServiceTest extends AbstractServiceTest {
 
     @Test
     void getDealsByPersonId_throwsWhenPersonMissing() {
-        assertThrows(ResourceNotFoundException.class, () -> personService.getDealsByPersonId(-1));
+        ResourceNotFoundException failure = assertThrows(
+            ResourceNotFoundException.class,
+            () -> personService.getDealsByPersonId(-1));
+
+        assertEquals("Contact not found", failure.getMessage());
     }
 
     @Test

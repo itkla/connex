@@ -25,6 +25,7 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.context.i18n.LocaleContextHolder;
+import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -33,6 +34,9 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.validation.BeanPropertyBindingResult;
+import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
@@ -80,6 +84,39 @@ class GlobalExceptionHandlerTest {
 
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
         assertEquals("Missing required parameter: personA", response.getBody());
+    }
+
+    @Test
+    void resourceNotFoundReturnsStableStructuredCode() {
+        ResponseEntity<Map<String, String>> response = handler.notFound(
+            new ResourceNotFoundException("Contact not found"));
+
+        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+        assertEquals(Map.of(
+            "code", "RESOURCE_NOT_FOUND",
+            "message", "Contact not found"), response.getBody());
+    }
+
+    @Test
+    void badRequestReturnsStableStructuredCode() {
+        ResponseEntity<Map<String, String>> response = handler.badRequest(
+            new BadRequestException("The request is invalid"));
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals(Map.of(
+            "code", "BAD_REQUEST",
+            "message", "The request is invalid"), response.getBody());
+    }
+
+    @Test
+    void forbiddenReturnsStableStructuredCode() {
+        ResponseEntity<Map<String, String>> response = handler.forbidden(
+            new ForbiddenException("Permission is required"));
+
+        assertEquals(HttpStatus.FORBIDDEN, response.getStatusCode());
+        assertEquals(Map.of(
+            "code", "FORBIDDEN",
+            "message", "Permission is required"), response.getBody());
     }
 
     @Test
@@ -216,12 +253,66 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
-    void tooManyRequests_mapsTo429() {
-        ResponseEntity<String> response = handler.tooManyRequests(
+    void tooManyRequestsReturnsStableStructuredCode() {
+        ResponseEntity<Map<String, String>> response = handler.tooManyRequests(
             new TooManyRequestsException("slow down"));
 
         assertEquals(HttpStatus.TOO_MANY_REQUESTS, response.getStatusCode());
-        assertEquals("slow down", response.getBody());
+        assertEquals(Map.of(
+            "code", "TOO_MANY_REQUESTS",
+            "message", "slow down"), response.getBody());
+    }
+
+    @Test
+    void validationReturnsStableCodeAndEnvelopedFieldErrors() {
+        BeanPropertyBindingResult bindingResult =
+            new BeanPropertyBindingResult(new Object(), "request");
+        bindingResult.addError(new FieldError(
+            "request", "discountType", "Choose either an amount or a percentage discount."));
+        MethodArgumentNotValidException failure = new MethodArgumentNotValidException(
+            mock(MethodParameter.class), bindingResult);
+
+        ResponseEntity<Map<String, Object>> response = handler.validation(failure);
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals(Map.of(
+            "code", "VALIDATION_FAILED",
+            "message", "Please fix the highlighted fields",
+            "fieldErrors", Map.of(
+                "discountType", "Choose either an amount or a percentage discount.")),
+            response.getBody());
+    }
+
+    @Test
+    void validationKeepsAConstraintErrorOnAFieldNamedMessage() {
+        BeanPropertyBindingResult bindingResult =
+            new BeanPropertyBindingResult(new Object(), "request");
+        bindingResult.addError(new FieldError(
+            "request", "message", "Keep the message under 2,000 characters."));
+        MethodArgumentNotValidException failure = new MethodArgumentNotValidException(
+            mock(MethodParameter.class), bindingResult);
+
+        ResponseEntity<Map<String, Object>> response = handler.validation(failure);
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals(Map.of(
+            "code", "VALIDATION_FAILED",
+            "message", "Please fix the highlighted fields",
+            "fieldErrors", Map.of(
+                "message", "Keep the message under 2,000 characters.")),
+            response.getBody());
+    }
+
+    @Test
+    void shareBlockedPrivacyHoldReturnsStableStructuredCode() {
+        ResponseEntity<Map<String, String>> response = handler.badRequest(
+            new ShareBlockedPrivacyHoldException());
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertEquals(Map.of(
+            "code", "SHARE_BLOCKED_PRIVACY_HOLD",
+            "message", "This contact asked not to be shared outside this workspace, "
+                + "so new shares are blocked."), response.getBody());
     }
 
     @Test

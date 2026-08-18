@@ -117,7 +117,7 @@ public class PersonService {
     public List<Person> getPersonsByDealId(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (!dealMapper.exists(workspaceId, dealId)) {
-            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+            throw new ResourceNotFoundException("Deal not found");
         }
         return personMapper.getPersonsByDealId(workspaceId, dealId);
     }
@@ -237,7 +237,7 @@ public class PersonService {
     public Person getPersonById(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person person = personMapper.getPersonById(workspaceId, id);
-        if (person == null) throw new ResourceNotFoundException("Person not found with id: " + id);
+        if (person == null) throw new ResourceNotFoundException("Contact not found");
         Person hydrated = hydrateScopedRelationships(person, workspaceId);
         referenceService.hydrateTasks(workspaceId, List.of(hydrated.getTasks()));
         if (hydrated.getActivities() != null && hydrated.getActivities().length > 0) {
@@ -340,7 +340,7 @@ public class PersonService {
                 || person.getArchivedAt() != null
                 || person.getSuspendedAt() != null
                 || person.getProvisionCeasedAt() != null) {
-            throw new ResourceNotFoundException("Person not found with id: " + id);
+            throw new ResourceNotFoundException("Contact not found");
         }
         return person;
     }
@@ -404,7 +404,7 @@ public class PersonService {
         duplicateDecisionLockService.lockCurrentOrganization();
         Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
         if (before == null || before.getArchivedAt() != null) {
-            throw new ResourceNotFoundException("Person not found with id: " + id);
+            throw new ResourceNotFoundException("Contact not found");
         }
         preserveHiddenCompanyAndValidateRequestedCompany(
             workspaceId, companyIdOf(before), person);
@@ -485,7 +485,7 @@ public class PersonService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
         if (before == null || before.getArchivedAt() != null) {
-            throw new ResourceNotFoundException("Person not found with id: " + id);
+            throw new ResourceNotFoundException("Contact not found");
         }
         String acceptedDetail = trimToNull(detail);
         validateProvenance(workspaceId, id, source, acceptedDetail, referrerPersonId);
@@ -522,7 +522,7 @@ public class PersonService {
             throw new BadRequestException("A contact cannot refer itself");
         }
         if (!personMapper.existsOwned(workspaceId, referrerPersonId)) {
-            throw new BadRequestException("Referrer not found with id: " + referrerPersonId);
+            throw new BadRequestException("Referring contact not found");
         }
     }
 
@@ -570,7 +570,7 @@ public class PersonService {
         int orgId = duplicateDecisionLockService.lockCurrentOrganization();
         Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
         if (before == null) {
-            throw new ResourceNotFoundException("Person not found with id: " + id);
+            throw new ResourceNotFoundException("Contact not found");
         }
         List<Integer> restrictionWorkspaceIds = suspended || provisionCeased
             ? restrictionWorkspaceIds(orgId, workspaceId)
@@ -646,7 +646,7 @@ public class PersonService {
             return;
         }
         if (!companyMapper.exists(workspaceId, requestedCompanyId)) {
-            throw new BadRequestException("Company not found with id: " + requestedCompanyId);
+            throw new BadRequestException("Company not found");
         }
     }
 
@@ -675,11 +675,11 @@ public class PersonService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         duplicateDecisionLockService.lockCurrentOrganization();
         if (personMapper.lockById(workspaceId, id) == null) {
-            throw new ResourceNotFoundException("Person not found with id: " + id);
+            throw new ResourceNotFoundException("Contact not found");
         }
         Person before = requireOwnedPerson(workspaceId, id);
         if (personMapper.archive(workspaceId, id) != 1) {
-            throw new ResourceNotFoundException("Person not found with id: " + id);
+            throw new ResourceNotFoundException("Contact not found");
         }
         withdrawProviderCapture(workspaceId, id);
         Person after = requireArchivedPerson(workspaceId, id);
@@ -704,11 +704,11 @@ public class PersonService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         duplicateDecisionLockService.lockCurrentOrganization();
         if (personMapper.lockById(workspaceId, id) == null) {
-            throw new ResourceNotFoundException("Person not found with id: " + id);
+            throw new ResourceNotFoundException("Contact not found");
         }
         Person before = requireArchivedPerson(workspaceId, id);
         if (personMapper.restore(workspaceId, id) != 1) {
-            throw new ResourceNotFoundException("Person not found with id: " + id);
+            throw new ResourceNotFoundException("Contact not found");
         }
         Person after = requireOwnedPerson(workspaceId, id);
         identityIntakeService.recordPerson(
@@ -726,7 +726,7 @@ public class PersonService {
     private Person requireArchivedPerson(int workspaceId, int id) {
         Person person = personMapper.getOwnedArchivedPersonById(workspaceId, id);
         if (person == null) {
-            throw new ResourceNotFoundException("Person not found with id: " + id);
+            throw new ResourceNotFoundException("Contact not found");
         }
         return person;
     }
@@ -754,7 +754,7 @@ public class PersonService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person person = requireOwnedPerson(workspaceId, personId);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
-        if (tag == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
+        if (tag == null) throw new ResourceNotFoundException("Tag not found");
         if (personMapper.addTag(workspaceId, personId, tagId) != 1) {
             return false;
         }
@@ -891,13 +891,13 @@ public class PersonService {
 
     private Person requirePerson(int workspaceId, int personId) {
         Person person = personMapper.getPersonById(workspaceId, personId);
-        if (person == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
+        if (person == null) throw new ResourceNotFoundException("Contact not found");
         return person;
     }
 
     private Person requireOwnedPerson(int workspaceId, int personId) {
         if (!personMapper.existsOwned(workspaceId, personId)) {
-            throw new ResourceNotFoundException("Person not found with id: " + personId);
+            throw new ResourceNotFoundException("Contact not found");
         }
         return requirePerson(workspaceId, personId);
     }

@@ -287,7 +287,7 @@ class WorkflowControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(createBody().replace("Workflow", "w".repeat(129))))
             .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.name").exists());
+            .andExpect(jsonPath("$.fieldErrors.name").exists());
         mockMvc.perform(put("/api/workflows/42/draft")
                 .with(csrf().asHeader())
                 .contentType(MediaType.APPLICATION_JSON)
@@ -299,13 +299,13 @@ class WorkflowControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(draftBody().replace("\"expectedRevision\":3", "\"expectedRevision\":-1")))
             .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.expectedRevision").exists());
+            .andExpect(jsonPath("$.fieldErrors.expectedRevision").exists());
         mockMvc.perform(post("/api/workflows/42/publish")
                 .with(csrf().asHeader())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}"))
             .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.expectedRevision").exists());
+            .andExpect(jsonPath("$.fieldErrors.expectedRevision").exists());
         mockMvc.perform(post("/api/workflows/42/simulate")
                 .with(csrf().asHeader())
                 .contentType(MediaType.APPLICATION_JSON)
@@ -317,7 +317,7 @@ class WorkflowControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedRevision\":3}"))
             .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.recordId").exists());
+            .andExpect(jsonPath("$.fieldErrors.recordId").exists());
         mockMvc.perform(post("/api/workflows")
                 .with(csrf().asHeader())
                 .contentType(MediaType.APPLICATION_JSON)
@@ -380,10 +380,12 @@ class WorkflowControllerTest {
 
         mockMvc.perform(get("/api/workflows/42"))
             .andExpect(status().isNotFound())
-            .andExpect(content().string("Workflow not found"));
+            .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
+            .andExpect(jsonPath("$.message").value("Workflow not found"));
         mockMvc.perform(post("/api/workflows/42/validate").with(csrf().asHeader()))
             .andExpect(status().isBadRequest())
-            .andExpect(content().string("Workflow graph is incomplete"));
+            .andExpect(jsonPath("$.code").value("BAD_REQUEST"))
+            .andExpect(jsonPath("$.message").value("Workflow graph is incomplete"));
         mockMvc.perform(post("/api/workflows/42/publish")
                 .with(csrf().asHeader())
                 .contentType(MediaType.APPLICATION_JSON)
@@ -392,7 +394,8 @@ class WorkflowControllerTest {
             .andExpect(jsonPath("$.message").value("Workflow draft revision does not match"));
         mockMvc.perform(post("/api/workflows/42/enable").with(csrf().asHeader()))
             .andExpect(status().isForbidden())
-            .andExpect(content().string("Requires the RULE_MANAGE permission"));
+            .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+            .andExpect(jsonPath("$.message").value("Requires the RULE_MANAGE permission"));
     }
 
     @Test

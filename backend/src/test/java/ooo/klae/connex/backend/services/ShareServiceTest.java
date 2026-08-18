@@ -17,8 +17,8 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
-import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.ShareBlockedPrivacyHoldException;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.tenant.TenantContext;
@@ -144,9 +144,13 @@ class ShareServiceTest extends AbstractServiceTest {
 
         assertEquals(0, shareMapper.sharePerson(
             person.getId(), owner.getId(), blockedTarget.getId(), currentUser.getId(), false));
-        BadRequestException blocked = assertThrows(BadRequestException.class,
+        ShareBlockedPrivacyHoldException blocked = assertThrows(
+            ShareBlockedPrivacyHoldException.class,
             () -> shareService.share("person", person.getId(), blockedTarget.getId(), false));
-        assertEquals("Third-party provision has been ceased for this contact", blocked.getMessage());
+        assertEquals(
+            "This contact asked not to be shared outside this workspace, so new shares are blocked.",
+            blocked.getMessage());
+        assertEquals("SHARE_BLOCKED_PRIVACY_HOLD", blocked.getCode());
 
         shareService.unshare("person", person.getId(), existingTarget.getId());
         assertTrue(shareService.listShares("person", person.getId()).isEmpty());
