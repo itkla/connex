@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useMessages, useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
 
 import type { AuditLogEntry } from "@/app/lib/types";
@@ -9,23 +9,13 @@ import { ApiError, getOrgAudit } from "@/app/lib/api";
 import { toastError } from "@/app/lib/toast";
 import { useLiveNow } from "@/app/hooks/useNow";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { orgAuditActionKey, titleCaseAction } from "@/app/lib/orgAuditActionLabel";
 import { Button } from "@/components/ui/button";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import Rise from "@/app/components/motion/Rise";
 import { NoAccessCard, EmptyRow, ListCard } from "@/app/components/organization/OrgPrimitives";
 
 const PAGE_SIZE = 30;
-
-/**
- * Last-resort label for an audit action Connex has no sentence for yet: one readable phrase in
- * sentence case rather than the raw dotted code.
- */
-function titleCaseAction(action: string) {
-    const words = action.split(/[._]/).filter(Boolean);
-    if (words.length === 0) return action;
-    const [first, ...rest] = words;
-    return [first.charAt(0).toUpperCase() + first.slice(1), ...rest].join(" ");
-}
 
 function relativeTime(iso: string, locale: string, now: number) {
     const then = new Date(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z").getTime();
@@ -41,6 +31,7 @@ function relativeTime(iso: string, locale: string, now: number) {
 
 export default function OrgAuditPanel() {
     const t = useTranslations("OrgAudit");
+    const messages = useMessages();
     const locale = useLocale();
     const now = useLiveNow();
     const { activeWorkspace } = useWorkspace();
@@ -54,8 +45,8 @@ export default function OrgAuditPanel() {
     const [hasMore, setHasMore] = useState(false);
 
     const actionLabel = (action: string) => {
-        const key = `action.${action}`;
-        return t.has(key) ? t(key) : titleCaseAction(action);
+        const key = orgAuditActionKey(messages, action);
+        return key === null ? titleCaseAction(action) : t(key);
     };
 
     useEffect(() => {

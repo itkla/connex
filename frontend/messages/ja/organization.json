@@ -111,24 +111,24 @@
     "title": "AIプロバイダー",
     "subtitle": "組織で利用するAIプロバイダーを設定します（BYOP）。Connexは可能な範囲でテキスト内の識別情報をマスキングし、すべての外部リクエストを監査します。名刺の代替読み取りを含む画像機能では、マスキングできない画像データがメタデータを除去したうえで送信されます。ここでプロバイダーを設定して有効化するまで、AI機能は無効のままです。",
     "workspaceEnableTitle": "このワークスペースでAIを有効にする",
-    "workspaceEnableDescription": "このワークスペースの緊急停止設定はメンバーの AI 権限より優先され、実行中のアシスタントの回答を次の安全確認で停止します。",
+    "workspaceEnableDescription": "このワークスペースの緊急停止設定はメンバーのAI権限より優先され、実行中のアシスタントの回答を次の安全確認で停止します。",
     "assistantMaxSteps": "回答ごとのアシスタントステップ数",
-    "assistantMaxStepsDescription": "Ask Connex の各回答を 1〜12 回のモデルまたはツールステップに制限します。",
+    "assistantMaxStepsDescription": "Ask Connexの各回答を1〜12回のモデルまたはツールステップに制限します。",
     "saveWorkspaceControls": "ワークスペース設定を保存",
     "governanceSaved": "ワークスペースのAI設定を保存しました。",
     "governanceSaveFailed": "ワークスペースのAI設定を保存できませんでした。",
-    "dailyBudgetTitle": "組織の 1 日あたりの AI 利用上限",
-    "dailyBudgetDescription": "UTC日単位の共有上限をデータベースで管理し、この組織の全Connexサーバーとワークスペースに適用します。",
-    "dailyTokenLimit": "トークン上限",
-    "dailyTokenLimitHint": "0 にすると無制限です。実行中の呼び出しは、プロバイダーへの送信前に余裕を持った上限を確保します。",
+    "dailyBudgetTitle": "組織の1日あたりのAI利用上限",
+    "dailyBudgetDescription": "この組織のすべてのワークスペースで共有する上限です。毎日UTCの0時にリセットされます。",
+    "dailyTokenLimit": "1日あたりの上限",
+    "dailyTokenLimitHint": "0にすると無制限です。実行中の呼び出しは、プロバイダーへの送信前に余裕を持った上限を確保します。",
     "tokensUsed": "本日の使用量",
     "tokensRemaining": "残り",
     "unlimited": "無制限",
     "budgetExhausted": "上限到達",
     "todayUsage": "本日のメンバー・機能別使用量",
-    "saveBudget": "予算を保存",
-    "budgetSaved": "組織のAI予算を保存しました。",
-    "budgetSaveFailed": "組織のAI予算を保存できませんでした。",
+    "saveBudget": "上限を保存",
+    "budgetSaved": "1日あたりのAI利用上限を保存しました。",
+    "budgetSaveFailed": "1日あたりのAI利用上限を保存できませんでした。",
     "enableTitle": "AI機能を有効にする",
     "enableDescription": "AI権限を持つメンバーが、この組織のワークスペースでAI機能を利用できるようにします。",
     "enableRequiresAttestation": "有効化には下記の学習不使用の確認が必要です。",
@@ -222,6 +222,17 @@
     "colActor": "実行者",
     "colWhen": "日時",
     "action": {
+      "appi": {
+        "subject_request": {
+          "create": "プライバシー関連の申請を登録しました",
+          "update": "プライバシー関連の申請を更新しました",
+          "disclosure": "プライバシー関連の申請に対する開示用データを作成しました"
+        },
+        "incident": {
+          "create": "データに関するインシデントを登録しました",
+          "update": "データに関するインシデントを更新しました"
+        }
+      },
       "org": {
         "create": "組織を作成しました",
         "rename": "組織名を変更しました",
@@ -254,9 +265,6 @@
           "revoke": "AIプロバイダーの認証情報を失効させました",
           "zdr_attest": "AIプロバイダーがデータを保持しないことを確認しました"
         },
-        "ai_budget": {
-          "save": "1日あたりのAI利用上限を保存しました"
-        },
         "workspace": {
           "create": "ワークスペースを作成しました",
           "export": "ワークスペースのデータを書き出しました"
@@ -265,6 +273,18 @@
           "completed": "サポート用データを作成しました",
           "download": "サポート用データをダウンロードしました"
         }
+      },
+      "secret_store": {
+        "secret": {
+          "use": "保存された認証情報を使用しました",
+          "use_failed": "保存された認証情報を使用できませんでした",
+          "rewrap": "保存された認証情報を現在の鍵で再暗号化しました",
+          "rewrap_failed": "保存された認証情報を再暗号化できませんでした"
+        },
+        "diagnostics": {
+          "read": "保存された認証情報の状態を確認しました"
+        },
+        "operation": "保存された認証情報に関する操作"
       },
       "tenant": {
         "organization": {

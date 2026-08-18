@@ -116,19 +116,19 @@
     "assistantMaxStepsDescription": "Limit each Ask Connex answer to 1-12 model or tool steps.",
     "saveWorkspaceControls": "Save workspace controls",
     "governanceSaved": "Workspace AI controls saved.",
-    "governanceSaveFailed": "Could not save the workspace AI controls.",
+    "governanceSaveFailed": "Couldn't save the workspace AI controls.",
     "dailyBudgetTitle": "Daily AI limit for the organization",
-    "dailyBudgetDescription": "A shared UTC-day limit enforced in the database across every Connex server and workspace in this organization.",
-    "dailyTokenLimit": "Token limit",
+    "dailyBudgetDescription": "One shared limit for every workspace in this organization. It resets at midnight UTC.",
+    "dailyTokenLimit": "Daily limit",
     "dailyTokenLimitHint": "Set 0 for no limit. Requests already running reserve a cautious amount before Connex sends anything to the provider.",
     "tokensUsed": "Used today",
     "tokensRemaining": "Remaining",
     "unlimited": "Unlimited",
-    "budgetExhausted": "Exhausted",
+    "budgetExhausted": "Limit reached",
     "todayUsage": "Today by member and feature",
-    "saveBudget": "Save budget",
-    "budgetSaved": "Organization AI budget saved.",
-    "budgetSaveFailed": "Could not save the organization AI budget.",
+    "saveBudget": "Save limit",
+    "budgetSaved": "Daily AI limit saved.",
+    "budgetSaveFailed": "Couldn't save the daily AI limit.",
     "enableTitle": "Enable AI features",
     "enableDescription": "Let members who hold the AI permission use AI features in this organization's workspaces.",
     "enableRequiresAttestation": "Requires the no-training attestation below.",
@@ -222,6 +222,17 @@
     "colActor": "By",
     "colWhen": "When",
     "action": {
+      "appi": {
+        "subject_request": {
+          "create": "Privacy request logged",
+          "update": "Privacy request updated",
+          "disclosure": "Disclosure export assembled for a privacy request"
+        },
+        "incident": {
+          "create": "Data incident logged",
+          "update": "Data incident updated"
+        }
+      },
       "org": {
         "create": "Organization created",
         "rename": "Organization renamed",
@@ -254,9 +265,6 @@
           "revoke": "AI provider credential revoked",
           "zdr_attest": "AI provider confirmed it keeps no copy of your data"
         },
-        "ai_budget": {
-          "save": "Daily AI limit saved"
-        },
         "workspace": {
           "create": "Workspace created",
           "export": "Workspace data exported"
@@ -265,6 +273,18 @@
           "completed": "Support bundle prepared",
           "download": "Support bundle downloaded"
         }
+      },
+      "secret_store": {
+        "secret": {
+          "use": "Stored credential used",
+          "use_failed": "Couldn't use a stored credential",
+          "rewrap": "Stored credential re-encrypted with the current key",
+          "rewrap_failed": "Couldn't re-encrypt a stored credential"
+        },
+        "diagnostics": {
+          "read": "Stored credential health checked"
+        },
+        "operation": "Stored credential activity"
       },
       "tenant": {
         "organization": {
