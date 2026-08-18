@@ -88,7 +88,7 @@
     "status_error": "Needs attention",
     "status_revoked": "Revoked",
     "status_disconnecting": "Disconnecting",
-    "status_purge_failed": "Purge failed",
+    "status_purge_failed": "Erase didn't finish",
     "connect": "Connect",
     "reconnect": "Reconnect",
     "pause": "Pause",
@@ -109,7 +109,7 @@
     "retry": "Retry",
     "unavailableTitle": "Connected accounts aren't available",
     "unavailableBody": "This Connex instance has no connected-account providers configured. Ask your administrator to enable Google or Microsoft connections.",
-    "privacyNote": "Connecting an account does not start capture. Capture begins only after you save a policy, and you can review or purge captured workspace data at any time.",
+    "privacyNote": "Connecting an account does not start capture. Capture begins only after you save a policy, and you can review or erase this workspace's captured data at any time.",
     "error_state": "The connection attempt expired or was invalid. Please try again.",
     "error_denied": "The connection was cancelled at the provider.",
     "error_exchange": "The provider rejected the connection. Please try again.",
@@ -193,7 +193,7 @@
     "configure": "Configure",
     "editPolicy": "Edit policy",
     "workspacePolicy": "Workspace policy",
-    "purge": "Purge captured data",
+    "purge": "Erase captured data",
     "reviews": "{count, plural, one {Review # item} other {Review # items}}",
     "syncNow": "Sync now",
     "syncStarted": "Capture sync started"
@@ -219,7 +219,7 @@
       "hint": "Choose 1 to {max} days. New policies default to 90 days."
     },
     "includeBodies": "Include message bodies",
-    "includeBodiesHint": "Off by default. Bodies are admitted only when both you and the workspace allow them.",
+    "includeBodiesHint": "Off by default. Message bodies are captured only when both you and the workspace allow it.",
     "exclusions": {
       "people": "Excluded people",
       "peoplePlaceholder": "person@example.com",
@@ -236,7 +236,7 @@
       "hint": {
         "manual": "Connex runs only when you choose Sync now, then holds evidence for review.",
         "review": "Scheduled sync holds evidence for your approval before it appears in relationship history.",
-        "automatic": "Scheduled sync admits exact matches. Ambiguous identities always remain in review."
+        "automatic": "Scheduled sync captures exact matches on its own. Anyone it can't identify with certainty still waits for your review."
       }
     },
     "effectiveRestriction": "Workspace restrictions apply",
@@ -303,7 +303,7 @@
       "rate_limited": "Provider rate limit",
       "reauthorization_required": "Reconnect required",
       "intervention_required": "Action required",
-      "purging": "Purging"
+      "purging": "Erasing"
     },
     "progressKnown": "{processed} of {total} items",
     "progressUnknown": "{processed} items processed. The provider did not supply a total.",
@@ -316,7 +316,7 @@
       "cursorInvalid": "The provider changed its sync position. Start a new sync.",
       "providerUnavailable": "The provider is temporarily unavailable.",
       "interventionRequired": "Review the provider connection before syncing again.",
-      "purgeFailed": "The last purge did not complete. Try again.",
+      "purgeFailed": "The last erase didn't finish. Try again.",
       "generic": "Capture needs attention before it can continue."
     }
   },
@@ -355,11 +355,11 @@
     "approve": "Approve capture",
     "approved": "Captured evidence approved",
     "attachTitle": "Attach to an existing contact",
-    "attachDescription": "Choose the canonical contact this exact participant represents.",
+    "attachDescription": "Choose the contact this participant is.",
     "candidateLabel": "Matching contacts",
     "attach": "Attach",
     "createTitle": "Create a contact",
-    "createDescription": "Creation uses the same duplicate preflight as every other contact workflow.",
+    "createDescription": "Connex checks for duplicates first, the same way it does anywhere else you create a contact.",
     "field": {
       "name": "Name",
       "title": "Title",
@@ -375,7 +375,7 @@
   "AccountCaptureDisclosure": {
     "summary": "Review scope, data, visibility, and retention",
     "scope": "Provider scopes",
-    "data": "Admitted fields",
+    "data": "Captured fields",
     "excluded": "Always excluded",
     "visibility": {
       "ownerOnly": "Visible only to the connected account owner",
@@ -384,14 +384,14 @@
       "unknown": "Visibility rule: {code}"
     },
     "retention": {
-      "untilPurged": "Retained until you purge captured workspace data",
-      "untilPurgedOrDisconnected": "Retained until purge or provider disconnect",
-      "purgedOnDisconnect": "Purged when the provider account is disconnected",
-      "purgedOnAccountDeletion": "Purged when the connected account owner is deleted",
+      "untilPurged": "Kept until you erase this workspace's captured data",
+      "untilPurgedOrDisconnected": "Kept until you erase it or disconnect the provider",
+      "purgedOnDisconnect": "Erased when the provider account is disconnected",
+      "purgedOnAccountDeletion": "Erased when the connected account's owner is deleted",
       "unknown": "Retention rule: {code}"
     },
     "admittedField": {
-      "providerSourceId": "Opaque provider source identifier",
+      "providerSourceId": "The provider's own ID for this item",
       "occurredAt": "Interaction date and time",
       "eventTime": "Event date and time",
       "title": "Event title",
@@ -409,8 +409,8 @@
       "attachments": "Attachments",
       "rawMime": "Raw MIME data",
       "remoteImages": "Remote images",
-      "arbitraryFolders": "Folders outside the admitted mail streams",
-      "arbitraryCalendars": "Calendars outside the admitted calendar stream",
+      "arbitraryFolders": "Folders outside the mail sources you chose",
+      "arbitraryCalendars": "Calendars other than the one you chose",
       "privateEvents": "Private event contents",
       "unmatchedParticipants": "Participants that have not been resolved",
       "fullSearch": "Full provider search",
@@ -421,21 +421,21 @@
     }
   },
   "AccountCaptureLifecycle": {
-    "purgeTitle": "Purge {provider} captured data?",
+    "purgeTitle": "Erase the data captured from {provider}?",
     "purgeDescription": "Delete captured content and derived relationship evidence from the active workspace.",
     "disconnectTitle": "Disconnect {provider}?",
     "disconnectDescription": "Remove provider access from your Connex account.",
     "activeWorkspaceTitle": "This affects the active workspace",
     "activeWorkspaceDescription": "Captured content, participants, reviews, sync state, and derived activities are removed. Metadata-only audit records remain.",
-    "allWorkspacesTitle": "Captured data is purged before disconnect",
+    "allWorkspacesTitle": "Captured data is erased before disconnect",
     "allWorkspacesDescription": "Connex removes this provider's captured data from every workspace before deleting the credential. This cannot be undone.",
     "acknowledge": "I understand which captured data will be removed.",
     "cancel": "Cancel",
-    "confirmPurge": "Purge captured data",
+    "confirmPurge": "Erase captured data",
     "confirmDisconnect": "Disconnect account",
-    "purging": "Starting purge",
+    "purging": "Erasing",
     "disconnecting": "Disconnecting",
-    "purgeStarted": "Captured-data purge started"
+    "purgeStarted": "Erasing captured data"
   },
   "AccountChangeEmail": {
     "title": "Change your email",

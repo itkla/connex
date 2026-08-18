@@ -1303,7 +1303,7 @@
                                 "description": "If a deal has almost no history, Connex says there is not enough activity yet to write a reliable brief instead of producing something confident and empty."
                             },
                             {
-                                "title": "It admits when it was working blind",
+                                "title": "It tells you when it was working blind",
                                 "description": "If part of the surrounding context could not be gathered, the brief says so underneath rather than quietly leaving it out."
                             },
                             {
@@ -3844,7 +3844,7 @@
                             },
                             {
                                 "title": "Participant review",
-                                "description": "Unmatched or ambiguous participants stay in a review queue. Attach, create through duplicate preflight, or ignore them."
+                                "description": "Unmatched or ambiguous participants stay in a review queue. Attach them to a contact, create a new contact after the usual duplicate check, or ignore them."
                             },
                             {
                                 "title": "Approval and evidence",
@@ -3855,8 +3855,8 @@
                     {
                         "type": "callout",
                         "variant": "warning",
-                        "title": "Purge and disconnect have different scopes",
-                        "body": "Purge removes captured content and derived evidence from the active workspace. Disconnect purges this provider's captured data from every workspace before deleting the credential. Metadata-only audit records remain."
+                        "title": "Erasing and disconnecting cover different things",
+                        "body": "Erasing removes captured content and derived evidence from the active workspace. Disconnecting erases this provider's captured data from every workspace before deleting the credential. Metadata-only audit records remain."
                     }
                 ]
             },
@@ -4146,7 +4146,7 @@
                         "items": [
                             {
                                 "title": "Connected account capture",
-                                "description": "What is captured, how it is reviewed, and how to purge it.",
+                                "description": "What is captured, how it is reviewed, and how to erase it.",
                                 "href": "/docs/settings/connected-capture"
                             },
                             {

@@ -512,7 +512,7 @@
   },
   "CapturedEvidence": {
     "title": "プロバイダー取り込みの根拠",
-    "description": "この読み取り専用アクティビティは、実際の取り込みポリシーで許可されたプロバイダーデータから作成されました。",
+    "description": "連携アカウントから、取り込み設定にしたがって自動で記録されました。",
     "capturedBy": "{provider} から取り込み",
     "provider": "プロバイダー",
     "stream": "取り込み元",
@@ -524,7 +524,7 @@
     "sourceId": "プロバイダーのソースID",
     "capturedAt": "取り込み日時",
     "captureAsOf": "根拠の基準日時",
-    "readOnly": "プロバイダーから作成されたアクティビティは Connex で編集・削除できません。"
+    "readOnly": "自動で取り込んだアクティビティは Connex で編集・削除できません。"
   },
   "ActivityAllLayout": {
     "title": "活動記録 / すべて",

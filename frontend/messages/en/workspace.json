@@ -1025,7 +1025,7 @@
             "retrying": "Retrying",
             "intervention_required": "Needs attention",
             "paused": "Paused",
-            "purging": "Purging"
+            "purging": "Erasing"
         }
     }
 }

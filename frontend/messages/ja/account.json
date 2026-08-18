@@ -88,7 +88,7 @@
     "status_error": "要対応",
     "status_revoked": "無効",
     "status_disconnecting": "連携解除中",
-    "status_purge_failed": "消去に失敗",
+    "status_purge_failed": "消去できませんでした",
     "connect": "連携する",
     "reconnect": "再連携",
     "pause": "一時停止",
@@ -355,7 +355,7 @@
     "approve": "取り込みを承認",
     "approved": "取り込み根拠を承認しました",
     "attachTitle": "既存の連絡先に紐づける",
-    "attachDescription": "この参加者に対応する正式な連絡先を選択してください。",
+    "attachDescription": "この参加者が誰なのか、連絡先を選んでください。",
     "candidateLabel": "一致する連絡先",
     "attach": "紐づける",
     "createTitle": "連絡先を作成",
@@ -391,7 +391,7 @@
       "unknown": "保存ルール: {code}"
     },
     "admittedField": {
-      "providerSourceId": "プロバイダー側の不透明な識別子",
+      "providerSourceId": "プロバイダー側でのこの項目のID",
       "occurredAt": "やり取りの日時",
       "eventTime": "予定の日時",
       "title": "予定のタイトル",
