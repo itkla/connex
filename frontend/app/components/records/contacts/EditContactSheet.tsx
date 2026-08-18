@@ -41,6 +41,7 @@ export default function EditContactSheet({
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [isSaving, setIsSaving] = useState(false);
     const cfRef = useRef<CustomFieldsEditHandle>(null);
+    const [customFieldsDirty, setCustomFieldsDirty] = useState(false);
     const { fieldErrors, setFieldErrors, reset: resetFieldErrors, clearError } = useFieldErrors();
 
     const handleOpenChange = (next: boolean) => {
@@ -129,7 +130,15 @@ export default function EditContactSheet({
             isSaving={isSaving}
             saveEdits={saveEdits}
             fieldErrors={{ [contact.id]: fieldErrors }}
-            customFieldsSlot={<CustomFieldsEditSection ref={cfRef} entityType="person" entityId={contact.id} />}
+            customFieldsDirty={customFieldsDirty}
+            customFieldsSlot={(
+                <CustomFieldsEditSection
+                    ref={cfRef}
+                    entityType="person"
+                    entityId={contact.id}
+                    onDirtyChange={setCustomFieldsDirty}
+                />
+            )}
         />
     );
 }

@@ -78,6 +78,10 @@ type Props = {
     defaultSubject?: string;
     /** Prefills the notes, e.g. carried over from the Quick Create panel. */
     defaultNotes?: string;
+    /** Replaces "No contact found." when the surface knows why the list is empty. */
+    personEmptyMessage?: string;
+    /** Replaces "No deal found." when the surface knows why the list is empty. */
+    dealEmptyMessage?: string;
     /** Requires a contact or deal link when this activity is intended to create relationship evidence. */
     requireRelationshipTarget?: boolean;
     initialDraftGeneration?: number;
@@ -119,6 +123,8 @@ export default function ActivityDialog({
     defaultType,
     defaultSubject = '',
     defaultNotes = '',
+    personEmptyMessage,
+    dealEmptyMessage,
     requireRelationshipTarget = false,
     initialDraftGeneration,
     onDraftMounted,
@@ -175,6 +181,8 @@ export default function ActivityDialog({
                         defaultType={defaultType}
                         defaultSubject={defaultSubject}
                         defaultNotes={defaultNotes}
+                        personEmptyMessage={personEmptyMessage}
+                        dealEmptyMessage={dealEmptyMessage}
                         requireRelationshipTarget={requireRelationshipTarget}
                         ownsInitialDraft={initialDraftGeneration !== undefined}
                         requestInit={requestInit}
@@ -212,6 +220,8 @@ type ActivityDialogFormProps = {
     defaultType?: ActivityType;
     defaultSubject?: string;
     defaultNotes?: string;
+    personEmptyMessage?: string;
+    dealEmptyMessage?: string;
     requireRelationshipTarget?: boolean;
     ownsInitialDraft?: boolean;
     requestInit?: RequestInit;
@@ -244,6 +254,8 @@ export function ActivityDialogForm({
     defaultType,
     defaultSubject = '',
     defaultNotes = '',
+    personEmptyMessage,
+    dealEmptyMessage,
     requireRelationshipTarget = false,
     ownsInitialDraft = false,
     requestInit,
@@ -527,7 +539,7 @@ export function ActivityDialogForm({
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{t('noPersonFound')}</ComboboxEmpty>
+                                        <ComboboxEmpty>{personEmptyMessage ?? t('noPersonFound')}</ComboboxEmpty>
                                         {persons.map((p) => (
                                             <ComboboxItem key={p.id} value={p}>
                                                 {p.name}
@@ -561,7 +573,7 @@ export function ActivityDialogForm({
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{t('noDealFound')}</ComboboxEmpty>
+                                        <ComboboxEmpty>{dealEmptyMessage ?? t('noDealFound')}</ComboboxEmpty>
                                         {deals.map((d) => (
                                             <ComboboxItem key={d.id} value={d}>
                                                 {d.name}

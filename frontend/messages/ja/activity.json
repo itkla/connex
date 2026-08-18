@@ -73,7 +73,9 @@
     "followUp_nextWeek": "来週",
     "triggerAdd": "アクティビティを記録",
     "toastLinkFailed": "アクティビティを記録しましたが、連絡先を案件に追加できませんでした",
-    "toastFailedLoadLinks": "関連付けできるレコードを読み込めませんでした"
+    "toastFailedLoadLinks": "関連付けできるレコードを読み込めませんでした",
+    "noCompanyForDeals": "この連絡先にはまだ会社が設定されていないため、関連付けられる案件がありません。",
+    "noCompanyForPeople": "この案件にはまだ会社が設定されていないため、関連付けられる連絡先がありません。"
   },
   "ActivityNotes": {
     "title": "メモ",
@@ -269,7 +271,9 @@
     "toastFailedCreate": "タスクを作成できませんでした",
     "triggerAdd": "タスクを追加",
     "toastLinkFailed": "タスクを作成しましたが、連絡先を案件に追加できませんでした",
-    "toastFailedLoadLinks": "関連付けできるレコードを読み込めませんでした"
+    "toastFailedLoadLinks": "関連付けできるレコードを読み込めませんでした",
+    "noCompanyForDeals": "この連絡先にはまだ会社が設定されていないため、関連付けられる案件がありません。",
+    "noCompanyForPeople": "この案件にはまだ会社が設定されていないため、関連付けられる連絡先がありません。"
   },
   "ActivityEditActivitySheet": {
     "title": "アクティビティを編集",
@@ -349,8 +353,7 @@
     "toastDeleted": "タグ「{name}」を削除しました",
     "toastFailedDelete": "タグを削除できませんでした",
     "entityLabel": "タグ",
-    "deleteDetails": "このタグが付いているすべての連絡先・会社・案件からも外れます。",
-    "cancel": "キャンセル"
+    "deleteDetails": "このタグが付いているすべての連絡先・会社・案件からも外れます。"
   },
   "ActivityLibraryTagDialog": {
     "titleCreate": "新規タグ",

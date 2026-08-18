@@ -73,7 +73,6 @@
     "noResultsTitle": "条件に一致するファイルがありません",
     "noResultsBody": "検索条件を変えるか、フィルターを解除してすべて表示してください。",
     "clearFilters": "フィルターを解除",
-    "cancel": "キャンセル",
     "toastDeleted": "ファイルを削除しました",
     "toastDeleteFailed": "ファイルを削除できませんでした",
     "unlinked": "リンク切れ",

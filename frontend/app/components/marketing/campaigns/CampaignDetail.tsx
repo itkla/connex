@@ -288,6 +288,11 @@ export default function CampaignDetail({
             ? `${formatDate(current.startAt ?? undefined, locale)} – ${formatDate(current.endAt ?? undefined, locale)}`
             : t("noValue");
     const latestSnapshot = snapshots[0] ?? null;
+    const deleteBlockedNote = latestSnapshot !== null
+        ? t("deleteBlocked")
+        : snapshotsRestricted
+            ? t("deleteBlockedUnknown")
+            : null;
 
     return (
         <>
@@ -608,7 +613,9 @@ export default function CampaignDetail({
                 selectedItems={[current]}
                 entityLabel={t("entityLabel")}
                 getDisplayName={(campaign) => campaign.name}
-                details={<p className="text-sm text-muted-foreground">{t("deleteBlocked")}</p>}
+                details={deleteBlockedNote ? (
+                    <p className="text-sm text-muted-foreground">{deleteBlockedNote}</p>
+                ) : undefined}
                 isDeleting={isDeleting}
                 confirmDelete={removeCampaign}
             />

@@ -51,6 +51,8 @@ type Props = {
     saveEdits: () => void;
     /** Per-deal inline validation messages, keyed by deal id then draft field. */
     fieldErrors?: Record<number, Record<string, string>>;
+    /** Unsaved state owned by `customFieldsSlot`, folded into the sheet's discard guard. */
+    customFieldsDirty?: boolean;
     customFieldsSlot?: ReactNode;
 };
 
@@ -73,6 +75,7 @@ export default function QuickEditDealSheet({
     isSaving,
     saveEdits,
     fieldErrors,
+    customFieldsDirty,
     customFieldsSlot,
 }: Props) {
     const t = useTranslations('DealsQuickEditSheet');
@@ -111,7 +114,7 @@ export default function QuickEditDealSheet({
             onSave={saveEdits}
             saveLabel={t('save')}
             cancelLabel={t('cancel')}
-            dirtySnapshot={drafts}
+            dirtySnapshot={{ drafts, customFieldsDirty }}
         >
             {selectedDeals.map((d, idx) => {
                 const draft = drafts[d.id];

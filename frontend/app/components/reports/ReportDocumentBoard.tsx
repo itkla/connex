@@ -604,6 +604,9 @@ export default function ReportDocumentBoard({
                 selectedIds={new Set(snapshotPendingDelete !== null ? [snapshotPendingDelete.id] : [])}
                 selectedItems={snapshotPendingDelete !== null ? [snapshotPendingDelete] : []}
                 entityLabel={t('document.snapshotEntityLabel')}
+                getDisplayName={(snapshot) => t('document.snapshotNamed', {
+                    date: new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(new Date(snapshot.generatedAt)),
+                })}
                 isDeleting={deletingSnapshotId !== null}
                 confirmDelete={confirmDeleteSnapshot}
             />

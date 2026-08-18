@@ -1,5 +1,5 @@
 {
-    "minimumCount": 18,
+    "minimumCount": 19,
     "surfaces": [
         {
             "file": "app/components/activity/activities/ActivityDialog.tsx",
@@ -25,6 +25,11 @@
             "file": "app/components/marketing/campaigns/CampaignFormDialog.tsx",
             "surface": "Campaign create and edit dialog",
             "guard": "own"
+        },
+        {
+            "file": "app/components/records/companies/EditCompanySheet.tsx",
+            "surface": "Company edit drawer",
+            "guard": "app/components/records/companies/QuickEditCompanySheet.tsx"
         },
         {
             "file": "app/components/records/companies/NewCompanyDialog.tsx",

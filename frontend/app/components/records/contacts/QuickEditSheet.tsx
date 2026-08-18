@@ -37,6 +37,8 @@ type Props = {
     saveEdits: () => void;
     /** Per-contact inline validation messages, keyed by contact id then draft field. */
     fieldErrors?: Record<number, Record<string, string>>;
+    /** Unsaved state owned by `customFieldsSlot`, folded into the sheet's discard guard. */
+    customFieldsDirty?: boolean;
     customFieldsSlot?: ReactNode;
 };
 
@@ -51,6 +53,7 @@ export default function QuickEditSheet({
     isSaving,
     saveEdits,
     fieldErrors,
+    customFieldsDirty,
     customFieldsSlot,
 }: Props) {
     const t = useTranslations('ContactsQuickEditSheet');
@@ -85,7 +88,7 @@ export default function QuickEditSheet({
             }}
             saveLabel={t('save')}
             cancelLabel={t('cancel')}
-            dirtySnapshot={drafts}
+            dirtySnapshot={{ drafts, customFieldsDirty }}
         >
             {selectedContacts.map((c, idx) => {
                 const draft = drafts[c.id];

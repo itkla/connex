@@ -17,7 +17,6 @@
     "common": {
       "cancel": "キャンセル",
       "delete": "削除",
-      "deleting": "削除中…",
       "edit": "編集",
       "retry": "再試行",
       "saving": "保存中…",
@@ -207,6 +206,7 @@
       "live": "ライブレポート",
       "deleteSnapshot": "スナップショットを削除",
       "deleteSnapshotNamed": "{date}のスナップショットを削除",
+      "snapshotNamed": "{date}のスナップショット",
       "snapshotEntityLabel": "スナップショット",
       "export": "エクスポート",
       "exporting": "エクスポート中…",

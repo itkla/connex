@@ -73,7 +73,6 @@
     "noResultsTitle": "No files match your filters",
     "noResultsBody": "Try a different search, or clear the filters to see everything.",
     "clearFilters": "Clear filters",
-    "cancel": "Cancel",
     "toastDeleted": "File deleted",
     "toastDeleteFailed": "Couldn't delete the file",
     "unlinked": "Unlinked",

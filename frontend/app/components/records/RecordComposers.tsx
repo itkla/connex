@@ -7,6 +7,7 @@ import { PlusIcon } from '@heroicons/react/24/solid';
 import { Button } from '@/components/ui/button';
 import ActivityDialog from '@/app/components/activity/activities/ActivityDialog';
 import TaskDialog from '@/app/components/activity/tasks/TaskDialog';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import {
     addDealPerson,
     createActivity,
@@ -15,7 +16,7 @@ import {
     getCompanyPeople,
     getUsers,
 } from '@/app/lib/api';
-import { toastError, toastWarn } from '@/app/lib/toast';
+import { toastWarn } from '@/app/lib/toast';
 import type {
     Contact,
     CreateActivityPayload,
@@ -68,8 +69,8 @@ function useOpenState(controlledOpen: boolean | undefined, onOpenChange?: (open:
 function useRecordLinkOptions(
     anchor: RecordComposerAnchor,
     open: boolean,
-    onLoadError: () => void,
-): { persons: Contact[]; deals: Deal[] } {
+    onLoadError: (error: unknown) => void,
+): { persons: Contact[]; deals: Deal[]; companyId: number | null } {
     const anchorPerson = anchor.kind === 'person' ? anchor.person : null;
     const anchorDeal = anchor.kind === 'deal' ? anchor.deal : null;
     const companyId = anchor.kind === 'person' ? anchor.companyId : anchor.deal.company ?? null;
@@ -95,8 +96,8 @@ function useRecordLinkOptions(
                 if (active) setCompanyPeople(items);
             });
         request
-            .catch(() => {
-                if (active) onLoadErrorRef.current();
+            .catch((error: unknown) => {
+                if (active) onLoadErrorRef.current(error);
             })
             .finally(() => {
                 if (active) setLoadedCompanyId(companyId);
@@ -115,7 +116,7 @@ function useRecordLinkOptions(
         [anchorDeal, companyDeals],
     );
 
-    return { persons, deals };
+    return { persons, deals, companyId };
 }
 
 /** Loads the assignable teammates the task composer needs, on its first open. */
@@ -159,11 +160,20 @@ function ComposerTrigger({ title, onClick }: { title: string; onClick: () => voi
  */
 export function RecordTaskComposer({ anchor, currentUserId, open: openProp, onOpenChange }: RecordComposerProps) {
     const t = useTranslations('ActivityTasksDialog');
+    const showApiError = useApiErrorToast('ActivityTasksDialog');
     const { controlled, open, setOpen } = useOpenState(openProp, onOpenChange);
-    const onLoadError = useCallback(() => toastError(t('toastFailedLoadLinks')), [t]);
-    const { persons, deals } = useRecordLinkOptions(anchor, open, onLoadError);
+    const onLoadError = useCallback(
+        (error: unknown) => showApiError(error, 'toastFailedLoadLinks'),
+        [showApiError],
+    );
+    const { persons, deals, companyId } = useRecordLinkOptions(anchor, open, onLoadError);
     const users = useAssignableUsers(open);
     const linkRole = anchor.kind === 'person' ? PERSON_ANCHOR_LINK_ROLE : DEAL_ANCHOR_LINK_ROLE;
+
+    const linkEmptyMessages = {
+        personEmptyMessage: anchor.kind === 'deal' && companyId == null ? t('noCompanyForPeople') : undefined,
+        dealEmptyMessage: anchor.kind === 'person' && companyId == null ? t('noCompanyForDeals') : undefined,
+    };
 
     const createRequest = useCallback(
         async (payload: CreateTaskPayload, init?: RequestInit) => {
@@ -190,6 +200,7 @@ export function RecordTaskComposer({ anchor, currentUserId, open: openProp, onOp
                 currentUserId={currentUserId}
                 defaultPerson={anchor.kind === 'person' ? anchor.person : null}
                 defaultDeal={anchor.kind === 'deal' ? anchor.deal : null}
+                {...linkEmptyMessages}
                 createRequest={createRequest}
             />
         </>
@@ -203,10 +214,19 @@ export function RecordTaskComposer({ anchor, currentUserId, open: openProp, onOp
  */
 export function RecordActivityComposer({ anchor, currentUserId, open: openProp, onOpenChange }: RecordComposerProps) {
     const t = useTranslations('ActivityCreateDialog');
+    const showApiError = useApiErrorToast('ActivityCreateDialog');
     const { controlled, open, setOpen } = useOpenState(openProp, onOpenChange);
-    const onLoadError = useCallback(() => toastError(t('toastFailedLoadLinks')), [t]);
-    const { persons, deals } = useRecordLinkOptions(anchor, open, onLoadError);
+    const onLoadError = useCallback(
+        (error: unknown) => showApiError(error, 'toastFailedLoadLinks'),
+        [showApiError],
+    );
+    const { persons, deals, companyId } = useRecordLinkOptions(anchor, open, onLoadError);
     const linkRole = anchor.kind === 'person' ? PERSON_ANCHOR_LINK_ROLE : DEAL_ANCHOR_LINK_ROLE;
+
+    const linkEmptyMessages = {
+        personEmptyMessage: anchor.kind === 'deal' && companyId == null ? t('noCompanyForPeople') : undefined,
+        dealEmptyMessage: anchor.kind === 'person' && companyId == null ? t('noCompanyForDeals') : undefined,
+    };
 
     const createRequest = useCallback(
         async (payload: CreateActivityPayload, init?: RequestInit) => {
@@ -232,6 +252,7 @@ export function RecordActivityComposer({ anchor, currentUserId, open: openProp, 
                 currentUserId={currentUserId}
                 defaultPerson={anchor.kind === 'person' ? anchor.person : null}
                 defaultDeal={anchor.kind === 'deal' ? anchor.deal : null}
+                {...linkEmptyMessages}
                 createRequest={createRequest}
             />
         </>

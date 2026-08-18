@@ -2,6 +2,16 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+/**
+ * Gate over the committed draft-guard denominator. It proves that every surface **named in**
+ * `lint/draft-guard-inventory.json` wires `useUnsavedChangesGuard` + `ConfirmDiscardDialog`, itself or
+ * through a component it renders.
+ *
+ * It is list-driven, and that is its one blind spot: a new dialog or drawer that accumulates input and
+ * is never added to the inventory is invisible here and this suite still passes. The inventory is the
+ * denominator only because adding the surface to it is part of adding the surface — nothing in this
+ * file can discover an unlisted one.
+ */
 const INVENTORY_PATH = path.join(process.cwd(), "lint", "draft-guard-inventory.json");
 
 const GUARD_HOOK = "useUnsavedChangesGuard";

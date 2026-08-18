@@ -67,12 +67,14 @@ export default function EditDealSheet({
     const [stageOptionsByPipeline, setStageOptionsByPipeline] = useState(stagesByPipeline);
     const [stageLoadRevision, setStageLoadRevision] = useState(0);
     const cfRef = useRef<CustomFieldsEditHandle>(null);
+    const [customFieldsDirty, setCustomFieldsDirty] = useState(false);
     const pipelinesLoaded = useRef(false);
     const { fieldErrors, setFieldErrors, reset: resetFieldErrors, clearError } = useFieldErrors();
 
     const [wasOpen, setWasOpen] = useState(open);
     if (open !== wasOpen) {
         setWasOpen(open);
+        resetFieldErrors();
         if (open) setDraft(toDraft(deal));
     }
 
@@ -168,7 +170,15 @@ export default function EditDealSheet({
             isSaving={isSaving}
             saveEdits={saveEdits}
             fieldErrors={{ [deal.id]: fieldErrors }}
-            customFieldsSlot={<CustomFieldsEditSection ref={cfRef} entityType="deal" entityId={deal.id} />}
+            customFieldsDirty={customFieldsDirty}
+            customFieldsSlot={(
+                <CustomFieldsEditSection
+                    ref={cfRef}
+                    entityType="deal"
+                    entityId={deal.id}
+                    onDirtyChange={setCustomFieldsDirty}
+                />
+            )}
         />
     );
 }
