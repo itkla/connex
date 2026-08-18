@@ -34,6 +34,7 @@ function bannedTerm(id: string) {
 }
 
 const GLOSSARY_ROW = "| Task ownership | **Assignee** | **担当者** | Assigned to |";
+const GENERATOR_NOTE = "Generator note: where a banned term is a substring of a canonical term";
 
 function mutate(replacement: string, target: string = GLOSSARY_ROW): string {
     const guide = readProductGuide();
@@ -181,6 +182,21 @@ describe("vocabulary generator", () => {
 
         expect(texts).toContain("`tenant`");
         expect(texts).toContain("`sharding`");
+    });
+
+    it("reads a banned-terms line that carries no separator", () => {
+        const extended = mutate("`preflight` · `idempotency`\n\n`quorum`", "`preflight` · `idempotency`");
+        const texts = bannedListEntries(vocabularySection(extended)).map((entry) => entry.text);
+
+        expect(texts).toContain("`quorum`");
+        expect(texts).toContain("`hash`");
+    });
+
+    it("fails closed on a banned term stated below the list", () => {
+        const stranded = mutate(`${GENERATOR_NOTE}\n\nAlso never say \`quorum\`.`, GENERATOR_NOTE);
+
+        expect(() => bannedListEntries(vocabularySection(stranded)))
+            .toThrow(/names a term in backticks below the banned-terms list/);
     });
 
     it("never matches a canonical term of the same locale", () => {

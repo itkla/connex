@@ -957,6 +957,7 @@
                     "actions.json",
                     "activity.json",
                     "dashboard.json",
+                    "docs.json",
                     "notifications.json",
                     "records.json"
                 ]
@@ -1138,7 +1139,7 @@
                 "flags": "u"
             },
             "sources": [
-                "§4 glossary row \"Support reference on failures\" (Japanese rendering)"
+                "§4 banned-on-all-product-surfaces list (Japanese rendering)"
             ]
         },
         {

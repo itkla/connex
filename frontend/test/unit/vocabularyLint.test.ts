@@ -30,18 +30,22 @@ const BURN_DOWN = "The baseline only shrinks: fix the copy and delete its entry 
  * The banned-term matches a surface filter removes from the gate, proving the filter is
  * load-bearing rather than decorative.
  */
-function suppressedMatches(inScope: (entry: { file: string; namespace: string }) => boolean): string[] {
-    const compiled = model.terms.map((term) => ({ term, expression: new RegExp(term.pattern.source, term.pattern.flags) }));
-    return messageEntries()
-        .filter(inScope)
-        .flatMap((entry) =>
-            compiled
-                .filter(({ term, expression }) =>
-                    term.locale === entry.locale
-                    && scopeCovers(term.scope, entry.file, entry.namespace)
-                    && expression.test(entry.value))
-                .map(({ term }) => `${entry.locale}/${entry.file}:${entry.keyPath}#${term.term}`),
-        );
+function suppressedMatches(
+    inScope: (entry: { file: string; namespace: string }) => boolean,
+    terms = model.terms,
+): string[] {
+    const compiled = terms.map((term) => ({ term, expression: new RegExp(term.pattern.source, term.pattern.flags) }));
+    const found: string[] = [];
+    for (const entry of messageEntries()) {
+        if (!inScope(entry)) continue;
+        for (const { term, expression } of compiled) {
+            if (term.locale === "ja" && entry.locale !== "ja") continue;
+            if (!scopeCovers(term.scope, entry.file, entry.namespace)) continue;
+            if (!expression.test(entry.value)) continue;
+            found.push(`${entry.locale}/${entry.file}:${entry.keyPath}#${term.term}`);
+        }
+    }
+    return found;
 }
 
 describe("message catalogue vocabulary", () => {
@@ -95,21 +99,45 @@ describe("message catalogue vocabulary", () => {
         expect(removed, "rewritten copy: drop these from AT_A_GLANCE_SURFACES").toEqual([]);
     });
 
-    it("never baselines an allowlisted or out-of-scope surface", () => {
+    it("never baselines an out-of-scope surface", () => {
         const overlapping = baseline
             .map(parseBaselineEntry)
-            .filter((entry) => isAllowedSurface(entry.file, entry.namespace) || isExcludedSurface(entry.file, entry.namespace))
+            .filter((entry) => isExcludedSurface(entry.file, entry.namespace))
             .map((entry) => `${entry.locale}/${entry.file}:${entry.keyPath}`);
 
         expect(overlapping).toEqual([]);
     });
 
-    it("exempts the compliance surfaces, which would otherwise report statutory terms", () => {
-        const suppressed = suppressedMatches((entry) => isAllowedSurface(entry.file, entry.namespace));
+    it("exempts a compliance surface only for the terms §4 notes there", () => {
+        const carveOuts = new Set(
+            model.terms.filter((term) => term.allowFiles.length > 0).map((term) => term.term),
+        );
+        const onComplianceSurfaces = baseline
+            .map(parseBaselineEntry)
+            .filter((entry) => isAllowedSurface(entry.file, entry.namespace));
 
         expect(ALLOWED_SURFACES).toEqual(["legal.json", "organization.json#OrgDataRequests"]);
+        expect(carveOuts.size).toBeGreaterThan(0);
+        expect(onComplianceSurfaces.filter((entry) => carveOuts.has(entry.term)).map((entry) => entry.term)).toEqual([]);
+        expect(onComplianceSurfaces.some((entry) => entry.term === "tenant")).toBe(true);
+    });
+
+    it("suppresses the statutory carve-out terms that a compliance surface really carries", () => {
+        const carveOuts = model.terms.filter((term) => term.allowFiles.length > 0);
+        const suppressed = suppressedMatches((entry) => isAllowedSurface(entry.file, entry.namespace), carveOuts);
+        const reported = new Set(violations.map((violation) => violation.entry));
+
         expect(suppressed.length).toBeGreaterThan(0);
-        expect(violations.filter((violation) => suppressed.includes(violation.entry))).toEqual([]);
+        expect(suppressed.filter((entry) => reported.has(entry))).toEqual([]);
+    });
+
+    it("runs the Latin-script bans against the Japanese catalog too", () => {
+        const found = baseline.map(parseBaselineEntry).filter((entry) => entry.locale === "ja" && entry.term === "ESP");
+
+        expect(found.map((entry) => entry.keyPath)).toEqual(expect.arrayContaining([
+            "WorkspaceDelivery.subtitle",
+            "WorkspaceDelivery.providerHttpEsp",
+        ]));
     });
 
     it("leaves the workflow seam WS5 owns out of scope", () => {

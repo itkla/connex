@@ -26,6 +26,7 @@ const BANNED_LIST_MARKER = "**Banned on all product surfaces**";
 const EMPTY_CELL = "—";
 const BOLD_SPAN = /\*\*([^*]+)\*\*/g;
 const CODE_SPAN = /`([^`]+)`/g;
+const HAS_CODE_SPAN = /`[^`]+`/;
 const QUALIFIER_WORD = /\s(?:as|except|alone|when|only|unless)\s/;
 const CJK_CHARACTER = /[぀-ヿ㐀-䶿一-鿿ｦ-ﾟ]/u;
 const JAPANESE_MIN_OVERLAP = 2;
@@ -34,11 +35,11 @@ const JAPANESE_MIN_OVERLAP = 2;
 export const LOCALES = ["en", "ja"];
 
 /**
- * Compliance surfaces exempt from the gate. §4 allows the statutory register on the
- * organization data-requests admin tooling and the public legal pages; the gate exempts
- * those surfaces wholesale rather than per term, so statutory copy that belongs there is
- * never reported. Individual terms still record their §4 "only where noted" carve-out in
- * `allowFiles`, and the gate honours the union of the two.
+ * The compliance surfaces §4 names: the organization data-requests admin tooling and the
+ * public legal pages. §4 allows the statutory register there **only where noted**, so
+ * these surfaces are not exempt wholesale — a term is skipped here only when its own §4
+ * entry carries the carve-out, which the model records in `allowFiles`. Every other
+ * banned term stays active on these surfaces.
  */
 export const ALLOWED_SURFACES = ["legal.json", "organization.json#OrgDataRequests"];
 
@@ -60,6 +61,7 @@ const NOTE_SURFACES = [
     "actions.json",
     "activity.json",
     "dashboard.json",
+    "docs.json",
     "notifications.json",
     "records.json",
 ];
@@ -456,14 +458,22 @@ function neverSayItems(cell) {
         current += character;
     }
     items.push(current);
-    return items
-        .flatMap((item) => (item.includes("(") ? [item] : item.split(/\s+\/\s+/)))
-        .map((item) => item.trim())
-        .filter((item) => item.length > 0);
+    const parsed = [];
+    for (const item of items) {
+        for (const part of item.includes("(") ? [item] : item.split(/\s+\/\s+/)) {
+            const trimmed = part.trim();
+            if (trimmed.length > 0) parsed.push(trimmed);
+        }
+    }
+    return parsed;
 }
 
 /**
- * Reads the "Banned on all product surfaces" list of §4 as its `·`-separated entries.
+ * Reads the "Banned on all product surfaces" block of §4. The block is every line after
+ * its heading that names a term in backticks, however many lines it runs to and whether
+ * or not a line carries a `·` separator; it ends at the first prose line that names no
+ * term. A backticked term stated after the block would never be read, so it fails closed
+ * rather than being dropped.
  * @param {string} section
  * @returns {{text: string, terms: string[], qualified: boolean}[]}
  */
@@ -473,19 +483,36 @@ export function bannedListEntries(section) {
     if (marker < 0) {
         throw new Error(`docs/PRODUCT.md §4 no longer contains the "${BANNED_LIST_MARKER}" list`);
     }
-    const list = lines.slice(marker + 1).filter((line) => line.includes("·"));
-    if (list.length === 0) {
-        throw new Error("docs/PRODUCT.md §4 no longer states the banned terms as a `·`-separated list");
+    const block = [];
+    let index = marker + 1;
+    for (; index < lines.length; index += 1) {
+        if (lines[index].length === 0) continue;
+        if (!HAS_CODE_SPAN.test(lines[index])) break;
+        block.push(lines[index]);
     }
-    return list.flatMap((line) => line.split("·")).map((chunk) => {
-        const text = chunk.trim();
-        const terms = [...text.matchAll(CODE_SPAN)].map((match) => match[1]);
-        if (terms.length === 0) {
-            throw new Error(`docs/PRODUCT.md §4 lists "${text}" as banned without naming a term in backticks`);
+    if (block.length === 0) {
+        throw new Error("docs/PRODUCT.md §4 no longer states any banned term in backticks below its heading");
+    }
+    for (let after = index; after < lines.length; after += 1) {
+        if (HAS_CODE_SPAN.test(lines[after])) {
+            throw new Error(
+                `docs/PRODUCT.md §4 names a term in backticks below the banned-terms list, where the generator cannot read it: ${lines[after]}`,
+            );
         }
-        const outside = text.replace(CODE_SPAN, " ").replace(/[\s/]+/g, " ").trim();
-        return { text, terms, qualified: outside.length > 0 };
-    });
+    }
+    const entries = [];
+    for (const line of block) {
+        for (const chunk of line.split("·")) {
+            const text = chunk.trim();
+            const terms = [...text.matchAll(CODE_SPAN)].map((match) => match[1]);
+            if (terms.length === 0) {
+                throw new Error(`docs/PRODUCT.md §4 lists "${text}" as banned without naming a term in backticks`);
+            }
+            const outside = text.replace(CODE_SPAN, " ").replace(/[\s/]+/g, " ").trim();
+            entries.push({ text, terms, qualified: outside.length > 0 });
+        }
+    }
+    return entries;
 }
 
 /**
@@ -747,8 +774,9 @@ export function buildVocabularyModel(markdown) {
         });
     }
 
+    const itemsByText = new Map(items.map((item) => [item.text, item]));
     for (const [text, rendering] of Object.entries(JAPANESE_RENDERINGS)) {
-        const source = items.find((item) => item.text === text);
+        const source = itemsByText.get(text);
         if (!source) {
             throw new Error(
                 `JAPANESE_RENDERINGS in frontend/lint/vocabulary.mjs renders "${text}", which docs/PRODUCT.md §4 no longer bans.`,
@@ -805,7 +833,7 @@ export function loadBaseline() {
  * that were always there, and may raise this number **in the same commit that widens
  * them**, never on its own.
  */
-export const BASELINE_HIGH_WATER_MARK = 358;
+export const BASELINE_HIGH_WATER_MARK = 384;
 
 /**
  * The surfaces that still say "at a glance". §4 allows the phrase on one surface only,
@@ -851,11 +879,14 @@ export const AT_A_GLANCE_SURFACES = [
  * @returns {string[]}
  */
 export function atAGlanceEntries() {
-    return messageEntries()
-        .filter((entry) => entry.locale === "en" && !isExcludedSurface(entry.file, entry.namespace))
-        .filter((entry) => /at a glance/i.test(entry.value))
-        .map((entry) => `${entry.locale}/${entry.file}:${entry.keyPath}`)
-        .sort();
+    const found = [];
+    for (const entry of messageEntries()) {
+        if (entry.locale !== "en") continue;
+        if (isExcludedSurface(entry.file, entry.namespace)) continue;
+        if (!/at a glance/i.test(entry.value)) continue;
+        found.push(`${entry.locale}/${entry.file}:${entry.keyPath}`);
+    }
+    return found.sort();
 }
 
 /**
@@ -995,8 +1026,10 @@ export function messageEntries() {
  */
 
 /**
- * Scans the message catalogs for banned terms, honouring the WS5 exclusions, the
- * compliance allowlist, and each term's scope and carve-outs.
+ * Scans the message catalogs for banned terms, honouring the WS5 exclusions, each term's
+ * scope, and the §4 compliance carve-outs it records in `allowFiles`. English patterns
+ * run against both catalogs — a Latin term such as `ESP` or `RBAC` appears verbatim in
+ * Japanese copy — while Japanese patterns run against the Japanese catalog only.
  * @param {VocabularyModel} model
  * @returns {Violation[]}
  */
@@ -1005,9 +1038,8 @@ export function scanMessageCatalogs(model) {
     const violations = [];
     for (const entry of messageEntries()) {
         if (isExcludedSurface(entry.file, entry.namespace)) continue;
-        if (isAllowedSurface(entry.file, entry.namespace)) continue;
         for (const { term, expression } of compiled) {
-            if (term.locale !== entry.locale) continue;
+            if (term.locale === "ja" && entry.locale !== "ja") continue;
             if (!scopeCovers(term.scope, entry.file, entry.namespace)) continue;
             if (matchesAnySurface(term.allowFiles, entry.file, entry.namespace)) continue;
             const match = expression.exec(entry.value);
