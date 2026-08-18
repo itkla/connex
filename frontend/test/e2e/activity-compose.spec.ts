@@ -12,7 +12,7 @@ test.describe("activity composer", () => {
         const subjectField = page.getByLabel("Subject");
         await expect(subjectField).toBeVisible();
         await subjectField.fill(subject);
-        await page.getByRole("button", { name: "Log", exact: true }).click();
+        await page.getByRole("button", { name: "Create", exact: true }).click();
 
         await expect(page.getByText("Activity logged").first()).toBeVisible();
         await expect(page.getByText(subject).first()).toBeVisible({ timeout: 15_000 });
