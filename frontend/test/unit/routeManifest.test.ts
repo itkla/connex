@@ -41,18 +41,25 @@ type SharedManifest = {
     routes: string[];
 };
 
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+    return isJsonObject(value) && Object.values(value).every((entry) => typeof entry === "string");
+}
+
+function isStringArray(value: unknown): value is string[] {
+    return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
+
 function readSharedManifest(): SharedManifest {
     const parsed: unknown = JSON.parse(readFileSync(SHARED_MANIFEST_PATH, "utf8"));
-    if (typeof parsed !== "object" || parsed === null) throw new Error("shared route manifest is not an object");
-    const { params, routes } = parsed as { params?: unknown; routes?: unknown };
-    if (typeof params !== "object" || params === null) throw new Error("shared route manifest has no params");
-    if (!Array.isArray(routes)) throw new Error("shared route manifest has no routes");
-    return {
-        params: Object.fromEntries(
-            Object.entries(params as Record<string, unknown>).map(([key, value]) => [key, String(value)]),
-        ),
-        routes: routes.map((route) => String(route)),
-    };
+    if (!isJsonObject(parsed)) throw new Error("shared route manifest is not an object");
+    const { params, routes } = parsed;
+    if (!isStringRecord(params)) throw new Error("shared route manifest params must map strings to strings");
+    if (!isStringArray(routes)) throw new Error("shared route manifest routes must be an array of strings");
+    return { params, routes };
 }
 
 function appRouterRoutes(directory: string, segments: string[] = []): string[] {
