@@ -1,0 +1,95 @@
+{
+    "minimumCount": 18,
+    "surfaces": [
+        {
+            "file": "app/components/activity/activities/ActivityDialog.tsx",
+            "surface": "Activity composer",
+            "guard": "own"
+        },
+        {
+            "file": "app/components/activity/notes/NoteDialog.tsx",
+            "surface": "Note composer",
+            "guard": "own"
+        },
+        {
+            "file": "app/components/activity/tasks/EditTaskSheet.tsx",
+            "surface": "Task edit drawer",
+            "guard": "own"
+        },
+        {
+            "file": "app/components/activity/tasks/TaskDialog.tsx",
+            "surface": "Task composer",
+            "guard": "own"
+        },
+        {
+            "file": "app/components/marketing/campaigns/CampaignFormDialog.tsx",
+            "surface": "Campaign create and edit dialog",
+            "guard": "own"
+        },
+        {
+            "file": "app/components/records/companies/NewCompanyDialog.tsx",
+            "surface": "Company composer",
+            "guard": "own"
+        },
+        {
+            "file": "app/components/records/companies/QuickEditCompanySheet.tsx",
+            "surface": "Company quick-edit drawer",
+            "guard": "app/components/records/quick-edit/QuickEditSheetShell.tsx"
+        },
+        {
+            "file": "app/components/records/contacts/EditContactSheet.tsx",
+            "surface": "Contact edit drawer",
+            "guard": "app/components/records/contacts/QuickEditSheet.tsx"
+        },
+        {
+            "file": "app/components/records/contacts/NewContactDialog.tsx",
+            "surface": "Contact composer",
+            "guard": "own"
+        },
+        {
+            "file": "app/components/records/contacts/QuickEditSheet.tsx",
+            "surface": "Contact quick-edit drawer",
+            "guard": "app/components/records/quick-edit/QuickEditSheetShell.tsx"
+        },
+        {
+            "file": "app/components/records/deals/EditDealSheet.tsx",
+            "surface": "Deal edit drawer",
+            "guard": "app/components/records/deals/QuickEditDealSheet.tsx"
+        },
+        {
+            "file": "app/components/records/deals/NewDealDialog.tsx",
+            "surface": "Deal composer",
+            "guard": "own"
+        },
+        {
+            "file": "app/components/records/deals/QuickEditDealSheet.tsx",
+            "surface": "Deal quick-edit drawer",
+            "guard": "app/components/records/quick-edit/QuickEditSheetShell.tsx"
+        },
+        {
+            "file": "app/components/records/pipelines/EditPipelineSheet.tsx",
+            "surface": "Pipeline edit drawer",
+            "guard": "app/components/records/pipelines/QuickEditPipelineSheet.tsx"
+        },
+        {
+            "file": "app/components/records/pipelines/QuickEditPipelineSheet.tsx",
+            "surface": "Pipeline quick-edit drawer",
+            "guard": "app/components/records/quick-edit/QuickEditSheetShell.tsx"
+        },
+        {
+            "file": "app/components/records/quick-edit/QuickEditSheetShell.tsx",
+            "surface": "Shared quick-edit drawer chrome",
+            "guard": "own"
+        },
+        {
+            "file": "app/components/reports/GoalDialog.tsx",
+            "surface": "Revenue goal dialog",
+            "guard": "own"
+        },
+        {
+            "file": "app/components/reports/ScheduleDialog.tsx",
+            "surface": "Report delivery schedule dialog",
+            "guard": "own"
+        }
+    ]
+}

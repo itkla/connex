@@ -107,6 +107,7 @@ export default function QuickEditDealSheet({
             onSave={saveEdits}
             saveLabel={t('save')}
             cancelLabel={t('cancel')}
+            dirtySnapshot={drafts}
         >
             {selectedDeals.map((d, idx) => {
                 const draft = drafts[d.id];

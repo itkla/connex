@@ -69,11 +69,11 @@ export default function EditDealSheet({
     const cfRef = useRef<CustomFieldsEditHandle>(null);
     const pipelinesLoaded = useRef(false);
 
-    const wasOpen = useRef(open);
-    useEffect(() => {
-        if (open && !wasOpen.current) setDraft(toDraft(deal));
-        wasOpen.current = open;
-    }, [open, deal]);
+    const [wasOpen, setWasOpen] = useState(open);
+    if (open !== wasOpen) {
+        setWasOpen(open);
+        if (open) setDraft(toDraft(deal));
+    }
 
     useEffect(() => {
         if (!open || pipelinesLoaded.current) return;

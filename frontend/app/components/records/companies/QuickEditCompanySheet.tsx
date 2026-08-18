@@ -82,6 +82,7 @@ export default function QuickEditCompanySheet({
             }}
             saveLabel={t('save')}
             cancelLabel={t('cancel')}
+            dirtySnapshot={drafts}
         >
             {selectedCompanies.map((c, idx) => {
                 const draft = drafts[c.id];

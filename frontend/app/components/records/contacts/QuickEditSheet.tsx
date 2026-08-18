@@ -81,6 +81,7 @@ export default function QuickEditSheet({
             }}
             saveLabel={t('save')}
             cancelLabel={t('cancel')}
+            dirtySnapshot={drafts}
         >
             {selectedContacts.map((c, idx) => {
                 const draft = drafts[c.id];

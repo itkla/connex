@@ -24,7 +24,9 @@ import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import { ENTITY_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
 import RecordSelect from '@/app/components/records/RecordSelect';
 import { Checkbox } from '@/components/ui/checkbox';
+import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
 import { useDealTargetSearch } from '@/app/hooks/useRecordTargetSearch';
+import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { getCompanyPeople, getUsers, updateTask } from '@/app/lib/api';
@@ -80,6 +82,12 @@ export default function EditTaskSheet({
         if (!next) setDraft(toDraft(task));
     };
 
+    const dirty = JSON.stringify(draft) !== JSON.stringify(toDraft(task));
+    const guard = useUnsavedChangesGuard({
+        isDirty: dirty && !isSaving,
+        onClose: () => handleOpenChange(false),
+    });
+
     useEffect(() => {
         if (!open) return;
         Promise.all([
@@ -120,7 +128,8 @@ export default function EditTaskSheet({
     };
 
     return (
-        <Drawer open={open} onOpenChange={handleOpenChange} swipeDirection="right">
+        <>
+        <Drawer open={open} onOpenChange={guard.onOpenChange} swipeDirection="right">
             <DrawerContent className="flex w-full flex-col sm:max-w-lg">
                 <DrawerHeader className="border-b pr-12">
                     <div className="flex items-start gap-3">
@@ -251,5 +260,11 @@ export default function EditTaskSheet({
                 </DrawerFooter>
             </DrawerContent>
         </Drawer>
+        <ConfirmDiscardDialog
+            open={guard.confirm.open}
+            onKeepEditing={guard.confirm.onKeepEditing}
+            onDiscard={guard.confirm.onDiscard}
+        />
+        </>
     );
 }

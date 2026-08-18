@@ -81,6 +81,7 @@ export default function QuickEditPipelineSheet({
             onSave={saveEdits}
             saveLabel={t('save')}
             cancelLabel={t('cancel')}
+            dirtySnapshot={drafts}
         >
             {selectedPipelines.map((p, idx) => {
                 const draft = drafts[p.id];
