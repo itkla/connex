@@ -66,10 +66,11 @@ import {
     FilterBar,
     MultiSelectFilter,
     RadioFilter,
-    SegmentedToggle,
     pillClass,
     type FilterChipData,
 } from '@/app/components/filters';
+import { SegmentedControl } from '@/components/ui/segmented-control';
+import { IconButton } from '@/components/ui/icon-button';
 import FileActionsMenu from '@/app/components/library/files/FileActionsMenu';
 import FileGlyph from '@/app/components/library/files/FileGlyph';
 import OwnerChip from '@/app/components/library/files/OwnerChip';
@@ -375,15 +376,15 @@ export default function FilesBrowser() {
                     >
                         <IconLink href={a.url} label={t('open')} Icon={ArrowTopRightOnSquareIcon} openInNewTab />
                         <IconLink href={a.url} label={t('download')} Icon={ArrowDownTrayIcon} download={a.fileName} />
-                        <button
-                            type="button"
+                        <IconButton
+                            variant="ghost"
+                            size="icon-toolbar"
+                            label={t('delete')}
                             onClick={() => setDeleting(a)}
-                            title={t('delete')}
-                            aria-label={t('delete')}
-                            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                            className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                         >
                             <TrashIcon className="size-4" />
-                        </button>
+                        </IconButton>
                     </span>
                 ),
                 widthClass: 'w-28',
@@ -397,7 +398,7 @@ export default function FilesBrowser() {
             {allTags.length > 0 && (
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="sm" disabled={bulkBusy}>
+                        <Button variant="outline" size="toolbar" menu disabled={bulkBusy}>
                             <TagIcon className="size-4" />
                             {t('tagAction')}
                         </Button>
@@ -419,18 +420,18 @@ export default function FilesBrowser() {
             )}
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                    <Button
+                    <IconButton
                         variant="outline"
-                        size="sm"
+                        size="icon-toolbar"
                         disabled={bulkBusy}
-                        aria-label={t('actionsAria', { name: t('selectedCount', { count: selectedIds.size }) })}
+                        label={t('actionsAria', { name: t('selectedCount', { count: selectedIds.size }) })}
                     >
                         {bulkBusy ? (
                             <Loader2Icon className="size-4 animate-spin" />
                         ) : (
                             <EllipsisVerticalIcon className="size-4" />
                         )}
-                    </Button>
+                    </IconButton>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent side="top" align="end">
                     <DropdownMenuItem
@@ -504,7 +505,7 @@ export default function FilesBrowser() {
                                     onValueChange={(v) => setSort(v as SortKey)}
                                     options={SORT_KEYS.map((key) => ({ value: key, label: t(SORT_LABEL_KEY[key]) }))}
                                 />
-                                <SegmentedToggle
+                                <SegmentedControl
                                     ariaLabel={t('viewGrid')}
                                     value={view}
                                     onChange={setView}

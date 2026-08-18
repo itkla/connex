@@ -18,6 +18,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
+import { IconButton } from '@/components/ui/icon-button';
 import { ButtonGroup } from '@/components/ui/button-group';
 
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
@@ -126,13 +127,13 @@ export default function ContactActionsMenu({
         <>
             <div className="flex flex-row gap-2">
                 <ButtonGroup orientation="horizontal">
-                    <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
+                    <Button variant="outline" size="toolbar" onClick={() => setEditOpen(true)}>
                         <PencilSquareIcon className="size-4" />
                         {t('edit')}
                     </Button>
                     <Button
                         variant="outline"
-                        size="sm"
+                        size="toolbar"
                         onClick={() => router.push(`/overview/map?contactId=${contact.id}`)}
                     >
                         <EyeIcon className="size-4" />
@@ -143,7 +144,7 @@ export default function ContactActionsMenu({
                     {/* // add attachments, files, pictures, business cards etc */}
                     <Button
                         variant="outline"
-                        size="sm"
+                        size="toolbar"
                         onClick={openAttachmentPicker}
                         disabled={attachmentsUploading}
                     >
@@ -156,7 +157,7 @@ export default function ContactActionsMenu({
                     </Button>
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                            <Button variant="outline" size="sm">
+                            <Button variant="outline" size="toolbar" menu>
                                 <PlusIcon className="size-4" />
                                 {t('new')}
                             </Button>
@@ -194,9 +195,9 @@ export default function ContactActionsMenu({
 
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                            <Button variant="outline" size="sm">
+                            <IconButton variant="outline" size="icon-toolbar" label={t('moreActions')}>
                                 <EllipsisVerticalIcon className="size-4" />
-                            </Button>
+                            </IconButton>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48">
                             <DropdownMenuItem

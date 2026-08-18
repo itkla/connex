@@ -28,7 +28,7 @@ import {
 } from '@/components/ui/combobox';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { SegmentedToggle } from '@/app/components/filters';
+import { SegmentedControl } from '@/components/ui/segmented-control';
 import RichNoteEditor from './RichNoteEditor';
 import { InputGroupAddon } from '@/components/ui/input-group';
 import { DialogStatusCover, resolveDialogStatus } from '@/components/ui/dialog-status-cover';
@@ -734,7 +734,7 @@ export function NoteDialogForm({
                                 dealOptionsLoading={dealOptionsLoading}
                                 documentStyle
                             />
-                            <SegmentedToggle<NoteVisibility>
+                            <SegmentedControl<NoteVisibility>
                                 value={visibility}
                                 onChange={setVisibility}
                                 ariaLabel={t('visibilityAria')}

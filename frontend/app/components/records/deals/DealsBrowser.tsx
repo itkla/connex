@@ -7,6 +7,8 @@ import { useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import RecordsActions from '@/app/components/import/RecordsActions';
 import { ButtonGroup } from '@/components/ui/button-group';
+import { SegmentedControl } from '@/components/ui/segmented-control';
+import { IconButton } from '@/components/ui/icon-button';
 import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
@@ -1309,11 +1311,11 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         <ButtonGroup className="rounded-full bg-muted">
             {allSelectedDealsLoaded && (
                 <>
-                    <Button variant="outline" size="sm" onClick={viewSelected}>
+                    <Button variant="outline" size="toolbar" onClick={viewSelected}>
                         <EyeIcon className="size-4" />
                         {t('view')}
                     </Button>
-                    <Button variant="outline" size="sm" onClick={openEditSheet}>
+                    <Button variant="outline" size="toolbar" onClick={openEditSheet}>
                         <PencilIcon className="size-4" />
                         {t('quickEdit')}
                     </Button>
@@ -1321,9 +1323,9 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             )}
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm">
+                    <IconButton variant="outline" size="icon-toolbar" label={t('moreActions')}>
                         <EllipsisVerticalIcon className="size-4" />
-                    </Button>
+                    </IconButton>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
                     {allSelectedDealsLoaded && (
@@ -1583,39 +1585,18 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                         onSortChange={handleSortChange}
                                     />
                                 )}
-                                <div
-                                    role="group"
-                                    aria-label={t('displayMode')}
-                                    className="hidden rounded-full bg-muted p-0.5 ring-1 ring-border md:inline-flex"
-                                >
-                                    <button
-                                        type="button"
-                                        onClick={() => setDisplayMode('grid')}
-                                        aria-label={t('gridView')}
-                                        aria-pressed={displayMode === 'grid'}
-                                        className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'grid' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
-                                    >
-                                        <Squares2X2Icon className="size-4" />
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setDisplayMode('table')}
-                                        aria-label={t('tableView')}
-                                        aria-pressed={displayMode === 'table'}
-                                        className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'table' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
-                                    >
-                                        <TableCellsIcon className="size-4" />
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setDisplayMode('kanban')}
-                                        aria-label={t('kanbanView')}
-                                        aria-pressed={displayMode === 'kanban'}
-                                        className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'kanban' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
-                                    >
-                                        <ViewColumnsIcon className="size-4" />
-                                    </button>
-                                </div>
+                                <SegmentedControl
+                                    ariaLabel={t('displayMode')}
+                                    className="hidden md:inline-flex"
+                                    value={displayMode}
+                                    onChange={setDisplayMode}
+                                    options={[
+                                        { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridView') },
+                                        { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableView') },
+                                        { value: 'kanban', icon: <ViewColumnsIcon className="size-4" />, ariaLabel: t('kanbanView') },
+                                    ]}
+                                />
+
                                 {effectiveDisplayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
                                 {effectiveDisplayMode === 'table' && (
                                     <ColumnVisibilityMenu

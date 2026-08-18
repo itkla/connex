@@ -6,6 +6,7 @@ import { PlusIcon } from '@heroicons/react/16/solid';
 import { CheckCircleIcon, DocumentTextIcon } from '@heroicons/react/24/outline';
 import { Loader2Icon } from 'lucide-react';
 
+import { Button } from '@/components/ui/button';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -34,13 +35,10 @@ export default function QuickCreate() {
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <button
-                    type="button"
-                    className="inline-flex items-center gap-1.5 rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.97] motion-reduce:transition-none motion-reduce:active:scale-100"
-                >
+                <Button type="button" variant="brand" size="page" menu>
                     <PlusIcon className="size-4" />
                     {t('new')}
-                </button>
+                </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-44">
                 {items.map(({ id, label, Icon }) => {

@@ -9,7 +9,6 @@ import {
     ArchiveBoxXMarkIcon,
     TrashIcon,
     EllipsisHorizontalIcon,
-    ChevronDownIcon,
     PlusIcon,
     DocumentTextIcon,
     ShieldCheckIcon,
@@ -298,10 +297,9 @@ export default function DealDocuments({
     const generateMenu = (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <Button variant="brand" size="sm" disabled={busy}>
+                <Button variant="brand" size="toolbar" menu disabled={busy}>
                     <PlusIcon className="size-4" />
                     {t('generate')}
-                    <ChevronDownIcon className="size-3.5 opacity-70 transition-transform duration-150 group-data-[state=open]/button:rotate-180" />
                 </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-56">
@@ -398,13 +396,13 @@ export default function DealDocuments({
                                     </td>
                                     <td className="px-2 py-3">
                                         <div className="flex items-center justify-end gap-1">
-                                            <Button variant="outline" size="sm" onClick={() => openPdf(doc)} disabled={busy}>
+                                            <Button variant="outline" size="toolbar" onClick={() => openPdf(doc)} disabled={busy}>
                                                 <ArrowDownTrayIcon className="size-4" />
                                                 <span className="hidden sm:inline">{t('pdf')}</span>
                                             </Button>
                                             <DropdownMenu>
                                                 <DropdownMenuTrigger asChild>
-                                                    <Button variant="ghost" size="icon-xs" aria-label={t('actions')} disabled={busy}>
+                                                    <Button variant="ghost" size="icon-inline" aria-label={t('actions')} disabled={busy}>
                                                         <EllipsisHorizontalIcon className="size-4" />
                                                     </Button>
                                                 </DropdownMenuTrigger>

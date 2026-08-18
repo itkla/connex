@@ -14,7 +14,7 @@ import {
     UsersIcon,
 } from "@heroicons/react/24/outline";
 import type { Contact, Deal, Note, NoteVisibility, User } from "@/app/lib/types";
-import { SegmentedToggle } from "@/app/components/filters";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { createNote, updateNote } from "@/app/lib/api";
 import { toastError } from "@/app/lib/toast";
 import { deriveNoteTitle } from "@/app/lib/noteText";
@@ -252,7 +252,7 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
                                 </Link>
                             </>
                         ) : null}
-                        <SegmentedToggle<NoteVisibility>
+                        <SegmentedControl<NoteVisibility>
                             ariaLabel={t("visibilityAria")}
                             className="ml-auto"
                             value={visibility}

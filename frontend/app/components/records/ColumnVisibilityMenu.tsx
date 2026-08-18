@@ -2,6 +2,7 @@
 
 import { useTranslations } from 'next-intl';
 import { ViewColumnsIcon } from '@heroicons/react/24/outline';
+import { ChevronDownIcon } from '@heroicons/react/24/solid';
 
 import {
     DropdownMenu,
@@ -39,7 +40,7 @@ export default function ColumnVisibilityMenu({
                 <button
                     type="button"
                     aria-label={t('ariaLabel')}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-full bg-muted px-3 text-xs font-medium text-muted-foreground ring-1 ring-border transition hover:text-foreground aria-expanded:text-foreground"
+                    className="group/columns inline-flex h-9 items-center gap-1.5 rounded-full bg-muted px-3 text-xs font-medium text-muted-foreground ring-1 ring-border transition hover:text-foreground aria-expanded:text-foreground"
                 >
                     <ViewColumnsIcon className="size-3.5" />
                     <span>{t('label')}</span>
@@ -48,6 +49,10 @@ export default function ColumnVisibilityMenu({
                             {hiddenCount}
                         </span>
                     )}
+                    <ChevronDownIcon
+                        aria-hidden="true"
+                        className="size-3.5 opacity-70 transition-transform duration-(--motion-micro) group-aria-expanded/columns:rotate-180 motion-reduce:transition-none"
+                    />
                 </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-52">

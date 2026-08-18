@@ -407,7 +407,7 @@ export default function SavedViewsBar({
             {explicitView && modified ? (
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button size="xs" variant="ghost" className="ml-1 text-brand hover:text-brand-hover">
+                        <Button size="inline" variant="ghost" menu className="ml-1 text-brand hover:text-brand-hover">
                             {t("save")}
                         </Button>
                     </DropdownMenuTrigger>
@@ -421,7 +421,7 @@ export default function SavedViewsBar({
             ) : (
                 canSaveNew && (
                     <Button
-                        size="xs"
+                        size="inline"
                         variant="ghost"
                         className="ml-1 gap-1 text-brand hover:text-brand-hover"
                         onClick={() => setDialog({ mode: "create" })}
@@ -435,7 +435,7 @@ export default function SavedViewsBar({
             {activeView && (
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button size="icon-xs" variant="ghost" aria-label={t("viewActions")}>
+                        <Button size="icon-inline" variant="ghost" aria-label={t("viewActions")}>
                             <EllipsisHorizontalIcon className="size-4" />
                         </Button>
                     </DropdownMenuTrigger>

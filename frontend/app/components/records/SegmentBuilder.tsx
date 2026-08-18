@@ -330,7 +330,7 @@ export default function SegmentBuilder({
     return (
         <ResponsiveDialog open={open} onOpenChange={setOpen}>
             <ResponsiveDialogTrigger asChild>
-                <Button variant="outline" size="sm" className="h-9 gap-1.5" {...triggerProps}>
+                <Button variant="outline" size="toolbar" className="h-9 gap-1.5" {...triggerProps}>
                     <SparklesIcon className="size-4" />
                     {t("title")}
                     {total > 0 && (
@@ -480,7 +480,7 @@ function GroupEditor({
                 {onRemove && (
                     <Button
                         variant="ghost"
-                        size="icon-sm"
+                        size="icon-toolbar"
                         aria-label={t("removeGroup")}
                         onClick={onRemove}
                         className="ml-auto shrink-0 text-muted-foreground"
@@ -558,7 +558,7 @@ function GroupEditor({
                     <Button
                         ref={addGroupButtonRef}
                         variant="ghost"
-                        size="sm"
+                        size="toolbar"
                         className="gap-1.5 text-muted-foreground hover:text-foreground"
                         onClick={() => {
                             setPendingFocusGroup(groups.length);
@@ -593,7 +593,7 @@ function AddConditionMenu({
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-1.5">
+                <Button variant="outline" size="toolbar" menu className="gap-1.5">
                     <PlusIcon className="size-4" />
                     {t("addCondition")}
                 </Button>
@@ -737,7 +737,7 @@ function ConditionCard({
 
                 <Button
                     variant="ghost"
-                    size="icon-sm"
+                    size="icon-toolbar"
                     aria-label={t("removeCondition")}
                     onClick={onRemove}
                     className="shrink-0 text-muted-foreground"
