@@ -40,7 +40,7 @@ function sidebarSectionsSource(): string {
 }
 
 function sidebarSectionLabelKeys(): string[] {
-    const keys = [...sidebarSectionsSource().matchAll(/label:\s*t\("(section[A-Za-z]+)"\)/g)]
+    const keys = [...sidebarSectionsSource().matchAll(/label:\s*t\(["'](section[A-Za-z]+)["']\)/g)]
         .map((match) => match[1]);
     if (keys.length === 0) throw new Error("Sidebar.tsx declares no sidebar section labels");
     return keys;
@@ -80,9 +80,11 @@ function articleProseTexts(locale: Locale): string[] {
 /**
  * Parses the navigation areas a docs sentence enumerates.
  *
- * The contract both locales follow is one clause: a colon, the comma-separated area names, then the
- * sentence's terminator. Only that clause is read, so prose edits elsewhere in the article — or in
- * the rest of the same sentence — cannot move this assertion.
+ * The contract both locales follow is one clause: a colon, the separated area names (comma, 読点, or
+ * nakaguro), then the sentence's terminator. A trailing parenthetical qualifier on an area — like
+ * "(when campaigns are enabled)" on the capability-gated Marketing section — is stripped, so the docs
+ * may hedge conditional sections while the comparison still lands on the section label itself. Only
+ * that clause is read, so prose edits elsewhere in the article cannot move this assertion.
  */
 function enumeratedAreas(text: string): string[] {
     const separator = text.search(/[:：]/);
@@ -91,8 +93,8 @@ function enumeratedAreas(text: string): string[] {
     const terminator = rest.search(/[.。]/);
     const clause = terminator < 0 ? rest : rest.slice(0, terminator);
     return clause
-        .split(/[,、]/)
-        .map((part) => part.trim().replace(/^and\s+/i, "").trim())
+        .split(/[,、・]/)
+        .map((part) => part.trim().replace(/^and\s+/i, "").replace(/\s*[（(][^（）()]*[）)]$/u, "").trim())
         .filter((part) => part.length > 0);
 }
 
