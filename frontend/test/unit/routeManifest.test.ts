@@ -178,15 +178,15 @@ describe("deep-link producers emit the consumers' canonical params", () => {
     });
 
     it("links a Deals stat tile to the deals browser filtered by company", () => {
-        const href = companyDealsHref(7);
+        const href = companyDealsHref(7) ?? "";
 
         expect(resolveShippedRoute(href)).toBe("/records/deals");
         expect(queryOf(href).get(DEAL_COMPANY_FILTER_KEY)).toBe("7");
     });
 
-    it("drops the company filter for a contact with no company rather than filtering on nothing", () => {
-        expect(companyDealsHref(null)).toBe("/records/deals");
-        expect(companyDealsHref(undefined)).toBe("/records/deals");
+    it("renders no deals link for a contact with no company rather than linking the whole browser", () => {
+        expect(companyDealsHref(null)).toBeUndefined();
+        expect(companyDealsHref(undefined)).toBeUndefined();
     });
 
     it("links a pipeline's deal count to the deals browser filtered by pipeline", () => {
@@ -243,5 +243,87 @@ describe("deep-link producers emit the consumers' canonical params", () => {
                 expect(Object.values(DEEP_LINK_URL_KEYS)).toContain(key);
             }
         }
+    });
+});
+
+const DYNAMIC_SEGMENT = "__dynamic__";
+
+const APP_SHELL_TOP_SEGMENTS = new Set(
+    shippedRoutes.map((route) => route.split("/").filter(Boolean)[0]).filter(Boolean),
+);
+
+/** Recursively lists every TypeScript source file under a directory. */
+function sourceFiles(directory: string): string[] {
+    const files: string[] = [];
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        const full = path.join(directory, entry.name);
+        if (entry.isDirectory()) {
+            files.push(...sourceFiles(full));
+        } else if (/\.tsx?$/.test(entry.name)) {
+            files.push(full);
+        }
+    }
+    return files;
+}
+
+const HREF_PATTERNS = [
+    /href=\{?["'`](\/[^"'`\s]*)/g,
+    /router\.(?:push|replace|prefetch)\(\s*["'`](\/[^"'`\s]*)/g,
+];
+
+/**
+ * Every literal or template-literal href target found in the app's source, with `${…}` holes
+ * normalized to a wildcard segment marker. Multi-segment holes and non-app-shell paths are filtered
+ * by the assertion, not here.
+ */
+function literalAppHrefs(): Array<{ file: string; href: string }> {
+    const hits: Array<{ file: string; href: string }> = [];
+    for (const file of sourceFiles(path.join(process.cwd(), "app"))) {
+        const source = readFileSync(file, "utf8");
+        for (const pattern of HREF_PATTERNS) {
+            for (const match of source.matchAll(pattern)) {
+                hits.push({
+                    file: path.relative(process.cwd(), file),
+                    href: match[1].replace(/\$\{[^}]*\}/g, DYNAMIC_SEGMENT),
+                });
+            }
+        }
+    }
+    return hits;
+}
+
+/**
+ * Whether a scanned href can be served by some shipped route. A wildcard segment (a `${…}` hole in
+ * the source) matches any pattern segment, so dynamic route parts never false-fail; every literal
+ * segment must match exactly, so a hard-coded unshipped path always fails.
+ */
+function scannedHrefIsShipped(href: string): boolean {
+    const segments = href.split("#")[0].split("?")[0].split("/").filter(Boolean);
+    return shippedRoutes.some((route) => {
+        const pattern = route.split("/").filter(Boolean);
+        if (pattern.length !== segments.length) return false;
+        return pattern.every((patternSegment, index) => {
+            const segment = segments[index];
+            if (segment.includes(DYNAMIC_SEGMENT)) return true;
+            if (patternSegment.startsWith("[")) return segment.length > 0;
+            return patternSegment === segment;
+        });
+    });
+}
+
+describe("every literal in-app href targets a shipped route", () => {
+    it("finds no app-shell href pointing at an unshipped route", () => {
+        const violations = literalAppHrefs().filter(({ href }) => {
+            const [first] = href.split("#")[0].split("?")[0].split("/").filter(Boolean);
+            if (!first || first.includes(DYNAMIC_SEGMENT)) return false;
+            if (!APP_SHELL_TOP_SEGMENTS.has(first)) return false;
+            return !scannedHrefIsShipped(href);
+        });
+
+        expect(violations).toEqual([]);
+    });
+
+    it("scans a corpus large enough to be meaningful", () => {
+        expect(literalAppHrefs().length).toBeGreaterThan(50);
     });
 });
