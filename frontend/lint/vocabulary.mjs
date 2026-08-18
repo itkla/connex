@@ -90,7 +90,7 @@ const RADAR_LABEL_SURFACES = ["actions.json", "radar.json"];
 
 /**
  * A message surface: a namespace file (`"contacts.json"`) or one next-intl namespace
- * inside a file (`"workspace.json#WorkspaceRules"`).
+ * inside a file (`"workspace.json#WorkspaceWorkflows"`).
  * @typedef {string} Surface
  */
 
@@ -876,7 +876,6 @@ export const AT_A_GLANCE_SURFACES = [
     "en/docs.json:DocsRecords.articles.table-and-grid.blocks[2].items[2].description",
     "en/docs.json:DocsRelationshipIntelligence.articles.warmth-and-temperature.blocks[0].text",
     "en/docs.json:DocsSettings.articles.audit-logs.blocks[5].title",
-    "en/docs.json:DocsSettings.articles.rules-and-automation.blocks[5].items[2].question",
     "en/docs.json:DocsTutorials.articles.add-your-first-company.blocks[1].caption",
     "en/docs.json:DocsTutorials.articles.build-your-pipeline.blocks[3].items[0].description",
     "en/docs.json:DocsTutorials.articles.request-a-warm-intro.blocks[2].text",

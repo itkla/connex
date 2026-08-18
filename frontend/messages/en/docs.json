@@ -3562,61 +3562,81 @@
                     }
                 ]
             },
-            "rules-and-automation": {
-                "title": "Rules & automation",
-                "description": "Automate routine changes with workspace rules.",
+            "workflows-and-automation": {
+                "title": "Workflows & automation",
+                "description": "Automate the routine with workflows.",
                 "blocks": [
                     {
                         "type": "prose",
                         "text": [
-                            "Rules take care of the repetitive stuff for you. Set one up once, and whenever something happens, like a deal is won or a company goes quiet, Connex runs the steps you chose automatically. No reminders to yourself, no manual busywork.",
-                            "Anyone with permission to manage rules can create them, and you can switch any rule on or off whenever you like."
+                            "A workflow takes care of the repetitive work for you. Build one once, and whenever something happens — a deal is won, a contact changes jobs, a company goes quiet — Connex runs the steps you laid out. No reminders to yourself, no manual busywork.",
+                            "Workflows live under Workflows in the sidebar. Anyone with permission to manage them can build one, and you can switch any workflow on or off whenever you like."
                         ]
                     },
                     {
                         "type": "featureList",
-                        "title": "How a rule works",
+                        "title": "What a workflow is made of",
                         "columns": 2,
                         "items": [
                             {
-                                "title": "The trigger",
-                                "description": "What sets the rule off. Usually a change to a record, like a deal moving to a new stage. It can also run on a schedule."
+                                "title": "A trigger",
+                                "description": "What starts it. Usually a change to a record, like a deal moving to a new stage. Deals, companies, and contacts can also start on a schedule — hourly, daily, or weekly."
                             },
                             {
-                                "title": "A condition (optional)",
-                                "description": "A way to narrow things down so the rule only runs for the records you care about. Available for company rules."
+                                "title": "Conditions",
+                                "description": "Branching questions. Each condition sends the workflow down its Yes branch or its No branch, so one workflow can handle several cases."
                             },
                             {
-                                "title": "The actions",
-                                "description": "What Connex does when the rule runs. You can line up several steps."
+                                "title": "Actions",
+                                "description": "What Connex does — create a task, log an activity, add or remove a tag, add a note, assign an owner, move a deal to a stage, or send a notification."
+                            },
+                            {
+                                "title": "Waits",
+                                "description": "A pause before the next step. A single wait can be anything from a minute to 30 days, and one path can wait 90 days in total."
                             },
                             {
                                 "title": "Who it runs as",
-                                "description": "A rule can act as you, using your permissions, or as the workspace itself for team-wide automation."
+                                "description": "A workflow can act as you, using your permissions, or as the workspace itself for team-wide automation. Running as the workspace is limited to owners and admins."
+                            },
+                            {
+                                "title": "Versions",
+                                "description": "You edit a draft and publish it when it's ready. Each published version is kept as it was, and runs already going finish on the version they started with."
                             }
                         ]
                     },
                     {
                         "type": "table",
-                        "title": "What can set off a rule",
+                        "title": "What can start a workflow",
                         "columns": [
                             "Record",
-                            "What can trigger it"
+                            "What can start it"
                         ],
                         "rows": [
                             [
                                 "Deals",
-                                "Created, moved to a new stage, won, lost, or updated."
+                                "Created, moved to a new stage, won, lost, updated, reassigned, or the amount changed. Deals can also start on a schedule."
                             ],
                             [
                                 "Companies",
-                                "Created or updated. Companies can also run on a schedule."
+                                "Created, updated, or reassigned. Companies can also start on a schedule."
+                            ],
+                            [
+                                "Contacts",
+                                "Created, updated, changed jobs, reassigned, lifecycle changed, or a first response went overdue. Contacts can also start on a schedule."
+                            ],
+                            [
+                                "Tasks",
+                                "Created or completed."
+                            ],
+                            [
+                                "Documents",
+                                "Approval requested, approved, rejected, finalized, or superseded."
                             ]
                         ]
                     },
                     {
                         "type": "table",
-                        "title": "What a rule can do",
+                        "title": "What a workflow can do",
                         "columns": [
                             "Action",
                             "What it does",
@@ -3626,46 +3646,76 @@
                             [
                                 "Send a notification",
                                 "Sends someone an in-app notification with your message.",
-                                "All records"
+                                "Every record"
                             ],
                             [
                                 "Create a task",
                                 "Adds a task with a title and a due date, three days out by default.",
-                                "Deals"
+                                "Deals, contacts, documents"
                             ],
                             [
                                 "Log an activity",
-                                "Records an activity, like a note or a call.",
+                                "Records an activity, such as a call.",
+                                "Deals, contacts, documents"
+                            ],
+                            [
+                                "Add a note",
+                                "Writes a note onto the record.",
+                                "Deals, contacts, documents"
+                            ],
+                            [
+                                "Add or remove a tag",
+                                "Applies or clears a tag you've already set up.",
+                                "Deals, companies, contacts"
+                            ],
+                            [
+                                "Assign an owner",
+                                "Hands the record to the member you choose.",
+                                "Deals, contacts"
+                            ],
+                            [
+                                "Move to a stage",
+                                "Moves the deal to another stage in its pipeline.",
                                 "Deals"
                             ],
                             [
-                                "Add a tag",
-                                "Applies a tag you've already set up.",
-                                "All records"
+                                "Set a first-response deadline",
+                                "Starts the clock on replying to a contact.",
+                                "Contacts"
                             ]
                         ]
                     },
                     {
                         "type": "callout",
                         "variant": "tip",
-                        "title": "Schedules keep an eye on your companies",
-                        "body": "Besides reacting to changes, a rule can run on a repeating schedule, hourly, daily, or weekly, for your companies. Pair it with a condition (say, companies that have gone quiet or have an open deal) and Connex checks in for you on its own. It won't run twice for the same window, so you won't get duplicates."
+                        "title": "Start from a recipe",
+                        "body": "Recipes are ready-made workflows — follow up after a job change, hand off a won deal, check in on a company whose warmth is cooling. Each one shows exactly who it runs as, what it reads, and what it changes before you create it, and Connex creates it turned off so you can review it first."
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "note",
+                        "title": "See what happened, and step in when it matters",
+                        "body": "Operations shows every workflow's health, what's queued or waiting, and the runs that need a person. Open a run to see each step it took, retry a step that failed, cancel one that's still going, or start a fresh run over the records you pick."
                     },
                     {
                         "type": "faq",
                         "title": "Good to know",
                         "items": [
                             {
-                                "question": "Can I turn a rule off without deleting it?",
-                                "answer": "Yes. Each rule has a switch. A paused rule keeps all its settings but won't run until you turn it back on."
+                                "question": "Can I turn a workflow off without deleting it?",
+                                "answer": "Yes, and there are two ways. Turning it off stops new runs while runs already going finish. Pausing stops new records from being picked up but keeps everything waiting where it is, so nothing is lost when you resume."
                             },
                             {
-                                "question": "Can one rule react to more than one event?",
-                                "answer": "Yes. Pick any mix of events you like. Leave it blank and the rule reacts to every change."
+                                "question": "Can one workflow react to more than one event?",
+                                "answer": "Yes. Pick any mix of events you like. Leave it blank and the workflow reacts to every change."
                             },
                             {
-                                "question": "Can I tell what a rule does at a glance?",
-                                "answer": "Yes. Each rule shows a plain-language summary of its trigger and actions, with a badge when it's paused or set to run as the workspace."
+                                "question": "Can I try a workflow before publishing it?",
+                                "answer": "Yes. Preview runs your saved draft against a single record and shows the path it would take — nothing is created, changed, or sent."
+                            },
+                            {
+                                "question": "What happens to a workflow I archive?",
+                                "answer": "It stops running and moves to the Archived tab, keeping every version and its whole run history. You can restore it later; it comes back turned off."
                             }
                         ]
                     }

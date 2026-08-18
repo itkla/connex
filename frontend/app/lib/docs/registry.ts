@@ -210,7 +210,7 @@ export const docsCategories: DocCategory[] = [
         articles: [
             { slug: "members-and-roles", icon: UserGroupIcon },
             { slug: "sign-in-and-security", icon: FingerPrintIcon },
-            { slug: "rules-and-automation", icon: BoltIcon },
+            { slug: "workflows-and-automation", icon: BoltIcon },
             { slug: "notification-settings", icon: BellIcon },
             { slug: "connected-accounts", icon: LinkIcon },
             { slug: "connected-capture", icon: EnvelopeIcon },
