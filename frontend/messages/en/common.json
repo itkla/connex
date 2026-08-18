@@ -391,7 +391,7 @@
     "toolCards": {
       "outcome": "Outcome",
       "recordLink": "Open {target}",
-      "restrictedTarget": "Record you can't open",
+      "restrictedTarget": "a record you can't open",
       "states": {
         "pending": "Needs approval",
         "pendingDetail": "Nothing has happened yet. Review the exact action before approving.",

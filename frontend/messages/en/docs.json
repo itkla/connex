@@ -1370,7 +1370,7 @@
                             },
                             {
                                 "question": "Can I stop a particular contact being sent to an AI provider?",
-                                "answer": "Yes. Restricting processing for a contact excludes them from AI features and clears anything already generated that involved them."
+                                "answer": "Yes. Putting a contact on privacy hold excludes them from AI features and clears anything already generated about them."
                             },
                             {
                                 "question": "Does it write in Japanese?",
@@ -1389,7 +1389,7 @@
                             },
                             {
                                 "title": "Privacy and data requests",
-                                "description": "Restricting processing for a contact, and what that clears.",
+                                "description": "Putting a contact on privacy hold, and what that clears.",
                                 "href": "/docs/settings/privacy-and-data-requests"
                             }
                         ]
@@ -4160,7 +4160,7 @@
             },
             "privacy-and-data-requests": {
                 "title": "Privacy & data requests",
-                "description": "Handling a request from someone whose data you hold, and restricting processing for a contact.",
+                "description": "Handling a request from someone whose data you hold, and putting a contact on privacy hold.",
                 "blocks": [
                     {
                         "type": "prose",
@@ -4183,7 +4183,7 @@
                                 "description": "Connex assembles what it holds about a person into a single disclosure, so answering an access request is not a manual search across screens."
                             },
                             {
-                                "title": "Restrictions on a contact",
+                                "title": "Privacy hold on a contact",
                                 "description": "Putting a contact on privacy hold stops scoring, automation, suggestions, AI features and exports for them. Stopping sharing blocks new shares with other workspaces and keeps them out of AI entirely."
                             },
                             {
@@ -4195,7 +4195,7 @@
                     {
                         "type": "callout",
                         "variant": "note",
-                        "title": "Restricting a contact clears what AI already wrote",
+                        "title": "Putting a contact on privacy hold clears what AI already wrote",
                         "body": "When you put a contact on privacy hold or stop sharing them, anything AI generated about them earlier is deleted, and future AI features leave them out. It happens as part of applying the hold, not as a separate cleanup you have to remember."
                     },
                     {
@@ -4236,7 +4236,7 @@
                                 "answer": "Organisation administrators. Acting on one asks you to confirm with a passkey first, because the actions are not reversible."
                             },
                             {
-                                "question": "Does restricting a contact delete them?",
+                                "question": "Does a privacy hold delete the contact?",
                                 "answer": "No. They stay in your CRM, but Connex stops scoring, suggesting, automating and exporting them. Deletion is a separate decision."
                             },
                             {

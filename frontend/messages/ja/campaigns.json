@@ -88,7 +88,7 @@
     },
     "CampaignAudience": {
         "title": "対象者",
-        "subtitle": "対象者はスマートセグメントから自動的に決まります。配信の前に、配信停止（オプトアウト）の方、連絡不可の方、プライバシー保護のため利用停止中の方を自動的に除外します。",
+        "subtitle": "対象者はスマートセグメントから決まります。配信の前に、配信停止（オプトアウト）の方、連絡不可の方、プライバシー保護のため利用停止中の方を自動的に除外します。",
         "recordType": "対象の種類",
         "person": "連絡先",
         "company": "会社",
@@ -108,7 +108,7 @@
         "excluded": "除外",
         "excludedConsent": "オプトアウト",
         "excludedSuppressed": "連絡不可",
-        "excludedRestricted": "プライバシー保護",
+        "excludedRestricted": "利用停止中",
         "consentHint": "このチャネルでのマーケティング配信を明示的に拒否されています。",
         "suppressedHint": "配信停止・宛先エラー・迷惑メール報告などにより、連絡不可になっています。",
         "restrictedHint": "この方から、データの利用を制限してほしいというご要望があります。",
@@ -247,7 +247,7 @@
         "skipReasons": {
             "consent_revoked": "オプトアウト",
             "suppressed": "連絡不可",
-            "restricted": "プライバシー保護",
+            "restricted": "利用停止中",
             "frequency_capped": "頻度制限",
             "quiet_hours": "サイレント時間帯",
             "no_address": "アドレスなし",
