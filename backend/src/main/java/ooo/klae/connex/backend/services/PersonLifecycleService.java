@@ -216,23 +216,49 @@ public class PersonLifecycleService {
             PersonLifecycleStage from,
             PersonLifecycleStage to,
             LocalDateTime at) {
-        if (to == PersonLifecycleStage.NEW) {
+        if (endsLifecyclePass(to)) {
+            passMapper.syncFirstResponse(workspaceId, personId);
+            passMapper.closeOpenPass(workspaceId, personId, at);
+            return;
+        }
+        if (entersLifecycle(from)) {
             PersonLifecyclePass pass = new PersonLifecyclePass();
             pass.setWorkspaceId(workspaceId);
             pass.setPersonId(personId);
             pass.setEnteredAt(at);
             passMapper.insert(pass);
-            return;
         }
         if (to == PersonLifecycleStage.QUALIFIED
                 || to == PersonLifecycleStage.CONVERTED
                 || to == PersonLifecycleStage.DISQUALIFIED) {
-            passMapper.stampMilestone(workspaceId, personId, to.name(), at);
-            return;
+            requirePassWrite(
+                passMapper.stampMilestone(workspaceId, personId, to.name(), at), personId, to);
         }
-        if (endsLifecyclePass(to)) {
-            passMapper.syncFirstResponse(workspaceId, personId);
-            passMapper.closeOpenPass(workspaceId, personId, at);
+    }
+
+    /**
+     * Whether this transition is an entry into the lifecycle, which opens a pass.
+     *
+     * <p>Entry is defined by where the contact came <em>from</em>, not where it is going: a recycled
+     * contact may legally be worked straight to {@code WORKING}, {@code NURTURING}, {@code QUALIFIED}
+     * or {@code DISQUALIFIED} without passing through {@code NEW}, and treating only {@code NEW} as
+     * an entry left those passes unopened — their milestones then updated nothing at all.
+     */
+    private static boolean entersLifecycle(PersonLifecycleStage from) {
+        return from == null || from == PersonLifecycleStage.RECYCLED;
+    }
+
+    /**
+     * Fails the transition when a milestone found no open pass to record itself against.
+     *
+     * <p>The pass ledger is what reporting reads, so a silently skipped write is a figure that will
+     * be wrong forever with nothing to indicate it. Better to refuse the transition and surface the
+     * inconsistency than to accept it and publish an under-count.
+     */
+    private static void requirePassWrite(int rows, int personId, PersonLifecycleStage stage) {
+        if (rows == 0) {
+            throw new IllegalStateException(
+                "No open lifecycle pass to record " + stage + " for contact " + personId);
         }
     }
 

@@ -30,4 +30,5 @@ public class PersonLifecyclePass {
     private LocalDateTime firstRespondedAt;
     private LocalDateTime firstResponseDueAt;
     private LocalDateTime firstResponseBreachedAt;
+    private Integer ownerId;
 }

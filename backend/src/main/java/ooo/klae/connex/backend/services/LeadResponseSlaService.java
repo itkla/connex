@@ -39,6 +39,13 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
  *
  * <p>Like the rest of the lead lifecycle, the clock is strictly the owning workspace's own record
  * of how fast it answered. A contact that is merely shared in is not addressable here.
+ *
+ * <p>A clock may be started on a contact that is not in a lead lifecycle at all — a
+ * {@code set_response_due} rule on {@code person.created} does exactly that — so copying the
+ * outcome onto a lifecycle pass is allowed to match nothing. That is not a lost write: such a clock
+ * has no cohort to belong to and is simply absent from lead reporting, which is the truthful
+ * outcome. A stage milestone that finds no pass <em>is</em> a corrupt ledger and fails loudly in
+ * {@code PersonLifecycleService}; the asymmetry is deliberate.
  */
 @Service
 @RequiredArgsConstructor
@@ -69,7 +76,7 @@ public class LeadResponseSlaService {
     public boolean startFirstResponseClock(int personId, Integer dueInHours) {
         int hours = requireDueInHours(dueInHours);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Person person = requireOwnedPerson(workspaceId, personId);
+        Person person = requireAssessablePerson(workspaceId, personId);
         LocalDateTime startedAt = now();
         LocalDateTime dueAt = startedAt.plusHours(hours);
         if (personMapper.startFirstResponseClock(workspaceId, personId, startedAt, dueAt) == 0) {
@@ -168,6 +175,26 @@ public class LeadResponseSlaService {
                 "A first-response SLA must be between 1 and " + MAX_DUE_IN_HOURS + " hours");
         }
         return dueInHours;
+    }
+
+    /**
+     * The contact, locked for the write.
+     *
+     * <p>Taking the same row lock the lifecycle transition takes is what stops a clock being started
+     * against a pass that is closing: without it, a withdrawal committing between the read and the
+     * write leaves a live deadline attached to no pass, invisible to reporting and to the sweep's
+     * own accounting.
+     */
+    private Person requireAssessablePerson(int workspaceId, int personId) {
+        Person person = personMapper.getOwnedPersonByIdForUpdate(workspaceId, personId);
+        if (person == null
+                || person.getWorkspaceId() != workspaceId
+                || person.getArchivedAt() != null
+                || person.getSuspendedAt() != null
+                || person.getProvisionCeasedAt() != null) {
+            throw new ResourceNotFoundException("Person not found with id: " + personId);
+        }
+        return person;
     }
 
     private Person requireOwnedPerson(int workspaceId, int personId) {

@@ -226,6 +226,21 @@
     ORDER BY e.started_at DESC, e.created_at DESC, e.id DESC
   </select>
 
+  <select id="findLifecyclePasses"
+          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$LifecyclePassDto">
+    SELECT pass.id, pass.workspace_id, pass.person_id, pass.entered_at, pass.qualified_at,
+           pass.converted_at, pass.disqualified_at, pass.ended_at, pass.first_response_started_at,
+           pass.first_responded_at, pass.first_response_due_at, pass.first_response_breached_at,
+           pass.owner_id
+    FROM person p
+    JOIN person_lifecycle_pass pass ON pass.person_id = p.id AND pass.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
+    ORDER BY pass.entered_at DESC, pass.id DESC
+  </select>
+
   <!-- Answers are disclosed with the question they answered, including answers to criteria the
        workspace has since archived: the subject was assessed on them, so withholding them would
        make the disclosure incomplete. -->

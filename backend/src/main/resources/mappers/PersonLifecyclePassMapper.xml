@@ -16,6 +16,7 @@
     <result property="firstRespondedAt"        column="first_responded_at"/>
     <result property="firstResponseDueAt"      column="first_response_due_at"/>
     <result property="firstResponseBreachedAt" column="first_response_breached_at"/>
+    <result property="ownerId"                 column="owner_id"/>
   </resultMap>
 
   <select id="getOpenPass" resultMap="PersonLifecyclePassResult">
@@ -25,22 +26,33 @@
     LIMIT 1
   </select>
 
+  <!-- The accountable owner is snapshot from the contact as the pass opens, then re-snapshot once
+       when its first outcome is stamped, so credit stays with whoever did the work rather than
+       following a later reassignment. -->
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO person_lifecycle_pass (workspace_id, person_id, entered_at)
-    VALUES (#{workspaceId}, #{personId}, #{enteredAt})
+    INSERT INTO person_lifecycle_pass (workspace_id, person_id, entered_at, owner_id)
+    SELECT #{workspaceId}, #{personId}, #{enteredAt}, person.owner_id
+    FROM person
+    WHERE person.workspace_id = #{workspaceId} AND person.id = #{personId}
   </insert>
 
   <!-- COALESCE keeps the first occurrence: re-reaching a stage within one pass is the same cohort
        event, and overwriting would move the pass's latency to the last attempt. -->
   <update id="stampMilestone">
-    UPDATE person_lifecycle_pass
+    UPDATE person_lifecycle_pass pass
+    JOIN person ON person.workspace_id = pass.workspace_id AND person.id = pass.person_id
     SET
+      pass.owner_id = CASE
+        WHEN pass.qualified_at IS NULL AND pass.converted_at IS NULL AND pass.disqualified_at IS NULL
+        THEN person.owner_id ELSE pass.owner_id END,
       <choose>
-        <when test="stage == 'QUALIFIED'">qualified_at = COALESCE(qualified_at, #{at})</when>
-        <when test="stage == 'CONVERTED'">converted_at = COALESCE(converted_at, #{at})</when>
-        <otherwise>disqualified_at = COALESCE(disqualified_at, #{at})</otherwise>
+        <when test="stage == 'QUALIFIED'">pass.qualified_at = COALESCE(pass.qualified_at, #{at})</when>
+        <when test="stage == 'CONVERTED'">pass.converted_at = COALESCE(pass.converted_at, #{at})</when>
+        <otherwise>pass.disqualified_at = COALESCE(pass.disqualified_at, #{at})</otherwise>
       </choose>
-    WHERE workspace_id = #{workspaceId} AND person_id = #{personId} AND ended_at IS NULL
+    WHERE pass.workspace_id = #{workspaceId}
+      AND pass.person_id = #{personId}
+      AND pass.ended_at IS NULL
   </update>
 
   <update id="closeOpenPass">
