@@ -1,9 +1,8 @@
-// NOTE: again, not used anymore but keeping it just in case
-
 import { getLocale, getTranslations } from "next-intl/server";
+import { DocumentTextIcon } from "@heroicons/react/24/outline";
 
 import { type Note } from "@/app/lib/types";
-import EmptyState from "./EmptyState";
+import { EmptyState } from "@/app/components/EmptyState";
 import { timeOf, formatShortDate } from "@/app/lib/utils";
 
 export default async function NoteList({ notes }: { notes: Note[] }) {
@@ -11,7 +10,15 @@ export default async function NoteList({ notes }: { notes: Note[] }) {
     const locale = await getLocale();
 
     if (notes.length === 0) {
-        return <EmptyState message={t("empty")} />;
+        return (
+            <EmptyState
+                variant="inline"
+                tone="muted"
+                icon={DocumentTextIcon}
+                title={t("emptyTitle")}
+                body={t("empty")}
+            />
+        );
     }
 
     const sorted = [...notes].sort((a, b) => timeOf(b.createdAt) - timeOf(a.createdAt));

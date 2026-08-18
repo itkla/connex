@@ -10,10 +10,12 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 import { PlusIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, ShareIcon } from '@heroicons/react/24/solid';
 import {
     Squares2X2Icon,
+    ViewColumnsIcon,
 } from '@heroicons/react/24/outline';
 import { useReducedMotion } from 'motion/react';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import { EmptyState } from '@/app/components/EmptyState';
 import Rise from '@/app/components/motion/Rise';
 import { SearchField, FilterBar, type FilterChipData } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
@@ -594,6 +596,19 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                         gridClassName="grid grid-cols-1 gap-3"
                         entityLabel={t('entityLabel')}
                         selectionActions={selectionActions}
+                        emptyState={
+                            <EmptyState
+                                icon={ViewColumnsIcon}
+                                title={t('emptyTitle')}
+                                body={t('emptyBody')}
+                                action={
+                                    <Button variant="brand" onClick={() => setNewPipelineDialogOpen(true)}>
+                                        <PlusIcon strokeWidth={2.5} />
+                                        {t('emptyCta')}
+                                    </Button>
+                                }
+                            />
+                        }
                         filtersActive={hasActiveFilters}
                         onClearFilters={clearAll}
                     />

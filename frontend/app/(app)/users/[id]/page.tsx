@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import { getLocale, getTranslations } from "next-intl/server";
+import { ClockIcon } from "@heroicons/react/24/outline";
 
 import {
     getAttachmentsFromCookie,
@@ -22,7 +23,7 @@ import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage"
 import InfoRow from "@/app/components/me/InfoRow";
 import StatCard from "@/app/components/me/StatCard";
 import Timeline from "@/app/components/me/Timeline";
-import EmptyState from "@/app/components/me/EmptyState";
+import { EmptyState } from "@/app/components/EmptyState";
 import Attachments from "@/app/components/attachments/Attachments";
 import Rise from "@/app/components/motion/Rise";
 import { PageShell } from "@/app/components/PageShell";
@@ -136,7 +137,13 @@ export default async function UserPage({ params }: { params: { id: number } }) {
                                             currentUserId={currentUser.id}
                                         />
                                     ) : (
-                                        <EmptyState message={t("emptyActivity")} />
+                                        <EmptyState
+                                            variant="inline"
+                                            tone="muted"
+                                            icon={ClockIcon}
+                                            title={t("emptyActivity")}
+                                            body={t("emptyActivityBody")}
+                                        />
                                     )}
                                 </div>
                             </div>

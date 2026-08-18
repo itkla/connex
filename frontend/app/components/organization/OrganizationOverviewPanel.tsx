@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl";
 import OrganizationIdentityForm from "@/app/components/organization/OrganizationIdentityForm";
 import OrganizationLifecyclePanel from "@/app/components/organization/OrganizationLifecyclePanel";
 import OrganizationLayoutPanel from "@/app/components/organization/OrganizationLayoutPanel";
+import OrganizationOverviewSkeleton from "@/app/components/organization/OrganizationOverviewSkeleton";
 import { NoAccessCard } from "@/app/components/organization/OrgPrimitives";
 import Rise from "@/app/components/motion/Rise";
 import SectionBoundary from "@/app/components/SectionBoundary";
@@ -19,22 +20,6 @@ import {
     organizationOverviewReducer,
 } from "@/app/lib/organizationOverviewState";
 import { toastError } from "@/app/lib/toast";
-import { Skeleton } from "@/components/ui/skeleton";
-
-function OverviewLoading() {
-    return (
-        <div className="space-y-10">
-            <div className="space-y-4">
-                <Skeleton className="h-5 w-44" />
-                <Skeleton className="h-56 rounded-2xl" />
-            </div>
-            <div className="space-y-4">
-                <Skeleton className="h-5 w-56" />
-                <Skeleton className="h-96 rounded-2xl" />
-            </div>
-        </div>
-    );
-}
 
 export default function OrganizationOverviewPanel() {
     const t = useTranslations("OrgOverview");
@@ -129,7 +114,7 @@ export default function OrganizationOverviewPanel() {
     }
 
     if (orgRole === null || state.accessDenied) return <NoAccessCard />;
-    if (loading) return <OverviewLoading />;
+    if (loading) return <OrganizationOverviewSkeleton />;
     if (state.loadFailed) {
         return (
             <SectionBoundary

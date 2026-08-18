@@ -42,6 +42,9 @@
     "columnCreated": "Created",
     "columnUpdated": "Updated",
     "filterNoIndustry": "No industry",
+    "emptyTitle": "No companies yet",
+    "emptyBody": "Companies are the organizations your contacts work for — add your first one or import a CSV.",
+    "emptyCta": "New company",
     "entityLabel": "company",
     "toastMetricsLoadFailed": "Failed to load company metrics",
     "toastCompanyCreated": "Company created",
@@ -134,8 +137,9 @@
   },
   "CompaniesContactsGrid": {
     "contacts": "Contacts",
-    "newContact": "New contact",
-    "noContacts": "No contacts associated with this company.",
+    "newContact": "Add contact",
+    "noContacts": "No contacts here yet",
+    "noContactsBody": "Contacts you link to this company appear here — add the first person you know inside it.",
     "toastContactCreated": "Contact created",
     "toastCardAttached": "Business card attached",
     "toastCreateContactFailed": "Failed to create contact"

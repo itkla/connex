@@ -22,7 +22,7 @@ export function ProfileCapabilitiesSection({
     unavailable,
 }: {
     data: TenantDiagnostics | null;
-    loading: boolean;
+    loading?: boolean;
     unavailable?: boolean;
 }) {
     const t = useTranslations("TenantDiagnostics");

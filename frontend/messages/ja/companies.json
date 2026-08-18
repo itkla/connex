@@ -42,6 +42,9 @@
     "columnCreated": "作成日",
     "columnUpdated": "更新日",
     "filterNoIndustry": "業界なし",
+    "emptyTitle": "会社はまだありません",
+    "emptyBody": "会社は、連絡先が所属する組織です。最初の1社を追加するか、CSVを取り込んでください。",
+    "emptyCta": "新規会社",
     "entityLabel": "会社",
     "toastMetricsLoadFailed": "会社の指標を読み込めませんでした",
     "toastCompanyCreated": "会社を作成しました",
@@ -134,8 +137,9 @@
   },
   "CompaniesContactsGrid": {
     "contacts": "連絡先",
-    "newContact": "新規連絡先",
-    "noContacts": "この会社に紐づく連絡先はありません。",
+    "newContact": "連絡先を追加",
+    "noContacts": "連絡先はまだありません",
+    "noContactsBody": "この会社に紐づけた連絡先がここに並びます。まずは知っている方を1人追加してください。",
     "toastContactCreated": "連絡先を作成しました",
     "toastCardAttached": "名刺を添付しました",
     "toastCreateContactFailed": "連絡先を作成できませんでした"

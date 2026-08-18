@@ -7,8 +7,6 @@
     "filteredCount": "{total}件中{shown}件",
     "groupToday": "今日",
     "groupYesterday": "昨日",
-    "emptyTitle": "表示する項目がありません",
-    "emptyBody": "条件に一致する監査イベントはまだありません。",
     "emptyAllTitle": "アクティビティの記録なし",
     "emptyAllBody": "変更が行われると、ここに表示されます。",
     "deniedTitle": "監査ログの閲覧権限が必要です",

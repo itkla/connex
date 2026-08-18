@@ -10,7 +10,7 @@ import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import { TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
+import { TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon, PlusIcon } from '@heroicons/react/24/solid';
 import {
     TableCellsIcon,
     Squares2X2Icon,
@@ -19,10 +19,12 @@ import {
     TagIcon,
     UserCircleIcon,
     Bars3BottomLeftIcon,
+    BriefcaseIcon,
 } from '@heroicons/react/24/outline';
 import { useReducedMotion } from 'motion/react';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import { EmptyState } from '@/app/components/EmptyState';
 import DensityToggle from '@/app/components/records/DensityToggle';
 import { useRecordDensity } from '@/app/hooks/useRecordDensity';
 import ColumnVisibilityMenu from '@/app/components/records/ColumnVisibilityMenu';
@@ -1762,6 +1764,19 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             gridClassName="grid grid-cols-1 gap-3"
                             entityLabel={t('entityLabel')}
                             selectionActions={selectionActions}
+                            emptyState={
+                                <EmptyState
+                                    icon={BriefcaseIcon}
+                                    title={t('emptyTitle')}
+                                    body={t('emptyBody')}
+                                    action={
+                                        <Button variant="brand" onClick={() => setNewDialogOpen(true)}>
+                                            <PlusIcon strokeWidth={2.5} />
+                                            {t('emptyCta')}
+                                        </Button>
+                                    }
+                                />
+                            }
                             filtersActive={hasActiveFilters}
                             onClearFilters={clearAll}
                             pagination={{

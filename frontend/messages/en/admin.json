@@ -7,8 +7,6 @@
     "filteredCount": "{shown} of {total}",
     "groupToday": "Today",
     "groupYesterday": "Yesterday",
-    "emptyTitle": "Nothing to show",
-    "emptyBody": "No audit events match your filters yet.",
     "emptyAllTitle": "No activity recorded",
     "emptyAllBody": "Once people start making changes, they'll appear here.",
     "deniedTitle": "Audit access required",

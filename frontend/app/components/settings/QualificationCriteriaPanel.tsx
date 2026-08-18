@@ -19,7 +19,7 @@ import { SettingsSection } from "@/app/components/settings/SettingsSection";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton";
+import QualificationCriteriaSkeleton from "@/app/components/settings/QualificationCriteriaSkeleton";
 import { Switch } from "@/components/ui/switch";
 import {
     Select,
@@ -238,9 +238,7 @@ export default function QualificationCriteriaPanel() {
     if (loading) {
         return (
             <SettingsSection title={t("title")} description={t("description")}>
-                <div className="space-y-3">
-                    {[0, 1, 2].map((row) => <Skeleton key={row} className="h-16 w-full rounded-2xl" />)}
-                </div>
+                <QualificationCriteriaSkeleton />
             </SettingsSection>
         );
     }

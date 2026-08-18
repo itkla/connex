@@ -8,7 +8,7 @@ import RecordsActions from '@/app/components/import/RecordsActions';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toastError, toastInfo, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import { PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
+import { PencilIcon, EllipsisVerticalIcon, EyeIcon, PlusIcon } from '@heroicons/react/24/solid';
 import { BuildingOffice2Icon, NoSymbolIcon, TagIcon, UserCircleIcon, ArchiveBoxIcon, ArchiveBoxArrowDownIcon, UsersIcon } from '@heroicons/react/24/outline';
 import {
     Squares2X2Icon,
@@ -17,6 +17,7 @@ import {
 import { useReducedMotion } from 'motion/react';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import { EmptyState } from '@/app/components/EmptyState';
 import DensityToggle from '@/app/components/records/DensityToggle';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useRecordDensity } from '@/app/hooks/useRecordDensity';
@@ -1043,6 +1044,19 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                         entityLabel="contact"
                         selectionActions={selectionActions}
                         loading={loading}
+                        emptyState={
+                            <EmptyState
+                                icon={UsersIcon}
+                                title={t('emptyTitle')}
+                                body={t('emptyBody')}
+                                action={
+                                    <Button variant="brand" onClick={openNewContactDialog}>
+                                        <PlusIcon strokeWidth={2.5} />
+                                        {t('emptyCta')}
+                                    </Button>
+                                }
+                            />
+                        }
                         filtersActive={hasActiveFiltersOrScope}
                         onClearFilters={clearFiltersAndScope}
                         pagination={{ page, pageSize: size, total, onPageChange: setPage, onPageSizeChange: setSize }}

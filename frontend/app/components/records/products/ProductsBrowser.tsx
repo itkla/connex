@@ -27,9 +27,11 @@ import ProductDialog from '@/app/components/records/products/ProductDialog';
 import { EmptyState } from '@/app/components/EmptyState';
 import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
+import { Skeleton } from '@/components/ui/skeleton';
 import { deleteProduct, exportProductsCsv, getProducts } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatCurrency, formatDate } from '@/app/lib/utils';
+import { cn } from '@/lib/utils';
 import type { Product } from '@/app/lib/types';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 
@@ -107,6 +109,13 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
     }
     const searching = normalizedQuery.length > 0 && !searchCurrent;
     const searchFailed = normalizedQuery.length > 0 && searchCurrent && searchResult.status === 'error';
+    const supersededResults = searchResult?.status === 'success'
+        && searchResult.workspaceId === activeWorkspaceId
+        && searchResult.revision === catalogRevision
+        ? searchResult.products
+        : null;
+    const rows = searching ? supersededResults ?? products : filtered;
+    const searchingFromNothing = searching && rows.length === 0;
 
     const upsert = (saved: Product) => {
         setProducts((prev) => prev.some((p) => p.id === saved.id)
@@ -182,9 +191,14 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
                 </Rise>
 
                 <Rise delay={0.12}>
-                    {searching ? (
-                        <div role="status" aria-live="polite" className="rounded-2xl border border-border bg-card px-6 py-16 text-center text-sm text-muted-foreground">
-                            {t('searching')}
+                    {searchingFromNothing ? (
+                        <div className="space-y-2 rounded-2xl border border-border bg-card p-4" aria-busy>
+                            <span role="status" aria-live="polite" className="sr-only">
+                                {t('searchRunning')}
+                            </span>
+                            {Array.from({ length: 6 }, (_, row) => (
+                                <Skeleton key={row} className="h-9 w-full rounded-lg" />
+                            ))}
                         </div>
                     ) : searchFailed ? (
                         <div role="status" aria-live="polite" className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card px-6 py-16 text-center text-sm text-muted-foreground">
@@ -204,7 +218,7 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
                                 </Button>
                             }
                         />
-                    ) : filtered.length === 0 ? (
+                    ) : rows.length === 0 ? (
                         <EmptyState
                             icon={MagnifyingGlassIcon}
                             title={t('noMatchesTitle')}
@@ -220,7 +234,18 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
                             }
                         />
                     ) : (
-                        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                        <div
+                            className={cn(
+                                'overflow-hidden rounded-2xl border border-border bg-card',
+                                searching && 'opacity-60 transition-opacity',
+                            )}
+                            aria-busy={searching}
+                        >
+                            {searching ? (
+                                <span role="status" aria-live="polite" className="sr-only">
+                                    {t('searchRunning')}
+                                </span>
+                            ) : null}
                             <div
                                 aria-hidden="true"
                                 className="hidden grid-cols-[minmax(12rem,1fr)_6rem_7rem_6rem_5rem_10rem_2rem] items-center gap-5 border-b border-border px-5 py-3 text-left text-xs uppercase tracking-[0.08em] text-muted-foreground xl:grid"
@@ -234,7 +259,7 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
                                 <span />
                             </div>
                             <ul className="divide-y divide-border">
-                                {filtered.map((product) => (
+                                {rows.map((product) => (
                                     <li
                                         key={product.id}
                                         className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-start gap-x-3 p-4 transition-colors hover:bg-muted/50 xl:grid-cols-[minmax(12rem,1fr)_6rem_7rem_6rem_5rem_10rem_2rem] xl:items-center xl:gap-5 xl:px-5 xl:py-3.5"
