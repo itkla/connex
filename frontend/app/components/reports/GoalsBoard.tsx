@@ -15,15 +15,7 @@ import { createGoal, deleteGoal, updateGoal } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type { ReportGoal, ReportGoalInput, WorkspaceMember } from '@/app/lib/types';
 import { Button } from '@/components/ui/button';
-import {
-    Dialog,
-    DialogClose,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
+import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 
 type GoalsBoardProps = {
     initialGoals: ReportGoal[];
@@ -227,24 +219,20 @@ export default function GoalsBoard({
                 />
             ) : null}
 
-            <Dialog open={deleting !== null} onOpenChange={(open) => !open && setDeleting(null)}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>{t('goals.deleteTitle')}</DialogTitle>
-                        <DialogDescription>
-                            {t('goals.deleteBody', { scope: deleting?.ownerLabel ?? t('goals.workspaceWide') })}
-                        </DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button variant="outline" disabled={deleteBusy}>{t('common.cancel')}</Button>
-                        </DialogClose>
-                        <Button variant="destructive" onClick={confirmDelete} disabled={deleteBusy}>
-                            {deleteBusy ? t('common.deleting') : t('common.delete')}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            <DeleteRecordDialog
+                open={deleting !== null}
+                onOpenChange={(open) => !open && setDeleting(null)}
+                selectedIds={new Set(deleting ? [deleting.id] : [])}
+                selectedItems={deleting ? [deleting] : []}
+                entityLabel={t('goals.entityLabel')}
+                details={(
+                    <p className="text-sm text-muted-foreground">
+                        {t('goals.deleteDetails', { scope: deleting?.ownerLabel ?? t('goals.workspaceWide') })}
+                    </p>
+                )}
+                isDeleting={deleteBusy}
+                confirmDelete={confirmDelete}
+            />
         </div>
     );
 }

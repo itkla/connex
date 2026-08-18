@@ -348,9 +348,8 @@
     "toastHexCopyFailed": "色をコピーできませんでした",
     "toastDeleted": "タグ「{name}」を削除しました",
     "toastFailedDelete": "タグを削除できませんでした",
-    "deleteTitle": "このタグを削除しますか？",
-    "deleteBody": "「{name}」が付いているすべての連絡先・会社・案件から削除されます。この操作は取り消せません。",
-    "confirmDelete": "タグを削除",
+    "entityLabel": "タグ",
+    "deleteDetails": "このタグが付いているすべての連絡先・会社・案件からも外れます。",
     "cancel": "キャンセル"
   },
   "ActivityLibraryTagDialog": {

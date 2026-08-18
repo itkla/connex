@@ -92,7 +92,7 @@
     "confirmWorkspaceDescription": "A passkey prompt will verify you before Connex starts the permanent workspace teardown.",
     "confirmOrganizationTitle": "Delete {name}?",
     "confirmOrganizationDescription": "A passkey prompt will verify you before Connex permanently tears down the organization and every workspace in it.",
-    "irreversibleTitle": "This action cannot be undone",
+    "irreversibleTitle": "This can't be undone.",
     "workspaceRetention": "Workspace records and managed files are deleted. Integrity-protected audit metadata and closed or refused organization-level data-subject request records are retained with workspace and person links cleared. Backup copies expire under the backup-retention policy.",
     "organizationRetention": "All organization workspaces, memberships, settings, tenant records, managed files, and closed or refused data-subject request records are deleted. Integrity-protected audit metadata is retained without the deleted organization link. Backup copies expire under the backup-retention policy.",
     "confirmationLabel": "Type {slug} exactly to confirm",

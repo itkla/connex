@@ -39,15 +39,7 @@ import { toastError, toastSuccess } from '@/app/lib/toast';
 import type { ReportDefinition, ReportTemplate } from '@/app/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-    Dialog,
-    DialogClose,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
+import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -394,22 +386,17 @@ export default function ReportsBoard({
                 )}
             </PageShell>
 
-            <Dialog open={deleting !== null} onOpenChange={(open) => !open && setDeleting(null)}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>{t('landing.deleteTitle')}</DialogTitle>
-                        <DialogDescription>{t('landing.deleteBody', { name: deleting?.name ?? '' })}</DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button variant="outline" disabled={busy}>{t('common.cancel')}</Button>
-                        </DialogClose>
-                        <Button variant="destructive" onClick={confirmDelete} disabled={busy}>
-                            {busy ? t('common.deleting') : t('common.delete')}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            <DeleteRecordDialog
+                open={deleting !== null}
+                onOpenChange={(open) => !open && setDeleting(null)}
+                selectedIds={new Set(deleting ? [deleting.id] : [])}
+                selectedItems={deleting ? [deleting] : []}
+                entityLabel={t('landing.entityLabel')}
+                getDisplayName={(report) => report.name}
+                details={<p className="text-sm text-muted-foreground">{t('landing.deleteDetails')}</p>}
+                isDeleting={busy}
+                confirmDelete={confirmDelete}
+            />
         </>
     );
 }

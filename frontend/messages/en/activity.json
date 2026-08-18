@@ -348,9 +348,8 @@
     "toastHexCopyFailed": "Couldn't copy color",
     "toastDeleted": "Deleted tag {name}",
     "toastFailedDelete": "Failed to delete tag",
-    "deleteTitle": "Delete this tag?",
-    "deleteBody": "{name} will be removed from every contact, company, and deal it's on. This can't be undone.",
-    "confirmDelete": "Delete tag",
+    "entityLabel": "tag",
+    "deleteDetails": "It also comes off every contact, company, and deal it is on.",
     "cancel": "Cancel"
   },
   "ActivityLibraryTagDialog": {

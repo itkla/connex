@@ -14,15 +14,7 @@ import {
     SelectItem,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-    ResponsiveDialog,
-    ResponsiveDialogContent,
-    ResponsiveDialogHeader,
-    ResponsiveDialogTitle,
-    ResponsiveDialogDescription,
-    ResponsiveDialogFooter,
-    ResponsiveDialogClose,
-} from "@/components/ui/responsive-dialog";
+import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
 import Panel from "@/app/components/overview/analytics/Panel";
 import Rise from "@/app/components/motion/Rise";
 import InfoRow from "@/app/components/me/InfoRow";
@@ -609,40 +601,17 @@ export default function CampaignDetail({
                 onSubmit={saveCampaign}
             />
 
-            <ResponsiveDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-                <ResponsiveDialogContent className="p-0 sm:max-w-md">
-                    <div className="flex flex-col gap-4 p-6">
-                        <ResponsiveDialogHeader>
-                            <ResponsiveDialogTitle className="text-lg font-semibold tracking-tight">
-                                {t("deleteTitle")}
-                            </ResponsiveDialogTitle>
-                            <ResponsiveDialogDescription>{t("deleteBody")}</ResponsiveDialogDescription>
-                        </ResponsiveDialogHeader>
-                        <ResponsiveDialogFooter>
-                            <ResponsiveDialogClose asChild>
-                                <Button type="button" variant="outline" disabled={isDeleting}>
-                                    {t("cancel")}
-                                </Button>
-                            </ResponsiveDialogClose>
-                            <Button
-                                type="button"
-                                variant="destructive"
-                                onClick={removeCampaign}
-                                disabled={isDeleting}
-                            >
-                                {isDeleting ? (
-                                    <>
-                                        <Loader2Icon className="size-4 animate-spin" />
-                                        {t("delete")}
-                                    </>
-                                ) : (
-                                    t("delete")
-                                )}
-                            </Button>
-                        </ResponsiveDialogFooter>
-                    </div>
-                </ResponsiveDialogContent>
-            </ResponsiveDialog>
+            <DeleteRecordDialog
+                open={confirmDelete}
+                onOpenChange={setConfirmDelete}
+                selectedIds={new Set([current.id])}
+                selectedItems={[current]}
+                entityLabel={t("entityLabel")}
+                getDisplayName={(campaign) => campaign.name}
+                details={<p className="text-sm text-muted-foreground">{t("deleteBlocked")}</p>}
+                isDeleting={isDeleting}
+                confirmDelete={removeCampaign}
+            />
         </>
     );
 }

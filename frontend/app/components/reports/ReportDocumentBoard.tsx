@@ -49,15 +49,7 @@ import type {
     ReportSnapshotSummary,
 } from '@/app/lib/types';
 import { Button } from '@/components/ui/button';
-import {
-    Dialog,
-    DialogClose,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
+import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -606,29 +598,15 @@ export default function ReportDocumentBoard({
                 ) : null}
             </div>
 
-            <Dialog
+            <DeleteRecordDialog
                 open={snapshotPendingDelete !== null}
                 onOpenChange={(open) => !open && deletingSnapshotId === null && setSnapshotPendingDelete(null)}
-            >
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>{t('document.deleteSnapshotTitle')}</DialogTitle>
-                        <DialogDescription>{t('document.deleteSnapshotConfirm')}</DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button variant="outline" disabled={deletingSnapshotId !== null}>{t('common.cancel')}</Button>
-                        </DialogClose>
-                        <Button
-                            variant="destructive"
-                            onClick={confirmDeleteSnapshot}
-                            disabled={deletingSnapshotId !== null}
-                        >
-                            {deletingSnapshotId !== null ? t('common.deleting') : t('common.delete')}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+                selectedIds={new Set(snapshotPendingDelete !== null ? [snapshotPendingDelete.id] : [])}
+                selectedItems={snapshotPendingDelete !== null ? [snapshotPendingDelete] : []}
+                entityLabel={t('document.snapshotEntityLabel')}
+                isDeleting={deletingSnapshotId !== null}
+                confirmDelete={confirmDeleteSnapshot}
+            />
         </div>
     );
 }
