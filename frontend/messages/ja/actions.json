@@ -104,7 +104,7 @@
       "linkCopied": "リンクをクリップボードにコピーしました",
       "recordLinkCopied": "{label} のリンクをコピーしました",
       "allNotificationsRead": "すべての通知を既読にしました",
-      "runFailed": "問題が発生しました。もう一度お試しください。",
+      "runFailed": "アクションを実行できませんでした",
       "companyCreated": "会社を作成しました",
       "companyLogoUploadFailed": "会社は作成しましたが、ロゴをアップロードできませんでした。会社プロフィールから追加してください。",
       "personCreated": "連絡先を作成しました",
