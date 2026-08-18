@@ -101,9 +101,9 @@ export default function ContactLeadPanel({
         };
     }, [contact, locale, t]);
 
-    const blocking = qualification?.scores
-        .flatMap((score) => score.unmetRequiredLabels)
-        .filter((label, index, all) => all.indexOf(label) === index) ?? [];
+    const blocking = [
+        ...new Set(qualification?.scores.flatMap((score) => score.unmetRequiredLabels) ?? []),
+    ];
 
     return (
         <div className={cn('mt-6', className)}>
