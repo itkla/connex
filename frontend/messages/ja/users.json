@@ -35,7 +35,7 @@
     "notesCount": "メモ{count}件",
     "timeline": "タイムライン",
     "emptyActivity": "まだアクティビティはありません",
-    "emptyActivityBody": "このメンバーが記録したタスク・アクティビティ・メモが、このタイムラインに表示されます。",
+    "emptyActivityBody": "このメンバーが記録したアクティビティやメモと、このメンバーに割り当てられたタスクが、このタイムラインに表示されます。",
     "performance": "パフォーマンス",
     "performanceWindow": "過去90日間",
     "wonDeals": "成約した案件",

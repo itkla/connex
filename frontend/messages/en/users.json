@@ -35,7 +35,7 @@
     "notesCount": "{count} notes",
     "timeline": "Timeline",
     "emptyActivity": "No activity yet",
-    "emptyActivityBody": "Tasks, activities, and notes this person records will appear on this timeline.",
+    "emptyActivityBody": "Activities and notes this member records, plus tasks assigned to them, will appear on this timeline.",
     "performance": "Performance",
     "performanceWindow": "Last 90 days",
     "wonDeals": "Won deals",
