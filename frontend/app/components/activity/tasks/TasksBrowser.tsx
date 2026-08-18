@@ -694,19 +694,7 @@ export default function TasksBrowser({
         setDealFilter(new Set());
         setCompanyFilter(new Set());
     };
-    const taskEmptyState = !hasAnyTasks ? (
-        <EmptyState
-            icon={CheckCircleIcon}
-            title={t('emptyFirstRunTitle')}
-            body={t('emptyFirstRunBody')}
-            action={
-                <Button variant="brand" onClick={() => setCreating(true)}>
-                    <PlusIcon strokeWidth={2.5} />
-                    {t('new')}
-                </Button>
-            }
-        />
-    ) : filteredEmpty ? (
+    const taskEmptyState = filteredEmpty ? (
         <EmptyState
             tone="muted"
             icon={MagnifyingGlassIcon}
@@ -715,6 +703,18 @@ export default function TasksBrowser({
             action={
                 <Button variant="outline" onClick={clearAllFilters}>
                     {tf('clearAll')}
+                </Button>
+            }
+        />
+    ) : !hasAnyTasks ? (
+        <EmptyState
+            icon={CheckCircleIcon}
+            title={t('emptyFirstRunTitle')}
+            body={t('emptyFirstRunBody')}
+            action={
+                <Button variant="brand" onClick={() => setCreating(true)}>
+                    <PlusIcon strokeWidth={2.5} />
+                    {t('new')}
                 </Button>
             }
         />
