@@ -461,7 +461,7 @@
       "tooLarge": "File is too large",
       "unsupported": "File type isn’t supported",
       "limit": "Context limit reached",
-      "removeFailed": "Could not remove the file"
+      "removeFailed": "Couldn't remove the file"
     },
     "starters": {
       "person": {
