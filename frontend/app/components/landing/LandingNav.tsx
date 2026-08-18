@@ -101,7 +101,7 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
             </nav>
 
             {open && (
-                <div className="border-t border-border bg-background px-6 py-4 duration-200 animate-in fade-in-0 slide-in-from-top-2 md:hidden">
+                <div className="border-t border-border bg-background px-6 py-4 duration-200 animate-in fade-in-0 slide-in-from-top-2 motion-reduce:animate-none! md:hidden">
                     <div className="flex flex-col gap-1">
                         {links.map((link) =>
                             link.route ? (
