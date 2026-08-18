@@ -461,11 +461,11 @@ function retypedTrigger(trigger: WorkflowTriggerNode, recordType: string): Workf
 
 /**
  * Rewrites a graph so it stays authorable and publishable after its record type changes, mirroring
- * the legacy `RuleDialog` record-type reset. The entry trigger drops events and any stage filter
- * belonging to the previous record type; a schedule trigger falls back to `entity_change` when the
- * new record type has no schedule; every Condition is spliced out through its `yes` branch when the
- * new record type supports none, dropping whatever only its `no` branch reached; and any action the
- * new record type does not offer falls back to its default.
+ * the record-type reset the retired rule dialog performed. The entry trigger drops events and any
+ * stage filter belonging to the previous record type; a schedule trigger falls back to
+ * `entity_change` when the new record type has no schedule; every Condition is spliced out through
+ * its `yes` branch when the new record type supports none, dropping whatever only its `no` branch
+ * reached; and any action the new record type does not offer falls back to its default.
  *
  * Without this, switching to a record type outside `SCHEDULE_RECORD_TYPES` strands the draft with no
  * way back: the inspector hides the schedule option, the auto-inserted enrollment Condition refuses
