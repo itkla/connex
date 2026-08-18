@@ -575,7 +575,7 @@ public class IntroductionService {
         }
         String snippet = snippet(dto.getNote());
         String triggeredAt = now();
-        String actionUrl = "/introductions";
+        String actionUrl = "/overview/introductions";
         for (int recipientId : recipientIds) {
             if (recipientId == actor.getId()) {
                 continue;
