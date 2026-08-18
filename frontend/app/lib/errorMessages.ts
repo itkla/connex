@@ -86,9 +86,16 @@ export function userMessageFor(
     const expired = isSessionExpired(error);
     if (expired && redirectToSignIn()) return null;
 
-    const hasFallback = fallbackKey !== undefined && fallbackKey !== "" && t.has(fallbackKey);
+    const fallbackTitle = fallbackKey !== undefined && fallbackKey !== "" && t.has(fallbackKey)
+        ? t(fallbackKey)
+        : undefined;
+    const usableFallback = fallbackTitle !== undefined
+        && fallbackTitle !== fallbackKey
+        && !fallbackTitle.includes("{")
+        ? fallbackTitle
+        : undefined;
     return {
-        title: hasFallback ? t(fallbackKey) : t(GENERIC_TITLE_KEY),
+        title: usableFallback ?? t(GENERIC_TITLE_KEY),
         description: expired ? t(SESSION_EXPIRED_KEY) : descriptionFor(error, t),
     };
 }

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/app/lib/api";
 import { type MessageTranslator, toastApiError, userMessageFor } from "@/app/lib/errorMessages";
-import { isAuthPath, redirectToSignIn, signInHref } from "@/app/lib/sessionExpiry";
+import { isAuthPath, redirectToSignIn, resetRedirectMemoForTests, signInHref } from "@/app/lib/sessionExpiry";
 import { toastError } from "@/app/lib/toast";
 
 vi.mock("@/app/lib/toast", () => ({
@@ -155,7 +155,7 @@ describe("userMessageFor titles", () => {
 });
 
 describe("backend text containment", () => {
-    const statuses = [400, 401, 403, 404, 409, 410, 418, 422, 429, 500, 503];
+    const statuses = [400, 403, 404, 409, 410, 418, 422, 429, 500, 503];
 
     it.each(statuses)("never lets the backend's own %i text reach the user", (status) => {
         const error = new ApiError(POISONED_MESSAGE, status, "SOME_FUTURE_BACKEND_CODE", undefined, "b23f91");
@@ -176,6 +176,19 @@ describe("backend text containment", () => {
 });
 
 describe("expired sessions", () => {
+    beforeEach(() => {
+        resetRedirectMemoForTests();
+    });
+
+    it("shares one navigation across concurrent failures", () => {
+        const first = new ApiError("Request failed (401)", 401, undefined, undefined, undefined, true);
+        const second = new ApiError("Request failed (401)", 401, undefined, undefined, undefined, true);
+
+        expect(userMessageFor(first, t)).toBeNull();
+        expect(userMessageFor(second, t)).toBeNull();
+        expect(assign).toHaveBeenCalledTimes(1);
+    });
+
     it("takes the user to sign in instead of reporting a failure", () => {
         expect(userMessageFor(new ApiError("Request failed (401)", 401, undefined, undefined, undefined, true), t))
             .toBeNull();

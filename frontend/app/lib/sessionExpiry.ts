@@ -39,21 +39,30 @@ export function isAuthPath(pathname: string): boolean {
     return pathname === SIGN_IN_PATH || pathname.startsWith(AUTH_PATH_PREFIX);
 }
 
+let redirecting = false;
+
+/**
+ * Forgets the pending sign-in navigation. In a browser the navigation itself ends this module's
+ * life, so nothing ever needs to call this — tests do, because their window outlives the redirect.
+ */
+export function resetRedirectMemoForTests(): void {
+    redirecting = false;
+}
+
 /**
  * Takes the browser to sign in, remembering where the user was. Does nothing while rendering on the
- * server, while an authentication page is already showing, or when the browser is already headed at
- * that exact address, so concurrent failures cannot loop.
- * @returns whether a navigation was started
+ * server or while an authentication page is already showing, and concurrent failures share the one
+ * pending navigation instead of each issuing their own.
+ * @returns whether the user is on their way to sign in
  */
 export function redirectToSignIn(): boolean {
     if (typeof window === "undefined") return false;
 
     const { pathname, search } = window.location;
     if (isAuthPath(pathname)) return false;
+    if (redirecting) return true;
 
-    const href = signInHref(pathname, search);
-    if (`${pathname}${search}` === href) return false;
-
-    window.location.assign(href);
+    redirecting = true;
+    window.location.assign(signInHref(pathname, search));
     return true;
 }
