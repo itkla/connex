@@ -805,7 +805,7 @@ export function loadBaseline() {
  * that were always there, and may raise this number **in the same commit that widens
  * them**, never on its own.
  */
-export const BASELINE_HIGH_WATER_MARK = 317;
+export const BASELINE_HIGH_WATER_MARK = 358;
 
 /**
  * The surfaces that still say "at a glance". §4 allows the phrase on one surface only,
@@ -1013,7 +1013,7 @@ export function scanMessageCatalogs(model) {
             const match = expression.exec(entry.value);
             if (!match) continue;
             violations.push({
-                entry: `${entry.locale}/${entry.file}:${entry.keyPath}`,
+                entry: `${entry.locale}/${entry.file}:${entry.keyPath}#${term.term}`,
                 locale: entry.locale,
                 file: entry.file,
                 keyPath: entry.keyPath,
@@ -1046,16 +1046,20 @@ export function baselineEntries(violations) {
 }
 
 /**
- * Reads a `<locale>/<file>:<key path>` baseline entry back into its message surface.
+ * Reads a `<locale>/<file>:<key path>#<term>` baseline entry back into the message
+ * surface and the term it was flagged for. The term is part of the key so that adding a
+ * second banned term to a string that is already awaiting a rewrite still fails the gate.
  * @param {string} entry
- * @returns {{locale: string, file: string, namespace: string, keyPath: string}}
+ * @returns {{locale: string, file: string, namespace: string, keyPath: string, term: string}}
  */
 export function parseBaselineEntry(entry) {
     const separator = entry.indexOf(":");
+    const marker = entry.indexOf("#", separator);
     const [locale, file] = entry.slice(0, separator).split("/");
-    const keyPath = entry.slice(separator + 1);
-    if (!locale || !file || !keyPath) {
-        throw new Error(`"${entry}" is not a <locale>/<file>:<key path> baseline entry`);
+    const keyPath = entry.slice(separator + 1, marker < 0 ? undefined : marker);
+    const term = marker < 0 ? "" : entry.slice(marker + 1);
+    if (!locale || !file || !keyPath || !term) {
+        throw new Error(`"${entry}" is not a <locale>/<file>:<key path>#<term> baseline entry`);
     }
-    return { locale, file, namespace: namespaceOf(keyPath), keyPath };
+    return { locale, file, namespace: namespaceOf(keyPath), keyPath, term };
 }

@@ -40,7 +40,7 @@ function suppressedMatches(inScope: (entry: { file: string; namespace: string })
                     term.locale === entry.locale
                     && scopeCovers(term.scope, entry.file, entry.namespace)
                     && expression.test(entry.value))
-                .map(() => `${entry.locale}/${entry.file}:${entry.keyPath}`),
+                .map(({ term }) => `${entry.locale}/${entry.file}:${entry.keyPath}#${term.term}`),
         );
 }
 
@@ -65,7 +65,12 @@ describe("message catalogue vocabulary", () => {
         expect(baseline).toEqual([...new Set(baseline)].sort());
 
         const keys = new Set(messageEntries().map((entry) => `${entry.locale}/${entry.file}:${entry.keyPath}`));
-        expect(baseline.filter((entry) => !keys.has(entry))).toEqual([]);
+        const orphaned = baseline
+            .map(parseBaselineEntry)
+            .filter((entry) => !keys.has(`${entry.locale}/${entry.file}:${entry.keyPath}`))
+            .map((entry) => entry.keyPath);
+
+        expect(orphaned).toEqual([]);
     });
 
     it("never grows past the committed high-water mark", () => {
@@ -114,6 +119,17 @@ describe("message catalogue vocabulary", () => {
         expect(EXCLUDED_SURFACES).toContain("workspace.json#WorkspaceRules");
         expect(suppressed.length).toBeGreaterThan(0);
         expect(violations.filter((violation) => suppressed.includes(violation.entry))).toEqual([]);
+    });
+
+    it("baselines each banned term separately, so a second term on a flagged string still fails", () => {
+        const perKey = new Map<string, number>();
+        for (const entry of baseline.map(parseBaselineEntry)) {
+            const key = `${entry.locale}/${entry.file}:${entry.keyPath}`;
+            perKey.set(key, (perKey.get(key) ?? 0) + 1);
+        }
+
+        expect([...perKey.values()].some((count) => count > 1)).toBe(true);
+        expect(baseline.every((entry) => entry.includes("#"))).toBe(true);
     });
 
     it("states the file, key path, term, and §4 row of every violation", () => {
