@@ -132,7 +132,7 @@
       },
       "network-warm-intros": {
         "name": "ネットワークとウォーム紹介",
-        "description": "到達可能なパイプライン、未活用の紹介経路、コネクターのカバレッジ、リバース紹介の可能性。"
+        "description": "到達可能なパイプライン、未活用の紹介ルート、コネクターのカバレッジ、リバース紹介の可能性。"
       },
       "employment-moves": {
         "name": "勤務先の変化",
@@ -313,9 +313,9 @@
       "coverage_gap_open_pipeline_value": "カバレッジ不足のオープンパイプライン金額",
       "single_threaded_deal_count": "単一接点案件数",
       "single_threaded_deal_value": "単一接点案件金額",
-      "warm_intro_opportunity_value": "ウォーム紹介の機会価値",
+      "warm_intro_opportunity_value": "紹介候補の価値",
       "warm_intro_reachable_account_count": "紹介ルートで到達できる会社",
-      "reverse_intro_weighted_opportunities": "加重リバース紹介機会",
+      "reverse_intro_weighted_opportunities": "加重リバース紹介候補",
       "employment_departure_count": "勤務先からの離職数",
       "employment_arrival_count": "勤務先への入社数",
       "quote_count": "見積作成数",

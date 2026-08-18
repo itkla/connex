@@ -70,7 +70,7 @@ const NOTIFICATION_ITEMS = [
 ];
 
 const SEARCH_GROUPS = [
-    { label: "People", Icon: UsersIcon, items: ["Mika Tanaka", "Riku Sato"] },
+    { label: "Contacts", Icon: UsersIcon, items: ["Mika Tanaka", "Riku Sato"] },
     { label: "Companies", Icon: BuildingOffice2Icon, items: ["Acme Inc."] },
 ];
 
@@ -331,7 +331,7 @@ function GlobalSearch() {
         <div className="mx-auto max-w-sm space-y-2">
             <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
                 <MagnifyingGlassIcon className="size-4 text-muted-foreground" />
-                <span className="text-xs text-muted-foreground">Search people, companies, deals</span>
+                <span className="text-xs text-muted-foreground">Search contacts, companies, deals</span>
             </div>
             <div className="overflow-hidden rounded-lg border border-border bg-background">
                 {SEARCH_GROUPS.map((g) => (

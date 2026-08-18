@@ -65,7 +65,7 @@
     },
     "MapSearch": {
         "open": "マップを検索",
-        "placeholder": "人物・会社を検索…",
+        "placeholder": "連絡先・会社を検索…",
         "close": "検索を閉じる"
     },
     "MapLayout": {

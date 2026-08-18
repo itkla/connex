@@ -385,7 +385,7 @@
     "turnCancelled": "応答を停止しました",
     "turnFailed": "この回答を完了できませんでした。",
     "turnImageUnsupported": "現在のアシスタントモデルは画像を読み取れません。画像を外すか、画像対応モデルを選択してください。",
-    "budgetExhausted": "組織の 1 日あたりの AI 利用上限に達しました。しばらくしてからお試しください。",
+    "budgetExhausted": "組織の1日あたりのAI利用上限に達しました。しばらくしてからお試しください。",
     "toolResultBudgetExhausted": "関係データの取得中に、この回答で扱える情報量の上限に達しました。対象レコードや期間を絞って、もう一度お試しください。",
     "turnTimedOut": "この回答は完了前にタイムアウトしました。",
     "toolCards": {
@@ -505,7 +505,7 @@
       "left": "共有チャットから退出しました",
       "participantRemoved": "参加者を削除しました",
       "requestFailed": "Ask Connexのリクエストに失敗しました",
-      "turnFailed": "Ask Connex はこの回答を完了できませんでした",
+      "turnFailed": "Ask Connexはこの回答を完了できませんでした",
       "turnTimedOut": "Ask Connexがタイムアウトしました",
       "cancelFailed": "応答を停止できませんでした",
       "toolActionRefreshFailed": "操作は完了しましたが、最新の状態を読み込めませんでした"

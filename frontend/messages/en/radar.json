@@ -46,7 +46,7 @@
     "filters": {
       "label": "Radar filters",
       "searchLabel": "Search relationship signals",
-      "searchPlaceholder": "Search people, companies, deals, or evidence",
+      "searchPlaceholder": "Search contacts, companies, deals, or evidence",
       "familyLabel": "Filter by signal family",
       "stateLabel": "Filter by lifecycle state",
       "allFamilies": "All families",

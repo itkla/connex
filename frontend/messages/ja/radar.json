@@ -46,7 +46,7 @@
     "filters": {
       "label": "レーダーの絞り込み",
       "searchLabel": "関係性シグナルを検索",
-      "searchPlaceholder": "人物、会社、案件、根拠を検索",
+      "searchPlaceholder": "連絡先、会社、案件、根拠を検索",
       "familyLabel": "シグナル種別で絞り込む",
       "stateLabel": "対応状態で絞り込む",
       "allFamilies": "すべての種別",
@@ -95,7 +95,7 @@
       "parameterBridgePersonId": "橋渡し役",
       "parameterBridgeName": "橋渡し役の名前",
       "parameterReachType": "候補の種類",
-      "parameterEvidenceType": "経路の根拠",
+      "parameterEvidenceType": "紹介ルートの根拠",
       "parameterEvidenceCompany": "共通の会社",
       "parameterOverlapStartYear": "在籍重複の開始年",
       "parameterOverlapEndYear": "在籍重複の終了年",

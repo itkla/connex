@@ -129,7 +129,7 @@
     "relationshipCoolingBody": "{deal} の {person} と {days} 日間連絡がありません。",
     "relationshipColdTitle": "冷え切った関係",
     "relationshipColdBody": "{deal} の {person} とは {days} 日間連絡がなく、関係が冷え切っています。",
-    "introOpportunityTitle": "紹介のチャンス",
+    "introOpportunityTitle": "紹介の候補",
     "introOpportunityBody": "{personA} さんを {personB} さんに紹介できます。",
     "relationshipReasonClosingSoon": "決着間近",
     "relationshipReasonHighValue": "高額案件",
