@@ -27,6 +27,7 @@
     "app/components/calendar/CalendarShell.tsx": 3,
     "app/components/dashboard/MotionCard.tsx": 2,
     "app/components/dashboard/OverviewCard.tsx": 3,
+    "app/components/dashboard/PipelineChart.tsx": 1,
     "app/components/dashboard/QuickCreate.tsx": 1,
     "app/components/dashboard/activation/FirstInsightCard.tsx": 1,
     "app/components/dashboard/customize/DashboardGrid.tsx": 1,
@@ -98,8 +99,11 @@
     "app/components/settings/workflows/WorkflowEditor.tsx": 2,
     "app/components/settings/workflows/WorkflowNode.tsx": 2,
     "app/components/users/UserPerformance.tsx": 1,
+    "app/design-system/page.tsx": 3,
+    "app/globals.css": 10,
     "app/onboarding/OnboardingForm.tsx": 1,
     "app/page.tsx": 3,
     "app/sso/link/SsoLinkForm.tsx": 7,
+    "components/PixelCard.css": 2,
     "components/ui/range-calendar.tsx": 3
 }
