@@ -124,6 +124,7 @@ import {
     type WorkspaceMember,
 } from '@/app/lib/types';
 import { actualValueForOutcome, isDealClosed } from './dealOutcome';
+import { DEAL_COMPANY_FILTER_KEY, DEAL_PIPELINE_FILTER_KEY } from './dealLinks';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import ContactAvatar from '../contacts/ContactAvatar';
 import SummaryTile from '@/app/components/SummaryTile';
@@ -224,7 +225,14 @@ const EMPTY_DEAL_DRAFT: CreateDealPayload = {
     expectedCloseDate: undefined,
 };
 
-const DEAL_FILTER_KEYS = ['status', 'company', 'pipeline', 'stage', 'risk', 'owner'] as const;
+const DEAL_FILTER_KEYS = [
+    'status',
+    DEAL_COMPANY_FILTER_KEY,
+    DEAL_PIPELINE_FILTER_KEY,
+    'stage',
+    'risk',
+    'owner',
+] as const;
 
 type DealsViewState = {
     definition: SegmentDefinition;
@@ -1215,13 +1223,13 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             const label = facet.label ?? companyById.get(Number(facet.key))?.name;
             return label ? [{ key: facet.key, label }] : [];
         });
-        if (companyOptions.length > 0) result.push({ key: 'company', label: t('columnCompany'), options: companyOptions });
+        if (companyOptions.length > 0) result.push({ key: DEAL_COMPANY_FILTER_KEY, label: t('columnCompany'), options: companyOptions });
 
         const pipelineOptions = dealFacets.pipelines.flatMap((facet) => {
             const pipeline = pipelineById.get(Number(facet.key));
             return pipeline ? [{ key: facet.key, label: pipeline.name }] : [];
         });
-        if (pipelineOptions.length > 0) result.push({ key: 'pipeline', label: t('columnPipeline'), options: pipelineOptions });
+        if (pipelineOptions.length > 0) result.push({ key: DEAL_PIPELINE_FILTER_KEY, label: t('columnPipeline'), options: pipelineOptions });
 
         const stageOptions = dealFacets.stages.flatMap((facet) => {
             const stage = stageById.get(Number(facet.key));

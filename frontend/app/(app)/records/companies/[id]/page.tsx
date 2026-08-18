@@ -38,6 +38,7 @@ import CompanyActionsMenu from "@/app/components/records/companies/CompanyAction
 import CompanyAvatar from "@/app/components/records/companies/CompanyAvatar";
 import { EngagementSparkline, RevenueTiles } from "@/app/components/records/companies/CompanyCard";
 import ContactStatCard from "@/app/components/records/contacts/ContactStatCard";
+import { companyDealsHref } from "@/app/components/records/deals/dealLinks";
 import TagEditor from "@/app/components/records/contacts/TagEditor";
 import InfoRow from "@/app/components/me/InfoRow";
 import Timeline from "@/app/components/me/Timeline";
@@ -243,7 +244,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                                         label={t("deals")}
                                         value={engagement.numDeals}
                                         subtitle={engagement.numDeals > 0 ? t("dealsSubtitle", { count: engagement.numDeals }) : undefined}
-                                        viewHref={`/activity/deals?companyId=${company.id}`}
+                                        viewHref={companyDealsHref(company.id)}
                                     />
                                 </div>
                             </div>
