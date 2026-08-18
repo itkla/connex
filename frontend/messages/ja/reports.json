@@ -116,6 +116,10 @@
         "name": "目標達成率",
         "description": "担当者およびワークスペースの売上目標と受注売上を比較します。"
       },
+      "lead-lifecycle": {
+        "name": "リードライフサイクル",
+        "description": "リードの獲得元、見込みありへの到達率、初回応答の速さ、そして商談化の状況。"
+      },
       "commercial-documents": {
         "name": "見積と承認",
         "description": "見積の作成状況、承認の所要日数、実際に譲歩した値引率を可視化します。"
@@ -285,10 +289,20 @@
       "activities": "活動",
       "tasks": "タスク",
       "relationships": "関係性",
-      "documents": "書類"
+      "documents": "書類",
+      "leads": "リード"
     },
     "measure": {
       "count": "件数",
+      "lead_count": "リード獲得数",
+      "qualified_count": "見込みあり",
+      "converted_count": "商談化",
+      "disqualified_count": "見込みなし",
+      "qualification_rate": "見込みあり率",
+      "conversion_rate": "商談化率",
+      "time_to_convert_days": "商談化までの日数",
+      "first_response_hours": "初回応答までの時間",
+      "first_response_breach_rate": "初回応答期限超過率",
       "new_pipeline_value": "新規パイプライン金額",
       "won_revenue": "受注売上",
       "win_rate": "勝率",
@@ -320,6 +334,7 @@
     },
     "group": {
       "none": "グループ化なし",
+      "lead_source": "リードソース",
       "date": "日付",
       "pipeline": "パイプライン",
       "stage": "ステージ",

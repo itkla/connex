@@ -26,6 +26,7 @@ public class DataSubjectDisclosureDto {
     private List<EmploymentDto> employmentHistory;
     private List<LifecycleTransitionDto> lifecycleHistory;
     private List<QualificationAnswerDto> qualificationAnswers;
+    private List<LifecyclePassDto> lifecyclePasses;
     private List<RelationshipEdgeDto> relationshipEdges;
     private List<DealAssociationDto> dealAssociations;
     private List<IntroductionDto> introductions;
@@ -56,6 +57,7 @@ public class DataSubjectDisclosureDto {
         private String leadSourceDetail;
         private Integer referrerPersonId;
         private LocalDateTime firstResponseDueAt;
+        private LocalDateTime firstResponseStartedAt;
         private LocalDateTime firstRespondedAt;
         private LocalDateTime firstResponseBreachedAt;
         private LocalDateTime createdAt;
@@ -246,6 +248,28 @@ public class DataSubjectDisclosureDto {
      * travels with the answer, because "MET" discloses nothing on its own — the subject is entitled
      * to know what was asked as well as what was concluded.
      */
+    /**
+     * One lead-lifecycle pass recorded about the subject (#559). The pass retains its response and
+     * breach timestamps after those values are cleared from the contact, so disclosing only the
+     * live person fields would omit the subject's historical response record entirely.
+     */
+    @Data
+    public static class LifecyclePassDto {
+        private long id;
+        private int workspaceId;
+        private int personId;
+        private LocalDateTime enteredAt;
+        private LocalDateTime qualifiedAt;
+        private LocalDateTime convertedAt;
+        private LocalDateTime disqualifiedAt;
+        private LocalDateTime endedAt;
+        private LocalDateTime firstResponseStartedAt;
+        private LocalDateTime firstRespondedAt;
+        private LocalDateTime firstResponseDueAt;
+        private LocalDateTime firstResponseBreachedAt;
+        private Integer ownerId;
+    }
+
     @Data
     public static class QualificationAnswerDto {
         private int workspaceId;

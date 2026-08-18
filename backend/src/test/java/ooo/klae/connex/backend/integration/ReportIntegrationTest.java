@@ -2765,6 +2765,46 @@ class ReportIntegrationTest {
         }
     }
 
+    @Test
+    void leadLifecycleWidgetsAreAcceptedAndBoundToTheirOwnSource() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspace();
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+
+        List<CommercialWidget> accepted = List.of(
+                new CommercialWidget("lead-volume", "leads", "lead_count", "date", "bar"),
+                new CommercialWidget("lead-source", "leads", "lead_count", "lead_source", "donut"),
+                new CommercialWidget("qual-rate", "leads", "qualification_rate", "owner", "bar"),
+                new CommercialWidget("convert-days", "leads", "time_to_convert_days", "none", "kpi"),
+                new CommercialWidget("response-hours", "leads", "first_response_hours", "none", "kpi"),
+                new CommercialWidget("breach-rate", "leads", "first_response_breach_rate", "date", "line-area"));
+        for (CommercialWidget widget : accepted) {
+            mockMvc.perform(post("/api/reports")
+                    .header("X-Workspace-Id", workspace.getId())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(commercialReportBody(List.of(widget)))
+                    .session(session)
+                    .with(csrf().asHeader()))
+                .andExpect(status().isCreated());
+        }
+
+        List<CommercialWidget> rejected = List.of(
+                new CommercialWidget("lead-on-deals", "deals", "lead_count", "none", "kpi"),
+                new CommercialWidget("count-on-leads", "leads", "count", "none", "kpi"),
+                new CommercialWidget("lead-by-stage", "leads", "lead_count", "stage", "bar"),
+                new CommercialWidget("lead-source-elsewhere", "deals", "count", "lead_source", "bar"));
+        for (CommercialWidget widget : rejected) {
+            mockMvc.perform(post("/api/reports")
+                    .header("X-Workspace-Id", workspace.getId())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(commercialReportBody(List.of(widget)))
+                    .session(session)
+                    .with(csrf().asHeader()))
+                .andExpect(status().isBadRequest());
+        }
+    }
+
     private int createReport(MockHttpSession session, Workspace workspace) throws Exception {
         return createReport(session, workspace, REPORT_BODY);
     }

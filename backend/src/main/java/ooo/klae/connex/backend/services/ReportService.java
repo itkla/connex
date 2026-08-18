@@ -112,7 +112,18 @@ public class ReportService {
     private static final Set<String> BUCKETS = Set.of("day", "week", "month");
     private static final Set<String> CHART_TYPES = Set.of("bar", "line-area", "donut", "funnel", "table", "kpi");
     private static final Set<String> DATA_SOURCES = Set.of(
-            "deals", "people", "companies", "activities", "tasks", "relationships", "documents");
+            "deals", "people", "companies", "activities", "tasks", "relationships", "documents",
+            "leads");
+    /**
+     * Lead-lifecycle measures (#559 increment 6). Volume, qualification, and conversion read the
+     * append-only transition history rather than the contact's current stage, which cannot say a
+     * contact was ever qualified — only where it ended up.
+     */
+    private static final Set<String> LEAD_MEASURES = Set.of(
+            "lead_count", "qualified_count", "converted_count", "disqualified_count",
+            "qualification_rate", "conversion_rate", "time_to_convert_days",
+            "first_response_hours", "first_response_breach_rate");
+    private static final Set<String> LEAD_GROUPS = Set.of("none", "date", "owner", "lead_source");
     private static final Set<String> DEAL_MEASURES = Set.of(
             "count", "new_pipeline_value", "won_revenue", "win_rate", "avg_cycle_days",
             "open_pipeline_value", "open_deal_count", "at_risk_revenue",
@@ -129,10 +140,14 @@ public class ReportService {
     private static final Set<String> DOCUMENT_OUTCOME_MEASURES = Set.of("document_to_win_rate");
     private static final Set<String> NON_ADDITIVE_MEASURES = Set.of(
             "win_rate", "avg_cycle_days", "quote_issue_rate", "document_to_win_rate",
-            "approval_cycle_days");
+            "approval_cycle_days",
+            "qualification_rate", "conversion_rate", "time_to_convert_days",
+            "first_response_hours", "first_response_breach_rate");
     private static final Set<String> UNDEFINED_WHEN_EMPTY_MEASURES = Set.of(
             "quote_issue_rate", "document_to_win_rate", "approval_cycle_days",
-            "effective_discount_percent", "open_discount_percent");
+            "effective_discount_percent", "open_discount_percent",
+            "qualification_rate", "conversion_rate", "time_to_convert_days",
+            "first_response_hours", "first_response_breach_rate");
     private static final Set<String> FORECAST_MEASURES = Set.of(
             "forecast_best", "forecast_weighted", "forecast_worst");
     private static final Set<String> COMPANY_MEASURES = Set.of(
@@ -165,7 +180,7 @@ public class ReportService {
     private static final Set<String> TEMPLATE_KEYS = Set.of(
             "sales-performance", "pipeline-health", "relationship-coverage", "relationship-health",
             "forecasting", "quota-attainment", "activity-team", "network-warm-intros", "employment-moves",
-            "commercial-documents");
+            "commercial-documents", "lead-lifecycle");
 
     private final ReportMapper reportMapper;
     private final ScheduleMapper scheduleMapper;
@@ -317,6 +332,26 @@ public class ReportService {
                                         "effective_discount_percent", "none", "bar"),
                                 widget("open-discount", "Effective discount (open)", "deals",
                                         "open_discount_percent", "pipeline", "table"))),
+                template("lead-lifecycle", "Lead Lifecycle",
+                        "Where leads come from, how many qualify, how fast they are answered, "
+                            + "and what converts.",
+                        "monthly", "month", List.of(
+                                widget("lead-volume", "Leads entered", "leads",
+                                        "lead_count", "date", "line-area"),
+                                widget("lead-by-source", "Leads by source", "leads",
+                                        "lead_count", "lead_source", "donut"),
+                                widget("qualification-rate", "Qualification rate", "leads",
+                                        "qualification_rate", "none", "kpi"),
+                                widget("conversion-rate", "Conversion rate", "leads",
+                                        "conversion_rate", "none", "kpi"),
+                                widget("time-to-convert", "Time to convert", "leads",
+                                        "time_to_convert_days", "none", "kpi"),
+                                widget("first-response", "Time to first response", "leads",
+                                        "first_response_hours", "none", "kpi"),
+                                widget("breach-rate", "First-response breach rate", "leads",
+                                        "first_response_breach_rate", "date", "bar"),
+                                widget("qualified-by-owner", "Qualified by owner", "leads",
+                                        "qualified_count", "owner", "table"))),
                 template("activity-team", "Activity & Team", "Team activity and task execution.",
                         "weekly", List.of(
                                 widget("activity", "Activity volume", "activities", "count", "date", "line-area"),
@@ -988,6 +1023,7 @@ public class ReportService {
             case "people" -> EMPLOYMENT_MEASURES.contains(query.measure())
                     ? reportMapper.aggregateEmployment(query)
                     : reportMapper.aggregatePeople(query);
+            case "leads" -> reportMapper.aggregateLeadLifecycle(query);
             case "companies" -> reportMapper.aggregateCompanies(query);
             case "documents" -> DOCUMENT_APPROVAL_MEASURES.contains(query.measure())
                     ? reportMapper.aggregateDocumentApprovals(query)
@@ -1445,6 +1481,7 @@ public class ReportService {
 
     private static Set<String> supportedMeasureCatalog() {
         Set<String> measures = new HashSet<>(DEAL_MEASURES);
+        measures.addAll(LEAD_MEASURES);
         measures.addAll(COMPANY_MEASURES);
         measures.addAll(RELATIONSHIP_MEASURES);
         measures.addAll(EMPLOYMENT_MEASURES);
@@ -1478,6 +1515,7 @@ public class ReportService {
             case "companies" -> COMPANY_MEASURES;
             case "relationships" -> RELATIONSHIP_MEASURES;
             case "documents" -> DOCUMENT_MEASURES;
+            case "leads" -> LEAD_MEASURES;
             default -> COUNT_MEASURES;
         };
         Set<String> groups = switch (source) {
@@ -1488,6 +1526,7 @@ public class ReportService {
             case "companies" -> COMPANY_GROUPS;
             case "relationships" -> RELATIONSHIP_GROUPS;
             case "documents" -> DOCUMENT_GROUPS;
+            case "leads" -> LEAD_GROUPS;
             default -> Set.of();
         };
         if (!measures.contains(measure) || !groups.contains(group)
@@ -1514,6 +1553,8 @@ public class ReportService {
                 || DISCOUNT_MEASURES.contains(measure) && !DISCOUNT_GROUPS.contains(group)
                 || DOCUMENT_MEASURES.contains(measure) && !DOCUMENT_GROUPS.contains(group)
                 || EMPLOYMENT_MEASURES.contains(measure) && !EMPLOYMENT_GROUPS.contains(group)
+                || LEAD_MEASURES.contains(measure) && !"leads".equals(source)
+                || "leads".equals(source) && !LEAD_MEASURES.contains(measure)
                 || "people".equals(source) && "count".equals(measure)
                         && !Set.of("none", "company").contains(group)
                 || FORECAST_MEASURES.contains(measure)

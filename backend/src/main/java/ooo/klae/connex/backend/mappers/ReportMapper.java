@@ -106,6 +106,14 @@ public interface ReportMapper {
 
     List<ReportAggregateRow> aggregateEmployment(@Param("query") ReportAggregateQuery query);
 
+    /**
+     * Lead-lifecycle volume, qualification, conversion, and first-response measures (#559).
+     *
+     * @param query aggregate query
+     * @return one row per group
+     */
+    List<ReportAggregateRow> aggregateLeadLifecycle(@Param("query") ReportAggregateQuery query);
+
     List<ReportAggregateRow> aggregateCompanies(@Param("query") ReportAggregateQuery query);
 
     /**

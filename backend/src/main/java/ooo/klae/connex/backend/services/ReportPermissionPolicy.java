@@ -32,7 +32,10 @@ public class ReportPermissionPolicy {
             "employment_arrival_count",
             "effective_discount_percent", "open_discount_percent",
             "quote_count", "quote_issue_rate", "document_to_win_rate",
-            "approval_decision_count", "approval_cycle_days");
+            "approval_decision_count", "approval_cycle_days",
+            "lead_count", "qualified_count", "converted_count", "disqualified_count",
+            "qualification_rate", "conversion_rate", "time_to_convert_days",
+            "first_response_hours", "first_response_breach_rate");
     private static final Set<String> MAPPED_MEASURES = mappedMeasureCatalog();
 
     private final ObjectMapper objectMapper;

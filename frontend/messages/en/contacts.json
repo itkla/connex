@@ -421,6 +421,18 @@
             "OTHER": "Other"
         }
     },
+    "ContactLead": {
+        "title": "Lead",
+        "stageChanged": "Stage changed",
+        "reason": "Reason",
+        "blocking": "Blocking qualification",
+        "assess": "Assess",
+        "response": {
+            "due": "Response due",
+            "overdue": "Response overdue",
+            "answered": "Answered"
+        }
+    },
     "ContactQualification": {
         "title": "Qualification",
         "noCriteria": "No qualification criteria are configured for this workspace yet.",
@@ -428,6 +440,8 @@
         "unanswered": "{count} unanswered",
         "blocked": "This contact cannot be qualified until every required criterion is met.",
         "loadFailed": "Couldn't load this contact's qualification. Refresh to try again.",
+        "dialogDescription": "Answer the workspace\u0027s qualification criteria for this contact.",
+        "done": "Done",
         "toastFailed": "Couldn't record that answer.",
         "dimension": {
             "FIT": "Fit",

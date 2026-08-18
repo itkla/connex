@@ -41,7 +41,7 @@ class DataSubjectDisclosureMapperXmlTest {
         Set<String> expectedStatements = Set.of(
             "subjectPersonExists", "lockSubjectPersonForShare", "findPerson", "findIdentities", "findTags",
             "findCustomFields", "findActivities", "findNotes", "findTasks", "findAttachments",
-            "findEmployment", "findLifecycleHistory", "findQualificationAnswers",
+            "findEmployment", "findLifecycleHistory", "findQualificationAnswers", "findLifecyclePasses",
             "findEdges", "findDeals", "findIntroductions",
             "findProvisions",
             "findProviderCaptureEvidence", "findRecordCommentThreads", "findRecordComments");

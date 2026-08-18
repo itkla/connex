@@ -324,6 +324,81 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
         assertEquals(List.of(older.getId(), newer.getId()), breachingIds(workspace.getId()));
     }
 
+    @Test
+    void aClosedPassKeepsTheResponseOutcomeTheContactNoLongerHolds() {
+        Person person = enterLifecycle(newPerson(newCompany()));
+        slaService.startFirstResponseClock(person.getId(), 4);
+        logActivity(person, "Called back");
+
+        lifecycleService.withdrawFromLifecycle(person.getId(), "not a prospect after all");
+
+        Person cleared = personMapper.getPersonById(workspace.getId(), person.getId());
+        assertNull(cleared.getFirstRespondedAt(), "the contact's live clock is cleared as designed");
+
+        Map<String, Object> pass = jdbcTemplate.queryForMap(
+            "SELECT first_response_started_at, first_responded_at, ended_at "
+                + "FROM person_lifecycle_pass WHERE workspace_id = ? AND person_id = ?",
+            workspace.getId(), person.getId());
+        assertNotNull(pass.get("first_responded_at"),
+            "the pass keeps the response so historical reporting cannot change retroactively");
+        assertNotNull(pass.get("first_response_started_at"));
+        assertNotNull(pass.get("ended_at"));
+    }
+
+    @Test
+    void recyclingOpensASecondPassSoLatencyIsMeasuredWithinIt() {
+        Person person = enterLifecycle(newPerson(newCompany()));
+        lifecycleService.updateLifecycle(person.getId(), request(PersonLifecycleStage.DISQUALIFIED));
+        lifecycleService.updateLifecycle(person.getId(), request(PersonLifecycleStage.RECYCLED));
+        lifecycleService.updateLifecycle(person.getId(), request(PersonLifecycleStage.NEW));
+
+        Integer passes = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM person_lifecycle_pass WHERE workspace_id = ? AND person_id = ?",
+            Integer.class, workspace.getId(), person.getId());
+        assertEquals(2, passes, "each entry into the lifecycle is its own cohort member");
+
+        Integer open = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM person_lifecycle_pass "
+                + "WHERE workspace_id = ? AND person_id = ? AND ended_at IS NULL",
+            Integer.class, workspace.getId(), person.getId());
+        assertEquals(1, open, "exactly one pass is open at a time");
+    }
+
+    @Test
+    void aRecycledContactWorkedStraightToQualifiedStillGetsAPass() {
+        Person person = enterLifecycle(newPerson(newCompany()));
+        lifecycleService.updateLifecycle(person.getId(), request(PersonLifecycleStage.DISQUALIFIED));
+        lifecycleService.updateLifecycle(person.getId(), request(PersonLifecycleStage.RECYCLED));
+
+        lifecycleService.updateLifecycle(person.getId(), request(PersonLifecycleStage.WORKING));
+        lifecycleService.updateLifecycle(person.getId(), request(PersonLifecycleStage.QUALIFIED));
+
+        Integer qualifiedPasses = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM person_lifecycle_pass "
+                + "WHERE workspace_id = ? AND person_id = ? AND qualified_at IS NOT NULL",
+            Integer.class, workspace.getId(), person.getId());
+        assertEquals(1, qualifiedPasses,
+            "RECYCLED may go straight to WORKING, so entry is defined by where the contact came "
+                + "from; treating only NEW as an entry left the milestone with no pass to land on");
+    }
+
+    @Test
+    void thePassCreditsTheOwnerWhoQualifiedItNotAlaterAssignee() {
+        User first = newUser();
+        User second = newUser();
+        Person person = enterLifecycle(newPerson(newCompany()));
+        personService.updateOwner(person.getId(), first.getId());
+        lifecycleService.updateLifecycle(person.getId(), request(PersonLifecycleStage.QUALIFIED));
+
+        personService.updateOwner(person.getId(), second.getId());
+
+        Integer owner = jdbcTemplate.queryForObject(
+            "SELECT owner_id FROM person_lifecycle_pass WHERE workspace_id = ? AND person_id = ?",
+            Integer.class, workspace.getId(), person.getId());
+        assertEquals(first.getId(), owner,
+            "reassignment must not move credit for work already done");
+    }
+
     private List<Integer> breachingIds(int workspaceId) {
         return slaService.findBreaches(workspaceId, 50).stream().map(PersonBreachRow::id).toList();
     }

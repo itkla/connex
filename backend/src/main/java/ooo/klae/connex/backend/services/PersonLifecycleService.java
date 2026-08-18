@@ -18,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.PersonDisqualificationReason;
 import ooo.klae.connex.backend.beans.PersonLifecycleHistory;
+import ooo.klae.connex.backend.beans.PersonLifecyclePass;
 import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.dto.PersonLifecycleDto;
 import ooo.klae.connex.backend.dto.PersonLifecycleHistoryDto;
@@ -26,6 +27,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonLifecycleHistoryMapper;
+import ooo.klae.connex.backend.mappers.PersonLifecyclePassMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -54,6 +56,7 @@ public class PersonLifecycleService {
     private final AuditService auditService;
     private final RuleTriggerPublisher ruleTriggers;
     private final LeadResponseSlaService leadResponseSla;
+    private final PersonLifecyclePassMapper passMapper;
     private final PersonQualificationService qualificationService;
     private final NotificationChangePublisher notificationChanges;
     private final Clock clock;
@@ -185,6 +188,7 @@ public class PersonLifecycleService {
             workspaceId, personId, requested, changedAt, acceptedReason, retainedNote);
         if (transitioning) {
             recordTransition(workspaceId, personId, current, requested, acceptedReason, acceptedNote);
+            recordPass(workspaceId, personId, current, requested, changedAt);
             if (endsLifecyclePass(requested)) {
                 leadResponseSla.clearFirstResponseClock(workspaceId, personId);
             }
@@ -196,6 +200,66 @@ public class PersonLifecycleService {
             ruleTriggers.publish(workspaceId, "person", personId, "person.lifecycle_changed");
         }
         return after;
+    }
+
+    /**
+     * Keeps the pass ledger in step with the transition just accepted.
+     *
+     * <p>The pass is closed <em>before</em> the clock is cleared, so the response outcome is copied
+     * onto the pass while it still exists. Reporting reads passes, and a pass that lost its response
+     * data when it ended would make historical response time and breach rate disappear — and change
+     * past reports retroactively.
+     */
+    private void recordPass(
+            int workspaceId,
+            int personId,
+            PersonLifecycleStage from,
+            PersonLifecycleStage to,
+            LocalDateTime at) {
+        if (endsLifecyclePass(to)) {
+            passMapper.syncFirstResponse(workspaceId, personId);
+            passMapper.closeOpenPass(workspaceId, personId, at);
+            return;
+        }
+        if (entersLifecycle(from)) {
+            PersonLifecyclePass pass = new PersonLifecyclePass();
+            pass.setWorkspaceId(workspaceId);
+            pass.setPersonId(personId);
+            pass.setEnteredAt(at);
+            passMapper.insert(pass);
+        }
+        if (to == PersonLifecycleStage.QUALIFIED
+                || to == PersonLifecycleStage.CONVERTED
+                || to == PersonLifecycleStage.DISQUALIFIED) {
+            requirePassWrite(
+                passMapper.stampMilestone(workspaceId, personId, to.name(), at), personId, to);
+        }
+    }
+
+    /**
+     * Whether this transition is an entry into the lifecycle, which opens a pass.
+     *
+     * <p>Entry is defined by where the contact came <em>from</em>, not where it is going: a recycled
+     * contact may legally be worked straight to {@code WORKING}, {@code NURTURING}, {@code QUALIFIED}
+     * or {@code DISQUALIFIED} without passing through {@code NEW}, and treating only {@code NEW} as
+     * an entry left those passes unopened — their milestones then updated nothing at all.
+     */
+    private static boolean entersLifecycle(PersonLifecycleStage from) {
+        return from == null || from == PersonLifecycleStage.RECYCLED;
+    }
+
+    /**
+     * Fails the transition when a milestone found no open pass to record itself against.
+     *
+     * <p>The pass ledger is what reporting reads, so a silently skipped write is a figure that will
+     * be wrong forever with nothing to indicate it. Better to refuse the transition and surface the
+     * inconsistency than to accept it and publish an under-count.
+     */
+    private static void requirePassWrite(int rows, int personId, PersonLifecycleStage stage) {
+        if (rows == 0) {
+            throw new IllegalStateException(
+                "No open lifecycle pass to record " + stage + " for contact " + personId);
+        }
     }
 
     /**

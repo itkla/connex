@@ -84,6 +84,9 @@ public final class ProcessingRestrictionRegistry {
             "Introduction person projections exclude suspended people.");
         enroll(entries, "PersonEmploymentMapper", RestrictionStrategy.EXCLUDE_RESTRICTED,
             "Recent employment moves exclude both suspended and provision-ceased people.");
+        enroll(entries, "PersonLifecyclePassMapper", RestrictionStrategy.EXCLUDE_RESTRICTED,
+            "Copying a lifecycle pass's response outcome from the contact excludes both suspended "
+                + "and provision-ceased people; the pass's own timestamps carry no personal data.");
         enroll(entries, "ProviderCaptureMapper", RestrictionStrategy.DETECT_RESTRICTED,
             "Provider participant matching detects both restriction states before projection.");
         return Map.copyOf(entries);

@@ -21,7 +21,7 @@ export type ReportTemplateGroupId = 'pipeline' | 'relationships' | 'other';
 const REPORT_TEMPLATE_GROUPS: { id: Exclude<ReportTemplateGroupId, 'other'>; keys: string[] }[] = [
     {
         id: 'pipeline',
-        keys: ['sales-performance', 'pipeline-health', 'forecasting', 'quota-attainment', 'commercial-documents'],
+        keys: ['lead-lifecycle', 'sales-performance', 'pipeline-health', 'forecasting', 'quota-attainment', 'commercial-documents'],
     },
     {
         id: 'relationships',
@@ -71,6 +71,7 @@ export const REPORT_DATA_SOURCES: ReportDataSource[] = [
     'tasks',
     'relationships',
     'documents',
+    'leads',
 ];
 
 export const REPORT_CHART_TYPES: ReportChartType[] = ['bar', 'line-area', 'donut', 'funnel', 'table', 'kpi'];
@@ -118,6 +119,17 @@ export const REPORT_MEASURES: Record<ReportDataSource, ReportMeasure[]> = {
         'approval_decision_count',
         'approval_cycle_days',
     ],
+    leads: [
+        'lead_count',
+        'qualified_count',
+        'converted_count',
+        'disqualified_count',
+        'qualification_rate',
+        'conversion_rate',
+        'time_to_convert_days',
+        'first_response_hours',
+        'first_response_breach_rate',
+    ],
 };
 
 export const REPORT_GROUPS: Record<ReportDataSource, ReportGroupBy[]> = {
@@ -128,6 +140,7 @@ export const REPORT_GROUPS: Record<ReportDataSource, ReportGroupBy[]> = {
     tasks: ['none', 'date', 'status', 'owner'],
     relationships: ['none', 'warmth_band', 'trend'],
     documents: ['none', 'date', 'owner', 'company'],
+    leads: ['none', 'date', 'owner', 'lead_source'],
 };
 
 export function reportGroupsForMeasure(
@@ -154,6 +167,7 @@ export function reportGroupsForMeasure(
         return ['none', 'date', 'pipeline', 'stage', 'owner', 'company'];
     }
     if (measure === 'attainment') return ['none', 'owner'];
+    if (dataSource === 'leads') return REPORT_GROUPS.leads;
     if (dataSource === 'documents') return REPORT_GROUPS.documents;
     if (dataSource === 'companies') return ['none', 'industry'];
     if (dataSource === 'deals') return REPORT_GROUPS.deals.filter((group) => group !== 'deal');

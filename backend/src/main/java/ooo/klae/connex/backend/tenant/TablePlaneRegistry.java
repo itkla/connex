@@ -180,6 +180,7 @@ public final class TablePlaneRegistry {
         "person_edge",
         "person_employment",
         "person_lifecycle_history",
+        "person_lifecycle_pass",
         "person_qualification_answer",
         "person_share",
         "person_tag",

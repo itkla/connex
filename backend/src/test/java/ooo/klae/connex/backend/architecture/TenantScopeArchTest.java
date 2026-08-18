@@ -150,6 +150,7 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.RecordCommentMapper.deleteReactionsAnywhere",
         "ooo.klae.connex.backend.mappers.CompanyMapper.clearOwnershipAnywhere",
         "ooo.klae.connex.backend.mappers.PersonMapper.clearOwnershipAnywhere",
+        "ooo.klae.connex.backend.mappers.PersonLifecyclePassMapper.clearOwnerAnywhere",
         "ooo.klae.connex.backend.mappers.DealMapper.clearOwnershipAnywhere",
         "ooo.klae.connex.backend.mappers.DealMapper.removeCollaboratorAnywhere",
         "ooo.klae.connex.backend.mappers.DealDuplicateReviewProofMapper.deleteForActorAnywhere",

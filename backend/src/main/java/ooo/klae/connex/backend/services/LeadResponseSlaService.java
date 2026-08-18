@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.dto.PersonBreachRow;
+import ooo.klae.connex.backend.mappers.PersonLifecyclePassMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -38,6 +39,13 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
  *
  * <p>Like the rest of the lead lifecycle, the clock is strictly the owning workspace's own record
  * of how fast it answered. A contact that is merely shared in is not addressable here.
+ *
+ * <p>A clock may be started on a contact that is not in a lead lifecycle at all — a
+ * {@code set_response_due} rule on {@code person.created} does exactly that — so copying the
+ * outcome onto a lifecycle pass is allowed to match nothing. That is not a lost write: such a clock
+ * has no cohort to belong to and is simply absent from lead reporting, which is the truthful
+ * outcome. A stage milestone that finds no pass <em>is</em> a corrupt ledger and fails loudly in
+ * {@code PersonLifecycleService}; the asymmetry is deliberate.
  */
 @Service
 @RequiredArgsConstructor
@@ -49,6 +57,7 @@ public class LeadResponseSlaService {
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
     private final RuleTriggerPublisher ruleTriggers;
+    private final PersonLifecyclePassMapper passMapper;
     private final NotificationChangePublisher notificationChanges;
     private final Clock clock;
 
@@ -67,11 +76,13 @@ public class LeadResponseSlaService {
     public boolean startFirstResponseClock(int personId, Integer dueInHours) {
         int hours = requireDueInHours(dueInHours);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Person person = requireOwnedPerson(workspaceId, personId);
-        LocalDateTime dueAt = now().plusHours(hours);
-        if (personMapper.startFirstResponseClock(workspaceId, personId, dueAt) == 0) {
+        Person person = requireAssessablePerson(workspaceId, personId);
+        LocalDateTime startedAt = now();
+        LocalDateTime dueAt = startedAt.plusHours(hours);
+        if (personMapper.startFirstResponseClock(workspaceId, personId, startedAt, dueAt) == 0) {
             return false;
         }
+        passMapper.syncFirstResponse(workspaceId, personId);
         auditService.record("person.first_response_sla", "person", personId, person.getName(),
             "Started the first-response SLA for " + person.getName(),
             Map.of("firstResponseDueAt", Map.of("from", "none", "to", dueAt.toString())));
@@ -93,6 +104,7 @@ public class LeadResponseSlaService {
      */
     public void recordFirstResponse(int workspaceId, int personId) {
         if (personMapper.recordFirstResponse(workspaceId, personId, now()) > 0) {
+            passMapper.syncFirstResponse(workspaceId, personId);
             notificationChanges.publish(workspaceId, "person", personId);
         }
     }
@@ -147,6 +159,7 @@ public class LeadResponseSlaService {
         if (personMapper.recordFirstResponseBreach(workspaceId, personId, breachedAt) == 0) {
             return false;
         }
+        passMapper.syncFirstResponse(workspaceId, personId);
         String name = breaching.name() == null ? "contact " + personId : breaching.name();
         auditService.record("person.first_response_breached", "person", personId, name,
             "First-response SLA breached for " + name,
@@ -162,6 +175,26 @@ public class LeadResponseSlaService {
                 "A first-response SLA must be between 1 and " + MAX_DUE_IN_HOURS + " hours");
         }
         return dueInHours;
+    }
+
+    /**
+     * The contact, locked for the write.
+     *
+     * <p>Taking the same row lock the lifecycle transition takes is what stops a clock being started
+     * against a pass that is closing: without it, a withdrawal committing between the read and the
+     * write leaves a live deadline attached to no pass, invisible to reporting and to the sweep's
+     * own accounting.
+     */
+    private Person requireAssessablePerson(int workspaceId, int personId) {
+        Person person = personMapper.getOwnedPersonByIdForUpdate(workspaceId, personId);
+        if (person == null
+                || person.getWorkspaceId() != workspaceId
+                || person.getArchivedAt() != null
+                || person.getSuspendedAt() != null
+                || person.getProvisionCeasedAt() != null) {
+            throw new ResourceNotFoundException("Person not found with id: " + personId);
+        }
+        return person;
     }
 
     private Person requireOwnedPerson(int workspaceId, int personId) {

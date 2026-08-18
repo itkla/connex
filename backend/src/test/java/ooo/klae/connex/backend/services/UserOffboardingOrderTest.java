@@ -37,6 +37,7 @@ import ooo.klae.connex.backend.mappers.DealDuplicateReviewProofMapper;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.mappers.PersonLifecyclePassMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RelationshipSignalMapper;
@@ -65,6 +66,7 @@ class UserOffboardingOrderTest {
     @Mock private NotificationMapper notificationMapper;
     @Mock private CompanyMapper companyMapper;
     @Mock private PersonMapper personMapper;
+    @Mock private PersonLifecyclePassMapper personLifecyclePassMapper;
     @Mock private DealMapper dealMapper;
     @Mock private DealDuplicateReviewProofMapper dealDuplicateReviewProofMapper;
     @Mock private ReportMapper reportMapper;

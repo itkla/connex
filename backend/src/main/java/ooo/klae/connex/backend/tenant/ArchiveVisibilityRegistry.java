@@ -246,6 +246,11 @@ public final class ArchiveVisibilityRegistry {
                 + "keyed by an already-authorised contact. The recent-moves feed projects the "
                 + "contact's own name and picture and is returned verbatim by EmploymentService, so "
                 + "its join carries the archive predicate itself.");
+        declare(entries, "PersonLifecyclePassMapper", ArchiveStrategy.NO_RECORD_PROJECTION,
+            "Lifecycle passes join the contact only to resolve its key and copy the pass's own "
+                + "response timestamps, and project no identifying person column. Archiving a "
+                + "contact must not rewrite the lifecycle history already recorded against it, so "
+                + "the pass rows themselves stay reachable for reporting and teardown.");
         declare(entries, "ProviderCaptureMapper", ArchiveStrategy.NO_RECORD_PROJECTION,
             "Provider capture checks the retained person row only for processing restrictions and "
                 + "never projects identifying person or company fields; participant evidence stays "

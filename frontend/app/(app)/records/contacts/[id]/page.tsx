@@ -29,9 +29,7 @@ import Timeline from "@/app/components/me/Timeline";
 import Attachments from "@/app/components/attachments/Attachments";
 import CommentsSection from "@/app/components/records/comments/CommentsSection";
 import CustomFieldRows from "@/app/components/records/CustomFieldRows";
-import ContactLifecyclePanel from "@/app/components/records/contacts/ContactLifecyclePanel";
-import ContactQualificationPanel from "@/app/components/records/contacts/ContactQualificationPanel";
-import ContactProvenancePanel from "@/app/components/records/contacts/ContactProvenancePanel";
+import ContactLeadPanel from "@/app/components/records/contacts/ContactLeadPanel";
 import EngineEvaluationPanel from "@/app/components/records/EngineEvaluationPanel";
 import RecordDetailSection from "@/app/components/records/RecordDetailSection";
 import { formatCompactCurrency, formatDate, formatDateTime, formatShortDate } from "@/app/lib/utils";
@@ -290,44 +288,13 @@ export default async function ContactPage({ params }: ContactPageProps) {
                             ) : null}
                         </RecordDetailSection>
 
-                        {ownsContact ? (
-                            <ContactProvenancePanel
-                                contactId={contact.id}
-                                ownerWorkspaceId={contact.workspaceId}
-                                leadSource={contact.leadSource ?? null}
-                                leadSourceDetail={contact.leadSourceDetail ?? null}
-                                referrerPersonId={contact.referrerPersonId ?? null}
-                                referrer={referrer}
-                                canEdit={effectivePermissions.includes("PERSON_UPDATE")
-                                    && !contact.archivedAt
-                                    && !contact.suspendedAt
-                                    && !contact.provisionCeasedAt}
-                                className="mt-0"
-                            />
-                        ) : null}
-
                         {ownsContact && lifecycle ? (
-                            <ContactLifecyclePanel
-                                contactId={contact.id}
+                            <ContactLeadPanel
+                                contact={contact}
                                 lifecycle={lifecycle}
-                                firstResponse={{
-                                    dueAt: contact.firstResponseDueAt,
-                                    respondedAt: contact.firstRespondedAt,
-                                    breachedAt: contact.firstResponseBreachedAt,
-                                }}
-                                canEdit={effectivePermissions.includes("PERSON_UPDATE")
-                                    && !contact.archivedAt
-                                    && !contact.suspendedAt
-                                    && !contact.provisionCeasedAt}
-                                hasLinkedDeal={deals.length > 0}
-                                className="mt-0"
-                            />
-                        ) : null}
-
-                        {ownsContact ? (
-                            <ContactQualificationPanel
-                                contactId={contact.id}
                                 qualification={"loaded" in qualification ? qualification.loaded : null}
+                                referrer={referrer}
+                                hasLinkedDeal={deals.length > 0}
                                 canEdit={effectivePermissions.includes("PERSON_UPDATE")
                                     && !contact.archivedAt
                                     && !contact.suspendedAt

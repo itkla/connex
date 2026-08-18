@@ -21,6 +21,7 @@ import ooo.klae.connex.backend.mappers.DealDuplicateReviewProofMapper;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.mappers.PersonLifecyclePassMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RelationshipSignalMapper;
@@ -75,6 +76,7 @@ public class UserOffboardingService {
     private final NotificationMapper notificationMapper;
     private final CompanyMapper companyMapper;
     private final PersonMapper personMapper;
+    private final PersonLifecyclePassMapper personLifecyclePassMapper;
     private final DealMapper dealMapper;
     private final DealDuplicateReviewProofMapper dealDuplicateReviewProofMapper;
     private final TaskMapper taskMapper;
@@ -316,6 +318,7 @@ public class UserOffboardingService {
         }
         companyMapper.clearOwnershipAnywhere(userId);
         personMapper.clearOwnershipAnywhere(userId);
+        personLifecyclePassMapper.clearOwnerAnywhere(userId);
         dealMapper.clearOwnershipAnywhere(userId);
         aiChatMapper.clearSessionCreatorsAnywhere(userId);
         aiChatMapper.clearMessageAuthorsAnywhere(userId);
