@@ -318,7 +318,7 @@
     "DealsNewDialog": {
         "companySearchFailed": "Couldn't search companies. Try again.",
         "title": "New deal",
-        "description": "Add a deal to your pipeline. Deals are shared with all users of this organization.",
+        "description": "Add a deal to your pipeline. Deals are shared with everyone in this workspace.",
         "name": "Name",
         "namePlaceholder": "Acme renewal Q4",
         "value": "Value",

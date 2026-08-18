@@ -242,7 +242,7 @@
     "ContactsNewContactDialog": {
         "companySearchFailed": "Couldn't search companies. Try again.",
         "dialogTitle": "New contact",
-        "description": "Add a person to your contacts. These contacts will be shared with all users of this organization.",
+        "description": "Add a person to your contacts. These contacts will be shared with everyone in this workspace.",
         "businessCard": "Business card",
         "businessCardDescription": "Scan or upload a JPEG, PNG, or WebP image, then review every detail. Automatic reading runs on this Connex instance when available; otherwise, the metadata-free image may be sent to your organization's configured AI provider. A metadata-free copy is saved with the contact when you finish.",
         "cardAvailabilityLoading": "Checking business-card availability…",

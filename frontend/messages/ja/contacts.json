@@ -242,7 +242,7 @@
     "ContactsNewContactDialog": {
         "companySearchFailed": "会社を検索できませんでした。もう一度お試しください。",
         "dialogTitle": "新規連絡先",
-        "description": "連絡先に人物を追加します。追加した連絡先は組織内の全ユーザーで共有されます。",
+        "description": "連絡先に人物を追加します。追加した連絡先はこのワークスペースのメンバー全員と共有されます。",
         "businessCard": "名刺",
         "businessCardDescription": "名刺を撮影するか、JPEG・PNG・WebP画像を選択して、すべての項目を確認してください。自動読み取りは、利用可能な場合はこのConnexインスタンス内で処理されます。利用できない場合は、メタデータを除去した画像が組織で設定されたAIプロバイダーに送信されることがあります。完了すると、メタデータを除去した画像が連絡先に保存されます。",
         "cardAvailabilityLoading": "名刺機能を確認しています…",

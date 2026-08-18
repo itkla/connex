@@ -66,7 +66,7 @@ Numbered and testable. Cite them by number in reviews.
 
 ## 4. Vocabulary
 
-**This section is the canonical glossary — the single source of truth for product terms.** There is no other glossary file. The CI banned-terms lint over the product's message catalogs (EN and JA patterns) is **generated from this section**: edit here, and the gate follows. (The generator and CI gate land with the copy workstream of the product-overhaul program, #1323; until they exist, reviewers enforce this section by hand.) Labels, columns, titles, and buttons use these terms verbatim; prose may vary naturally around them. "Never say" applies to product surfaces — code, schema, logs, and engineering docs keep their own names.
+**This section is the canonical glossary — the single source of truth for product terms.** There is no other glossary file. The CI banned-terms lint over the product's message catalogs (EN and JA patterns) is **generated from this section**: edit here, and the gate follows. (The generator is `frontend/lint/vocabulary.mjs`, which writes the checked-in pattern set; the gate is the `frontend/test/unit/vocabularyLint.test.ts` suite, which scans both message catalogs against it in error mode over a baseline that only shrinks. Editing this section without regenerating fails the generator test.) Labels, columns, titles, and buttons use these terms verbatim; prose may vary naturally around them. "Never say" applies to product surfaces — code, schema, logs, and engineering docs keep their own names.
 
 | Concept | EN | JA | Never say (on product surfaces) |
 |---|---|---|---|
