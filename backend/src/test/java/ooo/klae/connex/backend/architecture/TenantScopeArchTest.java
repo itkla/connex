@@ -150,8 +150,6 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.RecordCommentMapper.deleteReactionsAnywhere",
         "ooo.klae.connex.backend.mappers.CompanyMapper.clearOwnershipAnywhere",
         "ooo.klae.connex.backend.mappers.PersonMapper.clearOwnershipAnywhere",
-        // Permanent account erasure must reach every workspace's credit for the erased user, so the
-        // lifecycle pass's historical owner is cleared account-wide like the record owners above.
         "ooo.klae.connex.backend.mappers.PersonLifecyclePassMapper.clearOwnerAnywhere",
         "ooo.klae.connex.backend.mappers.DealMapper.clearOwnershipAnywhere",
         "ooo.klae.connex.backend.mappers.DealMapper.removeCollaboratorAnywhere",
