@@ -15,8 +15,8 @@ const inventories: [string, string[], number][] = [
 ];
 
 describe.each(inventories)("%s exclusion inventory", (_name, exclusions, baseline) => {
-    it("only ever shrinks", () => {
-        expect(exclusions.length).toBeLessThanOrEqual(baseline);
+    it("matches the committed ledger exactly", () => {
+        expect(exclusions.length).toBe(baseline);
     });
 
     it("names each file once, in order", () => {

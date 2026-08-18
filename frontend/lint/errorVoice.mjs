@@ -2,8 +2,9 @@
  * The error-voice lint gates and their burndown inventory (#1337).
  *
  * Two rules keep failure copy in one dialect: nothing imports `sonner` except the branded toast
- * helpers, and no raw error text is carried into a toast. Both ship in error mode, so the lists
- * below are the *only* thing standing between today's code and a green build.
+ * helpers, and no raw error text is carried into a toast. Both ship in error mode. The selectors
+ * catch the idioms the audited inventory actually contains — determined evasion (aliased imports,
+ * multi-step variable laundering, non-toast render paths) is review's job, not this gate's.
  *
  * **The burndown contract.** `SONNER_IMPORT_EXCLUSIONS` and `RAW_ERROR_TOAST_EXCLUSIONS` are the
  * committed inventory of files that still violate their rule — the denominator for every "every
@@ -123,11 +124,13 @@ export const RAW_ERROR_TOAST_EXCLUSIONS = [
 ];
 
 /**
- * The size of each list when the gates landed. A list may shrink; it may never grow past this.
+ * The current size of each list — the burndown ledger. Every commit that migrates a file lowers the
+ * matching count in the same change, so the inventory test holds the lists exactly at this number
+ * and regressions cannot hide in slack between an old high-water mark and today's list.
  */
 export const EXCLUSION_BASELINE = {
-    sonnerImports: 21,
-    rawErrorToasts: 103,
+    sonnerImports: 13,
+    rawErrorToasts: 77,
 };
 
 const SONNER_IMPORT_MESSAGE =
@@ -148,7 +151,12 @@ const RAW_TEXT_IN_TOAST_SELECTOR =
     ":matches("
     + "CallExpression[callee.name=/[Tt]oast/],"
     + "CallExpression[callee.object.name='toast'][callee.property.name=/^(error|warning|info|success|message|custom)$/]"
-    + ") :matches(MemberExpression[property.name='message'], CallExpression[callee.name='String'])";
+    + ") :matches("
+    + "MemberExpression[property.name='message'], "
+    + "CallExpression[callee.name='String'], "
+    + "CallExpression[callee.property.name='toString'], "
+    + "TemplateLiteral Identifier[name=/^(e|err|error|cause)$/]"
+    + ")";
 
 /**
  * Flags the same leak one step removed — `const message = err instanceof ApiError ? err.message : …`
