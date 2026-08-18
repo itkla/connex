@@ -149,7 +149,7 @@
   },
   "CompaniesNewDialog": {
     "title": "New company",
-    "description": "Add a company to your records. These companies will be shared with all users of this organization.",
+    "description": "Add a company to your records. These companies will be shared with everyone in this workspace.",
     "labelName": "Name",
     "placeholderName": "Acme Corp",
     "labelWebsite": "Website",

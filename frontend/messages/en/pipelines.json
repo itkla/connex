@@ -49,7 +49,7 @@
   },
   "PipelinesNewDialog": {
     "title": "New pipeline",
-    "description": "Add a pipeline to your records. These pipelines will be shared with all users of this organization.",
+    "description": "Add a pipeline to your records. These pipelines will be shared with everyone in this workspace.",
     "name": "Name",
     "namePlaceholder": "Sales Pipeline",
     "stages": "Stages",
