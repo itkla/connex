@@ -40,6 +40,7 @@ const REFERENCE_KEY = "ApiErrors.reference";
  */
 const CODE_MESSAGE_KEYS = new Map<string, string>([
     ["IDENTITY_COLLISION_REPORT_TIMEOUT", "ApiErrors.identityCollisionReportTimeout"],
+    ["SHARE_BLOCKED_PRIVACY_HOLD", "ApiErrors.sharePrivacyHold"],
 ]);
 
 function statusMessageKey(status: number): string {
