@@ -591,13 +591,15 @@ This is the single most common support-flow mistake, so internalize it before th
 
 | The user is looking at | They can quote | Where it comes from |
 |---|---|---|
-| A broken **page** (render/boundary failure) | **`Reference: <digest>`** — a Next.js server digest | The error screen renders it in monospace, `select-all`. **This is the only correlation-like identifier shown outside the admin diagnostics panels.** |
+| A broken **page** (render/boundary failure) | **`Reference: <digest>`** — a Next.js server digest | The error screen renders it in monospace, `select-all`. This is the page identifier; it is NOT the API correlation ID. |
+| A failed **in-app action** (an error toast) | **`Reference: <correlationId>`** appended to the toast body | The API error mapper (`frontend/app/lib/errorMessages.ts`) appends it whenever the response carried a correlation id — today only the catch-all 500 handler emits one |
 | A raw API `500` (curl, devtools, an integration) | `correlationId` in the JSON body, and the `X-Correlation-Id` response header | The catch-all exception handler and the correlation filter |
 
-**No everyday screen renders the correlation ID.** The frontend parses it into `ApiError.correlationId`
-and displays it only in the workspace/organization diagnostics and mail-deliverability panels (as
-"Reference ID"). So a user reporting a broken page will hand you a **digest**, not a
-correlation ID — asking them for a correlation ID will produce confusion, not an identifier.
+**Which identifier you get depends on what broke.** A failed action (toast) hands you the API
+correlation ID as `Reference: <id>`; the admin diagnostics and mail-deliverability panels show the
+same id as "Reference ID". A broken **page** hands you a Next.js **digest** — also labeled
+`Reference:` — which is not a correlation ID and cannot be looked up as one. Distinguish them by
+what the user was doing: an action that failed → correlation ID; a page that wouldn't render → digest.
 
 When the frontend error boundary fires, it best-effort reports to `POST /api/client-errors`. The
 digest, message, and stack remain only in the local log sink and never enter the database or bundle:

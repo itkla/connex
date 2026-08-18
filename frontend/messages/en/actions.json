@@ -104,7 +104,7 @@
       "linkCopied": "Link copied to clipboard",
       "recordLinkCopied": "Link to {label} copied",
       "allNotificationsRead": "All notifications marked as read",
-      "runFailed": "Something went wrong. Please try again.",
+      "runFailed": "Couldn't run that action",
       "companyCreated": "Company created",
       "companyLogoUploadFailed": "The company was created, but its logo couldn't be uploaded. Add it from the company profile.",
       "personCreated": "Contact created",

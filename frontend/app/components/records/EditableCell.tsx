@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 
 import { fieldInputClass } from '@/components/ui/dialog-status-cover';
 import { cn } from '@/lib/utils';
-import { ApiError } from '@/app/lib/api';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { toastError } from '@/app/lib/toast';
 
 /**
@@ -30,6 +30,7 @@ export default function EditableCell({
     ariaLabel: string;
 }) {
     const t = useTranslations('RecordInlineEdit');
+    const showApiError = useApiErrorToast('RecordInlineEdit');
     const [editing, setEditing] = useState(false);
     const [saving, setSaving] = useState(false);
 
@@ -48,7 +49,7 @@ export default function EditableCell({
         try {
             await onCommit(next);
         } catch (err) {
-            toastError(err instanceof ApiError ? err.message : t('saveFailed'));
+            showApiError(err, 'saveFailed');
         } finally {
             setSaving(false);
         }

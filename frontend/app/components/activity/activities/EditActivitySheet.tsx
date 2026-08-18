@@ -3,7 +3,6 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
 import { ChatBubbleLeftRightIcon } from '@heroicons/react/24/outline';
@@ -23,7 +22,8 @@ import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import { ACTIVITY_REFERENCE_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
 import RecordSelect from '@/app/components/records/RecordSelect';
 
-import { ApiError, updateActivity } from '@/app/lib/api';
+import { updateActivity } from '@/app/lib/api';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { ActivityTypePicker, normalizeType, type ActivityType } from '@/app/components/activity/activities/activityTypes';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import {
@@ -95,6 +95,7 @@ export default function EditActivitySheet({
 }) {
     const router = useRouter();
     const t = useTranslations('ActivityEditActivitySheet');
+    const showApiError = useApiErrorToast('ActivityEditActivitySheet');
     const { activeWorkspaceId, switching } = useWorkspace();
     const [draft, setDraft] = useState<ActivityDraft>(() => toDraft(activity));
     const [session, setSession] = useState<EditSession | null>(() =>
@@ -183,7 +184,7 @@ export default function EditActivitySheet({
             return;
         }
         if (!draft.subject.trim()) {
-            toast.error(t('subjectRequired'));
+            toastError(t('subjectRequired'));
             return;
         }
         setSavingSession(current);
@@ -205,8 +206,7 @@ export default function EditActivitySheet({
             router.refresh();
         } catch (err) {
             if (sessionRef.current !== current || current.controller.signal.aborted) return;
-            const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('updateFailed');
-            toastError(message);
+            showApiError(err, 'updateFailed');
         } finally {
             finishSaving(current);
         }

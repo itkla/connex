@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { toast } from 'sonner';
 import { PlusIcon } from '@heroicons/react/24/solid';
 import { Loader2Icon } from 'lucide-react';
 
@@ -28,7 +27,8 @@ import { cn } from '@/lib/utils';
 
 import { toMysqlDateTime } from '@/app/lib/utils';
 
-import { ApiError, addDealPerson, createActivity, getCompanyDeals } from '@/app/lib/api';
+import { addDealPerson, createActivity, getCompanyDeals } from '@/app/lib/api';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { type Deal } from '@/app/lib/types';
 
@@ -51,6 +51,7 @@ export default function NewActivityDialog({
 }) {
     const router = useRouter();
     const t = useTranslations('ContactsNewActivityDialog');
+    const showApiError = useApiErrorToast('ContactsNewActivityDialog');
     const controlled = openProp !== undefined;
     const [internalOpen, setInternalOpen] = useState(false);
     const open = controlled ? openProp : internalOpen;
@@ -79,7 +80,7 @@ export default function NewActivityDialog({
     async function handleSubmit(e: React.SubmitEvent<HTMLFormElement>) {
         e.preventDefault();
         if (!subject.trim()) {
-            toast.error(t('toastSubjectRequired'));
+            toastError(t('toastSubjectRequired'));
             return;
         }
         setSubmitting(true);
@@ -103,8 +104,7 @@ export default function NewActivityDialog({
             router.refresh();
             setTimeout(() => setOpen(false), 900);
         } catch (err) {
-            const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('toastFailedLog');
-            toastError(message);
+            showApiError(err, 'toastFailedLog');
         } finally {
             setSubmitting(false);
         }
@@ -124,15 +124,14 @@ export default function NewActivityDialog({
             })
             .catch((err) => {
                 if (!active) return;
-                const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('toastFailedLoadDeals');
-                toastError(message);
+                showApiError(err, 'toastFailedLoadDeals');
                 setDeals([]);
                 setLoadedCompanyId(cid);
             });
         return () => {
             active = false;
         };
-    }, [open, companyId, t]);
+    }, [companyId, open, showApiError, t]);
 
     const status = resolveDialogStatus({ isLoading: submitting, isSuccess: succeeded });
 

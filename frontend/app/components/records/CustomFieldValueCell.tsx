@@ -14,8 +14,8 @@ import {
 import { fieldInputClass } from "@/components/ui/dialog-status-cover";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/app/lib/utils";
-import { ApiError, updateEntityCustomField } from "@/app/lib/api";
-import { toastError } from "@/app/lib/toast";
+import { updateEntityCustomField } from "@/app/lib/api";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import type {
     CustomFieldCellValue,
     CustomFieldEntityType,
@@ -54,6 +54,7 @@ export function CustomFieldValueCell({
     align?: "left" | "right";
 }) {
     const t = useTranslations("RecordCustomFields");
+    const showApiError = useApiErrorToast("RecordCustomFields");
     const locale = useLocale();
     const [editing, setEditing] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -70,7 +71,7 @@ export function CustomFieldValueCell({
             if (saved) onChange(saved.value);
         } catch (err) {
             onChange(previous);
-            toastError(err instanceof ApiError ? err.message : t("saveFailed"));
+            showApiError(err, "saveFailed");
         } finally {
             setSaving(false);
         }

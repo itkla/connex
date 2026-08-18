@@ -13,8 +13,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import DocumentBodyEditor from '@/app/components/library/documents/editor/DocumentBodyEditor';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import { createDocumentTemplate, updateDocumentTemplate, ApiError } from '@/app/lib/api';
+import { createDocumentTemplate, updateDocumentTemplate } from '@/app/lib/api';
 import { DOCUMENT_TYPES } from '@/app/lib/documentTokens';
 import type { CreateDocumentTemplatePayload, DocumentBodyNode, DocumentTemplate, DocumentType } from '@/app/lib/types';
 
@@ -89,6 +90,7 @@ function toDraft(template: DocumentTemplate | null, termsLabel: string): Draft {
  */
 export default function TemplateBuilder({ template }: { template: DocumentTemplate | null }) {
     const t = useTranslations('DocumentTemplateBuilder');
+    const showApiError = useApiErrorToast('DocumentTemplateBuilder');
     const router = useRouter();
     const [draft, setDraft] = useState<Draft>(() => toDraft(template, t('slashTermsHeading')));
     const [saving, setSaving] = useState(false);
@@ -123,7 +125,7 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
             router.push('/library/documents');
             router.refresh();
         } catch (err) {
-            toastError(err instanceof ApiError ? err.message : t('saveFailed'));
+            showApiError(err, 'saveFailed');
         } finally {
             setSaving(false);
         }

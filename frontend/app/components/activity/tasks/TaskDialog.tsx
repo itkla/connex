@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { isSessionExpired } from '@/app/lib/sessionExpiry';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
 import { ClipboardDocumentCheckIcon, Bars3BottomLeftIcon, CalendarIcon, UserCircleIcon, UserIcon, BriefcaseIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
@@ -35,8 +36,9 @@ import { InputGroupAddon } from '@/components/ui/input-group';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
 
-import { ApiError, createTask, isFieldError } from '@/app/lib/api';
+import { createTask, isFieldError } from '@/app/lib/api';
 import { isSubmitShortcut } from '@/app/lib/submitShortcut';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { DRAFT_VERSIONS } from '@/app/lib/formDrafts';
 import type { Contact, CreateTaskPayload, Deal, User } from '@/app/lib/types';
@@ -266,6 +268,7 @@ export function TaskDialogForm({
 }: TaskDialogFormProps) {
     const router = useRouter();
     const t = useTranslations('ActivityTasksDialog');
+    const showApiError = useApiErrorToast('ActivityTasksDialog');
 
     const [description, setDescription] = useState(() => defaultDescription);
     const [dueDate, setDueDate] = useState(() => defaultDueDate);
@@ -372,13 +375,8 @@ export function TaskDialogForm({
                 }
                 return;
             }
-            const message = failureMessage ?? (
-                err instanceof ApiError
-                    ? err.message
-                    : err instanceof Error
-                      ? err.message
-                      : t('toastFailedCreate'));
-            toastError(message);
+            if (failureMessage && !isSessionExpired(err)) toastError(failureMessage);
+            else showApiError(err, 'toastFailedCreate');
         } finally {
             if (!requestInit?.signal?.aborted) {
                 setSubmitting(false);

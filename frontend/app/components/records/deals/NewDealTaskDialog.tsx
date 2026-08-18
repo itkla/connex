@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { toast } from 'sonner';
 import { Loader2Icon } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
@@ -24,8 +23,9 @@ import RecordSelect from '@/app/components/records/RecordSelect';
 import { UserCircleIcon, UserIcon, Bars3BottomLeftIcon, CalendarIcon } from '@heroicons/react/24/outline';
 import { cn } from '@/lib/utils';
 
-import { addDealPerson, ApiError, createTask, getCompanyPeople, getUsers } from '@/app/lib/api';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { addDealPerson, createTask, getCompanyPeople, getUsers } from '@/app/lib/api';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { toastError, toastSuccess, toastWarn } from '@/app/lib/toast';
 import { type Contact, type Deal, type User } from '@/app/lib/types';
 
 export default function NewDealTaskDialog({
@@ -45,6 +45,7 @@ export default function NewDealTaskDialog({
 }) {
     const router = useRouter();
     const t = useTranslations('DealsNewTaskDialog');
+    const showApiError = useApiErrorToast('DealsNewTaskDialog');
     const [description, setDescription] = useState('');
     const [dueDate, setDueDate] = useState('');
     const [submitting, setSubmitting] = useState(false);
@@ -63,7 +64,7 @@ export default function NewDealTaskDialog({
     async function handleSubmit(e: React.SubmitEvent<HTMLFormElement>) {
         e.preventDefault();
         if (!description.trim()) {
-            toast.error(t('descriptionRequired'));
+            toastError(t('descriptionRequired'));
             return;
         }
         setSubmitting(true);
@@ -78,7 +79,7 @@ export default function NewDealTaskDialog({
             });
             if (personId != null) {
                 await addDealPerson(dealId, personId, '').catch(() => {
-                    toast.warning(t('taskCreatedButFailedToLink'));
+                    toastWarn(t('taskCreatedButFailedToLink'));
                 });
             }
             toastSuccess(t('taskAdded'));
@@ -87,8 +88,7 @@ export default function NewDealTaskDialog({
             router.refresh();
             setTimeout(() => onOpenChange(false), 900);
         } catch (err) {
-            const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('failedToCreateTask');
-            toastError(message);
+            showApiError(err, 'failedToCreateTask');
         } finally {
             setSubmitting(false);
         }

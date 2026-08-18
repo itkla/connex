@@ -6,8 +6,7 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import RecordsActions from '@/app/components/import/RecordsActions';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { toast } from 'sonner';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastError, toastInfo, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
 import { BuildingOffice2Icon, NoSymbolIcon, TagIcon, UserCircleIcon, ArchiveBoxIcon, ArchiveBoxArrowDownIcon, UsersIcon } from '@heroicons/react/24/outline';
@@ -19,6 +18,7 @@ import { useReducedMotion } from 'motion/react';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
 import DensityToggle from '@/app/components/records/DensityToggle';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useRecordDensity } from '@/app/hooks/useRecordDensity';
 import { useInlineEdit } from '@/app/hooks/useInlineEdit';
 import ColumnVisibilityMenu from '@/app/components/records/ColumnVisibilityMenu';
@@ -99,6 +99,7 @@ function diffDraft(original: ContactDraft, draft: ContactDraft): boolean {
 export default function ContactsBrowser({ savedViews, defaultView, savedViewsUnavailable }: { savedViews: SavedView[]; defaultView: SavedView | null; savedViewsUnavailable?: boolean }) {
     const router = useRouter();
     const t = useTranslations('ContactsBrowser');
+    const showApiError = useApiErrorToast('ContactsBrowser');
     const tf = useTranslations('Filters');
     const ts = useTranslations('MemberScope');
     const tl = useTranslations('ContactLifecycle');
@@ -368,12 +369,12 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
             setMatchedSignature(requestSignature);
         } catch (err) {
             if (requestId === selectAllRequestRef.current) {
-                toastError(err instanceof Error ? err.message : t('toastSelectAllFailed'));
+                showApiError(err, 'toastSelectAllFailed');
             }
         } finally {
             if (requestId === selectAllRequestRef.current) setSelectingAll(false);
         }
-    }, [filterParams, query, filterSignature, setSelectedIds, t]);
+    }, [filterParams, filterSignature, query, setSelectedIds, showApiError]);
 
     const [tempByContactId, setTempByContactId] = useState<Map<number, RelationshipTemperature>>(new Map());
     useEffect(() => {
@@ -497,14 +498,14 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         });
 
         if (changed.length === 0) {
-            toast.info(t('toastNoChangesToSave'));
+            toastInfo(t('toastNoChangesToSave'));
             setEditSheetOpen(false);
             return;
         }
 
         const invalid = changed.find((c) => !drafts[c.id].name.trim());
         if (invalid) {
-            toast.error(t('toastNameRequiredForX', { name: invalid.name }));
+            toastError(t('toastNameRequiredForX', { name: invalid.name }));
             return;
         }
 
@@ -529,7 +530,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
             setEditSheetOpen(false);
             refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastFailedSave'));
+            showApiError(err, 'toastFailedSave');
         } finally {
             setIsSaving(false);
         }
@@ -538,7 +539,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
     const bulkRemoveFromCompany = async () => {
         const affected = selectedContacts.filter((c) => c.companyId || c.company);
         if (affected.length === 0) {
-            toast.info(t('toastNoneHaveCompany'));
+            toastInfo(t('toastNoneHaveCompany'));
             return;
         }
         setIsClearingCompany(true);
@@ -557,7 +558,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
             );
             refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastFailedRemoveFromCompany'));
+            showApiError(err, 'toastFailedRemoveFromCompany');
         } finally {
             setIsClearingCompany(false);
         }
@@ -596,7 +597,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                 refresh();
             }
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t(showArchived ? 'toastFailedRestore' : 'toastFailedArchive'));
+            showApiError(err, showArchived ? 'toastFailedRestore' : 'toastFailedArchive');
         } finally {
             setIsDeleting(false);
         }

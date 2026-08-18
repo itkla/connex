@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { toast } from 'sonner';
 import { Loader2Icon } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
@@ -21,8 +20,9 @@ import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import { ENTITY_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
 import RecordSelect from '@/app/components/records/RecordSelect';
 
-import { addDealPerson, ApiError, createActivity, getCompanyPeople } from '@/app/lib/api';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { addDealPerson, createActivity, getCompanyPeople } from '@/app/lib/api';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { toastError, toastSuccess, toastWarn } from '@/app/lib/toast';
 import { type Contact, type Deal } from '@/app/lib/types';
 import { toMysqlDateTime } from '@/app/lib/utils';
 import { Select, SelectContent, SelectValue, SelectTrigger, SelectItem } from '@/components/ui/select';
@@ -49,6 +49,7 @@ export default function NewDealActivityDialog({
 }) {
     const router = useRouter();
     const t = useTranslations('DealsNewActivityDialog');
+    const showApiError = useApiErrorToast('DealsNewActivityDialog');
     const [type, setType] = useState<string>(ACTIVITY_TYPES[0]);
     const [subject, setSubject] = useState('');
     const [notes, setNotes] = useState('');
@@ -69,7 +70,7 @@ export default function NewDealActivityDialog({
     async function handleSubmit(e: React.SubmitEvent<HTMLFormElement>) {
         e.preventDefault();
         if (!subject.trim()) {
-            toast.error(t('subjectRequired'));
+            toastError(t('subjectRequired'));
             return;
         }
         setSubmitting(true);
@@ -86,7 +87,7 @@ export default function NewDealActivityDialog({
             });
             if (personId != null) {
                 await addDealPerson(dealId, personId, '').catch(() => {
-                    toast.warning(t('activityLoggedButFailedToLink'));
+                    toastWarn(t('activityLoggedButFailedToLink'));
                 });
             }
             toastSuccess(t('activityLogged'));
@@ -95,8 +96,7 @@ export default function NewDealActivityDialog({
             router.refresh();
             setTimeout(() => onOpenChange(false), 900);
         } catch (err) {
-            const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('failedToLogActivity');
-            toastError(message);
+            showApiError(err, 'failedToLogActivity');
         } finally {
             setSubmitting(false);
         }

@@ -82,11 +82,11 @@
         "toastNameRequiredForX": "Name is required for \"{name}\"",
         "toastContactUpdated": "Contact updated",
         "toastContactsUpdated": "{count} contacts updated",
-        "toastFailedSave": "Failed to save",
+        "toastFailedSave": "Couldn't save the contact",
         "toastNoneHaveCompany": "None of the selected contacts have a company",
         "toastRemovedFromCompany": "Removed from company",
         "toastRemovedNContactsFromCompanies": "Removed {count} contacts from their companies",
-        "toastFailedRemoveFromCompany": "Failed to remove from company",
+        "toastFailedRemoveFromCompany": "Couldn't remove from the company",
         "addTag": "Add tag",
         "removeTag": "Remove tag",
         "toastTagAdded": "Tagged {count} contacts",
@@ -134,7 +134,7 @@
         "toastNameRequired": "Name is required",
         "toastContactUpdated": "Contact updated",
         "toastPartiallySaved": "Contact details were saved, but the photo upload failed. Review the current values and try again.",
-        "toastFailedSave": "Failed to save",
+        "toastFailedSave": "Couldn't save the contact",
         "toastEmailCopied": "Email copied",
         "toastFailedCopyEmail": "Failed to copy email",
         "toastPhoneCopied": "Phone copied",
@@ -158,7 +158,7 @@
         "removeFromCompanyNamed": "Remove from {companyName}",
         "entityLabel": "contact",
         "toastRemovedFromCompany": "Removed {contactName} from {companyName}",
-        "toastFailedRemoveFromCompany": "Failed to remove from company",
+        "toastFailedRemoveFromCompany": "Couldn't remove from the company",
         "restrictions": "Processing restrictions",
         "assignOwner": "Assign owner",
         "toastOwnerAssigned": "Owner updated",
@@ -196,7 +196,7 @@
         "toastNameRequired": "Name is required",
         "toastContactUpdated": "Contact updated",
         "toastPartiallySaved": "Some contact changes were saved, but another change failed. Review the current values and try again.",
-        "toastFailedSave": "Failed to save"
+        "toastFailedSave": "Couldn't save the contact"
     },
     "ContactsQuickEditSheet": {
         "titleSingle": "Quick edit contact",
@@ -236,8 +236,8 @@
         "typeOther": "Other",
         "toastSubjectRequired": "Subject is required",
         "toastActivityLogged": "Activity logged",
-        "toastFailedLog": "Failed to log activity",
-        "toastFailedLoadDeals": "Failed to load deals"
+        "toastFailedLog": "Couldn't log the activity",
+        "toastFailedLoadDeals": "Couldn't load deals"
     },
     "ContactsNewContactDialog": {
         "companySearchFailed": "Couldn't search companies. Try again.",
@@ -353,8 +353,8 @@
         "create": "Create",
         "toastDescriptionRequired": "Description is required",
         "toastTaskAdded": "Task added",
-        "toastFailedCreate": "Failed to create task",
-        "toastFailedLoadDeals": "Failed to load deals"
+        "toastFailedCreate": "Couldn't create the task",
+        "toastFailedLoadDeals": "Couldn't load deals"
     },
     "ContactsTagEditor": {
         "removeAria": "Remove {name}",

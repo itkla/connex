@@ -27,7 +27,8 @@ import {
 } from '@/components/ui/dialog-status-cover';
 
 import { cn } from '@/lib/utils';
-import { ApiError, createTag, updateTag } from '@/app/lib/api';
+import { createTag, updateTag } from '@/app/lib/api';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type { Tag } from '@/app/lib/types';
 import { DEFAULT_TAG_COLOR, TAG_PALETTE } from './colors';
@@ -85,6 +86,7 @@ function TagForm({
     setSubmitting: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
     const t = useTranslations('ActivityLibraryTagDialog');
+    const showApiError = useApiErrorToast('ActivityLibraryTagDialog');
     const reduce = useReducedMotion() ?? false;
 
     const initialColor =
@@ -134,13 +136,7 @@ function TagForm({
                 onClose();
             }, 900);
         } catch (err) {
-            const message =
-                err instanceof ApiError
-                    ? err.message
-                    : err instanceof Error
-                      ? err.message
-                      : t('toastFailedSave');
-            toastError(message);
+            showApiError(err, 'toastFailedSave');
         } finally {
             setSubmitting(false);
         }

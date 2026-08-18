@@ -461,7 +461,7 @@
       "tooLarge": "File is too large",
       "unsupported": "File type isn’t supported",
       "limit": "Context limit reached",
-      "removeFailed": "Could not remove the file"
+      "removeFailed": "Couldn't remove the file"
     },
     "starters": {
       "person": {
@@ -491,7 +491,7 @@
       "lookupTitle": "Permission status unavailable",
       "lookupBody": "Connex could not confirm whether your role can use the assistant. Try again after permissions reload.",
       "featureTitle": "Ask Connex is unavailable",
-      "featureBody": "The assistant cannot be used right now. Server reason: {reason}",
+      "featureBody": "The assistant can't be used in this workspace right now. Ask a workspace admin if you need access.",
       "uncertainTitle": "This turn needs reconciliation",
       "uncertainBody": "Connex did not receive a reliable turn response, so sending again is blocked to prevent a duplicate. Start a new chat or refresh this session."
     },

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { sameOriginPath } from "@/app/lib/sessionExpiry";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { useTranslations } from "next-intl";
 import {
@@ -122,7 +123,7 @@ export function AuthForm({
 
     function routeAfterAuth() {
         const hasWorkspace = /(?:^|;\s*)connex_workspace=/.test(document.cookie);
-        const safeRedirect = redirectUrl && /^\/(?![/\\])/.test(redirectUrl) ? redirectUrl : null;
+        const safeRedirect = sameOriginPath(redirectUrl);
         if (safeRedirect) {
             router.push(safeRedirect);
         } else if (!hasWorkspace) {
