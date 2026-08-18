@@ -10,7 +10,12 @@ import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@
 import { type Pipeline } from '@/app/lib/types';
 import { type SelectionId } from '@/app/components/records/types';
 import { cn } from '@/lib/utils';
-import { QuickEditField, QuickEditRecordCard, QuickEditSheetShell } from '@/app/components/records/quick-edit/QuickEditSheetShell';
+import {
+    QuickEditField,
+    QuickEditRecordCard,
+    QuickEditSheetShell,
+    quickEditErrorId,
+} from '@/app/components/records/quick-edit/QuickEditSheetShell';
 
 export type StageKind = 'normal' | 'won' | 'lost';
 
@@ -51,6 +56,8 @@ type Props = {
     removeStage: (pipelineId: number, index: number) => void;
     isSaving: boolean;
     saveEdits: () => void;
+    /** Per-pipeline inline validation messages, keyed by pipeline id then `name` or `stages`. */
+    fieldErrors?: Record<number, Record<string, string>>;
 };
 
 export default function QuickEditPipelineSheet({
@@ -65,6 +72,7 @@ export default function QuickEditPipelineSheet({
     removeStage,
     isSaving,
     saveEdits,
+    fieldErrors,
 }: Props) {
     const t = useTranslations('PipelinesQuickEditSheet');
     const total = selectedPipelines.length;
@@ -88,12 +96,19 @@ export default function QuickEditPipelineSheet({
                 if (!draft) return null;
                 return (
                     <QuickEditRecordCard key={p.id} index={idx} total={total} title={p.name}>
-                        <QuickEditField label={t('name')} htmlFor={`name-${p.id}`} required>
+                        <QuickEditField
+                            label={t('name')}
+                            htmlFor={`name-${p.id}`}
+                            required
+                            error={fieldErrors?.[p.id]?.name}
+                        >
                             <Input
                                 id={`name-${p.id}`}
                                 type="text"
                                 value={draft.name}
                                 onChange={(e) => updateDraft(p.id, { name: e.target.value })}
+                                aria-invalid={Boolean(fieldErrors?.[p.id]?.name)}
+                                aria-describedby={fieldErrors?.[p.id]?.name ? quickEditErrorId(`name-${p.id}`) : undefined}
                                 required
                             />
                         </QuickEditField>
@@ -146,6 +161,9 @@ export default function QuickEditPipelineSheet({
                                     {t('addStage')}
                                 </button>
                             </div>
+                            {fieldErrors?.[p.id]?.stages ? (
+                                <p className="text-sm text-destructive">{fieldErrors[p.id].stages}</p>
+                            ) : null}
                         </div>
                     </QuickEditRecordCard>
                 );

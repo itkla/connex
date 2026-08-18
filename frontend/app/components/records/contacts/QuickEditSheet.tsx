@@ -14,6 +14,7 @@ import {
     QuickEditMediaUpload,
     QuickEditRecordCard,
     QuickEditSheetShell,
+    quickEditErrorId,
 } from '@/app/components/records/quick-edit/QuickEditSheetShell';
 
 export type ContactDraft = {
@@ -34,6 +35,8 @@ type Props = {
     updateImageFile?: (id: number, file: File | null) => void;
     isSaving: boolean;
     saveEdits: () => void;
+    /** Per-contact inline validation messages, keyed by contact id then draft field. */
+    fieldErrors?: Record<number, Record<string, string>>;
     customFieldsSlot?: ReactNode;
 };
 
@@ -47,6 +50,7 @@ export default function QuickEditSheet({
     updateImageFile,
     isSaving,
     saveEdits,
+    fieldErrors,
     customFieldsSlot,
 }: Props) {
     const t = useTranslations('ContactsQuickEditSheet');
@@ -118,12 +122,19 @@ export default function QuickEditSheet({
                         title={c.name}
                         subtitle={draft.title || draft.email || undefined}
                     >
-                        <QuickEditField label={t('name')} htmlFor={`name-${c.id}`} required>
+                        <QuickEditField
+                            label={t('name')}
+                            htmlFor={`name-${c.id}`}
+                            required
+                            error={fieldErrors?.[c.id]?.name}
+                        >
                             <Input
                                 id={`name-${c.id}`}
                                 type="text"
                                 value={draft.name}
                                 onChange={(e) => updateDraft(c.id, { name: e.target.value })}
+                                aria-invalid={Boolean(fieldErrors?.[c.id]?.name)}
+                                aria-describedby={fieldErrors?.[c.id]?.name ? quickEditErrorId(`name-${c.id}`) : undefined}
                                 required
                             />
                         </QuickEditField>

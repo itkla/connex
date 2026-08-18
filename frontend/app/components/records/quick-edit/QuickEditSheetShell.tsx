@@ -199,12 +199,19 @@ type QuickEditFieldProps = {
     label: ReactNode;
     htmlFor?: string;
     required?: boolean;
+    /** Validation message for this field, shown under the control instead of as a toast. */
+    error?: string;
     className?: string;
     children: ReactNode;
 };
 
-/** Label-over-control field wrapper that fixes the sheet's form rhythm and required marker. */
-export function QuickEditField({ label, htmlFor, required, className, children }: QuickEditFieldProps) {
+/** The id a field's inline validation message renders under, for the control's `aria-describedby`. */
+export function quickEditErrorId(htmlFor: string): string {
+    return `${htmlFor}-error`;
+}
+
+/** Label-over-control field wrapper that fixes the sheet's form rhythm, required marker, and error line. */
+export function QuickEditField({ label, htmlFor, required, error, className, children }: QuickEditFieldProps) {
     return (
         <div className={cn('grid gap-1.5', className)}>
             <Label htmlFor={htmlFor}>
@@ -212,6 +219,14 @@ export function QuickEditField({ label, htmlFor, required, className, children }
                 {required ? <span className="text-destructive">*</span> : null}
             </Label>
             {children}
+            {error ? (
+                <p
+                    id={htmlFor ? quickEditErrorId(htmlFor) : undefined}
+                    className="text-sm text-destructive"
+                >
+                    {error}
+                </p>
+            ) : null}
         </div>
     );
 }

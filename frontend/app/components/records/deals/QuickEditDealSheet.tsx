@@ -18,6 +18,7 @@ import {
     QuickEditField,
     QuickEditRecordCard,
     QuickEditSheetShell,
+    quickEditErrorId,
 } from '@/app/components/records/quick-edit/QuickEditSheetShell';
 import { useCompanySearch } from '@/app/hooks/useCompanySearch';
 import { toastError } from '@/app/lib/toast';
@@ -48,6 +49,8 @@ type Props = {
     stagesByPipeline: Record<number, Stage[]>;
     isSaving: boolean;
     saveEdits: () => void;
+    /** Per-deal inline validation messages, keyed by deal id then draft field. */
+    fieldErrors?: Record<number, Record<string, string>>;
     customFieldsSlot?: ReactNode;
 };
 
@@ -69,6 +72,7 @@ export default function QuickEditDealSheet({
     stagesByPipeline,
     isSaving,
     saveEdits,
+    fieldErrors,
     customFieldsSlot,
 }: Props) {
     const t = useTranslations('DealsQuickEditSheet');
@@ -129,12 +133,19 @@ export default function QuickEditDealSheet({
                         title={d.name}
                         subtitle={selectedCompany?.name ?? undefined}
                     >
-                        <QuickEditField label={t('name')} htmlFor={`deal-name-${d.id}`} required>
+                        <QuickEditField
+                            label={t('name')}
+                            htmlFor={`deal-name-${d.id}`}
+                            required
+                            error={fieldErrors?.[d.id]?.name}
+                        >
                             <Input
                                 id={`deal-name-${d.id}`}
                                 type="text"
                                 value={draft.name}
                                 onChange={(e) => updateDraft(d.id, { name: e.target.value })}
+                                aria-invalid={Boolean(fieldErrors?.[d.id]?.name)}
+                                aria-describedby={fieldErrors?.[d.id]?.name ? quickEditErrorId(`deal-name-${d.id}`) : undefined}
                                 required
                             />
                         </QuickEditField>
@@ -169,7 +180,12 @@ export default function QuickEditDealSheet({
                         </div>
 
                         <div className="grid grid-cols-2 gap-3">
-                            <QuickEditField label={t('pipeline')} htmlFor={`deal-pipeline-${d.id}`}>
+                            <QuickEditField
+                                label={t('pipeline')}
+                                htmlFor={`deal-pipeline-${d.id}`}
+                                required
+                                error={fieldErrors?.[d.id]?.pipeline}
+                            >
                                 <Combobox
                                     items={pipelines}
                                     itemToStringLabel={(p: Pipeline) => p.name}
@@ -192,7 +208,12 @@ export default function QuickEditDealSheet({
                                     </ComboboxContent>
                                 </Combobox>
                             </QuickEditField>
-                            <QuickEditField label={t('stage')} htmlFor={`deal-stage-${d.id}`}>
+                            <QuickEditField
+                                label={t('stage')}
+                                htmlFor={`deal-stage-${d.id}`}
+                                required
+                                error={fieldErrors?.[d.id]?.stage}
+                            >
                                 <Combobox
                                     items={stages}
                                     itemToStringLabel={(s: Stage) => s.name}
