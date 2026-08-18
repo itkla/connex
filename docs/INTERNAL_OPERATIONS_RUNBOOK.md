@@ -840,6 +840,179 @@ All customer-facing wording on this subject comes from
 carries the review lint checklist. Use its questionnaire boilerplate verbatim rather than
 paraphrasing this section.
 
+## Runtime cutover
+
+`connex.workflows.runtime.enabled` / `CONNEX_WORKFLOWS_RUNTIME_ENABLED` defaults to **`false`**. The
+flag changes delivery for every workflow before any individual workflow changes owner: with it on,
+the after-commit legacy listener is inert, the legacy scheduler stops executing directly, and the
+durable workflow outbox delivers both legacy-owned and canonical-owned work. Runtime ownership is
+the persisted `workflow.runtime_owner` value, not a process-local flag.
+
+This section records the behavior that operators must measure before a supervised cutover. It is
+not an authorization to enable the flag or change ownership; the bounded flip procedure and its
+rollback sequence are a separate rollout artifact.
+
+### Engine delta inventory
+
+#### Trigger intake
+
+| Behavior | Legacy owner | Canonical owner |
+|---|---|---|
+| Entity-change delivery | Asynchronous `AFTER_COMMIT` listener; process death can lose the fire | Trigger target is written before source commit and drained by a leased worker |
+| Candidate selection | Loads all enabled entity-change rules, then filters each in Java | SQL pre-filters trigger event and excludes intake-paused workflows |
+| Fan-out | Unbounded | Maximum 128 matching workflow targets; excess intake fails with `trigger_fanout_limit` |
+| Delivery retry | None; a dispatch failure is logged and dropped | Up to 8 leased delivery attempts, pinned to workflow generation and version |
+| Typical latency | Near-immediate after commit | Up to the scheduler delay, 5 seconds by default, plus queue time |
+
+#### Scheduling
+
+| Behavior | Legacy owner | Canonical owner |
+|---|---|---|
+| Cadence producer | `RuleScheduler` evaluates every 15 minutes | The same tick creates a durable outbox target; the worker drains it |
+| Bucket identity | Production uses a UTC cadence bucket | Uses the same UTC cadence bucket |
+| Record enumeration | One unbounded whole-workspace segment evaluation | Freezes the upper record id at intake and scans pages of 100, checking each match |
+| Schedule with no WHEN condition | Inert: it enrolls no records | Invalid: compilation fails with `schedule_enrollment_condition_required`, blocking cutover |
+| Test-seam enrollment | Unbounded | `WorkflowRuntimeService` rejects more than 128 matches; production outbox delivery pages instead |
+
+The legacy `runSchedule(workspaceId, cadence)` test overload uses the system-default time zone. It is
+not the production path and must not be used as evidence for cadence-bucket parity.
+
+#### Actions and failure handling
+
+| Behavior | Legacy owner | Canonical owner |
+|---|---|---|
+| One action fails | Records the failure, continues later actions, and ends `partial` | Stops at that node; later nodes never run and the run fails or requires intervention |
+| Mutable-reference preflight | None | Checks action permission, tag existence, active assignment target, and stage/pipeline compatibility before each action |
+| Record guard | Contacts only, using the visibility-scoped person query | Every supported record type, owned by the workspace and not suspended/archived; rechecked before every node |
+| Retry | None | At most 3 attempts for classified transient database failures, subject to action retry safety |
+| Transaction boundary | All actions in one execution block | One node effect and checkpoint per `REQUIRES_NEW`, `READ_COMMITTED` transaction |
+| Traversal bound | At most 16 flattened actions | At most 50 traversed nodes |
+| Delay and branches | Cannot be projected | Supported, but a workflow using either can no longer roll back to the legacy engine |
+
+Both engines call the same `RuleActionExecutor`, so a successfully admitted action has the same
+mechanics. The material differences are admission, transaction boundaries, retry, and what happens
+after failure.
+
+#### Notifications
+
+| Behavior | Legacy owner | Canonical owner |
+|---|---|---|
+| Dedupe scope | One `rule:{ruleId}:{entityId}:{suffix}` key shared by every notify action in a fire | One `workflow:{runId}:node:{nodeId}` key per action node |
+| Two notify actions | One notification row; the second action overwrites the first | Two notification rows |
+| Email consequence | One first-occurrence email claim | One first-occurrence email claim per notify node |
+
+Notification content other than the dedupe key is produced by the same executor: type `rule`,
+category, severity, title, body, actor label `Automation`, source type, and source id.
+
+#### Run recording
+
+| Behavior | Legacy owner | Canonical owner |
+|---|---|---|
+| Ledger | One `rule_execution` row with a JSON detail | `workflow_run`, `workflow_step_run`, and `workflow_step_attempt` |
+| WHEN not matched | `skipped` | `succeeded` after Condition → no → End |
+| Partial execution | `partial` | No equivalent; the run fails or becomes `intervention_required` |
+| User history | Exposed as stable `legacy-<id>` keys | Exposed as stable `canonical-<id>` keys; both histories are merged |
+| Operations telemetry | Not included in workflow operations summaries | Included in summaries, interventions, failures, and overdue counts |
+
+#### Idempotency and ownership
+
+Both engines claim through `WorkflowRuntimeClaimService`, lock the same workflow row, read the
+database-authoritative runtime owner under that lock, and check the opposite ledger before insert.
+The established legacy rule id remains the primary identity for paired workflows. A workflow-id
+compatibility identity is retained when needed, and schedule identities include the UTC cadence
+bucket. Never derive replay identity from process time or a JVM-local owner flag.
+
+#### Execution identity
+
+| Mode | Both engines |
+|---|---|
+| `system` | Execute as the built-in `SystemActor`; attribute the effect to `created_by_id` |
+| `user` | Execute as the configured live workspace member and current role; fail closed when the user or membership is gone |
+| Condition evaluation | Uses the same effective actor for every graph shape that a legacy rule can represent |
+
+### Read-only fleet pre-scan
+
+Run this against each active tenant catalog before planning any ownership change. Every statement is
+read-only. Save the complete output with the rollout evidence. The third query is deliberately
+conservative: SQL cannot evaluate the full segment condition model, so it reports schedule rules
+whose current eligible record-type population exceeds one 100-row production page. Evaluate those
+rules through the application condition model to determine the exact enrollment count; do not treat
+absence from this candidate list as proof that a future population will stay below 100.
+
+```sql
+SELECT workspace_id,
+       COUNT(*) AS legacy_owned_workflows
+FROM workflow
+WHERE runtime_owner = 'legacy'
+  AND archived_at IS NULL
+GROUP BY workspace_id
+ORDER BY workspace_id;
+
+SELECT r.workspace_id,
+       r.id AS rule_id,
+       w.id AS workflow_id,
+       r.enabled,
+       r.record_type,
+       JSON_UNQUOTE(JSON_EXTRACT(r.trigger_config, '$.cadence')) AS cadence
+FROM rule r
+LEFT JOIN workflow w
+  ON w.workspace_id = r.workspace_id
+ AND w.legacy_rule_id = r.id
+WHERE LOWER(TRIM(r.trigger_type)) = 'schedule'
+  AND r.condition_json IS NULL
+ORDER BY r.workspace_id, r.id;
+
+WITH record_population AS (
+    SELECT workspace_id, 'company' AS record_type, COUNT(*) AS eligible_records
+    FROM company
+    WHERE archived_at IS NULL
+    GROUP BY workspace_id
+    UNION ALL
+    SELECT workspace_id, 'person' AS record_type, COUNT(*) AS eligible_records
+    FROM person
+    WHERE suspended_at IS NULL
+      AND archived_at IS NULL
+    GROUP BY workspace_id
+    UNION ALL
+    SELECT workspace_id, 'deal' AS record_type, COUNT(*) AS eligible_records
+    FROM deal
+    GROUP BY workspace_id
+)
+SELECT r.workspace_id,
+       r.id AS rule_id,
+       w.id AS workflow_id,
+       r.record_type,
+       JSON_UNQUOTE(JSON_EXTRACT(r.trigger_config, '$.cadence')) AS cadence,
+       p.eligible_records AS conservative_enrollment_ceiling
+FROM rule r
+JOIN workflow w
+  ON w.workspace_id = r.workspace_id
+ AND w.legacy_rule_id = r.id
+JOIN record_population p
+  ON p.workspace_id = r.workspace_id
+ AND p.record_type = r.record_type
+WHERE LOWER(TRIM(r.trigger_type)) = 'schedule'
+  AND p.eligible_records > 100
+ORDER BY r.workspace_id, r.id;
+
+SELECT r.workspace_id,
+       r.id AS rule_id,
+       w.id AS workflow_id,
+       COUNT(*) AS notify_action_count
+FROM rule r
+JOIN workflow w
+  ON w.workspace_id = r.workspace_id
+ AND w.legacy_rule_id = r.id
+JOIN JSON_TABLE(
+    r.actions_json,
+    '$[*]' COLUMNS (action_type VARCHAR(24) PATH '$.type')
+) action_rows
+WHERE LOWER(TRIM(action_rows.action_type)) = 'notify'
+GROUP BY r.workspace_id, r.id, w.id
+HAVING COUNT(*) > 1
+ORDER BY r.workspace_id, r.id;
+```
+
 ## Offboarding
 
 The sequence is **export → verify → delete workspaces or delete organization**. There is no CLI for
