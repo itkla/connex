@@ -51,7 +51,7 @@ import {
     ActivityTypePicker,
     type ActivityType,
 } from '@/app/components/activity/activities/activityTypes';
-import type { Contact, Deal } from '@/app/lib/types';
+import type { Contact, CreateActivityPayload, Deal } from '@/app/lib/types';
 
 /** The serializable slice of the activity composer persisted as a draft and re-injected on resume. */
 export type ActivityDraftData = {
@@ -83,6 +83,8 @@ type Props = {
     initialDraftGeneration?: number;
     onDraftMounted?: () => void;
     requestInit?: RequestInit;
+    /** Replaces the plain create call, e.g. to also file the contact on the linked deal. */
+    createRequest?: (payload: CreateActivityPayload, init?: RequestInit) => Promise<unknown>;
 };
 
 function nowLocalValue(): string {
@@ -121,6 +123,7 @@ export default function ActivityDialog({
     initialDraftGeneration,
     onDraftMounted,
     requestInit,
+    createRequest,
 }: Props) {
     const t = useTranslations('ActivityCreateDialog');
     const { activeWorkspaceId } = useWorkspace();
@@ -175,6 +178,7 @@ export default function ActivityDialog({
                         requireRelationshipTarget={requireRelationshipTarget}
                         ownsInitialDraft={initialDraftGeneration !== undefined}
                         requestInit={requestInit}
+                        createRequest={createRequest}
                         onSubmittingChange={(value) => {
                             submittingRef.current = value;
                         }}
@@ -211,6 +215,7 @@ type ActivityDialogFormProps = {
     requireRelationshipTarget?: boolean;
     ownsInitialDraft?: boolean;
     requestInit?: RequestInit;
+    createRequest?: (payload: CreateActivityPayload, init?: RequestInit) => Promise<unknown>;
     onSubmittingChange: (submitting: boolean) => void;
     /** Reports whether the form holds unsaved edits, so a wrapper can guard against accidental discard. */
     onDirtyChange?: (dirty: boolean) => void;
@@ -242,6 +247,7 @@ export function ActivityDialogForm({
     requireRelationshipTarget = false,
     ownsInitialDraft = false,
     requestInit,
+    createRequest = createActivity,
     onSubmittingChange,
     onDirtyChange,
     onPersistDraft,
@@ -336,7 +342,7 @@ export function ActivityDialogForm({
         onSubmittingChange(true);
         try {
             if (!activityCreatedRef.current) {
-                await createActivity(
+                await createRequest(
                     {
                         type,
                         subject: subject.trim(),

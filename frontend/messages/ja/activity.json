@@ -70,7 +70,10 @@
     "followUp_today": "今日",
     "followUp_tomorrow": "明日",
     "followUp_inThreeDays": "3日後",
-    "followUp_nextWeek": "来週"
+    "followUp_nextWeek": "来週",
+    "triggerAdd": "アクティビティを記録",
+    "toastLinkFailed": "アクティビティを記録しましたが、連絡先を案件に追加できませんでした",
+    "toastFailedLoadLinks": "関連付けできるレコードを読み込めませんでした"
   },
   "ActivityNotes": {
     "title": "メモ",
@@ -263,7 +266,10 @@
     "create": "作成",
     "toastDescriptionRequired": "説明は必須です",
     "toastCreated": "タスクを作成しました",
-    "toastFailedCreate": "タスクを作成できませんでした"
+    "toastFailedCreate": "タスクを作成できませんでした",
+    "triggerAdd": "タスクを追加",
+    "toastLinkFailed": "タスクを作成しましたが、連絡先を案件に追加できませんでした",
+    "toastFailedLoadLinks": "関連付けできるレコードを読み込めませんでした"
   },
   "ActivityEditActivitySheet": {
     "title": "アクティビティを編集",

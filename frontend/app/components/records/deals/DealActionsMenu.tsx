@@ -35,8 +35,11 @@ import { ButtonGroup } from '@/components/ui/button-group';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import DealTeamDialog from '@/app/components/records/deals/DealTeamDialog';
 import EditDealSheet from '@/app/components/records/deals/EditDealSheet';
-import NewDealActivityDialog from '@/app/components/records/deals/NewDealActivityDialog';
-import NewDealTaskDialog from '@/app/components/records/deals/NewDealTaskDialog';
+import {
+    RecordActivityComposer,
+    RecordTaskComposer,
+    type RecordComposerAnchor,
+} from '@/app/components/records/RecordComposers';
 import NoteDialog from '@/app/components/activity/notes/NoteDialog';
 import {
     useContactTargetSearch,
@@ -85,6 +88,7 @@ export default function DealActionsMenu({
             : [deal, ...dealSeeds],
         [deal, dealSeeds],
     );
+    const composerAnchor = useMemo<RecordComposerAnchor>(() => ({ kind: 'deal', deal }), [deal]);
     const personSearch = useContactTargetSearch(noteOpen, [], personSeeds);
     const dealSearch = useDealTargetSearch(noteOpen, [deal.id], stableDealSeeds);
 
@@ -275,19 +279,15 @@ export default function DealActionsMenu({
                 initialCollaborators={collaborators}
             />
 
-            <NewDealActivityDialog
-                dealId={deal.id}
-                dealName={deal.name}
+            <RecordActivityComposer
+                anchor={composerAnchor}
                 currentUserId={currentUserId}
-                deal={deal}
                 open={activityOpen}
                 onOpenChange={setActivityOpen}
             />
 
-            <NewDealTaskDialog
-                dealId={deal.id}
-                dealName={deal.name}
-                deal={deal}
+            <RecordTaskComposer
+                anchor={composerAnchor}
                 currentUserId={currentUserId}
                 open={taskOpen}
                 onOpenChange={setTaskOpen}

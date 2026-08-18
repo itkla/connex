@@ -24,8 +24,11 @@ import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompany
 import ArchiveRecordDialog from '@/app/components/records/ArchiveRecordDialog';
 import ShareDialog from '@/app/components/records/ShareDialog';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
-import NewActivityDialog from '@/app/components/records/contacts/NewActivityDialog';
-import NewTaskDialog from '@/app/components/records/contacts/NewTaskDialog';
+import {
+    RecordActivityComposer,
+    RecordTaskComposer,
+    type RecordComposerAnchor,
+} from '@/app/components/records/RecordComposers';
 import NewNoteDialog from '@/app/components/activity/notes/NoteDialog';
 
 import { archiveContact, restoreContact, getActiveWorkspaceMembers, updateContact, updatePersonOwner } from '@/app/lib/api';
@@ -64,6 +67,10 @@ export default function ContactActionsMenu({
     const [assignOwnerOpen, setAssignOwnerOpen] = useState(false);
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
     const contactSeeds = useMemo(() => [contact], [contact]);
+    const composerAnchor = useMemo<RecordComposerAnchor>(
+        () => ({ kind: 'person', person: contact, companyId: contact.companyId ?? contact.company?.id ?? null }),
+        [contact],
+    );
     const contactSearch = useContactTargetSearch(noteOpen, [contact.id], contactSeeds);
     const dealSearch = useDealTargetSearch(noteOpen, [], dealSeeds);
     useEffect(() => {
@@ -275,18 +282,14 @@ export default function ContactActionsMenu({
 
                 <RestrictionsDialog contact={contact} open={restrictionsOpen} onOpenChange={setRestrictionsOpen} />
 
-                <NewActivityDialog
-                    contactId={contact.id}
-                    contactName={contact.name}
-                    companyId={contact.companyId ?? contact.company?.id}
+                <RecordActivityComposer
+                    anchor={composerAnchor}
                     currentUserId={currentUserId}
                     open={activityOpen}
                     onOpenChange={setActivityOpen}
                 />
-                <NewTaskDialog
-                    contactId={contact.id}
-                    contactName={contact.name}
-                    companyId={contact.companyId ?? contact.company?.id}
+                <RecordTaskComposer
+                    anchor={composerAnchor}
                     currentUserId={currentUserId}
                     open={taskOpen}
                     onOpenChange={setTaskOpen}
