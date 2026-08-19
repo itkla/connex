@@ -346,7 +346,19 @@ jobs:
           fi
       - name: Install Playwright Chromium
         working-directory: frontend
-        run: node_modules/.bin/playwright install --with-deps chromium
+        # The Azure apt mirror behind --with-deps intermittently hangs apt-get with no
+        # timeout, eating the whole 60-minute job (three consecutive occurrences on one
+        # PR, 2026-08-19). Bound each attempt and retry so a bad mirror draw costs
+        # minutes, not the job.
+        run: |
+          for attempt in 1 2 3; do
+            if timeout 8m node_modules/.bin/playwright install --with-deps chromium; then
+              exit 0
+            fi
+            echo "playwright install attempt ${attempt} failed or timed out; retrying"
+          done
+          echo "::error::playwright install failed after 3 bounded attempts"
+          exit 1
       - name: E2E tests (Playwright)
         working-directory: frontend
         run: node_modules/.bin/playwright test
