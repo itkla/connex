@@ -74,6 +74,35 @@ type RadarSignalCardProps = {
 /** Evidence parameters that are provenance rather than product: raw ids and model bookkeeping. */
 const INTERNAL_PARAMETERS = new Set(['bridgePersonId', 'personId', 'modelVersion']);
 
+/**
+ * The evidence parameters worth showing: everything except the provenance a user would read as
+ * noise.
+ */
+function evidenceParameters(evidence: RadarEvidence): [string, unknown][] {
+    return Object.entries(evidence.parameters).filter(([key]) => !INTERNAL_PARAMETERS.has(key));
+}
+
+/**
+ * Stable render keys for one signal's evidence, derived from what each entry is about rather than
+ * where it sits. Deal risk repeats `stakeholder_cold` once per contact and an intro path repeats
+ * `warm_path` once per connector, so the person the entry names is what tells them apart; a
+ * suffix keeps the keys unique if the detector ever emits a true duplicate.
+ */
+function evidenceKeys(evidence: readonly RadarEvidence[]): string[] {
+    const seen = new Map<string, number>();
+    return evidence.map((item) => {
+        const personId = item.parameters.personId;
+        const bridgePersonId = item.parameters.bridgePersonId;
+        const subject = typeof personId === 'number'
+            ? personId
+            : typeof bridgePersonId === 'number' ? bridgePersonId : '';
+        const base = `${item.type}:${subject}`;
+        const repeat = seen.get(base) ?? 0;
+        seen.set(base, repeat + 1);
+        return repeat === 0 ? base : `${base}#${repeat}`;
+    });
+}
+
 function freshnessLabels(value: string, anchor: number, locale: string): { absolute: string; relative: string } | null {
     const timestamp = parseMysqlDateTime(value);
     if (!Number.isFinite(timestamp) || !Number.isFinite(anchor)) return null;
@@ -167,6 +196,7 @@ export default function RadarSignalCard({
     const followed = signal.state === 'followed';
     const dismissed = signal.state === 'dismissed';
     const names = radarSignalNames(signal);
+    const evidenceRenderKeys = evidenceKeys(signal.evidence);
     const subjectHref = radarSubjectHref(signal.subject);
     const detailId = `radar-detail-${signal.id}`;
 
@@ -339,10 +369,6 @@ export default function RadarSignalCard({
                         ? t('actions.createTaskPathUnavailableNamed', { subject: signal.subject.label })
                         : t(warmPath ? 'actions.askIntroNamed' : 'actions.followUpNamed', { subject: signal.subject.label });
 
-    const evidenceParameters = (evidence: RadarEvidence): [string, unknown][] => (
-        Object.entries(evidence.parameters).filter(([key]) => !INTERNAL_PARAMETERS.has(key))
-    );
-
     return (
         <li className="border-b border-border/60 last:border-b-0">
             <Collapsible open={expanded} onOpenChange={onExpandedChange}>
@@ -510,7 +536,7 @@ export default function RadarSignalCard({
                                     const links = radarReferenceLinks(evidence.references, names);
                                     const parameters = evidenceParameters(evidence);
                                     return (
-                                        <li key={`${evidence.type}:${index}`} className="text-sm">
+                                        <li key={evidenceRenderKeys[index]} className="text-sm">
                                             <p className="font-medium text-foreground">
                                                 {evidenceTypes[evidence.type] ?? t('evidence.unknownType')}
                                             </p>

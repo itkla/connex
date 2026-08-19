@@ -233,6 +233,7 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
     );
     const surface = classifyRadarSurface(payload, visibleSignals);
     const unavailableFamilies = unavailableRadarFamilies(payload.families);
+    const unavailableLookup = new Set<RadarFamily>(unavailableFamilies);
     const shownFamilies = family === 'all' ? RADAR_SIGNAL_FAMILIES : [family];
 
     const restoreListFocus = (id: number) => {
@@ -459,7 +460,7 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
                                     key={value}
                                     family={value}
                                     signals={familySignals}
-                                    unavailable={unavailableFamilies.includes(value)}
+                                    unavailable={unavailableLookup.has(value)}
                                     open={!closedFamilies.has(value)}
                                     onOpenChange={(open) => setClosedFamilies((current) => {
                                         const next = new Set(current);
