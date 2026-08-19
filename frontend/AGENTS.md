@@ -193,8 +193,8 @@ Section rhythm (`gap-10` between stacked children) and the page gutter come from
 **Color (§15/§18).** Calm neutral canvas. Semantic palettes (`--warmth-*`, `--chart-*`, success/warning/destructive, `--rank-*`) carry unambiguous meaning — never a raw hex or px, never color alone.
 
 ### Review checklist (every new page / redesign / cross-surface pattern)
-- [ ] Content is inside `PageShell` at the correct `tier`; no hand-rolled wrapper, gutter, or `gap-*` (full-bleed, marketing/docs, and full-height editor shells excepted).
-- [ ] Any `loading.tsx` uses the same wrapper and tier as its page.
+- [ ] Content is inside `PageShell` and spans the full content area; no hand-rolled wrapper, gutter, `gap-*`, or page-width cap (full-bleed, marketing/docs, and full-height editor shells excepted). Any readable measure sits on the text block, never on the page.
+- [ ] Any `loading.tsx` renders the same `PageShell` tag as its page.
 - [ ] Title is a `PageHeader` (canon size) with actions in the cluster slot; no bare `<h1>`.
 - [ ] Loading, empty, error, and permission states all present and use the shared components.
 - [ ] Cards only for genuine semantic units; open sections otherwise; no card-in-card.
