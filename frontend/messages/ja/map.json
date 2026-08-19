@@ -5,13 +5,13 @@
         "emptyBody": "会社や連絡先を追加すると、ネットワークのつながりと成長を可視化できます。",
         "emptyCta": "会社を追加",
         "limitTitle": "このマップは安全に表示できる上限を超えています",
-        "limitBody": "より大規模なグラフ表示を準備する間、レコードの検索とフィルターをご利用ください。"
+        "limitBody": "より大規模なマップ表示を準備する間、レコードの検索とフィルターをご利用ください。"
     },
     "CompanyNode": {
-        "title": "会社ノード"
+        "title": "会社"
     },
     "ContactNode": {
-        "title": "連絡先ノード"
+        "title": "連絡先"
     },
     "Legend": {
         "title": "凡例",
@@ -65,7 +65,7 @@
     },
     "MapSearch": {
         "open": "マップを検索",
-        "placeholder": "人物・会社を検索…",
+        "placeholder": "連絡先・会社を検索…",
         "close": "検索を閉じる"
     },
     "MapLayout": {

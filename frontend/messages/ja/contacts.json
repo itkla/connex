@@ -427,7 +427,7 @@
         "correctAction": "修正",
         "referredBy": "紹介者",
         "dialogTitle": "獲得元を記録",
-        "dialogDescription": "この関係が元々どこから始まったかを記録します。修正は記録全体を置き換え、以前の値は監査ログに残ります。",
+        "dialogDescription": "この関係が元々どこから始まったかを記録します。修正は記録全体を置き換え、以前の値は変更履歴に残ります。",
         "sourceLabel": "獲得元",
         "detailLabel": "詳細",
         "detailPlaceholder": "イベント名、ウェブサイト、キャンペーンなど",

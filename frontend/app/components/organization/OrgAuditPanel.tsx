@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useMessages, useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
 
 import type { AuditLogEntry } from "@/app/lib/types";
@@ -9,19 +9,13 @@ import { ApiError, getOrgAudit } from "@/app/lib/api";
 import { toastError } from "@/app/lib/toast";
 import { useLiveNow } from "@/app/hooks/useNow";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { orgAuditActionKey, titleCaseAction } from "@/app/lib/orgAuditActionLabel";
 import { Button } from "@/components/ui/button";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import Rise from "@/app/components/motion/Rise";
 import { NoAccessCard, EmptyRow, ListCard } from "@/app/components/organization/OrgPrimitives";
 
 const PAGE_SIZE = 30;
-
-function humanizeAction(action: string) {
-    return action
-        .split(".")
-        .map((part) => part.replace(/_/g, " "))
-        .join(" · ");
-}
 
 function relativeTime(iso: string, locale: string, now: number) {
     const then = new Date(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z").getTime();
@@ -37,6 +31,7 @@ function relativeTime(iso: string, locale: string, now: number) {
 
 export default function OrgAuditPanel() {
     const t = useTranslations("OrgAudit");
+    const messages = useMessages();
     const locale = useLocale();
     const now = useLiveNow();
     const { activeWorkspace } = useWorkspace();
@@ -48,6 +43,11 @@ export default function OrgAuditPanel() {
     const [loadError, setLoadError] = useState(false);
     const [loadingMore, setLoadingMore] = useState(false);
     const [hasMore, setHasMore] = useState(false);
+
+    const actionLabel = (action: string) => {
+        const key = orgAuditActionKey(messages, action);
+        return key === null ? titleCaseAction(action) : t(key);
+    };
 
     useEffect(() => {
         if (!orgId) return;
@@ -115,10 +115,10 @@ export default function OrgAuditPanel() {
                             <li key={entry.id} className="flex items-start justify-between gap-4 px-4 py-3">
                                 <div className="min-w-0 flex-1">
                                     <p className="truncate text-sm font-medium text-foreground">
-                                        {entry.summary || humanizeAction(entry.action)}
+                                        {entry.summary || actionLabel(entry.action)}
                                     </p>
                                     <p className="truncate text-xs text-muted-foreground">
-                                        {humanizeAction(entry.action)} ·{" "}
+                                        {actionLabel(entry.action)} ·{" "}
                                         {entry.currentActorLabel || entry.actorLabel || t("actorSystem")}
                                     </p>
                                 </div>

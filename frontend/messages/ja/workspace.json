@@ -125,8 +125,8 @@
         "nameHint": "ワークスペース切替、ナビゲーション、検索に表示される名前が更新されます。",
         "nameRequired": "ワークスペース名を入力してください。",
         "nameTooLong": "128文字以内で入力してください。",
-        "slugLabel": "ワークスペーススラッグ",
-        "slugHint": "ルーティングに使う固定識別子です。ここでは変更できません。",
+        "slugLabel": "ワークスペースID（リンクに使用）",
+        "slugHint": "リンクに使われるIDです。ここでは変更できません。",
         "timezoneLabel": "レポートのタイムゾーン",
         "timezoneDefault": "各ユーザーのアカウント設定を使用",
         "timezoneUseAccount": "アカウント設定を使用",
@@ -927,7 +927,7 @@
         "configured": "設定済み",
         "notConfigured": "未設定",
         "notImplemented": "非対応",
-        "correlationId": "相関ID",
+        "correlationId": "参照コード",
         "workspaceHeading": "ワークスペース {id}",
         "profileTitle": "デプロイと機能",
         "profileDescription": "このインスタンスのエディションと、許可されている機能です。",
@@ -1025,7 +1025,7 @@
             "retrying": "再試行中",
             "intervention_required": "対応が必要",
             "paused": "一時停止",
-            "purging": "削除中"
+            "purging": "消去中"
         }
     }
 }

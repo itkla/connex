@@ -255,7 +255,7 @@
     "descriptionLabel": "Description",
     "descriptionPlaceholder": "What needs to happen?",
     "dueDateLabel": "Due date",
-    "assignedToLabel": "Assigned to",
+    "assignedToLabel": "Assignee",
     "assignedToPlaceholder": "Pick a teammate",
     "noUserFound": "No user found.",
     "personLabel": "Contact",
@@ -308,7 +308,7 @@
     "title": "Edit task",
     "description": "Update fields below and save.",
     "descriptionLabel": "Description",
-    "assignedToLabel": "Assigned to",
+    "assignedToLabel": "Assignee",
     "selectUserPlaceholder": "Select user",
     "contactLabel": "Contact",
     "selectContactPlaceholder": "Select contact",
@@ -512,7 +512,7 @@
   },
   "CapturedEvidence": {
     "title": "Provider capture evidence",
-    "description": "This read-only activity was projected from provider data admitted by the effective capture policy.",
+    "description": "This was captured automatically from your connected account, following your capture settings.",
     "capturedBy": "Captured from {provider}",
     "provider": "Provider",
     "stream": "Source stream",
@@ -524,7 +524,7 @@
     "sourceId": "Provider source ID",
     "capturedAt": "Captured",
     "captureAsOf": "Evidence as of",
-    "readOnly": "Provider projections cannot be edited or deleted in Connex."
+    "readOnly": "Automatically captured activities can't be edited or deleted in Connex."
   },
   "ActivityAllLayout": {
     "title": "Activity / All",

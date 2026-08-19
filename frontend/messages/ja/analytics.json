@@ -67,7 +67,7 @@
     "taskStatusSubtitle": "すべての未完了・完了タスク",
     "taskStatusInfo": "タスクをカンバンの列（未着手・進行中・完了）別に表示。中央は完了の割合です。",
     "introsTitle": "ウォーム紹介",
-    "introsSubtitle": "可能な紹介と実施した紹介",
+    "introsSubtitle": "紹介の候補と実施した紹介",
     "introsInfo": "あなたが橋渡しできる紹介の候補と、選択期間中に実際に記録された紹介です。",
     "movesTitle": "最近の異動",
     "movesInfo": "最近転職した連絡先です。キーパーソンの異動は、新しい会社での有力なリードになります。"
@@ -143,7 +143,7 @@
     "warmShare": "温かい連絡先",
     "cooling": "冷え込み中",
     "pipelineAtRisk": "リスクのある案件額",
-    "introOpportunities": "紹介の機会",
+    "introOpportunities": "紹介の候補",
     "warmShareCaption": "{count} 件中",
     "coolingCaption": "勢いが低下中",
     "pipelineAtRiskCaption": "{count} 件の案件",
@@ -189,7 +189,7 @@
     "count": "{count} 件"
   },
   "AnalyticsIntros": {
-    "opportunities": "実施可能な紹介",
+    "opportunities": "紹介の候補",
     "made": "実施した紹介",
     "madeInPeriod": "今期間の実施数",
     "emptyMade": "今期間に記録された紹介はありません"

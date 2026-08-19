@@ -311,7 +311,7 @@ function TeardownDialog({
                     <div className="grid gap-2">
                         <Label htmlFor="tenant-teardown-confirmation">
                             {t("confirmationLabel", {
-                                slug: teardownTarget?.slug ?? "",
+                                id: teardownTarget?.slug ?? "",
                             })}
                         </Label>
                         <Input

@@ -275,7 +275,7 @@
         "toastStageFailed": "{failed}件の案件を移動できませんでした",
         "sectionPerformance": "実績",
         "sectionSummary": "パイプライン概要",
-        "metricsBasis": "現在のフィルター条件に一致する案件・オープンパイプラインは決着予定日で絞り込みません・アーカイブ済みアカウントの案件は未割り当てとして集計します",
+        "metricsBasis": "現在のフィルター条件に一致する案件・オープンパイプラインは決着予定日で絞り込みません・アーカイブ済みの会社の案件は未割り当てとして集計します",
         "valueDerivedFromLineItems": "この金額は明細から自動計算されています。変更するには明細を編集または削除してください。"
     },
     "DealsRevenueChart": {

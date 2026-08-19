@@ -67,10 +67,10 @@
     "taskStatusSubtitle": "Across every open and closed task",
     "taskStatusInfo": "Tasks by Kanban column (to do, in progress, done). Center shows the share done.",
     "introsTitle": "Warm introductions",
-    "introsSubtitle": "Opportunities available and intros made",
+    "introsSubtitle": "Suggested intros and intros made",
     "introsInfo": "Suggested introductions you're positioned to make, and introductions actually logged over the selected period.",
     "movesTitle": "Recent moves",
-    "movesInfo": "Contacts who recently changed companies — a champion who moves is a warm lead at their new account."
+    "movesInfo": "Contacts who recently changed companies — a champion who moves is a warm lead at their new company."
   },
   "AnalyticsKpis": {
     "wonRevenue": "Won revenue",
@@ -143,7 +143,7 @@
     "warmShare": "Warm contacts",
     "cooling": "Cooling off",
     "pipelineAtRisk": "Pipeline at risk",
-    "introOpportunities": "Intro opportunities",
+    "introOpportunities": "Suggested intros",
     "warmShareCaption": "of {count} tracked",
     "coolingCaption": "losing warmth",
     "pipelineAtRiskCaption": "{count, plural, one {# deal} other {# deals}}",
@@ -189,7 +189,7 @@
     "count": "{count, plural, one {# task} other {# tasks}}"
   },
   "AnalyticsIntros": {
-    "opportunities": "Opportunities available",
+    "opportunities": "Suggested intros",
     "made": "Intros made",
     "madeInPeriod": "Made this period",
     "emptyMade": "No introductions logged this period"

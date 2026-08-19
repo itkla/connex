@@ -400,7 +400,7 @@
     "noDecayDate": "低下予測日はありません",
     "sources": "主な根拠",
     "sourceType": {
-      "note": "ワークスペースノート",
+      "note": "ワークスペースメモ",
       "task": "タスク"
     },
     "activityType": "アクティビティ: {type}",
@@ -418,7 +418,7 @@
     },
     "omitted": "ほか{count}件の対象ソースもスコアに含まれています。",
     "limited": "根拠が限定的です。信頼度の高い評価には{minimum}件以上の対象ソースが必要です。",
-    "privateNotesExcluded": "あなたの非公開ノート{count}件はこのスコアから除外されています。",
+    "privateNotesExcluded": "あなたの非公開メモ{count}件はこのスコアから除外されています。",
     "asOf": "{date}時点、モデル{version}で計算。",
     "unknownModel": "不明"
   },
@@ -436,7 +436,7 @@
     "error_failed": "このレコードを読み込めませんでした。",
     "openFull": "レコードを開く",
     "moreActions": "その他のアクション",
-    "addNote": "ノートを追加",
+    "addNote": "メモを追加",
     "createTask": "タスクを作成",
     "copyLink": "リンクをコピー",
     "email": "メール",
@@ -445,7 +445,7 @@
     "openDeals": "進行中の案件",
     "industry": "業種",
     "website": "ウェブサイト",
-    "people": "担当者",
+    "people": "連絡先",
     "openTasks": "未完了タスク",
     "projectedRevenue": "予測売上",
     "stage": "ステージ",

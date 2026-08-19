@@ -1,11 +1,11 @@
 {
   "Radar": {
     "metadata": {
-      "title": "Relationship Radar",
+      "title": "Radar",
       "description": "Prioritized relationship signals with their current evidence."
     },
-    "title": "Relationship Radar",
-    "description": "Review cooling relationships, deal risk, and warm paths from one ranked, evidence-backed list.",
+    "title": "Radar",
+    "description": "Review cooling relationships, deal risk, and intro paths from one ranked, evidence-backed list.",
     "summary": {
       "headline": "{count, plural, =0 {Nothing needs your attention right now} one {# signal needs your attention} other {# signals need your attention}}",
       "headlineFiltered": "{count, plural, =0 {No signals match this view} one {# signal in this view} other {# signals in this view}}"
@@ -18,7 +18,7 @@
     "family": {
       "relationship_decay": "Cooling relationships",
       "deal_risk": "Deal risk",
-      "warm_path": "Warm paths"
+      "warm_path": "Intro paths"
     },
     "subject": {
       "person": "Contact",
@@ -29,7 +29,7 @@
       "high": "High priority",
       "medium": "Medium priority",
       "cooling": "Cooling",
-      "opportunity": "Opportunity"
+      "opportunity": "Suggested intro"
     },
     "state": {
       "active": "Active",
@@ -46,7 +46,7 @@
     "filters": {
       "label": "Radar filters",
       "searchLabel": "Search relationship signals",
-      "searchPlaceholder": "Search people, companies, deals, or evidence",
+      "searchPlaceholder": "Search contacts, companies, deals, or evidence",
       "familyLabel": "Filter by signal family",
       "stateLabel": "Filter by lifecycle state",
       "allFamilies": "All families",
@@ -81,7 +81,7 @@
       "typeStalled": "Deal activity has stalled",
       "typeStakeholderCold": "Stakeholder relationship is cold",
       "typeNoStakeholders": "No stakeholders are linked",
-      "typeWarmPath": "Warm introduction path",
+      "typeWarmPath": "Intro path",
       "parameterBand": "Warmth band",
       "parameterTrend": "Trend",
       "parameterScore": "Score",
@@ -94,7 +94,7 @@
       "parameterSeverity": "Severity",
       "parameterBridgePersonId": "Bridge contact",
       "parameterBridgeName": "Path through",
-      "parameterReachType": "Opportunity type",
+      "parameterReachType": "Suggestion type",
       "parameterEvidenceType": "Path evidence",
       "parameterEvidenceCompany": "Shared company",
       "parameterOverlapStartYear": "Overlap started",
@@ -123,7 +123,7 @@
       "high": "High",
       "medium": "Medium",
       "low": "Low",
-      "opportunity": "Opportunity",
+      "opportunity": "Suggested intro",
       "connection": "Verified connection",
       "colleagues": "Current colleagues",
       "former_colleagues": "Former colleagues",
@@ -154,28 +154,28 @@
       "taskCreatedNamed": "A task has already been created for {subject}",
       "createTaskDeniedNamed": "Task creation is not permitted for {subject}",
       "createTaskPermissionUnavailableNamed": "Task permission could not be checked for {subject}",
-      "createWarmPathTaskDeniedNamed": "Warm-path task creation is not permitted for {subject}",
-      "createWarmPathTaskPermissionUnavailableNamed": "Warm-path task permissions could not be checked for {subject}",
+      "createWarmPathTaskDeniedNamed": "Intro-path task creation is not permitted for {subject}",
+      "createWarmPathTaskPermissionUnavailableNamed": "Couldn't check intro-path task permissions for {subject}",
       "createTaskEvidenceCheckingNamed": "Relationship evidence is being refreshed for {subject}",
       "createTaskEvidenceUnavailableNamed": "Relationship evidence could not be refreshed for {subject}",
       "createTaskStaleNamed": "Task creation is unavailable because the signal for {subject} is stale",
-      "createTaskPathUnavailableNamed": "Task creation is unavailable because the warm path for {subject} has no current bridge",
+      "createTaskPathUnavailableNamed": "Task creation is unavailable because the intro path for {subject} has no connector right now",
       "openContextNamed": "Open the source record for {subject}",
       "taskPermissionDenied": "You do not have permission to create tasks.",
       "taskPermissionUnavailable": "Task permissions could not be checked. Retry before creating a task.",
-      "warmPathTaskPermissionDenied": "You need permission to create tasks and update contacts before accepting a warm path.",
-      "warmPathTaskPermissionUnavailable": "Warm-path permissions could not be checked. Retry before creating a task.",
+      "warmPathTaskPermissionDenied": "You need permission to create tasks and update contacts before accepting an intro path.",
+      "warmPathTaskPermissionUnavailable": "Couldn't check intro-path permissions. Try again before creating a task.",
       "retryPermissionCheck": "Retry check",
       "taskEvidenceChecking": "Refreshing relationship evidence before task creation.",
       "taskEvidenceUnavailable": "Relationship evidence could not be refreshed. Retry before creating a task.",
       "retryEvidenceRefresh": "Retry refresh",
       "taskStale": "Refresh this stale signal before creating a task.",
-      "taskPathUnavailable": "The current warm-path bridge is unavailable. Refresh before creating a task.",
+      "taskPathUnavailable": "The connector on this intro path is unavailable. Refresh before creating a task.",
       "cancel": "Cancel",
       "snoozing": "Snoozing…"
     },
     "task": {
-      "defaultDescription": "Follow up on the Relationship Radar signal for {subject}",
+      "defaultDescription": "Follow up on the Radar signal for {subject}",
       "warmPathDescription": "Ask {bridge} for an introduction to {subject}"
     },
     "snooze": {
@@ -205,7 +205,7 @@
       "body": "Last-known results remain visible. Current data could not be loaded for: {families}."
     },
     "unavailable": {
-      "title": "Relationship Radar is unavailable",
+      "title": "Radar is unavailable",
       "body": "Current signal data could not be loaded for: {families}.",
       "routeBody": "Current signal data could not be loaded. Retry to check again."
     }

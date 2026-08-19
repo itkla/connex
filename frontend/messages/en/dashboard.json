@@ -100,7 +100,7 @@
       },
       "team": {
         "title": "Bring a colleague in",
-        "body": "Warm-intro paths get stronger with every colleague's network.",
+        "body": "Intro paths get stronger with every colleague's network.",
         "cta": "Invite a colleague",
         "done": "{count, plural, =1 {# member} other {# members}}"
       },

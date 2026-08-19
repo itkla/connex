@@ -68,7 +68,7 @@
     "featurePipelineStageNew": "新規",
     "featurePipelineStageTalking": "商談中",
     "featurePipelineStageWon": "受注",
-    "featureRecordsTitle": "すべての取引先を把握",
+    "featureRecordsTitle": "すべての会社を把握",
     "featureRecordsBody": "会社、連絡先、そしてやり取りの履歴を、すべてつなげて管理します。",
     "featureAnalyticsTitle": "効果を可視化",
     "featureAnalyticsBody": "日々の活動を明確な判断に変える、ダッシュボードとレポート。",
@@ -383,11 +383,11 @@
     "turnStreaming": "回答を作成中…",
     "turnResolved": "回答の準備ができました",
     "turnCancelled": "応答を停止しました",
-    "turnFailed": "このターンを完了できませんでした。",
+    "turnFailed": "この回答を完了できませんでした。",
     "turnImageUnsupported": "現在のアシスタントモデルは画像を読み取れません。画像を外すか、画像対応モデルを選択してください。",
-    "budgetExhausted": "組織の日次AIトークン予算が上限に達しました。",
-    "toolResultBudgetExhausted": "関係データの取得中に、このターンのコンテキスト容量が上限に達しました。対象レコードや期間を絞って、もう一度お試しください。",
-    "turnTimedOut": "完了前にこのターンがタイムアウトしました。",
+    "budgetExhausted": "組織の1日あたりのAI利用上限に達しました。しばらくしてからお試しください。",
+    "toolResultBudgetExhausted": "関係データの取得中に、この回答で扱える情報量の上限に達しました。対象レコードや期間を絞って、もう一度お試しください。",
+    "turnTimedOut": "この回答は完了前にタイムアウトしました。",
     "toolCards": {
       "outcome": "結果",
       "recordLink": "{target}を開く",
@@ -492,8 +492,8 @@
       "lookupBody": "アシスタントを利用できるロールか確認できませんでした。権限の再読み込み後にもう一度お試しください。",
       "featureTitle": "Ask Connexを利用できません",
       "featureBody": "現在このワークスペースではアシスタントを利用できません。利用が必要な場合は、ワークスペース管理者にお問い合わせください。",
-      "uncertainTitle": "このターンの状態を確認する必要があります",
-      "uncertainBody": "ターンの応答を確実に受け取れなかったため、重複防止のため再送信を停止しています。新しいチャットを始めるか、このセッションを再読み込みしてください。"
+      "uncertainTitle": "この回答が届いたか確認できません",
+      "uncertainBody": "回答を確実に受け取れなかったため、重複を防ぐために再送信を停止しています。新しいチャットを始めるか、このチャットを再読み込みしてください。"
     },
     "toast": {
       "archived": "チャットをアーカイブしました",
@@ -505,7 +505,7 @@
       "left": "共有チャットから退出しました",
       "participantRemoved": "参加者を削除しました",
       "requestFailed": "Ask Connexのリクエストに失敗しました",
-      "turnFailed": "Ask Connexはターンを完了できませんでした",
+      "turnFailed": "Ask Connexはこの回答を完了できませんでした",
       "turnTimedOut": "Ask Connexがタイムアウトしました",
       "cancelFailed": "応答を停止できませんでした",
       "toolActionRefreshFailed": "操作は完了しましたが、最新の状態を読み込めませんでした"

@@ -1,11 +1,11 @@
 {
   "Radar": {
     "metadata": {
-      "title": "リレーションシップ・レーダー",
+      "title": "レーダー",
       "description": "現在の根拠とともに優先順位付けされた関係性シグナルを確認できます。"
     },
-    "title": "リレーションシップ・レーダー",
-    "description": "冷え込みつつある関係、案件リスク、ウォームパスを、根拠に基づく一つの優先リストで確認します。",
+    "title": "レーダー",
+    "description": "冷え込みつつある関係、案件リスク、紹介ルートを、根拠に基づく一つの優先リストで確認します。",
     "summary": {
       "headline": "{count, plural, =0 {対応が必要なシグナルはありません} other {対応が必要なシグナル：#件}}",
       "headlineFiltered": "{count, plural, =0 {この表示に該当するシグナルはありません} other {この表示のシグナル：#件}}"
@@ -18,7 +18,7 @@
     "family": {
       "relationship_decay": "冷え込みつつある関係",
       "deal_risk": "案件リスク",
-      "warm_path": "ウォームパス"
+      "warm_path": "紹介ルート"
     },
     "subject": {
       "person": "連絡先",
@@ -29,7 +29,7 @@
       "high": "優先度：高",
       "medium": "優先度：中",
       "cooling": "冷え込み中",
-      "opportunity": "機会"
+      "opportunity": "紹介の候補"
     },
     "state": {
       "active": "対応中",
@@ -46,7 +46,7 @@
     "filters": {
       "label": "レーダーの絞り込み",
       "searchLabel": "関係性シグナルを検索",
-      "searchPlaceholder": "人物、会社、案件、根拠を検索",
+      "searchPlaceholder": "連絡先、会社、案件、根拠を検索",
       "familyLabel": "シグナル種別で絞り込む",
       "stateLabel": "対応状態で絞り込む",
       "allFamilies": "すべての種別",
@@ -81,7 +81,7 @@
       "typeStalled": "案件の動きが停滞",
       "typeStakeholderCold": "関係者との関係が冷えている",
       "typeNoStakeholders": "関係者が紐付けられていない",
-      "typeWarmPath": "温かな紹介経路",
+      "typeWarmPath": "紹介ルート",
       "parameterBand": "温度帯",
       "parameterTrend": "傾向",
       "parameterScore": "スコア",
@@ -94,8 +94,8 @@
       "parameterSeverity": "深刻度",
       "parameterBridgePersonId": "橋渡し役",
       "parameterBridgeName": "橋渡し役の名前",
-      "parameterReachType": "機会の種類",
-      "parameterEvidenceType": "経路の根拠",
+      "parameterReachType": "候補の種類",
+      "parameterEvidenceType": "紹介ルートの根拠",
       "parameterEvidenceCompany": "共通の会社",
       "parameterOverlapStartYear": "在籍重複の開始年",
       "parameterOverlapEndYear": "在籍重複の終了年",
@@ -123,7 +123,7 @@
       "high": "高",
       "medium": "中",
       "low": "低",
-      "opportunity": "機会",
+      "opportunity": "紹介の候補",
       "connection": "確認済みのつながり",
       "colleagues": "現在の同僚",
       "former_colleagues": "以前の同僚",
@@ -154,28 +154,28 @@
       "taskCreatedNamed": "{subject} のタスクは作成済みです",
       "createTaskDeniedNamed": "{subject} のタスクを作成する権限がありません",
       "createTaskPermissionUnavailableNamed": "{subject} のタスク作成権限を確認できませんでした",
-      "createWarmPathTaskDeniedNamed": "{subject} のウォームパスからタスクを作成する権限がありません",
-      "createWarmPathTaskPermissionUnavailableNamed": "{subject} のウォームパスタスクに必要な権限を確認できませんでした",
+      "createWarmPathTaskDeniedNamed": "{subject} の紹介ルートからタスクを作成する権限がありません",
+      "createWarmPathTaskPermissionUnavailableNamed": "{subject} の紹介ルートのタスクに必要な権限を確認できませんでした",
       "createTaskEvidenceCheckingNamed": "{subject} の関係性エビデンスを更新しています",
       "createTaskEvidenceUnavailableNamed": "{subject} の関係性エビデンスを更新できませんでした",
       "createTaskStaleNamed": "{subject} のシグナルが古いため、タスクを作成できません",
-      "createTaskPathUnavailableNamed": "{subject} の現在の橋渡し役を確認できないため、タスクを作成できません",
+      "createTaskPathUnavailableNamed": "{subject} の紹介ルートに橋渡し役が見つからないため、タスクを作成できません",
       "openContextNamed": "{subject} の参照元レコードを開く",
       "taskPermissionDenied": "タスクを作成する権限がありません。",
       "taskPermissionUnavailable": "タスク権限を確認できませんでした。再試行してからタスクを作成してください。",
-      "warmPathTaskPermissionDenied": "ウォームパスを受け入れるには、タスク作成と連絡先更新の権限が必要です。",
-      "warmPathTaskPermissionUnavailable": "ウォームパスに必要な権限を確認できませんでした。再試行してからタスクを作成してください。",
+      "warmPathTaskPermissionDenied": "紹介ルートを受け入れるには、タスク作成と連絡先更新の権限が必要です。",
+      "warmPathTaskPermissionUnavailable": "紹介ルートに必要な権限を確認できませんでした。もう一度お試しください。",
       "retryPermissionCheck": "再確認",
       "taskEvidenceChecking": "タスクを作成する前に関係性エビデンスを更新しています。",
       "taskEvidenceUnavailable": "関係性エビデンスを更新できませんでした。再試行してからタスクを作成してください。",
       "retryEvidenceRefresh": "再読み込み",
       "taskStale": "タスクを作成する前に、この古いシグナルを更新してください。",
-      "taskPathUnavailable": "現在の橋渡し役を確認できません。更新してからタスクを作成してください。",
+      "taskPathUnavailable": "この紹介ルートの橋渡し役を確認できません。更新してからタスクを作成してください。",
       "cancel": "キャンセル",
       "snoozing": "スヌーズ中…"
     },
     "task": {
-      "defaultDescription": "リレーションシップ・レーダーの「{subject}」をフォローアップ",
+      "defaultDescription": "レーダーの「{subject}」をフォローアップ",
       "warmPathDescription": "{bridge} に {subject} への紹介を依頼する"
     },
     "snooze": {
@@ -205,7 +205,7 @@
       "body": "取得済みの結果は表示しています。現在のデータを取得できなかった種別：{families}。"
     },
     "unavailable": {
-      "title": "リレーションシップ・レーダーを利用できません",
+      "title": "レーダーを利用できません",
       "body": "現在のシグナルデータを取得できなかった種別：{families}。",
       "routeBody": "現在のシグナルデータを取得できませんでした。再試行して確認してください。"
     }

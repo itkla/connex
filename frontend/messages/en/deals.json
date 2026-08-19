@@ -275,7 +275,7 @@
         "toastStageFailed": "Couldn't move {failed} deals",
         "sectionPerformance": "Performance",
         "sectionSummary": "Pipeline summary",
-        "metricsBasis": "Current matching deals · open pipeline is not bounded by close date · deals on archived accounts are grouped as unassigned",
+        "metricsBasis": "Current matching deals · open pipeline is not bounded by close date · deals on archived companies are grouped as unassigned",
         "valueDerivedFromLineItems": "This value is derived from the deal's line items. Edit or remove the line items to change it."
     },
     "DealsRevenueChart": {
