@@ -59,6 +59,7 @@ import ooo.klae.connex.backend.services.ActivityService;
 import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.ConnectionService;
+import ooo.klae.connex.backend.services.ContactMarketingService;
 import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.EmploymentService;
@@ -80,6 +81,7 @@ class RecordListControllerTest {
     @Mock private PersonQualificationService personQualificationService;
     @Mock private EmploymentService employmentService;
     @Mock private ConnectionService connectionService;
+    @Mock private ContactMarketingService contactMarketingService;
     @Mock private BulkOperationService bulkOperationService;
     @Mock private CompanyService companyService;
     @Mock private DealService dealService;
@@ -1075,7 +1077,7 @@ class RecordListControllerTest {
     private PersonController personController() {
         return new PersonController(
             personService, personLifecycleService, personQualificationService, employmentService,
-            connectionService, bulkOperationService, workspaceService, memberScopeResolver,
+            connectionService, contactMarketingService, bulkOperationService, workspaceService, memberScopeResolver,
             warmthFilterResolver);
     }
 

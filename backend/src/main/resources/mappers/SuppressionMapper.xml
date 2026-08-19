@@ -14,6 +14,27 @@
     ORDER BY created_at DESC, id DESC
   </select>
 
+  <!-- Contactability projection for one contact. Reproduces the send path's dual-arm match — the
+       person-sticky link plus the canonical address the channel would actually use — and returns
+       only the channel, reason, and first-recorded time. The address, note, and author stay behind
+       the consent-management surface. -->
+  <select id="findPersonChannelStates"
+          resultType="ooo.klae.connex.backend.dto.SuppressionChannelStateRow">
+    SELECT channel, reason, MIN(created_at) AS since
+    FROM suppression_entry
+    WHERE workspace_id = #{workspaceId}
+      AND (
+        person_id = #{personId}
+        <if test="addresses != null and addresses.size() > 0">
+          OR
+          <foreach collection="addresses" item="ref" open="(" separator=" OR " close=")">
+            (channel = #{ref.channel} AND address COLLATE utf8mb4_bin = #{ref.address})
+          </foreach>
+        </if>
+      )
+    GROUP BY channel, reason
+  </select>
+
   <select id="getById" resultType="SuppressionEntry">
     SELECT <include refid="columns"/> FROM suppression_entry
     WHERE workspace_id = #{workspaceId} AND id = #{id}
