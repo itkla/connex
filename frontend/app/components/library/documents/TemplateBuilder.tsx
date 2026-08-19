@@ -134,7 +134,7 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
     return (
         <div className="min-h-full bg-background">
             <div className="sticky top-0 z-20 border-b border-border bg-background/85 backdrop-blur">
-                <div className="mx-auto flex w-full max-w-[100rem] items-center gap-4 px-4 py-3 sm:px-6">
+                <div className="flex w-full items-center gap-4 px-4 py-3 sm:px-6">
                     <Button variant="ghost" size="sm" onClick={() => router.push('/library/documents')}>
                         <ChevronLeftIcon className="size-4" />
                         <span className="hidden sm:inline">{t('back')}</span>
@@ -150,7 +150,7 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
                 </div>
             </div>
 
-            <div className="mx-auto grid w-full max-w-[100rem] gap-8 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] lg:gap-10">
+            <div className="grid w-full gap-8 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] lg:gap-10">
                 <div className="lg:sticky lg:top-20 lg:self-start">
                     <SectionHeader title={t('groupIdentity')} />
                     <div className="flex flex-col gap-4 px-1 sm:px-6">

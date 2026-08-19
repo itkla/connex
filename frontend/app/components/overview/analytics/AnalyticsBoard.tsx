@@ -477,7 +477,7 @@ export default function AnalyticsBoard({
     }));
 
     return (
-        <div className="mx-auto w-full max-w-[100rem] space-y-6 px-2 pb-12">
+        <div className="w-full space-y-6 px-2 pb-12 2xl:px-6">
             <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                     <h1 className="text-4xl font-extrabold tracking-tight text-foreground">{t('title')}</h1>
