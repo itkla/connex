@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { type WarmthDecayCounts } from '@/app/lib/types';
 import { DECAY_BUCKETS, type DecayBucketKey } from '@/app/components/overview/analytics/relationshipMetrics';
 import { radarFamilyHref } from '@/app/components/radar/radarLinks';
+import { warmthHorizonContactsHref } from '@/app/components/records/warmthFilters';
 
 const BUCKET_COLOR: Record<DecayBucketKey, string> = {
     soon: 'var(--warmth-cool)',
@@ -17,13 +18,13 @@ const BUCKET_COLOR: Record<DecayBucketKey, string> = {
  * Relationship-decay horizon bars read from the server-computed {@link WarmthDecayCounts}
  * (contacts predicted to go cold within each horizon: {@code soon}/{@code mid}/{@code later}).
  *
- * Only the total drills through, and it drills into Radar's cooling family rather than a contact
- * list: Radar is the surface that acts on cooling relationships, and it is the nearest honest
- * destination this figure has. The per-bucket counts deliberately do not link, because no shipped
- * list can be filtered to one horizon — Radar ranks its own cooling set and would answer a
- * "within 30 days" bar with a different population. Once the contacts list accepts warmth-band and
- * cold-horizon filters, each bar links to `/records/contacts?warmth=…&goesCold=…` for its own
- * horizon and this note goes away.
+ * The bars report *cumulative* horizons — "within 30", "within 60", "within 90" — rather than the
+ * disjoint 0–30/31–60/61–90 ranges the server counts in. That is what makes each bar a working
+ * link: the contacts browser filters by `goesColdWithinDays`, an upper bound, so a disjoint bar
+ * would show one count and land the user on a strictly larger list. Summing the server's buckets is
+ * exact arithmetic on its own figures, so every number here is both the bar's value and the size of
+ * the list it opens. The total keeps its own destination — Radar's cooling family — because Radar is
+ * where a cooling relationship is worked, not merely listed.
  */
 export default function RelationshipDecay({ decay }: { decay: WarmthDecayCounts }) {
     const t = useTranslations('AnalyticsDecay');
@@ -39,8 +40,12 @@ export default function RelationshipDecay({ decay }: { decay: WarmthDecayCounts 
         );
     }
 
-    const max = Math.max(...DECAY_BUCKETS.map((bucket) => counts[bucket.key]), 1);
     const href = radarFamilyHref('relationship_decay');
+    let running = 0;
+    const horizons = DECAY_BUCKETS.map((bucket) => {
+        running += counts[bucket.key];
+        return { key: bucket.key, maxDays: bucket.maxDays, count: running };
+    });
 
     return (
         <div className="flex h-full flex-col">
@@ -55,21 +60,29 @@ export default function RelationshipDecay({ decay }: { decay: WarmthDecayCounts 
                 </Link>
             </div>
             <ul className="flex flex-col gap-4">
-                {DECAY_BUCKETS.map((bucket) => {
-                    const count = counts[bucket.key];
-                    const width = Math.max(count > 0 ? 6 : 0, (count / max) * 100);
+                {horizons.map((horizon) => {
+                    const label = t(`bucket_${horizon.key}`);
+                    const width = Math.max(horizon.count > 0 ? 6 : 0, (horizon.count / total) * 100);
                     return (
-                        <li key={bucket.key}>
-                            <div className="mb-1 flex items-baseline justify-between gap-3 text-sm">
-                                <span className="text-foreground">{t(`bucket_${bucket.key}`)}</span>
-                                <span className="tabular-nums text-muted-foreground">{count}</span>
-                            </div>
-                            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                                <div
-                                    className="h-full rounded-full transition-[width] duration-500 ease-out motion-reduce:transition-none"
-                                    style={{ width: `${width}%`, backgroundColor: BUCKET_COLOR[bucket.key] }}
-                                />
-                            </div>
+                        <li key={horizon.key}>
+                            <Link
+                                href={warmthHorizonContactsHref(horizon.maxDays)}
+                                aria-label={t('bucketDrillThrough', { horizon: label, count: horizon.count })}
+                                className="group/horizon block rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                            >
+                                <div className="mb-1 flex items-baseline justify-between gap-3 text-sm">
+                                    <span className="text-foreground group-hover/horizon:underline group-hover/horizon:underline-offset-4">
+                                        {label}
+                                    </span>
+                                    <span className="tabular-nums text-muted-foreground">{horizon.count}</span>
+                                </div>
+                                <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                                    <div
+                                        className="h-full rounded-full transition-[width] duration-500 ease-out group-hover/horizon:brightness-95 motion-reduce:transition-none"
+                                        style={{ width: `${width}%`, backgroundColor: BUCKET_COLOR[horizon.key] }}
+                                    />
+                                </div>
+                            </Link>
                         </li>
                     );
                 })}
