@@ -195,6 +195,10 @@ describe("the warmth filter keys a records browser round-trips through the URL",
     it("spell the horizon exactly as the backend param it becomes", () => {
         expect(WARMTH_HORIZON_FILTER_KEY).toBe("goesColdWithinDays");
     });
+
+    it("spell the sort key exactly as the backend sort value it becomes", () => {
+        expect(WARMTH_SORT_KEY).toBe("warmth");
+    });
 });
 
 describe("the warmth facet options a browser offers", () => {
