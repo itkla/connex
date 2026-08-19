@@ -404,9 +404,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
-            "narrowed": false,
+            "narrowed": true,
             "pattern": {
-                "source": "\\b(?:noding|noded|nodes|node)\\b",
+                "source": "\\b(?:noding|noded|nodes|node)\\b(?!\\.js)",
                 "flags": "iu"
             },
             "sources": [
@@ -772,7 +772,9 @@
             "term": "tenant",
             "locale": "en",
             "scope": "global",
-            "allowFiles": [],
+            "allowFiles": [
+                "legal.json"
+            ],
             "canonicalExceptions": [],
             "narrowed": false,
             "pattern": {
@@ -943,7 +945,9 @@
             "term": "テナント",
             "locale": "ja",
             "scope": "global",
-            "allowFiles": [],
+            "allowFiles": [
+                "legal.json"
+            ],
             "canonicalExceptions": [],
             "narrowed": false,
             "pattern": {

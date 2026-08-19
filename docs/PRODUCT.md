@@ -76,8 +76,8 @@ Numbered and testable. Cite them by number in reviews.
 | Company record | **Company** | **会社** | account (for the record); アカウント, 取引先 |
 | Person record | **Contact** (labels, columns, counts, search groups); "person/people" only inside explanatory prose | **連絡先**; 文中の「人」は可 | People (as a label for contact lists) |
 | Deal record | **Deal** | **案件** | opportunity as a countable UI noun (intro suggestions are "suggested intros"); 商談 except as an example stage name |
-| Where records live and are shared | **workspace** | **ワークスペース** | organization (for workspace scope), team (as a scope; fine informally for the humans), tenant |
-| The admin level above workspaces | **Organization** (as a destination or section name, only on organization-admin surfaces; fine in prose stating a genuinely organization-scoped fact — "your organization's AI provider") | **組織** | tenant; テナント |
+| Where records live and are shared | **workspace** | **ワークスペース** | organization (for workspace scope), team (as a scope; fine informally for the humans), tenant (legal pages: allowed) |
+| The admin level above workspaces | **Organization** (as a destination or section name, only on organization-admin surfaces; fine in prose stating a genuinely organization-scoped fact — "your organization's AI provider") | **組織** | tenant; テナント (legal pages: allowed) |
 | A person in a workspace | **member** | **メンバー** | user (except auth/sign-in/session contexts), teammate (as a label; fine in informal prose) |
 | Org-level admin | **organization administrator** | **組織管理者** | — |
 | The automation object | **workflow**; **automation** only as the category noun; **recipe** for a pre-built template | **ワークフロー**／**自動化**（総称）／**レシピ** | rule (except as "legacy automations" inside the one migration screen while it exists), canonical, runtime, legacy runtime |
@@ -103,7 +103,7 @@ Numbered and testable. Cite them by number in reviews.
 
 `tenant` · `teardown` · `deterministic` · `canonical` / `legacy` (as runtime taxonomy) · `predicate` · `node` / `graph` / `traversal` · `slug` · `ESP` · `RBAC` / permission constants (`RULE_MANAGE` etc.) · `epoch` · `data subject` (compliance surfaces: allowed) · `cease of use` / `third-party provision` (compliance surfaces: allowed) · `suppression` · `purge` · `token budget` / `context space` · `turn` (assistant: say "answer") · `egress` / `provider egress` · `projected` / `projection` · `admitted` · `opaque identifier` · `preflight` · `idempotency` · `hash` · `invocation` · `mutation` · `register` (as a noun for a list) · `demask` / `rewrap` · `correlation ID` (say "Reference") · raw ids in copy (`contact #42`) · raw enum/code/camelCase fallbacks (`Retention rule: {code}`) · HTTP status codes shown to users (`Request failed (403)`)
 
-Generator note: where a banned term is a substring of a canonical term (温度 alone inside 温度感／温度帯), the generated pattern must except the canonical usages rather than dropping the ban.
+Generator note: where a banned term is a substring of a canonical term (温度 alone inside 温度感／温度帯), the generated pattern must except the canonical usages rather than dropping the ban. Where a banned word is also part of a proper noun — the Node.js runtime behind the banned engineering term node — the pattern excepts the proper noun and keeps the ban on every other use. The gate reads rendered copy: the command palette's search aliases, the Actions.keywords entries, are never shown to anyone and exist to catch what a member types, retired words included, so they are not scanned.
 
 ## 5. Voice & tone
 

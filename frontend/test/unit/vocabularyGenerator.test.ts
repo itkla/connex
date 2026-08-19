@@ -118,6 +118,27 @@ describe("vocabulary generator", () => {
         expect(expression(bare.pattern).test("関係の温度感を読み取ります")).toBe(false);
     });
 
+    it("excepts the Node.js proper noun without dropping the ban on node", () => {
+        const term = bannedTerm("en:node");
+
+        expect(expression(term.pattern).test("Node.js 18 or newer is required.")).toBe(false);
+        expect(expression(term.pattern).test("ノードは Node.js で動きます")).toBe(false);
+        expect(expression(term.pattern).test("Each node of the graph")).toBe(true);
+        expect(expression(term.pattern).test("the nodes it traverses")).toBe(true);
+        expect(expression(term.pattern).test("a Node in the network")).toBe(true);
+    });
+
+    it("keeps tenant banned everywhere the legal pages are not", () => {
+        for (const id of ["en:tenant", "ja:テナント"]) {
+            const term = bannedTerm(id);
+
+            expect(term.allowFiles).toEqual(["legal.json"]);
+            expect(term.scope).toBe("global");
+        }
+        expect(expression(bannedTerm("en:tenant").pattern).test("every tenant is isolated")).toBe(true);
+        expect(expression(bannedTerm("ja:テナント").pattern).test("テナントの分離")).toBe(true);
+    });
+
     it("detects substring overlaps in either direction", () => {
         expect(overlappingCanonicalTerms("関係の温度", ["温度感"], 2)).toEqual({
             leading: [],

@@ -44,6 +44,20 @@ export const LOCALES = ["en", "ja"];
 export const ALLOWED_SURFACES = ["legal.json", "organization.json#OrgDataRequests"];
 
 /**
+ * The public legal pages alone. §4 allows the multi-tenancy vocabulary of the contracts there —
+ * the terms and the privacy and disclosure notices state what tenant isolation is — while every
+ * other surface, the organization data-requests tooling included, must say workspace.
+ */
+export const LEGAL_PAGES = ["legal.json"];
+
+/**
+ * Message keys that are never rendered. The command palette matches a member's query against
+ * these aliases and shows the action's own label instead, so they deliberately hold the words §4
+ * retires: someone who still types the old name has to find the action.
+ */
+export const SEARCH_ALIAS_KEYS = ["actions.json:Actions.keywords"];
+
+/**
  * The workflow seam: every namespace that names the automation object. §4's automation row
  * governs these surfaces, so `rule` — and its Japanese rendering — is banned here as the
  * name of that object. §4's one sanctioned use of the word lives on the legacy-automations
@@ -157,6 +171,21 @@ const RADAR_LABEL_SURFACES = ["actions.json", "radar.json"];
  * @type {Record<string, CuratedDecision>}
  */
 export const CURATED_DECISIONS = {
+    "tenant (legal pages: allowed)": {
+        decision: "ban",
+        allowFiles: LEGAL_PAGES,
+        reason: "§4 allows the word on the legal pages, where the contracts describe multi-tenant isolation itself; every product surface says workspace or organization.",
+    },
+    "テナント (legal pages: allowed)": {
+        decision: "ban",
+        allowFiles: LEGAL_PAGES,
+        reason: "§4 allows the word on the legal pages, whose Japanese contracts describe multi-tenant isolation itself; every product surface says ワークスペース or 組織.",
+    },
+    node: {
+        decision: "ban",
+        pattern: { source: "\\b(?:noding|noded|nodes|node)\\b(?!\\.js)", flags: "iu" },
+        reason: "§4 excepts the proper noun: Node.js names the runtime a member installs, while node stays banned as the engineering term everywhere else.",
+    },
     "温度 alone as the metric name": {
         decision: "ban",
         reason: "§4's generator note keeps the bare metric name banned and excepts the canonical 温度感／温度帯 carriers instead of dropping the ban.",
@@ -952,6 +981,20 @@ export function scopeCovers(scope, file, namespace) {
 }
 
 /**
+ * Whether a message entry is one of the search aliases {@link SEARCH_ALIAS_KEYS} names, matched
+ * on the alias key itself and on every key below it.
+ * @param {string} file
+ * @param {string} keyPath
+ * @returns {boolean}
+ */
+export function isSearchAlias(file, keyPath) {
+    return SEARCH_ALIAS_KEYS.some((alias) => {
+        const [aliasFile, aliasKeyPath] = alias.split(":");
+        return aliasFile === file && (keyPath === aliasKeyPath || keyPath.startsWith(`${aliasKeyPath}.`));
+    });
+}
+
+/**
  * Whether a banned term is scanned against a message entry. A Japanese pattern runs against the
  * Japanese catalog only, while a Latin-script term is scanned in both — Japanese copy states
  * terms such as `ESP` and `RBAC` verbatim. The term's own scope and the §4 compliance carve-outs
@@ -1052,7 +1095,8 @@ export function messageEntries() {
  * Scans every message catalog for banned terms, honouring each term's scope and the §4
  * compliance carve-outs it records in `allowFiles`. English patterns run against both
  * catalogs — a Latin term such as `ESP` or `RBAC` appears verbatim in Japanese copy —
- * while Japanese patterns run against the Japanese catalog only.
+ * while Japanese patterns run against the Japanese catalog only. The unrendered search
+ * aliases of {@link SEARCH_ALIAS_KEYS} are left out: §4 governs the copy a member reads.
  * @param {VocabularyModel} model
  * @returns {Violation[]}
  */
@@ -1060,6 +1104,7 @@ export function scanMessageCatalogs(model) {
     const compiled = model.terms.map((term) => ({ term, expression: new RegExp(term.pattern.source, term.pattern.flags) }));
     const violations = [];
     for (const entry of messageEntries()) {
+        if (isSearchAlias(entry.file, entry.keyPath)) continue;
         for (const { term, expression } of compiled) {
             if (!termApplies(term, entry)) continue;
             const match = expression.exec(entry.value);
