@@ -10,6 +10,7 @@ import { toastError } from "@/app/lib/toast";
 import { useLiveNow } from "@/app/hooks/useNow";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { orgAuditActionKey, titleCaseAction } from "@/app/lib/orgAuditActionLabel";
+import { isSensitiveAuditEntry } from "@/app/lib/auditPresentation";
 import { Button } from "@/components/ui/button";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import Rise from "@/app/components/motion/Rise";
@@ -47,6 +48,12 @@ export default function OrgAuditPanel() {
     const actionLabel = (action: string) => {
         const key = orgAuditActionKey(messages, action);
         return key === null ? titleCaseAction(action) : t(key);
+    };
+
+    const eventLines = (entry: AuditLogEntry) => {
+        const action = actionLabel(entry.action);
+        const summary = isSensitiveAuditEntry(entry) ? null : entry.summary;
+        return summary ? { title: summary, detail: action } : { title: action, detail: null };
     };
 
     useEffect(() => {
@@ -111,26 +118,27 @@ export default function OrgAuditPanel() {
             ) : (
                 <>
                     <ListCard>
-                        {entries.map((entry) => (
-                            <li key={entry.id} className="flex items-start justify-between gap-4 px-4 py-3">
-                                <div className="min-w-0 flex-1">
-                                    <p className="truncate text-sm font-medium text-foreground">
-                                        {entry.summary || actionLabel(entry.action)}
-                                    </p>
-                                    <p className="truncate text-xs text-muted-foreground">
-                                        {actionLabel(entry.action)} ·{" "}
-                                        {entry.currentActorLabel || entry.actorLabel || t("actorSystem")}
-                                    </p>
-                                </div>
-                                <time
-                                    className="shrink-0 pt-0.5 text-xs tabular-nums text-muted-foreground"
-                                    dateTime={entry.createdAt}
-                                    title={entry.createdAt}
-                                >
-                                    {relativeTime(entry.createdAt, locale, now)}
-                                </time>
-                            </li>
-                        ))}
+                        {entries.map((entry) => {
+                            const { title, detail } = eventLines(entry);
+                            const actor = entry.currentActorLabel || entry.actorLabel || t("actorSystem");
+                            return (
+                                <li key={entry.id} className="flex items-start justify-between gap-4 px-4 py-3">
+                                    <div className="min-w-0 flex-1">
+                                        <p className="truncate text-sm font-medium text-foreground">{title}</p>
+                                        <p className="truncate text-xs text-muted-foreground">
+                                            {detail === null ? actor : `${detail} · ${actor}`}
+                                        </p>
+                                    </div>
+                                    <time
+                                        className="shrink-0 pt-0.5 text-xs tabular-nums text-muted-foreground"
+                                        dateTime={entry.createdAt}
+                                        title={entry.createdAt}
+                                    >
+                                        {relativeTime(entry.createdAt, locale, now)}
+                                    </time>
+                                </li>
+                            );
+                        })}
                     </ListCard>
                     {hasMore && (
                         <div className="flex justify-center">
