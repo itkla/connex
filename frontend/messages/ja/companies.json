@@ -46,6 +46,8 @@
     "filterNoIndustry": "業界なし",
     "emptyTitle": "会社はまだありません",
     "emptyBody": "会社は、連絡先が所属する組織です。最初の1社を追加するか、CSVを取り込んでください。",
+    "emptyContactsFirstBody": "会社は、連絡先が所属する組織です。ここから始めることもできますが、温度感は連絡先から読み取るため、多くの場合はまず人を取り込みます。",
+    "emptyReadOnlyBody": "会社は、連絡先が所属する組織です。このワークスペースにはまだ誰も追加していません。",
     "emptyCta": "新規会社",
     "entityLabel": "会社",
     "toastMetricsLoadFailed": "会社の指標を読み込めませんでした",

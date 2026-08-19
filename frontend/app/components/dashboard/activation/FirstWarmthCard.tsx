@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { motion, useReducedMotion } from 'motion/react';
 
 import { Button } from '@/components/ui/button';
+import { WARMTH_SORT_KEY } from '@/app/components/records/warmthFilters';
 import type { TemperatureBand, WarmthBandCounts } from '@/app/lib/types';
 import { durationStandard, easeOut, instant } from '@/app/lib/motion';
 import { warmthDotClass, warmthSurfaceClasses } from '@/app/lib/utils';
@@ -12,14 +13,19 @@ import { cn } from '@/lib/utils';
 
 const BANDS: TemperatureBand[] = ['hot', 'warm', 'cool', 'cold'];
 
-/** Where the journey hands over: the contacts list, whose warmth column reads per person. */
-const WARMTH_HREF = '/records/contacts';
+/**
+ * Where the journey hands over: the contacts list ordered by warmth, so the column the card is
+ * talking about is the one the member arrives sorted by. Deliberately not band-filtered — the
+ * reading can span several bands, and filtering to one would hide the rest of what was just read.
+ */
+const WARMTH_HREF = `/records/contacts?sort=${WARMTH_SORT_KEY}&dir=desc`;
 
 /**
  * The end of the first-run journey: the workspace's first warmth reading, shown as the bands its
- * own logged interactions produced. Bands nobody is in are left out rather than shown as zeroes, so
- * the card only ever claims what the recorded evidence supports, and its one action hands the
- * member to the contacts list where warmth is read person by person.
+ * own logged interactions produced. Contacts with no interaction history are already excluded by
+ * the facet this reads, and bands nobody is in are left out rather than shown as zeroes, so the
+ * card only ever claims what the recorded evidence supports. Its one action hands the member to the
+ * contacts list where warmth is read person by person.
  */
 export default function FirstWarmthCard({ readings }: { readings: WarmthBandCounts }) {
     const t = useTranslations('FirstRunJourney');

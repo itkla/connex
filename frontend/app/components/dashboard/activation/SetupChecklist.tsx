@@ -9,7 +9,7 @@ import { Loader2Icon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useActions } from '@/app/hooks/useActions';
 import type { ActivationStep } from '@/app/lib/activation';
-import type { FirstRunJourney } from '@/app/lib/firstRunJourney';
+import type { FirstRunEntry } from '@/app/lib/firstRunJourney';
 import FirstRunDoors from '@/app/components/FirstRunDoors';
 import WorkspaceUnavailableRetry from '@/app/components/WorkspaceUnavailableRetry';
 import { cn } from '@/lib/utils';
@@ -17,20 +17,24 @@ import { cn } from '@/lib/utils';
 const IMPORT_CONTACTS_ACTION = 'utility.import-contacts';
 const CREATE_PERSON_ACTION = 'create.person';
 
-function StepDoors({ journey }: { journey: FirstRunJourney }) {
+function StepDoors({ entry }: { entry: FirstRunEntry }) {
+    const t = useTranslations('DashboardActivation');
+    const tJourney = useTranslations('FirstRunJourney');
     const { run, pendingIds, getAction } = useActions();
-    const doors = journey.doors.filter((door) => (door === 'importCsv'
+    const doors = entry.doors.filter((door) => (door === 'import'
         ? getAction(IMPORT_CONTACTS_ACTION) != null
         : getAction(CREATE_PERSON_ACTION) != null));
 
     return (
         <FirstRunDoors
             doors={doors}
+            importLabel={t('steps.contacts.cta')}
+            createLabel={tJourney('newContact')}
             importPending={pendingIds.has(IMPORT_CONTACTS_ACTION)}
             onImport={() => {
                 void run(IMPORT_CONTACTS_ACTION, { source: 'empty-state' });
             }}
-            onNew={() => {
+            onCreate={() => {
                 void run(CREATE_PERSON_ACTION, { source: 'empty-state' });
             }}
         />
@@ -95,22 +99,21 @@ function StepAction({ step, emphasis }: { step: ActivationStep; emphasis: boolea
  * The workspace setup checklist. Every step's completion is recomputed from the workspace's own
  * counts on each render rather than stored, and a completed step shows the count that completed it
  * instead of a generic tick, so the list can always be checked against the records themselves.
- * While the workspace is still on the first leg of its first-run journey, the contacts step offers
- * that journey's doors in place of its single call to action.
+ * While the workspace still has no contacts, the contacts step offers the guided entry's doors in
+ * place of its single call to action.
  */
 export default function SetupChecklist({
     steps,
-    journey,
+    entry,
 }: {
     steps: ActivationStep[];
-    journey: FirstRunJourney | null;
+    entry: FirstRunEntry | null;
 }) {
     const t = useTranslations('DashboardActivation');
     const tCapability = useTranslations('CapabilityUnavailable');
     const doneCount = steps.filter((step) => step.done).length;
     const firstOutstanding = steps.find((step) => !step.done && step.required)
         ?? steps.find((step) => !step.done);
-    const contactDoors = journey?.leg === 'contacts' ? journey : null;
 
     return (
         <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-border bg-card">
@@ -151,14 +154,14 @@ export default function SetupChecklist({
                                         ? tCapability('body')
                                         : step.done
                                         ? t(`steps.${step.id}.done`, { count: step.count ?? 0 })
-                                        : step.id === 'contacts' && contactDoors?.cardScanning
+                                        : step.id === 'contacts' && entry?.cardScanning
                                         ? t('steps.contacts.bodyScanning')
                                         : t(`steps.${step.id}.body`)}
                                 </p>
                             </div>
                         </div>
-                        {step.done ? null : step.id === 'contacts' && contactDoors ? (
-                            <StepDoors journey={contactDoors} />
+                        {step.done ? null : step.id === 'contacts' && entry ? (
+                            <StepDoors entry={entry} />
                         ) : (
                             <StepAction step={step} emphasis={step.id === firstOutstanding?.id} />
                         )}

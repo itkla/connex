@@ -1,80 +1,79 @@
+import { WARMTH_NONE_FACET_KEY } from '@/app/components/records/warmthFilters';
 import type { ActivationCounts } from '@/app/lib/activation';
-import type { WarmthBandCounts, WarmthSummary } from '@/app/lib/types';
+import type { FacetCount, TemperatureBand, WarmthBandCounts } from '@/app/lib/types';
 
 /**
- * Where a brand-new workspace stands on the way to its first warmth reading. The legs are ordered:
- * people come in, an interaction records what happened between you, and warmth follows from that
- * evidence. `warmth` is the arrival, not another chore.
+ * The ways into a record type with nothing in it yet. Both doors belong to the same permission and
+ * the same record type, so the contacts and companies browsers share them and supply their own
+ * labels.
  */
-export type FirstRunLeg = 'contacts' | 'evidence' | 'warmth';
+export type FirstRunDoor = 'import' | 'create';
 
-/** The ways a workspace can bring its first people in, in the order they are offered. */
-export type FirstRunDoor = 'importCsv' | 'newContact';
-
-/** The journey a workspace is currently on, resolved from its own counts. */
-export type FirstRunJourney = {
-    leg: FirstRunLeg;
-    /** The on-ramps this member can use right now. Empty on every leg but `contacts`. */
+/** The guided entry a workspace with no contacts is offered, resolved from its own counts. */
+export type FirstRunEntry = {
     doors: FirstRunDoor[];
     /**
-     * Whether the journey may mention reading a business card. Card scanning lives inside the
-     * contact composer, so it is offered as part of adding someone rather than as a door of its
-     * own, and it is withheld entirely on an instance that cannot scan.
+     * Whether the entry may mention reading a business card. Card scanning lives inside the contact
+     * composer, so it is offered as part of adding someone rather than as a door of its own, and it
+     * is withheld entirely on an instance that cannot scan.
      */
     cardScanning: boolean;
 };
 
-/**
- * The warmth the workspace's own interactions have produced, or null when nothing recorded backs a
- * reading. Band counts alone are not evidence: a contact nobody has interacted with still falls in
- * a band, so the counts are only returned once at least one relationship carries a recorded touch.
- *
- * @param summary - the workspace-wide warmth summary
- * @param hasRelationshipEvidence - whether any relationship carries a recorded interaction
- * @returns the contact band counts, or null when no reading is provable
- */
-export function warmthReadings(
-    summary: WarmthSummary,
-    hasRelationshipEvidence: boolean,
-): WarmthBandCounts | null {
-    if (!hasRelationshipEvidence) return null;
-    const { hot, warm, cool, cold } = summary.contacts;
-    return hot + warm + cool + cold > 0 ? summary.contacts : null;
-}
+const BANDS: readonly TemperatureBand[] = ['hot', 'warm', 'cool', 'cold'];
 
 /**
- * The on-ramps a member can use to bring the first people in. Both doors create contacts, so they
- * share one permission and one absence: a member who cannot create contacts is offered nothing
+ * The doors a member can use to bring the first records in. Both create records of the same type,
+ * so they share one permission and one absence: a member who cannot create them is offered nothing
  * rather than an invitation they cannot accept.
  *
- * @param canCreateContacts - whether the member may create contacts
- * @returns the offered doors, empty when the member cannot create contacts
+ * @param canCreateRecords - whether the member may create records of this type
+ * @returns the offered doors, empty when the member cannot create them
  */
-export function firstRunDoors(canCreateContacts: boolean): FirstRunDoor[] {
-    return canCreateContacts ? ['importCsv', 'newContact'] : [];
+export function firstRunDoors(canCreateRecords: boolean): FirstRunDoor[] {
+    return canCreateRecords ? ['import', 'create'] : [];
 }
 
 /**
- * Resolves the first-run journey from the same counts the setup checklist is built from, so the two
- * can never disagree. Returns null whenever this member cannot move the journey along, which leaves
- * the surface showing its plain empty state instead of a guided one that leads nowhere.
+ * Resolves the guided entry from the same counts the setup checklist is built from, so the two can
+ * never disagree. Returns null once contacts exist, and for a member who cannot create them, which
+ * leaves the surface showing its plain empty state instead of a guided one that leads nowhere.
  *
  * @param counts - exact workspace counts
  * @param scanningAvailable - whether this instance can read business cards
- * @returns the current leg with its doors, or null when there is nothing to guide
+ * @returns the entry to offer, or null when there is nothing to guide
  */
-export function resolveFirstRunJourney(
+export function resolveFirstRunEntry(
     counts: ActivationCounts,
     scanningAvailable: boolean,
-): FirstRunJourney | null {
-    if (counts.contacts === 0) {
-        const doors = firstRunDoors(counts.canImportContacts);
-        if (doors.length === 0) return null;
-        return { leg: 'contacts', doors, cardScanning: scanningAvailable };
+): FirstRunEntry | null {
+    if (counts.contacts > 0) return null;
+    const doors = firstRunDoors(counts.canImportContacts);
+    if (doors.length === 0) return null;
+    return { doors, cardScanning: scanningAvailable };
+}
+
+/**
+ * The warmth a workspace's own interactions have produced, read from the contacts warmth facet.
+ * Contacts with no interaction history are counted by the backend under their own key, disjoint
+ * from every band, and are dropped here: a relationship nobody has touched has no reading, and
+ * counting it as cold would claim evidence that does not exist. Returns null when the facet was not
+ * requested and when no contact carries a reading, so the caller never claims an arrival it cannot
+ * show.
+ *
+ * @param bands - the contacts warmth facet, or undefined when it was not requested
+ * @returns the band counts backed by recorded interactions, or null when none are
+ */
+export function warmthArrival(bands: FacetCount[] | undefined): WarmthBandCounts | null {
+    if (!bands) return null;
+    const counts: WarmthBandCounts = { hot: 0, warm: 0, cool: 0, cold: 0 };
+    let read = 0;
+    for (const facet of bands) {
+        if (facet.key === WARMTH_NONE_FACET_KEY || facet.count <= 0) continue;
+        const band = BANDS.find((candidate) => candidate === facet.key);
+        if (!band) continue;
+        counts[band] = facet.count;
+        read += facet.count;
     }
-    if (!counts.hasInteractions) {
-        if (!counts.canCreateActivities || !counts.hasRelationshipTargets) return null;
-        return { leg: 'evidence', doors: [], cardScanning: scanningAvailable };
-    }
-    return { leg: 'warmth', doors: [], cardScanning: scanningAvailable };
+    return read > 0 ? counts : null;
 }

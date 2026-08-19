@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
@@ -9,10 +12,10 @@ import { EmptyState } from "@/app/components/EmptyState";
 import { buildActivationSteps, type ActivationCounts, type ActivationInsight } from "@/app/lib/activation";
 import {
     firstRunDoors,
-    resolveFirstRunJourney,
-    warmthReadings,
+    resolveFirstRunEntry,
+    warmthArrival,
 } from "@/app/lib/firstRunJourney";
-import type { WarmthSummary } from "@/app/lib/types";
+import type { FacetCount } from "@/app/lib/types";
 
 vi.mock("next/navigation", () => ({
     redirect: vi.fn(),
@@ -42,6 +45,7 @@ vi.mock("motion/react", async () => {
 
 vi.mock("@/app/hooks/useActions", () => ({
     useActions: () => ({
+        actions: [],
         getAction: () => ({ id: "stub" }),
         openOverlay: vi.fn(),
         pendingIds: new Set<string>(),
@@ -85,100 +89,97 @@ const EMPTY_COUNTS: ActivationCounts = {
     canCreateTasks: true,
 };
 
-const PEOPLE_IN: ActivationCounts = {
+const WARMED: ActivationCounts = {
     ...EMPTY_COUNTS,
     contacts: 6,
     hasRelationshipTargets: true,
+    hasInteractions: true,
 };
 
-const WARMED: ActivationCounts = { ...PEOPLE_IN, hasInteractions: true };
+function facets(entries: Record<string, number>): FacetCount[] {
+    return Object.entries(entries).map(([key, count]) => ({ key, count }));
+}
 
-const EMPTY_WARMTH: WarmthSummary = {
-    contacts: { hot: 0, warm: 0, cool: 0, cold: 0 },
-    companies: { hot: 0, warm: 0, cool: 0, cold: 0 },
-    contactTrends: { rising: 0, steady: 0, cooling: 0 },
-    contactDecay: { soon: 0, mid: 0, later: 0 },
-};
-
-const READ_WARMTH: WarmthSummary = {
-    ...EMPTY_WARMTH,
-    contacts: { hot: 1, warm: 2, cool: 0, cold: 0 },
-};
-
-describe("resolveFirstRunJourney", () => {
-    it("puts a workspace with nobody in it on the contacts leg with both doors", () => {
-        expect(resolveFirstRunJourney(EMPTY_COUNTS, false)).toEqual({
-            leg: "contacts",
-            doors: ["importCsv", "newContact"],
+describe("resolveFirstRunEntry", () => {
+    it("offers both doors to a workspace with nobody in it", () => {
+        expect(resolveFirstRunEntry(EMPTY_COUNTS, false)).toEqual({
+            doors: ["import", "create"],
             cardScanning: false,
         });
     });
 
-    it("offers the card scanner only on an instance that can read cards", () => {
-        expect(resolveFirstRunJourney(EMPTY_COUNTS, true)?.cardScanning).toBe(true);
-        expect(resolveFirstRunJourney(EMPTY_COUNTS, false)?.cardScanning).toBe(false);
+    it("mentions the card scanner only on an instance that can read cards", () => {
+        expect(resolveFirstRunEntry(EMPTY_COUNTS, true)?.cardScanning).toBe(true);
+        expect(resolveFirstRunEntry(EMPTY_COUNTS, false)?.cardScanning).toBe(false);
     });
 
     it("guides nobody who cannot create the contacts it would ask for", () => {
-        expect(resolveFirstRunJourney({ ...EMPTY_COUNTS, canImportContacts: false }, true)).toBeNull();
+        expect(resolveFirstRunEntry({ ...EMPTY_COUNTS, canImportContacts: false }, true)).toBeNull();
         expect(firstRunDoors(false)).toEqual([]);
     });
 
-    it("moves to the evidence leg once people are in", () => {
-        expect(resolveFirstRunJourney(PEOPLE_IN, false)).toEqual({
-            leg: "evidence",
-            doors: [],
-            cardScanning: false,
-        });
-    });
-
-    it("guides nobody who cannot log the interaction it would ask for", () => {
-        expect(resolveFirstRunJourney({ ...PEOPLE_IN, canCreateActivities: false }, false)).toBeNull();
-        expect(resolveFirstRunJourney({ ...PEOPLE_IN, hasRelationshipTargets: false }, false)).toBeNull();
-    });
-
-    it("arrives at warmth once an interaction is recorded", () => {
-        expect(resolveFirstRunJourney(WARMED, false)?.leg).toBe("warmth");
+    it("retires once contacts exist", () => {
+        expect(resolveFirstRunEntry({ ...EMPTY_COUNTS, contacts: 1 }, true)).toBeNull();
     });
 });
 
-describe("warmthReadings", () => {
-    it("refuses a reading with no recorded interaction behind it", () => {
-        expect(warmthReadings(READ_WARMTH, false)).toBeNull();
+describe("warmthArrival", () => {
+    it("claims nothing when the warmth facet was not requested", () => {
+        expect(warmthArrival(undefined)).toBeNull();
     });
 
-    it("refuses a reading that covers nobody", () => {
-        expect(warmthReadings(EMPTY_WARMTH, true)).toBeNull();
+    it("refuses an arrival when every contact is untouched", () => {
+        expect(warmthArrival(facets({ __none__: 20 }))).toBeNull();
+        expect(warmthArrival(facets({ __none__: 20, hot: 0, warm: 0, cool: 0, cold: 0 }))).toBeNull();
     });
 
-    it("returns the contact bands once recorded interactions back them", () => {
-        expect(warmthReadings(READ_WARMTH, true)).toEqual({ hot: 1, warm: 2, cool: 0, cold: 0 });
+    it("counts only the contacts a recorded interaction reached", () => {
+        expect(warmthArrival(facets({ warm: 1, __none__: 19 }))).toEqual({
+            hot: 0,
+            warm: 1,
+            cool: 0,
+            cold: 0,
+        });
+    });
+
+    it("keeps a genuinely cold reading, which is not the same as no history", () => {
+        expect(warmthArrival(facets({ cold: 2, __none__: 3 }))).toEqual({
+            hot: 0,
+            warm: 0,
+            cool: 0,
+            cold: 2,
+        });
+    });
+
+    it("ignores a band it does not recognize", () => {
+        expect(warmthArrival(facets({ lukewarm: 4 }))).toBeNull();
     });
 });
 
 describe("the checklist's contacts step", () => {
-    it("offers the journey's doors instead of its single call to action", () => {
-        const journey = resolveFirstRunJourney(EMPTY_COUNTS, false);
+    it("offers the entry's doors instead of its single call to action", () => {
         const html = renderToStaticMarkup(
-            <SetupChecklist steps={buildActivationSteps(EMPTY_COUNTS)} journey={journey} />,
+            <SetupChecklist
+                steps={buildActivationSteps(EMPTY_COUNTS)}
+                entry={resolveFirstRunEntry(EMPTY_COUNTS, false)}
+            />,
         );
 
-        expect(html).toContain("FirstRunJourney.doors.importCsv");
-        expect(html).toContain("FirstRunJourney.doors.newContact");
-        expect(html).not.toContain("DashboardActivation.steps.contacts.cta");
+        expect(html).toContain("DashboardActivation.steps.contacts.cta");
+        expect(html).toContain("FirstRunJourney.newContact");
     });
 
     it("promises card scanning only on an instance that can scan", () => {
         const scanning = renderToStaticMarkup(
             <SetupChecklist
                 steps={buildActivationSteps(EMPTY_COUNTS)}
-                journey={resolveFirstRunJourney(EMPTY_COUNTS, true)}
+                entry={resolveFirstRunEntry(EMPTY_COUNTS, true)}
             />,
         );
         const withoutScanning = renderToStaticMarkup(
             <SetupChecklist
                 steps={buildActivationSteps(EMPTY_COUNTS)}
-                journey={resolveFirstRunJourney(EMPTY_COUNTS, false)}
+                entry={resolveFirstRunEntry(EMPTY_COUNTS, false)}
             />,
         );
 
@@ -187,24 +188,24 @@ describe("the checklist's contacts step", () => {
         expect(withoutScanning).toContain("DashboardActivation.steps.contacts.body");
     });
 
-    it("keeps its plain call to action when there is no journey to guide", () => {
+    it("keeps its plain call to action and drops the create door when there is no entry", () => {
         const html = renderToStaticMarkup(
-            <SetupChecklist steps={buildActivationSteps(EMPTY_COUNTS)} journey={null} />,
+            <SetupChecklist steps={buildActivationSteps(EMPTY_COUNTS)} entry={null} />,
         );
 
         expect(html).toContain("DashboardActivation.steps.contacts.cta");
-        expect(html).not.toContain("FirstRunJourney.doors.importCsv");
+        expect(html).not.toContain("FirstRunJourney.newContact");
     });
 
     it("drops the doors once the step is done rather than repeating the invitation", () => {
         const html = renderToStaticMarkup(
             <SetupChecklist
                 steps={buildActivationSteps(WARMED)}
-                journey={resolveFirstRunJourney(WARMED, true)}
+                entry={resolveFirstRunEntry(WARMED, true)}
             />,
         );
 
-        expect(html).not.toContain("FirstRunJourney.doors.importCsv");
+        expect(html).not.toContain("FirstRunJourney.newContact");
         expect(html).toContain("DashboardActivation.steps.contacts.done");
     });
 });
@@ -221,67 +222,58 @@ describe("the activation panel's ending", () => {
         evidence: [{ kind: "touchCount", count: 4 }],
     };
 
-    it("shows the first warmth reading instead of claiming there is no signal", () => {
-        const html = renderToStaticMarkup(
+    function panel(
+        overrides: {
+            insight?: ActivationInsight | null;
+            bands?: FacetCount[] | undefined;
+            gaps?: Parameters<typeof ActivationPanel>[0]["gaps"];
+        } = {},
+    ): string {
+        return renderToStaticMarkup(
             <ActivationPanel
                 steps={null}
-                journey={null}
-                insight={null}
-                warmthReadings={{ hot: 1, warm: 2, cool: 0, cold: 0 }}
-                gaps={["noSignal"]}
+                entry={null}
+                insight={overrides.insight ?? null}
+                warmthReadings={warmthArrival(overrides.bands)}
+                gaps={overrides.gaps ?? ["noSignal"]}
                 canCreateFollowUp
             />,
         );
+    }
+
+    it("shows the first warmth reading instead of claiming there is no signal", () => {
+        const html = panel({ bands: facets({ warm: 1 }) });
 
         expect(html).toContain("FirstRunJourney.warmth.title");
         expect(html).toContain("FirstRunJourney.warmth.cta");
-        expect(html).toContain("/records/contacts");
+        expect(html).toContain("/records/contacts?sort=warmth&amp;dir=desc");
         expect(html).not.toContain("DashboardActivation.missing.noSignalTitle");
     });
 
-    it("names only the bands somebody is actually in", () => {
-        const html = renderToStaticMarkup(
-            <ActivationPanel
-                steps={null}
-                journey={null}
-                insight={null}
-                warmthReadings={{ hot: 1, warm: 0, cool: 0, cold: 0 }}
-                gaps={["noSignal"]}
-                canCreateFollowUp
-            />,
-        );
+    it("claims no arrival for an import whose contacts nobody has interacted with", () => {
+        const html = panel({ bands: facets({ __none__: 20 }) });
 
-        expect(html).toContain("Temperature.hot");
+        expect(html).not.toContain("FirstRunJourney.warmth.title");
+        expect(html).toContain("DashboardActivation.missing.noSignalTitle");
+    });
+
+    it("names only the touched contacts, never the ones with no history", () => {
+        const html = panel({ bands: facets({ warm: 1, __none__: 19 }) });
+
+        expect(html).toContain("Temperature.warm");
         expect(html).not.toContain("Temperature.cold");
+        expect(html).not.toContain("19");
     });
 
     it("lets a triage-worthy signal outrank the arrival", () => {
-        const html = renderToStaticMarkup(
-            <ActivationPanel
-                steps={null}
-                journey={null}
-                insight={insight}
-                warmthReadings={{ hot: 1, warm: 2, cool: 0, cold: 0 }}
-                gaps={[]}
-                canCreateFollowUp
-            />,
-        );
+        const html = panel({ insight, bands: facets({ warm: 1 }), gaps: [] });
 
         expect(html).toContain("DashboardActivation.insight.coolingContact.headline");
         expect(html).not.toContain("FirstRunJourney.warmth.title");
     });
 
     it("says the signals could not load rather than inventing an arrival", () => {
-        const html = renderToStaticMarkup(
-            <ActivationPanel
-                steps={null}
-                journey={null}
-                insight={null}
-                warmthReadings={{ hot: 1, warm: 2, cool: 0, cold: 0 }}
-                gaps={["unavailable"]}
-                canCreateFollowUp
-            />,
-        );
+        const html = panel({ bands: facets({ warm: 1 }), gaps: ["unavailable"] });
 
         expect(html).toContain("DashboardActivation.missing.unavailableTitle");
         expect(html).not.toContain("FirstRunJourney.warmth.title");
@@ -296,9 +288,11 @@ describe("first-run and filtered-empty stay distinct", () => {
             body="ContactsBrowser.emptyJourneyBody"
             action={
                 <FirstRunDoors
-                    doors={["importCsv", "newContact"]}
+                    doors={["import", "create"]}
+                    importLabel="Actions.utility.importContacts"
+                    createLabel="ContactsBrowser.emptyCta"
                     onImport={() => {}}
-                    onNew={() => {}}
+                    onCreate={() => {}}
                 />
             }
         />
@@ -325,7 +319,7 @@ describe("first-run and filtered-empty stay distinct", () => {
         const html = render(false);
 
         expect(html).toContain("ContactsBrowser.emptyJourneyBody");
-        expect(html).toContain("FirstRunJourney.doors.importCsv");
+        expect(html).toContain("Actions.utility.importContacts");
         expect(html).not.toContain("RecordsRenderView.clearFilters");
     });
 
@@ -333,7 +327,62 @@ describe("first-run and filtered-empty stay distinct", () => {
         const html = render(true);
 
         expect(html).toContain("RecordsRenderView.clearFilters");
-        expect(html).not.toContain("FirstRunJourney.doors.importCsv");
+        expect(html).not.toContain("Actions.utility.importContacts");
         expect(html).not.toContain("ContactsBrowser.emptyJourneyBody");
+    });
+});
+
+describe("the doors survive a hard load", () => {
+    const BROWSERS = [
+        ["contacts", "app/components/records/contacts/ContactsBrowser.tsx"],
+        ["companies", "app/components/records/companies/CompaniesBrowser.tsx"],
+    ] as const;
+
+    it.each(BROWSERS)(
+        "recomputes the %s doors when the action registry seeds after mount",
+        (_entity, file) => {
+            const source = readFileSync(resolve(process.cwd(), file), "utf8");
+            const memo = /const firstRunEntryDoors = useMemo\([\s\S]*?\n {8}\[([^\]]*)\],\n {4}\);/.exec(source);
+
+            expect(memo, `${file} no longer resolves its first-run doors in a useMemo`).not.toBeNull();
+            expect(
+                memo?.[1].split(",").map((dependency) => dependency.trim()),
+                `${file} memoizes the first-run doors without the action registry: the registry is `
+                + "seeded in an effect, so a hard load would resolve against an empty registry, drop "
+                + "the import door, and never recompute it.",
+            ).toContain("actions");
+        },
+    );
+});
+
+describe("the doors themselves", () => {
+    function doors(list: Parameters<typeof FirstRunDoors>[0]["doors"]): string {
+        return renderToStaticMarkup(
+            <FirstRunDoors
+                doors={list}
+                importLabel="Actions.utility.importContacts"
+                createLabel="ContactsBrowser.emptyCta"
+                onImport={() => {}}
+                onCreate={() => {}}
+            />,
+        );
+    }
+
+    it("renders nothing at all for a member who cannot create records", () => {
+        expect(doors(firstRunDoors(false))).toBe("");
+    });
+
+    it("names each door as the action behind it is named everywhere else", () => {
+        const html = doors(firstRunDoors(true));
+
+        expect(html).toContain("Actions.utility.importContacts");
+        expect(html).toContain("ContactsBrowser.emptyCta");
+    });
+
+    it("keeps the create door when the import action has not been registered yet", () => {
+        const html = doors(["create"]);
+
+        expect(html).toContain("ContactsBrowser.emptyCta");
+        expect(html).not.toContain("Actions.utility.importContacts");
     });
 });

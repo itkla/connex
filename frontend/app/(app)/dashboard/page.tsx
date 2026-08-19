@@ -38,6 +38,7 @@ import {
     getMyWorkspacesFromCookie,
     getNotesPageResultFromCookie,
     getNotifications,
+    getPersonFacets,
     getPipelinesResultFromCookie,
     getProviderConnectionsResultFromCookie,
     getRecentMovesResultFromCookie,
@@ -103,7 +104,7 @@ import {
     selectFirstInsight,
     type ActivationCounts,
 } from '@/app/lib/activation';
-import { resolveFirstRunJourney, warmthReadings } from '@/app/lib/firstRunJourney';
+import { resolveFirstRunEntry, warmthArrival } from '@/app/lib/firstRunJourney';
 
 const EMPTY_DEAL_KPIS: DealKpis = {
     wonRevenue: 0,
@@ -487,11 +488,22 @@ export default async function Dashboard() {
         : null;
     const activationSignalsAvailable = activationInputsAvailable
         && (activationInsight != null || introSuggestionsResult.ok);
-    const firstRunJourney = activationCounts && activationInputsAvailable
-        ? resolveFirstRunJourney(activationCounts, businessCardScanning)
+    const firstRunEntry = activationCounts && activationInputsAvailable
+        ? resolveFirstRunEntry(activationCounts, businessCardScanning)
         : null;
-    const firstWarmthReadings = relationshipDashboardResult.ok
-        ? warmthReadings(warmthSummary, relationshipDashboard.hasRelationshipEvidence)
+    const arrivalPlausible =
+        activationCounts != null
+        && activationVisible
+        && activationInsight == null
+        && contactsPageResult.ok
+        && contactsPage.total > 0
+        && relationshipDashboardResult.ok
+        && relationshipDashboard.hasRelationshipEvidence;
+    const warmthFacetsResult = arrivalPlausible
+        ? await toResult(getPersonFacets({ warmth: true }, init))
+        : null;
+    const firstWarmthReadings = warmthFacetsResult?.ok
+        ? warmthArrival(warmthFacetsResult.data.warmthBands)
         : null;
 
     const chartCard = (child: ReactNode) => (
@@ -617,7 +629,7 @@ export default async function Dashboard() {
                     <Rise delay={0.09}>
                         <ActivationPanel
                             steps={activationSteps}
-                            journey={firstRunJourney}
+                            entry={firstRunEntry}
                             insight={activationInsight}
                             warmthReadings={firstWarmthReadings}
                             gaps={activationGaps(

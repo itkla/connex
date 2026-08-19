@@ -6,7 +6,7 @@ import FirstWarmthCard from '@/app/components/dashboard/activation/FirstWarmthCa
 import MissingEvidence from '@/app/components/dashboard/activation/MissingEvidence';
 import SetupChecklist from '@/app/components/dashboard/activation/SetupChecklist';
 import type { ActivationGap, ActivationInsight, ActivationStep } from '@/app/lib/activation';
-import type { FirstRunJourney } from '@/app/lib/firstRunJourney';
+import type { FirstRunEntry } from '@/app/lib/firstRunJourney';
 import type { WarmthBandCounts } from '@/app/lib/types';
 
 /**
@@ -18,16 +18,16 @@ import type { WarmthBandCounts } from '@/app/lib/types';
  */
 export default function ActivationPanel({
     steps,
-    journey,
+    entry,
     insight,
     warmthReadings,
     gaps,
     canCreateFollowUp,
 }: {
     steps: ActivationStep[] | null;
-    journey: FirstRunJourney | null;
+    entry: FirstRunEntry | null;
     insight: ActivationInsight | null;
-    /** Warmth band counts backed by recorded interactions, or null when none are proven. */
+    /** Warmth band counts read from the contacts warmth facet, or null when no contact carries one. */
     warmthReadings: WarmthBandCounts | null;
     gaps: ActivationGap[];
     canCreateFollowUp: boolean;
@@ -41,7 +41,7 @@ export default function ActivationPanel({
         <section aria-label={t('sectionTitle')}>
             <SectionHeader title={t('sectionTitle')} />
             <div className={paired || steps ? 'grid grid-cols-1 items-stretch gap-6 lg:grid-cols-2' : 'grid'}>
-                {steps ? <SetupChecklist steps={steps} journey={journey} /> : null}
+                {steps ? <SetupChecklist steps={steps} entry={entry} /> : null}
                 {!steps && unavailable ? <MissingEvidence gaps={gaps} /> : null}
                 {insight ? (
                     <FirstInsightCard insight={insight} canCreateFollowUp={canCreateFollowUp} />

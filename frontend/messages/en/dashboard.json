@@ -152,11 +152,7 @@
     }
   },
   "FirstRunJourney": {
-    "doors": {
-      "importCsv": "Import CSV",
-      "newContact": "New contact"
-    },
-    "cardScanning": "You can scan a business card while adding someone.",
+    "newContact": "New contact",
     "warmth": {
       "title": "Your first warmth reading",
       "body": "Connex read the interactions you logged. This is how warm your relationships are right now.",

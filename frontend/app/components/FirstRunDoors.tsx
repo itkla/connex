@@ -1,6 +1,5 @@
 'use client';
 
-import { useTranslations } from 'next-intl';
 import { ArrowUpTrayIcon, PlusIcon } from '@heroicons/react/24/outline';
 import { Loader2Icon } from 'lucide-react';
 
@@ -8,37 +7,37 @@ import { Button } from '@/components/ui/button';
 import type { FirstRunDoor } from '@/app/lib/firstRunJourney';
 
 /**
- * The ways into a workspace with no people in it yet: bring a list in, or add someone. Rendered
- * wherever the first-run journey asks for its first contacts, so the dashboard checklist and the
- * contacts browser offer the same two doors in the same order. The first door is the primary
- * action; nothing else in the region competes with it.
+ * The ways into a record type with nothing in it yet: bring a list in, or add one by hand. Rendered
+ * wherever the guided first run asks for a workspace's first records, so the dashboard checklist and
+ * the record browsers offer the same doors in the same order. Both labels are supplied by the
+ * caller, which names each door exactly as the action behind it is named everywhere else. The first
+ * door is the primary action; nothing else in the region competes with it.
  */
 export default function FirstRunDoors({
     doors,
+    importLabel,
+    createLabel,
     onImport,
-    onNew,
-    newLabel,
+    onCreate,
     importPending = false,
     size = 'toolbar',
 }: {
     doors: FirstRunDoor[];
+    importLabel: string;
+    createLabel: string;
     onImport: () => void;
-    onNew: () => void;
-    /** Label for the create door. Defaults to the journey's own "New contact". */
-    newLabel?: string;
+    onCreate: () => void;
     /** Whether the import door is waiting on the action that opens it. */
     importPending?: boolean;
     size?: 'toolbar' | 'page';
 }) {
-    const t = useTranslations('FirstRunJourney');
-
     if (doors.length === 0) return null;
 
     return (
-        <div className="flex flex-wrap items-center justify-center gap-2">
+        <div className="flex w-full flex-col items-stretch justify-center gap-2 sm:w-auto sm:flex-row sm:items-center">
             {doors.map((door, index) => {
                 const variant = index === 0 ? 'brand' : 'outline';
-                if (door === 'importCsv') {
+                if (door === 'import') {
                     return (
                         <Button
                             key={door}
@@ -46,6 +45,7 @@ export default function FirstRunDoors({
                             size={size}
                             variant={variant}
                             disabled={importPending}
+                            className="w-full sm:w-auto sm:shrink-0"
                             onClick={onImport}
                         >
                             {importPending ? (
@@ -53,7 +53,7 @@ export default function FirstRunDoors({
                             ) : (
                                 <ArrowUpTrayIcon aria-hidden />
                             )}
-                            {t('doors.importCsv')}
+                            {importLabel}
                         </Button>
                     );
                 }
@@ -63,10 +63,11 @@ export default function FirstRunDoors({
                         type="button"
                         size={size}
                         variant={variant}
-                        onClick={onNew}
+                        className="w-full sm:w-auto sm:shrink-0"
+                        onClick={onCreate}
                     >
                         <PlusIcon strokeWidth={2.5} aria-hidden />
-                        {newLabel ?? t('doors.newContact')}
+                        {createLabel}
                     </Button>
                 );
             })}

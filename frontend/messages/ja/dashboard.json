@@ -152,11 +152,7 @@
     }
   },
   "FirstRunJourney": {
-    "doors": {
-      "importCsv": "CSVをインポート",
-      "newContact": "新規連絡先"
-    },
-    "cardScanning": "連絡先の追加時に、名刺をスキャンできます。",
+    "newContact": "新規連絡先",
     "warmth": {
       "title": "最初の温度感",
       "body": "記録された接点をもとに、Connex が読み取った現在の関係の温度感です。",
