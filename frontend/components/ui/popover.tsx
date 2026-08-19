@@ -10,17 +10,23 @@ function PopoverTrigger(props: PopoverPrimitive.Trigger.Props) {
   return <PopoverPrimitive.Trigger data-slot="popover-trigger" {...props} />
 }
 
+/**
+ * The anchored popup. `anchor` is forwarded so a popover can point at something other than its own
+ * trigger — a clicked calendar event, a cell, a virtual rect — which is what an anchored peek needs
+ * when the thing it describes was clicked rather than pressed as a trigger.
+ */
 function PopoverContent({
   className,
   sideOffset = 8,
   side,
   align,
+  anchor,
   ...props
 }: PopoverPrimitive.Popup.Props &
-  Pick<PopoverPrimitive.Positioner.Props, "side" | "align" | "sideOffset">) {
+  Pick<PopoverPrimitive.Positioner.Props, "side" | "align" | "sideOffset" | "anchor">) {
   return (
     <PopoverPrimitive.Portal>
-      <PopoverPrimitive.Positioner className="z-[100]" sideOffset={sideOffset} side={side} align={align}>
+      <PopoverPrimitive.Positioner className="z-[100]" sideOffset={sideOffset} side={side} align={align} anchor={anchor}>
         <PopoverPrimitive.Popup
           data-slot="popover-content"
           className={cn(

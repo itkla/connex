@@ -32,6 +32,7 @@ import WeekView from './WeekView';
 import DayView from './DayView';
 import AgendaView from './AgendaView';
 import EventDetailSheet from './EventDetailSheet';
+import EventPeekPopover from './EventPeekPopover';
 import QuickCreateHost from './QuickCreateHost';
 import GoToDateDialog from './GoToDateDialog';
 import CalendarShortcuts from './CalendarShortcuts';
@@ -105,6 +106,7 @@ export default function CalendarShell({
     const now = useNow();
     const today = useMemo(() => startOfDay(new Date(now)), [now]);
     const [openEventId, setOpenEventId] = useState<string | null>(null);
+    const [peek, setPeek] = useState<{ eventId: string; anchor: HTMLElement } | null>(null);
     const [overrides, setOverrides] = useState<Map<string, string>>(() => new Map());
     const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
     const [slotAt, setSlotAt] = useState<string | null>(null);
@@ -265,7 +267,31 @@ export default function CalendarShell({
         () => (openEventId ? events.find((e) => e.id === openEventId) ?? null : null),
         [openEventId, events],
     );
-    const onOpenEvent = (event: CalendarEvent) => setOpenEventId(event.id);
+    const peekEvent = useMemo(
+        () => (peek ? events.find((e) => e.id === peek.eventId) ?? null : null),
+        [peek, events],
+    );
+
+    /**
+     * D5's calendar archetype: a click inspects in an anchored popover, and "Details" expands the
+     * same event into the drawer. A coarse pointer has no anchor worth pointing at and gets the
+     * bottom sheet directly, which is the same rule the responsive overlays follow everywhere else.
+     */
+    const onOpenEvent = (event: CalendarEvent, anchor: HTMLElement | null) => {
+        if (coarse || !anchor) {
+            setPeek(null);
+            setOpenEventId(event.id);
+            return;
+        }
+        setOpenEventId(null);
+        setPeek({ eventId: event.id, anchor });
+    };
+
+    const expandPeek = () => {
+        if (!peek) return;
+        setOpenEventId(peek.eventId);
+        setPeek(null);
+    };
 
     const onSelectDay = (day: Date) => {
         if (isWide) cal.selectDay(day);
@@ -495,6 +521,24 @@ export default function CalendarShell({
                     </div>
                 </Rise>
             </PageShell>
+
+            <EventPeekPopover
+                event={peekEvent}
+                anchor={peek?.anchor ?? null}
+                open={peekEvent != null}
+                onOpenChange={(next) => {
+                    if (!next) setPeek(null);
+                }}
+                onExpand={expandPeek}
+                onComplete={(event) => {
+                    setPeek(null);
+                    void handleComplete(event);
+                }}
+                locale={locale}
+                personById={personById}
+                dealById={dealById}
+                currentUserId={currentUserId}
+            />
 
             <EventDetailSheet
                 event={openEvent}
