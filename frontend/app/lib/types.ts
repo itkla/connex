@@ -717,6 +717,12 @@ export type RadarSubject = {
 export type RadarEvidenceReference = {
     type: string;
     id: number;
+    /**
+     * Display name of the referenced record, when the API supplies one. Radar renders a cited
+     * record as a named link and renders nothing at all when it cannot name it, so this optional
+     * field is what turns a source reference into a working link rather than a bare id.
+     */
+    label?: string | null;
 };
 
 export type RadarEvidence = {
