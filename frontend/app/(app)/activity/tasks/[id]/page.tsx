@@ -95,7 +95,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
     );
 
     return (
-        <PageShell tier="form">
+        <PageShell>
                 <Rise className="flex flex-col gap-6">
                     <CrumbLabel value={noteSnippet(task.description, 60) || t("untitled")} />
 

@@ -119,7 +119,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
 
     return (
         <ContactIntroAskProvider contactId={contact.id} contactName={contact.name}>
-        <PageShell tier="wide">
+        <PageShell>
                 <Rise>
                     <CrumbLabel value={contact.name} />
                     <ActionRecordBridge type="person" id={contact.id} label={contact.name} />

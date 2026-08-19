@@ -110,7 +110,7 @@ export default function UsersBrowser({ users }: { users: User[] }) {
     );
 
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <Rise>
                     <PageHeader title={t("heading")} actions={<NewUserDialog />} />
                 </Rise>

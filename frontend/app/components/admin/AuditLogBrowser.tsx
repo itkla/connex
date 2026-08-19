@@ -511,7 +511,7 @@ export default function AuditLogBrowser({
     })();
 
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <Rise delay={0}>
                     <PageHeader
                         title={t("heading")}

@@ -150,7 +150,7 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
 
     return (
         <>
-            <PageShell tier="wide">
+            <PageShell>
                 <Rise>
                     <PageHeader
                         title={t('title')}

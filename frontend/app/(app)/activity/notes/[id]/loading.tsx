@@ -3,7 +3,7 @@ import { PageShell } from "@/app/components/PageShell";
 
 export default function Loading() {
     return (
-        <PageShell tier="reading">
+        <PageShell>
                 <Skeleton className="h-4 w-24" />
                 <div className="mx-auto w-full max-w-3xl space-y-4">
                     <Skeleton className="h-10 w-2/3" />

@@ -58,7 +58,7 @@ describe('record detail grammar', () => {
         expect(signals).toBeLessThan(activity);
         expect(evaluation).toBeGreaterThan(signals);
         expect(evaluation).toBeLessThan(activity);
-        expect(source).toContain('tier="wide"');
+        expect(source).toContain('<PageShell>');
         expect(source).not.toContain('xl:sticky');
         expect(source.indexOf('<EngineEvaluationPanel', evaluation + 1)).toBe(-1);
     });
@@ -92,7 +92,7 @@ describe('record detail grammar', () => {
         expect(source).not.toContain('<RelationshipEvidencePanel');
         expect(source).not.toContain('RecordStickyContext');
         expect(sparkline).toBeGreaterThan(files);
-        expect(source).toContain('tier="wide"');
+        expect(source).toContain('<PageShell>');
         expect(source).not.toContain('xl:sticky');
         expect(source.indexOf('<EngagementSparkline', sparkline + 1)).toBe(-1);
     });
@@ -142,16 +142,16 @@ describe('record detail grammar', () => {
         expect(source.indexOf('<DealBriefPanel', brief + 1)).toBe(-1);
         expect(source.indexOf('<EngineEvaluationPanel', evaluation + 1)).toBe(-1);
         expect(source.indexOf('<EngagementSparkline', sparkline + 1)).toBe(-1);
-        expect(source).toContain('tier="wide"');
+        expect(source).toContain('<PageShell>');
     });
 
-    it('deal detail loading skeleton matches the wide PageShell tier and left-rail order', () => {
+    it('deal detail loading skeleton matches the uncapped PageShell and left-rail order', () => {
         const source = readFileSync(
             path.resolve(process.cwd(), 'app/(app)/records/deals/[id]/loading.tsx'),
             'utf8',
         );
-        expect(source).toContain('tier="wide"');
-        expect(source).not.toContain('tier="reading"');
+        expect(source).toContain('<PageShell>');
+        expect(source).not.toMatch(/<PageShell[^>]*max-w-/);
         expect(source).not.toContain('xl:sticky');
         const peopleSkeleton = source.indexOf('size-12 shrink-0 rounded-full');
         const filesSkeleton = source.indexOf('xl:grid-cols-2');
@@ -163,14 +163,14 @@ describe('record detail grammar', () => {
         expect(timelineSkeleton).toBeGreaterThan(engagementSkeleton);
     });
 
-    it('contact and company loading skeletons match the wide left-rail canvas', () => {
+    it('contact and company loading skeletons match the uncapped left-rail canvas', () => {
         for (const relativePath of [
             'app/(app)/records/contacts/[id]/loading.tsx',
             'app/(app)/records/companies/[id]/loading.tsx',
         ]) {
             const source = readFileSync(path.resolve(process.cwd(), relativePath), 'utf8');
-            expect(source).toContain('tier="wide"');
-            expect(source).not.toContain('tier="reading"');
+            expect(source).toContain('<PageShell>');
+            expect(source).not.toMatch(/<PageShell[^>]*max-w-/);
             expect(source).toContain('xl:grid-cols-[minmax(16rem,20rem)_minmax(0,1fr)]');
             expect(source).not.toContain('xl:sticky');
         }

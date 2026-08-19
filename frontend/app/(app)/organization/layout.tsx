@@ -44,7 +44,7 @@ export default async function OrganizationLayout({ children }: { children: React
         : "unavailable";
     return (
         <OrganizationWorkspaceGuard workspaceId={activeWorkspace.id}>
-            <PageShell tier="wide">
+            <PageShell>
                 <Rise>
                     <PageHeader title={t("title")} description={t("subtitle")} />
                 </Rise>

@@ -3,7 +3,7 @@ import { PageShell } from '@/app/components/PageShell';
 
 export default function UsersLoading() {
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <div className="flex items-center justify-between">
                     <Skeleton className="h-10 w-48" />
                     <Skeleton className="h-9 w-28 rounded-md" />

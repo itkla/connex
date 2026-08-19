@@ -67,7 +67,7 @@ export default function DocumentTemplatesBrowser({ templates: initial }: { templ
 
     return (
         <>
-            <PageShell tier="wide">
+            <PageShell>
                 <Rise>
                     <PageHeader
                         title={t('title')}

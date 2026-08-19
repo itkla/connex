@@ -3,7 +3,7 @@ import { PageShell } from "@/app/components/PageShell";
 
 export default function ActivityAllLoading() {
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <div className="space-y-2">
                         <Skeleton className="h-10 w-40" />

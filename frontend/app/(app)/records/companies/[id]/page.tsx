@@ -120,7 +120,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
     const interactionUsers = relatedUsers.filter((user) => interactionUserIds.has(user.id));
 
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <Rise>
                     <CrumbLabel value={company.name} />
                     <RecentRecordBridge type="company" id={company.id} label={company.name} />

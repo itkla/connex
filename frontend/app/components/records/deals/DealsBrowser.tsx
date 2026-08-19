@@ -1420,7 +1420,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 deferredQuery={deferredQuery}
                 onExternalQuery={changeQuery}
             />
-            <PageShell tier="wide">
+            <PageShell>
                 <Rise>
                     <PageHeader
                         title={t('title')}

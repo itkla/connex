@@ -27,7 +27,7 @@ export default async function SettingsLayout({ children }: { children: React.Rea
         capabilitiesResult.ok ? capabilitiesResult.data.mailManaged : null,
     );
     return (
-        <PageShell tier="wide">
+        <PageShell>
             <Rise>
                 <PageHeader title={t("title")} description={t("subtitle")} />
             </Rise>

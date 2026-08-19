@@ -18,7 +18,7 @@ function TemplateRow() {
 
 export default function DocumentTemplatesLoading() {
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <Skeleton className="h-9 w-64 max-w-full sm:h-10" />
                     <div className="flex items-center gap-2">

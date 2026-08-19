@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
  */
 export default function WorkflowOperationsLoading() {
     return (
-        <PageShell tier="wide">
+        <PageShell>
             <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="space-y-2">
                     <Skeleton className="h-10 w-72 max-w-full" />

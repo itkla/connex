@@ -42,7 +42,7 @@ function BandSkeleton({ rows }: { rows: number }) {
 
 export default function RadarLoading() {
     return (
-        <PageShell tier="wide">
+        <PageShell>
             <header>
                 <Skeleton className="h-10 w-48" />
             </header>

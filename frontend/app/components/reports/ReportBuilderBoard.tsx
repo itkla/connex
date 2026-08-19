@@ -285,208 +285,206 @@ export default function ReportBuilderBoard({
     };
 
     return (
-        <div className="min-h-full bg-background px-2 pb-12 pt-8">
-            <div className="mx-auto w-full max-w-[100rem]">
-                <header className="flex flex-wrap items-end justify-between gap-5 border-b border-border pb-6">
-                    <div>
-                        <p className="mb-2 text-xs font-medium uppercase tracking-[0.12em] text-brand-dark">
-                            {t(initialReport ? 'builder.editEyebrow' : 'builder.newEyebrow')}
-                        </p>
-                        <h1 className="text-4xl font-extrabold tracking-tight text-foreground">
-                            {t(initialReport ? 'builder.editTitle' : 'builder.newTitle')}
-                        </h1>
-                        <p className="mt-2 text-sm text-muted-foreground">{t('builder.subtitle')}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <Button variant="outline" onClick={() => router.back()} disabled={saving}>
-                            {t('common.cancel')}
-                        </Button>
-                        <Button variant="brand" onClick={save} disabled={saving || ownerFiltersUnresolved}>
-                            {saving ? t('common.saving') : t('builder.save')}
-                        </Button>
-                    </div>
-                </header>
-
-                <div className="mt-8 grid grid-cols-1 gap-8 xl:grid-cols-[22rem_minmax(0,1fr)]">
-                    <aside className="space-y-6 xl:sticky xl:top-6 xl:self-start">
-                        <section className="rounded-2xl border border-border bg-card p-5">
-                            <h2 className="text-sm font-semibold text-foreground">{t('builder.detailsTitle')}</h2>
-                            <div className="mt-5 space-y-4">
-                                <div className="space-y-2">
-                                    <Label htmlFor="report-name">{t('builder.name')}</Label>
-                                    <Input
-                                        id="report-name"
-                                        value={name}
-                                        maxLength={128}
-                                        onChange={(event) => setName(event.target.value)}
-                                        placeholder={t('builder.namePlaceholder')}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="report-description">{t('builder.description')}</Label>
-                                    <Textarea
-                                        id="report-description"
-                                        value={description}
-                                        maxLength={512}
-                                        onChange={(event) => setDescription(event.target.value)}
-                                        placeholder={t('builder.descriptionPlaceholder')}
-                                        rows={3}
-                                    />
-                                </div>
-                                <FieldSelect
-                                    label={t('builder.cadence')}
-                                    value={cadence}
-                                    onChange={setCadence}
-                                    options={cadenceOptions.map((value) => ({ value, label: t(`cadence.${value}`) }))}
-                                />
-                                <FieldSelect
-                                    label={t('builder.bucket')}
-                                    value={config.bucket}
-                                    onChange={(value) => setConfig((current) => ({ ...current, bucket: value }))}
-                                    options={(['day', 'week', 'month'] as const).map((value) => ({ value, label: t(`bucket.${value}`) }))}
-                                />
-                                {cadence === 'custom' ? (
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div className="space-y-2">
-                                            <Label htmlFor="report-start">{t('builder.startDate')}</Label>
-                                            <Input
-                                                id="report-start"
-                                                type="date"
-                                                value={config.range?.start ?? ''}
-                                                onChange={(event) => setConfig((current) => ({
-                                                    ...current,
-                                                    range: { start: event.target.value, end: current.range?.end ?? '' },
-                                                }))}
-                                            />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label htmlFor="report-end">{t('builder.endDate')}</Label>
-                                            <Input
-                                                id="report-end"
-                                                type="date"
-                                                value={config.range?.end ?? ''}
-                                                onChange={(event) => setConfig((current) => ({
-                                                    ...current,
-                                                    range: { start: current.range?.start ?? '', end: event.target.value },
-                                                }))}
-                                            />
-                                        </div>
-                                    </div>
-                                ) : null}
-                            </div>
-                        </section>
-
-                        <section className="rounded-2xl border border-border bg-card p-5">
-                            <h2 className="text-sm font-semibold text-foreground">{t('builder.filtersTitle')}</h2>
-                            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{t('builder.filtersSubtitle')}</p>
-                            {hasAttainment ? (
-                                <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-                                    {t('builder.attainmentFilters')}
-                                </p>
-                            ) : null}
-                            <div className="mt-5 space-y-5">
-                                <FilterChecklist
-                                    label={t('builder.pipelines')}
-                                    options={pipelines.map((pipeline) => ({ value: pipeline.id, label: pipeline.name }))}
-                                    values={filters.pipelineIds}
-                                    onChange={(value) => updateFilters({ pipelineIds: toggleValue(filters.pipelineIds, value) })}
-                                    disabled={hasAttainment}
-                                />
-                                <FilterChecklist
-                                    label={t('builder.owners')}
-                                    options={ownerOptions}
-                                    values={filters.ownerIds}
-                                    onChange={(value) => updateFilters({ ownerIds: toggleValue(filters.ownerIds, value) })}
-                                    disabled={hasWorkspaceAttainment}
-                                />
-                                {ownersFailed || ownerFiltersUnresolved ? (
-                                    <div role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
-                                        <p>{t(ownersFailed
-                                            ? ownerFiltersUnresolved ? 'builder.ownersLoadBlocked' : 'builder.ownersLoadError'
-                                            : 'builder.ownersUnavailable')}</p>
-                                        <div className="mt-3 flex flex-wrap gap-2">
-                                            {ownerFiltersUnresolved ? (
-                                                <Button variant="outline" size="sm" onClick={clearUnavailableOwners}>
-                                                    {t('builder.clearUnavailableOwners')}
-                                                </Button>
-                                            ) : null}
-                                            {ownersFailed ? (
-                                                <Button variant="outline" size="sm" onClick={() => router.refresh()}>
-                                                    {t('common.retry')}
-                                                </Button>
-                                            ) : null}
-                                        </div>
-                                    </div>
-                                ) : null}
-                                <FilterChecklist
-                                    label={t('builder.statuses')}
-                                    options={STATUSES.map((value) => ({ value, label: t(`status.${value}`) }))}
-                                    values={filters.statuses}
-                                    onChange={(value) => updateFilters({ statuses: toggleValue(filters.statuses, value) })}
-                                    disabled={hasAttainment}
-                                />
-                                <FilterChecklist
-                                    label={t('builder.tags')}
-                                    options={tags.map((tag) => ({ value: tag.id, label: tag.name }))}
-                                    values={filters.tagIds}
-                                    onChange={(value) => updateFilters({ tagIds: toggleValue(filters.tagIds, value) })}
-                                    disabled={hasAttainment}
-                                />
-                                <FilterChecklist
-                                    label={t('builder.warmth')}
-                                    options={WARMTH_BANDS.map((value) => ({ value, label: t(`warmth.${value}`) }))}
-                                    values={filters.warmthBands}
-                                    onChange={(value) => updateFilters({ warmthBands: toggleValue(filters.warmthBands, value) })}
-                                />
-                            </div>
-                        </section>
-                    </aside>
-
-                    <main>
-                        <div className="mb-5 flex items-end justify-between gap-4">
-                            <div>
-                                <h2 className="text-xl font-bold tracking-tight text-foreground">{t('builder.canvasTitle')}</h2>
-                                <p className="mt-1 text-sm text-muted-foreground">{t('builder.canvasSubtitle')}</p>
-                            </div>
-                            <Button variant="outline" onClick={addWidget} disabled={config.widgets.length >= 16}>
-                                <PlusIcon />
-                                {t('builder.addWidget')}
-                            </Button>
-                        </div>
-                        <SortableGrid
-                            items={config.widgets}
-                            getLabel={(widget) => widget.title?.trim() || t(`measure.${widget.measure}`)}
-                            onChange={setWidgets}
-                            messages={messages}
-                            reduceMotion={reduceMotion}
-                            gridClassName="grid grid-cols-1 gap-5 lg:grid-cols-2"
-                            itemClassName={(widget) => (layoutById.get(widget.id)?.width ?? 6) >= 12 ? 'lg:col-span-2' : undefined}
-                            renderItem={(widget, { dragHandle, isDragging }) => (
-                                <WidgetEditor
-                                    widget={widget}
-                                    dragHandle={dragHandle}
-                                    isDragging={isDragging}
-                                    fullWidth={(layoutById.get(widget.id)?.width ?? 6) >= 12}
-                                    canRemove={config.widgets.length > 1}
-                                    canReadGoals={canReadGoals}
-                                    onDataSourceChange={(value) => updateDataSource(widget, value)}
-                                    onMeasureChange={(value) => updateMeasure(widget, value)}
-                                    onGroupChange={(value) => updateGroup(widget, value)}
-                                    onChange={(patch) => updateWidget(widget.id, patch)}
-                                    onToggleWidth={() => toggleWidth(widget.id)}
-                                    onRemove={() => removeWidget(widget.id)}
-                                />
-                            )}
-                            renderOverlay={(widget) => (
-                                <div className="rounded-2xl border border-brand/40 bg-card p-5 shadow-xl">
-                                    <p className="truncate text-sm font-semibold text-foreground">
-                                        {widget.title?.trim() || t(`measure.${widget.measure}`)}
-                                    </p>
-                                </div>
-                            )}
-                        />
-                    </main>
+        <div className="min-h-full bg-background px-2 pb-12 pt-8 2xl:px-6">
+            <header className="flex flex-wrap items-end justify-between gap-5 border-b border-border pb-6">
+                <div>
+                    <p className="mb-2 text-xs font-medium uppercase tracking-[0.12em] text-brand-dark">
+                        {t(initialReport ? 'builder.editEyebrow' : 'builder.newEyebrow')}
+                    </p>
+                    <h1 className="text-4xl font-extrabold tracking-tight text-foreground">
+                        {t(initialReport ? 'builder.editTitle' : 'builder.newTitle')}
+                    </h1>
+                    <p className="mt-2 text-sm text-muted-foreground">{t('builder.subtitle')}</p>
                 </div>
+                <div className="flex items-center gap-2">
+                    <Button variant="outline" onClick={() => router.back()} disabled={saving}>
+                        {t('common.cancel')}
+                    </Button>
+                    <Button variant="brand" onClick={save} disabled={saving || ownerFiltersUnresolved}>
+                        {saving ? t('common.saving') : t('builder.save')}
+                    </Button>
+                </div>
+            </header>
+
+            <div className="mt-8 grid grid-cols-1 gap-8 xl:grid-cols-[22rem_minmax(0,1fr)]">
+                <aside className="space-y-6 xl:sticky xl:top-6 xl:self-start">
+                    <section className="rounded-2xl border border-border bg-card p-5">
+                        <h2 className="text-sm font-semibold text-foreground">{t('builder.detailsTitle')}</h2>
+                        <div className="mt-5 space-y-4">
+                            <div className="space-y-2">
+                                <Label htmlFor="report-name">{t('builder.name')}</Label>
+                                <Input
+                                    id="report-name"
+                                    value={name}
+                                    maxLength={128}
+                                    onChange={(event) => setName(event.target.value)}
+                                    placeholder={t('builder.namePlaceholder')}
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="report-description">{t('builder.description')}</Label>
+                                <Textarea
+                                    id="report-description"
+                                    value={description}
+                                    maxLength={512}
+                                    onChange={(event) => setDescription(event.target.value)}
+                                    placeholder={t('builder.descriptionPlaceholder')}
+                                    rows={3}
+                                />
+                            </div>
+                            <FieldSelect
+                                label={t('builder.cadence')}
+                                value={cadence}
+                                onChange={setCadence}
+                                options={cadenceOptions.map((value) => ({ value, label: t(`cadence.${value}`) }))}
+                            />
+                            <FieldSelect
+                                label={t('builder.bucket')}
+                                value={config.bucket}
+                                onChange={(value) => setConfig((current) => ({ ...current, bucket: value }))}
+                                options={(['day', 'week', 'month'] as const).map((value) => ({ value, label: t(`bucket.${value}`) }))}
+                            />
+                            {cadence === 'custom' ? (
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="report-start">{t('builder.startDate')}</Label>
+                                        <Input
+                                            id="report-start"
+                                            type="date"
+                                            value={config.range?.start ?? ''}
+                                            onChange={(event) => setConfig((current) => ({
+                                                ...current,
+                                                range: { start: event.target.value, end: current.range?.end ?? '' },
+                                            }))}
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="report-end">{t('builder.endDate')}</Label>
+                                        <Input
+                                            id="report-end"
+                                            type="date"
+                                            value={config.range?.end ?? ''}
+                                            onChange={(event) => setConfig((current) => ({
+                                                ...current,
+                                                range: { start: current.range?.start ?? '', end: event.target.value },
+                                            }))}
+                                        />
+                                    </div>
+                                </div>
+                            ) : null}
+                        </div>
+                    </section>
+
+                    <section className="rounded-2xl border border-border bg-card p-5">
+                        <h2 className="text-sm font-semibold text-foreground">{t('builder.filtersTitle')}</h2>
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{t('builder.filtersSubtitle')}</p>
+                        {hasAttainment ? (
+                            <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+                                {t('builder.attainmentFilters')}
+                            </p>
+                        ) : null}
+                        <div className="mt-5 space-y-5">
+                            <FilterChecklist
+                                label={t('builder.pipelines')}
+                                options={pipelines.map((pipeline) => ({ value: pipeline.id, label: pipeline.name }))}
+                                values={filters.pipelineIds}
+                                onChange={(value) => updateFilters({ pipelineIds: toggleValue(filters.pipelineIds, value) })}
+                                disabled={hasAttainment}
+                            />
+                            <FilterChecklist
+                                label={t('builder.owners')}
+                                options={ownerOptions}
+                                values={filters.ownerIds}
+                                onChange={(value) => updateFilters({ ownerIds: toggleValue(filters.ownerIds, value) })}
+                                disabled={hasWorkspaceAttainment}
+                            />
+                            {ownersFailed || ownerFiltersUnresolved ? (
+                                <div role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
+                                    <p>{t(ownersFailed
+                                        ? ownerFiltersUnresolved ? 'builder.ownersLoadBlocked' : 'builder.ownersLoadError'
+                                        : 'builder.ownersUnavailable')}</p>
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                        {ownerFiltersUnresolved ? (
+                                            <Button variant="outline" size="sm" onClick={clearUnavailableOwners}>
+                                                {t('builder.clearUnavailableOwners')}
+                                            </Button>
+                                        ) : null}
+                                        {ownersFailed ? (
+                                            <Button variant="outline" size="sm" onClick={() => router.refresh()}>
+                                                {t('common.retry')}
+                                            </Button>
+                                        ) : null}
+                                    </div>
+                                </div>
+                            ) : null}
+                            <FilterChecklist
+                                label={t('builder.statuses')}
+                                options={STATUSES.map((value) => ({ value, label: t(`status.${value}`) }))}
+                                values={filters.statuses}
+                                onChange={(value) => updateFilters({ statuses: toggleValue(filters.statuses, value) })}
+                                disabled={hasAttainment}
+                            />
+                            <FilterChecklist
+                                label={t('builder.tags')}
+                                options={tags.map((tag) => ({ value: tag.id, label: tag.name }))}
+                                values={filters.tagIds}
+                                onChange={(value) => updateFilters({ tagIds: toggleValue(filters.tagIds, value) })}
+                                disabled={hasAttainment}
+                            />
+                            <FilterChecklist
+                                label={t('builder.warmth')}
+                                options={WARMTH_BANDS.map((value) => ({ value, label: t(`warmth.${value}`) }))}
+                                values={filters.warmthBands}
+                                onChange={(value) => updateFilters({ warmthBands: toggleValue(filters.warmthBands, value) })}
+                            />
+                        </div>
+                    </section>
+                </aside>
+
+                <main>
+                    <div className="mb-5 flex items-end justify-between gap-4">
+                        <div>
+                            <h2 className="text-xl font-bold tracking-tight text-foreground">{t('builder.canvasTitle')}</h2>
+                            <p className="mt-1 text-sm text-muted-foreground">{t('builder.canvasSubtitle')}</p>
+                        </div>
+                        <Button variant="outline" onClick={addWidget} disabled={config.widgets.length >= 16}>
+                            <PlusIcon />
+                            {t('builder.addWidget')}
+                        </Button>
+                    </div>
+                    <SortableGrid
+                        items={config.widgets}
+                        getLabel={(widget) => widget.title?.trim() || t(`measure.${widget.measure}`)}
+                        onChange={setWidgets}
+                        messages={messages}
+                        reduceMotion={reduceMotion}
+                        gridClassName="grid grid-cols-1 gap-5 lg:grid-cols-2"
+                        itemClassName={(widget) => (layoutById.get(widget.id)?.width ?? 6) >= 12 ? 'lg:col-span-2' : undefined}
+                        renderItem={(widget, { dragHandle, isDragging }) => (
+                            <WidgetEditor
+                                widget={widget}
+                                dragHandle={dragHandle}
+                                isDragging={isDragging}
+                                fullWidth={(layoutById.get(widget.id)?.width ?? 6) >= 12}
+                                canRemove={config.widgets.length > 1}
+                                canReadGoals={canReadGoals}
+                                onDataSourceChange={(value) => updateDataSource(widget, value)}
+                                onMeasureChange={(value) => updateMeasure(widget, value)}
+                                onGroupChange={(value) => updateGroup(widget, value)}
+                                onChange={(patch) => updateWidget(widget.id, patch)}
+                                onToggleWidth={() => toggleWidth(widget.id)}
+                                onRemove={() => removeWidget(widget.id)}
+                            />
+                        )}
+                        renderOverlay={(widget) => (
+                            <div className="rounded-2xl border border-brand/40 bg-card p-5 shadow-xl">
+                                <p className="truncate text-sm font-semibold text-foreground">
+                                    {widget.title?.trim() || t(`measure.${widget.measure}`)}
+                                </p>
+                            </div>
+                        )}
+                    />
+                </main>
             </div>
         </div>
     );

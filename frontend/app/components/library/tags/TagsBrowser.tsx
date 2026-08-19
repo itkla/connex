@@ -129,7 +129,7 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
     const noResults = hasTags && visible.length === 0;
 
     return (
-        <PageShell tier="wide">
+        <PageShell>
             <Rise>
                 <PageHeader
                     title={t('title')}

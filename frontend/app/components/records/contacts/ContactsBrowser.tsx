@@ -898,7 +898,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
     );
 
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <Rise>
                     <PageHeader
                         title={t('heading')}

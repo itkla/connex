@@ -3,7 +3,7 @@ import WorkflowRecipeDetailSkeleton from "@/app/components/settings/workflows/re
 
 export default function WorkflowRecipeLoading() {
     return (
-        <PageShell tier="wide">
+        <PageShell>
             <WorkflowRecipeDetailSkeleton />
         </PageShell>
     );

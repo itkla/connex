@@ -296,7 +296,7 @@ export default function CampaignDetail({
 
     return (
         <>
-            <PageShell tier="reading">
+            <PageShell>
                 <Rise className="flex flex-col gap-4">
                     <CrumbLabel value={current.name} />
                     <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
@@ -328,7 +328,7 @@ export default function CampaignDetail({
 
                 <Rise delay={0.06}>
                     <Tabs value={tab} onValueChange={setTab} className="gap-6">
-                    <div className="-mx-2 overflow-x-auto px-2 pb-px">
+                    <div className="-mx-2 overflow-x-auto px-2 pb-px 2xl:-mx-6 2xl:px-6">
                         <TabsList className="w-max">
                             <TabsTrigger value="overview">{t("tabOverview")}</TabsTrigger>
                             <TabsTrigger value="audience">{t("tabAudience")}</TabsTrigger>

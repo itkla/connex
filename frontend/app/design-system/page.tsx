@@ -160,11 +160,11 @@ const RADII: { label: string; className: string; use: string }[] = [
   { label: "rounded-full", className: "rounded-full", use: "Buttons & pills" },
 ];
 
-const WIDTH_TIERS: { name: string; className: string; maxWidth: string; use: string }[] = [
-  { name: "wide", className: "max-w-[100rem]", maxWidth: "100rem", use: "Lists, dashboards, overview, settings" },
-  { name: "reading", className: "max-w-5xl", maxWidth: "64rem", use: "Record detail, long reads" },
-  { name: "form", className: "max-w-3xl", maxWidth: "48rem", use: "Focused single-column forms" },
-  { name: "full", className: "—", maxWidth: "100%", use: "Relationship map only" },
+const WIDTH_RULES: { name: string; className: string; maxWidth: string; use: string }[] = [
+  { name: "Page", className: "no cap", maxWidth: "100%", use: "Every routed surface, at every screen size" },
+  { name: "Editor body", className: "max-w-3xl", maxWidth: "48rem", use: "The note and document measure, inside a spanning page" },
+  { name: "Generated prose", className: "max-w-[70ch]", maxWidth: "70ch", use: "Briefs, rationales, and other long text blocks" },
+  { name: "Record rail", className: "minmax(16rem,20rem)", maxWidth: "20rem", use: "The record-detail left rail; the main column takes the rest" },
 ];
 
 const RHYTHM: { label: string; token: string; size: string }[] = [
@@ -327,7 +327,7 @@ export default function DesignSystemPage() {
   }, []);
 
   return (
-    <PageShell tier="wide">
+    <PageShell>
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="flex flex-col gap-2">
           <Badge variant="secondary" className="font-mono">
@@ -460,22 +460,22 @@ export default function DesignSystemPage() {
           <Section
             id="layout"
             title="Layout"
-            description="Three width tiers, one page rhythm, one primitive. Every routed surface renders inside <PageShell>."
+            description="No page-width cap, one page rhythm, one primitive. Every routed surface renders inside <PageShell> and spans the full content area."
           >
             <div className="flex flex-col gap-3">
-              <SubHeading>Width tiers</SubHeading>
+              <SubHeading>Where width is capped</SubHeading>
               <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6">
-                {WIDTH_TIERS.map((tier) => (
-                  <div key={tier.name} className="flex flex-col gap-1.5">
+                {WIDTH_RULES.map((rule) => (
+                  <div key={rule.name} className="flex flex-col gap-1.5">
                     <div className="flex items-baseline justify-between">
-                      <span className="text-sm font-medium text-foreground">{tier.name}</span>
-                      <span className="font-mono text-xs text-muted-foreground">{tier.className}</span>
+                      <span className="text-sm font-medium text-foreground">{rule.name}</span>
+                      <span className="font-mono text-xs text-muted-foreground">{rule.className}</span>
                     </div>
                     <div
                       className="h-8 rounded-lg bg-brand/15 ring-1 ring-inset ring-brand/30"
-                      style={{ maxWidth: tier.maxWidth, width: "100%" }}
+                      style={{ maxWidth: rule.maxWidth, width: "100%" }}
                     />
-                    <span className="text-xs text-muted-foreground">{tier.use}</span>
+                    <span className="text-xs text-muted-foreground">{rule.use}</span>
                   </div>
                 ))}
               </div>
@@ -484,12 +484,12 @@ export default function DesignSystemPage() {
             <div className="flex flex-col gap-3">
               <SubHeading>PageShell</SubHeading>
               <p className="max-w-prose text-sm text-muted-foreground">
-                <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
-                  &lt;PageShell tier=&quot;wide|reading|form&quot;&gt;
-                </code>{" "}
-                encodes the outer gutter, vertical padding, the centered max-width column, and the standard{" "}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">&lt;PageShell&gt;</code>{" "}
+                encodes the responsive gutter, vertical padding, and the standard{" "}
                 <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">gap-10</code> between
-                sections. This very page is wrapped in one.
+                sections. It takes no width prop: the column is uncapped, so a page never leaves a dead
+                gutter. A surface that needs a readable measure puts it on the text block, never on the
+                page. This very page is wrapped in one.
               </p>
             </div>
           </Section>

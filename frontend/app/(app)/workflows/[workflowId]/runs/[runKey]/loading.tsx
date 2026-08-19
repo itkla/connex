@@ -3,7 +3,7 @@ import WorkflowRunDetailSkeleton from "@/app/components/settings/workflows/opera
 
 export default function WorkflowRunLoading() {
     return (
-        <PageShell tier="wide">
+        <PageShell>
             <WorkflowRunDetailSkeleton />
         </PageShell>
     );

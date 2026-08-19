@@ -195,7 +195,7 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
 
     return (
         <>
-            <PageShell tier="wide">
+            <PageShell>
                 <Rise>
                     <PageHeader
                         title={t('title')}

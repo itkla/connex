@@ -50,7 +50,7 @@ export default function SearchResultsView({
     const hasResults = groups.length > 0;
 
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <Rise delay={0}>
                     <PageHeader
                         className="px-4 sm:px-6"

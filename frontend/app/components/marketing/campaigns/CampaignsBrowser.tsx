@@ -73,7 +73,7 @@ export default function CampaignsBrowser({
 
     return (
         <>
-            <PageShell tier="wide">
+            <PageShell>
                 <Rise>
                     <PageHeader
                         title={t("title")}

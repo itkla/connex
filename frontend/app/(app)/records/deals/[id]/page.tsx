@@ -236,7 +236,7 @@ export default async function DealPage({ params }: DealPageProps) {
     );
 
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <RecordStickyContext
                     anchorId="deal-record-identity"
                     name={deal.name}

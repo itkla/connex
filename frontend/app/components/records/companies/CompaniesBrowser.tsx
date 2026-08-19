@@ -1013,7 +1013,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
     );
 
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <Rise>
                     <PageHeader
                         title={t('title')}

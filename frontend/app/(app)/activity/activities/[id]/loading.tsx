@@ -3,7 +3,7 @@ import { PageShell } from "@/app/components/PageShell";
 
 export default function Loading() {
     return (
-        <PageShell tier="form">
+        <PageShell>
                 <Skeleton className="h-4 w-28" />
                 <div className="flex items-start gap-3.5">
                     <Skeleton className="size-10 rounded-full" />

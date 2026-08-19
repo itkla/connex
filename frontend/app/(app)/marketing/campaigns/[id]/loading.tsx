@@ -11,7 +11,7 @@ function SectionLabel() {
 
 export default function CampaignDetailLoading() {
     return (
-        <PageShell tier="reading">
+        <PageShell>
                 <div className="flex flex-col gap-4">
                     <Skeleton className="h-5 w-28" />
                     <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">

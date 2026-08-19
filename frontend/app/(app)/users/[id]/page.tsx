@@ -64,7 +64,7 @@ export default async function UserPage({ params }: { params: { id: number } }) {
     const hasActivity = tasks.length > 0 || activities.length > 0 || notes.length > 0;
 
     return (
-        <PageShell tier="reading">
+        <PageShell>
                 <Rise>
                     <div className="flex flex-col gap-8">
                         <CrumbLabel value={user.displayName} />
