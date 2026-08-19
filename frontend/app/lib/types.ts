@@ -2362,6 +2362,31 @@ export type CampaignEngagement = {
     sends: CampaignSendEngagement[];
 };
 
+/**
+ * One recipient behind a campaign engagement count, carrying the contact record the delivery
+ * reached. `personId` is absent once the contact link was cleared and `personLabel` is absent when
+ * the contact is no longer visible, so a row can name a delivery without ever claiming a record it
+ * cannot open.
+ */
+export type CampaignRecipient = {
+    deliveryId: number;
+    sendId: number;
+    channel: string;
+    personId?: number;
+    personLabel?: string;
+    status: string;
+    skipReason?: string;
+    createdAt?: string;
+    updatedAt?: string;
+};
+
+/** Which population of a campaign's deliveries a recipient page is drawn from. */
+export type CampaignRecipientsPageParams = PageParams & {
+    sendId?: number;
+    status?: string[];
+    event?: string;
+};
+
 export type CampaignExportStatus = "draft" | "running" | "completed" | "failed";
 
 /** A campaign audience export bound to a frozen snapshot and an external connector. */

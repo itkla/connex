@@ -85,3 +85,15 @@ export function canCreateSend(access: CampaignAccess): boolean {
 export function canCreateExport(access: CampaignAccess): boolean {
     return access.manage && access.consent;
 }
+
+/**
+ * Whether the viewer may open the contacts behind an engagement count. A delivery is always
+ * contact-scoped, so the roster is person data and the backend guards it with `CONSENT_MANAGE` on
+ * top of the campaign read that got the viewer to the page — mirroring
+ * `CampaignRecipientService`. Reading a count needs neither, so a viewer without consent access
+ * keeps the numbers and is simply not offered the drill-through.
+ * @param access the resolved campaign permissions
+ */
+export function canReadRecipients(access: CampaignAccess): boolean {
+    return access.consent;
+}

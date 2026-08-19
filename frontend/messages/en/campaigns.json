@@ -226,6 +226,7 @@
         "unknownMessage": "Message"
     },
     "CampaignEngagement": {
+        "drillThrough": "Show the {count} contacts behind {counter}",
         "title": "Engagement",
         "subtitle": "Delivery outcomes aggregated across this campaign's sends.",
         "empty": "No engagement yet",
@@ -290,5 +291,19 @@
         "pushed": "Pushed",
         "failed": "Failed",
         "exportUnavailable": "Campaign delivery is not enabled on this instance."
+    },
+    "CampaignRecipients": {
+        "title": "{counter}",
+        "description": "{count} contacts this campaign reached.",
+        "loading": "Loading contacts…",
+        "emptyTitle": "No contacts here",
+        "emptyBody": "Nothing landed in this outcome. Try another count.",
+        "failedTitle": "Couldn't load the contacts",
+        "failedBody": "Nothing was lost — close this and try again.",
+        "contactUnnamed": "Contact",
+        "contactRemoved": "Contact no longer linked",
+        "page": "Page {page} of {pageCount}",
+        "previousPage": "Previous page",
+        "nextPage": "Next page"
     }
 }

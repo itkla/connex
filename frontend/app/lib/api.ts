@@ -6024,6 +6024,26 @@ export function getCampaignEngagement(id: number, init: RequestInit = {}) {
 }
 
 /**
+ * One bounded page of the recipients behind a campaign's engagement counts, as contact record links.
+ * A delivery is always contact-scoped, so the server requires consent access on top of campaign
+ * read — a caller without it must never be offered the drill-through.
+ *
+ * @param id - the campaign whose deliveries to page through
+ * @param params - the population to draw from: `status` for the status-derived counters, `event` for
+ *   the unsubscribe counter, and an optional single send
+ */
+export function getCampaignRecipients(
+    id: number,
+    params: Types.CampaignRecipientsPageParams = {},
+    init: RequestInit = {},
+) {
+    return getJson<Types.Page<Types.CampaignRecipient>>(
+        `/api/campaigns/${id}/recipients${buildQuery(params)}`,
+        init,
+    );
+}
+
+/**
  * Fetches the public unsubscribe preview for a delivery token. Deliberately bypasses the workspace
  * and CSRF machinery: the route is unauthenticated and resolves the tenant from the token alone.
  * @param token the 64-character hex delivery token from the unsubscribe link

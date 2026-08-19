@@ -226,6 +226,7 @@
         "unknownMessage": "メッセージ"
     },
     "CampaignEngagement": {
+        "drillThrough": "{counter}の対象となった{count}件の連絡先を表示",
         "title": "エンゲージメント",
         "subtitle": "このキャンペーンの各配信を集計した到達結果です。",
         "empty": "エンゲージメントはまだありません",
@@ -290,5 +291,19 @@
         "pushed": "送信済み",
         "failed": "失敗",
         "exportUnavailable": "このインスタンスではキャンペーン配信が有効になっていません。"
+    },
+    "CampaignRecipients": {
+        "title": "{counter}",
+        "description": "このキャンペーンが到達した連絡先{count}件です。",
+        "loading": "連絡先を読み込んでいます…",
+        "emptyTitle": "該当する連絡先はありません",
+        "emptyBody": "この結果に該当する配信はありません。別の指標をお試しください。",
+        "failedTitle": "連絡先を読み込めませんでした",
+        "failedBody": "データは失われていません。閉じてもう一度お試しください。",
+        "contactUnnamed": "連絡先",
+        "contactRemoved": "連絡先との紐付けが解除されています",
+        "page": "{pageCount} ページ中 {page} ページ",
+        "previousPage": "前のページ",
+        "nextPage": "次のページ"
     }
 }
