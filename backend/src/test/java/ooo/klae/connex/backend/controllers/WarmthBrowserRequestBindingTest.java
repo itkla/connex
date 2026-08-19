@@ -133,6 +133,15 @@ class WarmthBrowserRequestBindingTest {
         assertBands(warmth, Set.of("warm"), true, null);
     }
 
+    /** The browser serializes its facet selections as one comma-joined value, not repeated keys. */
+    @Test
+    void commaJoinedBandsBindAsSeparateValues() throws Exception {
+        persons.perform(get("/api/persons/page").param("warmthBands", "hot,cool,__none__"))
+            .andExpect(status().isOk());
+
+        assertBands(capturedContactFilter(), Set.of("hot", "cool"), true, null);
+    }
+
     @Test
     void unknownBandsAndOutOfRangeHorizonsFailBeforeAnyQueryRuns() throws Exception {
         persons.perform(get("/api/persons/page").param("warmthBands", "lukewarm"))
