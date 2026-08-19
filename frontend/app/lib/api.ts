@@ -832,6 +832,23 @@ function buildQuery(params: Record<string, unknown>): string {
     return qs ? `?${qs}` : "";
 }
 
+/**
+ * Projects the warmth dimension of a records filter into query params. The page, the
+ * select-all-matching id read, and the CSV export each build their own query string, so they share
+ * this projection rather than three hand-kept key lists that could drift — a drift that would let a
+ * bulk action reach records the list never showed (#1342). A false `noWarmth` is normalized away
+ * rather than sent as `noWarmth=false`: the backend defaults it to false either way, so dropping it
+ * is what makes the three surfaces emit byte-identical warmth params for the same filter, which is
+ * what their parity is actually asserted on.
+ */
+function warmthQueryParams(params: Types.WarmthFilterParams): Record<string, unknown> {
+    return {
+        warmthBands: params.warmthBands,
+        noWarmth: params.noWarmth ? true : undefined,
+        goesColdWithinDays: params.goesColdWithinDays,
+    };
+}
+
 const WORKSPACE_LIST_PAGE_SIZE = 100;
 const RELATIONSHIP_MAP_RECORD_LIMIT = 2_000;
 const RELATIONSHIP_MAP_TOUCH_LIMIT = 4_000;
@@ -2004,7 +2021,8 @@ export function getCompanies(init: RequestInit = {}) {
 }
 
 export function getCompaniesPage(params: Types.CompaniesPageParams = {}, init: RequestInit = {}) {
-    return getJson<Types.Page<Types.Company>>(`/api/companies/page${buildQuery(params)}`, init);
+    const query = buildQuery({ ...params, ...warmthQueryParams(params) });
+    return getJson<Types.Page<Types.Company>>(`/api/companies/page${query}`, init);
 }
 
 export function getCompaniesPageResultFromCookie(
@@ -2037,8 +2055,10 @@ export function getCompaniesSegmentPage(params: Types.CompanySegmentPageParams, 
     return postJson<Types.Page<Types.Company>>(`/api/companies/segment/page`, params, init);
 }
 
-export function getCompanyFacets(init: RequestInit = {}) {
-    return getJson<Types.CompanyFacets>(`/api/companies/facets`, init);
+/** Reads the company browser's facet counts, with the same opt-in warmth bands as {@link getPersonFacets}. */
+export function getCompanyFacets(params: { warmth?: boolean } = {}, init: RequestInit = {}) {
+    const query = buildQuery({ warmth: params.warmth ? true : undefined });
+    return getJson<Types.CompanyFacets>(`/api/companies/facets${query}`, init);
 }
 
 /** Ids of every company matching an active filter, capped by the backend bulk-operation limit. */
@@ -2046,6 +2066,7 @@ export function getCompanyIds(params: Types.CompaniesPageParams = {}, init: Requ
     const query = buildQuery({
         q: params.q, industry: params.industry, noIndustry: params.noIndustry, ids: params.ids,
         scope: params.scope, memberIds: params.memberIds, archived: params.archived,
+        ...warmthQueryParams(params),
     });
     return getJson<number[]>(`/api/companies/ids${query}`, init);
 }
@@ -2149,7 +2170,8 @@ export function getContactsFromCookie(cookie: string | null, filters: Types.Cont
 }
 
 export function getContactsPage(params: Types.ContactsPageParams = {}, init: RequestInit = {}) {
-    return getJson<Types.Page<Types.Contact>>(`/api/persons/page${buildQuery(params)}`, init);
+    const query = buildQuery({ ...params, ...warmthQueryParams(params) });
+    return getJson<Types.Page<Types.Contact>>(`/api/persons/page${query}`, init);
 }
 
 export function getContactsPageResultFromCookie(
@@ -2242,6 +2264,7 @@ export function exportContactsCsv(params: Types.ContactsPageParams = {}, init: R
         lifecycleStages: params.lifecycleStages, noLifecycle: params.noLifecycle,
         leadSources: params.leadSources, noLeadSource: params.noLeadSource,
         firstResponseStates: params.firstResponseStates, noFirstResponse: params.noFirstResponse,
+        ...warmthQueryParams(params),
     });
     return downloadCsv(`/api/exports/persons${query}`, "contacts.csv", init);
 }
@@ -2250,6 +2273,7 @@ export function exportCompaniesCsv(params: Types.CompaniesPageParams = {}, init:
     const query = buildQuery({
         q: params.q, industry: params.industry, noIndustry: params.noIndustry, ids: params.ids,
         scope: params.scope, memberIds: params.memberIds,
+        ...warmthQueryParams(params),
     });
     return downloadCsv(`/api/exports/companies${query}`, "companies.csv", init);
 }
@@ -2275,8 +2299,16 @@ export function exportDealSegmentCsv(params: Types.DealSegmentPageParams, init: 
     });
 }
 
-export function getPersonFacets(init: RequestInit = {}) {
-    return getJson<Types.PersonFacets>(`/api/persons/facets`, init);
+/**
+ * Reads the contact browser's facet counts. The warmth bands are opt-in because they cost a
+ * full-workspace decayed-touch aggregate: ask for them only where the warmth facet is actually
+ * shown, and read {@link Types.PersonFacets.warmthBands} as absent — not empty — when you did not.
+ *
+ * @param params - whether to include the warmth-band counts
+ */
+export function getPersonFacets(params: { warmth?: boolean } = {}, init: RequestInit = {}) {
+    const query = buildQuery({ warmth: params.warmth ? true : undefined });
+    return getJson<Types.PersonFacets>(`/api/persons/facets${query}`, init);
 }
 
 /*
@@ -2386,6 +2418,7 @@ export function getContactIds(params: Types.ContactsPageParams = {}, init: Reque
         leadSources: params.leadSources, noLeadSource: params.noLeadSource,
         firstResponseStates: params.firstResponseStates, noFirstResponse: params.noFirstResponse,
         archived: params.archived,
+        ...warmthQueryParams(params),
     });
     return getJson<number[]>(`/api/persons/ids${query}`, init);
 }
@@ -2607,6 +2640,25 @@ export type RadarCookieResult =
 /** Reads the canonical relationship-signal feed without collapsing refusal and failure into empty data. */
 export function getRadar(init: RequestInit = {}) {
     return getJson<Types.RadarPayload>('/api/radar', { cache: 'no-store', ...init });
+}
+
+/**
+ * Reads the Radar feed narrowed in the database to the signals about one record, for a record page
+ * that would otherwise pay for the whole workspace's feed to show a handful of rows. Both params are
+ * required together; the backend rejects one without the other.
+ *
+ * @param subjectType - the kind of record the signals are about
+ * @param subjectId - the record the signals are about
+ */
+export function getRadarForSubject(
+    subjectType: Types.RadarSubjectType,
+    subjectId: number,
+    init: RequestInit = {},
+) {
+    return getJson<Types.RadarPayload>(
+        `/api/radar${buildQuery({ subjectType, subjectId })}`,
+        { cache: 'no-store', ...init },
+    );
 }
 
 /** Server-side Radar read that preserves the HTTP status required for honest route states. */

@@ -168,8 +168,9 @@
     "empty": "No warm relationships are predicted to cool off.",
     "summary": "contacts predicted to go cold within 90 days",
     "bucket_soon": "Within 30 days",
-    "bucket_mid": "31–60 days",
-    "bucket_later": "61–90 days",
+    "bucket_mid": "Within 60 days",
+    "bucket_later": "Within 90 days",
+    "bucketDrillThrough": "{horizon}: open the {count, plural, one {# contact} other {# contacts}} in the contacts list",
     "openCoolingInRadar": "Work these in Radar"
   },
   "AnalyticsDealRisk": {

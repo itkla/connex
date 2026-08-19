@@ -11,7 +11,7 @@ import { useActions } from '@/app/hooks/useActions';
 import {
     dismissRadarSignal,
     followRadarSignal,
-    getRadar,
+    getRadarForSubject,
     snoozeRadarSignal,
 } from '@/app/lib/api';
 import {
@@ -56,10 +56,9 @@ function warmPathBridge(signal: RadarSignal): { id: number; label: string } | un
  * as this block's last rows, because what the record contributes to Radar belongs beside what
  * Radar says about it. A read that fails says so rather than rendering as "no signals".
  *
- * The feed is read whole and narrowed to this subject in the client: `GET /api/radar` returns every
- * active signal for the actor with no server-side cap, so the narrowing is complete rather than a
- * page of it. It is not cheap — the record pays for the whole workspace's feed. When the endpoint
- * accepts `subjectType`/`subjectId`, pass them and drop the client filter.
+ * The feed is narrowed to this subject in the database via `subjectType`/`subjectId`, so the record
+ * reads only the signals it displays rather than paying for the whole workspace's feed and filtering
+ * the remainder away in the client.
  */
 export default function RecordSignalsPanel({
     subject,
@@ -86,12 +85,10 @@ export default function RecordSignalsPanel({
     const activeTaskRef = useRef<ActiveRadarTask | null>(null);
 
     const load = useCallback((session: { active: boolean }) => {
-        getRadar().then(
+        getRadarForSubject(subject.type, subject.id).then(
             (payload) => {
                 if (!session.active) return;
-                setSignals(payload.items.filter((signal) => (
-                    signal.subject.type === subject.type && signal.subject.id === subject.id
-                )));
+                setSignals(payload.items);
                 setAsOf(payload.asOf);
                 setFreshnessStatus('current');
             },

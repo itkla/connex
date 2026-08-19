@@ -62,7 +62,19 @@ import { createCompany, createContact, getUsers, updateCompany, getCompaniesPage
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
-import { type Company, type CompaniesPageParams, type CompanyEngagement, type CompanyFacets, type CreateCompanyPayload, type UpdateCompanyPayload, type User, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields, type RuleBuilderOptions, type Tag, type WorkspaceMember } from '@/app/lib/types';
+import { type Company, type CompaniesPageParams, type CompanyEngagement, type CompanyFacets, type CreateCompanyPayload, type UpdateCompanyPayload, type User, type CompanyMetrics, type LoadStatus, type RelationshipTemperature, type SavedView, type SavedViewConfig, type SegmentDefinition, type SegmentFields, type RuleBuilderOptions, type Tag, type WarmthFilterParams, type WorkspaceMember } from '@/app/lib/types';
+import {
+    WARMTH_HORIZON_FILTER_KEY,
+    WARMTH_FILTER_KEY,
+    WARMTH_SORT_KEY,
+    hasWarmthFilter,
+    parseWarmthHorizon,
+    warmthFacetOptions,
+    warmthRequestParams,
+    withValidWarmthHorizon,
+    withoutWarmth,
+    withoutWarmthHorizon,
+} from '@/app/components/records/warmthFilters';
 import WarmthPill from '@/app/components/records/WarmthPill';
 import CommentIndicatorChip from '@/app/components/records/comments/CommentIndicatorChip';
 import { useCommentIndicators } from '@/app/hooks/useCommentIndicators';
@@ -114,6 +126,15 @@ function metricsFromEngagement(engagement: CompanyEngagement, users: User[]): Co
 
 const searchFields = (c: Company) => [c.name, c.website, c.industry, c.phone, c.address];
 
+/** Every server filter the browser derives from its filter state, shared by the page, ids, and export reads. */
+type CompanyFilterParams = WarmthFilterParams & {
+    industry?: string[];
+    noIndustry?: boolean;
+    scope?: 'me' | 'members' | 'unassigned';
+    memberIds?: number[];
+    archived?: boolean;
+};
+
 const NO_ITEMS: Company[] = [];
 const ARCHIVED_FILTER_KEY = 'archived';
 const ARCHIVED_FILTER_VALUE = '1';
@@ -150,12 +171,13 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
     const tf = useTranslations('Filters');
     const ts = useTranslations('MemberScope');
     const tSeg = useTranslations('SmartSegments');
+    const ttemp = useTranslations('Temperature');
     const reduce = useReducedMotion() ?? false;
     const {
         displayMode,
         effectiveDisplayMode,
         setDisplayMode,
-        filterState,
+        filterState: urlFilterState,
         setFilterState,
         selectedIds,
         setSelectedIds,
@@ -173,20 +195,19 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         getSegmentFields('company').then(setSegmentFields).catch(() => { setSegmentFields(null); toastError(tSeg('fieldsFailed')); });
     }, [tSeg]);
 
-    const showArchived = filterState[ARCHIVED_FILTER_KEY]?.[0] === ARCHIVED_FILTER_VALUE;
-    const setShowArchived = useCallback((next: boolean) => {
-        if (next) setDefinition(EMPTY_DEFINITION);
-        setFilterState((current) => {
-            const rest = withoutArchived(current);
-            return next ? { ...rest, [ARCHIVED_FILTER_KEY]: [ARCHIVED_FILTER_VALUE] } : rest;
-        });
-    }, [setFilterState]);
+    const validatedFilterState = useMemo(() => withValidWarmthHorizon(urlFilterState), [urlFilterState]);
+    const showArchived = validatedFilterState[ARCHIVED_FILTER_KEY]?.[0] === ARCHIVED_FILTER_VALUE;
+    const segmentScoped = !showArchived && hasSegments;
+    const filterState = useMemo(
+        () => (segmentScoped ? withoutWarmth(validatedFilterState) : validatedFilterState),
+        [segmentScoped, validatedFilterState],
+    );
 
     const ownerScope = useMemo(() => interpretMemberScope(filterState.owner), [filterState.owner]);
-    const filterParams = useMemo<{ industry?: string[]; noIndustry?: boolean; scope?: 'me' | 'members' | 'unassigned'; memberIds?: number[]; archived?: boolean }>(() => {
+    const filterParams = useMemo<CompanyFilterParams>(() => {
         const industryFilter = filterState.industry ?? [];
         const industries = industryFilter.filter((k) => k !== FILTER_EMPTY);
-        const params: { industry?: string[]; noIndustry?: boolean; scope?: 'me' | 'members' | 'unassigned'; memberIds?: number[]; archived?: boolean } = {};
+        const params: CompanyFilterParams = { ...warmthRequestParams(filterState) };
         if (industries.length) params.industry = industries;
         if (industryFilter.includes(FILTER_EMPTY)) params.noIndustry = true;
         if (ownerScope.mode !== 'all') params.scope = ownerScope.mode;
@@ -271,6 +292,18 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         clearSelection();
         applyServerSort(key, direction);
     }, [clearSelection, applyServerSort]);
+    const setShowArchived = useCallback((next: boolean) => {
+        if (next) setDefinition(EMPTY_DEFINITION);
+        const rest = withoutArchived(filterState);
+        setFilterState(next ? { ...rest, [ARCHIVED_FILTER_KEY]: [ARCHIVED_FILTER_VALUE] } : rest);
+        if (next && sortKey === WARMTH_SORT_KEY) applySort(null, 'asc');
+    }, [applySort, filterState, setFilterState, sortKey]);
+    const changeDefinition = useCallback((next: SegmentDefinition) => {
+        setDefinition(next);
+        if (sortKey === WARMTH_SORT_KEY && hasSegmentConditions(evaluableSegmentDefinition(next))) {
+            applySort(null, 'asc');
+        }
+    }, [applySort, sortKey]);
     const handleSelectedIdsChange = useCallback((ids: Set<SelectionId>) => {
         selectAllRequestRef.current += 1;
         setMatchedSignature(null);
@@ -303,8 +336,11 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
 
     const [companyFacets, setCompanyFacets] = useState<CompanyFacets | null>(null);
     const loadFacets = useCallback(() => {
-        getCompanyFacets().then(setCompanyFacets).catch(() => setCompanyFacets(null));
-    }, []);
+        getCompanyFacets({ warmth: !segmentScoped })
+            .catch(() => getCompanyFacets())
+            .then(setCompanyFacets)
+            .catch(() => setCompanyFacets(null));
+    }, [segmentScoped]);
     useEffect(() => { loadFacets(); }, [loadFacets]);
     const refresh = useCallback(() => {
         clearSelection();
@@ -684,10 +720,10 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
             ),
         },
         {
-            key: 'warmth',
+            key: WARMTH_SORT_KEY,
             label: t('columnWarmth'),
             getSortValue: (c) => showArchived ? null : tempByCompanyId.get(c.id)?.score ?? null,
-            sortable: false,
+            sortable: !showArchived && !segmentScoped,
             render: (c) => <WarmthPill temp={showArchived ? undefined : tempByCompanyId.get(c.id)} />,
         },
         {
@@ -732,16 +768,27 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
             getSortValue: (c) => (c.updatedAt ? Date.parse(c.updatedAt) : null),
             render: (c) => c.updatedAt,
         },
-    ], [t, tempByCompanyId, memberById, inlineEdit, saveCompany, showArchived, commentCounts]);
+    ], [t, tempByCompanyId, memberById, inlineEdit, saveCompany, showArchived, segmentScoped, commentCounts]);
 
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('company', companies);
 
     const facets = useMemo<ColumnFilterFacet[]>(() => {
         if (!companyFacets) return [];
+        const out: ColumnFilterFacet[] = [];
         const options = companyFacets.industries.map((name) => ({ key: name, label: name }));
         if (companyFacets.hasNoIndustry) options.push({ key: FILTER_EMPTY, label: t('filterNoIndustry') });
-        return options.length ? [{ key: 'industry', label: t('columnIndustry'), options }] : [];
-    }, [companyFacets, t]);
+        if (options.length) out.push({ key: 'industry', label: t('columnIndustry'), options });
+        const warmthOptions = segmentScoped ? [] : warmthFacetOptions(
+            companyFacets.warmthBands,
+            filterState[WARMTH_FILTER_KEY],
+            (band) => ttemp(band),
+            ttemp('noHistory'),
+        );
+        if (warmthOptions.length) {
+            out.push({ key: WARMTH_FILTER_KEY, label: t('columnWarmth'), options: warmthOptions });
+        }
+        return out;
+    }, [companyFacets, filterState, segmentScoped, t, ttemp]);
     const facetFilterState = useMemo(() => withoutArchived(filterState), [filterState]);
     const hasActiveFilters = query.trim() !== '' || countActiveFilters(facetFilterState) > 0 || (!showArchived && hasSegments);
     const clearAll = useCallback(() => {
@@ -780,9 +827,16 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
             onRemove: () => changeOwnerScope(effectiveOwnerValues.filter((other) => other !== value)),
         };
     });
+    const horizonDays = parseWarmthHorizon(filterState[WARMTH_HORIZON_FILTER_KEY]);
+    const horizonChips: FilterChipData[] = horizonDays === undefined ? [] : [{
+        id: WARMTH_HORIZON_FILTER_KEY,
+        label: t('chipGoesColdWithin', { days: horizonDays }),
+        onRemove: () => setFilterState(withoutWarmthHorizon(filterState)),
+    }];
     const chips: FilterChipData[] = [
         ...(query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] : []),
         ...ownerChips,
+        ...horizonChips,
         ...facetChips(facets, filterState, setFilterState),
         ...(!showArchived ? segmentConditionEntries(definition) : []).map(({ condition, groupPath, conditionIndex }) => ({
             id: `segment:${[...groupPath, conditionIndex].join(':')}`,
@@ -840,7 +894,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
     );
 
     const currentConfig: SavedViewConfig = useMemo(
-        () => ({ filters: filterState, query, sortKey: sortKey === 'warmth' ? null : sortKey, sortDirection, segments: showArchived ? EMPTY_DEFINITION : evaluable }),
+        () => ({ filters: filterState, query, sortKey, sortDirection, segments: showArchived ? EMPTY_DEFINITION : evaluable }),
         [filterState, query, sortKey, sortDirection, evaluable, showArchived],
     );
     const { activeSavedViewId, setActiveSavedView } = useSavedViewScope(savedViews, currentConfig);
@@ -850,24 +904,26 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
             const archived = filters[ARCHIVED_FILTER_KEY]?.[0] === ARCHIVED_FILTER_VALUE;
             setFilterState(filters);
             applyQuery(config.query ?? '');
-            applySort(config.sortKey === 'warmth' ? null : config.sortKey ?? null, config.sortDirection ?? 'asc');
-            setDefinition(archived ? EMPTY_DEFINITION : normalizeSegmentDefinition(config.segments) ?? EMPTY_DEFINITION);
+            applySort(config.sortKey ?? null, config.sortDirection ?? 'asc');
+            changeDefinition(archived ? EMPTY_DEFINITION : normalizeSegmentDefinition(config.segments) ?? EMPTY_DEFINITION);
             setActiveSavedView(config, savedViewId);
         },
-        [setFilterState, applyQuery, applySort, setActiveSavedView],
+        [setFilterState, applyQuery, applySort, changeDefinition, setActiveSavedView],
     );
     const workflowSelection = useMemo(() => {
         if (selectedIds.size === 0) return null;
+        const warmthNarrowed = hasWarmthFilter(filterState);
         const canResolveFilter = allMatchingActive
             && !showArchived
             && !hasSegments
-            && !filterParams.noIndustry;
+            && !filterParams.noIndustry
+            && !warmthNarrowed;
         const canResolveSegment = allMatchingActive
             && hasSegments
             && !showArchived
             && query.trim() === ''
             && Object.keys(filterParams).length === 0;
-        const scope = allMatchingActive && activeSavedViewId !== null
+        const scope = allMatchingActive && activeSavedViewId !== null && !warmthNarrowed
             ? { kind: 'saved_view' as const, savedViewId: activeSavedViewId }
             : canResolveSegment
                 ? { kind: 'smart_segment' as const, definition: evaluable }
@@ -893,6 +949,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         allMatchingActive,
         evaluable,
         filterParams,
+        filterState,
         hasSegments,
         query,
         selectedCompanyIds,
@@ -1004,7 +1061,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                                                 fields={segmentFields}
                                                 options={segmentOptions}
                                                 allowGroups
-                                                onChange={setDefinition}
+                                                onChange={changeDefinition}
                                             />
                                         )}
                                     </>
@@ -1022,7 +1079,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                                         fields={segmentFields}
                                         options={segmentOptions}
                                         allowGroups
-                                        onChange={setDefinition}
+                                        onChange={changeDefinition}
                                     />
                                 )}
                                 {effectiveDisplayMode !== 'table' && (

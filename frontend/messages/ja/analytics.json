@@ -168,8 +168,9 @@
     "empty": "冷え込むと予測される温かい関係はありません。",
     "summary": "90日以内に冷え込むと予測される連絡先",
     "bucket_soon": "30日以内",
-    "bucket_mid": "31〜60日",
-    "bucket_later": "61〜90日",
+    "bucket_mid": "60日以内",
+    "bucket_later": "90日以内",
+    "bucketDrillThrough": "{horizon}：該当する連絡先 {count} 件を連絡先一覧で開く",
     "openCoolingInRadar": "レーダーで対応する"
   },
   "AnalyticsDealRisk": {

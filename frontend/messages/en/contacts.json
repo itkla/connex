@@ -66,6 +66,7 @@
         "searchPlaceholder": "Search contacts",
         "columnName": "Name",
         "columnWarmth": "Warmth",
+        "chipGoesColdWithin": "Goes cold within {days, plural, one {# day} other {# days}}",
         "columnEmail": "Email",
         "columnPhone": "Phone",
         "columnCompany": "Company",

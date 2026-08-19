@@ -36,6 +36,7 @@
     "searchPlaceholder": "会社を検索",
     "columnName": "名前",
     "columnWarmth": "温度感",
+    "chipGoesColdWithin": "{days}日以内に冷める",
     "columnWebsite": "ウェブサイト",
     "columnIndustry": "業界",
     "columnPhone": "電話",
