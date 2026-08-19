@@ -61,7 +61,7 @@ export default function SettingsDirectory({ scopes }: { scopes: SettingsNavModel
                             <span className="font-normal text-muted-foreground"> · {scope.qualifier}</span>
                         ) : null}
                     </h2>
-                    <ul className="mt-3 space-y-1">
+                    <ul className="mt-3 gap-x-10 [&>li]:mb-1 [&>li]:break-inside-avoid xl:columns-2 2xl:columns-3">
                         {scope.groups.map((group) => {
                             const current = pathname === group.href;
                             return (

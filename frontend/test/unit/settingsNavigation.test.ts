@@ -14,7 +14,6 @@ import {
     entryVisible,
     resolveSettingsNavigation,
     searchSettingsNavigation,
-    settingsLandingDestination,
     type SettingsNavContext,
     type SettingsNavViewer,
 } from "@/app/lib/settingsNavigation";
@@ -309,26 +308,22 @@ describe("settings navigation resolves a landing for every group", () => {
         }
     });
 
-    it("lands the settings home on a real destination rather than on Members", () => {
-        const landing = settingsLandingDestination(resolveSettingsNavigation(context("en")));
+    it("puts a real destination first, so the home never lands the reader on Members", () => {
+        const model = resolveSettingsNavigation(context("en"));
+        const first = model[0]?.groups[0]?.destinations[0];
 
-        expect(landing?.href).toBe("/account/profile");
-        expect(landing?.href).not.toBe("/settings/members");
+        expect(first?.href).toBe("/account/profile");
+        expect(first?.href).not.toBe("/settings/members");
     });
 
-    it("reports no landing at all when the viewer can reach nothing", () => {
+    it("still offers the personal scope to a viewer holding nothing", () => {
         const model = resolveSettingsNavigation({
             ...context("en"),
             viewer: { capabilities: ALL_CAPABILITIES, permissions: new Set(), isOrgAdmin: false },
         });
-        const emptied = resolveSettingsNavigation({
-            ...context("en"),
-            viewer: { capabilities: ALL_CAPABILITIES, permissions: new Set(), isOrgAdmin: false },
-        });
 
-        expect(settingsLandingDestination(model)).not.toBeNull();
-        expect(settingsLandingDestination([])).toBeNull();
-        expect(emptied.length).toBeGreaterThan(0);
+        expect(model[0]?.scope).toBe("personal");
+        expect(model[0]?.groups.length).toBeGreaterThan(0);
     });
 });
 

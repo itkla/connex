@@ -39,12 +39,15 @@ function chrome() {
     return renderToStaticMarkup(
         createElement(
             PermissionsProvider,
-            { permissions: ["WORKSPACE_SETTINGS"], status: "resolved" as const },
-            createElement(WorkspaceSettingsChrome, {
-                title: "Settings",
-                description: "Manage this workspace.",
-                mailManagementAvailability: "disabled" as const,
-            }),
+            {
+                permissions: ["WORKSPACE_SETTINGS"],
+                status: "resolved" as const,
+                children: createElement(WorkspaceSettingsChrome, {
+                    title: "Settings",
+                    description: "Manage this workspace.",
+                    mailManagementAvailability: "disabled" as const,
+                }),
+            },
         ),
     );
 }

@@ -298,18 +298,3 @@ export function searchSettingsNavigation(
     }
     return results;
 }
-
-/**
- * The destination `/settings` lands on when it has nothing else to show.
- *
- * The epic forbids the settings home forwarding to an arbitrary destination, so the home renders
- * rather than redirects. This is the fallback for the reader who arrives with no reachable
- * destination at all — an empty navigation — and is null in that case, which the home explains in
- * place instead of forwarding.
- *
- * @param model - the resolved navigation
- * @returns the first destination in navigation order, or null when the viewer can reach none
- */
-export function settingsLandingDestination(model: SettingsNavModel): SettingsNavDestination | null {
-    return model[0]?.groups[0]?.destinations[0] ?? null;
-}
