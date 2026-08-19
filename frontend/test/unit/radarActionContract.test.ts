@@ -73,10 +73,12 @@ const navigation = vi.hoisted(() => ({
     refresh: vi.fn(),
     searchParams: { get: vi.fn(() => null) },
 }));
-const translate = vi.hoisted(() => (
-    key: string,
-    values?: Record<string, string | number>,
-) => values?.subject === undefined ? key : `${key}:${values.subject}`);
+const translate = vi.hoisted(() => {
+    const format = (key: string, values?: Record<string, string | number>) => (
+        values?.subject === undefined ? key : `${key}:${values.subject}`
+    );
+    return Object.assign(format, { rich: (key: string) => key });
+});
 
 vi.mock('next/dynamic', async () => {
     const React = await import('react');
@@ -320,7 +322,14 @@ function installMinimalDocument() {
         lastChild: null,
         parentNode: null,
         textContent: '',
-        style: {},
+        style: {
+            setProperty: vi.fn(),
+            removeProperty: vi.fn(() => ''),
+            getPropertyValue: vi.fn(() => ''),
+        },
+        getBoundingClientRect: vi.fn(() => ({
+            x: 0, y: 0, top: 0, right: 0, bottom: 0, left: 0, width: 0, height: 0,
+        })),
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
         appendChild: vi.fn(),
@@ -335,12 +344,16 @@ function installMinimalDocument() {
         body: containerTarget,
     });
     vi.stubGlobal('window', windowTarget);
+    vi.stubGlobal('self', windowTarget);
     vi.stubGlobal('document', documentTarget);
     vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
         callback(0);
         return 1;
     }));
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    vi.stubGlobal('requestIdleCallback', vi.fn(() => 1));
+    vi.stubGlobal('cancelIdleCallback', vi.fn());
+    vi.stubGlobal('getComputedStyle', vi.fn(() => ({ getPropertyValue: () => '' })));
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     return {
         container: document.createElement('div'),
@@ -361,6 +374,17 @@ type InteractiveText = {
     ownerDocument: InteractiveDocument;
 };
 
+/**
+ * The slice of `CSSStyleDeclaration` React writes through. Custom properties go through
+ * `setProperty`, which `motion` also reaches for when it drives a layout thumb, so a bare object
+ * literal is not a faithful enough stand-in to render the real control surfaces.
+ */
+type InteractiveStyle = Record<string, unknown> & {
+    setProperty: (name: string, value: string) => void;
+    removeProperty: (name: string) => string;
+    getPropertyValue: (name: string) => string;
+};
+
 type InteractiveElement = {
     nodeType: 1;
     tagName: string;
@@ -371,7 +395,7 @@ type InteractiveElement = {
     childNodes: Array<InteractiveElement | InteractiveText>;
     attributes: Map<string, string>;
     listeners: Map<string, InteractiveListener[]>;
-    style: Record<string, unknown>;
+    style: InteractiveStyle;
     disabled?: boolean;
     id?: string;
     type?: string;
@@ -387,6 +411,7 @@ type InteractiveElement = {
     setAttribute: (name: string, value: string) => void;
     removeAttribute: (name: string) => void;
     getAttribute: (name: string) => string | null;
+    getBoundingClientRect: () => DOMRectInit;
     focus: () => void;
 };
 
@@ -439,6 +464,21 @@ function installInteractiveDocument() {
         ));
     }
 
+    function createInteractiveStyle(): InteractiveStyle {
+        const properties = new Map<string, string>();
+        return {
+            setProperty: (name, value) => {
+                properties.set(name, value);
+            },
+            removeProperty: (name) => {
+                const previous = properties.get(name) ?? '';
+                properties.delete(name);
+                return previous;
+            },
+            getPropertyValue: (name) => properties.get(name) ?? '',
+        };
+    }
+
     function createInteractiveElement(tagName: string, namespaceURI = 'http://www.w3.org/1999/xhtml') {
         const childNodes: Array<InteractiveElement | InteractiveText> = [];
         const attributes = new Map<string, string>();
@@ -453,7 +493,7 @@ function installInteractiveDocument() {
             childNodes,
             attributes,
             listeners,
-            style: {},
+            style: createInteractiveStyle(),
             addEventListener: (type, callback, options) => {
                 addListener(listeners, type, callback, options);
             },
@@ -489,6 +529,9 @@ function installInteractiveDocument() {
                 if (name === 'disabled') element.disabled = false;
             },
             getAttribute: (name) => attributes.get(name) ?? null,
+            getBoundingClientRect: () => ({
+                x: 0, y: 0, top: 0, right: 0, bottom: 0, left: 0, width: 0, height: 0,
+            }),
             focus: () => {
                 documentTarget.activeElement = element;
             },
@@ -548,11 +591,22 @@ function installInteractiveDocument() {
         body,
     });
     vi.stubGlobal('window', windowTarget);
+    vi.stubGlobal('self', windowTarget);
     vi.stubGlobal('document', documentTarget);
     vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
         callback(0);
         return 1;
     }));
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    vi.stubGlobal('requestIdleCallback', vi.fn(() => 1));
+    vi.stubGlobal('cancelIdleCallback', vi.fn());
+    vi.stubGlobal('getComputedStyle', vi.fn(() => ({ getPropertyValue: () => '' })));
+    vi.stubGlobal('IntersectionObserver', class {
+        observe = vi.fn();
+        unobserve = vi.fn();
+        disconnect = vi.fn();
+        takeRecords = vi.fn(() => []);
+    });
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     const container = document.createElement('div');
     const containerNode = elements.at(-1);
@@ -772,12 +826,24 @@ async function renderOverlayHost() {
     };
 }
 
+/**
+ * Renders the board the way the app shell does. The D4 icon button carries its own tooltip, so the
+ * shell's `TooltipProvider` is part of the contract these tests exercise rather than decoration.
+ */
+async function renderBoardTree(initialPayload: RadarPayload) {
+    const { TooltipProvider } = await import('@/components/ui/tooltip');
+    const providerProps: Parameters<typeof TooltipProvider>[0] = {
+        children: createElement(RadarBoard, { initialPayload }),
+    };
+    return createElement(TooltipProvider, providerProps);
+}
+
 async function renderRadarBoard(initialPayload: RadarPayload) {
     const installed = installMinimalDocument();
     const { createRoot } = await import('react-dom/client');
     const root = createRoot(installed.container);
     await act(async () => {
-        root.render(createElement(RadarBoard, { initialPayload }));
+        root.render(await renderBoardTree(initialPayload));
         await Promise.resolve();
         await Promise.resolve();
     });
@@ -792,7 +858,7 @@ async function renderInteractiveRadarBoard(initialPayload: RadarPayload) {
     const { createRoot } = await import('react-dom/client');
     const root = createRoot(installed.container, { onCaughtError: vi.fn() });
     await act(async () => {
-        root.render(createElement(RadarBoard, { initialPayload }));
+        root.render(await renderBoardTree(initialPayload));
         await Promise.resolve();
         await Promise.resolve();
     });
@@ -824,34 +890,23 @@ afterEach(() => {
 });
 
 describe('Radar action integration', () => {
-    it('opens task and record contexts from the production Radar card controls', async () => {
+    it('opens the intro-path task from the one action the production card promotes', async () => {
         const currentPayload = payload([warmPathSignal()]);
         api.getRadar.mockResolvedValue(currentPayload);
-        api.getRadarContext.mockResolvedValue({
-            type: 'person',
-            id: 10,
-            label: 'Ada Lovelace',
-            href: '/records/people/10',
-        });
         actions.run.mockResolvedValue({ status: 'completed' });
         captures.renderRealRadarCards = true;
         const board = await renderInteractiveRadarBoard(currentPayload);
-        const createTaskButton = board.elements.find((element) => (
+        const askIntroButton = board.elements.find((element) => (
             element.tagName === 'BUTTON'
             && element.parentNode !== null
-            && element.getAttribute('aria-label') === 'actions.createTaskNamed:Ada Lovelace'
+            && element.getAttribute('aria-label') === 'actions.askIntroNamed:Ada Lovelace'
         ));
-        const openContextButton = board.elements.find((element) => (
-            element.tagName === 'BUTTON'
-            && element.parentNode !== null
-            && element.getAttribute('aria-label') === 'actions.openContextNamed:Ada Lovelace'
-        ));
-        if (!createTaskButton || !openContextButton) {
-            throw new Error('Production Radar card actions did not render');
+        if (!askIntroButton) {
+            throw new Error('The production Radar card promoted no intro-path action');
         }
 
         await act(async () => {
-            board.dispatch('click', createTaskButton);
+            board.dispatch('click', askIntroButton);
             await Promise.resolve();
         });
         expect(actions.run).toHaveBeenCalledWith('create.task', expect.objectContaining({
@@ -863,12 +918,28 @@ describe('Radar action integration', () => {
                 bridgePersonId: 20,
             }),
         }));
+        await board.unmount();
+    });
+
+    it('opens the current record through the authorized context lookup, not a guessed href', async () => {
+        const currentPayload = payload([warmPathSignal()]);
+        api.getRadar.mockResolvedValue(currentPayload);
+        api.getRadarContext.mockResolvedValue({
+            type: 'person',
+            id: 10,
+            label: 'Ada Lovelace',
+            href: '/records/contacts/10',
+        });
+        actions.run.mockResolvedValue({ status: 'completed' });
+        const board = await renderRadarBoard(currentPayload);
 
         await act(async () => {
-            board.dispatch('click', openContextButton);
+            invoke(requiredProps(captures.radarCardProps.get(1), 'Radar card'), 'onOpenContext');
             await Promise.resolve();
             await Promise.resolve();
         });
+
+        expect(api.getRadarContext).toHaveBeenCalledWith(1);
         expect(actions.run).toHaveBeenCalledWith('record.open', {
             source: 'menu',
             record: { type: 'person', id: 10, label: 'Ada Lovelace' },
@@ -1049,29 +1120,38 @@ describe('Radar action integration', () => {
             onOpenContext: vi.fn(),
         };
 
+        const { TooltipProvider } = await vi.importActual<
+            typeof import('@/components/ui/tooltip')
+        >('@/components/ui/tooltip');
+
         await act(async () => {
-            root.render(createElement(cardModule.default, {
-                signal: signal(),
-                pageAsOf: '2026-08-08T12:00:00Z',
-                freshnessStatus: 'current',
-                busy: true,
-                snoozeOpen: false,
-                expanded: false,
-                onExpandedChange: vi.fn(),
-                ...callbacks,
-            }));
+            const providerProps: Parameters<typeof TooltipProvider>[0] = {
+                children: createElement(cardModule.default, {
+                    signal: signal(),
+                    pageAsOf: '2026-08-08T12:00:00Z',
+                    freshnessStatus: 'current',
+                    busy: true,
+                    snoozeOpen: false,
+                    expanded: false,
+                    onExpandedChange: vi.fn(),
+                    ...callbacks,
+                }),
+            };
+            root.render(createElement(TooltipProvider, providerProps));
         });
         const buttons = installed.elements.filter(
             (element) => element.tagName === 'BUTTON' && element.parentNode !== null,
         );
-        const disclosure = buttons.filter((button) => button.getAttribute('aria-expanded') !== null);
-        const actionButtons = buttons.filter((button) => button.getAttribute('aria-expanded') === null);
+        const disclosure = buttons.filter(
+            (button) => button.getAttribute('aria-controls') === 'radar-detail-1',
+        );
+        const mutating = buttons.filter((button) => !disclosure.includes(button));
 
-        expect(actionButtons).toHaveLength(5);
-        expect(actionButtons.every((button) => button.disabled === true)).toBe(true);
         expect(disclosure).toHaveLength(1);
         expect(disclosure[0].disabled).not.toBe(true);
         expect(disclosure[0].getAttribute('aria-expanded')).toBe('false');
+        expect(mutating.length).toBeGreaterThan(0);
+        expect(mutating.every((button) => button.disabled === true)).toBe(true);
 
         await act(async () => root.unmount());
     });
