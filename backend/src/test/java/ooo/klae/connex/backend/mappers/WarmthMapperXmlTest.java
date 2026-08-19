@@ -6,7 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.InputStream;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
@@ -19,10 +22,13 @@ import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.warmth.RelationshipWarmthModel;
 
 /** Verifies warmth aggregate and evidence mapper statements bind the shared model contract. */
 class WarmthMapperXmlTest {
+    private static final Instant NOW = Instant.parse("2026-06-30T00:00:00Z");
 
     @Test
     void warmthStatementsParseAndBindModelParameters() throws Exception {
@@ -139,6 +145,112 @@ class WarmthMapperXmlTest {
             assertEquals(10, timeout(configuration, PersonMapper.class, statement));
             assertEquals(10, timeout(configuration, CompanyMapper.class, statement));
         }
+    }
+
+    /**
+     * An ordinary browser page must not pay for the warmth aggregate, and a warmth page must bind
+     * the model boundaries rather than inlining tuned literals into the mapper.
+     */
+    @Test
+    void browserStatementsJoinTheWarmthAggregateOnlyWhenWarmthWasRequested() throws Exception {
+        Configuration configuration = configuration();
+        Map<String, Object> unfiltered = browserParameters(null);
+        Map<String, Object> sorted = browserParameters(
+            WarmthFilter.fromRequest(null, false, null, "warmth", NOW));
+        Map<String, Object> banded = browserParameters(
+            WarmthFilter.fromRequest(List.of("hot", "cold"), true, 30, "warmth", NOW));
+
+        for (String statement : new String[] {
+                "getPersonsPage", "countPersons", "getPersonIdsFiltered", "getPersonsFiltered"}) {
+            assertFalse(sql(configuration, PersonMapper.class, statement, unfiltered)
+                .contains("raw_weight"), statement + " scores an unfiltered page");
+            assertTrue(sql(configuration, PersonMapper.class, statement, sorted)
+                .contains("raw_weight"), statement + " does not join the aggregate");
+        }
+        for (String statement : new String[] {
+                "getCompaniesPage", "countCompanies", "getCompanyIdsFiltered", "getCompaniesFiltered"}) {
+            assertFalse(sql(configuration, CompanyMapper.class, statement, unfiltered)
+                .contains("raw_weight"), statement + " scores an unfiltered page");
+            assertTrue(sql(configuration, CompanyMapper.class, statement, sorted)
+                .contains("raw_weight"), statement + " does not join the aggregate");
+        }
+
+        String personSorted = collapsed(
+            sql(configuration, PersonMapper.class, "getPersonsPage", sorted));
+        assertTrue(personSorted.contains("ORDER BY COALESCE(w.raw_weight, 0.0) DESC"));
+        assertTrue(personSorted.contains("POW(?, -touch.age_days / ?)"));
+
+        String personBanded = collapsed(
+            sql(configuration, PersonMapper.class, "getPersonIdsFiltered", banded));
+        assertTrue(personBanded.contains("WHEN w.last_touch_at IS NULL THEN '__none__'"));
+        assertTrue(personBanded.contains("OR w.last_touch_at IS NULL"));
+        assertTrue(personBanded.contains("ROUND(? * LOG(?, w.raw_weight / ?)) <= ?"));
+        assertFalse(personBanded.contains("0.913"), "band boundaries must stay model-bound");
+
+        String companyBanded = collapsed(
+            sql(configuration, CompanyMapper.class, "getCompanyIdsFiltered", banded));
+        assertTrue(companyBanded.contains("WHEN w.last_touch_at IS NULL THEN '__none__'"));
+        assertTrue(companyBanded.contains("ROUND(? * LOG(?, w.raw_weight / ?)) <= ?"));
+    }
+
+    /**
+     * The smart-segment company page shares the browser's sort whitelist but joins no warmth
+     * aggregate, so an unsupported warmth sort there must fall through to the default column.
+     */
+    @Test
+    void theSegmentCompanyPageNeverEmitsTheWarmthSortColumn() throws Exception {
+        Configuration configuration = configuration();
+        Map<String, Object> parameters = new HashMap<>();
+        parameters.put("workspaceId", 7);
+        parameters.put("segmentIdsJson", "[1,2]");
+        parameters.put("sort", "warmth");
+        parameters.put("dir", "desc");
+        parameters.put("limit", 25);
+        parameters.put("offset", 0);
+
+        String sql = collapsed(
+            sql(configuration, CompanyMapper.class, "getSegmentCompaniesPage", parameters));
+
+        assertFalse(sql.contains("raw_weight"));
+        assertTrue(sql.contains("ORDER BY c.name DESC"));
+    }
+
+    @Test
+    void theWarmthBandFacetGroupsEveryVisibleRecordWithoutInliningModelLiterals() throws Exception {
+        Configuration configuration = configuration();
+        Map<String, Object> parameters = new HashMap<>();
+        parameters.put("workspaceId", 7);
+        parameters.put("warmth", WarmthFilter.forScoring(NOW));
+
+        for (Class<?> mapper : new Class<?>[] {PersonMapper.class, CompanyMapper.class}) {
+            String sql = collapsed(sql(configuration, mapper, "countsByWarmthBand", parameters));
+            assertTrue(sql.contains("raw_weight"), mapper.getSimpleName());
+            assertTrue(sql.contains("'__none__'"), mapper.getSimpleName());
+            assertTrue(sql.contains("GROUP BY `key`"), mapper.getSimpleName());
+            assertTrue(sql.contains("archived_at IS NULL"), mapper.getSimpleName());
+        }
+    }
+
+    private static String collapsed(String sql) {
+        return sql.replaceAll("\\s+", " ").trim();
+    }
+
+    private static Map<String, Object> browserParameters(WarmthFilter warmth) {
+        Map<String, Object> parameters = new HashMap<>();
+        parameters.put("workspaceId", 7);
+        parameters.put("memberScope", MemberScope.allTeam());
+        parameters.put("archived", false);
+        parameters.put("noCompany", false);
+        parameters.put("noLifecycle", false);
+        parameters.put("noLeadSource", false);
+        parameters.put("noFirstResponse", false);
+        parameters.put("noIndustry", false);
+        parameters.put("sort", warmth == null ? "name" : "warmth");
+        parameters.put("dir", "desc");
+        parameters.put("warmth", warmth);
+        parameters.put("limit", 25);
+        parameters.put("offset", 0);
+        return parameters;
     }
 
     private static Integer timeout(Configuration configuration, Class<?> mapper, String statement) {

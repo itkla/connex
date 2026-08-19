@@ -115,6 +115,11 @@ public record WarmthFilter(
             RelationshipWarmthModel.current().sqlParameters());
     }
 
+    /** Whether any band or no-history bucket narrows the result set. */
+    public boolean restrictsBands() {
+        return !bands.isEmpty() || noWarmth;
+    }
+
     /**
      * Creates the unrestricted filter that only supplies the model parameters and evaluation
      * instant, for callers that score every visible record rather than narrowing to a band.
