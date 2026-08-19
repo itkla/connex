@@ -39,7 +39,10 @@ import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { useRecordReturnSelection } from '@/app/hooks/useRecordReturnSelection';
-import { useActionSelection } from '@/app/hooks/useActions';
+import { useActionSelection, useActions } from '@/app/hooks/useActions';
+import { usePermission } from '@/app/hooks/usePermissions';
+import FirstRunDoors from '@/app/components/FirstRunDoors';
+import { firstRunDoors } from '@/app/lib/firstRunJourney';
 import { useSavedViewScope } from '@/app/hooks/useSavedViewScope';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
 import SavedViewsBar from '@/app/components/records/SavedViewsBar';
@@ -125,6 +128,8 @@ function diffDraft(original: ContactDraft, draft: ContactDraft): boolean {
         original.title !== draft.title
     );
 }
+
+const IMPORT_CONTACTS_ACTION = 'utility.import-contacts';
 
 export default function ContactsBrowser({ savedViews, defaultView, savedViewsUnavailable }: { savedViews: SavedView[]; defaultView: SavedView | null; savedViewsUnavailable?: boolean }) {
     const router = useRouter();
@@ -364,6 +369,17 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         setQuery('');
         setFilterState({});
     }, [setQuery, setFilterState]);
+    const canCreateContacts = usePermission('PERSON_CREATE');
+    const { run: runAction, pendingIds, getAction } = useActions();
+    const importPending = pendingIds.has(IMPORT_CONTACTS_ACTION);
+    const firstRunEntryDoors = useMemo(
+        () => firstRunDoors(canCreateContacts)
+            .filter((door) => door !== 'importCsv' || getAction(IMPORT_CONTACTS_ACTION) != null),
+        [canCreateContacts, getAction],
+    );
+    const runContactImport = useCallback(() => {
+        void runAction(IMPORT_CONTACTS_ACTION, { source: 'empty-state' });
+    }, [runAction]);
     const effectiveOwnerValues = ownerScope.mode === 'me'
         ? [MEMBER_SCOPE_ME]
         : ownerScope.mode === 'unassigned'
@@ -1096,17 +1112,34 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                         selectionActions={selectionActions}
                         loading={loading}
                         emptyState={
-                            <EmptyState
-                                icon={UsersIcon}
-                                title={t('emptyTitle')}
-                                body={t('emptyBody')}
-                                action={
-                                    <Button variant="brand" onClick={openNewContactDialog}>
-                                        <PlusIcon strokeWidth={2.5} />
-                                        {t('emptyCta')}
-                                    </Button>
-                                }
-                            />
+                            firstRunEntryDoors.length > 0 ? (
+                                <EmptyState
+                                    icon={UsersIcon}
+                                    title={t('emptyTitle')}
+                                    body={t('emptyJourneyBody')}
+                                    action={
+                                        <FirstRunDoors
+                                            doors={firstRunEntryDoors}
+                                            size="page"
+                                            importPending={importPending}
+                                            onImport={runContactImport}
+                                            onNew={openNewContactDialog}
+                                        />
+                                    }
+                                />
+                            ) : (
+                                <EmptyState
+                                    icon={UsersIcon}
+                                    title={t('emptyTitle')}
+                                    body={t('emptyBody')}
+                                    action={
+                                        <Button variant="brand" onClick={openNewContactDialog}>
+                                            <PlusIcon strokeWidth={2.5} />
+                                            {t('emptyCta')}
+                                        </Button>
+                                    }
+                                />
+                            )
                         }
                         filtersActive={hasActiveFiltersOrScope}
                         onClearFilters={clearFiltersAndScope}

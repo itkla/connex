@@ -78,9 +78,10 @@
     "steps": {
       "contacts": {
         "title": "Bring in your contacts",
-        "body": "Import a CSV from your old CRM, or add the first person by hand. You can scan a business card while adding one.",
+        "body": "Import a CSV from your old CRM, or add the first person by hand.",
         "cta": "Import contacts",
-        "done": "{count, plural, =1 {# contact} other {# contacts}}"
+        "done": "{count, plural, =1 {# contact} other {# contacts}}",
+        "bodyScanning": "Import a CSV from your old CRM, or add the first person by hand. You can scan a business card while adding someone."
       },
       "companies": {
         "title": "Add the companies they work for",
@@ -148,6 +149,20 @@
         "interactions": "No interactions logged",
         "noSignal": "Contacts and interactions are in, but none of them adds up to a signal worth claiming yet."
       }
+    }
+  },
+  "FirstRunJourney": {
+    "doors": {
+      "importCsv": "Import CSV",
+      "newContact": "New contact"
+    },
+    "cardScanning": "You can scan a business card while adding someone.",
+    "warmth": {
+      "title": "Your first warmth reading",
+      "body": "Connex read the interactions you logged. This is how warm your relationships are right now.",
+      "readings": "Read from the interactions you logged",
+      "bandCount": "{count, plural, =1 {# contact} other {# contacts}}",
+      "cta": "See warmth"
     }
   },
   "DashboardGreeting": {

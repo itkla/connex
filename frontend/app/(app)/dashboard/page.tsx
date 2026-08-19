@@ -103,6 +103,7 @@ import {
     selectFirstInsight,
     type ActivationCounts,
 } from '@/app/lib/activation';
+import { resolveFirstRunJourney, warmthReadings } from '@/app/lib/firstRunJourney';
 
 const EMPTY_DEAL_KPIS: DealKpis = {
     wonRevenue: 0,
@@ -196,6 +197,8 @@ export async function loadActivationExtras(cookie: string | null): Promise<{
         connectedCaptureReady: number;
         connectedCaptureAvailable: boolean;
         connectedAccountsAvailability: CapabilityAvailability;
+        /** Whether this instance can read business cards, so the journey may offer the scanner. */
+        businessCardScanning: boolean;
         canImportContacts: boolean;
         canImportCompanies: boolean;
         canCreateActivities: boolean;
@@ -245,6 +248,7 @@ export async function loadActivationExtras(cookie: string | null): Promise<{
             connectedAccountsAvailability: capabilityAvailability(capabilities === null
                 ? null
                 : connectedAccountsAvailable || connectedCaptureAvailable),
+            businessCardScanning: capabilities?.businessCardScanning === true,
             canImportContacts: effectivePermissions.includes('PERSON_CREATE'),
             canImportCompanies: effectivePermissions.includes('COMPANY_CREATE'),
             canCreateActivities: effectivePermissions.includes('ACTIVITY_CREATE'),
@@ -450,6 +454,7 @@ export default async function Dashboard() {
             connectedCaptureReady: 0,
             connectedCaptureAvailable: false,
             connectedAccountsAvailability: capabilityAvailability(null),
+            businessCardScanning: false,
             canImportContacts: false,
             canImportCompanies: false,
             canCreateActivities: false,
@@ -457,8 +462,9 @@ export default async function Dashboard() {
             canManageMembers: false,
             canCreateTasks: false,
         };
+    const { businessCardScanning, ...activationStepCounts } = activationExtras;
     const activationCounts: ActivationCounts | null = activationNeedsEvaluation
-        ? { ...setupCounts, ...activationExtras }
+        ? { ...setupCounts, ...activationStepCounts }
         : null;
     const activationInputsAvailable =
         activationCoreInputsAvailable && activationExtrasResult?.ok === true;
@@ -481,6 +487,12 @@ export default async function Dashboard() {
         : null;
     const activationSignalsAvailable = activationInputsAvailable
         && (activationInsight != null || introSuggestionsResult.ok);
+    const firstRunJourney = activationCounts && activationInputsAvailable
+        ? resolveFirstRunJourney(activationCounts, businessCardScanning)
+        : null;
+    const firstWarmthReadings = relationshipDashboardResult.ok
+        ? warmthReadings(warmthSummary, relationshipDashboard.hasRelationshipEvidence)
+        : null;
 
     const chartCard = (child: ReactNode) => (
         <div className="h-full rounded-2xl border border-border bg-card p-6">{child}</div>
@@ -605,7 +617,9 @@ export default async function Dashboard() {
                     <Rise delay={0.09}>
                         <ActivationPanel
                             steps={activationSteps}
+                            journey={firstRunJourney}
                             insight={activationInsight}
+                            warmthReadings={firstWarmthReadings}
                             gaps={activationGaps(
                                 activationCounts,
                                 activationInsight != null,

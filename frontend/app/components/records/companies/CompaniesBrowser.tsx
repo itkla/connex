@@ -41,7 +41,10 @@ import { IconButton } from '@/components/ui/icon-button';
 import ArchiveRecordDialog from '@/app/components/records/ArchiveRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { useRecordReturnSelection } from '@/app/hooks/useRecordReturnSelection';
-import { useActionSelection } from '@/app/hooks/useActions';
+import { useActionSelection, useActions } from '@/app/hooks/useActions';
+import { usePermission } from '@/app/hooks/usePermissions';
+import FirstRunDoors from '@/app/components/FirstRunDoors';
+import { firstRunDoors } from '@/app/lib/firstRunJourney';
 import { useSavedViewScope } from '@/app/hooks/useSavedViewScope';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
 import { type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, FILTER_EMPTY, facetChips, countActiveFilters } from '@/app/components/records/types';
@@ -134,6 +137,8 @@ type CompanyFilterParams = WarmthFilterParams & {
     memberIds?: number[];
     archived?: boolean;
 };
+
+const IMPORT_COMPANIES_ACTION = 'utility.import-companies';
 
 const NO_ITEMS: Company[] = [];
 const ARCHIVED_FILTER_KEY = 'archived';
@@ -802,6 +807,17 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         setFilterState({});
         setDefinition(EMPTY_DEFINITION);
     }, [setQuery, setFilterState]);
+    const canCreateCompanies = usePermission('COMPANY_CREATE');
+    const { run: runAction, pendingIds, getAction } = useActions();
+    const companyImportPending = pendingIds.has(IMPORT_COMPANIES_ACTION);
+    const firstRunEntryDoors = useMemo(
+        () => firstRunDoors(canCreateCompanies)
+            .filter((door) => door !== 'importCsv' || getAction(IMPORT_COMPANIES_ACTION) != null),
+        [canCreateCompanies, getAction],
+    );
+    const runCompanyImport = useCallback(() => {
+        void runAction(IMPORT_COMPANIES_ACTION, { source: 'empty-state' });
+    }, [runAction]);
     const resolveTagName = useCallback(
         (id: string) => segmentFields?.tags.find((tag) => String(tag.id) === id)?.name ?? id,
         [segmentFields],
@@ -1211,17 +1227,35 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                         entityLabel={t('entityLabel')}
                         selectionActions={selectionActions}
                         emptyState={
-                            <EmptyState
-                                icon={BuildingOffice2Icon}
-                                title={t('emptyTitle')}
-                                body={t('emptyBody')}
-                                action={
-                                    <Button variant="brand" onClick={openNewDialog}>
-                                        <PlusIcon strokeWidth={2.5} />
-                                        {t('emptyCta')}
-                                    </Button>
-                                }
-                            />
+                            firstRunEntryDoors.length > 0 ? (
+                                <EmptyState
+                                    icon={BuildingOffice2Icon}
+                                    title={t('emptyTitle')}
+                                    body={t('emptyBody')}
+                                    action={
+                                        <FirstRunDoors
+                                            doors={firstRunEntryDoors}
+                                            size="page"
+                                            newLabel={t('emptyCta')}
+                                            importPending={companyImportPending}
+                                            onImport={runCompanyImport}
+                                            onNew={openNewDialog}
+                                        />
+                                    }
+                                />
+                            ) : (
+                                <EmptyState
+                                    icon={BuildingOffice2Icon}
+                                    title={t('emptyTitle')}
+                                    body={t('emptyBody')}
+                                    action={
+                                        <Button variant="brand" onClick={openNewDialog}>
+                                            <PlusIcon strokeWidth={2.5} />
+                                            {t('emptyCta')}
+                                        </Button>
+                                    }
+                                />
+                            )
                         }
                         filtersActive={hasActiveFiltersOrScope}
                         onClearFilters={clearFiltersAndScope}
