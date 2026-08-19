@@ -7,7 +7,7 @@ import {
     UserPlusIcon,
 } from '@heroicons/react/24/outline';
 
-import { useContactIntroAsk } from '@/app/components/records/contacts/contactIntroAsk';
+import { useContactIntroAsk } from '@/app/components/records/contacts/introAsk';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 

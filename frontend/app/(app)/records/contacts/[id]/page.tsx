@@ -32,7 +32,7 @@ import CustomFieldRows from "@/app/components/records/CustomFieldRows";
 import ContactLeadPanel from "@/app/components/records/contacts/ContactLeadPanel";
 import EngineEvaluationPanel from "@/app/components/records/EngineEvaluationPanel";
 import RecordSignalsPanel from "@/app/components/records/RecordSignalsPanel";
-import { ContactIntroAskProvider } from "@/app/components/records/contacts/contactIntroAsk";
+import ContactIntroAskProvider from "@/app/components/records/contacts/ContactIntroAskProvider";
 import RecordDetailSection from "@/app/components/records/RecordDetailSection";
 import { formatCompactCurrency, formatDate, formatDateTime, formatShortDate } from "@/app/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";

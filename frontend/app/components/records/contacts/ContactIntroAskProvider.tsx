@@ -1,76 +1,19 @@
 'use client';
 
-import {
-    createContext,
-    useCallback,
-    useContext,
-    useEffect,
-    useState,
-    type ReactNode,
-} from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 
+import {
+    bridgeToTarget,
+    ContactIntroAskContext,
+    introMention,
+    useCanAskForIntro,
+    WARM_PATH_LIMIT,
+    type IntroBridge,
+} from '@/app/components/records/contacts/introAsk';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
-import { usePermissionCheck } from '@/app/hooks/usePermissions';
 import { acceptWarmPath, getWarmPaths } from '@/app/lib/api';
 import { toastSuccess } from '@/app/lib/toast';
-import type { WarmPath } from '@/app/lib/types';
-
-/**
- * How many ranked paths to read. The board's own maximum, so a record never offers an ask for a
- * target the board has already ranked out of its feed.
- */
-const WARM_PATH_LIMIT = 50;
-
-/** The bridge a record's introduction would go through. */
-export type IntroBridge = {
-    personId: number;
-    personName: string;
-};
-
-/** The single per-page intro-ask state every surface on a contact record shares. */
-export type ContactIntroAsk = {
-    /** The warmest bridge the Introductions board offers for this contact, or null when it offers none. */
-    bridge: IntroBridge | null;
-    asking: boolean;
-    asked: boolean;
-    ask: () => void;
-};
-
-const NO_ASK: ContactIntroAsk = {
-    bridge: null,
-    asking: false,
-    asked: false,
-    ask: () => undefined,
-};
-
-const ContactIntroAskContext = createContext<ContactIntroAsk>(NO_ASK);
-
-/** Composes the mention token an intro follow-up task carries for a contact. */
-export function introMention(name: string, id: number): string {
-    return `[${name}](person:${id})`;
-}
-
-/**
- * Whether the viewer may ask for an introduction: the server requires both updating the contact and
- * creating the follow-up task. A refused permission hides the entry point rather than offering a
- * button that can only fail; an unresolved lookup leaves it, so a failed probe never removes an
- * ability the viewer has.
- */
-export function useCanAskForIntro(): boolean {
-    const personUpdate = usePermissionCheck('PERSON_UPDATE');
-    const taskCreate = usePermissionCheck('TASK_CREATE');
-    return personUpdate !== 'denied' && taskCreate !== 'denied';
-}
-
-/** The board's warmest bridge to one target, or null when the feed holds no path to it. */
-function bridgeToTarget(paths: readonly WarmPath[], targetPersonId: number): IntroBridge | null {
-    const path = paths.find((candidate) => candidate.targetId === targetPersonId);
-    const bridge = path?.bridges[0];
-    if (!bridge) return null;
-    const personName = bridge.name.trim();
-    return personName.length > 0 ? { personId: bridge.personId, personName } : null;
-}
 
 /**
  * Holds one contact record's introduction ask, shared by every surface on the page — the warmth
@@ -86,7 +29,7 @@ function bridgeToTarget(paths: readonly WarmPath[], targetPersonId: number): Int
  * target, pass it and drop the narrowing. A refused or failed read leaves no bridge, so the record
  * offers no ask rather than one that could only fail.
  */
-export function ContactIntroAskProvider({
+export default function ContactIntroAskProvider({
     contactId,
     contactName,
     children,
@@ -134,17 +77,14 @@ export function ContactIntroAskProvider({
             .finally(() => setAsking(false));
     }, [asked, asking, bridge, contactId, contactName, showApiError, t]);
 
+    const value = useMemo(
+        () => ({ bridge, asking, asked, ask }),
+        [ask, asked, asking, bridge],
+    );
+
     return (
-        <ContactIntroAskContext.Provider value={{ bridge, asking, asked, ask }}>
+        <ContactIntroAskContext.Provider value={value}>
             {children}
         </ContactIntroAskContext.Provider>
     );
-}
-
-/**
- * The contact record's shared intro ask. Outside a {@link ContactIntroAskProvider} it reports no
- * bridge, so a surface reused off the record page simply renders no ask.
- */
-export function useContactIntroAsk(): ContactIntroAsk {
-    return useContext(ContactIntroAskContext);
 }

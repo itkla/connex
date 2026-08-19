@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useLocale, useTranslations } from 'next-intl';
 import { useReducedMotion } from 'motion/react';
@@ -42,7 +42,10 @@ export type RelationshipEvidenceActionContext = {
     goesColdAt: string | null;
 };
 
-/** The composer an evidence action hands off to once the evidence surface has finished closing. */
+/**
+ * The composer an evidence action hands off to once the evidence surface has finished closing.
+ * Held in a ref rather than state: nothing renders from it, so writing it must not cost a render.
+ */
 type PendingComposer = 'activity' | 'task';
 
 /**
@@ -68,7 +71,7 @@ export default function WarmthEvidenceChip({
     const now = useLiveNow();
     const reduceMotion = useReducedMotion();
     const [dialogOpen, setDialogOpen] = useState(false);
-    const [pending, setPending] = useState<PendingComposer | null>(null);
+    const pendingRef = useRef<PendingComposer | null>(null);
     const [activityOpen, setActivityOpen] = useState(false);
     const [taskOpen, setTaskOpen] = useState(false);
     const [composersMounted, setComposersMounted] = useState(false);
@@ -81,16 +84,17 @@ export default function WarmthEvidenceChip({
     const bandLabel = hasHistory ? tTemp(temperature.band) : tTemp('noHistory');
 
     const handOff = (composer: PendingComposer) => {
-        setPending(composer);
+        pendingRef.current = composer;
         setDialogOpen(false);
     };
 
     const openPendingComposer = () => {
+        const pending = pendingRef.current;
         if (pending === null) return;
+        pendingRef.current = null;
         setComposersMounted(true);
         if (pending === 'activity') setActivityOpen(true);
         else setTaskOpen(true);
-        setPending(null);
     };
 
     return (

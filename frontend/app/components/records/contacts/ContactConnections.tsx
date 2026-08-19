@@ -24,7 +24,7 @@ import {
     removeContactConnection,
 } from '@/app/lib/api';
 import { useContactTargetSearch } from '@/app/hooks/useRecordTargetSearch';
-import { useContactIntroAsk } from '@/app/components/records/contacts/contactIntroAsk';
+import { useContactIntroAsk } from '@/app/components/records/contacts/introAsk';
 import { INTRODUCTIONS_PATH } from '@/app/components/introductions/introductionLinks';
 import type { Contact, IntroPath, PersonConnection } from '@/app/lib/types';
 
