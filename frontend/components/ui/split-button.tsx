@@ -27,6 +27,13 @@ const CAPSULE =
  * The divider: an inset hairline in the capsule's own ink at low alpha — not a border token, and
  * never full-bleed. A seam that runs cap to cap reads as two abutted objects; a score line that
  * stops short of both reads as one object divided, which is the D4 contract.
+ *
+ * It is the capsule's only vertical line. Every button variant carries `border border-transparent`
+ * under `bg-clip-padding`, so two halves set side by side meet as three lines — the action half's
+ * right border, this hairline, the chevron half's left border. On `outline` all three are inked; on
+ * the filled variants the outer two read as 1px transparent gaps either side of the seam. The
+ * halves therefore drop their inner border (`border-r-0` / `border-l-0`) and let the hairline be
+ * the only division, which is what keeps the law true for every variant the type allows.
  */
 const splitButtonDividerVariants = cva("pointer-events-none w-px self-stretch", {
   variants: {
@@ -61,6 +68,8 @@ const TRIGGER_PADDING: Record<SplitButtonSize, string> = {
 export type SplitButtonProps = {
   /** Visible label of the primary verb. */
   label: React.ReactNode
+  /** The primary verb's `type`. Defaults to `button`; the chevron half is always a `button`. */
+  type?: "button" | "submit" | "reset"
   /** Leading icon of the primary verb. */
   icon?: React.ReactNode
   onClick: () => void
@@ -90,6 +99,7 @@ export type SplitButtonProps = {
  */
 export function SplitButton({
   label,
+  type = "button",
   icon,
   onClick,
   variant = "brand",
@@ -106,10 +116,11 @@ export function SplitButton({
   return (
     <div data-slot="split-button" className={cn(CAPSULE, className)}>
       <Button
+        type={type}
         variant={variant}
         size={size}
         press="none"
-        className="rounded-r-none"
+        className="rounded-r-none border-r-0"
         aria-label={actionAriaLabel}
         disabled={actionDisabled}
         onClick={onClick}
@@ -123,10 +134,11 @@ export function SplitButton({
           <DropdownMenuTrigger asChild>
             <TooltipTrigger asChild>
               <Button
+                type="button"
                 variant={variant}
                 size={size}
                 press="none"
-                className={cn("rounded-l-none", TRIGGER_PADDING[size])}
+                className={cn("rounded-l-none border-l-0", TRIGGER_PADDING[size])}
                 aria-label={menuLabel}
                 disabled={menuDisabled}
               >
