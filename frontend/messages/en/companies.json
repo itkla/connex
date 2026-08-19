@@ -36,6 +36,7 @@
     "searchPlaceholder": "Search companies",
     "columnName": "Name",
     "columnWarmth": "Warmth",
+    "chipGoesColdWithin": "Goes cold within {days} days",
     "columnWebsite": "Website",
     "columnIndustry": "Industry",
     "columnPhone": "Phone",
