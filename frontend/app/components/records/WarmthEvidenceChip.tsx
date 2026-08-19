@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useLocale, useTranslations } from 'next-intl';
 import { useReducedMotion } from 'motion/react';
 
@@ -8,7 +9,6 @@ import RelationshipEvidencePanel from '@/app/components/records/RelationshipEvid
 import RelationshipEvidenceActions, {
     type RelationshipEvidenceActionContext,
 } from '@/app/components/records/RelationshipEvidenceActions';
-import { RecordActivityComposer, RecordTaskComposer } from '@/app/components/records/RecordComposers';
 import WarmthPill from '@/app/components/records/WarmthPill';
 import { useLiveNow } from '@/app/hooks/useNow';
 import { followUpDueDate } from '@/app/lib/followUp';
@@ -22,6 +22,14 @@ import {
 } from '@/components/ui/dialog';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card';
 import { cn } from '@/lib/utils';
+
+const RecordActivityComposer = dynamic(() => import(
+    '@/app/components/records/RecordComposers'
+).then((composers) => composers.RecordActivityComposer));
+
+const RecordTaskComposer = dynamic(() => import(
+    '@/app/components/records/RecordComposers'
+).then((composers) => composers.RecordTaskComposer));
 
 /**
  * Record-detail entry point that reuses {@link WarmthPill}: hover shows a short warmth
@@ -44,6 +52,7 @@ export default function WarmthEvidenceChip({
     const [dialogOpen, setDialogOpen] = useState(false);
     const [activityOpen, setActivityOpen] = useState(false);
     const [taskOpen, setTaskOpen] = useState(false);
+    const [composersMounted, setComposersMounted] = useState(false);
 
     const temperature = evidence.temperature;
     const hasHistory = Boolean(temperature.lastTouchAt);
@@ -119,10 +128,12 @@ export default function WarmthEvidenceChip({
                                     context={actions}
                                     onLogInteraction={() => {
                                         setDialogOpen(false);
+                                        setComposersMounted(true);
                                         setActivityOpen(true);
                                     }}
                                     onScheduleFollowUp={() => {
                                         setDialogOpen(false);
+                                        setComposersMounted(true);
                                         setTaskOpen(true);
                                     }}
                                 />
@@ -132,7 +143,7 @@ export default function WarmthEvidenceChip({
                 </DialogContent>
             </Dialog>
 
-            {actions ? (
+            {actions && composersMounted ? (
                 <>
                     <RecordActivityComposer
                         anchor={{
