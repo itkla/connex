@@ -17,7 +17,7 @@ import LoginPage from "@/app/auth/login/page";
 import { AuthForm } from "@/app/components/AuthForm";
 import CapabilityUnavailablePage from "@/app/components/CapabilityUnavailablePage";
 import EmailPanel from "@/app/components/settings/EmailPanel";
-import SettingsTabs from "@/app/components/settings/SettingsTabs";
+import WorkspaceSettingsChrome from "@/app/components/settings/WorkspaceSettingsChrome";
 import type { InstanceCapabilities } from "@/app/lib/types";
 import {
     installInteractiveDocument,
@@ -323,7 +323,7 @@ describe("settings navigation capability honesty", () => {
         stubCapabilities(null);
 
         const rendered = await SettingsLayout({ children: createElement("p", null, "settings content") });
-        const tabs = findByType(rendered, SettingsTabs);
+        const tabs = findByType(rendered, WorkspaceSettingsChrome);
         if (tabs === null || !hasMailManagementAvailability(tabs.props)) {
             throw new Error("Settings did not render the expected capability contract");
         }
@@ -339,7 +339,7 @@ describe("settings navigation capability honesty", () => {
         stubCapabilities(DISABLED_CAPABILITIES);
 
         const rendered = await SettingsLayout({ children: createElement("p", null, "settings content") });
-        const tabs = findByType(rendered, SettingsTabs);
+        const tabs = findByType(rendered, WorkspaceSettingsChrome);
         if (tabs === null || !hasMailManagementAvailability(tabs.props)) {
             throw new Error("Settings did not render the expected capability contract");
         }

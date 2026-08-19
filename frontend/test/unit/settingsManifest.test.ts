@@ -32,6 +32,11 @@ import { SHIPPED_APP_ROUTES } from "@/app/lib/routeManifest";
  *   self-contradiction (the same permission filed as both on one entry) is caught here.
  * - The group title-drift gate reads English only. A key whose Japanese has drifted from its English
  *   is not detectable, because the manifest records one name per group, not a translation pair.
+ * - The settings navigation (#1340 WS4.1) reads every route it links from this manifest at render
+ *   time, so it carries no literal href for the entry-point scan to find and is verified instead by
+ *   the data-level equality suite in `settingsNavigation.test.ts`. The residual risk is a literal
+ *   href added to the shell later: it would bypass both gates until the shell is registered as a
+ *   navigation source, which is what PR 7 does when `entryPoints` becomes generated truth.
  */
 const APP_DIRECTORY = path.join(process.cwd(), "app", "(app)");
 
