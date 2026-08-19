@@ -10,18 +10,42 @@ import { join, relative, resolve, sep } from "node:path";
  * decided. Anything that paints its own pill, overrides the primitive's shape, or names a height
  * outside the context scale is debt, and this scanner is its denominator.
  *
- * Three idioms, listed with their remediation in {@link REMEDIATION}:
+ * Six idioms, listed with their remediation in {@link REMEDIATION}:
  *
- * 1. `handRolled` — a raw `<button>` that paints a button surface (a radius plus a fill, ring,
- *    border, or shadow, plus its own padding or size). A bare `<button>` carrying only colour, or
- *    a wrapper around a card or row, is not a button in the D4 sense and does not report.
- * 2. `shapeOverride` — a `<Button>` or `<IconButton>` whose `className` re-decides the radius or
+ * 1. `handRolled` — a `<button>`, or an element with `role="button"`, that paints a button surface:
+ *    a radius, plus a fill/ring/border/shadow, plus a **reserved control height**. The height is
+ *    what separates a button from a chip — D4's law is one height per context, so a pill that hugs
+ *    its text on `py-0.5` is a tag and belongs to #509 Phase 3, not here. An element declaring a
+ *    foreign semantic (`role` other than `button`, `aria-current`, `aria-selected`) is a tab, nav
+ *    item, or option, and never reports.
+ * 2. `linkAsButton` — an `<a>` or `<Link>` painting the same surface. #509 Phase 2 routes these
+ *    through `buttonVariants` rather than leaving each one to redraw the button.
+ * 3. `hoistedClass` — a module-scope class string, or a helper returning one, that paints a button
+ *    surface and is spent on a `className`. `pillClass` is the reason this rule exists: one
+ *    function draws the whole filter-pill layer, and a tag-shaped scanner scores all of its call
+ *    sites clean.
+ * 4. `shapeOverride` — a `<Button>` or `<IconButton>` whose `className` re-decides the radius or
  *    the height (`rounded-*`, `h-8`, `size-9`). The variant is the height scale; a call site that
  *    types a number has left the scale.
- * 3. `legacySize` — a `size` outside the four context tiers (`page`, `dialog`, `toolbar`,
+ * 5. `legacySize` — a `size` outside the four context tiers (`page`, `dialog`, `toolbar`,
  *    `inline`, and their `icon-` forms). `default`/`sm`/`xs`/`lg`/`icon*` still resolve to the same
  *    heights so nothing broke when the tiers landed, but they name a size instead of a context,
  *    which is exactly what D4 replaced.
+ * 6. `iconOnlyWithoutTooltip` — a raw `<Button>` at an icon size that no `TooltipTrigger` wraps.
+ *    D4 says icon-only buttons are always tooltipped; `IconButton` is what makes that structural,
+ *    because there the accessible name and the tooltip are one string.
+ *
+ * **What it does not measure.** The chevron law and one-primary-action-per-region are review-
+ * enforced, not scanned: whether a button opens a menu, and whether two primaries share a region,
+ * are facts about a render tree that a text scanner cannot read without lying about its confidence.
+ *
+ * **Rule-widening note.** 390 → 461 (raised). The gate landed measuring shape and height only, over
+ * `<button>` tags and `<Button>` call sites. Three holes: button-shaped links and hoisted class
+ * strings were invisible however much surface they painted, and the tooltip half of the D4 law went
+ * unmeasured entirely while the guide called this list the D4 denominator. Widening added 34
+ * `linkAsButton`, 15 `hoistedClass`, and 63 `iconOnlyWithoutTooltip` findings; requiring a reserved
+ * control height and rejecting foreign semantics removed 41 tabs, chips, and nav rows that were
+ * never button debt. `classNameOf` reading past its own attribute had been feeding several of those.
  *
  * **The burndown contract**, deliberately identical to `lint/motionDurations.mjs` so the two gates
  * read the same way. `loadBaseline()` returns the committed inventory of files that still carry
@@ -61,11 +85,17 @@ export const SYSTEM_SURFACES = [
 /** What to write instead, per idiom. */
 export const REMEDIATION = {
     handRolled:
-        "hand-rolled button surface → `<Button>` / `<IconButton>` from `components/ui`, or `buttonVariants` for a link.",
+        "hand-rolled button surface → `<Button>` / `<IconButton>` from `components/ui`.",
+    linkAsButton:
+        "button-shaped link → `buttonVariants({ variant, size })` on the `<a>` / `<Link>`, or `<Button asChild>`.",
+    hoistedClass:
+        "hoisted button-surface class string → a `buttonVariants` call, or a variant on the primitive.",
     shapeOverride:
         "`className` re-deciding radius or height → drop it and pick the `size` context tier (`page`, `dialog`, `toolbar`, `inline`).",
     legacySize:
         "`size` outside the context scale → `page` | `dialog` | `toolbar` | `inline` (or their `icon-` forms).",
+    iconOnlyWithoutTooltip:
+        "icon-only `<Button>` with no guaranteed tooltip → `<IconButton label={…}>`, which makes the accessible name and the tooltip one string.",
 };
 
 /** The context tiers D4 defines. Everything else on `size` is legacy naming. */
@@ -84,10 +114,22 @@ export const CONTEXT_SIZES = [
 const RADIUS = /(?<![\w-])(?:[a-z-]+:)*rounded(?:-[a-z]+)*(?:-(?:none|full|xs|sm|md|lg|xl|\d?xl|\[[^\]]+\]))?(?![\w-])/;
 /** A fill, ring, border, or shadow — what makes a radius read as a surface rather than a clip. */
 const SURFACE = /(?<![\w-])(?:[a-z-]+:)*(?:bg-(?!transparent(?![\w-]))|ring-\d|ring-1|ring-2|border(?![\w-])|border-[a-z]|shadow)/;
-/** An explicit box: the element sizes itself instead of inheriting a scale. */
-const BOX = /(?<![\w-])(?:[a-z-]+:)*(?:p[xy]?-(?:\d|\[)|size-\d|h-\d|w-\d)/;
+/**
+ * A reserved control height — the signal that separates a button from a chip. D4's law is one
+ * height per context, so a control that names a height (`h-9`), a square (`size-8`), or vertical
+ * padding of 6px or more is participating in that scale. A pill that hugs its text on `py-0.5` is a
+ * chip, a tag, or a badge; those are a different control family and #509 Phase 3 owns them.
+ */
+const CONTROL_HEIGHT = /(?<![\w-])(?:[a-z-]+:)*(?:size-\d|h-\d|min-h-|py-(?:1\.5|2|2\.5|3|3\.5|4|5|6)(?![\d.])|p-(?:1\.5|2|2\.5|3|3\.5|4|5|6)(?![\d.]))/;
 /** A height or radius decision taken at a `<Button>` call site. */
 const SHAPE_OVERRIDE = /(?<![\w-])(?:[a-z-]+:)*(?:rounded(?:-[a-z]+)*-|h-\d|size-\d)/;
+/**
+ * A semantic that says this element is not an action: a foreign ARIA role, or the current/selected
+ * state of a tab, nav item, or option. Those belong to their own patterns, not to the button system.
+ */
+const FOREIGN_SEMANTIC = /\brole="(?!button")|\baria-current[=\s]|\baria-selected[=\s]/;
+/** An icon-only size on the raw primitive, where nothing guarantees the D4 tooltip. */
+const ICON_SIZE = /\bsize="icon(?:-[a-z]+)?"/;
 
 function tagBodies(source, name) {
     const bodies = [];
@@ -116,9 +158,37 @@ function tagBodies(source, name) {
     return bodies;
 }
 
+/**
+ * The `className` attribute's own value, and nothing after it. Slicing to the end of the tag would
+ * let a neighbouring `title`, `aria-label`, or handler donate the words the idioms look for, which
+ * is how a plain `<button>` beside a `rounded-full` sibling attribute ends up ledgered.
+ */
 function classNameOf(tag) {
-    const at = tag.indexOf("className");
-    return at === -1 ? "" : tag.slice(at);
+    const at = tag.search(/\bclassName\s*=/);
+    if (at === -1) return "";
+    const rest = tag.slice(tag.indexOf("=", at) + 1).trimStart();
+    const opener = rest[0];
+    if (opener === '"' || opener === "'") {
+        const close = rest.indexOf(opener, 1);
+        return close === -1 ? rest : rest.slice(1, close);
+    }
+    if (opener !== "{") return "";
+    let depth = 0;
+    let quote = null;
+    for (let index = 0; index < rest.length; index += 1) {
+        const character = rest[index];
+        if (quote) {
+            if (character === quote) quote = null;
+        } else if (character === '"' || character === "'" || character === "`") {
+            quote = character;
+        } else if (character === "{") {
+            depth += 1;
+        } else if (character === "}") {
+            depth -= 1;
+            if (depth === 0) return rest.slice(1, index);
+        }
+    }
+    return rest;
 }
 
 function fragment(tag) {
@@ -135,20 +205,38 @@ export function scanFile(file) {
     const source = readFileSync(resolve(PACKAGE_ROOT, file), "utf8");
     /** @type {{ text: string, idiom: keyof typeof REMEDIATION }[]} */
     const found = [];
-    const isSystemSurface = SYSTEM_SURFACES.includes(file);
+    if (SYSTEM_SURFACES.includes(file)) return found;
 
-    if (!isSystemSurface) {
-        for (const tag of tagBodies(source, "button")) {
-            const className = classNameOf(tag.text);
-            if (RADIUS.test(className) && SURFACE.test(className) && BOX.test(className)) {
+    const paintsAButton = (className) =>
+        RADIUS.test(className) && SURFACE.test(className) && CONTROL_HEIGHT.test(className);
+
+    for (const name of ["button", "div", "span"]) {
+        for (const tag of tagBodies(source, name)) {
+            if (name !== "button" && !/\brole="button"/.test(tag.text)) continue;
+            if (FOREIGN_SEMANTIC.test(tag.text)) continue;
+            if (paintsAButton(classNameOf(tag.text))) {
                 found.push({ text: fragment(tag.text), idiom: "handRolled" });
             }
         }
     }
 
+    for (const name of ["a", "Link"]) {
+        for (const tag of tagBodies(source, name)) {
+            if (FOREIGN_SEMANTIC.test(tag.text)) continue;
+            if (paintsAButton(classNameOf(tag.text))) {
+                found.push({ text: fragment(tag.text), idiom: "linkAsButton" });
+            }
+        }
+    }
+
+    for (const [identifier, body] of hoistedClassSources(source)) {
+        if (!paintsAButton(body)) continue;
+        if (!usedInClassName(source, identifier)) continue;
+        found.push({ text: `${identifier} = ${fragment(body)}`, idiom: "hoistedClass" });
+    }
+
     for (const name of ["Button", "IconButton"]) {
         for (const tag of tagBodies(source, name)) {
-            if (isSystemSurface) continue;
             const className = classNameOf(tag.text);
             if (SHAPE_OVERRIDE.test(className)) {
                 found.push({ text: fragment(tag.text), idiom: "shapeOverride" });
@@ -157,10 +245,50 @@ export function scanFile(file) {
             if (size && !CONTEXT_SIZES.includes(size[1])) {
                 found.push({ text: fragment(tag.text), idiom: "legacySize" });
             }
+            if (name === "Button" && ICON_SIZE.test(tag.text) && !wrappedInTooltip(source, tag.index)) {
+                found.push({ text: fragment(tag.text), idiom: "iconOnlyWithoutTooltip" });
+            }
         }
     }
 
     return found;
+}
+
+/**
+ * Class strings hoisted out of JSX — a module-scope `const`, or a helper that returns one. They are
+ * where a hand-rolled button surface hides from a tag-shaped scanner: `pillClass` paints the whole
+ * filter-pill layer from one function body, and a scanner that only reads `className=` attributes
+ * would score every one of its call sites as clean.
+ *
+ * @returns {[string, string][]} identifier and the source text that may carry the classes
+ */
+function hoistedClassSources(source) {
+    /** @type {[string, string][]} */
+    const sources = [];
+    for (const match of source.matchAll(/^(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*([\s\S]*?);$/gm)) {
+        sources.push([match[1], match[2]]);
+    }
+    for (const match of source.matchAll(
+        /^(?:export\s+)?function\s+([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*(?::\s*string\s*)?\{([\s\S]*?)^\}/gm
+    )) {
+        sources.push([match[1], match[2]]);
+    }
+    return sources;
+}
+
+/** Whether an identifier is spent on a `className`, which is what makes a class string load-bearing. */
+function usedInClassName(source, identifier) {
+    const pattern = new RegExp(`className\\s*=\\s*\\{[^}]*\\b${identifier}\\b`);
+    return pattern.test(source);
+}
+
+/**
+ * Whether a tag sits directly inside a tooltip trigger. `IconButton` guarantees the D4 tooltip by
+ * construction; a raw `<Button>` at an icon size only has one if a call site wrapped it, so the
+ * scanner looks back over the opening tags that could plausibly be that wrapper.
+ */
+function wrappedInTooltip(source, index) {
+    return /TooltipTrigger[^>]*>\s*$/.test(source.slice(Math.max(0, index - 400), index));
 }
 
 function* walk(directory) {
@@ -223,8 +351,7 @@ export function loadBaseline() {
 }
 
 /**
- * The ledger's total when the gate landed, after WS8 swept the reference pages, the records
- * browsers, and the surfaces the chevron, icon-button, and segmented-control laws touch. It may
- * fall. It rises only in a commit that widens what the scanner catches.
+ * The ledger's total after the widening described above. It may fall. It rises only in a commit
+ * that widens what the scanner catches — never to make room for new debt.
  */
-export const BASELINE_HIGH_WATER_MARK = 390;
+export const BASELINE_HIGH_WATER_MARK = 461;

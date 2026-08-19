@@ -115,10 +115,27 @@ describe("the scanner itself", () => {
                 source: '<button type="button" className="rounded-full bg-muted px-3 py-1.5">x</button>',
             },
             {
+                idiom: "handRolled",
+                source: '<div role="button" className="rounded-full bg-muted px-3 h-9">x</div>',
+            },
+            {
+                idiom: "linkAsButton",
+                source: '<Link href="/x" className="rounded-full bg-brand px-3 py-2">x</Link>',
+            },
+            {
+                idiom: "hoistedClass",
+                source:
+                    'const chipClass = "inline-flex h-9 rounded-full bg-muted ring-1";\nexport function X() { return <span className={chipClass} />; }',
+            },
+            {
                 idiom: "shapeOverride",
                 source: '<Button variant="brand" className="h-11 rounded-md">x</Button>',
             },
             { idiom: "legacySize", source: '<Button variant="brand" size="sm">x</Button>' },
+            {
+                idiom: "iconOnlyWithoutTooltip",
+                source: '<Button variant="ghost" size="icon-toolbar" aria-label="Close"><X /></Button>',
+            },
         ];
 
         for (const probe of probes) {
@@ -132,5 +149,44 @@ describe("the scanner itself", () => {
             scanProbe('<button type="button" className="text-muted-foreground">x</button>')
         ).toEqual([]);
         expect(scanProbe('<Button variant="brand" size="toolbar" menu>x</Button>')).toEqual([]);
+    });
+
+    it("reads only the className attribute, not the rest of the tag", () => {
+        expect(
+            scanProbe(
+                '<button type="button" title="rounded-full bg-muted px-3 py-2" className="text-muted-foreground">x</button>'
+            )
+        ).toEqual([]);
+    });
+
+    it("holds a chip, a tab, and a nav item to be something other than a button", () => {
+        expect(
+            scanProbe('<button type="button" className="rounded-full bg-muted px-2 py-0.5 ring-1">x</button>')
+        ).toEqual([]);
+        expect(
+            scanProbe(
+                '<button type="button" aria-current="page" className="rounded-full bg-muted px-3 py-2">x</button>'
+            )
+        ).toEqual([]);
+        expect(
+            scanProbe('<div role="tab" className="rounded-full bg-muted px-3 py-2">x</div>')
+        ).toEqual([]);
+    });
+
+    it("clears an icon-only button that a tooltip trigger wraps", () => {
+        expect(
+            scanProbe(
+                '<TooltipTrigger asChild>\n  <Button variant="ghost" size="icon-toolbar" aria-label="Close"><X /></Button>\n</TooltipTrigger>'
+            )
+        ).toEqual([]);
+        expect(
+            scanProbe('<IconButton variant="ghost" size="icon-toolbar" label="Close"><X /></IconButton>')
+        ).toEqual([]);
+    });
+
+    it("ignores a hoisted class string that never reaches a className", () => {
+        expect(scanProbe('const unusedClass = "inline-flex h-9 rounded-full bg-muted ring-1";')).toEqual(
+            []
+        );
     });
 });
