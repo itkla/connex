@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { ArrowLongRightIcon, PlusIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import { ArrowLongRightIcon, PlusIcon, UserPlusIcon, XMarkIcon } from '@heroicons/react/24/outline';
 
 import {
     Combobox,
@@ -24,6 +24,8 @@ import {
     removeContactConnection,
 } from '@/app/lib/api';
 import { useContactTargetSearch } from '@/app/hooks/useRecordTargetSearch';
+import { useContactIntroAsk } from '@/app/components/records/contacts/introAsk';
+import { INTRODUCTIONS_PATH } from '@/app/components/introductions/introductionLinks';
 import type { Contact, IntroPath, PersonConnection } from '@/app/lib/types';
 
 const TYPES = ['knows', 'colleague', 'former_colleague', 'friend'] as const;
@@ -50,6 +52,7 @@ export default function ContactConnections({
     initialIntroPath: IntroPath;
 }) {
     const t = useTranslations('ContactConnections');
+    const tIntro = useTranslations('Introductions');
     const [connections, setConnections] = useState(initialConnections);
     const [introPath, setIntroPath] = useState(initialIntroPath);
     const [selected, setSelected] = useState<Contact | null>(null);
@@ -57,6 +60,7 @@ export default function ContactConnections({
     const [busy, setBusy] = useState(false);
     const [pickerOpen, setPickerOpen] = useState(false);
     const contactSearch = useContactTargetSearch(pickerOpen, [selected?.id]);
+    const { bridge, asking, asked, ask } = useContactIntroAsk();
 
     const candidates = useMemo(
         () => contactSearch.contacts.filter(
@@ -108,9 +112,17 @@ export default function ContactConnections({
     return (
         <div className="overflow-hidden rounded-2xl bg-card ring-1 ring-border">
             <div className="border-b border-border px-6 py-4">
-                <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                    {t('warmPath')}
-                </p>
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <p className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                        {t('warmPath')}
+                    </p>
+                    <Link
+                        href={INTRODUCTIONS_PATH}
+                        className="text-xs text-brand transition-colors hover:text-brand-hover"
+                    >
+                        {t('seeAllPaths')}
+                    </Link>
+                </div>
                 {introPath.directlyKnown ? (
                     <p className="mt-1.5 text-sm text-foreground">{t('alreadyKnown', { name: contactName })}</p>
                 ) : introPath.reachable ? (
@@ -135,6 +147,20 @@ export default function ContactConnections({
                 ) : (
                     <p className="mt-1.5 text-sm text-muted-foreground">{t('noPath')}</p>
                 )}
+                {bridge ? (
+                    <Button
+                        type="button"
+                        size="inline"
+                        variant="secondary"
+                        className="mt-3"
+                        disabled={asking || asked}
+                        onClick={ask}
+                        title={tIntro('askIntroVia', { name: bridge.personName })}
+                    >
+                        <UserPlusIcon aria-hidden />
+                        {asked ? tIntro('introAsked') : tIntro('askIntro')}
+                    </Button>
+                ) : null}
             </div>
 
             {connections.length > 0 ? (

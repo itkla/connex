@@ -18,8 +18,16 @@ import {
     companyDealsHref,
     DEAL_COMPANY_FILTER_KEY,
     DEAL_PIPELINE_FILTER_KEY,
+    DEAL_RISK_FILTER_KEY,
+    DEAL_RISK_LEVELS,
+    DEAL_STAGE_FILTER_KEY,
+    DEAL_STATUS_FILTER_KEY,
     pipelineDealsHref,
+    riskDealsHref,
+    stageDealsHref,
 } from "@/app/components/records/deals/dealLinks";
+import { RADAR_FAMILY_FILTER_KEY, radarFamilyHref } from "@/app/components/radar/radarLinks";
+import { INTRODUCTIONS_PATH } from "@/app/components/introductions/introductionLinks";
 import { buildEvents, type CalendarEvent, type CalendarEventKind } from "@/app/lib/calendar";
 import { recentRecordHref } from "@/app/lib/recentRecords";
 import { savedViewHref } from "@/app/lib/savedViewLink";
@@ -201,6 +209,41 @@ describe("deep-link producers emit the consumers' canonical params", () => {
 
         expect(resolveShippedRoute(href)).toBe("/records/deals");
         expect(queryOf(href).get(DEAL_PIPELINE_FILTER_KEY)).toBe("3");
+    });
+
+    it("links a risk severity to the deals browser filtered by that severity", () => {
+        const href = riskDealsHref(["high"]);
+
+        expect(resolveShippedRoute(href)).toBe("/records/deals");
+        expect(queryOf(href).get(DEAL_RISK_FILTER_KEY)).toBe("high");
+    });
+
+    it("links an at-risk total to every flagged severity rather than the whole browser", () => {
+        const href = riskDealsHref([]);
+
+        expect(resolveShippedRoute(href)).toBe("/records/deals");
+        expect(queryOf(href).get(DEAL_RISK_FILTER_KEY)).toBe([...DEAL_RISK_LEVELS].join(","));
+    });
+
+    it("links a funnel stage to that stage's open deals", () => {
+        const href = stageDealsHref(3, 8);
+        const query = queryOf(href);
+
+        expect(resolveShippedRoute(href)).toBe("/records/deals");
+        expect(query.get(DEAL_PIPELINE_FILTER_KEY)).toBe("3");
+        expect(query.get(DEAL_STAGE_FILTER_KEY)).toBe("8");
+        expect(query.get(DEAL_STATUS_FILTER_KEY)).toBe("open");
+    });
+
+    it("links a decay figure to Radar filtered to the decay family", () => {
+        const href = radarFamilyHref("relationship_decay");
+
+        expect(resolveShippedRoute(href)).toBe("/radar");
+        expect(queryOf(href).get(RADAR_FAMILY_FILTER_KEY)).toBe("relationship_decay");
+    });
+
+    it("links a record's intro path to the Introductions surface", () => {
+        expect(resolveShippedRoute(INTRODUCTIONS_PATH)).toBe("/overview/introductions");
     });
 
     it.each(["company", "person", "deal"] as const)(

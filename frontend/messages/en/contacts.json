@@ -47,6 +47,7 @@
         "typeKnows": "Knows",
         "typeColleague": "Colleague",
         "typeFormer": "Former colleague",
+        "seeAllPaths": "See all paths",
         "typeFriend": "Friend"
     },
     "ContactsBrowser": {

@@ -41,6 +41,16 @@ type RecordComposerProps = {
     onOpenChange?: (open: boolean) => void;
 };
 
+type RecordTaskComposerProps = RecordComposerProps & {
+    /**
+     * Prefills the due date (`YYYY-MM-DD`) when the surface opening the composer already knows when
+     * the work has to happen — a follow-up scheduled ahead of a predicted cold date, for instance.
+     */
+    defaultDueDate?: string;
+    /** Prefills the description when the surface opening the composer knows what the task is for. */
+    defaultDescription?: string;
+};
+
 /** Role recorded on the deal when a contact-anchored composer files its contact onto a deal. */
 const PERSON_ANCHOR_LINK_ROLE = 'Contact';
 
@@ -158,7 +168,14 @@ function ComposerTrigger({ title, onClick }: { title: string; onClick: () => voi
  * Choosing the other side of the link also files the contact on the deal, so the task and the
  * relationship stay consistent; a link that fails is reported without losing the created task.
  */
-export function RecordTaskComposer({ anchor, currentUserId, open: openProp, onOpenChange }: RecordComposerProps) {
+export function RecordTaskComposer({
+    anchor,
+    currentUserId,
+    open: openProp,
+    onOpenChange,
+    defaultDueDate,
+    defaultDescription,
+}: RecordTaskComposerProps) {
     const t = useTranslations('ActivityTasksDialog');
     const showApiError = useApiErrorToast('ActivityTasksDialog');
     const { controlled, open, setOpen } = useOpenState(openProp, onOpenChange);
@@ -200,6 +217,8 @@ export function RecordTaskComposer({ anchor, currentUserId, open: openProp, onOp
                 currentUserId={currentUserId}
                 defaultPerson={anchor.kind === 'person' ? anchor.person : null}
                 defaultDeal={anchor.kind === 'deal' ? anchor.deal : null}
+                defaultDueDate={defaultDueDate}
+                defaultDescription={defaultDescription}
                 {...linkEmptyMessages}
                 createRequest={createRequest}
             />

@@ -31,6 +31,8 @@ import CommentsSection from "@/app/components/records/comments/CommentsSection";
 import CustomFieldRows from "@/app/components/records/CustomFieldRows";
 import ContactLeadPanel from "@/app/components/records/contacts/ContactLeadPanel";
 import EngineEvaluationPanel from "@/app/components/records/EngineEvaluationPanel";
+import RecordSignalsPanel from "@/app/components/records/RecordSignalsPanel";
+import ContactIntroAskProvider from "@/app/components/records/contacts/ContactIntroAskProvider";
 import RecordDetailSection from "@/app/components/records/RecordDetailSection";
 import { formatCompactCurrency, formatDate, formatDateTime, formatShortDate } from "@/app/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
@@ -116,6 +118,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
         : null;
 
     return (
+        <ContactIntroAskProvider contactId={contact.id} contactName={contact.name}>
         <PageShell tier="wide">
                 <Rise>
                     <CrumbLabel value={contact.name} />
@@ -167,7 +170,15 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                             </>
                                         ) : null}
                                         {evidence ? (
-                                            <WarmthEvidenceChip evidence={evidence} />
+                                            <WarmthEvidenceChip
+                                                evidence={evidence}
+                                                actions={{
+                                                    contact,
+                                                    companyId: contact.companyId ?? contact.company?.id ?? null,
+                                                    currentUserId: currentUser.id,
+                                                    goesColdAt: evidence.temperature.goesColdAt ?? null,
+                                                }}
+                                            />
                                         ) : null}
                                     </h3>
                                 </div>
@@ -302,16 +313,6 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                 className="mt-0"
                             />
                         ) : null}
-
-                        {ownsContact ? (
-                            <EngineEvaluationPanel
-                                kind="contact"
-                                id={contact.id}
-                                riskExcluded={contact.riskExcluded ?? false}
-                                introExcluded={contact.introExcluded ?? false}
-                                className="mt-0"
-                            />
-                        ) : null}
                     </aside>
 
                     <Rise delay={0.06} className="flex min-w-0 flex-col gap-8">
@@ -358,6 +359,23 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                 />
                             </div>
                         </RecordDetailSection>
+
+                        {ownsContact ? (
+                            <RecordDetailSection recordKind="contact" section="relationship">
+                                <RecordSignalsPanel
+                                    subject={{ type: "person", id: contact.id, label: contact.name }}
+                                    evaluation={
+                                        <EngineEvaluationPanel
+                                            kind="contact"
+                                            id={contact.id}
+                                            riskExcluded={contact.riskExcluded ?? false}
+                                            introExcluded={contact.introExcluded ?? false}
+                                            embedded
+                                        />
+                                    }
+                                />
+                            </RecordDetailSection>
+                        ) : null}
 
                         <RecordDetailSection recordKind="contact" section="activity">
                             <SectionHeader title={t("activePipeline")} />
@@ -440,5 +458,6 @@ export default async function ContactPage({ params }: ContactPageProps) {
                     </RecordDetailSection>
                 </Rise>
         </PageShell>
+        </ContactIntroAskProvider>
     );
 }

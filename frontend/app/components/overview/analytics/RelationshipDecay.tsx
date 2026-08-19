@@ -1,9 +1,11 @@
 'use client';
 
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 
 import { type WarmthDecayCounts } from '@/app/lib/types';
 import { DECAY_BUCKETS, type DecayBucketKey } from '@/app/components/overview/analytics/relationshipMetrics';
+import { radarFamilyHref } from '@/app/components/radar/radarLinks';
 
 const BUCKET_COLOR: Record<DecayBucketKey, string> = {
     soon: 'var(--warmth-cool)',
@@ -14,6 +16,14 @@ const BUCKET_COLOR: Record<DecayBucketKey, string> = {
 /**
  * Relationship-decay horizon bars read from the server-computed {@link WarmthDecayCounts}
  * (contacts predicted to go cold within each horizon: {@code soon}/{@code mid}/{@code later}).
+ *
+ * Only the total drills through, and it drills into Radar's cooling family rather than a contact
+ * list: Radar is the surface that acts on cooling relationships, and it is the nearest honest
+ * destination this figure has. The per-bucket counts deliberately do not link, because no shipped
+ * list can be filtered to one horizon — Radar ranks its own cooling set and would answer a
+ * "within 30 days" bar with a different population. Once the contacts list accepts warmth-band and
+ * cold-horizon filters, each bar links to `/records/contacts?warmth=…&goesCold=…` for its own
+ * horizon and this note goes away.
  */
 export default function RelationshipDecay({ decay }: { decay: WarmthDecayCounts }) {
     const t = useTranslations('AnalyticsDecay');
@@ -30,12 +40,19 @@ export default function RelationshipDecay({ decay }: { decay: WarmthDecayCounts 
     }
 
     const max = Math.max(...DECAY_BUCKETS.map((bucket) => counts[bucket.key]), 1);
+    const href = radarFamilyHref('relationship_decay');
 
     return (
         <div className="flex h-full flex-col">
             <div className="mb-5">
                 <div className="text-3xl leading-none text-foreground tabular-nums">{total}</div>
                 <p className="mt-1.5 text-sm text-muted-foreground">{t('summary')}</p>
+                <Link
+                    href={href}
+                    className="mt-2 inline-block text-sm text-brand underline-offset-4 transition-colors hover:text-brand-hover hover:underline"
+                >
+                    {t('openCoolingInRadar')}
+                </Link>
             </div>
             <ul className="flex flex-col gap-4">
                 {DECAY_BUCKETS.map((bucket) => {

@@ -108,7 +108,8 @@
     "subtitle": "Open deals in {pipeline}",
     "morePipelines": "+{count} more",
     "deals": "{count, plural, one {# deal} other {# deals}}",
-    "empty": "No open deals to chart"
+    "empty": "No open deals to chart",
+    "stageDrillThrough": "{stage}: open the {count, plural, one {# open deal} other {# open deals}} in the deals list"
   },
   "AnalyticsWinRate": {
     "subtitle": "Closed deals this period",
@@ -168,7 +169,8 @@
     "summary": "contacts predicted to go cold within 90 days",
     "bucket_soon": "Within 30 days",
     "bucket_mid": "31–60 days",
-    "bucket_later": "61–90 days"
+    "bucket_later": "61–90 days",
+    "openCoolingInRadar": "Work these in Radar"
   },
   "AnalyticsDealRisk": {
     "empty": "No open deals are at risk right now.",
@@ -179,7 +181,8 @@
     "factor_closing_soon_quiet": "Closing soon but quiet",
     "factor_stalled": "Stalled",
     "factor_stakeholder_cold": "Stakeholder cold",
-    "factor_no_stakeholders": "No stakeholders"
+    "factor_no_stakeholders": "No stakeholders",
+    "levelDrillThrough": "{level}: open the {count, plural, one {# deal} other {# deals}} in the deals list"
   },
   "AnalyticsTaskStatus": {
     "empty": "No tasks yet",

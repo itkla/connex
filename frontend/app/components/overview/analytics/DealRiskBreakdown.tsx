@@ -1,12 +1,14 @@
 'use client';
 
 import { useMemo } from 'react';
+import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 
 import { type DealRiskCurrencySummary, type DealRiskFactorCode, type DealRiskSeverity } from '@/app/lib/types';
 import { formatCompactCurrency } from '@/app/lib/utils';
 import { useRiskText } from '@/app/components/records/deals/dealRisk';
+import { riskDealsHref } from '@/app/components/records/deals/dealLinks';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
     RISK_LEVELS,
@@ -64,9 +66,12 @@ export default function DealRiskBreakdown({
                         <div className="text-3xl leading-none text-foreground tabular-nums">
                             {formatCompactCurrency(pipelineAtRisk, currency, locale)}
                         </div>
-                        <p className="mt-1.5 text-sm text-muted-foreground">
+                        <Link
+                            href={riskDealsHref(RISK_LEVELS)}
+                            className="mt-1.5 inline-block text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+                        >
                             {t('summary', { count: atRiskDeals })}
-                        </p>
+                        </Link>
                     </div>
 
                     <ul className="flex flex-col gap-3">
@@ -75,16 +80,24 @@ export default function DealRiskBreakdown({
                             if (count === 0) return null;
                             return (
                                 <li key={level}>
-                                    <div className="mb-1 flex items-baseline justify-between gap-3 text-sm">
-                                        <span className="text-foreground">{levelLabel(level)}</span>
-                                        <span className="tabular-nums text-muted-foreground">{count}</span>
-                                    </div>
-                                    <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                                        <div
-                                            className="h-full rounded-full transition-[width] duration-500 ease-out motion-reduce:transition-none"
-                                            style={{ width: `${Math.max(6, (count / maxLevel) * 100)}%`, backgroundColor: RISK_VAR[level] }}
-                                        />
-                                    </div>
+                                    <Link
+                                        href={riskDealsHref([level])}
+                                        aria-label={t('levelDrillThrough', { level: levelLabel(level), count })}
+                                        className="group/level block rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                                    >
+                                        <div className="mb-1 flex items-baseline justify-between gap-3 text-sm">
+                                            <span className="text-foreground group-hover/level:underline group-hover/level:underline-offset-4">
+                                                {levelLabel(level)}
+                                            </span>
+                                            <span className="tabular-nums text-muted-foreground">{count}</span>
+                                        </div>
+                                        <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                                            <div
+                                                className="h-full rounded-full transition-[width] duration-500 ease-out group-hover/level:brightness-95 motion-reduce:transition-none"
+                                                style={{ width: `${Math.max(6, (count / maxLevel) * 100)}%`, backgroundColor: RISK_VAR[level] }}
+                                            />
+                                        </div>
+                                    </Link>
                                 </li>
                             );
                         })}

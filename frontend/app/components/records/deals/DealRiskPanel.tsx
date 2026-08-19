@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 
 import { cn } from '@/lib/utils';
@@ -23,7 +24,7 @@ export default function DealRiskPanel({
 }) {
     const t = useTranslations('DealRisk');
     const locale = useLocale();
-    const { factorText } = useRiskText();
+    const { factorNode } = useRiskText();
 
     if (!risk) {
         return (
@@ -61,7 +62,18 @@ export default function DealRiskPanel({
                                 )}
                             >
                                 <Icon className={cn('size-5 shrink-0', riskTextClass(factor.severity))} aria-hidden />
-                                <p className="min-w-0 flex-1 text-sm text-foreground">{factorText(factor)}</p>
+                                <p className="min-w-0 flex-1 text-sm text-foreground">
+                                    {factorNode(factor, (contact, label) => (
+                                        contact.personId == null ? label : (
+                                            <Link
+                                                href={`/records/contacts/${contact.personId}`}
+                                                className="font-medium underline-offset-4 transition-colors hover:text-brand-hover hover:underline"
+                                            >
+                                                {label}
+                                            </Link>
+                                        )
+                                    ))}
+                                </p>
                             </li>
                         );
                     })}

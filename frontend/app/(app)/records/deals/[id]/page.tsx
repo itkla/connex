@@ -17,6 +17,7 @@ import {
     getAttachmentsFromCookie,
     getCompanyById,
     getContacts,
+    getContactTemperatures,
     getCurrentUserResultFromCookie,
     getEntityCustomFieldsFromCookie,
     getContextNotifications,
@@ -41,6 +42,7 @@ import {
     type DealPerson,
     type DealStageHistory,
     type Note,
+    type RelationshipTemperature,
     type Stage,
     type Tag,
     type Task,
@@ -52,7 +54,6 @@ import {
     formatCurrency,
     formatDate,
     formatDateTime,
-    formatRelativeTime,
     parseMysqlDateTime,
 } from '@/app/lib/utils';
 import { citationTitleKey } from '@/app/lib/dealBriefCitations';
@@ -61,6 +62,7 @@ import Rise from '@/app/components/motion/Rise';
 import { PageShell } from '@/app/components/PageShell';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
+import WarmthPill from '@/app/components/records/WarmthPill';
 import InfoRow from '@/app/components/me/InfoRow';
 import Timeline from '@/app/components/me/Timeline';
 import Attachments from '@/app/components/attachments/Attachments';
@@ -214,7 +216,16 @@ export default async function DealPage({ params }: DealPageProps) {
     for (const t of tasks) bucket(parseMysqlDateTime(t.createdAt), 'tasks');
     for (const n of notes) bucket(parseMysqlDateTime(n.createdAt), 'notes');
 
-    const lastTouchAtByPerson = lastTouchAtByPersonId(activities, tasks, notes);
+    const stakeholderWarmth = await getContactTemperatures(
+        personSeeds.map((person) => person.id),
+        init,
+    ).then(
+        (temperatures) => ({
+            read: true,
+            byPerson: new Map(temperatures.map((temperature) => [temperature.id, temperature])),
+        }),
+        () => ({ read: false, byPerson: new Map<number, RelationshipTemperature>() }),
+    );
     const citationTitles = buildCitationTitles(
         deal.id,
         deal.name,
@@ -360,16 +371,6 @@ export default async function DealPage({ params }: DealPageProps) {
                                     ) : (
                                         <ul className="divide-y divide-border">
                                             {dealPeople.map(({ person, role }) => {
-                                                const lastTouchAt = lastTouchAtByPerson.get(person.id);
-                                                const lastTouchLabel = lastTouchAt
-                                                        ? t('lastTouch', {
-                                                              when: formatRelativeTime(
-                                                                  lastTouchAt,
-                                                                  locale,
-                                                                  now,
-                                                              ),
-                                                          })
-                                                        : t('noLastTouch');
                                                 return (
                                                 <li key={person.id}>
                                                     <Link
@@ -386,9 +387,17 @@ export default async function DealPage({ params }: DealPageProps) {
                                                                     {person.title}
                                                                 </p>
                                                             ) : null}
-                                                            <p className="truncate text-xs text-muted-foreground">
-                                                                {lastTouchLabel}
-                                                            </p>
+                                                            <div className="mt-1">
+                                                                {stakeholderWarmth.read ? (
+                                                                    <WarmthPill
+                                                                        temp={stakeholderWarmth.byPerson.get(person.id)}
+                                                                    />
+                                                                ) : (
+                                                                    <span className="text-xs text-muted-foreground">
+                                                                        {t('warmthUnavailable')}
+                                                                    </span>
+                                                                )}
+                                                            </div>
                                                         </div>
                                                         {role ? (
                                                             <span className="max-w-[6rem] truncate rounded-full bg-brand-light px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-brand-dark">
@@ -628,28 +637,6 @@ function StatusPill({ outcome, t }: { outcome: DealOutcome; t: (key: string) => 
             {t('statusOpen')}
         </span>
     );
-}
-
-function lastTouchAtByPersonId(
-    activities: Activity[],
-    tasks: Task[],
-    notes: Note[],
-): Map<number, string> {
-    const bestMs = new Map<number, number>();
-    const bestAt = new Map<number, string>();
-    const consider = (personId: number | null | undefined, raw: string | null | undefined) => {
-        if (personId == null || !raw) return;
-        const ms = parseMysqlDateTime(raw);
-        if (!Number.isFinite(ms)) return;
-        const prev = bestMs.get(personId);
-        if (prev != null && ms <= prev) return;
-        bestMs.set(personId, ms);
-        bestAt.set(personId, raw);
-    };
-    for (const activity of activities) consider(activity.personId, activity.timestamp);
-    for (const task of tasks) consider(task.personId, task.updatedAt || task.createdAt);
-    for (const note of notes) consider(note.person, note.updatedAt || note.createdAt);
-    return bestAt;
 }
 
 function buildCitationTitles(
