@@ -420,7 +420,13 @@
     "limited": "Limited evidence. At least {minimum} eligible sources are required for a higher-confidence reading.",
     "privateNotesExcluded": "{count, plural, one {# of your private notes is excluded} other {# of your private notes are excluded}} from this score.",
     "asOf": "Calculated {date} with model {version}.",
-    "unknownModel": "unknown"
+    "unknownModel": "unknown",
+    "actionsTitle": "What to do next",
+    "actionLogInteraction": "Log an interaction",
+    "actionScheduleFollowUp": "Schedule a follow-up",
+    "actionAskIntroVia": "Ask {name} to make the introduction",
+    "actionIntroAsked": "Intro requested",
+    "followUpDescription": "Follow up with {name} before the relationship cools"
   },
   "RecordPeek": {
     "type_company": "Company",

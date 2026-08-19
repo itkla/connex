@@ -9,28 +9,10 @@ import type { Contact, RelationshipTemperature } from '@/app/lib/types';
 import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import WarmthPill from '@/app/components/records/WarmthPill';
 import { createTask } from '@/app/lib/api';
-import { parseMysqlDateTime } from '@/app/lib/utils';
+import { followUpDueDate } from '@/app/lib/followUp';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 
 export type CoolingItem = { contact: Contact; temp: RelationshipTemperature };
-
-const DAY_MS = 86_400_000;
-
-/**
- * Picks a follow-up due date that lands a few days before the relationship is predicted to go cold,
- * clamped to no earlier than tomorrow. Falls back to a short horizon when there is no prediction.
- */
-function followUpDueDate(temp: RelationshipTemperature, now: number): string {
-    const bufferDays = 5;
-    const cold = temp.goesColdAt ? parseMysqlDateTime(temp.goesColdAt) : NaN;
-    const target = Math.max(
-        Number.isNaN(cold) ? now + 3 * DAY_MS : cold - bufferDays * DAY_MS,
-        now + DAY_MS,
-    );
-    const date = new Date(target);
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
 
 /**
  * Dashboard widget: contacts whose relationship was warm but has gone quiet, with the predicted date
@@ -53,7 +35,7 @@ export default function CoolingRelationships({
         try {
             await createTask({
                 description: t('followUpWith', { name: item.contact.name }),
-                dueDate: followUpDueDate(item.temp, Date.now()),
+                dueDate: followUpDueDate(item.temp.goesColdAt, Date.now()),
                 assignedToId: currentUserId,
                 personId: item.contact.id,
             });

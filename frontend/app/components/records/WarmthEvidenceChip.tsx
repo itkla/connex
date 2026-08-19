@@ -5,8 +5,13 @@ import { useLocale, useTranslations } from 'next-intl';
 import { useReducedMotion } from 'motion/react';
 
 import RelationshipEvidencePanel from '@/app/components/records/RelationshipEvidencePanel';
+import RelationshipEvidenceActions, {
+    type RelationshipEvidenceActionContext,
+} from '@/app/components/records/RelationshipEvidenceActions';
+import { RecordActivityComposer, RecordTaskComposer } from '@/app/components/records/RecordComposers';
 import WarmthPill from '@/app/components/records/WarmthPill';
 import { useLiveNow } from '@/app/hooks/useNow';
+import { followUpDueDate } from '@/app/lib/followUp';
 import type { RelationshipEvidence } from '@/app/lib/types';
 import { formatRelativeTime } from '@/app/lib/utils';
 import {
@@ -21,11 +26,15 @@ import { cn } from '@/lib/utils';
 /**
  * Record-detail entry point that reuses {@link WarmthPill}: hover shows a short warmth
  * summary, click opens Relationship Evidence in a dialog that mirrors the page panel chrome.
+ * Passing {@code actions} adds the footer's next steps for a contact record; a surface with no
+ * contact anchor (a company) opens the same evidence without them.
  */
 export default function WarmthEvidenceChip({
     evidence,
+    actions,
 }: {
     evidence: RelationshipEvidence;
+    actions?: RelationshipEvidenceActionContext;
 }) {
     const tTemp = useTranslations('Temperature');
     const tEvidence = useTranslations('RelationshipEvidence');
@@ -33,6 +42,8 @@ export default function WarmthEvidenceChip({
     const now = useLiveNow();
     const reduceMotion = useReducedMotion();
     const [dialogOpen, setDialogOpen] = useState(false);
+    const [activityOpen, setActivityOpen] = useState(false);
+    const [taskOpen, setTaskOpen] = useState(false);
 
     const temperature = evidence.temperature;
     const hasHistory = Boolean(temperature.lastTouchAt);
@@ -100,10 +111,55 @@ export default function WarmthEvidenceChip({
                         {tEvidence('subtitle')}
                     </DialogDescription>
                     <div className="max-h-[min(90vh,44rem)] overflow-y-auto">
-                        <RelationshipEvidencePanel evidence={evidence} variant="dialog" />
+                        <RelationshipEvidencePanel
+                            evidence={evidence}
+                            variant="dialog"
+                            actions={actions ? (
+                                <RelationshipEvidenceActions
+                                    context={actions}
+                                    onLogInteraction={() => {
+                                        setDialogOpen(false);
+                                        setActivityOpen(true);
+                                    }}
+                                    onScheduleFollowUp={() => {
+                                        setDialogOpen(false);
+                                        setTaskOpen(true);
+                                    }}
+                                />
+                            ) : undefined}
+                        />
                     </div>
                 </DialogContent>
             </Dialog>
+
+            {actions ? (
+                <>
+                    <RecordActivityComposer
+                        anchor={{
+                            kind: 'person',
+                            person: actions.contact,
+                            companyId: actions.companyId,
+                        }}
+                        currentUserId={actions.currentUserId}
+                        open={activityOpen}
+                        onOpenChange={setActivityOpen}
+                    />
+                    <RecordTaskComposer
+                        anchor={{
+                            kind: 'person',
+                            person: actions.contact,
+                            companyId: actions.companyId,
+                        }}
+                        currentUserId={actions.currentUserId}
+                        open={taskOpen}
+                        onOpenChange={setTaskOpen}
+                        defaultDueDate={followUpDueDate(actions.goesColdAt, now)}
+                        defaultDescription={tEvidence('followUpDescription', {
+                            name: actions.contact.name,
+                        })}
+                    />
+                </>
+            ) : null}
         </>
     );
 }

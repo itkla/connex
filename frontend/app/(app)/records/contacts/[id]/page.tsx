@@ -167,7 +167,16 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                             </>
                                         ) : null}
                                         {evidence ? (
-                                            <WarmthEvidenceChip evidence={evidence} />
+                                            <WarmthEvidenceChip
+                                                evidence={evidence}
+                                                actions={{
+                                                    contact,
+                                                    companyId: contact.companyId ?? contact.company?.id ?? null,
+                                                    currentUserId: currentUser.id,
+                                                    goesColdAt: evidence.temperature.goesColdAt ?? null,
+                                                    introPath,
+                                                }}
+                                            />
                                         ) : null}
                                     </h3>
                                 </div>
