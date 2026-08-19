@@ -32,6 +32,71 @@
     ORDER BY version DESC, id DESC
   </select>
 
+  <!-- Cross-deal index projection. The parent deal is joined for its name and owner: a generated
+       document has no owner column of its own, so deal ownership is the only ownership the index
+       can scope by. No control-plane join here — creator display names are resolved client-side
+       from the member list, as the per-deal document read already does. -->
+  <sql id="summaryColumns">
+    dd.id, dd.deal_id, d.name AS deal_name, d.owner_id AS deal_owner_id, dd.type, dd.status,
+    dd.version, dd.title, dd.currency, dd.created_by, dd.generated_at, dd.created_at, dd.updated_at
+  </sql>
+
+  <sql id="workspaceFilter">
+    WHERE dd.workspace_id = #{workspaceId}
+    <if test="query != null">
+      AND (dd.title LIKE #{query} OR d.name LIKE #{query})
+    </if>
+    <if test="statuses != null and statuses.size() > 0">
+      AND dd.status IN
+      <foreach collection="statuses" item="status" open="(" separator="," close=")">#{status}</foreach>
+    </if>
+    <if test="types != null and types.size() > 0">
+      AND dd.type IN
+      <foreach collection="types" item="type" open="(" separator="," close=")">#{type}</foreach>
+    </if>
+    <if test="dealId != null">
+      AND dd.deal_id = #{dealId}
+    </if>
+    <choose>
+      <when test="memberScope.mode.name() == 'ME'">
+        AND d.owner_id = #{memberScope.userId}
+      </when>
+      <when test="memberScope.mode.name() == 'MEMBERS'">
+        AND d.owner_id IN
+        <foreach item="id" collection="memberScope.memberIds" open="(" separator="," close=")">#{id}</foreach>
+      </when>
+      <when test="memberScope.mode.name() == 'UNASSIGNED'">
+        AND d.owner_id IS NULL
+      </when>
+    </choose>
+  </sql>
+
+  <select id="getWorkspacePage" resultType="ooo.klae.connex.backend.dto.GeneratedDocumentSummaryDto">
+    SELECT <include refid="summaryColumns"/>
+    FROM deal_document dd
+    JOIN deal d ON d.workspace_id = dd.workspace_id AND d.id = dd.deal_id
+    <include refid="workspaceFilter"/>
+    ORDER BY dd.generated_at DESC, dd.id DESC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countWorkspace" resultType="long">
+    SELECT COUNT(*)
+    FROM deal_document dd
+    JOIN deal d ON d.workspace_id = dd.workspace_id AND d.id = dd.deal_id
+    <include refid="workspaceFilter"/>
+  </select>
+
+  <select id="search" resultType="ooo.klae.connex.backend.dto.GeneratedDocumentSummaryDto">
+    SELECT <include refid="summaryColumns"/>
+    FROM deal_document dd
+    JOIN deal d ON d.workspace_id = dd.workspace_id AND d.id = dd.deal_id
+    WHERE dd.workspace_id = #{workspaceId}
+      AND (dd.title LIKE #{query} OR d.name LIKE #{query})
+    ORDER BY dd.generated_at DESC, dd.id DESC
+    LIMIT 10
+  </select>
+
   <select id="getByIds" resultMap="DealDocumentResult">
     SELECT <include refid="cols"/> FROM deal_document
     WHERE workspace_id = #{workspaceId}

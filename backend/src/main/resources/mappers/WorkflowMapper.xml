@@ -17,6 +17,17 @@
     r.execution_mode, r.run_as_user_id, r.created_by_id, r.created_at, r.updated_at
   </sql>
 
+  <select id="search" resultType="ooo.klae.connex.backend.dto.WorkflowSummaryDto">
+    SELECT id, name, description, enabled, draft_record_type AS record_type,
+           archived_at, updated_at
+    FROM workflow
+    WHERE workspace_id = #{workspaceId}
+      AND archived_at IS NULL
+      AND (name LIKE #{query} OR description LIKE #{query})
+    ORDER BY name, id
+    LIMIT 10
+  </select>
+
   <select id="listByWorkspace" resultType="Workflow">
     SELECT <include refid="workflowColumns"/> FROM workflow
     WHERE workspace_id = #{workspaceId}

@@ -39,6 +39,17 @@
     ORDER BY name, id
   </select>
 
+  <!-- Global-search slice. Unlike getFiltered, the match is NOT binary-collated: every other
+       search group matches case-insensitively under the column's own collation, and a global
+       search that alone demanded exact case would read as broken. -->
+  <select id="search" resultType="ooo.klae.connex.backend.dto.ProductSummaryDto">
+    SELECT id, name, sku, active FROM product
+    WHERE workspace_id = #{workspaceId}
+      AND (name LIKE #{query} OR sku LIKE #{query})
+    ORDER BY name, id
+    LIMIT 10
+  </select>
+
   <select id="getById" resultMap="ProductResult">
     SELECT <include refid="cols"/> FROM product
     WHERE workspace_id = #{workspaceId} AND id = #{id}

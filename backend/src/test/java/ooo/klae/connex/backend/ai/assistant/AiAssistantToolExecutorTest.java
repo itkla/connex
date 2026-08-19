@@ -119,7 +119,8 @@ class AiAssistantToolExecutorTest {
         PersonDto restrictedSearch = PersonDto.from(restricted);
         when(searchService.search("Restricted")).thenReturn(new SearchResultsDto(
                 List.of(), List.of(restrictedSearch), List.of(), List.of(), List.of(),
-                List.of(), List.of(), List.of(), List.of(), List.of()));
+                List.of(), List.of(), List.of(), List.of(), List.of(),
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of()));
         when(personService.getPersonById(17)).thenReturn(restricted);
         AiChatResourceRegistry resources = new AiChatResourceRegistry();
         resources.register("person", 17);

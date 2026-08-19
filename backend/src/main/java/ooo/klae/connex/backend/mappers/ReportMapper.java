@@ -11,6 +11,7 @@ import ooo.klae.connex.backend.dto.ReportAggregateRow;
 import ooo.klae.connex.backend.dto.ReportForecastAggregateRow;
 import ooo.klae.connex.backend.dto.ReportNetworkAccountRow;
 import ooo.klae.connex.backend.dto.ReportSnapshotSummaryDto;
+import ooo.klae.connex.backend.dto.ReportSummaryDto;
 import ooo.klae.connex.backend.warmth.RelationshipWarmthModel.SqlParameters;
 
 /**
@@ -21,6 +22,17 @@ import ooo.klae.connex.backend.warmth.RelationshipWarmthModel.SqlParameters;
 public interface ReportMapper {
 
     List<ReportDefinition> getDefinitions(@Param("workspaceId") int workspaceId);
+
+    /**
+     * Bounded global-search slice of saved report definitions, matched on name and description.
+     *
+     * @param workspaceId the resolved tenant
+     * @param query the escaped {@code LIKE} pattern
+     * @return at most ten matching definitions, ordered by name
+     */
+    List<ReportSummaryDto> searchDefinitions(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query);
 
     List<Integer> lockDefinitions(@Param("workspaceId") int workspaceId);
 

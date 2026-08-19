@@ -28,6 +28,14 @@
     WHERE workspace_id = #{workspaceId} ORDER BY name, id
   </select>
 
+  <select id="search" resultType="ooo.klae.connex.backend.dto.DocumentTemplateSummaryDto">
+    SELECT id, name, type, locale, active, updated_at FROM document_template
+    WHERE workspace_id = #{workspaceId}
+      AND (name LIKE #{query} OR type LIKE #{query})
+    ORDER BY name, id
+    LIMIT 10
+  </select>
+
   <select id="getById" resultMap="DocumentTemplateResult">
     SELECT <include refid="cols"/> FROM document_template
     WHERE workspace_id = #{workspaceId} AND id = #{id}
