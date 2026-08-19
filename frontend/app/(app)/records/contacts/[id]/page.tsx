@@ -359,20 +359,22 @@ export default async function ContactPage({ params }: ContactPageProps) {
                             </div>
                         </RecordDetailSection>
 
-                        <RecordDetailSection recordKind="contact" section="relationship">
-                            <RecordSignalsPanel
-                                subject={{ type: "person", id: contact.id, label: contact.name }}
-                                evaluation={ownsContact ? (
-                                    <EngineEvaluationPanel
-                                        kind="contact"
-                                        id={contact.id}
-                                        riskExcluded={contact.riskExcluded ?? false}
-                                        introExcluded={contact.introExcluded ?? false}
-                                        embedded
-                                    />
-                                ) : undefined}
-                            />
-                        </RecordDetailSection>
+                        {ownsContact ? (
+                            <RecordDetailSection recordKind="contact" section="relationship">
+                                <RecordSignalsPanel
+                                    subject={{ type: "person", id: contact.id, label: contact.name }}
+                                    evaluation={
+                                        <EngineEvaluationPanel
+                                            kind="contact"
+                                            id={contact.id}
+                                            riskExcluded={contact.riskExcluded ?? false}
+                                            introExcluded={contact.introExcluded ?? false}
+                                            embedded
+                                        />
+                                    }
+                                />
+                            </RecordDetailSection>
+                        ) : null}
 
                         <RecordDetailSection recordKind="contact" section="activity">
                             <SectionHeader title={t("activePipeline")} />
