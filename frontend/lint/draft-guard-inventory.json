@@ -22,9 +22,9 @@
             "guard": "own"
         },
         {
-            "file": "app/components/marketing/campaigns/CampaignFormDialog.tsx",
-            "surface": "Campaign create and edit dialog",
-            "guard": "own"
+            "file": "app/components/marketing/campaigns/EditCampaignSheet.tsx",
+            "surface": "Campaign settings edit drawer",
+            "guard": "app/components/records/quick-edit/QuickEditSheetShell.tsx"
         },
         {
             "file": "app/components/records/companies/EditCompanySheet.tsx",

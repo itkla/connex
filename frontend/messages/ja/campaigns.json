@@ -28,15 +28,13 @@
         "completed": "完了",
         "archived": "アーカイブ"
     },
-    "CampaignsNewDialog": {
-        "title": "新規キャンペーン",
-        "description": "キャンペーン名と基本情報を設定します。対象者は次のステップで定義できます。",
+    "CampaignsEditSheet": {
+        "title": "キャンペーンを編集",
+        "description": "キャンペーンの詳細を更新します。対象者とメッセージは変更されません。",
         "name": "名称",
-        "namePlaceholder": "春の再エンゲージメント",
         "objective": "目的",
         "objectivePlaceholder": "冷え込んだ会社との関係を再構築",
         "type": "種別",
-        "typePlaceholder": "nurture",
         "status": "ステータス",
         "budget": "予算",
         "budgetAmountPlaceholder": "0.00",
@@ -45,14 +43,22 @@
         "startAt": "開始",
         "endAt": "終了",
         "cancel": "キャンセル",
+        "submit": "変更を保存",
+        "saving": "保存中…",
+        "statusLockedHint": "完了または保管済みのキャンペーンはステータスを変更できません。"
+    },
+    "CampaignsNewDialog": {
+        "title": "新規キャンペーン",
+        "description": "キャンペーン名と種別を入力します。対象者とメッセージは次の画面で設計できます。",
+        "name": "名称",
+        "namePlaceholder": "春の再エンゲージメント",
+        "type": "種別",
+        "typePlaceholder": "nurture",
+        "typeHint": "キャンペーンの種類を表す短いラベルです（nurture、webinar、event など）。",
+        "cancel": "キャンセル",
         "submit": "キャンペーンを作成",
         "creating": "作成中…",
-        "editTitle": "キャンペーンを編集",
-        "editDescription": "キャンペーンの詳細を更新します。対象者とメッセージは変更されません。",
-        "editSubmit": "変更を保存",
-        "editSaving": "保存中…",
-        "statusLockedHint": "完了または保管済みのキャンペーンはステータスを変更できません。",
-        "created": "キャンペーンを作成しました"
+        "createFailed": "キャンペーンを作成できませんでした"
     },
     "CampaignDetail": {
         "back": "キャンペーン",

@@ -26,7 +26,7 @@ import CampaignDelivery from "@/app/components/marketing/campaigns/CampaignDeliv
 import CampaignEngagement from "@/app/components/marketing/campaigns/CampaignEngagement";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import CampaignExportPanel from "@/app/components/marketing/campaigns/CampaignExportPanel";
-import CampaignFormDialog from "@/app/components/marketing/campaigns/CampaignFormDialog";
+import EditCampaignSheet from "@/app/components/marketing/campaigns/EditCampaignSheet";
 import { PageShell } from "@/app/components/PageShell";
 import {
     type Campaign,
@@ -595,8 +595,7 @@ export default function CampaignDetail({
                 </Rise>
             </PageShell>
 
-            <CampaignFormDialog
-                mode="edit"
+            <EditCampaignSheet
                 open={editOpen}
                 onOpenChange={setEditOpen}
                 payload={editPayload}
