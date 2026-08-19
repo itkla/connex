@@ -2,6 +2,7 @@ import {
     type Activity,
     type ContactLifecycleHistoryEntry,
     type Note,
+    type PersonCampaignTouch,
     type RecordComment,
     type RecordCommentThread,
     type Task,
@@ -12,13 +13,18 @@ import { timeOf } from "@/app/lib/utils";
  * One dated thing that happened to a record. D19 phase 1: comments join tasks, activities, notes,
  * and lifecycle changes so a record has one chronology instead of parallel histories.
  * `CommentsSection` remains the composer and thread view — the timeline only carries the event.
+ *
+ * WS7 adds the campaign touch: a contact's record no longer omits the marketing that reached them.
+ * A touch is something the workspace did to the contact rather than something a member wrote, so it
+ * is read-only here and the campaign remains the surface that explains it.
  */
 export type TimelineEntry =
     | { kind: 'task'; sortAt: number; task: Task }
     | { kind: 'activity'; sortAt: number; activity: Activity }
     | { kind: 'note'; sortAt: number; note: Note }
     | { kind: 'lifecycle'; sortAt: number; lifecycle: ContactLifecycleHistoryEntry }
-    | { kind: 'comment'; sortAt: number; comment: RecordComment };
+    | { kind: 'comment'; sortAt: number; comment: RecordComment }
+    | { kind: 'campaign'; sortAt: number; campaign: PersonCampaignTouch };
 
 /**
  * How many comment threads a record page loads for its chronology. The server caps the page at 100;
@@ -26,6 +32,13 @@ export type TimelineEntry =
  * the surface that pages through all of it.
  */
 export const TIMELINE_COMMENT_LIMIT = 50;
+
+/**
+ * How many campaign touches a contact page loads for its chronology. A touch is one delivery, so a
+ * heavily campaigned contact could carry thousands; the timeline wants the recent ones, and the
+ * campaign itself remains the surface that lists a whole send.
+ */
+export const TIMELINE_CAMPAIGN_TOUCH_LIMIT = 50;
 
 /**
  * The comments a record's chronology carries, oldest thread structure flattened away.
@@ -46,6 +59,7 @@ export function entryAuthorId(entry: TimelineEntry): number | undefined {
     if (entry.kind === 'activity') return entry.activity.createdById;
     if (entry.kind === 'lifecycle') return entry.lifecycle.changedById ?? undefined;
     if (entry.kind === 'comment') return entry.comment.author?.id;
+    if (entry.kind === 'campaign') return undefined;
     return entry.note.author;
 }
 
@@ -55,6 +69,7 @@ export function entryId(entry: TimelineEntry): number {
     if (entry.kind === 'activity') return entry.activity.id;
     if (entry.kind === 'lifecycle') return entry.lifecycle.id;
     if (entry.kind === 'comment') return entry.comment.id;
+    if (entry.kind === 'campaign') return entry.campaign.deliveryId;
     return entry.note.id;
 }
 
@@ -65,12 +80,14 @@ export function buildTimeline({
     notes,
     lifecycleHistory,
     comments,
+    campaignTouches,
 }: {
     tasks: Task[];
     activities: Activity[];
     notes: Note[];
     lifecycleHistory: ContactLifecycleHistoryEntry[];
     comments: RecordComment[];
+    campaignTouches: PersonCampaignTouch[];
 }): TimelineEntry[] {
     const entries: TimelineEntry[] = [
         ...tasks.map<TimelineEntry>((task) => ({
@@ -97,6 +114,11 @@ export function buildTimeline({
             kind: "comment",
             sortAt: timeOf(comment.editedAt ?? undefined) || timeOf(comment.createdAt),
             comment,
+        })),
+        ...campaignTouches.map<TimelineEntry>((campaign) => ({
+            kind: "campaign",
+            sortAt: timeOf(campaign.updatedAt) || timeOf(campaign.createdAt),
+            campaign,
         })),
     ];
     return entries.sort((a, b) => b.sortAt - a.sortAt);

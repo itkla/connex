@@ -1,5 +1,7 @@
 {
     "ContactsPage": {
+        "marketingOptedOut": "Opted out",
+        "marketingDoNotContact": "Do not contact",
         "allContacts": "All Contacts",
         "relations": "Relations",
         "noRecordedInteractions": "No recorded interactions",

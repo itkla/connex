@@ -66,6 +66,17 @@
         "empty": "Notes you write on a contact, company, or deal collect here — open a record and add the first one."
     },
     "MeTimeline": {
+        "chipCampaign": "campaign",
+        "campaignChannelEmail": "Email",
+        "campaignChannelSms": "SMS",
+        "campaignStatusPending": "Queued",
+        "campaignStatusDispatching": "Sending",
+        "campaignStatusDispatched": "Sent",
+        "campaignStatusDelivered": "Delivered",
+        "campaignStatusBounced": "Bounced",
+        "campaignStatusComplained": "Marked as spam",
+        "campaignStatusFailed": "Couldn't send",
+        "campaignStatusSkipped": "Withheld",
         "completed": "Completed",
         "due": "Due {date}",
         "chipTask": "task",

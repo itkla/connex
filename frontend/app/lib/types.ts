@@ -2387,6 +2387,54 @@ export type CampaignRecipientsPageParams = PageParams & {
     event?: string;
 };
 
+/**
+ * Why a contact is excluded from marketing on one channel, most restrictive first. `state` is the
+ * single token a badge renders from and is absent when the channel is still contactable; the flags
+ * stay available so a surface can explain the state without re-deriving it.
+ */
+export type ContactChannelMarketingState = "do_not_contact" | "opted_out";
+
+/** One delivery channel's marketing exclusion state for a contact. */
+export type ContactChannelMarketingStatus = {
+    channel: string;
+    state?: ContactChannelMarketingState;
+    optedOut: boolean;
+    doNotContact: boolean;
+    consentRevoked: boolean;
+    addressable: boolean;
+};
+
+/**
+ * Whether a contact may still be marketed to, and why not.
+ *
+ * A privacy hold is the record-level restriction the contact themself asked for and is reported
+ * once for the whole contact; an opt-out or do-not-contact is a workspace-owned marketing exclusion
+ * and is always per channel. The two are never folded into one badge.
+ */
+export type ContactMarketingStatus = {
+    personId: number;
+    privacyHold: boolean;
+    suspendedAt?: string;
+    provisionCeasedAt?: string;
+    channels: ContactChannelMarketingStatus[];
+};
+
+/**
+ * One campaign touch on a contact's timeline: the campaign that reached them, on which channel, and
+ * what became of that delivery. The delivery's skip reason is deliberately absent — it names the
+ * ground a send was withheld on and stays with the campaign's recipient roster.
+ */
+export type PersonCampaignTouch = {
+    deliveryId: number;
+    campaignId: number;
+    campaignName: string;
+    sendId: number;
+    channel: string;
+    status: string;
+    createdAt?: string;
+    updatedAt?: string;
+};
+
 export type CampaignExportStatus = "draft" | "running" | "completed" | "failed";
 
 /** A campaign audience export bound to a frozen snapshot and an external connector. */

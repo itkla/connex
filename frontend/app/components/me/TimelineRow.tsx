@@ -34,14 +34,40 @@ const CHIP_CLASS: Record<TimelineEntry['kind'], string> = {
     note: 'bg-neutral-200 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200',
     lifecycle: 'bg-muted text-muted-foreground',
     comment: 'bg-secondary text-secondary-foreground',
+    campaign: 'bg-accent text-accent-foreground',
 };
 
-const CHIP_LABEL_KEY: Record<TimelineEntry['kind'], 'chipTask' | 'chipActivity' | 'chipNote' | 'chipLifecycle' | 'chipComment'> = {
+const CHIP_LABEL_KEY: Record<
+    TimelineEntry['kind'],
+    'chipTask' | 'chipActivity' | 'chipNote' | 'chipLifecycle' | 'chipComment' | 'chipCampaign'
+> = {
     task: 'chipTask',
     activity: 'chipActivity',
     note: 'chipNote',
     lifecycle: 'chipLifecycle',
     comment: 'chipComment',
+    campaign: 'chipCampaign',
+};
+
+/**
+ * The delivery outcomes a campaign touch reports. Anything else the server adds later renders as
+ * the touch without an outcome line rather than as a raw status token.
+ */
+const CAMPAIGN_STATUS_KEY: Record<string, string> = {
+    pending: 'campaignStatusPending',
+    dispatching: 'campaignStatusDispatching',
+    dispatched: 'campaignStatusDispatched',
+    delivered: 'campaignStatusDelivered',
+    bounced: 'campaignStatusBounced',
+    complained: 'campaignStatusComplained',
+    failed: 'campaignStatusFailed',
+    skipped: 'campaignStatusSkipped',
+};
+
+/** Delivery channels a campaign touch names; an unrecognized one renders its own value. */
+const CAMPAIGN_CHANNEL_KEY: Record<string, string> = {
+    email: 'campaignChannelEmail',
+    sms: 'campaignChannelSms',
 };
 
 /**
@@ -117,7 +143,8 @@ export default function TimelineRow({
     const reduceMotion = useReducedMotion();
     const deepLink = entryDeepLink(entry);
     const isHighlighted = deepLink !== null && searchParams.get(deepLink.key) === String(deepLink.id);
-    const readOnlyEntry = entry.kind === 'lifecycle' || entry.kind === 'comment';
+    const readOnlyEntry =
+        entry.kind === 'lifecycle' || entry.kind === 'comment' || entry.kind === 'campaign';
     const noteOpen = editOpen && entry.kind === 'note';
     const personSearch = useContactTargetSearch(
         noteOpen,
@@ -234,6 +261,31 @@ export default function TimelineRow({
                 >
                     {t('commentViewInThread')}
                 </Link>
+            </p>
+        );
+    } else if (entry.kind === 'campaign') {
+        const { campaign } = entry;
+        const statusKey = CAMPAIGN_STATUS_KEY[campaign.status];
+        const channelKey = CAMPAIGN_CHANNEL_KEY[campaign.channel];
+        title = (
+            <p className="text-sm text-foreground">
+                <Link
+                    href={`/marketing/campaigns/${campaign.campaignId}`}
+                    className="underline-offset-2 hover:underline"
+                >
+                    {campaign.campaignName}
+                </Link>
+            </p>
+        );
+        subtitle = (
+            <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                <span>{channelKey ? t(channelKey) : campaign.channel}</span>
+                {statusKey ? (
+                    <>
+                        <span aria-hidden>·</span>
+                        <span>{t(statusKey)}</span>
+                    </>
+                ) : null}
             </p>
         );
     } else if (entry.kind === 'lifecycle') {

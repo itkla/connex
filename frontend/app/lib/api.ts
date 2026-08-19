@@ -6072,6 +6072,32 @@ export function getPersonConsent(personId: number, init: RequestInit = {}) {
     return getJson<Types.ContactChannelConsent[]>(`/api/persons/${personId}/consent`, init);
 }
 
+/**
+ * A contact's marketing contactability, so a member sees that someone opted out — or is on a
+ * privacy hold — before writing to them. Reports the state only: the recorded address, note, and
+ * author stay behind the consent-management surface.
+ */
+export function getPersonMarketingStatus(personId: number, init: RequestInit = {}) {
+    return getJson<Types.ContactMarketingStatus>(`/api/persons/${personId}/marketing-status`, init);
+}
+
+/**
+ * One bounded page of the campaign touches on a contact's record timeline, newest first.
+ *
+ * @param personId - the contact whose touches to read
+ * @param page - the one-based page number and page size
+ */
+export function getPersonCampaignTouches(
+    personId: number,
+    page: { page?: number; size?: number } = {},
+    init: RequestInit = {},
+) {
+    return getJson<Types.Page<Types.PersonCampaignTouch>>(
+        `/api/persons/${personId}/campaign-touches${buildQuery(page)}`,
+        init,
+    );
+}
+
 export function setPersonConsent(personId: number, payload: Types.ContactChannelConsentPayload) {
     return putJson<Types.ContactChannelConsent>(`/api/persons/${personId}/consent`, payload);
 }
