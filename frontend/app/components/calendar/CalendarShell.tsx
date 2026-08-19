@@ -400,7 +400,7 @@ export default function CalendarShell({
 
     return (
         <>
-            <PageShell tier="wide">
+            <PageShell>
                 <Rise>
                     <div className="flex flex-col gap-3">
                         <PageHeader

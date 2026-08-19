@@ -3,7 +3,7 @@ import { PageShell } from '@/app/components/PageShell';
 
 export default function CalendarLoading() {
     return (
-        <PageShell tier="wide">
+        <PageShell>
             <div className="flex flex-col gap-3">
                 <header className="flex flex-wrap items-start justify-between gap-4">
                     <Skeleton className="h-10 w-40" />

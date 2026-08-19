@@ -17,7 +17,7 @@ function PolicyRow() {
 
 export default function ApprovalPoliciesLoading() {
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <div className="flex items-center justify-between">
                     <Skeleton className="h-10 w-64" />
                     <div className="flex items-center gap-2">

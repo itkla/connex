@@ -296,7 +296,7 @@ export default function CampaignDetail({
 
     return (
         <>
-            <PageShell tier="reading">
+            <PageShell>
                 <Rise className="flex flex-col gap-4">
                     <CrumbLabel value={current.name} />
                     <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">

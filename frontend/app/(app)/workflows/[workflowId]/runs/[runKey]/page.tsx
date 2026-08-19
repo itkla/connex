@@ -14,7 +14,7 @@ export default async function WorkflowRunPage({
     const workflowId = Number(rawWorkflowId);
     if (!Number.isInteger(workflowId) || workflowId > 2_147_483_647) notFound();
     return (
-        <PageShell tier="wide">
+        <PageShell>
             <WorkflowRunOperationsDetail workflowId={workflowId} runKey={runKey} />
         </PageShell>
     );

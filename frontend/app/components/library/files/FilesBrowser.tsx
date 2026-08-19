@@ -460,7 +460,7 @@ export default function FilesBrowser() {
     );
 
     return (
-        <PageShell tier="wide">
+        <PageShell>
             <Rise>
                 <div className="flex flex-col gap-3">
                     <PageHeader title={t('title')} description={t('subtitle')} />

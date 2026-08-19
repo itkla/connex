@@ -8,7 +8,7 @@ const TIMELINE_ROWS = 6;
 
 export default function AuditLogLoading() {
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <header className="flex flex-wrap items-end justify-between gap-4">
                     <div className="space-y-2">
                         <Skeleton className="h-9 w-56" />

@@ -3,7 +3,7 @@ import { PageShell } from "@/app/components/PageShell";
 
 export default function CompanyDetailLoading() {
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <header className="flex flex-col gap-6 py-4 sm:flex-row sm:items-end sm:justify-between">
                     <div className="flex items-center gap-6">
                         <Skeleton className="size-32 shrink-0 rounded-2xl" />

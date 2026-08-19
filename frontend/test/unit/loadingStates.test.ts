@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -83,8 +83,23 @@ function layoutSource(route: string): string {
     return readFileSync(file, "utf8");
 }
 
-function pageShellTier(source: string): string | null {
-    return /<PageShell\s+tier="([a-z]+)"/.exec(source)?.[1] ?? null;
+/** Every `.tsx` source file under `app/`, so a shell rule can be checked everywhere the shell is used. */
+function appSources(directory = path.join(process.cwd(), "app")): string[] {
+    return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+        const full = path.join(directory, entry.name);
+        if (entry.isDirectory()) return appSources(full);
+        return entry.name.endsWith(".tsx") ? [full] : [];
+    });
+}
+
+/**
+ * The `PageShell` opening tag a routed surface renders, normalized for whitespace. Comparing the whole
+ * tag — not one prop — is what keeps a skeleton and its page from drifting apart on any wrapper concern.
+ */
+function pageShellTag(source: string): string | null {
+    const match = /<PageShell(\s[^>]*)?>/.exec(source);
+    if (!match) return null;
+    return `<PageShell${(match[1] ?? "").replace(/\s+/g, " ").trimEnd()}>`;
 }
 
 const SKELETON_PRIMITIVE = "@/components/ui/skeleton";
@@ -351,19 +366,30 @@ describe("loading skeletons mirror rather than decorate", () => {
         expect(localCopies, "delete the local skeleton and render the shared one instead").toEqual([]);
     });
 
-    it("agrees with its page about the shell tier", () => {
+    it("agrees with its page about the page wrapper", () => {
         const disagreements = skeletonRoutes
             .filter((route) => existsSync(path.join(routeDirectory(route), "page.tsx")))
             .map((route) => ({
                 route,
-                page: pageShellTier(readRouteFile(route, "page.tsx")),
-                skeleton: pageShellTier(readRouteFile(route, "loading.tsx")),
+                page: pageShellTag(readRouteFile(route, "page.tsx")),
+                skeleton: pageShellTag(readRouteFile(route, "loading.tsx")),
             }))
             .filter((entry) => entry.page !== null && entry.page !== entry.skeleton);
 
         expect(
             disagreements,
             "a skeleton and its page must not disagree about the wrapper, or the page jumps when data arrives",
+        ).toEqual([]);
+    });
+
+    it("caps no page at the shell", () => {
+        const capped = appSources()
+            .filter((file) => /<PageShell\s[^>]*max-w-/.test(readFileSync(file, "utf8")))
+            .map((file) => path.relative(process.cwd(), file));
+
+        expect(
+            capped,
+            "pages span the full content area; a readable measure belongs on the text block, never on the shell",
         ).toEqual([]);
     });
 });

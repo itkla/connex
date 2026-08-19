@@ -3,7 +3,7 @@ import { PageShell } from "@/app/components/PageShell";
 
 export default function WorkflowOperationsPage() {
     return (
-        <PageShell tier="wide">
+        <PageShell>
             <WorkflowOperationsCenter />
         </PageShell>
     );

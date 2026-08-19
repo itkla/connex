@@ -196,7 +196,7 @@ export default function NoteEditorView({ note, currentUserId, persons, deals, us
     const displayTitle = deriveNoteTitle({ title, content }, t("untitled"));
 
     return (
-        <PageShell tier="reading">
+        <PageShell>
                 {note ? <CrumbLabel value={displayTitle} /> : null}
                 <div className={note ? "flex items-center justify-end gap-4" : "flex items-center justify-between gap-4"}>
                     {note ? null : (

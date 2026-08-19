@@ -3,7 +3,7 @@ import { PageShell } from "@/app/components/PageShell";
 
 export default function Loading() {
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <div className="flex items-start justify-between gap-4">
                     <div className="space-y-2">
                         <Skeleton className="h-10 w-40" />

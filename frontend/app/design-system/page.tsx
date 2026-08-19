@@ -327,7 +327,7 @@ export default function DesignSystemPage() {
   }, []);
 
   return (
-    <PageShell tier="wide">
+    <PageShell>
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="flex flex-col gap-2">
           <Badge variant="secondary" className="font-mono">

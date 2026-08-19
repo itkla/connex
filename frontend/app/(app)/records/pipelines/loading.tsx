@@ -3,7 +3,7 @@ import { PageShell } from "@/app/components/PageShell";
 
 export default function PipelinesLoading() {
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <div className="flex items-center justify-between">
                     <Skeleton className="h-10 w-56" />
                     <Skeleton className="h-9 w-24 rounded-md" />

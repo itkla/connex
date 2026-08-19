@@ -386,7 +386,7 @@ export default function IntroductionsBoard({
               };
 
     return (
-        <PageShell tier="wide">
+        <PageShell>
             <Rise>
                 <PageHeader
                     title={t('pageTitle')}

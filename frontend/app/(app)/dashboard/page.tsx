@@ -610,7 +610,7 @@ export default async function Dashboard() {
     const initialWidgets = normalizeLayout(layoutResponse.response?.layout);
 
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <Rise>
                     <Greeting
                         user={user}
