@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Product;
 import ooo.klae.connex.backend.beans.ProductSkuResolution;
+import ooo.klae.connex.backend.dto.ProductSummaryDto;
 
 /**
  * Mapper for {@code Product} persistence. SQL lives in {@code resources/mappers/ProductMapper.xml}.
@@ -13,6 +14,18 @@ import ooo.klae.connex.backend.beans.ProductSkuResolution;
  */
 public interface ProductMapper {
     List<Product> getFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query);
+
+    /**
+     * Bounded global-search slice of the catalog, matched on name and SKU.
+     *
+     * @param workspaceId the resolved tenant
+     * @param query the escaped {@code LIKE} pattern
+     * @return at most ten matching products, ordered by name
+     */
+    List<ProductSummaryDto> search(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query);
+
     Product getById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Product> findBySkus(@Param("workspaceId") int workspaceId, @Param("skus") List<String> skus);
 

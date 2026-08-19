@@ -39,6 +39,18 @@
     ORDER BY name, id
   </select>
 
+  <!-- Global-search slice. Unlike getFiltered it is not binary-collated, so it matches under the
+       column's own accent- and kana-insensitive collation, as every other search group does; the
+       products browser stays exact. It also matches name and SKU only, not description, because a
+       search row shows neither. -->
+  <select id="search" resultType="ooo.klae.connex.backend.dto.ProductSummaryDto">
+    SELECT id, name, sku, active FROM product
+    WHERE workspace_id = #{workspaceId}
+      AND (name LIKE #{query} OR sku LIKE #{query})
+    ORDER BY name, id
+    LIMIT 10
+  </select>
+
   <select id="getById" resultMap="ProductResult">
     SELECT <include refid="cols"/> FROM product
     WHERE workspace_id = #{workspaceId} AND id = #{id}

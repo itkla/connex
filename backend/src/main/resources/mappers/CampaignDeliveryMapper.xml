@@ -18,6 +18,66 @@
     </foreach>
   </insert>
 
+  <!-- Recipient reads project the record id only; the contact label is resolved separately through
+       the archive-aware label read the audience preview uses, so this mapper never joins person and
+       never has to reproduce the restriction sweep. -->
+  <sql id="recipientFilter">
+    WHERE d.workspace_id = #{workspaceId}
+      AND s.campaign_id = #{campaignId}
+    <if test="sendId != null">
+      AND d.send_id = #{sendId}
+    </if>
+    <if test="statuses != null and statuses.size() > 0">
+      AND d.status IN
+      <foreach collection="statuses" item="status" open="(" separator="," close=")">#{status}</foreach>
+    </if>
+    <if test="eventType != null">
+      AND EXISTS (
+        SELECT 1 FROM campaign_delivery_event e
+        WHERE e.workspace_id = d.workspace_id
+          AND e.delivery_id = d.id
+          AND e.event_type = #{eventType}
+      )
+    </if>
+  </sql>
+
+  <select id="listRecipients" resultType="ooo.klae.connex.backend.dto.CampaignRecipientRow">
+    SELECT d.id AS delivery_id, d.send_id, s.channel, d.person_id, d.status, d.skip_reason,
+           d.created_at, d.updated_at
+    FROM campaign_delivery d
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    <include refid="recipientFilter"/>
+    ORDER BY d.id
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countRecipients" resultType="long">
+    SELECT COUNT(*)
+    FROM campaign_delivery d
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    <include refid="recipientFilter"/>
+  </select>
+
+  <sql id="personTouchFrom">
+    FROM campaign_delivery d
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    JOIN campaign c ON c.workspace_id = s.workspace_id AND c.id = s.campaign_id
+    WHERE d.workspace_id = #{workspaceId} AND d.person_id = #{personId}
+  </sql>
+
+  <select id="listPersonTouches" resultType="ooo.klae.connex.backend.dto.PersonCampaignTouchDto">
+    SELECT d.id AS delivery_id, c.id AS campaign_id, c.name AS campaign_name, d.send_id,
+           s.channel, d.status, d.created_at, d.updated_at
+    <include refid="personTouchFrom"/>
+    ORDER BY d.created_at DESC, d.id DESC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+  <select id="countPersonTouches" resultType="long">
+    SELECT COUNT(*)
+    <include refid="personTouchFrom"/>
+  </select>
+
   <select id="getDelivery" resultType="CampaignDelivery">
     SELECT <include refid="deliveryColumns"/> FROM campaign_delivery
     WHERE workspace_id = #{workspaceId} AND id = #{id}

@@ -39,6 +39,7 @@ import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.ConnectionService;
+import ooo.klae.connex.backend.services.ContactMarketingService;
 import ooo.klae.connex.backend.services.EmploymentService;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.PersonLifecycleService;
@@ -62,6 +63,7 @@ class WarmthBrowserRequestBindingTest {
     @Mock private PersonQualificationService personQualificationService;
     @Mock private EmploymentService employmentService;
     @Mock private ConnectionService connectionService;
+    @Mock private ContactMarketingService contactMarketingService;
     @Mock private BulkOperationService bulkOperationService;
     @Mock private CompanyService companyService;
     @Mock private WorkspaceService workspaceService;
@@ -82,7 +84,7 @@ class WarmthBrowserRequestBindingTest {
             new GlobalExceptionHandler(errorReporter, tenantContext);
         persons = MockMvcBuilders.standaloneSetup(new PersonController(
                 personService, personLifecycleService, personQualificationService, employmentService,
-                connectionService, bulkOperationService, workspaceService, memberScopeResolver,
+                connectionService, contactMarketingService, bulkOperationService, workspaceService, memberScopeResolver,
                 warmthFilterResolver))
             .setControllerAdvice(exceptionHandler)
             .build();

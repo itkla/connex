@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.dto.BulkOperationResult;
 import ooo.klae.connex.backend.dto.BulkOwnerRequest;
 import ooo.klae.connex.backend.dto.BulkTagRequest;
 import ooo.klae.connex.backend.dto.ConnectionRequestDto;
+import ooo.klae.connex.backend.dto.ContactMarketingStatusDto;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.CustomFieldValueRequest;
 import ooo.klae.connex.backend.dto.CustomFieldValuesRequest;
@@ -37,6 +38,7 @@ import ooo.klae.connex.backend.dto.JobMoveDto;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.NoteDto;
 import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.dto.PersonCampaignTouchDto;
 import ooo.klae.connex.backend.dto.PersonConnectionDto;
 import ooo.klae.connex.backend.dto.PersonEmploymentDto;
 import ooo.klae.connex.backend.dto.PersonFacets;
@@ -57,6 +59,7 @@ import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.ConnectionService;
+import ooo.klae.connex.backend.services.ContactMarketingService;
 import ooo.klae.connex.backend.services.EmploymentService;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.WarmthFilterResolver;
@@ -88,6 +91,7 @@ public class PersonController {
     private final PersonQualificationService personQualificationService;
     private final EmploymentService employmentService;
     private final ConnectionService connectionService;
+    private final ContactMarketingService contactMarketingService;
     private final BulkOperationService bulkOperationService;
     private final WorkspaceService workspaceService;
     private final MemberScopeResolver memberScopeResolver;
@@ -564,6 +568,35 @@ public class PersonController {
     @GetMapping("/{id}/tasks")
     public List<TaskDto> getTasksForPerson(@PathVariable int id) {
         return personService.getTasksByPersonId(id).stream().map(TaskDto::from).toList();
+    }
+
+    /**
+     * GET endpoint for a contact's marketing exclusion state, so a member can see that someone
+     * opted out — or is on a privacy hold — before contacting them.
+     *
+     * @param id the contact id
+     * @return the per-channel marketing state plus the contact-level privacy hold
+     */
+    @GetMapping("/{id}/marketing-status")
+    public ContactMarketingStatusDto getMarketingStatus(@PathVariable int id) {
+        return contactMarketingService.getStatus(id);
+    }
+
+    /**
+     * GET endpoint for the campaign touches on a contact's timeline, newest first.
+     *
+     * @param id the contact id
+     * @param page the one-based page number
+     * @param size the page size, capped by {@link PageBounds#MAX_SIZE}
+     * @return the page of campaign touches and the total it was drawn from
+     */
+    @GetMapping("/{id}/campaign-touches")
+    public PageResponse<PersonCampaignTouchDto> getCampaignTouches(
+            @PathVariable int id,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "25") int size) {
+        PageBounds bounds = PageBounds.of(page, size);
+        return contactMarketingService.getCampaignTouches(id, bounds.size(), bounds.offset());
     }
 
     /**

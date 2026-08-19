@@ -7,10 +7,14 @@ import java.util.Set;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 
 /**
- * Shared normalization for the deal list filter parameters, so the list, metrics, and CSV export
- * endpoints validate and expand identical inputs and therefore return identical result sets. Rejects
- * out-of-range or over-long values, de-duplicates, and expands the {@code closed} status shorthand
- * into its {@code won}/{@code lost} outcomes to match the mapper's status projection.
+ * Shared normalization for multi-value list filter parameters, so every endpoint offering the same
+ * filter validates and expands identical inputs and therefore returns identical result sets.
+ * Rejects out-of-range or over-long values, de-duplicates, and expands the {@code closed} status
+ * shorthand into its {@code won}/{@code lost} outcomes to match the mapper's status projection.
+ *
+ * <p>The deal-specific vocabularies and {@link #normalizeStatuses} back the deal list, metrics, and
+ * CSV export; the generic {@link #normalizeValues} and {@link #validateOptionalValue} are reused by
+ * any bounded list filter, including the generated-document index and the campaign recipient list.
  */
 public final class DealFilterNormalizer {
 
