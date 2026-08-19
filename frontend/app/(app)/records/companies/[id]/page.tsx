@@ -15,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 import {
     getAttachmentsFromCookie,
+    getCommentThreads,
     getCompanyById,
     getCompanyDeals,
     getCompanyEngagement,
@@ -42,6 +43,7 @@ import { companyDealsHref } from "@/app/components/records/deals/dealLinks";
 import TagEditor from "@/app/components/records/contacts/TagEditor";
 import InfoRow from "@/app/components/me/InfoRow";
 import Timeline from "@/app/components/me/Timeline";
+import { commentsFromThreads, TIMELINE_COMMENT_LIMIT } from "@/app/components/me/timelineEntries";
 import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import ContactsGrid from "@/app/components/records/companies/ContactsGrid";
@@ -82,6 +84,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
         customFields,
         evidence,
         effectivePermissions,
+        commentThreads,
     ] = await Promise.all([
         getTranslations("CompaniesDetail"),
         getLocale(),
@@ -96,6 +99,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
         getEntityCustomFieldsFromCookie("company", id, cookie),
         getCompanyEvidence(id, init).catch(() => null),
         getEffectivePermissionsFromCookie(cookie),
+        getCommentThreads("company", id, { limit: TIMELINE_COMMENT_LIMIT }, init).catch(() => []),
     ]);
 
     if (companyAccess.kind === "forbidden") {
@@ -300,6 +304,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                                     users={relatedUsers}
                                     persons={people}
                                     deals={deals}
+                                    comments={commentsFromThreads(commentThreads)}
                                     currentUserId={currentUser.id}
                                     companyId={company.id}
                                     limit={100}
