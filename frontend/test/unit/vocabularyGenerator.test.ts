@@ -5,6 +5,7 @@ import {
     buildVocabularyModel,
     canonicalTerms,
     CURATED_DECISIONS,
+    exemptionSurfaces,
     inflections,
     JAPANESE_RENDERINGS,
     loadVocabularyModel,
@@ -34,7 +35,7 @@ function bannedTerm(id: string) {
 }
 
 const GLOSSARY_ROW = "| Task ownership | **Assignee** | **担当者** | Assigned to |";
-const GENERATOR_NOTE = "Generator note: where a banned term is a substring of a canonical term";
+const GENERATOR_NOTE = "where a banned term is a substring of a canonical term";
 
 function mutate(replacement: string, target: string = GLOSSARY_ROW): string {
     const guide = readProductGuide();
@@ -87,12 +88,20 @@ describe("vocabulary generator", () => {
         }
     });
 
-    it("decides every §4 item that carries a qualifier", () => {
+    it("decides every §4 item that carries a qualifier it cannot read", () => {
         const undecided = items
-            .filter((item) => item.qualified && !Object.hasOwn(CURATED_DECISIONS, item.text))
+            .filter((item) => item.qualified
+                && !Object.hasOwn(CURATED_DECISIONS, item.text)
+                && exemptionSurfaces(item.statement) === null)
             .map((item) => item.text);
+        const annotated = items
+            .filter((item) => item.qualified && exemptionSurfaces(item.statement) !== null)
+            .map((item) => item.term);
 
         expect(undecided).toEqual([]);
+        expect([...new Set(annotated)].sort()).toEqual(
+            ["cease of use", "data subject", "tenant", "third-party provision", "テナント"],
+        );
     });
 
     it("keeps the terms #1323 names in the model", () => {
@@ -228,15 +237,29 @@ describe("vocabulary generator", () => {
     });
 
     it("fails closed on a banned-list entry that names no term", () => {
-        expect(() => buildVocabularyModel(mutate("`tenant` · nothing in particular ·", "`tenant` ·")))
+        expect(() => buildVocabularyModel(mutate("`teardown` · nothing in particular ·", "`teardown` ·")))
             .toThrow(/without naming a term in backticks/);
+    });
+
+    it("fails closed when §4 states one term's exemption two different ways", () => {
+        const bare = "| Where records live and are shared | **workspace** | **ワークスペース** | organization (for workspace scope), team (as a scope; fine informally for the humans), tenant |";
+        const annotated = `${bare.slice(0, -2)} (legal pages: allowed) |`;
+
+        expect(() => buildVocabularyModel(mutate(bare, annotated)))
+            .toThrow(/allows "tenant" on legal\.json, while .+ allows it on no surface/);
+        expect(buildVocabularyModel(mutate(annotated, annotated))).toEqual(committed);
+    });
+
+    it("fails closed on an exemption idiom it does not know", () => {
+        expect(() => buildVocabularyModel(mutate("`tenant` (marketing pages: allowed) ·", "`tenant` (legal pages: allowed) ·")))
+            .toThrow(/exempts a term on "marketing pages"/);
     });
 
     it("reads every line of the banned-terms list, not only the first", () => {
         const extended = mutate("`preflight` · `idempotency`\n\n`sharding` · `quorum`", "`preflight` · `idempotency`");
         const texts = bannedListEntries(vocabularySection(extended)).map((entry) => entry.text);
 
-        expect(texts).toContain("`tenant`");
+        expect(texts).toContain("`teardown`");
         expect(texts).toContain("`sharding`");
     });
 
