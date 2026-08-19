@@ -17,6 +17,13 @@ import { timeOf } from "@/app/lib/utils";
  * WS7 adds the campaign touch: a contact's record no longer omits the marketing that reached them.
  * A touch is something the workspace did to the contact rather than something a member wrote, so it
  * is read-only here and the campaign remains the surface that explains it.
+ *
+ * A touch is dated by when it happened, never by when its delivery row last changed: a bounce
+ * receipt arriving months later would otherwise file a January send at the top of today, reading as
+ * if the contact had just been emailed. Dating by the delivery's creation also keeps the rendered
+ * order a true prefix of the page the server returned, which it orders the same way — a window
+ * sorted one way and displayed another is not the newest 50 of anything. The status still reports
+ * what became of the touch.
  */
 export type TimelineEntry =
     | { kind: 'task'; sortAt: number; task: Task }
@@ -117,7 +124,7 @@ export function buildTimeline({
         })),
         ...campaignTouches.map<TimelineEntry>((campaign) => ({
             kind: "campaign",
-            sortAt: timeOf(campaign.updatedAt) || timeOf(campaign.createdAt),
+            sortAt: timeOf(campaign.createdAt),
             campaign,
         })),
     ];

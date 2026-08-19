@@ -61,7 +61,8 @@ export default async function ContactPage({ params }: ContactPageProps) {
         redirect('/auth/login');
     }
 
-    const [t, locale, contactAccess, allTags, attachments, notificationPage, employment, connections, introPath, customFields, evidence, effectivePermissions, lifecycle, lifecycleHistory, qualification, commentThreads, marketingStatus] = await Promise.all([
+    const permissionsPromise = getEffectivePermissionsFromCookie(cookie);
+    const [t, locale, contactAccess, allTags, attachments, notificationPage, employment, connections, introPath, customFields, evidence, effectivePermissions, lifecycle, lifecycleHistory, qualification, commentThreads, marketingStatus, campaignTouches] = await Promise.all([
         getTranslations("ContactsPage"),
         getLocale(),
         loadRecord<Contact>(() => getContactById(id, init)),
@@ -78,7 +79,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
         getContactIntroPath(id, init).catch(() => ({ reachable: false, directlyKnown: false, steps: [] }) as IntroPath),
         getEntityCustomFieldsFromCookie("person", id, cookie),
         getContactEvidence(id, init).catch(() => null),
-        getEffectivePermissionsFromCookie(cookie),
+        permissionsPromise,
         getContactLifecycle(id, init).catch(() => null),
         getContactLifecycleHistory(id, init).catch(() => []),
         getContactQualification(id, init).then(
@@ -87,6 +88,12 @@ export default async function ContactPage({ params }: ContactPageProps) {
         ),
         getCommentThreads("person", id, { limit: TIMELINE_COMMENT_LIMIT }, init).catch(() => []),
         getPersonMarketingStatus(id, init).catch(() => null),
+        permissionsPromise.then((permissions): Promise<PersonCampaignTouch[]> | PersonCampaignTouch[] =>
+            permissions.includes("CAMPAIGN_VIEW")
+                ? getPersonCampaignTouches(id, { size: TIMELINE_CAMPAIGN_TOUCH_LIMIT }, init)
+                    .then((page) => page.items)
+                    .catch(() => [])
+                : []),
     ]);
     if (contactAccess.kind === "forbidden") {
         return <AccessDeniedPage />;
@@ -98,11 +105,6 @@ export default async function ContactPage({ params }: ContactPageProps) {
     const referrer = contact.referrerPersonId != null
         ? await getContactById(contact.referrerPersonId, init).catch(() => null)
         : null;
-    const campaignTouches: PersonCampaignTouch[] = effectivePermissions.includes("CAMPAIGN_VIEW")
-        ? await getPersonCampaignTouches(id, { size: TIMELINE_CAMPAIGN_TOUCH_LIMIT }, init)
-            .then((page) => page.items)
-            .catch(() => [])
-        : [];
 
     const tasks = contact.tasks ?? [];
     const activities = contact.activities ?? [];
@@ -258,14 +260,14 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                 <SectionHeader title={t("profile")} />
                                 <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
                                     <InfoRow
-                                label={t("email")}
-                                value={contact.email ?? ''}
-                                badge={
-                                    <MarketingExclusionBadge
-                                        state={channelMarketingExclusion(marketingStatus, EMAIL_CHANNEL)}
+                                        label={t("email")}
+                                        value={contact.email ?? ''}
+                                        badge={(
+                                            <MarketingExclusionBadge
+                                                state={channelMarketingExclusion(marketingStatus, EMAIL_CHANNEL)}
+                                            />
+                                        )}
                                     />
-                                }
-                            />
                                     <InfoRow label={t("phone")} value={contact.phone ?? ''} />
                                     <InfoRow label={t("title")} value={contact.title ?? ''} />
                                     <InfoRow label={t("company")} value={contact.company?.name ?? t("companyPlaceholder")} />

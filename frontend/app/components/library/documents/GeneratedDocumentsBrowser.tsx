@@ -2,11 +2,13 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { useReducedMotion } from 'motion/react';
 import { DocumentCheckIcon } from '@heroicons/react/24/outline';
 
 import Rise from '@/app/components/motion/Rise';
+import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/app/components/EmptyState';
 import { FilterBar, MultiSelectFilter, SearchField, type FilterChipData } from '@/app/components/filters';
 import { dealDocumentsHref } from '@/app/components/records/deals/dealLinks';
@@ -75,6 +77,7 @@ function toggle(values: Set<string>, value: string): Set<string> {
 export default function GeneratedDocumentsBrowser({ owners }: { owners: User[] }) {
     const t = useTranslations('GeneratedDocuments');
     const tf = useTranslations('Filters');
+    const router = useRouter();
     const locale = useLocale();
     const reduce = useReducedMotion() ?? false;
 
@@ -194,6 +197,15 @@ export default function GeneratedDocumentsBrowser({ owners }: { owners: User[] }
                         title={filtersActive ? t('noMatchesTitle') : t('emptyTitle')}
                         body={filtersActive ? t('noMatchesBody') : t('emptyBody')}
                         tone={filtersActive ? 'muted' : 'brand'}
+                        action={filtersActive ? (
+                            <Button variant="outline" onClick={clearFilters}>
+                                {tf('clearAll')}
+                            </Button>
+                        ) : (
+                            <Button variant="brand" onClick={() => router.push('/records/deals')}>
+                                {t('emptyAction')}
+                            </Button>
+                        )}
                     />
                 ) : (
                     <div className="overflow-hidden rounded-2xl border border-border bg-card" aria-busy={loading}>

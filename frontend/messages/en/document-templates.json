@@ -4,9 +4,6 @@
     "description": "Reusable templates for quotes, proposals, order forms, and contracts"
   },
   "DocumentTemplatesBrowser": {
-    "title": "Documents",
-    "newButton": "New template",
-    "approvalPoliciesLink": "Approval policies",
     "sectionTemplates": "Templates",
     "searchPlaceholder": "Search templates",
     "emptyTitle": "No templates yet",
@@ -121,6 +118,7 @@
     "approvalPoliciesLink": "Approval policies"
   },
   "GeneratedDocuments": {
+    "emptyAction": "Open deals",
     "searchPlaceholder": "Search documents",
     "statusLabel": "Status",
     "typeLabel": "Type",

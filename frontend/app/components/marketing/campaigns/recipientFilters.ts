@@ -1,6 +1,10 @@
 import type { CampaignRecipientsPageParams } from '@/app/lib/types';
 
-/** The engagement counters a campaign reports, in the order the tiles render them. */
+/**
+ * The engagement counters a campaign reports. `failed` has no campaign-level tile — it is reported
+ * only in the per-send breakdown — but it is still a population a reader can be sent to, so it maps
+ * like the rest rather than being a hole in the switch.
+ */
 export const ENGAGEMENT_COUNTERS = [
     'recipients',
     'dispatched',

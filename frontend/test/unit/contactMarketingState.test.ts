@@ -127,7 +127,7 @@ describe("a contact's timeline carries the campaigns that reached them", () => {
                 { id: 11, subject: 'Kickoff call', timestamp: '2026-03-01T09:00:00Z' } as Activity,
                 { id: 12, subject: 'Follow-up call', timestamp: '2026-03-05T09:00:00Z' } as Activity,
             ],
-            campaignTouches: [touch({ deliveryId: 21, updatedAt: '2026-03-03T09:00:00Z' })],
+            campaignTouches: [touch({ deliveryId: 21, createdAt: '2026-03-03T09:00:00Z' })],
         });
 
         expect(entries.map((entry) => [entry.kind, entryId(entry)])).toEqual([
@@ -137,18 +137,24 @@ describe("a contact's timeline carries the campaigns that reached them", () => {
         ]);
     });
 
-    it('dates a touch by its last delivery change, falling back to when it was materialized', () => {
-        const [changed] = buildTimeline({
+    it('dates a touch by when it happened, not by when a late receipt changed its row', () => {
+        const [entry] = buildTimeline({
             ...EMPTY_TIMELINE,
-            campaignTouches: [touch({ updatedAt: '2026-03-04T09:00:00Z' })],
-        });
-        const [created] = buildTimeline({
-            ...EMPTY_TIMELINE,
-            campaignTouches: [touch({ updatedAt: undefined })],
+            campaignTouches: [touch({
+                createdAt: '2026-01-05T09:00:00Z',
+                updatedAt: '2026-08-19T09:00:00Z',
+            })],
         });
 
-        expect(changed.sortAt).toBe(Date.parse('2026-03-04T09:00:00Z'));
-        expect(created.sortAt).toBe(Date.parse('2026-03-01T09:00:00Z'));
+        expect(entry.sortAt).toBe(Date.parse('2026-01-05T09:00:00Z'));
+    });
+
+    it('orders touches the way the server pages them, so the loaded window is a prefix of the display order', () => {
+        const older = touch({ deliveryId: 31, createdAt: '2026-01-05T09:00:00Z', updatedAt: '2026-08-19T09:00:00Z' });
+        const newer = touch({ deliveryId: 32, createdAt: '2026-03-01T09:00:00Z', updatedAt: '2026-03-01T09:00:00Z' });
+        const entries = buildTimeline({ ...EMPTY_TIMELINE, campaignTouches: [older, newer] });
+
+        expect(entries.map((entry) => entryId(entry))).toEqual([32, 31]);
     });
 
     it('attributes a touch to no member, because the workspace sent it rather than a person', () => {
@@ -170,10 +176,19 @@ describe("a contact's timeline carries the campaigns that reached them", () => {
     it('asks for the touches only when the reader may read campaigns, and stays quiet when the read fails', () => {
         const page = source(CONTACT_PAGE);
 
-        expect(page).toContain('effectivePermissions.includes("CAMPAIGN_VIEW")');
+        expect(page).toContain('permissions.includes("CAMPAIGN_VIEW")');
         expect(page).toContain('.catch(() => [])');
         expect(page).toContain(`getPersonCampaignTouches(id, { size: TIMELINE_CAMPAIGN_TOUCH_LIMIT }, init)`);
         expect(TIMELINE_CAMPAIGN_TOUCH_LIMIT).toBeGreaterThan(0);
+    });
+
+    it('gates on the same permissions read the rest of the page uses, and does not wait for the batch to finish', () => {
+        const page = source(CONTACT_PAGE);
+
+        expect(page).toContain('const permissionsPromise = getEffectivePermissionsFromCookie(cookie);');
+        expect(page.match(/getEffectivePermissionsFromCookie\(/g)).toHaveLength(1);
+        expect(page, 'the touches read belongs in the batch, not after it')
+            .not.toContain('= effectivePermissions.includes("CAMPAIGN_VIEW")');
     });
 
     it('carries a denied reader an empty chronology rather than a broken one', () => {

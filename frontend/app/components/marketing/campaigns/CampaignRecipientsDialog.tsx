@@ -28,6 +28,23 @@ import type { CampaignRecipient } from '@/app/lib/types';
 
 const PAGE_SIZE = 25;
 
+/**
+ * What each counter's population actually is. "Reached" is only true of the counters that measure
+ * arrival; a withheld send never reached anyone, and a bounce or a failure is an attempt that did
+ * not land. One shared sentence across all eight would state the reverse of the truth for three of
+ * them, which is exactly the claim this drill-through exists to make checkable.
+ */
+const DESCRIPTION_KEY: Record<EngagementCounter, string> = {
+    recipients: 'descriptionRecipients',
+    dispatched: 'descriptionDispatched',
+    delivered: 'descriptionDelivered',
+    bounced: 'descriptionBounced',
+    complained: 'descriptionComplained',
+    unsubscribed: 'descriptionUnsubscribed',
+    skipped: 'descriptionSkipped',
+    failed: 'descriptionFailed',
+};
+
 /** The recipient page as the dialog knows it, so an in-flight read never claims an empty roster. */
 type RecipientRoster = {
     status: 'loading' | 'ready' | 'failed';
@@ -90,16 +107,19 @@ export default function CampaignRecipientsDialog({
             >
                 <ResponsiveDialogHeader className="shrink-0 border-b border-border px-4 py-4 sm:px-6">
                     <ResponsiveDialogTitle>{t('title', { counter: counterLabel })}</ResponsiveDialogTitle>
-                    <ResponsiveDialogDescription>
-                        {t('description', { count: total.toLocaleString(locale) })}
-                    </ResponsiveDialogDescription>
+                    {status === 'ready' ? (
+                        <ResponsiveDialogDescription>
+                            {t(DESCRIPTION_KEY[counter], { count: total.toLocaleString(locale) })}
+                        </ResponsiveDialogDescription>
+                    ) : status === 'loading' ? (
+                        <ResponsiveDialogDescription>{t('loading')}</ResponsiveDialogDescription>
+                    ) : null}
                 </ResponsiveDialogHeader>
 
                 <div className="min-h-0 flex-1 overflow-y-auto px-4 py-2 sm:px-6">
                     {status === 'loading' ? (
-                        <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
-                            <Loader2Icon className="size-4 animate-spin" />
-                            {t('loading')}
+                        <div className="flex items-center justify-center py-12 text-muted-foreground">
+                            <Loader2Icon className="size-5 animate-spin" aria-hidden />
                         </div>
                     ) : status === 'failed' ? (
                         <EmptyState

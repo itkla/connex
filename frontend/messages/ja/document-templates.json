@@ -4,9 +4,6 @@
     "description": "見積書・提案書・注文書・契約書の再利用可能なテンプレート"
   },
   "DocumentTemplatesBrowser": {
-    "title": "ドキュメント",
-    "newButton": "新規テンプレート",
-    "approvalPoliciesLink": "承認ポリシー",
     "sectionTemplates": "テンプレート",
     "searchPlaceholder": "テンプレートを検索",
     "emptyTitle": "テンプレートがありません",
@@ -121,6 +118,7 @@
     "approvalPoliciesLink": "承認ポリシー"
   },
   "GeneratedDocuments": {
+    "emptyAction": "案件を開く",
     "searchPlaceholder": "ドキュメントを検索",
     "statusLabel": "ステータス",
     "typeLabel": "種別",

@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/app/components/EmptyState';
 import SectionUnavailable from '@/app/components/SectionUnavailable';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
+import { dealDocumentsHref } from '@/app/components/records/deals/dealLinks';
 import type { ApprovalInboxItem } from '@/app/lib/types';
 import { formatUtcDateTime } from '@/app/lib/utils';
 
@@ -40,7 +41,7 @@ export default async function ApprovalInbox({ items }: Props) {
                         {items.map((item) => (
                             <li key={`${item.approvalId}:${item.stepId}`}>
                                 <Link
-                                    href={`/records/deals/${item.dealId}#deal-documents`}
+                                    href={dealDocumentsHref(item.dealId)}
                                     className="group flex items-center gap-4 px-5 py-4 transition-colors hover:bg-muted/50"
                                 >
                                     <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">

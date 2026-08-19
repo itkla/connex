@@ -10,6 +10,20 @@ import {
 } from '@/app/components/marketing/campaigns/recipientFilters';
 import { resolveShippedRoute } from '@/app/lib/routeManifest';
 
+function messages(locale: 'en' | 'ja'): Record<string, string> {
+    const parsed: unknown = JSON.parse(source(`messages/${locale}/campaigns.json`));
+    if (typeof parsed !== 'object' || parsed === null) throw new Error('campaigns catalog is not an object');
+    const scope = (parsed as Record<string, unknown>).CampaignRecipients;
+    if (typeof scope !== 'object' || scope === null) throw new Error('no CampaignRecipients namespace');
+    const entries = Object.entries(scope as Record<string, unknown>)
+        .filter((entry): entry is [string, string] => typeof entry[1] === 'string');
+    return Object.fromEntries(entries);
+}
+
+function descriptionKey(counter: EngagementCounter): string {
+    return `description${counter.charAt(0).toUpperCase()}${counter.slice(1)}`;
+}
+
 const ENGAGEMENT = 'app/components/marketing/campaigns/CampaignEngagement.tsx';
 const DIALOG = 'app/components/marketing/campaigns/CampaignRecipientsDialog.tsx';
 const DETAIL = 'app/components/marketing/campaigns/CampaignDetail.tsx';
@@ -96,5 +110,45 @@ describe('a campaign engagement count opens the contacts behind it', () => {
     it('asks the server for exactly the population the counter selected', () => {
         expect(source(DIALOG)).toContain('...recipientFilterFor(counter), page, size: PAGE_SIZE');
         expect(source('app/lib/api.ts')).toContain('`/api/campaigns/${id}/recipients${buildQuery(params)}`');
+    });
+
+    it('describes each population in its own words, so a withheld or bounced list never claims it reached anyone', () => {
+        const dialog = source(DIALOG);
+        expect(dialog).not.toContain("t('description'");
+
+        for (const locale of ['en', 'ja'] as const) {
+            const catalog = messages(locale);
+            const described = ENGAGEMENT_COUNTERS.map((counter) => catalog[descriptionKey(counter)]);
+            for (const [index, counter] of ENGAGEMENT_COUNTERS.entries()) {
+                expect(described[index], `${locale} is missing a description for ${counter}`).toBeTruthy();
+                expect(described[index]).toContain('{count}');
+            }
+            expect(new Set(described).size, `${locale} reuses one sentence for several populations`)
+                .toBe(ENGAGEMENT_COUNTERS.length);
+        }
+    });
+
+    it('keeps reached-language off the populations it would be false for', () => {
+        const catalog = messages('en');
+        const reached = /\breached\b/;
+
+        expect(catalog[descriptionKey('delivered')]).toMatch(reached);
+        for (const counter of ['skipped', 'bounced', 'failed'] as const) {
+            expect(catalog[descriptionKey(counter)], `${counter} must not claim it reached anyone`)
+                .not.toMatch(/\bit reached\b|\bcampaign reached\b/);
+        }
+        expect(catalog[descriptionKey('skipped')]).toMatch(/withheld/);
+    });
+
+    it('states no count until the roster is actually loaded', () => {
+        const dialog = source(DIALOG);
+
+        expect(dialog).toContain("{status === 'ready' ? (");
+        expect(dialog).toContain("t(DESCRIPTION_KEY[counter], { count: total.toLocaleString(locale) })");
+        const readyBranch = dialog.indexOf("t(DESCRIPTION_KEY[counter]");
+        const loadingBranch = dialog.indexOf("status === 'loading' ? (");
+        expect(readyBranch).toBeGreaterThan(-1);
+        expect(loadingBranch).toBeGreaterThan(readyBranch);
+        expect(dialog.slice(loadingBranch, loadingBranch + 200)).not.toContain('total');
     });
 });

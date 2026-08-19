@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { PlusIcon, ShieldCheckIcon } from '@heroicons/react/24/outline';
 
@@ -10,6 +10,7 @@ import { SegmentedControl } from '@/components/ui/segmented-control';
 import Rise from '@/app/components/motion/Rise';
 import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
+import { useOwnedUrlParams } from '@/app/hooks/useOwnedUrlParams';
 import DocumentTemplatesBrowser from '@/app/components/library/documents/DocumentTemplatesBrowser';
 import GeneratedDocumentsBrowser from '@/app/components/library/documents/GeneratedDocumentsBrowser';
 import type { DocumentTemplate, User } from '@/app/lib/types';
@@ -18,10 +19,23 @@ import type { DocumentTemplate, User } from '@/app/lib/types';
 type DocumentsView = 'documents' | 'templates';
 
 /**
+ * URL key this page owns for its view. Deliberately not `view`, which the records browsers own for
+ * their own display mode; a shared key would let two writers overwrite each other's state.
+ */
+const VIEW_URL_KEY = 'list';
+
+function normalizeView(value: string | null): DocumentsView {
+    return value === 'templates' ? 'templates' : 'documents';
+}
+
+/**
  * The library's documents surface. It holds two related but distinct things, so it names them
  * apart rather than letting one stand for both: the documents a workspace has generated, and the
  * document templates that produce them. Templates were the only thing here before, which is why a
  * finished quote could not be found without its deal.
+ *
+ * Which half is showing lives in the URL, so either can be linked, shared, and restored on a
+ * refresh — the same contract the records lists follow.
  *
  * @param templates - the workspace's document templates
  * @param owners - workspace members, used to name the deal owner behind a generated document
@@ -35,7 +49,10 @@ export default function DocumentsLibrary({
 }) {
     const t = useTranslations('DocumentsLibrary');
     const router = useRouter();
-    const [view, setView] = useState<DocumentsView>('documents');
+    const searchParams = useSearchParams();
+    const [view, setView] = useState<DocumentsView>(() => normalizeView(searchParams.get(VIEW_URL_KEY)));
+
+    useOwnedUrlParams({ [VIEW_URL_KEY]: view === 'documents' ? undefined : view });
 
     return (
         <PageShell>

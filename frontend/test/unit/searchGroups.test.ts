@@ -104,7 +104,7 @@ describe("global search reaches every first-class sidebar object", () => {
         expect(group.heading).toBe("groupDocuments");
         expect(group.rows[0]).toMatchObject({
             key: "document-41",
-            href: "/records/deals/9#deal-detail-files",
+            href: "/records/deals/9#deal-documents",
             label: "Quote for Acme",
             subtitle: "Acme renewal",
         });
