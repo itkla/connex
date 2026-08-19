@@ -394,7 +394,7 @@ export default function QualificationCriteriaPanel() {
                                                             })}
                                                         </span>
                                                         {canManage ? (
-                                                            <span className="flex items-center gap-1 opacity-100 [@media(hover:hover)and(pointer:fine)]:opacity-0 [@media(hover:hover)and(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)and(pointer:fine)]:group-focus-within:opacity-100">
+                                                            <span className="flex items-center gap-1 opacity-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100">
                                                                 <Button
                                                                     size="icon"
                                                                     variant="ghost"
