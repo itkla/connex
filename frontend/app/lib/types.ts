@@ -33,7 +33,7 @@ export type ContactsPageParams = PageParams & MemberScopeParams & {
     noFirstResponse?: boolean;
     /** Selects the archived contacts instead of the active ones (issue #854). */
     archived?: boolean;
-};
+} & WarmthFilterParams;
 
 export type CompaniesPageParams = PageParams & MemberScopeParams & {
     industry?: string[];
@@ -41,6 +41,20 @@ export type CompaniesPageParams = PageParams & MemberScopeParams & {
     ids?: number[];
     /** Selects the archived companies instead of the active ones (issue #854). */
     archived?: boolean;
+} & WarmthFilterParams;
+
+/**
+ * The warmth dimension a records request can filter by (issue #1342). Accepted by the contact and
+ * company page, id, and CSV-export surfaces alike, so select-all-matching and an export return
+ * exactly the records the list showed.
+ */
+export type WarmthFilterParams = {
+    /** Warmth bands to include; records with no interaction history are selected by {@link noWarmth}. */
+    warmthBands?: TemperatureBand[];
+    /** Includes records with no interaction history at all, counted under the `__none__` facet key. */
+    noWarmth?: boolean;
+    /** Selects records predicted to go cold within this many whole days; the backend accepts 1–3650. */
+    goesColdWithinDays?: number;
 };
 
 export type CompanySegmentPageParams = Omit<CompaniesPageParams, 'ids'> & {
@@ -241,6 +255,13 @@ export type PersonFacets = {
      * SLA are counted under the `__none__` key.
      */
     firstResponseStates: FacetCount[];
+    /**
+     * How many active contacts sit in each warmth band (issue #1342); contacts with no interaction
+     * history are counted under the `__none__` key. Absent from the response unless the request
+     * asked for it with `warmth=true`, because the count is a full-workspace decayed-touch
+     * aggregate — treat undefined as "not requested" rather than "no contacts".
+     */
+    warmthBands?: FacetCount[];
 };
 
 export type CompanyFacets = {
@@ -249,6 +270,8 @@ export type CompanyFacets = {
     owners: FacetCount[];
     /** How many companies the workspace currently holds archived (issue #854). */
     archivedCount: number;
+    /** How many active companies sit in each warmth band; opt-in exactly as {@link PersonFacets.warmthBands}. */
+    warmthBands?: FacetCount[];
 };
 
 export type TemperatureBand = 'hot' | 'warm' | 'cool' | 'cold';
