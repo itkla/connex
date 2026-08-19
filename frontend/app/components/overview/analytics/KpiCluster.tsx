@@ -153,7 +153,7 @@ export default function KpiCluster({
     const tiles = useMemo(() => toTiles(kpis), [kpis]);
     const gridColumns = snapshot
         ? snapshot.warmth
-            ? 'lg:grid-cols-3 2xl:grid-cols-6'
+            ? 'lg:grid-cols-3 min-[115rem]:grid-cols-6'
             : 'lg:grid-cols-3 2xl:grid-cols-5'
         : 'lg:grid-cols-4';
 
