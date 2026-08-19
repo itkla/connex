@@ -58,21 +58,24 @@
     <include refid="recipientFilter"/>
   </select>
 
-  <select id="listPersonTouches" resultType="ooo.klae.connex.backend.dto.PersonCampaignTouchDto">
-    SELECT d.id AS delivery_id, c.id AS campaign_id, c.name AS campaign_name, d.send_id,
-           s.channel, d.status, d.skip_reason, d.created_at, d.updated_at
+  <sql id="personTouchFrom">
     FROM campaign_delivery d
     JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
     JOIN campaign c ON c.workspace_id = s.workspace_id AND c.id = s.campaign_id
     WHERE d.workspace_id = #{workspaceId} AND d.person_id = #{personId}
+  </sql>
+
+  <select id="listPersonTouches" resultType="ooo.klae.connex.backend.dto.PersonCampaignTouchDto">
+    SELECT d.id AS delivery_id, c.id AS campaign_id, c.name AS campaign_name, d.send_id,
+           s.channel, d.status, d.created_at, d.updated_at
+    <include refid="personTouchFrom"/>
     ORDER BY d.created_at DESC, d.id DESC
     LIMIT #{limit} OFFSET #{offset}
   </select>
 
   <select id="countPersonTouches" resultType="long">
     SELECT COUNT(*)
-    FROM campaign_delivery d
-    WHERE d.workspace_id = #{workspaceId} AND d.person_id = #{personId}
+    <include refid="personTouchFrom"/>
   </select>
 
   <select id="getDelivery" resultType="CampaignDelivery">

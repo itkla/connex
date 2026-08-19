@@ -1,6 +1,5 @@
 package ooo.klae.connex.backend.services;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -118,7 +117,6 @@ public class ContactMarketingService {
             Set<String> addressableChannels) {
         boolean doNotContact = false;
         boolean suppressed = false;
-        LocalDateTime since = null;
         for (SuppressionChannelStateRow row : suppressions) {
             if (!channel.equals(row.channel())) {
                 continue;
@@ -128,16 +126,13 @@ public class ContactMarketingService {
             } else {
                 suppressed = true;
             }
-            if (since == null || (row.since() != null && row.since().isBefore(since))) {
-                since = row.since();
-            }
         }
         boolean consentRevoked = revokedChannels.contains(channel);
-        boolean optedOut = suppressed || consentRevoked;
+        boolean optedOut = suppressed || consentRevoked || doNotContact;
         String state = doNotContact ? DO_NOT_CONTACT : optedOut ? "opted_out" : null;
         return new ContactChannelMarketingStatusDto(
                 channel, state, optedOut, doNotContact, consentRevoked,
-                addressableChannels.contains(channel), since);
+                addressableChannels.contains(channel));
     }
 
     private Set<String> revokedMarketingChannels(int workspaceId, int personId) {

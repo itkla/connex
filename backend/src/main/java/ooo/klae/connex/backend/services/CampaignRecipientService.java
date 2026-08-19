@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
@@ -91,6 +92,10 @@ public class CampaignRecipientService {
             throw new BadRequestException(
                     "event must be one of: " + String.join(", ", RECIPIENT_EVENTS));
         }
+        if (statuses != null && !RECIPIENT_STATUSES.containsAll(statuses)) {
+            throw new BadRequestException(
+                    "status must be one of: " + String.join(", ", RECIPIENT_STATUSES));
+        }
         List<CampaignRecipientRow> rows = campaignDeliveryMapper.listRecipients(
                 workspaceId, campaignId, sendId, statuses, eventType, limit, offset);
         long total = campaignDeliveryMapper.countRecipients(
@@ -101,7 +106,7 @@ public class CampaignRecipientService {
     private List<CampaignRecipientDto> withLabels(List<CampaignRecipientRow> rows) {
         List<Integer> personIds = rows.stream()
                 .map(CampaignRecipientRow::personId)
-                .filter(java.util.Objects::nonNull)
+                .filter(Objects::nonNull)
                 .distinct()
                 .toList();
         Map<Integer, String> labels = new HashMap<>();

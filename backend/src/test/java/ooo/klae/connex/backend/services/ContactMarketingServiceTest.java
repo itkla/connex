@@ -53,8 +53,20 @@ class ContactMarketingServiceTest extends AbstractServiceTest {
         assertEquals("opted_out", channel(status, "email").state());
         assertTrue(channel(status, "email").optedOut());
         assertFalse(channel(status, "email").doNotContact());
-        assertNotNull(channel(status, "email").since());
         assertNull(channel(status, "sms").state());
+    }
+
+    @Test
+    void aDoNotContactOnlyChannelIsAlsoReportedAsExcluded() {
+        Person person = newPerson(newCompany());
+        suppress(person, "email", person.getEmail(), "do_not_contact");
+
+        ContactChannelMarketingStatusDto email =
+                channel(contactMarketingService.getStatus(person.getId()), "email");
+
+        assertEquals("do_not_contact", email.state());
+        assertTrue(email.doNotContact());
+        assertTrue(email.optedOut());
     }
 
     @Test

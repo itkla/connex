@@ -16,11 +16,13 @@
 
   <!-- Contactability projection for one contact. Reproduces the send path's dual-arm match — the
        person-sticky link plus the canonical address the channel would actually use — and returns
-       only the channel, reason, and first-recorded time. The address, note, and author stay behind
-       the consent-management surface. -->
+       only the channel and reason. The address, note, author, and recording time stay behind the
+       consent-management surface. The explicit COLLATE mirrors CampaignMapper.suppressedAddresses:
+       the column is declared utf8mb4_bin, so a bound parameter needs it to avoid an
+       illegal-mix-of-collations error. -->
   <select id="findPersonChannelStates"
           resultType="ooo.klae.connex.backend.dto.SuppressionChannelStateRow">
-    SELECT channel, reason, MIN(created_at) AS since
+    SELECT DISTINCT channel, reason
     FROM suppression_entry
     WHERE workspace_id = #{workspaceId}
       AND (
@@ -32,7 +34,6 @@
           </foreach>
         </if>
       )
-    GROUP BY channel, reason
   </select>
 
   <select id="getById" resultType="SuppressionEntry">

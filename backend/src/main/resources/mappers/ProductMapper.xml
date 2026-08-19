@@ -39,9 +39,10 @@
     ORDER BY name, id
   </select>
 
-  <!-- Global-search slice. Unlike getFiltered, the match is NOT binary-collated: every other
-       search group matches case-insensitively under the column's own collation, and a global
-       search that alone demanded exact case would read as broken. -->
+  <!-- Global-search slice. Unlike getFiltered it is not binary-collated, so it matches under the
+       column's own accent- and kana-insensitive collation, as every other search group does; the
+       products browser stays exact. It also matches name and SKU only, not description, because a
+       search row shows neither. -->
   <select id="search" resultType="ooo.klae.connex.backend.dto.ProductSummaryDto">
     SELECT id, name, sku, active FROM product
     WHERE workspace_id = #{workspaceId}

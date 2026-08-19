@@ -18,8 +18,7 @@
   </sql>
 
   <select id="search" resultType="ooo.klae.connex.backend.dto.WorkflowSummaryDto">
-    SELECT id, name, description, enabled, draft_record_type AS record_type,
-           archived_at, updated_at
+    SELECT id, name, description, enabled, draft_record_type AS record_type, updated_at
     FROM workflow
     WHERE workspace_id = #{workspaceId}
       AND archived_at IS NULL
