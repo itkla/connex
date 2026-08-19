@@ -5165,7 +5165,7 @@
                                 "description": "Every record, file, tag and setting belongs to exactly one workspace and never appears in another. That separation is enforced in the database layer, not just in the interface."
                             },
                             {
-                                "title": "Deterministic figures first",
+                                "title": "Figures you can trace",
                                 "description": "Warmth, risk, pipeline and report figures are computed from your data by rules you can reason about. Where AI is involved it explains those figures, it does not produce them."
                             },
                             {

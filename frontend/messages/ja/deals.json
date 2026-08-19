@@ -5,7 +5,7 @@
         "levelLow": "低リスク",
         "panelTitle": "リスクの兆候",
         "unavailable": "リスクの根拠を一時的に取得できません。",
-        "clear": "有効な決定論的リスクの兆候はありません。",
+        "clear": "この案件に現在のリスクの兆候はありません。",
         "assessedAt": "評価日時: {date}",
         "factorCloseOverdue": "予定成約日を{days}日超過しています",
         "factorClosingSoonQuiet": "あと{days}日で成約予定ですが、最近の活動がありません",

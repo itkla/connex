@@ -10,10 +10,21 @@
       "headline": "{count, plural, =0 {Nothing needs your attention right now} one {# signal needs your attention} other {# signals need your attention}}",
       "headlineFiltered": "{count, plural, =0 {No signals match this view} one {# signal in this view} other {# signals in this view}}"
     },
-    "band": {
-      "now": "Act today",
-      "soon": "Slipping away",
-      "later": "Worth a look"
+    "horizon": {
+      "heading": "When these need you",
+      "hint": "Every signal, placed by how long you have.",
+      "bandNamed": "{band}, {count, plural, =0 {no signals} one {# signal} other {# signals}}",
+      "band": {
+        "overdue": "Past due",
+        "week": "This week",
+        "month": "This month",
+        "later": "Later",
+        "undated": "No date"
+      }
+    },
+    "layer": {
+      "empty": "Nothing in this group right now.",
+      "unavailable": "Couldn't refresh this group. The signals below are the last ones Radar read."
     },
     "family": {
       "relationship_decay": "Cooling relationships",
@@ -25,21 +36,49 @@
       "company": "Company",
       "deal": "Deal"
     },
-    "priority": {
-      "high": "High priority",
-      "medium": "Medium priority",
-      "cooling": "Cooling",
-      "opportunity": "Suggested intro"
-    },
     "state": {
       "active": "Active",
       "followed": "Following",
       "snoozed": "Snoozed",
       "dismissed": "Dismissed"
     },
+    "decay": {
+      "trendRising": "warming up",
+      "trendSteady": "holding steady",
+      "trendCooling": "still cooling"
+    },
+    "reasonShort": {
+      "close_overdue": "Close date passed",
+      "closing_soon_quiet": "Closing quietly",
+      "stalled": "No recent activity",
+      "stakeholder_cold": "Contact gone cold",
+      "no_stakeholders": "No contacts linked"
+    },
+    "path": {
+      "connectorsHeading": "Who can open doors",
+      "opens": "{count, plural, one {# intro} other {# intros}}"
+    },
+    "reading": {
+      "warmth": "{band} and {trend}.",
+      "warmthBand": "{band} warmth right now.",
+      "warmthTrend": "Warmth is {trend}.",
+      "trendRising": "warming up",
+      "trendSteady": "holding steady",
+      "trendCooling": "still cooling",
+      "goesColdIn": "{days, plural, =0 {Goes cold today.} one {Goes cold in # day.} other {Goes cold in # days.}}",
+      "wentCold": "Already cold.",
+      "sinceContact": "{days, plural, =0 {Last contact was today.} one {# day since your last contact.} other {# days since your last contact.}}",
+      "closeOverdue": "{days, plural, one {Close date passed # day ago.} other {Close date passed # days ago.}}",
+      "closingSoonQuiet": "{days, plural, =0 {Closes today, and it has been quiet.} one {Closes in # day, and it has been quiet.} other {Closes in # days, and it has been quiet.}}",
+      "stalled": "{days, plural, one {No activity for # day.} other {No activity for # days.}}",
+      "stakeholderCold": "{band} contact on this deal.",
+      "noStakeholders": "No contacts are linked to this deal.",
+      "moreReasons": "{count, plural, one {# more reason.} other {# more reasons.}}",
+      "path": "<bridge>{name}</bridge> can introduce you.",
+      "pathShared": "<bridge>{name}</bridge> and {count, plural, one {# other} other {# others}} can introduce you."
+    },
     "detail": {
-      "show": "Show evidence",
-      "hide": "Hide evidence",
+      "why": "Why",
       "showNamed": "Show evidence for {subject}",
       "hideNamed": "Hide evidence for {subject}"
     },
@@ -47,34 +86,15 @@
       "label": "Radar filters",
       "searchLabel": "Search relationship signals",
       "searchPlaceholder": "Search contacts, companies, deals, or evidence",
-      "familyLabel": "Filter by signal family",
+      "familyLabel": "Show",
       "stateLabel": "Filter by lifecycle state",
-      "allFamilies": "All families",
+      "allFamilies": "All",
       "allStates": "All states",
       "attention": "Needs attention"
     },
-    "rank": {
-      "heading": "Rank {position}",
-      "rule": "Ordered by {rule}",
-      "factor": "{key}: {value} ({direction})",
-      "rulePriority": "priority, then source strength, then subject",
-      "keyPriority": "Priority",
-      "keyDaysUntilCold": "Days until cold",
-      "keyDaysSinceTouch": "Days since last touch",
-      "keyRiskScore": "Risk score",
-      "keyPathScore": "Path strength",
-      "keySubject": "Stable subject order",
-      "directionAscending": "ascending",
-      "directionDescending": "descending",
-      "unknownRule": "the deterministic cross-family ranking rule",
-      "unknownFactor": "Additional deterministic factor",
-      "unknownDirection": "stable order"
-    },
     "evidence": {
-      "heading": "Evidence",
       "separator": ", ",
-      "parameter": "{key}: {value}",
-      "references": "Sources: {references}",
+      "sources": "Records behind this:",
       "typeRelationshipTemperature": "Warmth",
       "typeCloseOverdue": "Expected close date is overdue",
       "typeClosingSoonQuiet": "Closing soon with little recent activity",
@@ -90,9 +110,7 @@
       "parameterGoesColdAt": "Predicted cold date",
       "parameterDaysUntilCold": "Days until cold",
       "parameterTouchCount": "Touch count",
-      "parameterModelVersion": "Model version",
       "parameterSeverity": "Severity",
-      "parameterBridgePersonId": "Bridge contact",
       "parameterBridgeName": "Path through",
       "parameterReachType": "Suggestion type",
       "parameterEvidenceType": "Path evidence",
@@ -102,15 +120,9 @@
       "parameterPathScore": "Path strength",
       "parameterDaysOverdue": "Days overdue",
       "parameterDaysUntilClose": "Days until close",
-      "parameterPersonId": "Stakeholder",
       "parameterRole": "Stakeholder role",
       "unknownType": "Additional relationship evidence",
-      "unknownParameter": "Additional source value",
-      "referencePerson": "contact",
-      "referenceCompany": "company",
-      "referenceDeal": "deal",
-      "referencePersonEdge": "relationship edge",
-      "unknownReference": "source record"
+      "unknownParameter": "Additional source value"
     },
     "value": {
       "hot": "Hot",
@@ -123,7 +135,6 @@
       "high": "High",
       "medium": "Medium",
       "low": "Low",
-      "opportunity": "Suggested intro",
       "connection": "Verified connection",
       "colleagues": "Current colleagues",
       "former_colleagues": "Former colleagues",
@@ -139,19 +150,20 @@
       "unavailable": "Time unavailable"
     },
     "actions": {
-      "label": "Actions for {subject}",
       "follow": "Follow",
       "followed": "Following",
       "snooze": "Snooze",
       "dismiss": "Dismiss",
-      "createTask": "Create task",
-      "taskCreated": "Task created",
-      "openContext": "Open context",
-      "followNamed": "Follow signal for {subject}",
-      "snoozeNamed": "Snooze signal for {subject}",
-      "dismissNamed": "Dismiss signal for {subject}",
-      "createTaskNamed": "Create a task for {subject}",
-      "taskCreatedNamed": "A task has already been created for {subject}",
+      "openContext": "Open the current record",
+      "moreNamed": "More actions for {subject}",
+      "followUp": "Schedule follow-up",
+      "followUpNamed": "Schedule a follow-up with {subject}",
+      "followUpDone": "Follow-up scheduled",
+      "followUpDoneNamed": "A follow-up with {subject} is already scheduled",
+      "askIntro": "Ask for the intro",
+      "askIntroNamed": "Ask for an introduction to {subject}",
+      "introAsked": "Intro requested",
+      "introAskedNamed": "An introduction to {subject} has already been requested",
       "createTaskDeniedNamed": "Task creation is not permitted for {subject}",
       "createTaskPermissionUnavailableNamed": "Task permission could not be checked for {subject}",
       "createWarmPathTaskDeniedNamed": "Intro-path task creation is not permitted for {subject}",
@@ -160,7 +172,6 @@
       "createTaskEvidenceUnavailableNamed": "Relationship evidence could not be refreshed for {subject}",
       "createTaskStaleNamed": "Task creation is unavailable because the signal for {subject} is stale",
       "createTaskPathUnavailableNamed": "Task creation is unavailable because the intro path for {subject} has no connector right now",
-      "openContextNamed": "Open the source record for {subject}",
       "taskPermissionDenied": "You do not have permission to create tasks.",
       "taskPermissionUnavailable": "Task permissions could not be checked. Retry before creating a task.",
       "warmPathTaskPermissionDenied": "You need permission to create tasks and update contacts before accepting an intro path.",
@@ -194,15 +205,11 @@
     },
     "empty": {
       "title": "Radar is clear",
-      "body": "No current relationship signals meet the deterministic detector rules."
+      "body": "Nothing in your logged activity needs attention right now. Radar watches for relationships going quiet, deals slipping, and new intro paths — keep logging your interactions and it will raise anything worth your time."
     },
     "noResults": {
       "title": "No signals match these filters",
-      "body": "Change the family, state, or search text to broaden the list."
-    },
-    "partial": {
-      "title": "Some signal families are unavailable",
-      "body": "Last-known results remain visible. Current data could not be loaded for: {families}."
+      "body": "Change what you are showing, the state, or the search text to widen the view."
     },
     "unavailable": {
       "title": "Radar is unavailable",
