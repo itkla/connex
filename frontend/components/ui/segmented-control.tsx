@@ -96,8 +96,10 @@ export type SegmentedControlProps<T extends string> = VariantProps<
  * an active/archived scope should be making.
  *
  * Segments stay toggle buttons (`aria-pressed`) rather than radios, which is what the surfaces
- * shipped and what assistive technology already reports for them; arrow keys, `Home`, and `End`
- * move the selection so the control answers the keyboard the way a native one does.
+ * shipped and what assistive technology already reports for them. Keyboard behaviour is the native
+ * one: a roving tabindex means `Tab` reaches the control once, and arrow keys, `Home`, and `End`
+ * move focus *and* the selection together. A segment supplied through `render` owns its own focus
+ * order, since the control cannot reach inside it.
  */
 export function SegmentedControl<T extends string>({
   value,
@@ -111,17 +113,36 @@ export function SegmentedControl<T extends string>({
   const generatedLayoutId = React.useId()
   const thumbLayoutId = layoutId ?? generatedLayoutId
   const reduce = useReducedMotion() ?? false
+  const segmentRefs = React.useRef(new Map<T, HTMLButtonElement>())
 
   const selectable = options.filter((option) => !option.disabled)
+  /**
+   * Roving tabindex: `Tab` reaches the control once and the arrows move within it. When `value`
+   * matches no option — a stale preference, a value owned by a `render` slot — the first segment
+   * stays tabbable so the control can never become unreachable from the keyboard.
+   */
+  const focusableValue = options.some((option) => option.value === value)
+    ? value
+    : selectable[0]?.value
+
+  function select(next: SegmentedControlOption<T> | undefined) {
+    if (!next) return
+    segmentRefs.current.get(next.value)?.focus()
+    if (next.value !== value) onChange(next.value)
+  }
 
   function move(delta: number) {
     if (selectable.length === 0) return
     const current = selectable.findIndex((option) => option.value === value)
-    const next = selectable[(current + delta + selectable.length) % selectable.length]
-    if (next && next.value !== value) onChange(next.value)
+    select(selectable[(current + delta + selectable.length) % selectable.length])
   }
 
-  function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+  /**
+   * Bound to each segment rather than to the track. A `render` slot may host a popup whose content
+   * is portalled but still bubbles through the React tree — the analytics custom-range calendar is
+   * one — and a track-level handler would read that calendar's arrow keys as a change of preset.
+   */
+  function handleKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
     if (event.key === "ArrowRight" || event.key === "ArrowDown") {
       event.preventDefault()
       move(1)
@@ -130,11 +151,10 @@ export function SegmentedControl<T extends string>({
       move(-1)
     } else if (event.key === "Home") {
       event.preventDefault()
-      if (selectable[0]) onChange(selectable[0].value)
+      select(selectable[0])
     } else if (event.key === "End") {
       event.preventDefault()
-      const last = selectable[selectable.length - 1]
-      if (last) onChange(last.value)
+      select(selectable[selectable.length - 1])
     }
   }
 
@@ -143,7 +163,6 @@ export function SegmentedControl<T extends string>({
       role="group"
       data-slot="segmented-control"
       aria-label={ariaLabel}
-      onKeyDown={handleKeyDown}
       className={cn(segmentedControlVariants({ size }), className)}
     >
       {options.map((option) => {
@@ -172,11 +191,17 @@ export function SegmentedControl<T extends string>({
         return (
           <button
             key={option.value}
+            ref={(node) => {
+              if (node) segmentRefs.current.set(option.value, node)
+              else segmentRefs.current.delete(option.value)
+            }}
             type="button"
             onClick={() => onChange(option.value)}
+            onKeyDown={handleKeyDown}
             aria-pressed={active}
             aria-label={option.ariaLabel}
             disabled={option.disabled}
+            tabIndex={option.value === focusableValue ? 0 : -1}
             className={segmentClassName}
           >
             {thumb}
