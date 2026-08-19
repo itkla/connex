@@ -48,10 +48,12 @@ import { join, relative, resolve, sep } from "node:path";
  *    15 `hoistedClass`, and 63 `iconOnlyWithoutTooltip` findings; requiring a reserved control
  *    height and rejecting foreign semantics removed 41 tabs, chips, and nav rows that were never
  *    button debt. `classNameOf` reading past its own attribute had been feeding several of those.
- * 2. 461 → 457 (lowered). WS8's D5 overlay pass deleted `CampaignFormDialog.tsx` — campaigns create
- *    through the instant-create prompt and edit in the shared quick-edit drawer — taking its hoisted
- *    input-surface class string with it, and moved the record timeline's overflow trigger onto
- *    `IconButton`, clearing that file's shape override, legacy size, and missing tooltip at once.
+ * 2. 461 → 455 (lowered). WS8's D5/D16 overlay pass deleted `CampaignFormDialog.tsx` — campaigns
+ *    create through the instant-create prompt and edit in the shared quick-edit drawer — taking its
+ *    hoisted input-surface class string with it; moved the record timeline's overflow trigger onto
+ *    `IconButton`, clearing that file's shape override, legacy size, and missing tooltip at once;
+ *    and put the products browser on `RecordsRenderView`, whose own row menu replaced the
+ *    hand-sized trigger the browser drew for itself.
  *
  * **The burndown contract**, deliberately identical to `lint/motionDurations.mjs` so the two gates
  * read the same way. `loadBaseline()` returns the committed inventory of files that still carry
@@ -360,4 +362,4 @@ export function loadBaseline() {
  * The ledger's total after the widening described above. It may fall. It rises only in a commit
  * that widens what the scanner catches — never to make room for new debt.
  */
-export const BASELINE_HIGH_WATER_MARK = 457;
+export const BASELINE_HIGH_WATER_MARK = 455;

@@ -139,7 +139,6 @@
     "app/components/records/pipelines/PipelineCard.tsx": 2,
     "app/components/records/pipelines/QuickEditPipelineSheet.tsx": 3,
     "app/components/records/products/ProductDialog.tsx": 1,
-    "app/components/records/products/ProductsBrowser.tsx": 2,
     "app/components/records/users/UserCard.tsx": 1,
     "app/components/reports/GoalsBoard.tsx": 4,
     "app/components/reports/ReportBuilderBoard.tsx": 6,
