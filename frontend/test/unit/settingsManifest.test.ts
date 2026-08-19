@@ -21,9 +21,17 @@ import { SHIPPED_APP_ROUTES } from "@/app/lib/routeManifest";
  * is a real backend constant, no two destinations claim the same canonical owner, and the navigation
  * surfaces that link into settings agree with the entry points it declares.
  *
- * Its one blind spot is deliberate: `contextual` entry points are not verified against source, because
- * a contextual shortcut may be a computed href anywhere in the app. The registry surfaces — the three
- * tab strips, the sidebar and user menu, and the command palette — are verified in both directions.
+ * Four blind spots, named rather than implied:
+ *
+ * - `contextual` entry points are not verified, because a contextual shortcut may be a computed href
+ *   anywhere in the app. The registry surfaces are verified in both directions.
+ * - The sidebar and the user menu live in one file, so this suite cannot tell them apart; an entry
+ *   linked from either satisfies a claim to either.
+ * - Whether a permission belongs in `permissions` or in `manage` is not derivable from the manifest.
+ *   Each was audited against the shipped panel and the backend service that serves it; only a
+ *   self-contradiction (the same permission filed as both on one entry) is caught here.
+ * - The group title-drift gate reads English only. A key whose Japanese has drifted from its English
+ *   is not detectable, because the manifest records one name per group, not a translation pair.
  */
 const APP_DIRECTORY = path.join(process.cwd(), "app", "(app)");
 
@@ -45,17 +53,28 @@ const PERMISSION_ENUM_PATH = path.join(
 const REGISTER_ENTRY =
     "register it in SETTINGS_ENTRIES in app/lib/settingsManifest.ts, with its scope group, its gates, and its entry points";
 
-const ENTRY_POINT_SOURCES: Record<Exclude<SettingsEntryPoint, "contextual">, readonly string[]> = {
-    "account-tabs": ["app/components/account/AccountTabs.tsx"],
-    "settings-tabs": ["app/components/settings/SettingsTabs.tsx"],
-    "organization-tabs": ["app/components/organization/OrgTabs.tsx"],
-    sidebar: ["app/components/Sidebar.tsx"],
-    "avatar-menu": ["app/components/Sidebar.tsx"],
-    "command-palette": [
-        "app/lib/actions/seedActions.ts",
-        "app/components/actions/NavActionsBridge.tsx",
-    ],
-};
+/**
+ * Which entry points each navigation source can register. The sidebar and the user menu share a
+ * file, so a route linked there satisfies a claim to either.
+ */
+const NAVIGATION_SOURCES: ReadonlyArray<{
+    file: string;
+    points: readonly Exclude<SettingsEntryPoint, "contextual">[];
+}> = [
+    { file: "app/components/account/AccountTabs.tsx", points: ["account-tabs"] },
+    { file: "app/components/settings/SettingsTabs.tsx", points: ["settings-tabs"] },
+    { file: "app/components/organization/OrgTabs.tsx", points: ["organization-tabs"] },
+    { file: "app/components/Sidebar.tsx", points: ["sidebar", "avatar-menu"] },
+    { file: "app/lib/actions/seedActions.ts", points: ["command-palette"] },
+    { file: "app/components/actions/NavActionsBridge.tsx", points: ["command-palette"] },
+];
+
+/** The sources that can register a given entry point. */
+function sourcesRegistering(point: Exclude<SettingsEntryPoint, "contextual">): string[] {
+    return NAVIGATION_SOURCES.filter((source) => source.points.includes(point)).map(
+        (source) => source.file,
+    );
+}
 
 const HREF_PATTERN = /href[=:]\s*\{?["'](\/[^"'\s]*)["']/g;
 const PALETTE_PATTERN =
@@ -75,11 +94,27 @@ function appRouterRoutes(directory: string, segments: string[]): string[] {
     return routes;
 }
 
-/** The routed pages on disk under the roots the manifest claims to cover. */
+/**
+ * The subtrees the manifest claims to cover: the settings roots in full, plus the subtree of every
+ * registered destination that lives outside them, so a page added beside a consolidation target is
+ * caught without demanding that its whole unrelated root be registered.
+ */
+function scannedSubtrees(): string[] {
+    const roots = new Set<string>(SETTINGS_ROUTE_ROOTS.map((root) => `/${root}`));
+    for (const entry of entries) {
+        if (!underSettingsRoot(entry.currentRoute)) roots.add(entry.currentRoute);
+    }
+    return [...roots].sort();
+}
+
+/** The routed pages on disk under the subtrees the manifest claims to cover. */
 function routedSettingsPages(): string[] {
-    return SETTINGS_ROUTE_ROOTS.flatMap((root) =>
-        appRouterRoutes(path.join(APP_DIRECTORY, root), [root]),
-    ).sort();
+    const routes = new Set(
+        scannedSubtrees().flatMap((root) =>
+            appRouterRoutes(path.join(APP_DIRECTORY, root), root.split("/").filter(Boolean)),
+        ),
+    );
+    return [...routes].sort();
 }
 
 function readSource(file: string): string {
@@ -135,6 +170,7 @@ const entries: readonly SettingsEntry[] = SETTINGS_ENTRIES;
 const groups: readonly SettingsGroup[] = SETTINGS_GROUPS;
 const diskRoutes = routedSettingsPages();
 const registeredRoutes = new Set(entries.map((entry) => entry.currentRoute));
+const entriesByRoute = new Map(entries.map((entry) => [entry.currentRoute, entry]));
 const groupsById = new Map(groups.map((group) => [group.id, group]));
 const english = messageCatalog("en");
 const japanese = messageCatalog("ja");
@@ -248,7 +284,7 @@ describe("settings manifest labels resolve in both locales", () => {
 
         expect(
             drifted.map((group) => group.id),
-            "a group either reuses a key whose rendered label already matches, or carries null so the shell PR authors one; it never silently renames a shipped destination",
+            "a group either reuses a key whose rendered English already matches its epicName, or updates epicName to match, or carries null so the shell PR authors one; it never silently renames a shipped destination",
         ).toEqual([]);
     });
 
@@ -276,6 +312,19 @@ describe("settings manifest names real authorization", () => {
         expect(
             unknown,
             "a manifest entry names a permission the backend Permission enum does not declare",
+        ).toEqual([]);
+    });
+
+    it("never files one permission as both a visibility gate and a manage gate on one entry", () => {
+        const contradictory = entries.flatMap((entry) =>
+            entry.access.permissions
+                .filter((permission) => entry.access.manage.includes(permission))
+                .map((permission) => `${entry.id}: ${permission}`),
+        );
+
+        expect(
+            contradictory,
+            "a permission either stops the page rendering or only stops its writes; it cannot be both on one page",
         ).toEqual([]);
     });
 
@@ -307,6 +356,51 @@ describe("settings manifest names real authorization", () => {
     });
 });
 
+describe("settings manifest forwards only to destinations that exist", () => {
+    it("resolves every redirect target to a registered route or a shipped route", () => {
+        const dangling = entries
+            .filter((entry) => entry.redirectsTo !== null)
+            .filter(
+                (entry) =>
+                    !registeredRoutes.has(entry.redirectsTo ?? "") &&
+                    !(SHIPPED_APP_ROUTES as readonly string[]).includes(entry.redirectsTo ?? ""),
+            );
+
+        expect(
+            dangling.map((entry) => `${entry.id} -> ${entry.redirectsTo}`),
+            "a redirect names a target the app does not serve",
+        ).toEqual([]);
+    });
+
+    it("resolves every capability forward to a registered route or a shipped route", () => {
+        const dangling = entries
+            .filter((entry) => entry.conditionalForward !== null)
+            .filter(
+                (entry) =>
+                    !registeredRoutes.has(entry.conditionalForward?.to ?? "") &&
+                    !(SHIPPED_APP_ROUTES as readonly string[]).includes(entry.conditionalForward?.to ?? ""),
+            );
+
+        expect(dangling.map((entry) => entry.id)).toEqual([]);
+    });
+
+    it("records a capability forward only where a capability the entry declares could fire it", () => {
+        const unbacked = entries
+            .filter((entry) => entry.conditionalForward !== null)
+            .filter(
+                (entry) =>
+                    !entry.access.capabilities.some(
+                        (requirement) => requirement.key === entry.conditionalForward?.capability,
+                    ),
+            );
+
+        expect(
+            unbacked.map((entry) => entry.id),
+            "a forward names a capability the entry does not declare a requirement on",
+        ).toEqual([]);
+    });
+});
+
 describe("settings manifest owns each canonical destination once", () => {
     it("lets no two destinations own the same canonical route", () => {
         const owners = entries
@@ -334,7 +428,7 @@ describe("settings manifest agrees with the navigation that links into settings"
                 .filter((point): point is Exclude<SettingsEntryPoint, "contextual"> => point !== "contextual")
                 .filter(
                     (point) =>
-                        !ENTRY_POINT_SOURCES[point].some((file) =>
+                        !sourcesRegistering(point).some((file) =>
                             linkedRoutes(file).includes(entry.currentRoute),
                         ),
                 )
@@ -344,12 +438,27 @@ describe("settings manifest agrees with the navigation that links into settings"
         expect(missing).toEqual([]);
     });
 
+    it("declares an entry point for every registered destination a navigation source links to", () => {
+        const undeclared = NAVIGATION_SOURCES.flatMap((source) =>
+            [...new Set(linkedRoutes(source.file))]
+                .map((route) => entriesByRoute.get(route))
+                .filter((entry): entry is SettingsEntry => entry !== undefined)
+                .filter((entry) => !entry.entryPoints.some((point) => (source.points as readonly SettingsEntryPoint[]).includes(point)))
+                .map((entry) => `${source.file} links ${entry.currentRoute} but ${entry.id} declares none of ${source.points.join(", ")}`),
+        );
+
+        expect(
+            undeclared,
+            "a navigation surface links a registered destination the manifest does not say links there; add the entry point",
+        ).toEqual([]);
+    });
+
     it("registers every settings destination the navigation sources link to", () => {
-        const unregistered = Object.entries(ENTRY_POINT_SOURCES).flatMap(([point, files]) =>
-            [...new Set(files.flatMap(linkedRoutes))]
+        const unregistered = NAVIGATION_SOURCES.flatMap((source) =>
+            [...new Set(linkedRoutes(source.file))]
                 .filter(underSettingsRoot)
                 .filter((route) => !registeredRoutes.has(route))
-                .map((route) => `${point} links ${route}`),
+                .map((route) => `${source.file} links ${route}`),
         );
 
         expect(
@@ -359,10 +468,9 @@ describe("settings manifest agrees with the navigation that links into settings"
     });
 
     it("scans navigation sources that actually carry settings links", () => {
-        const linked = Object.values(ENTRY_POINT_SOURCES)
-            .flat()
-            .flatMap(linkedRoutes)
-            .filter(underSettingsRoot);
+        const linked = NAVIGATION_SOURCES.flatMap((source) => linkedRoutes(source.file)).filter(
+            underSettingsRoot,
+        );
 
         expect(new Set(linked).size).toBeGreaterThan(20);
     });

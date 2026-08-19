@@ -58,23 +58,60 @@ export type SettingsCapabilityKey =
               : never;
       }[keyof InstanceCapabilities];
 
+/** A capability the destination depends on, and the value that capability must hold. */
+export type SettingsCapabilityRequirement = {
+    key: SettingsCapabilityKey;
+    /** The value the capability must hold for the destination to exist. */
+    expected: boolean;
+};
+
 /**
- * What a destination requires. `permissions`, `capabilities`, and `orgAdmin` gate reaching the
- * destination at all and therefore drive navigation visibility; `manage` gates only the
- * destination's own configuration writes, so a viewer without it still reaches and reads the page.
- * Keeping the two apart is load-bearing: promoting a `manage` permission to a visibility gate would
- * hide a page that works today.
+ * A capability state under which the shipped page forwards the browser elsewhere instead of
+ * explaining itself in place. #1340 forbids exactly this teleport, so it is recorded as evidence:
+ * the redirect matrix must retire it and the capability-state work must replace it with an in-place
+ * explanation.
+ */
+export type SettingsConditionalForward = {
+    capability: SettingsCapabilityKey;
+    /** The capability value that triggers the forward. */
+    expected: boolean;
+    /** Where the shipped page sends the browser under that state. */
+    to: string;
+};
+
+/**
+ * What a destination requires, split by the rule that drives navigation visibility:
+ *
+ * - **visibility** (`permissions`, `capabilities`, `orgAdmin`) — the shipped page refuses to render
+ *   its content without it, whether it refuses in the browser (an access-denied panel) or because
+ *   the read its content needs is gated server-side. A navigation consumer may hide or explain the
+ *   destination on these.
+ * - **manage** (`manage`, `orgWrite`) — the page renders and only its mutations are gated. A
+ *   consumer must NOT hide the destination on these; doing so would hide a page that works today.
+ *
+ * The same permission legitimately lands in both buckets across different pages:
+ * `WORKSPACE_SETTINGS` gates the delivery and mail reads that `/settings/delivery` and
+ * `/settings/email` need, but on `/settings/members` it gates only the allowed-domains block inside
+ * a page that otherwise renders for any member.
  */
 export type SettingsAccess = {
-    /** Backend `Permission` constants required to reach the destination. */
+    /** Backend `Permission` constants required to render the destination's content. */
     permissions: readonly string[];
-    /** Instance capabilities the destination depends on. */
-    capabilities: readonly SettingsCapabilityKey[];
-    /** Whether the viewer must hold an organization role. */
+    /** Capability requirements the destination's content depends on. */
+    capabilities: readonly SettingsCapabilityRequirement[];
+    /** Whether every capability requirement must hold, or any one of them. */
+    capabilityMatch: "all" | "any";
+    /** Whether the viewer must hold an organization role to reach the destination. */
     orgAdmin: boolean;
-    /** Backend `Permission` constants that gate the destination's configuration writes only. */
+    /** Backend `Permission` constants that gate the destination's writes only. */
     manage: readonly string[];
-    /** The in-place states this destination must be able to explain about itself. */
+    /** The organization role the destination's writes require, or null when it has none. */
+    orgWrite: "owner" | "admin" | null;
+    /**
+     * The in-place states this destination must be able to explain about itself once #1340 lands.
+     * This is target state, not shipped behavior: several destinations today vanish or forward
+     * instead of explaining, which is what {@link SettingsEntry.conditionalForward} records.
+     */
     states: readonly SettingsAvailabilityState[];
 };
 
@@ -127,6 +164,10 @@ export type SettingsEntry = {
     canonicalSection: string | null;
     /** Where the server forwards the browser today; null when the entry renders. */
     redirectsTo: string | null;
+    /** Query keys the forward carries and a successor redirect must preserve. */
+    redirectQuery: readonly string[];
+    /** A capability state under which a rendering destination forwards away instead; null when none. */
+    conditionalForward: SettingsConditionalForward | null;
     /** The shipped message key that labels this destination in navigation; null for a bare stub. */
     titleKey: string | null;
     access: SettingsAccess;
@@ -139,8 +180,10 @@ export type SettingsEntry = {
 const NO_ACCESS_REQUIREMENTS: SettingsAccess = {
     permissions: [],
     capabilities: [],
+    capabilityMatch: "all",
     orgAdmin: false,
     manage: [],
+    orgWrite: null,
     states: [],
 };
 
@@ -309,6 +352,8 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/personal/profile",
         canonicalSection: null,
         redirectsTo: "/account/profile",
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "CommonSidebar.accountSettings",
         access: NO_ACCESS_REQUIREMENTS,
         entryPoints: ["avatar-menu", "command-palette"],
@@ -322,18 +367,22 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/personal/connected-accounts",
         canonicalSection: null,
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "AccountConnections.title",
         access: {
-            permissions: ["WORKSPACE_SETTINGS"],
+            permissions: [],
             capabilities: [
-                "connectedAccounts.google",
-                "connectedAccounts.microsoft",
-                "connectedCapture.google",
-                "connectedCapture.microsoft",
+                { key: "connectedAccounts.google", expected: true },
+                { key: "connectedAccounts.microsoft", expected: true },
+                { key: "connectedCapture.google", expected: true },
+                { key: "connectedCapture.microsoft", expected: true },
             ],
+            capabilityMatch: "any",
             orgAdmin: false,
-            manage: [],
-            states: ["not-enabled", "ask-admin", "retry"],
+            manage: ["WORKSPACE_SETTINGS"],
+            orgWrite: null,
+            states: ["not-enabled", "retry"],
         },
         entryPoints: ["account-tabs", "contextual"],
         aliasKey: null,
@@ -346,12 +395,19 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/personal/connected-accounts",
         canonicalSection: "reviews",
         redirectsTo: "/account/connections",
+        redirectQuery: ["provider", "panel"],
+        conditionalForward: null,
         titleKey: "CommonSidebar.navCaptureReviews",
         access: {
             permissions: [],
-            capabilities: ["connectedCapture.google", "connectedCapture.microsoft"],
+            capabilities: [
+                { key: "connectedCapture.google", expected: true },
+                { key: "connectedCapture.microsoft", expected: true },
+            ],
+            capabilityMatch: "any",
             orgAdmin: false,
             manage: [],
+            orgWrite: null,
             states: ["not-enabled", "retry"],
         },
         entryPoints: ["sidebar", "command-palette"],
@@ -365,6 +421,8 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/personal/workspaces",
         canonicalSection: null,
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "Account.tabInvites",
         access: NO_ACCESS_REQUIREMENTS,
         entryPoints: ["account-tabs"],
@@ -378,6 +436,8 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/personal/notifications",
         canonicalSection: null,
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "Account.tabNotifications",
         access: NO_ACCESS_REQUIREMENTS,
         entryPoints: ["account-tabs"],
@@ -391,6 +451,8 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/personal/profile",
         canonicalSection: null,
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "Account.tabProfile",
         access: NO_ACCESS_REQUIREMENTS,
         entryPoints: ["account-tabs"],
@@ -404,6 +466,8 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/personal/security",
         canonicalSection: null,
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "Account.tabSecurity",
         access: NO_ACCESS_REQUIREMENTS,
         entryPoints: ["account-tabs"],
@@ -417,12 +481,16 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/workspace/audit-diagnostics",
         canonicalSection: "audit",
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "CommonSidebar.navAuditLog",
         access: {
             permissions: ["AUDIT_READ"],
             capabilities: [],
+            capabilityMatch: "all",
             orgAdmin: false,
             manage: [],
+            orgWrite: null,
             states: ["ask-admin", "retry"],
         },
         entryPoints: ["sidebar", "command-palette"],
@@ -436,12 +504,16 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/organization/overview",
         canonicalSection: null,
         redirectsTo: "/organization/overview",
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: null,
         access: {
             permissions: [],
             capabilities: [],
+            capabilityMatch: "all",
             orgAdmin: true,
             manage: [],
+            orgWrite: null,
             states: ["ask-admin", "retry"],
         },
         entryPoints: [],
@@ -455,12 +527,16 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/organization/ai-governance",
         canonicalSection: "ai-provider",
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "Organization.tabAi",
         access: {
             permissions: [],
             capabilities: [],
+            capabilityMatch: "all",
             orgAdmin: true,
             manage: [],
+            orgWrite: "admin",
             states: ["ask-admin", "retry"],
         },
         entryPoints: ["organization-tabs"],
@@ -474,12 +550,16 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/organization/identity",
         canonicalSection: "allowed-domains",
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "Organization.tabDomains",
         access: {
             permissions: [],
             capabilities: [],
+            capabilityMatch: "all",
             orgAdmin: true,
             manage: [],
+            orgWrite: "admin",
             states: ["ask-admin", "retry"],
         },
         entryPoints: ["organization-tabs"],
@@ -493,12 +573,16 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/organization/audit-diagnostics",
         canonicalSection: "audit",
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "Organization.tabAudit",
         access: {
             permissions: [],
             capabilities: [],
+            capabilityMatch: "all",
             orgAdmin: true,
             manage: [],
+            orgWrite: null,
             states: ["ask-admin", "retry"],
         },
         entryPoints: ["organization-tabs"],
@@ -512,12 +596,16 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/organization/data-requests",
         canonicalSection: null,
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "Organization.tabDataRequests",
         access: {
             permissions: [],
             capabilities: [],
+            capabilityMatch: "all",
             orgAdmin: true,
             manage: [],
+            orgWrite: "admin",
             states: ["ask-admin", "retry"],
         },
         entryPoints: ["organization-tabs"],
@@ -531,12 +619,16 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/organization/audit-diagnostics",
         canonicalSection: "diagnostics",
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "Organization.tabDiagnostics",
         access: {
             permissions: [],
             capabilities: [],
+            capabilityMatch: "all",
             orgAdmin: true,
             manage: [],
+            orgWrite: null,
             states: ["ask-admin", "retry"],
         },
         entryPoints: ["organization-tabs"],
@@ -550,12 +642,16 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/organization/identity",
         canonicalSection: "administrators",
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "Organization.tabMembers",
         access: {
             permissions: [],
             capabilities: [],
+            capabilityMatch: "all",
             orgAdmin: true,
             manage: [],
+            orgWrite: "owner",
             states: ["ask-admin", "retry"],
         },
         entryPoints: ["organization-tabs", "sidebar", "command-palette"],
@@ -569,12 +665,16 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/organization/overview",
         canonicalSection: null,
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "Organization.tabOverview",
         access: {
             permissions: [],
             capabilities: [],
+            capabilityMatch: "all",
             orgAdmin: true,
             manage: [],
+            orgWrite: "admin",
             states: ["ask-admin", "retry"],
         },
         entryPoints: ["organization-tabs"],
@@ -588,12 +688,16 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/organization/identity",
         canonicalSection: "sso",
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: { capability: "sso", expected: false, to: "/organization/members" },
         titleKey: "Organization.tabSso",
         access: {
             permissions: [],
-            capabilities: ["sso"],
+            capabilities: [{ key: "sso", expected: true }],
+            capabilityMatch: "all",
             orgAdmin: true,
             manage: [],
+            orgWrite: "admin",
             states: ["not-enabled", "ask-admin", "retry"],
         },
         entryPoints: ["organization-tabs"],
@@ -607,12 +711,16 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/workspace/crm",
         canonicalSection: "approval-policies",
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "CommonSidebar.navApprovalPolicies",
         access: {
             permissions: [],
             capabilities: [],
+            capabilityMatch: "all",
             orgAdmin: false,
             manage: ["DOCUMENT_MANAGE"],
+            orgWrite: null,
             states: [],
         },
         entryPoints: ["sidebar", "command-palette", "contextual"],
@@ -626,6 +734,8 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: SETTINGS_HOME_ROUTE,
         canonicalSection: null,
         redirectsTo: "/settings/members",
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "WorkspaceSettings.title",
         access: NO_ACCESS_REQUIREMENTS,
         entryPoints: [],
@@ -639,12 +749,16 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/workspace/crm",
         canonicalSection: "custom-fields",
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "WorkspaceSettings.tabCustomFields",
         access: {
             permissions: ["CUSTOM_FIELD_MANAGE"],
             capabilities: [],
+            capabilityMatch: "all",
             orgAdmin: false,
             manage: [],
+            orgWrite: null,
             states: ["ask-admin", "retry"],
         },
         entryPoints: ["settings-tabs"],
@@ -658,8 +772,27 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/workspace/data-privacy",
         canonicalSection: null,
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "WorkspaceSettings.tabData",
-        access: NO_ACCESS_REQUIREMENTS,
+        access: {
+            permissions: [],
+            capabilities: [],
+            capabilityMatch: "all",
+            orgAdmin: false,
+            manage: [
+                "ACTIVITY_CREATE",
+                "COMPANY_CREATE",
+                "CUSTOM_FIELD_MANAGE",
+                "DEAL_CREATE",
+                "NOTE_CREATE",
+                "PERSON_CREATE",
+                "TAG_MANAGE",
+                "TASK_CREATE",
+            ],
+            orgWrite: null,
+            states: [],
+        },
         entryPoints: ["settings-tabs"],
         aliasKey: null,
     },
@@ -671,12 +804,16 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/workspace/communications",
         canonicalSection: "delivery",
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "WorkspaceSettings.tabDelivery",
         access: {
             permissions: ["WORKSPACE_SETTINGS"],
             capabilities: [],
+            capabilityMatch: "all",
             orgAdmin: false,
             manage: [],
+            orgWrite: null,
             states: ["ask-admin", "retry"],
         },
         entryPoints: ["settings-tabs"],
@@ -690,12 +827,16 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/workspace/audit-diagnostics",
         canonicalSection: "diagnostics",
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "WorkspaceSettings.tabDiagnostics",
         access: {
             permissions: ["WORKSPACE_SETTINGS"],
             capabilities: [],
+            capabilityMatch: "all",
             orgAdmin: false,
             manage: [],
+            orgWrite: null,
             states: ["ask-admin", "retry"],
         },
         entryPoints: ["settings-tabs", "command-palette"],
@@ -709,12 +850,16 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/workspace/communications",
         canonicalSection: "email",
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: { capability: "mailManaged", expected: true, to: "/settings/members" },
         titleKey: "WorkspaceSettings.tabEmail",
         access: {
             permissions: ["WORKSPACE_SETTINGS"],
-            capabilities: ["mailManaged"],
+            capabilities: [{ key: "mailManaged", expected: false }],
+            capabilityMatch: "all",
             orgAdmin: false,
             manage: [],
+            orgWrite: null,
             states: ["managed", "ask-admin", "retry"],
         },
         entryPoints: ["settings-tabs"],
@@ -728,12 +873,16 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/workspace/general",
         canonicalSection: null,
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "WorkspaceSettings.tabGeneral",
         access: {
             permissions: ["WORKSPACE_SETTINGS"],
             capabilities: [],
+            capabilityMatch: "all",
             orgAdmin: false,
             manage: [],
+            orgWrite: null,
             states: ["ask-admin", "retry"],
         },
         entryPoints: ["settings-tabs"],
@@ -747,12 +896,16 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/workspace/people",
         canonicalSection: "members",
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "WorkspaceSettings.tabMembers",
         access: {
             permissions: [],
             capabilities: [],
+            capabilityMatch: "all",
             orgAdmin: false,
-            manage: ["MEMBER_MANAGE"],
+            manage: ["MEMBER_MANAGE", "WORKSPACE_SETTINGS"],
+            orgWrite: null,
             states: [],
         },
         entryPoints: ["settings-tabs", "sidebar", "command-palette", "contextual"],
@@ -766,6 +919,8 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/personal/workspaces",
         canonicalSection: null,
         redirectsTo: "/account/invites",
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: null,
         access: NO_ACCESS_REQUIREMENTS,
         entryPoints: [],
@@ -779,6 +934,8 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/personal/notifications",
         canonicalSection: null,
         redirectsTo: "/account/notifications",
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: null,
         access: NO_ACCESS_REQUIREMENTS,
         entryPoints: [],
@@ -792,12 +949,16 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/workspace/crm",
         canonicalSection: "qualification",
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "WorkspaceSettings.tabQualification",
         access: {
             permissions: ["WORKSPACE_SETTINGS"],
             capabilities: [],
+            capabilityMatch: "all",
             orgAdmin: false,
             manage: [],
+            orgWrite: null,
             states: ["ask-admin", "retry"],
         },
         entryPoints: ["settings-tabs"],
@@ -811,12 +972,16 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/workspace/people",
         canonicalSection: "roles",
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "WorkspaceSettings.tabRoles",
         access: {
             permissions: ["ROLE_MANAGE"],
             capabilities: [],
+            capabilityMatch: "all",
             orgAdmin: false,
             manage: [],
+            orgWrite: null,
             states: ["ask-admin", "retry"],
         },
         entryPoints: ["settings-tabs"],
@@ -830,6 +995,8 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/workflows",
         canonicalSection: null,
         redirectsTo: "/workflows",
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: null,
         access: NO_ACCESS_REQUIREMENTS,
         entryPoints: [],
@@ -843,6 +1010,8 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/personal/security",
         canonicalSection: null,
         redirectsTo: "/account/security",
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: null,
         access: NO_ACCESS_REQUIREMENTS,
         entryPoints: [],
@@ -856,6 +1025,8 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/organization/identity",
         canonicalSection: "sso",
         redirectsTo: "/organization/sso",
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: null,
         access: NO_ACCESS_REQUIREMENTS,
         entryPoints: [],
@@ -869,6 +1040,8 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/workflows/[workflowId]",
         canonicalSection: null,
         redirectsTo: "/workflows/[workflowId]",
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: null,
         access: NO_ACCESS_REQUIREMENTS,
         entryPoints: [],
@@ -882,12 +1055,16 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/workspace/people",
         canonicalSection: "directory",
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: "CommonSidebar.navUsers",
         access: {
             permissions: [],
             capabilities: [],
+            capabilityMatch: "all",
             orgAdmin: false,
             manage: ["MEMBER_MANAGE"],
+            orgWrite: null,
             states: [],
         },
         entryPoints: ["sidebar", "command-palette", "contextual"],
@@ -901,6 +1078,8 @@ export const SETTINGS_ENTRIES = [
         canonicalRoute: "/settings/workspace/people",
         canonicalSection: "member-detail",
         redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
         titleKey: null,
         access: NO_ACCESS_REQUIREMENTS,
         entryPoints: ["contextual"],
