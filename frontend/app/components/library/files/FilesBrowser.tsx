@@ -381,7 +381,7 @@ export default function FilesBrowser() {
                             size="icon-toolbar"
                             label={t('delete')}
                             onClick={() => setDeleting(a)}
-                            className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                            className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive dark:hover:bg-destructive/20"
                         >
                             <TrashIcon className="size-4" />
                         </IconButton>
@@ -506,7 +506,7 @@ export default function FilesBrowser() {
                                     options={SORT_KEYS.map((key) => ({ value: key, label: t(SORT_LABEL_KEY[key]) }))}
                                 />
                                 <SegmentedControl
-                                    ariaLabel={t('viewGrid')}
+                                    ariaLabel={t('displayMode')}
                                     value={view}
                                     onChange={setView}
                                     options={[

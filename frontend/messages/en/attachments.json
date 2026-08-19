@@ -51,6 +51,7 @@
     "sortLargest": "Largest",
     "viewList": "List view",
     "viewGrid": "Grid view",
+    "displayMode": "Display mode",
     "by": "by {name}",
     "unknownUser": "Unknown",
     "unknownRecord": "Unknown record",

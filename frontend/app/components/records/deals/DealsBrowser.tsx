@@ -1596,7 +1596,6 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                         { value: 'kanban', icon: <ViewColumnsIcon className="size-4" />, ariaLabel: t('kanbanView') },
                                     ]}
                                 />
-
                                 {effectiveDisplayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
                                 {effectiveDisplayMode === 'table' && (
                                     <ColumnVisibilityMenu

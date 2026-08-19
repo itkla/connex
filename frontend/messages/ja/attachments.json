@@ -51,6 +51,7 @@
     "sortLargest": "サイズが大きい順",
     "viewList": "リスト表示",
     "viewGrid": "グリッド表示",
+    "displayMode": "表示モード",
     "by": "{name}",
     "unknownUser": "不明",
     "unknownRecord": "不明なレコード",
