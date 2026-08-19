@@ -80,6 +80,11 @@ function bridgeToTarget(paths: readonly WarmPath[], targetPersonId: number): Int
  * The bridge comes from the Introductions board's own ranked feed rather than from the record's
  * raw shortest-path search, so a record inherits the server's dismissal records and bridge-warmth
  * eligibility for free and can never offer an introduction the board has retired.
+ *
+ * The whole ranked feed is read and narrowed here, which is the board's own cost paid once per
+ * record view; a viewer who may not make an introduction never pays it. When the endpoint accepts a
+ * target, pass it and drop the narrowing. A refused or failed read leaves no bridge, so the record
+ * offers no ask rather than one that could only fail.
  */
 export function ContactIntroAskProvider({
     contactId,
