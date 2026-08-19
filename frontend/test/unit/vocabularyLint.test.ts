@@ -16,6 +16,7 @@ import {
     parseBaselineEntry,
     scanMessageCatalogs,
     scopeCovers,
+    termApplies,
 } from "@/lint/vocabulary.mjs";
 
 const model = loadVocabularyModel();
@@ -138,12 +139,12 @@ describe("message catalogue vocabulary", () => {
     });
 
     it("runs the Latin-script bans against the Japanese catalog too", () => {
-        const found = baseline.map(parseBaselineEntry).filter((entry) => entry.locale === "ja" && entry.term === "ESP");
+        const esp = model.terms.find((term) => term.term === "ESP");
+        if (!esp) throw new Error("docs/PRODUCT.md §4 no longer bans ESP");
 
-        expect(found.map((entry) => entry.keyPath)).toEqual(expect.arrayContaining([
-            "WorkspaceDelivery.subtitle",
-            "WorkspaceDelivery.providerHttpEsp",
-        ]));
+        expect(esp.locale).toBe("en");
+        expect(termApplies(esp, { locale: "ja", file: "workspace.json", namespace: "WorkspaceDelivery" })).toBe(true);
+        expect(new RegExp(esp.pattern.source, esp.pattern.flags).test("メール配信サービス（ESP）経由で送信します。")).toBe(true);
     });
 
     it("bans the automation object's former name on the workflow seam only", () => {

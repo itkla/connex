@@ -233,7 +233,7 @@
         "skipped": "スキップ",
         "failed": "失敗",
         "notMeasured": "計測不可",
-        "notMeasuredHint": "SMTPは到達通知を返しません。計測するにはESPを接続してください。",
+        "notMeasuredHint": "SMTPは到達通知を返しません。計測するにはメール配信サービスを接続してください。",
         "deliveryRate": "到達率",
         "bounceRate": "バウンス率",
         "complaintRate": "苦情率",

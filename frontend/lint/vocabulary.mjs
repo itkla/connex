@@ -952,6 +952,21 @@ export function scopeCovers(scope, file, namespace) {
 }
 
 /**
+ * Whether a banned term is scanned against a message entry. A Japanese pattern runs against the
+ * Japanese catalog only, while a Latin-script term is scanned in both — Japanese copy states
+ * terms such as `ESP` and `RBAC` verbatim. The term's own scope and the §4 compliance carve-outs
+ * it records in `allowFiles` narrow it from there.
+ * @param {BannedTerm} term
+ * @param {{locale: string, file: string, namespace: string}} entry
+ * @returns {boolean}
+ */
+export function termApplies(term, entry) {
+    if (term.locale === "ja" && entry.locale !== "ja") return false;
+    if (!scopeCovers(term.scope, entry.file, entry.namespace)) return false;
+    return !matchesAnySurface(term.allowFiles, entry.file, entry.namespace);
+}
+
+/**
  * @typedef {object} MessageEntry
  * @property {string} locale
  * @property {string} file
@@ -1046,9 +1061,7 @@ export function scanMessageCatalogs(model) {
     const violations = [];
     for (const entry of messageEntries()) {
         for (const { term, expression } of compiled) {
-            if (term.locale === "ja" && entry.locale !== "ja") continue;
-            if (!scopeCovers(term.scope, entry.file, entry.namespace)) continue;
-            if (matchesAnySurface(term.allowFiles, entry.file, entry.namespace)) continue;
+            if (!termApplies(term, entry)) continue;
             const match = expression.exec(entry.value);
             if (!match) continue;
             violations.push({
