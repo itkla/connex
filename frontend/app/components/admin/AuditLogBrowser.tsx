@@ -86,6 +86,15 @@ const VERB_META: Record<string, VerbMeta> = {
     rewrap: { tone: "update", icon: ArrowPathIcon, verbKey: "verbReencrypted" },
     rewrap_failed: { tone: "update", icon: ArrowPathIcon, verbKey: "verbReencryptedFailed" },
     call: { tone: "default", icon: BoltIcon, verbKey: "verbCalled" },
+    operation: { tone: "default", icon: BoltIcon, verbKey: "verbActedOn" },
+};
+
+const PROVIDER_LABEL_KEYS: Record<string, string> = {
+    bedrock: "providerBedrock",
+    azure_openai: "providerAzureOpenAi",
+    vertex: "providerVertex",
+    openai_compatible: "providerOpenAiCompatible",
+    unresolved: "providerUnresolved",
 };
 
 const TARGET_LABEL_KEYS: Record<string, string> = {
@@ -874,7 +883,9 @@ type Translator = ReturnType<typeof useTranslations>;
 function targetText(label: string | null, t: Translator): string | null {
     if (label === null) return null;
     const key = TARGET_LABEL_KEYS[label];
-    return key === undefined ? label : t(key);
+    if (key !== undefined) return t(key);
+    const providerKey = PROVIDER_LABEL_KEYS[label.split("/")[0]];
+    return providerKey === undefined ? label : t(providerKey);
 }
 
 function auditMetadataValue(row: AuditMetadataRow, t: Translator): string {
@@ -888,6 +899,10 @@ function auditMetadataValue(row: AuditMetadataRow, t: Translator): string {
     }
     if (row.key === "target" || row.key === "purpose") {
         const key = TARGET_LABEL_KEYS[String(row.value)];
+        if (key !== undefined) return t(key);
+    }
+    if (row.key === "provider") {
+        const key = PROVIDER_LABEL_KEYS[String(row.value)];
         if (key !== undefined) return t(key);
     }
     return String(row.value);
