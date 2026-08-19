@@ -31,6 +31,9 @@ import ooo.klae.connex.backend.dto.DealDocumentDto;
 import ooo.klae.connex.backend.dto.DealLineItemsResponse;
 import ooo.klae.connex.backend.dto.DocumentApprovalDto;
 import ooo.klae.connex.backend.dto.DocumentContent;
+import ooo.klae.connex.backend.dto.GeneratedDocumentSummaryDto;
+import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -41,6 +44,7 @@ import ooo.klae.connex.backend.mappers.DocumentApprovalMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.util.LikePattern;
 
 /**
  * Generates and manages commercial documents on a deal. A generated document is an immutable,
@@ -76,6 +80,52 @@ public class DealDocumentService {
     private static final int MAX_VERSION_ATTEMPTS = 5;
     private static final int MAX_BODY_DEPTH = 50;
     private static final Pattern TOKEN_PATTERN = Pattern.compile("\\{\\{\\s*([\\w.]+)\\s*\\}\\}");
+
+    /**
+     * Every status a stored document can currently hold, as the {@code deal_document} status check
+     * constraint defines it. Wider than {@link #CLIENT_TARGET_STATUSES} because approval, delivery,
+     * and signature transitions are owned by their own services but remain filterable in the index.
+     */
+    public static final Set<String> INDEX_STATUSES = Set.of(
+        "draft", "pending_approval", "approved", "sent", "signed", "final", "superseded");
+
+    /** Every document type a template can produce. */
+    public static final Set<String> INDEX_TYPES = Set.of("quote", "proposal", "order_form", "contract");
+
+    /**
+     * One bounded page of generated documents across every deal in the workspace.
+     *
+     * <p>The per-deal reads this complements are membership-gated, and so is this index: it
+     * discloses no document a member could not already open from its parent deal, and it excludes
+     * the immutable content snapshot entirely. A generated document has no owner column of its own,
+     * so {@code memberScope} narrows by the parent deal's owner exactly as the deal list does.
+     *
+     * @param query the raw caller query over document title and deal name, or null
+     * @param statuses validated document statuses, or null for every status
+     * @param types validated document types, or null for every type
+     * @param dealId one parent deal to restrict to, or null for every deal
+     * @param memberScope the parent deal's ownership scope
+     * @param limit the page size
+     * @param offset the page offset
+     * @return the page of documents and the total it was drawn from
+     */
+    public PageResponse<GeneratedDocumentSummaryDto> getWorkspacePage(
+            String query,
+            List<String> statuses,
+            List<String> types,
+            Integer dealId,
+            MemberScope memberScope,
+            int limit,
+            int offset) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String pattern = query == null || query.isBlank() ? null : LikePattern.containing(query.trim());
+        MemberScope scope = memberScope == null ? MemberScope.allTeam() : memberScope;
+        List<GeneratedDocumentSummaryDto> items = documentMapper.getWorkspacePage(
+            workspaceId, pattern, statuses, types, dealId, scope, limit, offset);
+        long total = documentMapper.countWorkspace(
+            workspaceId, pattern, statuses, types, dealId, scope);
+        return new PageResponse<>(items, total);
+    }
 
     /** Documents on a deal, newest version first. */
     public List<DealDocumentDto> getForDeal(int dealId) {
