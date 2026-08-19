@@ -9,6 +9,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { usePermissionCheck } from '@/app/hooks/usePermissions';
 import { acceptWarmPath } from '@/app/lib/api';
 import { toastSuccess } from '@/app/lib/toast';
 import type { Contact, IntroPath } from '@/app/lib/types';
@@ -49,6 +50,18 @@ export function introMention(name: string, id: number): string {
 }
 
 /**
+ * Whether the viewer may ask for an introduction: the server requires both updating the contact and
+ * creating the follow-up task. A refused permission hides the entry point rather than offering a
+ * button that can only fail; an unresolved lookup leaves it, so a failed probe never removes an
+ * ability the viewer has.
+ */
+export function useCanAskForIntro(): boolean {
+    const personUpdate = usePermissionCheck('PERSON_UPDATE');
+    const taskCreate = usePermissionCheck('TASK_CREATE');
+    return personUpdate !== 'denied' && taskCreate !== 'denied';
+}
+
+/**
  * The action row under a contact's warmth evidence: log an interaction, schedule a follow-up dated
  * before the relationship is predicted to go cold, and — only when an intro path exists — ask for
  * the introduction. The two composer actions are handed back to the surface that owns the evidence
@@ -70,9 +83,10 @@ export default function RelationshipEvidenceActions({
     const showApiError = useApiErrorToast('Introductions');
     const [asking, setAsking] = useState(false);
     const [asked, setAsked] = useState(false);
+    const canAskForIntro = useCanAskForIntro();
 
     const { contact, introPath } = context;
-    const bridge = introPathBridge(introPath);
+    const bridge = canAskForIntro ? introPathBridge(introPath) : null;
 
     const askForIntro = async () => {
         if (!bridge || asking || asked) return;

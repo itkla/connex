@@ -29,6 +29,7 @@ import { useContactTargetSearch } from '@/app/hooks/useRecordTargetSearch';
 import {
     introMention,
     introPathBridge,
+    useCanAskForIntro,
 } from '@/app/components/records/RelationshipEvidenceActions';
 import { INTRODUCTIONS_PATH } from '@/app/components/introductions/introductionLinks';
 import type { Contact, IntroPath, PersonConnection } from '@/app/lib/types';
@@ -68,7 +69,8 @@ export default function ContactConnections({
     const [asked, setAsked] = useState(false);
     const [pickerOpen, setPickerOpen] = useState(false);
     const contactSearch = useContactTargetSearch(pickerOpen, [selected?.id]);
-    const bridge = introPathBridge(introPath);
+    const canAskForIntro = useCanAskForIntro();
+    const bridge = canAskForIntro ? introPathBridge(introPath) : null;
 
     const candidates = useMemo(
         () => contactSearch.contacts.filter(
