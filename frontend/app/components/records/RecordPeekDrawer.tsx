@@ -202,14 +202,14 @@ function RecordPeekDrawer({
                                     {position.index} / {position.total}
                                 </span>
                             )}
-                            <Button variant="ghost" size="icon-xs" aria-label={t('previous')} disabled={!hasPrev} onClick={onPrev}>
+                            <Button variant="ghost" size="icon-inline" aria-label={t('previous')} disabled={!hasPrev} onClick={onPrev}>
                                 <ChevronUpIcon className="size-4" />
                             </Button>
-                            <Button variant="ghost" size="icon-xs" aria-label={t('next')} disabled={!hasNext} onClick={onNext}>
+                            <Button variant="ghost" size="icon-inline" aria-label={t('next')} disabled={!hasNext} onClick={onNext}>
                                 <ChevronDownIcon className="size-4" />
                             </Button>
                             <DrawerClose
-                                render={<Button variant="ghost" size="icon-xs" aria-label={t('close')} />}
+                                render={<Button variant="ghost" size="icon-inline" aria-label={t('close')} />}
                             >
                                 <XMarkIcon className="size-4" />
                             </DrawerClose>
@@ -245,7 +245,7 @@ function RecordPeekDrawer({
                         <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border px-4 py-10 text-center">
                             <p className="text-sm text-muted-foreground">{t(`error_${error}`)}</p>
                             {error !== 'forbidden' && (hasNext || hasPrev) && (
-                                <Button variant="outline" size="sm" onClick={hasNext ? onNext : onPrev}>
+                                <Button variant="outline" size="toolbar" onClick={hasNext ? onNext : onPrev}>
                                     {t('goToNext')}
                                 </Button>
                             )}
@@ -262,7 +262,7 @@ function RecordPeekDrawer({
                     >
                         <Button
                             variant="brand"
-                            size="sm"
+                            size="toolbar"
                             onClick={openFull}
                             className="flex-1"
                         >
@@ -272,7 +272,7 @@ function RecordPeekDrawer({
                         {(canLogActivity || canAddNote || canCreateTask || canCopyLink) && (
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                    <Button variant="outline" size="icon-sm" aria-label={t('moreActions')}>
+                                    <Button variant="outline" size="icon-toolbar" aria-label={t('moreActions')}>
                                         <EllipsisHorizontalIcon className="size-4" />
                                     </Button>
                                 </DropdownMenuTrigger>

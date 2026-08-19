@@ -33,6 +33,7 @@ import { SearchField, FilterBar, MultiSelectFilter, type FilterChipData } from '
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
+import { SegmentedControl } from '@/components/ui/segmented-control';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
@@ -811,39 +812,19 @@ export default function TasksBrowser({
                         description={t('subtitle')}
                         actions={
                             <>
-                                <div
-                                    role="group"
-                                    aria-label={t('displayMode')}
-                                    className="hidden rounded-full bg-muted p-0.5 ring-1 ring-border md:inline-flex"
-                                >
-                                    <button
-                                        type="button"
-                                        onClick={() => setView('list')}
-                                        aria-label={t('viewList')}
-                                        aria-pressed={view === 'list'}
-                                        className={cn(
-                                            'flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97]',
-                                            view === 'list' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground',
-                                        )}
-                                    >
-                                        <QueueListIcon className="size-4" />
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setView('board')}
-                                        aria-label={t('viewBoard')}
-                                        aria-pressed={view === 'board'}
-                                        className={cn(
-                                            'flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97]',
-                                            view === 'board' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground',
-                                        )}
-                                    >
-                                        <ViewColumnsIcon className="size-4" />
-                                    </button>
-                                </div>
+                                <SegmentedControl
+                                    ariaLabel={t('displayMode')}
+                                    className="hidden md:inline-flex"
+                                    value={view}
+                                    onChange={setView}
+                                    options={[
+                                        { value: 'list', icon: <QueueListIcon className="size-4" />, ariaLabel: t('viewList') },
+                                        { value: 'board', icon: <ViewColumnsIcon className="size-4" />, ariaLabel: t('viewBoard') },
+                                    ]}
+                                />
                                 <Button
                                     variant="brand"
-                                    className="shadow-sm transition-transform active:scale-[0.98]"
+                                    size="page"
                                     aria-label={t('newAria')}
                                     onClick={() => setCreating(true)}
                                 >

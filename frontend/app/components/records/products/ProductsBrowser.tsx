@@ -203,7 +203,7 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
                     ) : searchFailed ? (
                         <div role="status" aria-live="polite" className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card px-6 py-16 text-center text-sm text-muted-foreground">
                             <span>{t('searchFailed')}</span>
-                            <Button variant="outline" size="sm" onClick={() => setSearchAttempt((attempt) => attempt + 1)}>
+                            <Button variant="outline" size="toolbar" onClick={() => setSearchAttempt((attempt) => attempt + 1)}>
                                 {t('retrySearch')}
                             </Button>
                         </div>
@@ -387,7 +387,7 @@ function ProductActions({
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon-xs" aria-label={label} className="size-10 xl:size-6">
+                <Button variant="ghost" size="icon-inline" aria-label={label} className="size-10 xl:size-6">
                     <EllipsisHorizontalIcon className="size-4" />
                 </Button>
             </DropdownMenuTrigger>

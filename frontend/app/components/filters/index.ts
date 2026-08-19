@@ -17,4 +17,3 @@ export {
     MEMBER_SCOPE_UNASSIGNED,
 } from "./MemberScopeFilter";
 export { default as SortToggle, type SortToggleOption } from "./SortToggle";
-export { default as SegmentedToggle, type Segment } from "./SegmentedToggle";

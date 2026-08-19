@@ -13,7 +13,8 @@ import RecordsRenderView from "@/app/components/records/RecordsRenderView";
 import { EmptyState } from "@/app/components/EmptyState";
 import Rise from "@/app/components/motion/Rise";
 import RecordsSortMenu from "@/app/components/records/RecordsSortMenu";
-import { SearchField, FilterBar, SegmentedToggle, type FilterChipData } from "@/app/components/filters";
+import { SearchField, FilterBar, type FilterChipData } from "@/app/components/filters";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import UserAvatar from "@/app/components/records/users/UserAvatar";
 import UserCard from "@/app/components/records/users/UserCard";
 import NewUserDialog from "@/app/components/records/users/NewUserDialog";
@@ -102,7 +103,7 @@ export default function UsersBrowser({ users }: { users: User[] }) {
     };
 
     const selectionActions = (
-        <Button variant="outline" size="sm" onClick={viewSelected}>
+        <Button variant="outline" size="toolbar" onClick={viewSelected}>
             <EyeIcon className="size-4" />
             {t("view")}
         </Button>
@@ -141,7 +142,7 @@ export default function UsersBrowser({ users }: { users: User[] }) {
                                         onSortChange={onSortChange}
                                     />
                                 )}
-                                <SegmentedToggle
+                                <SegmentedControl
                                     ariaLabel={t("displayModeAria")}
                                     value={displayMode}
                                     onChange={setDisplayMode}

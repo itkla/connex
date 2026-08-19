@@ -4,6 +4,8 @@ import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import { IconButton } from '@/components/ui/icon-button';
+import { SegmentedControl } from '@/components/ui/segmented-control';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toastError, toastInfo, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
@@ -495,15 +497,15 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
 
     const selectionActions = (
         <ButtonGroup className="rounded-full bg-muted">
-            <Button variant="outline" size="sm" onClick={openEditSheet}>
+            <Button variant="outline" size="toolbar" onClick={openEditSheet}>
                 <PencilIcon className="size-4" />
                 {t('quickEdit')}
             </Button>
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm">
+                    <IconButton variant="outline" size="icon-toolbar" label={t('moreActions')}>
                         <EllipsisVerticalIcon className="size-4" />
-                    </Button>
+                    </IconButton>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
                     {selectedPipelines.length === 1 &&
@@ -554,21 +556,14 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                             />
                         }
                         trailing={
-                            <div
-                                role="group"
-                                aria-label={t('displayModeAriaLabel')}
-                                className="inline-flex rounded-full bg-muted p-0.5 ring-1 ring-border"
-                            >
-                                <button
-                                    type="button"
-                                    onClick={() => setDisplayMode('grid')}
-                                    aria-label={t('gridViewAriaLabel')}
-                                    aria-pressed={displayMode === 'grid'}
-                                    className={`flex h-8 w-8 items-center justify-center rounded-full transition ${displayMode === 'grid' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
-                                >
-                                    <Squares2X2Icon className="size-4" />
-                                </button>
-                            </div>
+                            <SegmentedControl
+                                ariaLabel={t('displayModeAriaLabel')}
+                                value={displayMode}
+                                onChange={setDisplayMode}
+                                options={[
+                                    { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridViewAriaLabel') },
+                                ]}
+                            />
                         }
                     />
                 </Rise>

@@ -17,6 +17,7 @@ import { PlusIcon } from '@heroicons/react/24/solid';
 
 import { SearchField, FilterBar, SortToggle, type FilterChipData } from '@/app/components/filters';
 import { Button } from '@/components/ui/button';
+import { IconButton } from '@/components/ui/icon-button';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -316,13 +317,14 @@ function TagTile({ tag, reduce, onEdit, onCopy, onDelete, t }: TileProps) {
                     </button>
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                            <button
-                                type="button"
-                                aria-label={t('actionsAria', { name: tag.name })}
-                                className="flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground"
+                            <IconButton
+                                variant="ghost"
+                                size="icon-inline"
+                                label={t('actionsAria', { name: tag.name })}
+                                className="text-muted-foreground"
                             >
                                 <EllipsisHorizontalIcon className="size-4" />
-                            </button>
+                            </IconButton>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-40">
                             <DropdownMenuItem onSelect={onEdit}>

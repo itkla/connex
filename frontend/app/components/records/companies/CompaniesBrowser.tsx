@@ -35,7 +35,9 @@ import SegmentBuilder, { EMPTY_DEFINITION, segmentConditionLabel } from '@/app/c
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
 import RecordsFilterSheet from '@/app/components/records/RecordsFilterSheet';
-import { SearchField, FilterBar, SegmentedToggle, MemberScopeFilter, interpretMemberScope, MEMBER_SCOPE_ME, type FilterChipData } from '@/app/components/filters';
+import { SearchField, FilterBar, MemberScopeFilter, interpretMemberScope, MEMBER_SCOPE_ME, type FilterChipData } from '@/app/components/filters';
+import { SegmentedControl } from '@/components/ui/segmented-control';
+import { IconButton } from '@/components/ui/icon-button';
 import ArchiveRecordDialog from '@/app/components/records/ArchiveRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { useRecordReturnSelection } from '@/app/hooks/useRecordReturnSelection';
@@ -790,7 +792,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
     ];
 
     const selectionActions = showArchived ? (
-        <Button variant="outline" size="sm" onClick={() => setDeleteDialogOpen(true)}>
+        <Button variant="outline" size="toolbar" onClick={() => setDeleteDialogOpen(true)}>
             <ArchiveBoxIcon className="size-4" />
             {t('restore')}
         </Button>
@@ -798,11 +800,11 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         <ButtonGroup className="rounded-full bg-muted">
             {!allMatchingActive && (
                 <>
-                    <Button variant="outline" size="sm" onClick={viewSelected}>
+                    <Button variant="outline" size="toolbar" onClick={viewSelected}>
                         <EyeIcon className="size-4" />
                         {t('view')}
                     </Button>
-                    <Button variant="outline" size="sm" onClick={openEditSheet}>
+                    <Button variant="outline" size="toolbar" onClick={openEditSheet}>
                         <PencilIcon className="size-4" />
                         {t('quickEdit')}
                     </Button>
@@ -810,9 +812,9 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
             )}
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm">
+                    <IconButton variant="outline" size="icon-toolbar" label={t('moreActions')}>
                         <EllipsisVerticalIcon className="size-4" />
-                    </Button>
+                    </IconButton>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
                     <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setBulkTag({ open: true, mode: 'add' }); }}>
@@ -986,7 +988,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                                 mobileControls={
                                     <>
                                         {(showArchived || (companyFacets?.archivedCount ?? 0) > 0) && (
-                                            <SegmentedToggle
+                                            <SegmentedControl
                                                 ariaLabel={t('archivedScopeAria')}
                                                 value={showArchived ? 'archived' : 'active'}
                                                 onChange={(next) => setShowArchived(next === 'archived')}
@@ -1031,7 +1033,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                                         onSortChange={onSortChange}
                                     />
                                 )}
-                                <SegmentedToggle
+                                <SegmentedControl
                                     ariaLabel={t('displayModeAriaLabel')}
                                     value={displayMode}
                                     onChange={setDisplayMode}
@@ -1054,7 +1056,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                         }
                     >
                         {(showArchived || (companyFacets?.archivedCount ?? 0) > 0) && (
-                            <SegmentedToggle
+                            <SegmentedControl
                                 ariaLabel={t('archivedScopeAria')}
                                 value={showArchived ? 'archived' : 'active'}
                                 onChange={(next) => setShowArchived(next === 'archived')}

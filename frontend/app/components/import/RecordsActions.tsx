@@ -5,16 +5,10 @@ import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import { ArrowDownTrayIcon, ArrowUpTrayIcon } from '@heroicons/react/24/outline';
-import { ChevronDownIcon, PlusIcon } from '@heroicons/react/24/solid';
+import { PlusIcon } from '@heroicons/react/24/solid';
 
-import { Button } from '@/components/ui/button';
-import { ButtonGroup, ButtonGroupSeparator } from '@/components/ui/button-group';
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+import { SplitButton } from '@/components/ui/split-button';
+import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type { ExportEntity, ImportEntity } from '@/app/lib/types';
 import { useActions, useRegisterActions } from '@/app/hooks/useActions';
@@ -66,8 +60,8 @@ function isAbortError(error: unknown): boolean {
 }
 
 /**
- * Records list header actions rendered as a split button: the primary "New" action on the left,
- * joined to a dropdown holding Export and, for supported record types, Import. Export delegates to
+ * Records list header actions on the canonical {@link SplitButton}: the primary "New" verb, then a
+ * chevron menu holding Export and, for supported record types, Import. Export delegates to
  * {@code onExport}, which each browser implements against its own live filter and scope state so the
  * exported set equals the full current view. Import opens the {@link ImportDialog} wizard and calls
  * {@code onImported} after a successful commit.
@@ -197,32 +191,27 @@ export default function RecordsActions(props: RecordsActionsProps) {
 
     return (
         <>
-            <ButtonGroup>
-                <Button variant="brand" aria-label={newAriaLabel} onClick={onNew}>
-                    <PlusIcon strokeWidth={2.5} />
-                    {newLabel}
-                </Button>
-                <ButtonGroupSeparator className="bg-brand-foreground/20" />
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <Button variant="brand" size="icon" className="border-r-0 data-[state=open]:[&>svg]:rotate-180" aria-label={t('moreActions')}>
-                            <ChevronDownIcon className="size-3.5 transition-transform duration-200 ease-out motion-reduce:transition-none" />
-                        </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-60">
-                        {props.entity !== 'products' && (
-                            <DropdownMenuItem onSelect={(e) => { e.preventDefault(); openImport(); }}>
-                                <ArrowUpTrayIcon className="size-4" />
-                                {t('openImport')}
-                            </DropdownMenuItem>
-                        )}
-                        <DropdownMenuItem disabled={exportPending} aria-busy={exportPending} onSelect={runExport}>
-                            <ArrowDownTrayIcon className="size-4" />
-                            {t('exportCurrentView')}
-                        </DropdownMenuItem>
-                    </DropdownMenuContent>
-                </DropdownMenu>
-            </ButtonGroup>
+            <SplitButton
+                variant="brand"
+                size="page"
+                label={newLabel}
+                icon={<PlusIcon strokeWidth={2.5} />}
+                actionAriaLabel={newAriaLabel}
+                onClick={onNew}
+                menuLabel={t('moreActions')}
+                menuClassName="w-60"
+            >
+                {props.entity !== 'products' && (
+                    <DropdownMenuItem onSelect={(e) => { e.preventDefault(); openImport(); }}>
+                        <ArrowUpTrayIcon className="size-4" />
+                        {t('openImport')}
+                    </DropdownMenuItem>
+                )}
+                <DropdownMenuItem disabled={exportPending} aria-busy={exportPending} onSelect={runExport}>
+                    <ArrowDownTrayIcon className="size-4" />
+                    {t('exportCurrentView')}
+                </DropdownMenuItem>
+            </SplitButton>
             {props.entity !== 'products' && (
                 <ImportDialog
                     key={importGeneration}
