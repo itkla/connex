@@ -3,20 +3,19 @@ import type {
     RadarFamilyState,
     RadarLifecycleState,
     RadarPayload,
-    RadarPriority,
     RadarSignal,
 } from '@/app/lib/types';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 
-export const RADAR_FAMILIES = ['all', 'relationship_decay', 'deal_risk', 'warm_path'] as const;
+/** The signal families Radar detects, in the order their layers stack on the page. */
+export const RADAR_SIGNAL_FAMILIES = ['relationship_decay', 'deal_risk', 'warm_path'] as const;
+
+export const RADAR_FAMILIES = ['all', ...RADAR_SIGNAL_FAMILIES] as const;
 export const RADAR_STATES = ['attention', 'active', 'followed', 'snoozed', 'dismissed', 'all'] as const;
-export const RADAR_BANDS = ['now', 'soon', 'later'] as const;
 export const RADAR_STALE_AFTER_MS = 15 * 60 * 1000;
 
 export type RadarFamilyFilter = (typeof RADAR_FAMILIES)[number];
 export type RadarStateFilter = (typeof RADAR_STATES)[number];
-export type RadarBand = (typeof RADAR_BANDS)[number];
-export type RadarBandGroup = { band: RadarBand; signals: RadarSignal[] };
 
 export type RadarFilters = {
     family: RadarFamilyFilter;
@@ -201,50 +200,6 @@ export function filterRadarSignals(signals: readonly RadarSignal[], filters: Rad
         && matchesState(signal.state, filters.state)
         && (query.length === 0 || searchableText(signal).includes(query))
     ));
-}
-
-const RADAR_BAND_BY_PRIORITY: Record<RadarPriority, RadarBand> = {
-    high: 'now',
-    medium: 'soon',
-    cooling: 'soon',
-    opportunity: 'later',
-};
-
-/** Triage urgency band a ranked signal belongs to. */
-export function radarBandOf(priority: RadarPriority): RadarBand {
-    return RADAR_BAND_BY_PRIORITY[priority];
-}
-
-/**
- * Groups ranked signals into triage bands, preserving the backend rank order inside each band
- * and omitting bands that hold nothing.
- */
-export function groupRadarSignalsByBand(signals: readonly RadarSignal[]): RadarBandGroup[] {
-    return RADAR_BANDS
-        .map((band) => ({
-            band,
-            signals: signals.filter((signal) => radarBandOf(signal.priority) === band),
-        }))
-        .filter((group) => group.signals.length > 0);
-}
-
-/**
- * Counts how many signals each family would contribute under the current state and query, so the
- * family chips advertise what selecting them actually yields.
- */
-export function radarFamilyCounts(
-    signals: readonly RadarSignal[],
-    filters: Omit<RadarFilters, 'family'>,
-): Record<RadarFamilyFilter, number> {
-    const matched = filterRadarSignals(signals, { ...filters, family: 'all' });
-    const counts: Record<RadarFamilyFilter, number> = {
-        all: matched.length,
-        relationship_decay: 0,
-        deal_risk: 0,
-        warm_path: 0,
-    };
-    for (const signal of matched) counts[signal.family] += 1;
-    return counts;
 }
 
 export function unavailableRadarFamilies(families: readonly RadarFamilyState[]): RadarFamily[] {

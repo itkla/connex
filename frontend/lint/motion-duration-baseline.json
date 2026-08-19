@@ -60,7 +60,6 @@
     "app/components/overview/analytics/StageFunnel.tsx": 1,
     "app/components/overview/analytics/TeamLeaderboard.tsx": 1,
     "app/components/overview/analytics/WarmthDistribution.tsx": 1,
-    "app/components/radar/RadarSignalCard.tsx": 1,
     "app/components/records/RecordPeekDrawer.tsx": 1,
     "app/components/records/RecordStickyContext.tsx": 1,
     "app/components/records/RecordsRenderView.tsx": 4,
