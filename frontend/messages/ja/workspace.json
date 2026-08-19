@@ -830,7 +830,7 @@
         "apiKeyConfigured": "•••• {last4}（変更なし）",
         "apiKeyHint": "保存済みのキーを保持するには空欄のままにします。暗号化して保存され、表示されません。",
         "webhookTitle": "配信Webhook",
-        "webhookDescription": "メール配信サービスは、配信・バウンス・迷惑メール報告の結果をこのURLに送信します。以下でURLとシークレットを生成し、両方を配信サービス側の設定に登録してください。",
+        "webhookDescription": "メール配信サービスは、配信・バウンス・苦情の結果をこのURLに送信します。以下でURLとシークレットを生成し、両方を配信サービス側の設定に登録してください。",
         "webhookUrlLabel": "Webhook URL",
         "webhookConfiguredYes": "Webhookトークンが有効です。",
         "webhookConfiguredNo": "Webhookトークンはまだありません。",

@@ -830,7 +830,7 @@
         "apiKeyConfigured": "•••• {last4} (unchanged)",
         "apiKeyHint": "Leave blank to keep the stored key. Stored encrypted; never shown.",
         "webhookTitle": "Delivery webhook",
-        "webhookDescription": "Your email service provider reports deliveries, bounces, and spam complaints back to this URL. Generate the URL and secret below, then add both to your provider's settings.",
+        "webhookDescription": "Your email service provider reports deliveries, bounces, and complaints back to this URL. Generate the URL and secret below, then add both to your provider's settings.",
         "webhookUrlLabel": "Webhook URL",
         "webhookConfiguredYes": "A webhook token is active.",
         "webhookConfiguredNo": "No webhook token yet.",

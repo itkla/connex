@@ -727,7 +727,7 @@
             "canonicalExceptions": [],
             "narrowed": false,
             "pattern": {
-                "source": "\\btear[\\s-]+(?:downing|downed|downes|downs|down)\\b",
+                "source": "\\b(?:tearring|tearing|tearred|teared|teares|tears|tear)[\\s-]+(?:downing|downed|downes|downs|down)\\b",
                 "flags": "iu"
             },
             "sources": [

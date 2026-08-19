@@ -137,6 +137,16 @@ describe("vocabulary generator", () => {
         expect(expression(term.pattern).test("the subject of that data")).toBe(false);
     });
 
+    it("inflects the verb of a phrasal verb, not only its particle", () => {
+        const term = bannedTerm("en:tear down");
+
+        expect(expression(term.pattern).test("permanently tear down workspaces")).toBe(true);
+        expect(expression(term.pattern).test("Connex permanently tears down the organization")).toBe(true);
+        expect(expression(term.pattern).test("Connex is tearing down the organization")).toBe(true);
+        expect(expression(term.pattern).test("the tear-down starts")).toBe(true);
+        expect(expression(term.pattern).test("permanently deletes this organization")).toBe(false);
+    });
+
     it("catches a statutory state stated verb-first, not only noun-first", () => {
         const restriction = bannedTerm("en:processing restrictions");
         const suspension = bannedTerm("en:processing suspended");

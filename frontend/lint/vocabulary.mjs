@@ -29,6 +29,7 @@ const CODE_SPAN = /`([^`]+)`/g;
 const HAS_CODE_SPAN = /`[^`]+`/;
 const QUALIFIER_WORD = /\s(?:as|except|alone|when|only|unless)\s/;
 const WORD_GAP = "[\\s-]+";
+const PHRASAL_PARTICLES = new Set(["away", "back", "down", "in", "off", "out", "over", "up"]);
 const CJK_CHARACTER = /[぀-ヿ㐀-䶿一-鿿ｦ-ﾟ]/u;
 const JAPANESE_MIN_OVERLAP = 2;
 
@@ -708,19 +709,33 @@ export function inflections(word) {
 }
 
 /**
+ * The alternation matching every regular form of one word.
+ * @param {string} word
+ * @returns {string}
+ */
+function wordForms(word) {
+    const forms = inflections(word).map(escapeRegExp);
+    return forms.length > 1 ? `(?:${forms.join("|")})` : forms[0];
+}
+
+/**
  * Builds the pattern for an English term: word-bounded, case-insensitive, and matching
  * the inflections of its last word. A multi-word term accepts a hyphen between its words —
  * copy writes "data-subject request" as readily as "data subject request", and §4 bans the
- * term rather than one way of setting it. Word boundaries already stop an English term from
- * matching inside a longer canonical term, so no canonical exception is needed.
+ * term rather than one way of setting it. A phrasal verb inflects on its verb rather than on
+ * its particle, so "tear down" is also read as "tears down" and "tearing down". Word
+ * boundaries already stop an English term from matching inside a longer canonical term, so no
+ * canonical exception is needed.
  * @param {string} term
  * @returns {{pattern: SerializedPattern, canonicalExceptions: string[]}}
  */
 function englishPattern(term) {
     const words = term.split(/\s+/);
-    const lead = words.slice(0, -1).map(escapeRegExp).join(WORD_GAP);
-    const forms = inflections(words[words.length - 1]).map(escapeRegExp);
-    const tail = forms.length > 1 ? `(?:${forms.join("|")})` : forms[0];
+    const phrasal = words.length === 2 && PHRASAL_PARTICLES.has(words[1].toLowerCase());
+    const lead = phrasal
+        ? wordForms(words[0])
+        : words.slice(0, -1).map(escapeRegExp).join(WORD_GAP);
+    const tail = wordForms(words[words.length - 1]);
     return {
         pattern: { source: `\\b${lead.length > 0 ? `${lead}${WORD_GAP}` : ""}${tail}\\b`, flags: "iu" },
         canonicalExceptions: [],
