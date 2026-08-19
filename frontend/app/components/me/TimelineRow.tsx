@@ -215,20 +215,25 @@ export default function TimelineRow({
         );
     } else if (entry.kind === 'comment') {
         const { comment } = entry;
-        const commentHref = commentThreadHref(pathname, searchParams, comment.id);
         title = (
-            <Link
-                href={commentHref}
-                className="line-clamp-2 text-sm text-foreground underline-offset-2 hover:underline"
-            >
+            <p className="line-clamp-2 text-sm text-foreground">
                 <NoteContent content={comment.content ?? ''} references={comment.references} />
-            </Link>
+            </p>
         );
         subtitle = (
-            <p className="mt-0.5 text-xs text-muted-foreground">
-                {comment.author
-                    ? t('commentBy', { name: comment.author.displayName })
-                    : t('commentByRemovedMember')}
+            <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                <span>
+                    {comment.author
+                        ? t('commentBy', { name: comment.author.displayName })
+                        : t('commentByRemovedMember')}
+                </span>
+                <span aria-hidden>·</span>
+                <Link
+                    href={commentThreadHref(pathname, searchParams, comment.id)}
+                    className="text-foreground underline-offset-2 hover:underline"
+                >
+                    {t('commentViewInThread')}
+                </Link>
             </p>
         );
     } else if (entry.kind === 'lifecycle') {

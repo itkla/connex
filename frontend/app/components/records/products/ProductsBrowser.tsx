@@ -20,6 +20,7 @@ import DensityToggle from '@/app/components/records/DensityToggle';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import ProductAvailability from '@/app/components/records/products/ProductAvailability';
 import ProductCard from '@/app/components/records/products/ProductCard';
+import ProductListRow from '@/app/components/records/products/ProductListRow';
 import ProductDialog from '@/app/components/records/products/ProductDialog';
 import { formatEffectiveRange, formatTaxRate } from '@/app/components/records/products/productDisplay';
 import {
@@ -116,8 +117,13 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
             label: t('columnPrice'),
             getSortValue: (product) => product.unitPrice,
             render: (product) => (
-                <span className="tabular-nums">
+                <span className="whitespace-nowrap tabular-nums">
                     {formatCurrency(product.unitPrice, product.currency, locale)}
+                    {product.unit ? (
+                        <span className="ml-1 text-xs text-muted-foreground">
+                            {t('perUnit', { unit: product.unit })}
+                        </span>
+                    ) : null}
                 </span>
             ),
         },
@@ -195,6 +201,12 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
             : [...prev, saved].sort((a, b) => a.name.localeCompare(b.name)));
     };
 
+    /**
+     * Exports what `GET /api/exports/products` can express, which is the search and nothing else.
+     * The facets on this browser are client-side, and the endpoint takes no filter params, so the
+     * action's copy names the search rather than claiming the whole view; widening the endpoint is
+     * a backend change this surface does not make.
+     */
     const exportProducts = useCallback(
         (signal: AbortSignal, workspaceId: number) => exportProductsCsv(
             { q: trimmedQuery || undefined },
@@ -341,6 +353,7 @@ export default function ProductsBrowser({ products: initial }: { products: Produ
                                 onDelete={onDelete ? () => onDelete(item) : undefined}
                             />
                         )}
+                        renderListRow={(item) => <ProductListRow product={item} />}
                         onRowClick={editOne}
                         displayMode={effectiveDisplayMode}
                         density={density}

@@ -45,6 +45,20 @@ import { PageShell } from '@/app/components/PageShell';
 
 const SWIPE_OFFSET = 40;
 
+/**
+ * Any overlay that should swallow the calendar's single-key shortcuts. Base UI marks an open popup
+ * with `data-open` and Radix with `data-state="open"`, and both are in play here — the event peek is
+ * a Base UI popover, so matching only Radix's attribute let ArrowRight navigate out from under it.
+ */
+const OPEN_OVERLAY_SELECTOR = [
+    '[data-state="open"][role="dialog"]',
+    '[data-state="open"][role="alertdialog"]',
+    '[data-state="open"][role="menu"]',
+    '[data-open][role="dialog"]',
+    '[data-open][role="alertdialog"]',
+    '[data-open][role="menu"]',
+].join(',');
+
 const NO_FAILED_SOURCES: ReadonlyArray<CalendarSourceKey> = [];
 const NO_TRUNCATED_SOURCES: ReadonlyArray<CalendarTruncation> = [];
 
@@ -299,6 +313,7 @@ export default function CalendarShell({
     };
 
     const onSlotCreate = (startMs: number) => {
+        setPeek(null);
         const d = new Date(startMs);
         const pad = (n: number) => String(n).padStart(2, '0');
         setSlotAt(
@@ -310,22 +325,16 @@ export default function CalendarShell({
         const onKey = (e: KeyboardEvent) => {
             if (e.metaKey || e.ctrlKey || e.altKey) return;
             if (isTypingTarget(e.target)) return;
-            if (
-                document.querySelector(
-                    '[data-state="open"][role="dialog"],[data-state="open"][role="alertdialog"],[data-state="open"][role="menu"]',
-                )
-            ) {
-                return;
-            }
+            if (document.querySelector(OPEN_OVERLAY_SELECTOR)) return;
             switch (e.key) {
                 case 't': case 'T': cal.goToday(); break;
                 case 'm': case 'M': cal.setView('month'); break;
                 case 'w': case 'W': cal.setView('week'); break;
                 case 'd': case 'D': cal.setView('day'); break;
                 case 'a': case 'A': cal.setView('agenda'); break;
-                case 'g': case 'G': setGoToOpen(true); break;
-                case 'c': case 'C': setCreateOpen(true); break;
-                case '?': setHelpOpen(true); break;
+                case 'g': case 'G': setPeek(null); setGoToOpen(true); break;
+                case 'c': case 'C': setPeek(null); setCreateOpen(true); break;
+                case '?': setPeek(null); setHelpOpen(true); break;
                 case 'ArrowLeft': if (cal.view !== 'agenda') cal.goPrev(); else return; break;
                 case 'ArrowRight': if (cal.view !== 'agenda') cal.goNext(); else return; break;
                 default: return;
@@ -348,6 +357,18 @@ export default function CalendarShell({
                 return 'a';
         }
     }, [cal.view, cal.anchor]);
+
+    /**
+     * The peek is positioned against a DOM node inside the view container, which is keyed on the
+     * period and remounts on every navigation — so the popover has to die with its anchor rather
+     * than float over the next period pointing at nothing.
+     */
+    const peekScope = `${cal.view}:${periodKey}:${[...cal.visibleKinds].sort().join(',')}`;
+    const [peekScopeSeen, setPeekScopeSeen] = useState(peekScope);
+    if (peekScope !== peekScopeSeen) {
+        setPeekScopeSeen(peekScope);
+        if (peek) setPeek(null);
+    }
 
     const enableSwipe = coarse && !reduce && cal.view !== 'agenda';
 

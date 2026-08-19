@@ -307,7 +307,6 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                                     comments={commentsFromThreads(commentThreads)}
                                     currentUserId={currentUser.id}
                                     companyId={company.id}
-                                    limit={100}
                                 />
                             </div>
                         </div>

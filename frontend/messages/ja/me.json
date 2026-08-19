@@ -75,6 +75,7 @@
         "chipComment": "コメント",
         "commentBy": "{name} さんのコメント",
         "commentByRemovedMember": "退出したメンバーのコメント",
+        "commentViewInThread": "スレッドで表示",
         "emptyState": "最近のアクティビティはまだありません。",
         "edit": "編集",
         "delete": "削除",

@@ -18,6 +18,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DialogStatusCover } from "@/components/ui/dialog-status-cover";
+import ConfirmDiscardDialog from "@/app/components/ConfirmDiscardDialog";
+import { useUnsavedChangesGuard } from "@/app/hooks/useUnsavedChangesGuard";
 import { createCampaign, isFieldError } from "@/app/lib/api";
 import { useFieldErrors, quickEditErrorId } from "@/app/hooks/useFieldErrors";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
@@ -34,6 +36,10 @@ import {
  * no default would be truthful — the type is a fact about the customer's marketing, not a Connex
  * mechanism. That two-field prompt is this surface's documented D5 adaptation; everything else the
  * old create dialog collected now belongs to the builder.
+ *
+ * Short as it is, it is still a dialog that accumulates input, so it wires the discard guard
+ * `PRODUCT.md` §6 requires. The guard only interposes once a field is non-empty, so opening the
+ * prompt and pressing Escape stays instant — which is the whole point of instant-create.
  */
 export default function NewCampaignDialog({
     open,
@@ -71,9 +77,14 @@ export default function NewCampaignDialog({
         }
     }
 
+    const dirty = !isCreating
+        && !isCreated
+        && (name.trim() !== "" || type.trim() !== "");
+    const guard = useUnsavedChangesGuard({ isDirty: dirty, onClose: () => onOpenChange(false) });
+
     const handleOpenChange = (next: boolean) => {
         if (!next && (isCreating || isCreated)) return;
-        onOpenChange(next);
+        guard.onOpenChange(next);
     };
 
     const handleSubmit = async (event: FormEvent) => {
@@ -99,6 +110,7 @@ export default function NewCampaignDialog({
     };
 
     return (
+        <>
         <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
             <ResponsiveDialogContent className="gap-0 overflow-hidden p-0 sm:max-w-md">
                 <DialogStatusCover status={status} />
@@ -193,5 +205,11 @@ export default function NewCampaignDialog({
                 </ResponsiveDialogFooter>
             </ResponsiveDialogContent>
         </ResponsiveDialog>
+        <ConfirmDiscardDialog
+            open={guard.confirm.open}
+            onKeepEditing={guard.confirm.onKeepEditing}
+            onDiscard={guard.confirm.onDiscard}
+        />
+        </>
     );
 }

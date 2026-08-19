@@ -117,4 +117,36 @@ describe('the record timeline carries comments', () => {
         expect(row).toContain('commentThreadHref(pathname, searchParams, comment.id)');
         expect(row).toContain("const readOnlyEntry = entry.kind === 'lifecycle' || entry.kind === 'comment';");
     });
+
+    it('never nests an anchor inside an anchor, whatever the comment mentions', () => {
+        const row = readFileSync(
+            path.resolve(process.cwd(), 'app/components/me/TimelineRow.tsx'),
+            'utf8',
+        );
+
+        for (const match of row.matchAll(/<NoteContent/g)) {
+            const before = row.slice(0, match.index);
+            const opened = (before.match(/<Link[\s>]/g) ?? []).length;
+            const closed = (before.match(/<\/Link>/g) ?? []).length;
+
+            expect(
+                opened - closed,
+                'NoteContent renders mention and record chips as anchors, so it may never sit inside a Link',
+            ).toBe(0);
+        }
+        expect(row).toContain("{t('commentViewInThread')}");
+    });
+
+    it('re-runs the thread scroll when the linked comment changes, not once per mount', () => {
+        const section = readFileSync(
+            path.resolve(process.cwd(), 'app/components/records/comments/CommentsSection.tsx'),
+            'utf8',
+        );
+        const reset = section.slice(
+            section.indexOf('highlightScrolled.current = false'),
+            section.indexOf('highlightScrolled.current = false') + 90,
+        );
+
+        expect(reset).toContain('[highlightedCommentId]');
+    });
 });

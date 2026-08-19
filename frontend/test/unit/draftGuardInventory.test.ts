@@ -127,6 +127,7 @@ describe("draft-guard inventory", () => {
             "app/components/activity/activities/ActivityDialog.tsx",
             "app/components/activity/tasks/TaskDialog.tsx",
             "app/components/marketing/campaigns/EditCampaignSheet.tsx",
+            "app/components/marketing/campaigns/NewCampaignDialog.tsx",
             "app/components/records/quick-edit/QuickEditSheetShell.tsx",
             "app/components/reports/GoalDialog.tsx",
             "app/components/reports/ScheduleDialog.tsx",

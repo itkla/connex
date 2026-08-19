@@ -75,6 +75,7 @@
         "chipComment": "comment",
         "commentBy": "Comment from {name}",
         "commentByRemovedMember": "Comment from a removed member",
+        "commentViewInThread": "View in thread",
         "emptyState": "Nothing recent yet.",
         "edit": "Edit",
         "delete": "Delete",

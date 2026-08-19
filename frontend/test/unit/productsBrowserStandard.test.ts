@@ -72,6 +72,17 @@ describe('the products catalog follows the Records-browser standard', () => {
         expect(browser).not.toContain('useRecordPeekController');
     });
 
+    it('keeps the phone list and the table carrying what the catalog rows mean', () => {
+        const browser = source(BROWSER);
+        const listRow = source('app/components/records/products/ProductListRow.tsx');
+
+        expect(browser).toContain('renderListRow={(item) => <ProductListRow product={item} />}');
+        expect(browser).toContain("{t('perUnit', { unit: product.unit })}");
+        for (const fact of ["t('inactive')", "t('recurring')", 'formatTaxRate', 'formatEffectiveRange']) {
+            expect(listRow, `the phone row dropped ${fact}`).toContain(fact);
+        }
+    });
+
     it('states a tax rate as a percentage and an absent one as an em dash', () => {
         expect(formatTaxRate(product({ taxRate: 10 }), 'en')).toBe('10%');
         expect(formatTaxRate(product(), 'en')).toBe('—');
