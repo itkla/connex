@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { ChevronDownIcon } from '@heroicons/react/24/outline';
 
@@ -13,9 +14,11 @@ import {
 import { type DealStageDistribution, type Pipeline, type Stage } from '@/app/lib/types';
 import { formatCompactCurrency } from '@/app/lib/utils';
 import { classifyStage } from '@/app/components/records/deals/dealOutcome';
+import { stageDealsHref } from '@/app/components/records/deals/dealLinks';
 
 type Row = {
     id: number;
+    pipelineId: number;
     name: string;
     count: number;
     value: number;
@@ -88,6 +91,7 @@ export default function StageFunnel({
             if (count <= 0) continue;
             rows.push({
                 id: stage.id,
+                pipelineId: activeId,
                 name: stage.name,
                 count,
                 value: entry?.openValue ?? 0,
@@ -141,24 +145,32 @@ export default function StageFunnel({
                     {rows.map((row) => {
                         const width = Math.max(6, (row.value / maxValue) * 100);
                         return (
-                            <li key={row.id} className="group">
-                                <div className="mb-1 flex items-baseline justify-between gap-3 text-sm">
-                                    <span className="min-w-0 truncate font-medium text-foreground">{row.name}</span>
-                                    <span className="shrink-0 tabular-nums text-muted-foreground">
-                                        {t('deals', { count: row.count })}
-                                    </span>
-                                </div>
-                                <div className="flex items-center gap-3">
-                                    <div className="h-7 flex-1 overflow-hidden rounded-md bg-muted">
-                                        <div
-                                            className="h-full rounded-md transition-[width] duration-500 ease-out group-hover:brightness-95 motion-reduce:transition-none"
-                                            style={{ width: `${width}%`, backgroundColor: row.fill }}
-                                        />
+                            <li key={row.id}>
+                                <Link
+                                    href={stageDealsHref(row.pipelineId, row.id)}
+                                    aria-label={t('stageDrillThrough', { stage: row.name, count: row.count })}
+                                    className="group block rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                                >
+                                    <div className="mb-1 flex items-baseline justify-between gap-3 text-sm">
+                                        <span className="min-w-0 truncate font-medium text-foreground group-hover:underline group-hover:underline-offset-4">
+                                            {row.name}
+                                        </span>
+                                        <span className="shrink-0 tabular-nums text-muted-foreground">
+                                            {t('deals', { count: row.count })}
+                                        </span>
                                     </div>
-                                    <span className="w-16 shrink-0 text-right text-sm tabular-nums text-foreground">
-                                        {formatCompactCurrency(row.value, currency, locale)}
-                                    </span>
-                                </div>
+                                    <div className="flex items-center gap-3">
+                                        <div className="h-7 flex-1 overflow-hidden rounded-md bg-muted">
+                                            <div
+                                                className="h-full rounded-md transition-[width] duration-500 ease-out group-hover:brightness-95 motion-reduce:transition-none"
+                                                style={{ width: `${width}%`, backgroundColor: row.fill }}
+                                            />
+                                        </div>
+                                        <span className="w-16 shrink-0 text-right text-sm tabular-nums text-foreground">
+                                            {formatCompactCurrency(row.value, currency, locale)}
+                                        </span>
+                                    </div>
+                                </Link>
                             </li>
                         );
                     })}

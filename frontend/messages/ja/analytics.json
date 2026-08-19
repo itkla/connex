@@ -108,7 +108,8 @@
     "subtitle": "{pipeline} の進行中の案件",
     "morePipelines": "他 {count} 件",
     "deals": "{count} 件の案件",
-    "empty": "表示できる進行中の案件がありません"
+    "empty": "表示できる進行中の案件がありません",
+    "stageDrillThrough": "{stage}：進行中の案件 {count} 件を案件一覧で開く"
   },
   "AnalyticsWinRate": {
     "subtitle": "今期間にクローズした案件",
@@ -168,7 +169,8 @@
     "summary": "90日以内に冷え込むと予測される連絡先",
     "bucket_soon": "30日以内",
     "bucket_mid": "31〜60日",
-    "bucket_later": "61〜90日"
+    "bucket_later": "61〜90日",
+    "bucketDrillThrough": "{bucket}：冷え込みつつある連絡先 {count} 件をレーダーで開く"
   },
   "AnalyticsDealRisk": {
     "empty": "現在リスクのある進行中案件はありません。",
@@ -179,7 +181,8 @@
     "factor_closing_soon_quiet": "クローズ間近だが静か",
     "factor_stalled": "停滞",
     "factor_stakeholder_cold": "関係者が冷え込み",
-    "factor_no_stakeholders": "関係者なし"
+    "factor_no_stakeholders": "関係者なし",
+    "levelDrillThrough": "{level}：該当する案件 {count} 件を案件一覧で開く"
   },
   "AnalyticsTaskStatus": {
     "empty": "タスクがまだありません",
