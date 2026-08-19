@@ -32,6 +32,7 @@ import CustomFieldRows from "@/app/components/records/CustomFieldRows";
 import ContactLeadPanel from "@/app/components/records/contacts/ContactLeadPanel";
 import EngineEvaluationPanel from "@/app/components/records/EngineEvaluationPanel";
 import RecordSignalsPanel from "@/app/components/records/RecordSignalsPanel";
+import { ContactIntroAskProvider } from "@/app/components/records/contacts/contactIntroAsk";
 import RecordDetailSection from "@/app/components/records/RecordDetailSection";
 import { formatCompactCurrency, formatDate, formatDateTime, formatShortDate } from "@/app/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
@@ -117,6 +118,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
         : null;
 
     return (
+        <ContactIntroAskProvider contactId={contact.id} contactName={contact.name}>
         <PageShell tier="wide">
                 <Rise>
                     <CrumbLabel value={contact.name} />
@@ -175,7 +177,6 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                                     companyId: contact.companyId ?? contact.company?.id ?? null,
                                                     currentUserId: currentUser.id,
                                                     goesColdAt: evidence.temperature.goesColdAt ?? null,
-                                                    introPath,
                                                 }}
                                             />
                                         ) : null}
@@ -457,5 +458,6 @@ export default async function ContactPage({ params }: ContactPageProps) {
                     </RecordDetailSection>
                 </Rise>
         </PageShell>
+        </ContactIntroAskProvider>
     );
 }

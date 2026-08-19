@@ -16,21 +16,15 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastError } from '@/app/lib/toast';
 import {
-    acceptWarmPath,
     addContactConnection,
     getContactConnections,
     getContactIntroPath,
     removeContactConnection,
 } from '@/app/lib/api';
-import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useContactTargetSearch } from '@/app/hooks/useRecordTargetSearch';
-import {
-    introMention,
-    introPathBridge,
-    useCanAskForIntro,
-} from '@/app/components/records/RelationshipEvidenceActions';
+import { useContactIntroAsk } from '@/app/components/records/contacts/contactIntroAsk';
 import { INTRODUCTIONS_PATH } from '@/app/components/introductions/introductionLinks';
 import type { Contact, IntroPath, PersonConnection } from '@/app/lib/types';
 
@@ -59,18 +53,14 @@ export default function ContactConnections({
 }) {
     const t = useTranslations('ContactConnections');
     const tIntro = useTranslations('Introductions');
-    const showApiError = useApiErrorToast('Introductions');
     const [connections, setConnections] = useState(initialConnections);
     const [introPath, setIntroPath] = useState(initialIntroPath);
     const [selected, setSelected] = useState<Contact | null>(null);
     const [type, setType] = useState<string>('knows');
     const [busy, setBusy] = useState(false);
-    const [asking, setAsking] = useState(false);
-    const [asked, setAsked] = useState(false);
     const [pickerOpen, setPickerOpen] = useState(false);
     const contactSearch = useContactTargetSearch(pickerOpen, [selected?.id]);
-    const canAskForIntro = useCanAskForIntro();
-    const bridge = canAskForIntro ? introPathBridge(introPath) : null;
+    const { bridge, asking, asked, ask } = useContactIntroAsk();
 
     const candidates = useMemo(
         () => contactSearch.contacts.filter(
@@ -103,27 +93,6 @@ export default function ContactConnections({
             toastError(err instanceof Error ? err.message : t('addFailed'));
         } finally {
             setBusy(false);
-        }
-    };
-
-    const askForIntro = async () => {
-        if (!bridge || asking || asked) return;
-        setAsking(true);
-        try {
-            await acceptWarmPath({
-                targetPersonId: contactId,
-                bridgePersonId: bridge.personId,
-                taskDescription: tIntro('acceptTaskDescription', {
-                    bridge: introMention(bridge.personName, bridge.personId),
-                    target: introMention(contactName, contactId),
-                }),
-            });
-            setAsked(true);
-            toastSuccess(tIntro('acceptToast', { name: contactName }));
-        } catch (err: unknown) {
-            showApiError(err, 'acceptFailed');
-        } finally {
-            setAsking(false);
         }
     };
 
@@ -185,11 +154,11 @@ export default function ContactConnections({
                         variant="secondary"
                         className="mt-3"
                         disabled={asking || asked}
-                        onClick={() => void askForIntro()}
-                        title={t('askIntroVia', { name: bridge.personName })}
+                        onClick={ask}
+                        title={tIntro('askIntroVia', { name: bridge.personName })}
                     >
                         <UserPlusIcon className="size-4" />
-                        {asked ? t('introAsked') : tIntro('askIntro')}
+                        {asked ? tIntro('introAsked') : tIntro('askIntro')}
                     </Button>
                 ) : null}
             </div>

@@ -83,6 +83,7 @@
         "peopleOnThisDealTooltipShort": "この案件に紐づく関係者です。",
         "peopleOnThisDealTooltipLong": "この案件に紐づく関係者の一覧です。タスクへの紐付け・解除を通じて、このリストへの追加や削除ができます。",
         "noPeopleAssociated": "この案件に紐づく関係者はいません。",
+        "warmthUnavailable": "温度感を取得できません",
         "timeline": "タイムライン",
         "timelineTooltip": "この案件に紐づくアクティビティ、タスク、メモのタイムラインです。",
         "statusWon": "受注",

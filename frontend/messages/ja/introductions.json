@@ -67,6 +67,8 @@
         "reachRewarm": "関係の再加温",
         "reachNew": "新規リーチ",
         "askIntro": "紹介を依頼",
+        "askIntroVia": "{name} さんに紹介を依頼",
+        "introAsked": "紹介を依頼済み",
         "evidenceConnection": "直接のつながり",
         "evidenceColleagues": "{company} の同僚",
         "evidenceColleaguesUnnamed": "現在の同僚",

@@ -2581,6 +2581,15 @@ export function getIntroOverviewResultFromCookie(
     );
 }
 
+/**
+ * The ranked warm-path feed the Introductions board reads — already filtered by the server's own
+ * dismissal records and bridge-warmth eligibility. Any surface offering an introduction reads this,
+ * so no surface can offer an ask the board would not.
+ */
+export function getWarmPaths(limit?: number, init: RequestInit = {}) {
+    return getJson<Types.WarmPath[]>(`/api/introductions/paths${buildQuery({ limit })}`, init);
+}
+
 /** Accepts a warm path: the backend creates the follow-up task and retires the avenue. */
 export function acceptWarmPath(payload: Types.WarmPathPayload, init: RequestInit = {}) {
     return postJson<Types.Task>(`/api/introductions/paths/accept`, payload, init);

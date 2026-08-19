@@ -55,6 +55,11 @@ function warmPathBridge(signal: RadarSignal): { id: number; label: string } | un
  * taken here is the same decision Radar shows. The evaluation switches a record owns are absorbed
  * as this block's last rows, because what the record contributes to Radar belongs beside what
  * Radar says about it. A read that fails says so rather than rendering as "no signals".
+ *
+ * The feed is read whole and narrowed to this subject in the client: `GET /api/radar` returns every
+ * active signal for the actor with no server-side cap, so the narrowing is complete rather than a
+ * page of it. It is not cheap — the record pays for the whole workspace's feed. When the endpoint
+ * accepts `subjectType`/`subjectId`, pass them and drop the client filter.
  */
 export default function RecordSignalsPanel({
     subject,
@@ -256,13 +261,18 @@ export default function RecordSignalsPanel({
                                 )}
                                 onCreateTask={() => void openTask(signal)}
                                 onRefreshEvidence={refresh}
-                                onOpenContext={refresh}
-                                showOpenContext={false}
                             />
                         ))}
                     </ol>
                 )}
-                {evaluation}
+                {evaluation ? (
+                    <div className="border-t border-border pt-4">
+                        <p className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                            {t('evaluationHeading')}
+                        </p>
+                        {evaluation}
+                    </div>
+                ) : null}
             </div>
         </section>
     );

@@ -170,7 +170,7 @@
     "bucket_soon": "30日以内",
     "bucket_mid": "31〜60日",
     "bucket_later": "61〜90日",
-    "bucketDrillThrough": "{bucket}：冷え込みつつある連絡先 {count} 件をレーダーで開く"
+    "openCoolingInRadar": "レーダーで対応する"
   },
   "AnalyticsDealRisk": {
     "empty": "現在リスクのある進行中案件はありません。",

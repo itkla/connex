@@ -423,16 +423,15 @@
     "unknownModel": "不明",
     "actionsTitle": "次にできること",
     "actionLogInteraction": "やり取りを記録",
-    "actionScheduleFollowUp": "フォローアップを予定",
-    "actionAskIntroVia": "{name} さんに紹介を依頼します",
-    "actionIntroAsked": "紹介を依頼済み",
+    "actionScheduleFollowUp": "フォローアップを設定",
     "followUpDescription": "{name} さんとの関係が冷え込む前にフォローアップする"
   },
   "RecordSignals": {
     "title": "シグナル",
     "openInRadar": "レーダーで開く",
     "empty": "このレコードに関するシグナルは現在ありません。レーダーが温度感・案件リスク・紹介ルートを見守り、対応すべきことがあればここに表示します。",
-    "unavailable": "シグナルを一時的に取得できません。このレコードの情報は変わっていません。しばらくしてからもう一度お試しください。"
+    "unavailable": "シグナルを一時的に取得できません。このレコードの情報は変わっていません。しばらくしてからもう一度お試しください。",
+    "evaluationHeading": "レーダーの監視設定"
   },
   "RecordPeek": {
     "type_company": "会社",

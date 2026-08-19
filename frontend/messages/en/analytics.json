@@ -170,7 +170,7 @@
     "bucket_soon": "Within 30 days",
     "bucket_mid": "31–60 days",
     "bucket_later": "61–90 days",
-    "bucketDrillThrough": "{bucket}: open the {count, plural, one {# cooling contact} other {# cooling contacts}} in Radar"
+    "openCoolingInRadar": "Work these in Radar"
   },
   "AnalyticsDealRisk": {
     "empty": "No open deals are at risk right now.",

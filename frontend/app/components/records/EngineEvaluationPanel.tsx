@@ -13,8 +13,9 @@ import { cn } from '@/lib/utils';
 type PanelSurface = {
     className?: string;
     /**
-     * Renders the switch rows alone, without the section heading or card chrome, so a surrounding
-     * block (the record Signals block) can own them as its own last rows.
+     * Renders the switch rows alone, without the section heading, card chrome, or separator, so a
+     * surrounding block (the record Signals block) can own them as its own last rows and label them
+     * in its own voice.
      */
     embedded?: boolean;
 };
@@ -92,9 +93,7 @@ export default function EngineEvaluationPanel(props: PanelProps) {
             <div
                 className={cn(
                     'divide-y divide-border',
-                    embedded
-                        ? 'border-t border-border'
-                        : 'overflow-hidden rounded-2xl border border-border bg-card',
+                    !embedded && 'overflow-hidden rounded-2xl border border-border bg-card',
                 )}
             >
                 {rows.map((row) => (

@@ -424,15 +424,14 @@
     "actionsTitle": "What to do next",
     "actionLogInteraction": "Log an interaction",
     "actionScheduleFollowUp": "Schedule a follow-up",
-    "actionAskIntroVia": "Ask {name} to make the introduction",
-    "actionIntroAsked": "Intro requested",
     "followUpDescription": "Follow up with {name} before the relationship cools"
   },
   "RecordSignals": {
     "title": "Signals",
     "openInRadar": "Open in Radar",
     "empty": "No signals about this record right now. Radar watches warmth, deal risk, and intro paths, and anything worth acting on shows up here.",
-    "unavailable": "Signals are temporarily unavailable. Nothing about this record has changed — try again in a moment."
+    "unavailable": "Signals are temporarily unavailable. Nothing about this record has changed — try again in a moment.",
+    "evaluationHeading": "What Radar watches here"
   },
   "RecordPeek": {
     "type_company": "Company",

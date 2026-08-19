@@ -67,6 +67,8 @@
         "reachRewarm": "Re-warm",
         "reachNew": "New reach",
         "askIntro": "Ask for intro",
+        "askIntroVia": "Ask {name} to make the introduction",
+        "introAsked": "Intro requested",
         "evidenceConnection": "Direct connection",
         "evidenceColleagues": "Colleagues at {company}",
         "evidenceColleaguesUnnamed": "Current colleagues",

@@ -40,9 +40,11 @@ type RadarSignalCardProps = {
     onDismiss: () => void;
     onCreateTask: () => void;
     onRefreshEvidence: () => void;
-    onOpenContext: () => void;
-    /** Omit the open-the-record action on a surface that already *is* the record. */
-    showOpenContext?: boolean;
+    /**
+     * Opens the record the signal is about. Omit it on a surface that already *is* that record,
+     * which also removes the action rather than offering a link back to where the user stands.
+     */
+    onOpenContext?: () => void;
 };
 
 const SUBJECT_ICONS = {
@@ -105,7 +107,6 @@ export default function RadarSignalCard({
     onCreateTask,
     onRefreshEvidence,
     onOpenContext,
-    showOpenContext = true,
 }: RadarSignalCardProps) {
     const t = useTranslations('Radar');
     const locale = useLocale();
@@ -359,7 +360,7 @@ export default function RadarSignalCard({
                         <div
                             className={cn(
                                 'grid items-center gap-2 lg:contents',
-                                showOpenContext ? 'grid-cols-[1fr_1fr_auto]' : 'grid-cols-[1fr_auto]',
+                                onOpenContext ? 'grid-cols-[1fr_1fr_auto]' : 'grid-cols-[1fr_auto]',
                             )}
                         >
                             <Button
@@ -399,7 +400,7 @@ export default function RadarSignalCard({
                                 {signal.taskId != null ? <CheckCircleIcon aria-hidden /> : <ClipboardDocumentCheckIcon aria-hidden />}
                                 {signal.taskId != null ? t('actions.taskCreated') : t('actions.createTask')}
                             </Button>
-                            {showOpenContext ? (
+                            {onOpenContext ? (
                                 <Button
                                     type="button"
                                     size="sm"

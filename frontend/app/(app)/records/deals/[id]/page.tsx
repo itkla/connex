@@ -42,6 +42,7 @@ import {
     type DealPerson,
     type DealStageHistory,
     type Note,
+    type RelationshipTemperature,
     type Stage,
     type Tag,
     type Task,
@@ -215,9 +216,15 @@ export default async function DealPage({ params }: DealPageProps) {
     for (const t of tasks) bucket(parseMysqlDateTime(t.createdAt), 'tasks');
     for (const n of notes) bucket(parseMysqlDateTime(n.createdAt), 'notes');
 
-    const warmthByPerson = new Map(
-        (await getContactTemperatures(personSeeds.map((person) => person.id), init).catch(() => []))
-            .map((temperature) => [temperature.id, temperature]),
+    const stakeholderWarmth = await getContactTemperatures(
+        personSeeds.map((person) => person.id),
+        init,
+    ).then(
+        (temperatures) => ({
+            read: true,
+            byPerson: new Map(temperatures.map((temperature) => [temperature.id, temperature])),
+        }),
+        () => ({ read: false, byPerson: new Map<number, RelationshipTemperature>() }),
     );
     const citationTitles = buildCitationTitles(
         deal.id,
@@ -381,7 +388,15 @@ export default async function DealPage({ params }: DealPageProps) {
                                                                 </p>
                                                             ) : null}
                                                             <div className="mt-1">
-                                                                <WarmthPill temp={warmthByPerson.get(person.id)} />
+                                                                {stakeholderWarmth.read ? (
+                                                                    <WarmthPill
+                                                                        temp={stakeholderWarmth.byPerson.get(person.id)}
+                                                                    />
+                                                                ) : (
+                                                                    <span className="text-xs text-muted-foreground">
+                                                                        {t('warmthUnavailable')}
+                                                                    </span>
+                                                                )}
                                                             </div>
                                                         </div>
                                                         {role ? (
