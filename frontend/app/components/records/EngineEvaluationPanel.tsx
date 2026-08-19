@@ -10,9 +10,18 @@ import { updateContactEvaluation, updateDealEvaluation } from '@/app/lib/api';
 import { toastError } from '@/app/lib/toast';
 import { cn } from '@/lib/utils';
 
+type PanelSurface = {
+    className?: string;
+    /**
+     * Renders the switch rows alone, without the section heading or card chrome, so a surrounding
+     * block (the record Signals block) can own them as its own last rows.
+     */
+    embedded?: boolean;
+};
+
 type PanelProps =
-    | { kind: 'contact'; id: number; riskExcluded: boolean; introExcluded: boolean; className?: string }
-    | { kind: 'deal'; id: number; riskExcluded: boolean; className?: string };
+    | ({ kind: 'contact'; id: number; riskExcluded: boolean; introExcluded: boolean } & PanelSurface)
+    | ({ kind: 'deal'; id: number; riskExcluded: boolean } & PanelSurface);
 
 /**
  * Per-record engine-evaluation opt-outs (issue #358): switches that include or exclude the record
@@ -75,10 +84,19 @@ export default function EngineEvaluationPanel(props: PanelProps) {
                   },
               ];
 
+    const embedded = props.embedded ?? false;
+
     return (
-        <div className={cn('mt-6', props.className)}>
-            <SectionHeader title={t('title')} />
-            <div className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+        <div className={cn(!embedded && 'mt-6', props.className)}>
+            {embedded ? null : <SectionHeader title={t('title')} />}
+            <div
+                className={cn(
+                    'divide-y divide-border',
+                    embedded
+                        ? 'border-t border-border'
+                        : 'overflow-hidden rounded-2xl border border-border bg-card',
+                )}
+            >
                 {rows.map((row) => (
                     <div key={row.key} className="flex items-center justify-between gap-4 px-6 py-4">
                         <div className="min-w-0">

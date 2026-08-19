@@ -31,6 +31,7 @@ import CommentsSection from "@/app/components/records/comments/CommentsSection";
 import CustomFieldRows from "@/app/components/records/CustomFieldRows";
 import ContactLeadPanel from "@/app/components/records/contacts/ContactLeadPanel";
 import EngineEvaluationPanel from "@/app/components/records/EngineEvaluationPanel";
+import RecordSignalsPanel from "@/app/components/records/RecordSignalsPanel";
 import RecordDetailSection from "@/app/components/records/RecordDetailSection";
 import { formatCompactCurrency, formatDate, formatDateTime, formatShortDate } from "@/app/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
@@ -311,16 +312,6 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                 className="mt-0"
                             />
                         ) : null}
-
-                        {ownsContact ? (
-                            <EngineEvaluationPanel
-                                kind="contact"
-                                id={contact.id}
-                                riskExcluded={contact.riskExcluded ?? false}
-                                introExcluded={contact.introExcluded ?? false}
-                                className="mt-0"
-                            />
-                        ) : null}
                     </aside>
 
                     <Rise delay={0.06} className="flex min-w-0 flex-col gap-8">
@@ -366,6 +357,21 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                     viewHref={companyDealsHref(contact.companyId ?? contact.company?.id)}
                                 />
                             </div>
+                        </RecordDetailSection>
+
+                        <RecordDetailSection recordKind="contact" section="relationship">
+                            <RecordSignalsPanel
+                                subject={{ type: "person", id: contact.id, label: contact.name }}
+                                evaluation={ownsContact ? (
+                                    <EngineEvaluationPanel
+                                        kind="contact"
+                                        id={contact.id}
+                                        riskExcluded={contact.riskExcluded ?? false}
+                                        introExcluded={contact.introExcluded ?? false}
+                                        embedded
+                                    />
+                                ) : undefined}
+                            />
                         </RecordDetailSection>
 
                         <RecordDetailSection recordKind="contact" section="activity">

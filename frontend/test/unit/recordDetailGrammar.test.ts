@@ -40,21 +40,24 @@ describe('record detail grammar', () => {
         const files = source.indexOf('section="files"');
         const history = source.indexOf('section="history"');
         const chip = source.indexOf('<WarmthEvidenceChip');
+        const signals = source.indexOf('<RecordSignalsPanel');
         const evaluation = source.indexOf('<EngineEvaluationPanel');
         const identityClose = source.indexOf('</RecordDetailSection>', source.indexOf('section="identity"'));
 
         expect(profile).toBeGreaterThan(-1);
         expect(metrics).toBeGreaterThan(profile);
-        expect(relationship).toBe(-1);
-        expect(activity).toBeGreaterThan(metrics);
+        expect(relationship).toBeGreaterThan(metrics);
+        expect(activity).toBeGreaterThan(relationship);
         expect(related).toBeGreaterThan(activity);
         expect(files).toBeGreaterThan(related);
         expect(history).toBeGreaterThan(files);
         expect(chip).toBeGreaterThan(-1);
         expect(chip).toBeLessThan(identityClose);
         expect(source).not.toContain('<RelationshipEvidencePanel');
-        expect(evaluation).toBeGreaterThan(profile);
-        expect(evaluation).toBeLessThan(metrics);
+        expect(signals).toBeGreaterThan(relationship);
+        expect(signals).toBeLessThan(activity);
+        expect(evaluation).toBeGreaterThan(signals);
+        expect(evaluation).toBeLessThan(activity);
         expect(source).toContain('tier="wide"');
         expect(source).not.toContain('xl:sticky');
         expect(source.indexOf('<EngineEvaluationPanel', evaluation + 1)).toBe(-1);

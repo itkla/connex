@@ -428,6 +428,12 @@
     "actionIntroAsked": "Intro requested",
     "followUpDescription": "Follow up with {name} before the relationship cools"
   },
+  "RecordSignals": {
+    "title": "Signals",
+    "openInRadar": "Open in Radar",
+    "empty": "No signals about this record right now. Radar watches warmth, deal risk, and intro paths, and anything worth acting on shows up here.",
+    "unavailable": "Signals are temporarily unavailable. Nothing about this record has changed — try again in a moment."
+  },
   "RecordPeek": {
     "type_company": "Company",
     "type_person": "Contact",

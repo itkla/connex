@@ -428,6 +428,12 @@
     "actionIntroAsked": "紹介を依頼済み",
     "followUpDescription": "{name} さんとの関係が冷え込む前にフォローアップする"
   },
+  "RecordSignals": {
+    "title": "シグナル",
+    "openInRadar": "レーダーで開く",
+    "empty": "このレコードに関するシグナルは現在ありません。レーダーが温度感・案件リスク・紹介ルートを見守り、対応すべきことがあればここに表示します。",
+    "unavailable": "シグナルを一時的に取得できません。このレコードの情報は変わっていません。しばらくしてからもう一度お試しください。"
+  },
   "RecordPeek": {
     "type_company": "会社",
     "type_person": "連絡先",

@@ -41,6 +41,8 @@ type RadarSignalCardProps = {
     onCreateTask: () => void;
     onRefreshEvidence: () => void;
     onOpenContext: () => void;
+    /** Omit the open-the-record action on a surface that already *is* the record. */
+    showOpenContext?: boolean;
 };
 
 const SUBJECT_ICONS = {
@@ -103,6 +105,7 @@ export default function RadarSignalCard({
     onCreateTask,
     onRefreshEvidence,
     onOpenContext,
+    showOpenContext = true,
 }: RadarSignalCardProps) {
     const t = useTranslations('Radar');
     const locale = useLocale();
@@ -353,7 +356,12 @@ export default function RadarSignalCard({
                                 <XMarkIcon aria-hidden />
                             </Button>
                         </div>
-                        <div className="grid grid-cols-[1fr_1fr_auto] items-center gap-2 lg:contents">
+                        <div
+                            className={cn(
+                                'grid items-center gap-2 lg:contents',
+                                showOpenContext ? 'grid-cols-[1fr_1fr_auto]' : 'grid-cols-[1fr_auto]',
+                            )}
+                        >
                             <Button
                                 type="button"
                                 variant="secondary"
@@ -391,17 +399,19 @@ export default function RadarSignalCard({
                                 {signal.taskId != null ? <CheckCircleIcon aria-hidden /> : <ClipboardDocumentCheckIcon aria-hidden />}
                                 {signal.taskId != null ? t('actions.taskCreated') : t('actions.createTask')}
                             </Button>
-                            <Button
-                                type="button"
-                                size="sm"
-                                className="min-h-11 lg:min-h-9"
-                                onClick={onOpenContext}
-                                disabled={busy}
-                                aria-label={t('actions.openContextNamed', { subject: signal.subject.label })}
-                            >
-                                <ArrowTopRightOnSquareIcon aria-hidden />
-                                {t('actions.openContext')}
-                            </Button>
+                            {showOpenContext ? (
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    className="min-h-11 lg:min-h-9"
+                                    onClick={onOpenContext}
+                                    disabled={busy}
+                                    aria-label={t('actions.openContextNamed', { subject: signal.subject.label })}
+                                >
+                                    <ArrowTopRightOnSquareIcon aria-hidden />
+                                    {t('actions.openContext')}
+                                </Button>
+                            ) : null}
                             <Button
                                 type="button"
                                 variant="ghost"
