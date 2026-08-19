@@ -15,6 +15,24 @@ const BUCKET_COLOR: Record<DecayBucketKey, string> = {
 };
 
 /**
+ * Restates the server's disjoint decay buckets as the cumulative horizons the contacts browser can
+ * actually filter to, so each horizon's count is exactly the size of the list its link opens.
+ *
+ * @param counts - the server-computed per-bucket counts
+ */
+function cumulativeHorizons(
+    counts: WarmthDecayCounts,
+): { key: DecayBucketKey; maxDays: number; count: number }[] {
+    return DECAY_BUCKETS.map((bucket, index) => ({
+        key: bucket.key,
+        maxDays: bucket.maxDays,
+        count: DECAY_BUCKETS
+            .slice(0, index + 1)
+            .reduce((sum, within) => sum + counts[within.key], 0),
+    }));
+}
+
+/**
  * Relationship-decay horizon bars read from the server-computed {@link WarmthDecayCounts}
  * (contacts predicted to go cold within each horizon: {@code soon}/{@code mid}/{@code later}).
  *
@@ -41,11 +59,7 @@ export default function RelationshipDecay({ decay }: { decay: WarmthDecayCounts 
     }
 
     const href = radarFamilyHref('relationship_decay');
-    let running = 0;
-    const horizons = DECAY_BUCKETS.map((bucket) => {
-        running += counts[bucket.key];
-        return { key: bucket.key, maxDays: bucket.maxDays, count: running };
-    });
+    const horizons = cumulativeHorizons(counts);
 
     return (
         <div className="flex h-full flex-col">
