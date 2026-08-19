@@ -13,7 +13,7 @@
         "emptyTitle": "Nothing here you can change",
         "emptyBody": "Settings you can change appear here. Ask a workspace administrator if you need one.",
         "backTo": "Back to {name}",
-        "openGroup": "Open {name}"
+        "resultCount": "{count, plural, =0 {No settings match} one {# setting matches} other {# settings match}}"
     },
     "SettingsNav": {
         "scopePersonal": "Personal",

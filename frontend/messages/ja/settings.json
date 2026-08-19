@@ -13,7 +13,7 @@
         "emptyTitle": "変更できる設定はありません",
         "emptyBody": "変更できる設定がここに表示されます。必要な場合はワークスペース管理者にお問い合わせください。",
         "backTo": "{name}に戻る",
-        "openGroup": "{name}を開く"
+        "resultCount": "{count, plural, =0 {一致する設定はありません} other {一致する設定 #件}}"
     },
     "SettingsNav": {
         "scopePersonal": "個人",
@@ -23,11 +23,11 @@
         "groupWorkspacesInvitations": "ワークスペースと招待",
         "groupPeopleAccess": "メンバーとアクセス権",
         "groupCrmConfiguration": "CRM設定",
-        "groupCommunications": "メールと配信",
+        "groupCommunications": "メールと通知",
         "groupDataPrivacy": "データとプライバシー",
         "groupAuditDiagnostics": "監査ログと診断",
         "groupOrganizationGeneral": "一般",
-        "groupIdentityAdministrators": "ログインと管理者",
-        "groupAiDataGovernance": "AIとデータ管理"
+        "groupIdentityAdministrators": "認証と管理者",
+        "groupAiDataGovernance": "AIとデータガバナンス"
     }
 }

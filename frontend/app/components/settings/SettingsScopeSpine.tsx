@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import type { SettingsNavModel } from "@/app/lib/settingsNavigation";
+import { topmostIntersecting, type ObservedSection } from "@/app/lib/settingsScopeSpy";
 import { cn } from "@/lib/utils";
 
 /**
@@ -34,14 +35,17 @@ export default function SettingsScopeSpine({
             .filter((element): element is HTMLElement => element !== null);
         if (sections.length === 0) return;
 
+        const observed = new Map<string, ObservedSection>();
         const observer = new IntersectionObserver(
             (entries) => {
-                const visible = entries.filter((entry) => entry.isIntersecting);
-                if (visible.length === 0) return;
-                const topmost = visible.reduce((closest, entry) =>
-                    entry.boundingClientRect.top < closest.boundingClientRect.top ? entry : closest,
-                );
-                setActiveAnchor(topmost.target.id);
+                for (const entry of entries) {
+                    observed.set(entry.target.id, {
+                        id: entry.target.id,
+                        isIntersecting: entry.isIntersecting,
+                        top: entry.boundingClientRect.top,
+                    });
+                }
+                setActiveAnchor((current) => topmostIntersecting([...observed.values()]) ?? current);
             },
             { rootMargin: "-96px 0px -60% 0px", threshold: 0 },
         );

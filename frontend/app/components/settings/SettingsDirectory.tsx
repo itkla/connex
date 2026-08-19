@@ -8,14 +8,20 @@ import type { SettingsNavGroup, SettingsNavModel } from "@/app/lib/settingsNavig
 import { cn } from "@/lib/utils";
 
 /**
- * The destinations a group holds today, listed under it. Rendered only for a group that owns more
- * than one, because a group with a single destination would restate its own row.
+ * The destinations a group holds today, listed under it.
+ *
+ * The group's own row already links to its landing destination, so that one is dropped here rather
+ * than rendered a second time under a second name: two adjacent links to the same route is the
+ * one-name-per-destination failure #1340 exists to remove, and a redundant pair for a reader
+ * tabbing through. The match is on the route, not on position, so a restricted viewer whose landing
+ * shifted still sees every destination they can reach exactly once.
  */
 function GroupDestinations({ group, pathname }: { group: SettingsNavGroup; pathname: string }) {
-    if (group.destinations.length < 2) return null;
+    const rest = group.destinations.filter((destination) => destination.href !== group.href);
+    if (rest.length === 0) return null;
     return (
         <ul className="mt-0.5 ml-3 space-y-0.5 border-l border-border pl-3">
-            {group.destinations.map((destination) => {
+            {rest.map((destination) => {
                 const current = pathname === destination.href;
                 return (
                     <li key={destination.id}>

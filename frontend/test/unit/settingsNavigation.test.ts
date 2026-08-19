@@ -22,10 +22,13 @@ import type { InstanceCapabilities } from "@/app/lib/types";
 /**
  * Gate over the unified Settings navigation (#1340 WS4.1).
  *
- * The epic's acceptance is that the rendered navigation equals the manifest in both locales, so
- * these tests build the navigation the shell renders and reconcile it against `SETTINGS_GROUPS` and
- * `SETTINGS_ENTRIES` directly — with real message catalogs, once per locale, rather than a mocked
- * translator that would prove only that a key was passed through.
+ * The epic's acceptance is that the rendered navigation equals the manifest in both locales. What
+ * this suite proves is the **data** the shell renders from: it builds the navigation model with the
+ * real message catalogs, once per locale, and reconciles it against `SETTINGS_GROUPS` and
+ * `SETTINGS_ENTRIES` directly, rather than with a mocked translator that would prove only that a
+ * key was passed through. Whether every row of that model reaches the DOM is a render concern; one
+ * render assertion below covers the case the data-level tests cannot distinguish — a group whose
+ * single destination the directory deliberately does not list twice.
  *
  * The manifest suite cannot cover this seam: its entry-point gate scans navigation sources for
  * literal hrefs, and this navigation has none — every route it links is read from the manifest at

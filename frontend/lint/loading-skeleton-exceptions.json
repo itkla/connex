@@ -1,5 +1,5 @@
 {
-    "highWaterMark": 10,
+    "highWaterMark": 9,
     "exceptions": [
         {
             "route": "/account",

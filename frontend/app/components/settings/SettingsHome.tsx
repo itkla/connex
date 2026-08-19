@@ -16,6 +16,9 @@ import { useGrantedPermissions } from "@/app/hooks/usePermissions";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { resolveSettingsNavigation, searchSettingsNavigation } from "@/app/lib/settingsNavigation";
 import type { InstanceCapabilities } from "@/app/lib/types";
+import { cn } from "@/lib/utils";
+
+const RESULTS_REGION_ID = "settings-navigation";
 
 /**
  * The unified Settings home at `/settings` (#1340 WS4.1).
@@ -29,6 +32,9 @@ import type { InstanceCapabilities } from "@/app/lib/types";
  * The page renders rather than forwards. `/settings` used to send the reader to Members, which the
  * epic names as the failure it is replacing, so the home is itself the destination and stays one
  * click from every settings job the reader is allowed to reach.
+ *
+ * Searching hides the directory rather than replacing it, so the drill-down keeps the level the
+ * reader was on: clearing the query on a phone returns them where they were instead of to the top.
  *
  * @param capabilities - the resolved instance capabilities, or null when their lookup failed
  */
@@ -86,6 +92,7 @@ export default function SettingsHome({ capabilities }: { capabilities: InstanceC
                             searchAria={t("searchLabel")}
                             clearAria={t("searchClear")}
                             shortcut={null}
+                            controls={RESULTS_REGION_ID}
                             className="w-full"
                         />
                         {searching ? null : (
@@ -96,7 +103,10 @@ export default function SettingsHome({ capabilities }: { capabilities: InstanceC
                             />
                         )}
                     </div>
-                    <nav aria-label={t("navLabel")}>
+                    <nav aria-label={t("navLabel")} id={RESULTS_REGION_ID}>
+                        <p role="status" aria-live="polite" className="sr-only">
+                            {searching ? t("resultCount", { count: results.length }) : ""}
+                        </p>
                         {searching ? (
                             <SettingsSearchResults
                                 results={results}
@@ -106,20 +116,19 @@ export default function SettingsHome({ capabilities }: { capabilities: InstanceC
                                 clearLabel={t("searchClear")}
                                 onClear={() => setQuery("")}
                             />
-                        ) : (
-                            <>
-                                <div className="hidden lg:block">
-                                    <SettingsDirectory scopes={scopes} />
-                                </div>
-                                <div className="lg:hidden">
-                                    <SettingsDrillDown
-                                        scopes={scopes}
-                                        homeName={t("title")}
-                                        backLabel={(name) => t("backTo", { name })}
-                                    />
-                                </div>
-                            </>
-                        )}
+                        ) : null}
+                        <div className={cn(searching && "hidden")}>
+                            <div className="hidden lg:block">
+                                <SettingsDirectory scopes={scopes} />
+                            </div>
+                            <div className="lg:hidden">
+                                <SettingsDrillDown
+                                    scopes={scopes}
+                                    homeName={t("title")}
+                                    backLabel={(name) => t("backTo", { name })}
+                                />
+                            </div>
+                        </div>
                     </nav>
                 </div>
             )}

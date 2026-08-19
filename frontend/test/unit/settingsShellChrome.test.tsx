@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { createElement, type AnchorHTMLAttributes, type PropsWithChildren } from "react";
+import type { AnchorHTMLAttributes, PropsWithChildren } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import WorkspaceSettingsChrome from "@/app/components/settings/WorkspaceSettingsChrome";
@@ -37,18 +37,13 @@ vi.mock("next-intl", () => ({
  */
 function chrome() {
     return renderToStaticMarkup(
-        createElement(
-            PermissionsProvider,
-            {
-                permissions: ["WORKSPACE_SETTINGS"],
-                status: "resolved" as const,
-                children: createElement(WorkspaceSettingsChrome, {
-                    title: "Settings",
-                    description: "Manage this workspace.",
-                    mailManagementAvailability: "disabled" as const,
-                }),
-            },
-        ),
+        <PermissionsProvider permissions={["WORKSPACE_SETTINGS"]} status="resolved">
+            <WorkspaceSettingsChrome
+                title="Settings"
+                description="Manage this workspace."
+                mailManagementAvailability="disabled"
+            />
+        </PermissionsProvider>,
     );
 }
 
