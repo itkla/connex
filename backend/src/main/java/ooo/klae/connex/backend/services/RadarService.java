@@ -561,7 +561,9 @@ public class RadarService {
 
     /**
      * Current names of every processable person referenced by the supplied signals, read once per
-     * request so evidence labelling never becomes a per-reference query.
+     * request so evidence labelling never becomes a per-reference query. The map is built from the
+     * already-authorized processable ids, so its key set is the person visibility set that decides
+     * whether a person reference is disclosed at all.
      */
     private Map<Integer, String> personLabels(int workspaceId, Set<Integer> processablePersonIds) {
         if (processablePersonIds.isEmpty()) {
