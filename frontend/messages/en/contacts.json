@@ -47,7 +47,10 @@
         "typeKnows": "Knows",
         "typeColleague": "Colleague",
         "typeFormer": "Former colleague",
-        "typeFriend": "Friend"
+        "seeAllPaths": "See all paths",
+    "askIntroVia": "Ask {name} to make the introduction",
+    "introAsked": "Intro requested",
+    "typeFriend": "Friend"
     },
     "ContactsBrowser": {
         "heading": "Contacts",
