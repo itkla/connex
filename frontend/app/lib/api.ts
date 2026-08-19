@@ -3701,6 +3701,18 @@ export function deleteDocumentTemplate(id: number, init: RequestInit = {}) {
     return deleteJson<void[]>(`/api/document-templates/${id}`, init);
 }
 
+/**
+ * One bounded page of generated documents across every deal in the workspace — the cross-deal index
+ * that makes a finished quote findable without already knowing which deal produced it. Returns
+ * summaries only; the immutable content snapshot stays behind the per-deal read.
+ *
+ * @param params - paging, a free-text match over document title and deal name, and the status, type,
+ *   deal, and ownership-scope filters the index offers
+ */
+export function getGeneratedDocuments(params: Types.GeneratedDocumentsPageParams = {}, init: RequestInit = {}) {
+    return getJson<Types.Page<Types.GeneratedDocumentSummary>>(`/api/documents${buildQuery(params)}`, init);
+}
+
 export function getDealDocuments(dealId: number, init: RequestInit = {}) {
     return getJson<Types.DealDocument[]>(`/api/deals/${dealId}/documents`, init);
 }
@@ -3858,6 +3870,7 @@ export function search(query: string, init: RequestInit = {}) {
 
 const EMPTY_SEARCH_RESULTS: Types.SearchResults = {
     companies: [], people: [], deals: [], pipelines: [], tags: [], activities: [], notes: [], tasks: [], users: [], attachments: [],
+    products: [], campaigns: [], reports: [], documentTemplates: [], documents: [], workflows: [],
 };
 
 /**
@@ -6011,6 +6024,26 @@ export function getCampaignEngagement(id: number, init: RequestInit = {}) {
 }
 
 /**
+ * One bounded page of the recipients behind a campaign's engagement counts, as contact record links.
+ * A delivery is always contact-scoped, so the server requires consent access on top of campaign
+ * read — a caller without it must never be offered the drill-through.
+ *
+ * @param id - the campaign whose deliveries to page through
+ * @param params - the population to draw from: `status` for the status-derived counters, `event` for
+ *   the unsubscribe counter, and an optional single send
+ */
+export function getCampaignRecipients(
+    id: number,
+    params: Types.CampaignRecipientsPageParams = {},
+    init: RequestInit = {},
+) {
+    return getJson<Types.Page<Types.CampaignRecipient>>(
+        `/api/campaigns/${id}/recipients${buildQuery(params)}`,
+        init,
+    );
+}
+
+/**
  * Fetches the public unsubscribe preview for a delivery token. Deliberately bypasses the workspace
  * and CSRF machinery: the route is unauthenticated and resolves the tenant from the token alone.
  * @param token the 64-character hex delivery token from the unsubscribe link
@@ -6037,6 +6070,32 @@ export function confirmUnsubscribe(token: string) {
 
 export function getPersonConsent(personId: number, init: RequestInit = {}) {
     return getJson<Types.ContactChannelConsent[]>(`/api/persons/${personId}/consent`, init);
+}
+
+/**
+ * A contact's marketing contactability, so a member sees that someone opted out — or is on a
+ * privacy hold — before writing to them. Reports the state only: the recorded address, note, and
+ * author stay behind the consent-management surface.
+ */
+export function getPersonMarketingStatus(personId: number, init: RequestInit = {}) {
+    return getJson<Types.ContactMarketingStatus>(`/api/persons/${personId}/marketing-status`, init);
+}
+
+/**
+ * One bounded page of the campaign touches on a contact's record timeline, newest first.
+ *
+ * @param personId - the contact whose touches to read
+ * @param page - the one-based page number and page size
+ */
+export function getPersonCampaignTouches(
+    personId: number,
+    page: { page?: number; size?: number } = {},
+    init: RequestInit = {},
+) {
+    return getJson<Types.Page<Types.PersonCampaignTouch>>(
+        `/api/persons/${personId}/campaign-touches${buildQuery(page)}`,
+        init,
+    );
 }
 
 export function setPersonConsent(personId: number, payload: Types.ContactChannelConsentPayload) {

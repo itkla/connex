@@ -236,7 +236,13 @@
     "groupNotes": "メモ",
     "groupTasks": "タスク",
     "groupUsers": "ユーザー",
-    "groupAttachments": "ファイル"
+    "groupAttachments": "ファイル",
+    "groupProducts": "商品",
+    "groupCampaigns": "キャンペーン",
+    "groupReports": "レポート",
+    "groupDocuments": "ドキュメント",
+    "groupDocumentTemplates": "ドキュメントテンプレート",
+    "groupWorkflows": "ワークフロー"
   },
   "CommonProfileCard": {
     "defaultName": "プロフィール名",

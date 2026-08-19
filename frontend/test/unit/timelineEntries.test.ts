@@ -13,6 +13,7 @@ import type {
     Activity,
     ContactLifecycleHistoryEntry,
     Note,
+    PersonCampaignTouch,
     RecordComment,
     RecordCommentThread,
     Task,
@@ -48,6 +49,7 @@ const EMPTY = {
     notes: [] as Note[],
     lifecycleHistory: [] as ContactLifecycleHistoryEntry[],
     comments: [] as RecordComment[],
+    campaignTouches: [] as PersonCampaignTouch[],
 };
 
 describe('the record timeline carries comments', () => {
@@ -115,7 +117,9 @@ describe('the record timeline carries comments', () => {
 
         expect(row).toContain("comment: 'chipComment'");
         expect(row).toContain('commentThreadHref(pathname, searchParams, comment.id)');
-        expect(row).toContain("const readOnlyEntry = entry.kind === 'lifecycle' || entry.kind === 'comment';");
+        expect(row).toContain(
+            "entry.kind === 'lifecycle' || entry.kind === 'comment' || entry.kind === 'campaign';",
+        );
     });
 
     it('never nests an anchor inside an anchor, whatever the comment mentions', () => {

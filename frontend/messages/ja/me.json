@@ -66,6 +66,17 @@
         "empty": "連絡先・会社・案件に書いたメモがここに集まります。レコードを開いて最初の1件を書いてみてください。"
     },
     "MeTimeline": {
+        "chipCampaign": "キャンペーン",
+        "campaignChannelEmail": "メール",
+        "campaignChannelSms": "SMS",
+        "campaignStatusPending": "送信待ち",
+        "campaignStatusDispatching": "送信中",
+        "campaignStatusDispatched": "送信済み",
+        "campaignStatusDelivered": "到達",
+        "campaignStatusBounced": "不達",
+        "campaignStatusComplained": "迷惑メール報告",
+        "campaignStatusFailed": "送信できませんでした",
+        "campaignStatusSkipped": "送信対象外",
         "completed": "完了",
         "due": "期限: {date}",
         "chipTask": "タスク",

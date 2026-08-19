@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
+import { useReducedMotion } from 'motion/react';
 import { useLocale, useTranslations } from 'next-intl';
 import {
     ArrowDownTrayIcon,
@@ -72,6 +73,21 @@ import type {
     DocumentType,
 } from '@/app/lib/types';
 import DocumentApprovalChain from './DocumentApprovalChain';
+import { DEAL_DOCUMENTS_ANCHOR } from './dealLinks';
+
+/**
+ * Subscribes to same-document fragment changes. A fragment set by a client-side navigation arrives
+ * in the first snapshot rather than as an event, so this only has to carry the case where the
+ * fragment changes while the panel stays mounted.
+ */
+function subscribeToHash(onChange: () => void): () => void {
+    window.addEventListener('hashchange', onChange);
+    return () => window.removeEventListener('hashchange', onChange);
+}
+
+function hashSnapshot(): string {
+    return window.location.hash;
+}
 
 type Props = {
     dealId: number;
@@ -135,6 +151,10 @@ export default function DealDocuments({
     const t = useTranslations('DealsDocuments');
     const locale = useLocale();
     const router = useRouter();
+    const reduceMotion = useReducedMotion() ?? false;
+    const sectionRef = useRef<HTMLElement>(null);
+    const scrolledForHash = useRef<string | null>(null);
+    const hash = useSyncExternalStore(subscribeToHash, hashSnapshot, () => '');
     const { activeWorkspace } = useWorkspace();
     const [documents, setDocuments] = useState<DealDocument[]>(initial);
     const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
@@ -154,6 +174,21 @@ export default function DealDocuments({
             .then((all) => setTemplates(all.filter((tpl) => tpl.active)))
             .catch(() => setTemplates([]));
     }, []);
+
+    useEffect(() => {
+        if (hash !== `#${DEAL_DOCUMENTS_ANCHOR}`) scrolledForHash.current = null;
+    }, [hash]);
+
+    useEffect(() => {
+        if (hash !== `#${DEAL_DOCUMENTS_ANCHOR}` || scrolledForHash.current === hash) return;
+        const section = sectionRef.current;
+        if (!section) return;
+        scrolledForHash.current = hash;
+        const behavior = reduceMotion ? 'auto' : 'smooth';
+        section.scrollIntoView({ behavior, block: 'start' });
+        const frame = requestAnimationFrame(() => section.scrollIntoView({ behavior, block: 'start' }));
+        return () => cancelAnimationFrame(frame);
+    }, [hash, reduceMotion]);
 
     useEffect(() => {
         if (
@@ -326,7 +361,7 @@ export default function DealDocuments({
     const eligibleDelegates = approvalDialog?.action === 'delegate' ? delegateCandidates : [];
 
     return (
-        <section id="deal-documents">
+        <section id={DEAL_DOCUMENTS_ANCHOR} ref={sectionRef}>
             <div className="mb-3 flex items-center justify-between">
                 <SectionHeader title={t('title')} />
                 {documents.length > 0 && generateMenu}

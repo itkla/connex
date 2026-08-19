@@ -1,5 +1,7 @@
 {
     "ContactsPage": {
+        "marketingOptedOut": "配信停止（オプトアウト）",
+        "marketingDoNotContact": "連絡不可",
         "allContacts": "連絡先一覧",
         "relations": "関係",
         "noRecordedInteractions": "記録されたやり取りはありません",

@@ -2362,6 +2362,79 @@ export type CampaignEngagement = {
     sends: CampaignSendEngagement[];
 };
 
+/**
+ * One recipient behind a campaign engagement count, carrying the contact record the delivery
+ * reached. `personId` is absent once the contact link was cleared and `personLabel` is absent when
+ * the contact is no longer visible, so a row can name a delivery without ever claiming a record it
+ * cannot open.
+ */
+export type CampaignRecipient = {
+    deliveryId: number;
+    sendId: number;
+    channel: string;
+    personId?: number;
+    personLabel?: string;
+    status: string;
+    skipReason?: string;
+    createdAt?: string;
+    updatedAt?: string;
+};
+
+/** Which population of a campaign's deliveries a recipient page is drawn from. */
+export type CampaignRecipientsPageParams = PageParams & {
+    sendId?: number;
+    status?: string[];
+    event?: string;
+};
+
+/**
+ * Why a contact is excluded from marketing on one channel, most restrictive first. `state` is the
+ * single token a badge renders from and is absent when the channel is still contactable; the flags
+ * stay available so a surface can explain the state without re-deriving it.
+ */
+export type ContactChannelMarketingState = "do_not_contact" | "opted_out";
+
+/** One delivery channel's marketing exclusion state for a contact. */
+export type ContactChannelMarketingStatus = {
+    channel: string;
+    state?: ContactChannelMarketingState;
+    optedOut: boolean;
+    doNotContact: boolean;
+    consentRevoked: boolean;
+    addressable: boolean;
+};
+
+/**
+ * Whether a contact may still be marketed to, and why not.
+ *
+ * A privacy hold is the record-level restriction the contact themself asked for and is reported
+ * once for the whole contact; an opt-out or do-not-contact is a workspace-owned marketing exclusion
+ * and is always per channel. The two are never folded into one badge.
+ */
+export type ContactMarketingStatus = {
+    personId: number;
+    privacyHold: boolean;
+    suspendedAt?: string;
+    provisionCeasedAt?: string;
+    channels: ContactChannelMarketingStatus[];
+};
+
+/**
+ * One campaign touch on a contact's timeline: the campaign that reached them, on which channel, and
+ * what became of that delivery. The delivery's skip reason is deliberately absent — it names the
+ * ground a send was withheld on and stays with the campaign's recipient roster.
+ */
+export type PersonCampaignTouch = {
+    deliveryId: number;
+    campaignId: number;
+    campaignName: string;
+    sendId: number;
+    channel: string;
+    status: string;
+    createdAt?: string;
+    updatedAt?: string;
+};
+
 export type CampaignExportStatus = "draft" | "running" | "completed" | "failed";
 
 /** A campaign audience export bound to a frozen snapshot and an external connector. */
@@ -3630,6 +3703,85 @@ export type WarmthSummary = {
     contactDecay: WarmthDecayCounts;
 };
 
+/**
+ * Bounded catalog-product row carried by the global-search products group. The full {@link Product}
+ * is deliberately not sent: a search row renders a label and a short qualifier, never pricing.
+ */
+export type ProductSearchResult = {
+    id: number;
+    name: string;
+    sku?: string;
+    active: boolean;
+};
+
+/** Bounded campaign row carried by the global-search campaigns group. */
+export type CampaignSearchResult = {
+    id: number;
+    name: string;
+    type: string;
+    status: CampaignStatus;
+    startAt?: string;
+    endAt?: string;
+    updatedAt?: string;
+};
+
+/** Bounded report-definition row carried by the global-search reports group. */
+export type ReportSearchResult = {
+    id: number;
+    name: string;
+    description?: string;
+    cadence: string;
+    updatedAt?: string;
+};
+
+/** Bounded document-template row carried by the global-search document-templates group. */
+export type DocumentTemplateSearchResult = {
+    id: number;
+    name: string;
+    type: DocumentType;
+    locale: string;
+    active: boolean;
+    updatedAt?: string;
+};
+
+/**
+ * A generated commercial document as the cross-deal index and the global-search documents group
+ * see it: the parent deal it belongs to, its state, and when it was generated — never the
+ * immutable content snapshot the full {@link DealDocument} carries.
+ */
+export type GeneratedDocumentSummary = {
+    id: number;
+    dealId: number;
+    dealName?: string;
+    dealOwnerId?: number;
+    type: DocumentType;
+    status: DocumentStatus;
+    version: number;
+    title?: string;
+    currency?: string;
+    createdBy?: number;
+    generatedAt?: string;
+    createdAt?: string;
+    updatedAt?: string;
+};
+
+/** Filters accepted by the cross-deal generated-document index. */
+export type GeneratedDocumentsPageParams = PageParams & MemberScopeParams & {
+    status?: DocumentStatus[];
+    type?: DocumentType[];
+    dealId?: number;
+};
+
+/** Bounded workflow row carried by the global-search workflows group. */
+export type WorkflowSearchResult = {
+    id: number;
+    name: string;
+    description?: string;
+    enabled: boolean;
+    recordType?: string;
+    updatedAt?: string;
+};
+
 export type SearchResults = {
     companies: Company[];
     people: Contact[];
@@ -3641,6 +3793,12 @@ export type SearchResults = {
     tasks: Task[];
     users: User[];
     attachments: Attachment[];
+    products: ProductSearchResult[];
+    campaigns: CampaignSearchResult[];
+    reports: ReportSearchResult[];
+    documentTemplates: DocumentTemplateSearchResult[];
+    documents: GeneratedDocumentSummary[];
+    workflows: WorkflowSearchResult[];
 };
 
 export type AuditChange = {

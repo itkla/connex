@@ -95,6 +95,12 @@ const EMPTY_RESULTS: SearchResults = {
     notes: [],
     tasks: [],
     attachments: [],
+    products: [],
+    campaigns: [],
+    reports: [],
+    documentTemplates: [],
+    documents: [],
+    workflows: [],
 };
 
 /**

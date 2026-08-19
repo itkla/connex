@@ -4,9 +4,6 @@
     "description": "見積書・提案書・注文書・契約書の再利用可能なテンプレート"
   },
   "DocumentTemplatesBrowser": {
-    "title": "ドキュメント",
-    "newButton": "新規テンプレート",
-    "approvalPoliciesLink": "承認ポリシー",
     "sectionTemplates": "テンプレート",
     "searchPlaceholder": "テンプレートを検索",
     "emptyTitle": "テンプレートがありません",
@@ -109,5 +106,46 @@
     "slashTermsHeading": "利用条件",
     "slashFooter": "フッター",
     "slashFooterHint": "区切り線と結びの一文"
+  },
+  "DocumentsLibrary": {
+    "title": "ドキュメント",
+    "documentsDescription": "このワークスペースで生成した見積書・提案書・注文書・契約書の一覧です。各行から対象の案件を開けます。",
+    "templatesDescription": "案件のデータを完成したドキュメントに変換する、再利用できるレイアウトです。",
+    "viewSwitchAria": "表示",
+    "viewDocuments": "ドキュメント",
+    "viewTemplates": "ドキュメントテンプレート",
+    "newTemplate": "新規テンプレート",
+    "approvalPoliciesLink": "承認ポリシー"
+  },
+  "GeneratedDocuments": {
+    "emptyAction": "案件を開く",
+    "searchPlaceholder": "ドキュメントを検索",
+    "statusLabel": "ステータス",
+    "typeLabel": "種別",
+    "columnDocument": "ドキュメント",
+    "columnDeal": "案件",
+    "columnStatus": "ステータス",
+    "columnOwner": "担当者",
+    "columnGenerated": "生成日",
+    "versionLabel": "バージョン {version}",
+    "dealUnavailable": "案件を表示できません",
+    "ownerUnassigned": "未割り当て",
+    "ownerUnknown": "退出したメンバー",
+    "statusDraft": "下書き",
+    "statusPendingApproval": "承認待ち",
+    "statusApproved": "承認済み",
+    "statusFinal": "確定",
+    "statusSuperseded": "差し替え済み",
+    "typeQuote": "見積書",
+    "typeProposal": "提案書",
+    "typeOrderForm": "注文書",
+    "typeContract": "契約書",
+    "emptyTitle": "ドキュメントはまだありません",
+    "emptyBody": "ドキュメントはテンプレートを使って案件から生成します。案件を開いてテンプレートを選ぶと、完成した見積書や契約書がここに表示されます。",
+    "noMatchesTitle": "該当なし",
+    "noMatchesBody": "検索条件やフィルターを変更してください。",
+    "page": "{pageCount} ページ中 {page} ページ",
+    "previousPage": "前のページ",
+    "nextPage": "次のページ"
   }
 }

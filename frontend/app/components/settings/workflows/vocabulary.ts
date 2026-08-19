@@ -40,8 +40,9 @@ export const MANUAL_RUN_RECORD_TYPES = ["company", "person", "deal"];
 
 /**
  * Record types whose simulation subject can be found through workspace search. `document` is absent
- * because a document is reached from its parent deal, never from `/api/search`; submitting anything
- * else would send the server an id of the wrong entity.
+ * because the search response carries generated documents as a bounded summary group of their own
+ * (WS7 / issue #1343), which the record picker does not read; submitting one would send the server
+ * an id of the wrong entity.
  */
 export const SIMULATION_RECORD_TYPES = ["company", "person", "deal", "task"];
 

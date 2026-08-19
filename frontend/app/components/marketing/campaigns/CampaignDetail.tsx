@@ -55,6 +55,7 @@ import {
 import {
     canEstimateAudience,
     canFreezeSnapshot,
+    canReadRecipients,
     type CampaignAccess,
 } from "@/app/lib/campaignAccess";
 import AccessDenied from "@/app/components/AccessDenied";
@@ -579,7 +580,11 @@ export default function CampaignDetail({
                     </TabsContent>
 
                     <TabsContent value="engagement" forceMount className="data-[state=inactive]:hidden">
-                        <CampaignEngagement engagement={initialEngagement} />
+                        <CampaignEngagement
+                            campaignId={current.id}
+                            engagement={initialEngagement}
+                            canReadRecipients={canReadRecipients(access)}
+                        />
                     </TabsContent>
 
                     <TabsContent value="exports" forceMount className="data-[state=inactive]:hidden">

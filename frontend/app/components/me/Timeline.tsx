@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { getTranslations } from "next-intl/server";
 
 import { getMyWorkspacesFromCookie } from "@/app/lib/api";
-import { type Activity, type Contact, type ContactLifecycleHistoryEntry, type Deal, type Note, type RecordComment, type Task, type UserReference } from "@/app/lib/types";
+import { type Activity, type Contact, type ContactLifecycleHistoryEntry, type Deal, type Note, type PersonCampaignTouch, type RecordComment, type Task, type UserReference } from "@/app/lib/types";
 import { buildTimeline, entryAuthorId, entryId } from "./timelineEntries";
 import TimelineRow from "./TimelineRow";
 
@@ -15,6 +15,7 @@ export default async function Timeline({
     deals = [],
     lifecycleHistory = [],
     comments = [],
+    campaignTouches = [],
     currentUserId,
     companyId,
     limit,
@@ -27,6 +28,7 @@ export default async function Timeline({
     deals?: Deal[];
     lifecycleHistory?: ContactLifecycleHistoryEntry[];
     comments?: RecordComment[];
+    campaignTouches?: PersonCampaignTouch[];
     currentUserId?: number;
     companyId?: number | null;
     limit?: number;
@@ -36,7 +38,7 @@ export default async function Timeline({
         getTranslations("MeTimeline"),
         getMyWorkspacesFromCookie(cookie),
     ]);
-    const entries = buildTimeline({ tasks, activities, notes, lifecycleHistory, comments });
+    const entries = buildTimeline({ tasks, activities, notes, lifecycleHistory, comments, campaignTouches });
     const visible = limit ? entries.slice(0, limit) : entries;
 
     if (visible.length === 0) {
