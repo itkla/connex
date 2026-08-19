@@ -163,10 +163,16 @@ public interface PersonMapper {
      * How many visible active contacts sit in each relationship-warmth band, computed from the same
      * decayed touch aggregate the scoring service uses. Contacts with no logged interaction at all
      * are counted under the {@code __none__} key rather than {@code cold}, so the buckets partition
-     * the visible set and each count predicts exactly what the matching band filter returns.
+     * the visible unarchived set. Like every sibling facet these counts describe that whole
+     * population: a page additionally narrowed by member scope or the archived toggle returns fewer
+     * rows than the matching bucket count.
+     *
+     * <p>This aggregates the workspace's complete activity, note, and task history rather than
+     * reading an index, so it is materially more expensive than the other facets and callers must
+     * request it deliberately.
      *
      * @param workspaceId owning workspace
-     * @param warmth model parameters and evaluation instant for the decay
+     * @param warmth model parameters and evaluation instant for the decay, never null
      * @return one bucket per band, plus {@code __none__}
      */
     List<FacetCount> countsByWarmthBand(

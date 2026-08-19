@@ -165,7 +165,7 @@ public class PersonService {
             boolean noLifecycle, List<PersonLeadSource> leadSources, boolean noLeadSource,
             List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
             boolean archived, WarmthFilter warmth) {
-        if (!archived && warmth == null && !hasMatchingIdFilter(
+        if (!archived && (warmth == null || !warmth.restrictsRows()) && !hasMatchingIdFilter(
                 query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
                 leadSources, noLeadSource, firstResponseStates, noFirstResponse)) {
             throw new BadRequestException("At least one filter is required before selecting matching contact ids");
@@ -227,12 +227,19 @@ public class PersonService {
         return personMapper.countsByLeadSource(workspaceService.getCurrentWorkspaceId());
     }
 
-    /** How many active contacts sit in each first-response SLA state, for the browser's filter menu. */
-    /** How many visible contacts sit in each relationship-warmth band, plus those with no history. */
+    /**
+     * How many visible contacts sit in each relationship-warmth band, plus those with no history.
+     * This scans the workspace's whole interaction history, so callers request it deliberately.
+     *
+     * @param warmth resolved model parameters and evaluation instant, required
+     * @return one bucket per band, plus {@code __none__}
+     */
     public List<FacetCount> countsByWarmthBand(WarmthFilter warmth) {
+        Objects.requireNonNull(warmth, "warmth is required to compute warmth band facets");
         return personMapper.countsByWarmthBand(workspaceService.getCurrentWorkspaceId(), warmth);
     }
 
+    /** How many active contacts sit in each first-response SLA state, for the browser's filter menu. */
     public List<FacetCount> countsByFirstResponseState() {
         return personMapper.countsByFirstResponseState(workspaceService.getCurrentWorkspaceId());
     }

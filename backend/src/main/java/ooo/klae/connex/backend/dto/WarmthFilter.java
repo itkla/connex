@@ -121,6 +121,28 @@ public record WarmthFilter(
     }
 
     /**
+     * Whether this filter can change which rows a query returns. A warmth sort alone cannot, so a
+     * count, id selection, or export must not pay for the decayed-touch aggregate to honour it.
+     *
+     * @return true when a band, the no-history bucket, or a decay horizon narrows the result set
+     */
+    public boolean restrictsRows() {
+        return restrictsBands() || goesColdWithinDays != null;
+    }
+
+    /**
+     * Canonicalizes the warmth sort token so the request resolver and the mapper sort whitelist
+     * agree on one spelling; any other sort key is passed through untouched.
+     *
+     * @param sort raw requested sort key
+     * @return {@code warmth} for any casing of the warmth sort, otherwise the original key
+     */
+    public static String canonicalSort(String sort) {
+        String normalized = sort == null ? "" : sort.trim();
+        return WARMTH_SORT.equalsIgnoreCase(normalized) ? WARMTH_SORT : sort;
+    }
+
+    /**
      * Creates the unrestricted filter that only supplies the model parameters and evaluation
      * instant, for callers that score every visible record rather than narrowing to a band.
      *

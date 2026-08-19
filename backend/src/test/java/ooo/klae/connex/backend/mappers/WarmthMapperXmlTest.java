@@ -164,15 +164,30 @@ class WarmthMapperXmlTest {
                 "getPersonsPage", "countPersons", "getPersonIdsFiltered", "getPersonsFiltered"}) {
             assertFalse(sql(configuration, PersonMapper.class, statement, unfiltered)
                 .contains("raw_weight"), statement + " scores an unfiltered page");
-            assertTrue(sql(configuration, PersonMapper.class, statement, sorted)
-                .contains("raw_weight"), statement + " does not join the aggregate");
+            assertTrue(sql(configuration, PersonMapper.class, statement, banded)
+                .contains("raw_weight"), statement + " does not join the aggregate when filtering");
         }
         for (String statement : new String[] {
                 "getCompaniesPage", "countCompanies", "getCompanyIdsFiltered", "getCompaniesFiltered"}) {
             assertFalse(sql(configuration, CompanyMapper.class, statement, unfiltered)
                 .contains("raw_weight"), statement + " scores an unfiltered page");
-            assertTrue(sql(configuration, CompanyMapper.class, statement, sorted)
-                .contains("raw_weight"), statement + " does not join the aggregate");
+            assertTrue(sql(configuration, CompanyMapper.class, statement, banded)
+                .contains("raw_weight"), statement + " does not join the aggregate when filtering");
+        }
+
+        assertTrue(sql(configuration, PersonMapper.class, "getPersonsPage", sorted)
+            .contains("raw_weight"), "the page needs the column a warmth sort orders on");
+        assertTrue(sql(configuration, CompanyMapper.class, "getCompaniesPage", sorted)
+            .contains("raw_weight"), "the page needs the column a warmth sort orders on");
+        for (String statement : new String[] {
+                "countPersons", "getPersonIdsFiltered", "getPersonsFiltered"}) {
+            assertFalse(sql(configuration, PersonMapper.class, statement, sorted)
+                .contains("raw_weight"), statement + " pays for a sort it cannot observe");
+        }
+        for (String statement : new String[] {
+                "countCompanies", "getCompanyIdsFiltered", "getCompaniesFiltered"}) {
+            assertFalse(sql(configuration, CompanyMapper.class, statement, sorted)
+                .contains("raw_weight"), statement + " pays for a sort it cannot observe");
         }
 
         String personSorted = collapsed(
@@ -228,6 +243,8 @@ class WarmthMapperXmlTest {
             assertTrue(sql.contains("'__none__'"), mapper.getSimpleName());
             assertTrue(sql.contains("GROUP BY `key`"), mapper.getSimpleName());
             assertTrue(sql.contains("archived_at IS NULL"), mapper.getSimpleName());
+            assertEquals(10, timeout(configuration, mapper, "countsByWarmthBand"),
+                mapper.getSimpleName() + " runs the aggregate without a statement timeout");
         }
     }
 

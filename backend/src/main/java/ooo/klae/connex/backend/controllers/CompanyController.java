@@ -102,14 +102,17 @@ public class CompanyController {
         @RequestParam(required = false) List<Integer> memberIds,
         @RequestParam(required = false) List<String> warmthBands,
         @RequestParam(defaultValue = "false") boolean noWarmth,
+        @RequestParam(required = false) Integer goesColdWithinDays,
         @RequestParam(defaultValue = "false") boolean archived
     ) {
         PageBounds bounds = PageBounds.of(page, size);
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
+        String sortKey = WarmthFilter.canonicalSort(sort);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
-        WarmthFilter warmth = warmthFilterResolver.resolve(warmthBands, noWarmth, null, sort);
+        WarmthFilter warmth = warmthFilterResolver.resolve(
+            warmthBands, noWarmth, goesColdWithinDays, sortKey);
         List<CompanyDto> items = companyService.getCompaniesPage(
-            query, sort, dir, industry, noIndustry, ids, memberScope, archived, warmth,
+            query, sortKey, dir, industry, noIndustry, ids, memberScope, archived, warmth,
             bounds.size(), bounds.offset())
             .stream().map(CompanyDto::from).toList();
         return new PageResponse<>(items, companyService.countCompanies(
@@ -165,13 +168,15 @@ public class CompanyController {
         @RequestParam(required = false) List<Integer> memberIds,
         @RequestParam(required = false) List<String> warmthBands,
         @RequestParam(defaultValue = "false") boolean noWarmth,
+        @RequestParam(required = false) Integer goesColdWithinDays,
         @RequestParam(defaultValue = "false") boolean archived
     ) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
-        WarmthFilter warmth = warmthFilterResolver.resolve(warmthBands, noWarmth, null, null);
+        WarmthFilter warmth = warmthFilterResolver.resolve(
+            warmthBands, noWarmth, goesColdWithinDays, null);
         if (!archived
-            && warmth == null
+            && (warmth == null || !warmth.restrictsRows())
             && query == null
             && (industry == null || industry.isEmpty())
             && !noIndustry
@@ -199,13 +204,15 @@ public class CompanyController {
      * Retrieves the distinct industry facets across companies visible to the active workspace.
      */
     @GetMapping("/facets")
-    public CompanyFacets getCompanyFacets() {
+    public CompanyFacets getCompanyFacets(
+        @RequestParam(defaultValue = "false") boolean warmth
+    ) {
         return new CompanyFacets(
             companyService.distinctIndustries(),
             companyService.hasCompanyWithoutIndustry(),
             companyService.countsByOwner(),
             companyService.countArchivedCompanies(),
-            companyService.countsByWarmthBand(warmthFilterResolver.forFacets())
+            warmth ? companyService.countsByWarmthBand(warmthFilterResolver.forFacets()) : null
         );
     }
 

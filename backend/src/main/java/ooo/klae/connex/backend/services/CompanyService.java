@@ -242,8 +242,15 @@ public class CompanyService {
             query, industry, noIndustry, ids, memberScope, archived, warmth);
     }
 
-    /** How many visible companies sit in each relationship-warmth band, plus those with no history. */
+    /**
+     * How many visible companies sit in each relationship-warmth band, plus those with no history.
+     * This scans the workspace's whole interaction history, so callers request it deliberately.
+     *
+     * @param warmth resolved model parameters and evaluation instant, required
+     * @return one bucket per band, plus {@code __none__}
+     */
     public List<FacetCount> countsByWarmthBand(WarmthFilter warmth) {
+        Objects.requireNonNull(warmth, "warmth is required to compute warmth band facets");
         return companyMapper.countsByWarmthBand(workspaceService.getCurrentWorkspaceId(), warmth);
     }
 
@@ -312,7 +319,7 @@ public class CompanyService {
      */
     public List<Integer> getMatchingCompanyIds(String query, List<String> industry, boolean noIndustry,
             List<Integer> ids, MemberScope memberScope, boolean archived, WarmthFilter warmth) {
-        if (!archived && warmth == null
+        if (!archived && (warmth == null || !warmth.restrictsRows())
                 && !hasMatchingIdFilter(query, industry, noIndustry, ids, memberScope)) {
             throw new BadRequestException("At least one filter is required before selecting matching company ids");
         }

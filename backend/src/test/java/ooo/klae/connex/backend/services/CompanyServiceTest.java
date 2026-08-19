@@ -12,6 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -559,6 +561,21 @@ class CompanyServiceTest extends AbstractServiceTest {
         verify(taskMapper).getCompanyTasks(7, 9, 25);
         verify(noteMapper).getVisibleCompanyNotes(7, 9, 11, 25);
         verify(referenceService).hydrateActivities(7, List.of(activity));
+    }
+
+    /**
+     * The warmth band facet projects {@code w.*} columns that only exist when the aggregate join was
+     * emitted, so a missing filter must fail explicitly rather than as an unresolved-column 500.
+     */
+    @Test
+    void theWarmthFacetRefusesAMissingFilterInsteadOfReachingTheMapper() {
+        CompanyMapper mapper = mock(CompanyMapper.class);
+        WorkspaceService workspaceService = mock(WorkspaceService.class);
+        CompanyService service = companyService(mapper, workspaceService);
+
+        assertThrows(NullPointerException.class, () -> service.countsByWarmthBand(null));
+
+        verify(mapper, never()).countsByWarmthBand(anyInt(), any());
     }
 
     private CompanyService companyService(CompanyMapper mapper, WorkspaceService workspaceService) {

@@ -397,8 +397,7 @@
        can never read two different scores. The join is emitted only when a warmth sort or filter was
        requested. Binding `model` and `reference` here lets the shared touch-source fragment resolve
        its parameters unchanged. -->
-  <sql id="warmthJoin">
-    <if test="warmth != null">
+  <sql id="warmthAggregate">
       <bind name="model" value="warmth.model"/>
       <bind name="reference" value="warmth.reference"/>
       LEFT JOIN (
@@ -432,6 +431,20 @@
         ) aged
         GROUP BY aged.company_id
       ) w ON w.company_id = c.id
+  </sql>
+
+  <!-- Emitted wherever the aggregate column itself is projected or ordered on. -->
+  <sql id="warmthJoin">
+    <if test="warmth != null">
+      <include refid="warmthAggregate"/>
+    </if>
+  </sql>
+
+  <!-- A warmth sort cannot change which rows match, so counts, id selections, and exports join the
+       aggregate only when a band, the no-history bucket, or a decay horizon actually narrows them. -->
+  <sql id="warmthFilterJoin">
+    <if test="warmth != null and warmth.restrictsRows()">
+      <include refid="warmthAggregate"/>
     </if>
   </sql>
 
@@ -584,7 +597,7 @@
   <select id="countCompanies" resultType="long">
     SELECT COUNT(*)
     FROM company c
-    <include refid="warmthJoin"/>
+    <include refid="warmthFilterJoin"/>
     <include refid="pageWhere"/>
     <include refid="memberScopePredicate"/>
   </select>
@@ -755,7 +768,7 @@
   <select id="getCompanyIdsFiltered" resultType="int">
     SELECT c.id
     FROM company c
-    <include refid="warmthJoin"/>
+    <include refid="warmthFilterJoin"/>
     <include refid="pageWhere"/>
     <include refid="memberScopePredicate"/>
     ORDER BY c.id
@@ -765,13 +778,16 @@
   <select id="getCompaniesFiltered" resultType="Company">
     SELECT <include refid="qualifiedCompanyColumns"/>
     FROM company c
-    <include refid="warmthJoin"/>
+    <include refid="warmthFilterJoin"/>
     <include refid="pageWhere"/>
     <include refid="memberScopePredicate"/>
     ORDER BY c.name, c.id
   </select>
 
-  <select id="countsByWarmthBand" resultType="ooo.klae.connex.backend.dto.FacetCount">
+  <!-- Aggregates every visible company's attributed decayed touch history, so it costs a full
+       workspace scan of activity, note, and task rows. It is opt-in on the facets endpoint. -->
+  <select id="countsByWarmthBand" timeout="10"
+          resultType="ooo.klae.connex.backend.dto.FacetCount">
     SELECT <include refid="warmthBandKey"/> AS `key`,
            COUNT(*) AS count, NULL AS label
     FROM company c

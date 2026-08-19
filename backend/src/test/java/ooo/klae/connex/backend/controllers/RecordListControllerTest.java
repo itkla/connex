@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.controllers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -210,7 +211,7 @@ class RecordListControllerTest {
 
         assertThrows(BadRequestException.class,
             () -> controller.getPersonIds(null, null, null, false, null, null, null, false, null, false,
-                null, false, null, false, false));
+                null, false, null, false, null, false));
 
         verify(personService, never()).getMatchingPersonIds(
             null, null, null, false, MemberScope.allTeam(), null, false, null, false,
@@ -239,7 +240,7 @@ class RecordListControllerTest {
             .thenReturn(0L);
 
         var response = controller.getCompaniesPage(
-            0, 500, null, null, null, null, false, null, null, null, null, false, false);
+            0, 500, null, null, null, null, false, null, null, null, null, false, null, false);
 
         assertEquals(0, response.total());
         verify(companyService).getCompaniesPage(
@@ -304,7 +305,7 @@ class RecordListControllerTest {
 
         var response = controller.getCompaniesPage(
             2, 25, "50%_Company", "industry", "desc", industries, true, ids,
-            "members", List.of(3, 5), null, false, false);
+            "members", List.of(3, 5), null, false, null, false);
 
         assertEquals(7, response.total());
         verify(companyService).getCompaniesPage(
@@ -319,7 +320,8 @@ class RecordListControllerTest {
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(MemberScope.allTeam());
 
         assertThrows(BadRequestException.class,
-            () -> controller.getCompanyIds(" ", List.of(), false, List.of(), null, null, null, false, false));
+            () -> controller.getCompanyIds(
+                " ", List.of(), false, List.of(), null, null, null, false, null, false));
 
         verify(companyService, never()).getMatchingCompanyIds(
             null, List.of(), false, List.of(), MemberScope.allTeam(), false, null);
@@ -334,7 +336,8 @@ class RecordListControllerTest {
         when(companyService.getMatchingCompanyIds(
             null, null, false, ids, MemberScope.allTeam(), false, null)).thenReturn(ids);
 
-        assertSame(ids, controller.getCompanyIds(null, null, false, ids, null, null, null, false, false));
+        assertSame(ids, controller.getCompanyIds(
+            null, null, false, ids, null, null, null, false, null, false));
 
         verify(companyService).getMatchingCompanyIds(
             null, null, false, ids, MemberScope.allTeam(), false, null);
@@ -391,11 +394,13 @@ class RecordListControllerTest {
         when(companyService.hasCompanyWithoutIndustry()).thenReturn(true);
         when(companyService.countsByOwner()).thenReturn(owners);
 
-        var facets = controller.getCompanyFacets();
+        var facets = controller.getCompanyFacets(false);
 
         assertSame(industries, facets.industries());
         assertTrue(facets.hasNoIndustry());
         assertSame(owners, facets.owners());
+        assertNull(facets.warmthBands(), "the costly warmth facet must stay opt-in");
+        verify(companyService, never()).countsByWarmthBand(any());
     }
 
     @Test
@@ -409,12 +414,14 @@ class RecordListControllerTest {
         when(personService.hasPersonWithoutCompany()).thenReturn(true);
         when(personService.countsByOwner()).thenReturn(owners);
 
-        var facets = controller.getPersonFacets();
+        var facets = controller.getPersonFacets(false);
 
         assertSame(companies, facets.companies());
         assertSame(titles, facets.titles());
         assertTrue(facets.hasNoCompany());
         assertSame(owners, facets.owners());
+        assertNull(facets.warmthBands(), "the costly warmth facet must stay opt-in");
+        verify(personService, never()).countsByWarmthBand(any());
     }
 
     @Test

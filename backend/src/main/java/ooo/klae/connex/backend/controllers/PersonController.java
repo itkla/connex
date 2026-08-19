@@ -161,10 +161,11 @@ public class PersonController {
     ) {
         PageBounds bounds = PageBounds.of(page, size);
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
+        String sortKey = WarmthFilter.canonicalSort(sort);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
         WarmthFilter warmth = warmthFilterResolver.resolve(
-            warmthBands, noWarmth, goesColdWithinDays, sort);
-        List<PersonDto> items = personService.getPersonsPage(query, sort, dir, companies, titles, noCompany,
+            warmthBands, noWarmth, goesColdWithinDays, sortKey);
+        List<PersonDto> items = personService.getPersonsPage(query, sortKey, dir, companies, titles, noCompany,
             memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource,
             firstResponseStates, noFirstResponse, archived, warmth,
             bounds.size(), bounds.offset())
@@ -200,13 +201,15 @@ public class PersonController {
         @RequestParam(defaultValue = "false") boolean noFirstResponse,
         @RequestParam(required = false) List<String> warmthBands,
         @RequestParam(defaultValue = "false") boolean noWarmth,
+        @RequestParam(required = false) Integer goesColdWithinDays,
         @RequestParam(defaultValue = "false") boolean archived
     ) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
-        WarmthFilter warmth = warmthFilterResolver.resolve(warmthBands, noWarmth, null, null);
+        WarmthFilter warmth = warmthFilterResolver.resolve(
+            warmthBands, noWarmth, goesColdWithinDays, null);
         if (!archived
-            && warmth == null
+            && (warmth == null || !warmth.restrictsRows())
             && query == null
             && (companies == null || companies.isEmpty())
             && (titles == null || titles.isEmpty())
@@ -231,7 +234,9 @@ public class PersonController {
      * @return
      */
     @GetMapping("/facets")
-    public PersonFacets getPersonFacets() {
+    public PersonFacets getPersonFacets(
+        @RequestParam(defaultValue = "false") boolean warmth
+    ) {
         return new PersonFacets(
             personService.distinctCompanies(),
             personService.distinctTitles(),
@@ -241,7 +246,7 @@ public class PersonController {
             personService.countsByLifecycleStage(),
             personService.countsByLeadSource(),
             personService.countsByFirstResponseState(),
-            personService.countsByWarmthBand(warmthFilterResolver.forFacets())
+            warmth ? personService.countsByWarmthBand(warmthFilterResolver.forFacets()) : null
         );
     }
 

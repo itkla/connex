@@ -168,11 +168,24 @@ class WarmthBrowserRequestBindingTest {
     }
 
     @Test
-    void theContactFacetsResponseCarriesTheWarmthBandBuckets() throws Exception {
+    void theWarmthFacetIsOptInSoAnOrdinaryFacetsLoadNeverAggregatesTouchHistory() throws Exception {
+        persons.perform(get("/api/persons/facets"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.warmthBands").doesNotExist());
+        companies.perform(get("/api/companies/facets"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.warmthBands").doesNotExist());
+
+        verify(personService, never()).countsByWarmthBand(any());
+        verify(companyService, never()).countsByWarmthBand(any());
+    }
+
+    @Test
+    void requestingTheWarmthFacetReturnsTheBandBuckets() throws Exception {
         when(personService.countsByWarmthBand(any())).thenReturn(List.of(
             facet("hot", 3), facet(WarmthFilter.NO_WARMTH_KEY, 5)));
 
-        persons.perform(get("/api/persons/facets"))
+        persons.perform(get("/api/persons/facets").param("warmth", "true"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.warmthBands[0].key").value("hot"))
             .andExpect(jsonPath("$.warmthBands[0].count").value(3))
@@ -188,7 +201,7 @@ class WarmthBrowserRequestBindingTest {
                 .param("noWarmth", "true")
                 .param("sort", "warmth"))
             .andExpect(status().isOk());
-        companies.perform(get("/api/companies/facets"))
+        companies.perform(get("/api/companies/facets").param("warmth", "true"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.warmthBands[0].key").value("cool"));
 
@@ -198,6 +211,55 @@ class WarmthBrowserRequestBindingTest {
             anyBoolean(), captor.capture(),
             anyInt(), anyInt());
         assertBands(captor.getValue(), Set.of("cool"), true, null);
+    }
+
+    @Test
+    void theDecayHorizonReachesIdSelectionAndBothExportsNotJustThePage() throws Exception {
+        persons.perform(get("/api/persons/ids").param("goesColdWithinDays", "60"))
+            .andExpect(status().isOk());
+
+        ArgumentCaptor<WarmthFilter> captor = ArgumentCaptor.forClass(WarmthFilter.class);
+        verify(personService).getMatchingPersonIds(
+            eq(null), eq(null), eq(null), eq(false), any(), eq(null), eq(false), eq(null), eq(false),
+            eq(null), eq(false), eq(false), captor.capture());
+        assertBands(captor.getValue(), Set.of(), false, 60);
+    }
+
+    @Test
+    void aHorizonAloneSatisfiesTheAtLeastOneFilterRequirementOnBothIdEndpoints() throws Exception {
+        persons.perform(get("/api/persons/ids").param("goesColdWithinDays", "30"))
+            .andExpect(status().isOk());
+        companies.perform(get("/api/companies/ids").param("goesColdWithinDays", "30"))
+            .andExpect(status().isOk());
+
+        verify(personService).getMatchingPersonIds(
+            any(), any(), any(), anyBoolean(), any(), any(), anyBoolean(), any(), anyBoolean(),
+            any(), anyBoolean(), anyBoolean(), any(WarmthFilter.class));
+        verify(companyService).getMatchingCompanyIds(
+            any(), any(), anyBoolean(), any(), any(), anyBoolean(), any(WarmthFilter.class));
+    }
+
+    @Test
+    void aWarmthSortAloneIsNotAFilterSoIdSelectionStillRefusesIt() throws Exception {
+        persons.perform(get("/api/persons/ids").param("warmthBands", ""))
+            .andExpect(status().isBadRequest());
+
+        verify(personService, never()).getMatchingPersonIds(
+            any(), any(), any(), anyBoolean(), any(), any(), anyBoolean(), any(), anyBoolean(),
+            any(), anyBoolean(), anyBoolean(), any());
+    }
+
+    /** The resolver matched the warmth sort case-insensitively while the mapper matched exactly. */
+    @Test
+    void anUppercaseWarmthSortIsCanonicalizedBeforeReachingTheMapperWhitelist() throws Exception {
+        persons.perform(get("/api/persons/page").param("sort", "WARMTH"))
+            .andExpect(status().isOk());
+
+        ArgumentCaptor<String> sortKey = ArgumentCaptor.forClass(String.class);
+        verify(personService).getPersonsPage(
+            any(), sortKey.capture(), any(), any(), any(), anyBoolean(), any(), any(), anyBoolean(),
+            any(), anyBoolean(), any(), anyBoolean(), anyBoolean(), any(), anyInt(), anyInt());
+        assertEquals("warmth", sortKey.getValue());
     }
 
     private WarmthFilter capturedContactFilter() {

@@ -26,6 +26,8 @@ import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.services.ScoringService;
+import ooo.klae.connex.backend.warmth.RelationshipWarmthModel;
+import ooo.klae.connex.backend.warmth.RelationshipWarmthModel.SqlParameters;
 
 /**
  * Covers the contact and company browsers' relationship-warmth sort, band facet, no-history bucket,
@@ -258,6 +260,118 @@ class WarmthBrowserMapperTest extends AbstractMapperTest {
 
         assertEquals(List.of(hot.getId()), exported);
         assertEquals(List.of(hot.getId()), selected);
+    }
+
+    /**
+     * The band equivalence fixtures all sit comfortably inside their bands, so this pins two
+     * contacts either side of the hot floor. Timestamps have second granularity, which separates the
+     * two raw weights by roughly 2.4e-7 — far coarser than the ~1e-16 relative difference between
+     * MySQL POW and Math.pow, so which side of the floor each lands on is deterministic.
+     */
+    @Test
+    void sqlAndJavaAgreeOnBothSidesOfTheHotBandFloor() {
+        Workspace ws = newWorkspace();
+        Instant reference = Instant.parse("2026-06-30T00:00:00Z");
+        SqlParameters model = RelationshipWarmthModel.current().sqlParameters();
+        long atFloor = (long) Math.floor(
+            ageSecondsFor(model.hotMinimumRawWeight(), model.meetingWeight(), model));
+        Person justHot = contactWithTouchSeconds(ws, "meeting", reference, atFloor);
+        Person justWarm = contactWithTouchSeconds(ws, "meeting", reference, atFloor + 1);
+
+        Map<Integer, String> javaBands = scoringService.scoreContacts(ws.getId(), reference).stream()
+            .collect(Collectors.toMap(
+                RelationshipTemperatureDto::getId, RelationshipTemperatureDto::getBand));
+
+        assertEquals("hot", javaBands.get(justHot.getId()));
+        assertEquals("warm", javaBands.get(justWarm.getId()));
+        assertEquals(
+            List.of(justHot.getId()), contactIdsInBands(ws, reference, List.of("hot"), false));
+        assertEquals(
+            List.of(justWarm.getId()), contactIdsInBands(ws, reference, List.of("warm"), false));
+    }
+
+    /**
+     * Pins two contacts either side of a whole-day rounding boundary in the decay horizon. One
+     * second of age moves the prediction by about 1.16e-5 days, which is nine orders of magnitude
+     * larger than the MySQL LOG versus Math.log difference, so MySQL ROUND and Math.round cannot
+     * disagree here.
+     */
+    @Test
+    void theDecayHorizonRoundsWholeDaysTheSameWayTheModelDoes() {
+        Workspace ws = newWorkspace();
+        Instant reference = Instant.parse("2026-06-30T00:00:00Z");
+        SqlParameters model = RelationshipWarmthModel.current().sqlParameters();
+        long boundary = (long) Math.floor(
+            ageSecondsForDaysToCold(30.5, model.meetingWeight(), model));
+        Person roundsTo31 = contactWithTouchSeconds(ws, "meeting", reference, boundary);
+        Person roundsTo30 = contactWithTouchSeconds(ws, "meeting", reference, boundary + 1);
+
+        Map<Integer, Integer> predicted = scoringService.scoreContacts(ws.getId(), reference).stream()
+            .filter(temperature -> temperature.getDaysUntilCold() != null)
+            .collect(Collectors.toMap(
+                RelationshipTemperatureDto::getId, RelationshipTemperatureDto::getDaysUntilCold));
+
+        assertEquals(31, predicted.get(roundsTo31.getId()));
+        assertEquals(30, predicted.get(roundsTo30.getId()));
+        assertEquals(List.of(roundsTo30.getId()), horizonContactIds(ws, reference, 30));
+        assertEquals(
+            List.of(roundsTo31.getId(), roundsTo30.getId()).stream().sorted().toList(),
+            horizonContactIds(ws, reference, 31).stream().sorted().toList());
+    }
+
+    @Test
+    void exportAndIdSelectionHonorTheDecayHorizonJustAsThePageDoes() {
+        Workspace ws = newWorkspace();
+        Instant reference = Instant.parse("2026-06-30T00:00:00Z");
+        Person cool = contactWithTouch(ws, "other", reference, 30);
+        Person hot = contactWithTouch(ws, "meeting", reference, 0);
+        Person none = newPersonIn(ws);
+        WarmthFilter warmth = filter(reference, List.of(), false, 30);
+
+        List<Integer> exported = personMapper.getPersonsFiltered(
+                ws.getId(), null, null, null, false, MemberScope.allTeam(), null, false, null, false,
+                null, false, false, warmth)
+            .stream().map(Person::getId).toList();
+        List<Integer> selected = personMapper.getPersonIdsFiltered(
+            ws.getId(), null, null, null, false, MemberScope.allTeam(), null, false, null, false,
+            null, false, false, warmth, 100);
+        long counted = personMapper.countPersons(
+            ws.getId(), null, null, null, false, MemberScope.allTeam(), null, false, null, false,
+            null, false, false, warmth);
+
+        assertEquals(List.of(cool.getId()), exported);
+        assertEquals(List.of(cool.getId()), selected);
+        assertEquals(1L, counted);
+        assertFalse(selected.contains(hot.getId()));
+        assertFalse(selected.contains(none.getId()));
+    }
+
+    private static double ageSecondsFor(double targetRawWeight, double weight, SqlParameters model) {
+        return -86_400.0 * model.halfLifeDays()
+            * Math.log(targetRawWeight / weight) / Math.log(model.decayBase());
+    }
+
+    private static double ageSecondsForDaysToCold(
+            double targetDays, double weight, SqlParameters model) {
+        double horizonAtZeroAge = model.halfLifeDays()
+            * Math.log(weight / model.coldRawWeight()) / Math.log(model.decayBase());
+        return (horizonAtZeroAge - targetDays) * 86_400.0;
+    }
+
+    private Person contactWithTouchSeconds(
+            Workspace ws, String type, Instant reference, long ageSeconds) {
+        Person person = newPersonIn(ws);
+        Activity activity = new Activity();
+        activity.setWorkspaceId(ws.getId());
+        activity.setType(type);
+        activity.setSubject("Touch " + unique());
+        activity.setPerson(person);
+        activity.setCreatedBy(author());
+        activity.setTimestamp(LocalDateTime.ofInstant(reference, ZoneOffset.UTC)
+            .minusSeconds(ageSeconds)
+            .format(MYSQL_DATETIME));
+        activityMapper.insert(activity);
+        return person;
     }
 
     private List<Integer> contactIdsInBands(
