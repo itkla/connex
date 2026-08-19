@@ -3858,6 +3858,7 @@ export function search(query: string, init: RequestInit = {}) {
 
 const EMPTY_SEARCH_RESULTS: Types.SearchResults = {
     companies: [], people: [], deals: [], pipelines: [], tags: [], activities: [], notes: [], tasks: [], users: [], attachments: [],
+    products: [], campaigns: [], reports: [], documentTemplates: [], documents: [], workflows: [],
 };
 
 /**

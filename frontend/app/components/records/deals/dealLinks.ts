@@ -1,3 +1,5 @@
+import { recordDetailSectionId } from '@/app/components/records/recordDetailGrammar';
+
 /** Path of the deals browser — the only shipped route that lists deals. */
 const DEALS_BROWSER_PATH = '/records/deals';
 
@@ -63,4 +65,16 @@ export function stageDealsHref(pipelineId: number, stageId: number): string {
     return `${DEALS_BROWSER_PATH}?${DEAL_PIPELINE_FILTER_KEY}=${pipelineId}`
         + `&${DEAL_STAGE_FILTER_KEY}=${stageId}`
         + `&${DEAL_STATUS_FILTER_KEY}=open`;
+}
+
+/**
+ * Href for a generated document's canonical surface. A generated document has no page of its own —
+ * it is authored, approved, and superseded inside its parent deal — so every surface that finds one
+ * without its deal (global search, the library index) lands on that deal's documents section rather
+ * than inventing a destination.
+ *
+ * @param dealId - the parent deal the document belongs to
+ */
+export function dealDocumentsHref(dealId: number): string {
+    return `${DEALS_BROWSER_PATH}/${dealId}#${recordDetailSectionId('deal', 'files')}`;
 }

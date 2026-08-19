@@ -3630,6 +3630,85 @@ export type WarmthSummary = {
     contactDecay: WarmthDecayCounts;
 };
 
+/**
+ * Bounded catalog-product row carried by the global-search products group. The full {@link Product}
+ * is deliberately not sent: a search row renders a label and a short qualifier, never pricing.
+ */
+export type ProductSearchResult = {
+    id: number;
+    name: string;
+    sku?: string;
+    active: boolean;
+};
+
+/** Bounded campaign row carried by the global-search campaigns group. */
+export type CampaignSearchResult = {
+    id: number;
+    name: string;
+    type: string;
+    status: CampaignStatus;
+    startAt?: string;
+    endAt?: string;
+    updatedAt?: string;
+};
+
+/** Bounded report-definition row carried by the global-search reports group. */
+export type ReportSearchResult = {
+    id: number;
+    name: string;
+    description?: string;
+    cadence: string;
+    updatedAt?: string;
+};
+
+/** Bounded document-template row carried by the global-search document-templates group. */
+export type DocumentTemplateSearchResult = {
+    id: number;
+    name: string;
+    type: DocumentType;
+    locale: string;
+    active: boolean;
+    updatedAt?: string;
+};
+
+/**
+ * A generated commercial document as the cross-deal index and the global-search documents group
+ * see it: the parent deal it belongs to, its state, and when it was generated — never the
+ * immutable content snapshot the full {@link DealDocument} carries.
+ */
+export type GeneratedDocumentSummary = {
+    id: number;
+    dealId: number;
+    dealName?: string;
+    dealOwnerId?: number;
+    type: DocumentType;
+    status: DocumentStatus;
+    version: number;
+    title?: string;
+    currency?: string;
+    createdBy?: number;
+    generatedAt?: string;
+    createdAt?: string;
+    updatedAt?: string;
+};
+
+/** Filters accepted by the cross-deal generated-document index. */
+export type GeneratedDocumentsPageParams = PageParams & MemberScopeParams & {
+    status?: DocumentStatus[];
+    type?: DocumentType[];
+    dealId?: number;
+};
+
+/** Bounded workflow row carried by the global-search workflows group. */
+export type WorkflowSearchResult = {
+    id: number;
+    name: string;
+    description?: string;
+    enabled: boolean;
+    recordType?: string;
+    updatedAt?: string;
+};
+
 export type SearchResults = {
     companies: Company[];
     people: Contact[];
@@ -3641,6 +3720,12 @@ export type SearchResults = {
     tasks: Task[];
     users: User[];
     attachments: Attachment[];
+    products: ProductSearchResult[];
+    campaigns: CampaignSearchResult[];
+    reports: ReportSearchResult[];
+    documentTemplates: DocumentTemplateSearchResult[];
+    documents: GeneratedDocumentSummary[];
+    workflows: WorkflowSearchResult[];
 };
 
 export type AuditChange = {
