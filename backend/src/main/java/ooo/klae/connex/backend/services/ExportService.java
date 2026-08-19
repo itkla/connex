@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.beans.PersonLeadSource;
 import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.beans.Product;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
@@ -56,12 +57,13 @@ public class ExportService {
     public String exportPersons(String query, List<String> companies, List<String> titles, boolean noCompany,
             MemberScope memberScope, List<PersonLifecycleStage> lifecycleStages, boolean noLifecycle,
             List<PersonLeadSource> leadSources, boolean noLeadSource,
-            List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse) {
+            List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
+            WarmthFilter warmth) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Person> people = personMapper.getPersonsFiltered(
             workspaceId, query, companies, titles, noCompany, memberScope,
             lifecycleStages, noLifecycle, leadSources, noLeadSource,
-            firstResponseStates, noFirstResponse, false);
+            firstResponseStates, noFirstResponse, false, warmth);
         List<CustomFieldDefinition> defs = activeDefinitions(workspaceId, "person");
         Map<Integer, Map<Integer, Object>> custom =
             customFieldValueService.getForEntities("person", people.stream().map(Person::getId).toList());
@@ -88,10 +90,10 @@ public class ExportService {
      * CSV of companies matching the given list filters and member scope (all companies when unfiltered).
      */
     public String exportCompanies(String query, List<String> industry, boolean noIndustry, List<Integer> ids,
-            MemberScope memberScope) {
+            MemberScope memberScope, WarmthFilter warmth) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Company> companies = companyMapper.getCompaniesFiltered(
-            workspaceId, query, industry, noIndustry, ids, memberScope, false);
+            workspaceId, query, industry, noIndustry, ids, memberScope, false, warmth);
         List<CustomFieldDefinition> defs = activeDefinitions(workspaceId, "company");
         Map<Integer, Map<Integer, Object>> custom =
             customFieldValueService.getForEntities("company", companies.stream().map(Company::getId).toList());

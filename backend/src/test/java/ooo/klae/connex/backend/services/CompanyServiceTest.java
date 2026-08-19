@@ -12,6 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -407,7 +409,8 @@ class CompanyServiceTest extends AbstractServiceTest {
     @Test
     void getMatchingCompanyIdsRejectsRequestsWithoutFilters() {
         assertThrows(BadRequestException.class,
-            () -> companyService.getMatchingCompanyIds(null, null, false, null, MemberScope.allTeam(), false));
+            () -> companyService.getMatchingCompanyIds(
+                null, null, false, null, MemberScope.allTeam(), false, null));
     }
 
     @Test
@@ -444,18 +447,19 @@ class CompanyServiceTest extends AbstractServiceTest {
         List<Integer> matchingIds = List.of(3);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(mapper.countCompanies(
-            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false)).thenReturn(1L);
+            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false, null))
+            .thenReturn(1L);
         when(mapper.getCompanyIdsFiltered(
-            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false, 1000, 0))
+            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false, null, 1000, 0))
             .thenReturn(matchingIds);
 
-        assertEquals(matchingIds,
-            service.getMatchingCompanyIds("%Target%", industry, true, requestedIds, MemberScope.allTeam(), false));
+        assertEquals(matchingIds, service.getMatchingCompanyIds(
+            "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false, null));
 
         verify(mapper).countCompanies(
-            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false);
+            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false, null);
         verify(mapper).getCompanyIdsFiltered(
-            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false, 1000, 0);
+            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false, null, 1000, 0);
     }
 
     @Test
@@ -465,13 +469,13 @@ class CompanyServiceTest extends AbstractServiceTest {
         CompanyService service = companyService(mapper, workspaceService);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(mapper.countCompanies(
-            7, "%Target%", null, false, null, MemberScope.allTeam(), false)).thenReturn(1001L);
+            7, "%Target%", null, false, null, MemberScope.allTeam(), false, null)).thenReturn(1001L);
 
-        assertThrows(BadRequestException.class,
-            () -> service.getMatchingCompanyIds("%Target%", null, false, null, MemberScope.allTeam(), false));
+        assertThrows(BadRequestException.class, () -> service.getMatchingCompanyIds(
+            "%Target%", null, false, null, MemberScope.allTeam(), false, null));
 
         verify(mapper, never()).getCompanyIdsFiltered(
-            7, "%Target%", null, false, null, MemberScope.allTeam(), false, 1000, 0);
+            7, "%Target%", null, false, null, MemberScope.allTeam(), false, null, 1000, 0);
     }
 
     @Test
@@ -557,6 +561,21 @@ class CompanyServiceTest extends AbstractServiceTest {
         verify(taskMapper).getCompanyTasks(7, 9, 25);
         verify(noteMapper).getVisibleCompanyNotes(7, 9, 11, 25);
         verify(referenceService).hydrateActivities(7, List.of(activity));
+    }
+
+    /**
+     * The warmth band facet projects {@code w.*} columns that only exist when the aggregate join was
+     * emitted, so a missing filter must fail explicitly rather than as an unresolved-column 500.
+     */
+    @Test
+    void theWarmthFacetRefusesAMissingFilterInsteadOfReachingTheMapper() {
+        CompanyMapper mapper = mock(CompanyMapper.class);
+        WorkspaceService workspaceService = mock(WorkspaceService.class);
+        CompanyService service = companyService(mapper, workspaceService);
+
+        assertThrows(NullPointerException.class, () -> service.countsByWarmthBand(null));
+
+        verify(mapper, never()).countsByWarmthBand(anyInt(), any());
     }
 
     private CompanyService companyService(CompanyMapper mapper, WorkspaceService workspaceService) {

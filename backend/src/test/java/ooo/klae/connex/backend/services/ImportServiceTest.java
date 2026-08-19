@@ -2307,7 +2307,7 @@ class ImportServiceTest extends AbstractServiceTest {
         Company a = newCompany();
         Company b = newCompany();
         String csv = exportService.exportCompanies(
-            null, null, false, List.of(a.getId()), MemberScope.allTeam());
+            null, null, false, List.of(a.getId()), MemberScope.allTeam(), null);
         assertTrue(csv.contains(a.getName()), "selected company present");
         assertTrue(!csv.contains(b.getName()), "unselected company absent");
     }
@@ -2320,7 +2320,7 @@ class ImportServiceTest extends AbstractServiceTest {
             "fill_empty"));
 
         String csv = exportService.exportPersons(
-            null, null, null, false, MemberScope.allTeam(), null, false, null, false, null, false);
+            null, null, null, false, MemberScope.allTeam(), null, false, null, false, null, false, null);
 
         assertTrue(csv.startsWith("id,name,email"), "header present");
         assertTrue(csv.contains("'=SUM(A1:A2)"), "formula prefixed with apostrophe");

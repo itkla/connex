@@ -104,7 +104,10 @@ public final class RelationshipWarmthModel {
             otherActivityWeight,
             noteWeight,
             taskWeight,
-            warmMinimumRawWeight
+            warmMinimumRawWeight,
+            rawWeightForRoundedScore(hotMinimumScore),
+            rawWeightForRoundedScore(coolMinimumScore),
+            coldRawWeight
         );
     }
 
@@ -214,7 +217,15 @@ public final class RelationshipWarmthModel {
         return OptionalDouble.of(halfLifeDays * log2(rawWeight / coldRawWeight));
     }
 
-    /** Parameters that MyBatis binds into every SQL implementation of the model. */
+    /**
+     * Parameters that MyBatis binds into every SQL implementation of the model.
+     *
+     * <p>The raw-weight boundaries let SQL classify a decayed weight into the same band
+     * {@link #band(int)} produces in Java without reimplementing {@link #score(double)}: the score is
+     * strictly increasing in raw weight, so a raw-weight comparison and a score comparison select the
+     * same rows. {@code coldRawWeight} is the {@link #daysToCold(double)} horizon boundary and is
+     * deliberately the exact-score weight rather than a rounded band boundary.
+     */
     public record SqlParameters(
         double decayBase,
         double halfLifeDays,
@@ -227,7 +238,10 @@ public final class RelationshipWarmthModel {
         double otherActivityWeight,
         double noteWeight,
         double taskWeight,
-        double warmMinimumRawWeight
+        double warmMinimumRawWeight,
+        double hotMinimumRawWeight,
+        double coolMinimumRawWeight,
+        double coldRawWeight
     ) {}
 
     private double rawWeightForExactScore(double score) {
