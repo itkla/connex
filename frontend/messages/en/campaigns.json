@@ -233,7 +233,7 @@
         "skipped": "Skipped",
         "failed": "Failed",
         "notMeasured": "Not measured",
-        "notMeasuredHint": "SMTP returns no delivery receipts — connect an ESP to measure this.",
+        "notMeasuredHint": "SMTP returns no delivery receipts. Connect an email service provider to measure this.",
         "deliveryRate": "Delivery rate",
         "bounceRate": "Bounce rate",
         "complaintRate": "Complaint rate",

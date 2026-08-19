@@ -8,6 +8,7 @@ import {
     baselineEntries,
     describeViolation,
     isAllowedSurface,
+    isSearchAlias,
     isWorkflowSurface,
     loadBaseline,
     loadVocabularyModel,
@@ -16,6 +17,8 @@ import {
     parseBaselineEntry,
     scanMessageCatalogs,
     scopeCovers,
+    SEARCH_ALIAS_KEYS,
+    termApplies,
 } from "@/lint/vocabulary.mjs";
 
 const model = loadVocabularyModel();
@@ -31,7 +34,7 @@ const BURN_DOWN = "The baseline only shrinks: fix the copy and delete its entry 
  * load-bearing rather than decorative.
  */
 function suppressedMatches(
-    inScope: (entry: { file: string; namespace: string }) => boolean,
+    inScope: (entry: { file: string; namespace: string; keyPath: string }) => boolean,
     terms = model.terms,
 ): string[] {
     const compiled = terms.map((term) => ({ term, expression: new RegExp(term.pattern.source, term.pattern.flags) }));
@@ -125,7 +128,35 @@ describe("message catalogue vocabulary", () => {
         expect(ALLOWED_SURFACES).toEqual(["legal.json", "organization.json#OrgDataRequests"]);
         expect(carveOuts.size).toBeGreaterThan(0);
         expect(onComplianceSurfaces.filter((entry) => carveOuts.has(entry.term)).map((entry) => entry.term)).toEqual([]);
-        expect(onComplianceSurfaces.some((entry) => entry.term === "tenant")).toBe(true);
+        expect(onComplianceSurfaces.some((entry) => entry.term === "取引先")).toBe(true);
+    });
+
+    it("allows the multi-tenancy vocabulary of the contracts on the legal pages only", () => {
+        const flagged = new Set(violations.map((violation) => `${violation.file}:${violation.term}`));
+
+        for (const id of ["en:tenant", "ja:テナント"]) {
+            const term = model.terms.find((candidate) => candidate.id === id);
+            if (!term) throw new Error(`docs/PRODUCT.md §4 no longer bans ${id}`);
+
+            expect(term.allowFiles).toEqual(["legal.json"]);
+            expect(termApplies(term, { locale: term.locale, file: "legal.json", namespace: "Legal" })).toBe(false);
+            expect(termApplies(term, { locale: term.locale, file: "organization.json", namespace: "OrgDataRequests" })).toBe(true);
+        }
+        expect(flagged.has("legal.json:tenant")).toBe(false);
+        expect(flagged.has("legal.json:テナント")).toBe(false);
+    });
+
+    it("leaves the command palette's search aliases out of the scan", () => {
+        const aliases = messageEntries().filter((entry) => isSearchAlias(entry.file, entry.keyPath));
+        const suppressed = suppressedMatches((entry) => isSearchAlias(entry.file, entry.keyPath));
+        const reported = new Set(violations.map((violation) => violation.entry));
+
+        expect(SEARCH_ALIAS_KEYS).toEqual(["actions.json:Actions.keywords"]);
+        expect(aliases.length).toBeGreaterThan(0);
+        expect(aliases.every((entry) => entry.keyPath.startsWith("Actions.keywords."))).toBe(true);
+        expect(isSearchAlias("actions.json", "Actions.create.company.label")).toBe(false);
+        expect(suppressed.length).toBeGreaterThan(0);
+        expect(suppressed.filter((entry) => reported.has(entry))).toEqual([]);
     });
 
     it("suppresses the statutory carve-out terms that a compliance surface really carries", () => {
@@ -138,12 +169,12 @@ describe("message catalogue vocabulary", () => {
     });
 
     it("runs the Latin-script bans against the Japanese catalog too", () => {
-        const found = baseline.map(parseBaselineEntry).filter((entry) => entry.locale === "ja" && entry.term === "ESP");
+        const esp = model.terms.find((term) => term.term === "ESP");
+        if (!esp) throw new Error("docs/PRODUCT.md §4 no longer bans ESP");
 
-        expect(found.map((entry) => entry.keyPath)).toEqual(expect.arrayContaining([
-            "WorkspaceDelivery.subtitle",
-            "WorkspaceDelivery.providerHttpEsp",
-        ]));
+        expect(esp.locale).toBe("en");
+        expect(termApplies(esp, { locale: "ja", file: "workspace.json", namespace: "WorkspaceDelivery" })).toBe(true);
+        expect(new RegExp(esp.pattern.source, esp.pattern.flags).test("メール配信サービス（ESP）経由で送信します。")).toBe(true);
     });
 
     it("bans the automation object's former name on the workflow seam only", () => {

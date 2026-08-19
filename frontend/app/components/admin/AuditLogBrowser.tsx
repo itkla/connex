@@ -80,6 +80,35 @@ const VERB_META: Record<string, VerbMeta> = {
     removePerson: { tone: "update", icon: UserMinusIcon, verbKey: "verbRemovedPerson" },
     updatePersonRole: { tone: "update", icon: PencilSquareIcon, verbKey: "verbUpdatedRole" },
     replacePeople: { tone: "update", icon: UserPlusIcon, verbKey: "verbUpdatedPeople" },
+    read: { tone: "view", icon: EyeIcon, verbKey: "verbViewed" },
+    use: { tone: "view", icon: EyeIcon, verbKey: "verbUsed" },
+    use_failed: { tone: "view", icon: EyeIcon, verbKey: "verbUsedFailed" },
+    rewrap: { tone: "update", icon: ArrowPathIcon, verbKey: "verbReencrypted" },
+    rewrap_failed: { tone: "update", icon: ArrowPathIcon, verbKey: "verbReencryptedFailed" },
+    call: { tone: "default", icon: BoltIcon, verbKey: "verbCalled" },
+    operation: { tone: "default", icon: BoltIcon, verbKey: "verbActedOn" },
+};
+
+const PROVIDER_LABEL_KEYS: Record<string, string> = {
+    bedrock: "providerBedrock",
+    azure_openai: "providerAzureOpenAi",
+    vertex: "providerVertex",
+    openai_compatible: "providerOpenAiCompatible",
+    unresolved: "providerUnresolved",
+};
+
+const TARGET_LABEL_KEYS: Record<string, string> = {
+    "workspace.smtp.password": "targetSmtpPassword",
+    "workspace.delivery.provider_credential": "targetDeliveryCredential",
+    "workspace.delivery.webhook_secret": "targetDeliveryWebhookSecret",
+    "workspace.connector.credential": "targetConnectorCredential",
+    "org.sso.oidc_client_secret": "targetSsoClientSecret",
+    "org.sso.saml_sp_private_key": "targetSsoSigningKey",
+    "org.ai.provider_credential": "targetAiCredential",
+    "user.provider.google_token": "targetGoogleConnection",
+    "user.provider.microsoft_token": "targetMicrosoftConnection",
+    secret_store: "targetStoredCredential",
+    ai_call: "targetAiProvider",
 };
 
 const PLAIN_VERBS = new Set<string>(["login", "logout", "updateAvatar"]);
@@ -851,6 +880,14 @@ function PulseStrip({
 
 type Translator = ReturnType<typeof useTranslations>;
 
+function targetText(label: string | null, t: Translator): string | null {
+    if (label === null) return null;
+    const key = TARGET_LABEL_KEYS[label];
+    if (key !== undefined) return t(key);
+    const providerKey = PROVIDER_LABEL_KEYS[label.split("/")[0]];
+    return providerKey === undefined ? label : t(providerKey);
+}
+
 function auditMetadataValue(row: AuditMetadataRow, t: Translator): string {
     if (row.value == null) return t("valueUnknown");
     if (typeof row.value === "boolean") return t(row.value ? "valueYes" : "valueNo");
@@ -859,6 +896,14 @@ function auditMetadataValue(row: AuditMetadataRow, t: Translator): string {
         if (row.value === "failure") return t("outcomeFailed");
         if (row.value === "attempt") return t("outcomeAttempt");
         if (row.value === "blocked") return t("outcomeBlocked");
+    }
+    if (row.key === "target" || row.key === "purpose") {
+        const key = TARGET_LABEL_KEYS[String(row.value)];
+        if (key !== undefined) return t(key);
+    }
+    if (row.key === "provider") {
+        const key = PROVIDER_LABEL_KEYS[String(row.value)];
+        if (key !== undefined) return t(key);
     }
     return String(row.value);
 }
@@ -942,7 +987,7 @@ function AuditRow({
     const verbText = meta ? t(meta.verbKey) : verb;
     const actorTag = (chunks: React.ReactNode) => <span className="font-semibold text-foreground">{chunks}</span>;
     const targetTag = (chunks: React.ReactNode) => <span className="font-medium text-foreground">{chunks}</span>;
-    const targetLabel = auditTargetLabel(entry);
+    const targetLabel = targetText(auditTargetLabel(entry), t);
     const summary = auditSummary(entry);
     const actionLine = targetLabel && !PLAIN_VERBS.has(verb)
         ? t.rich("actionEntity", {

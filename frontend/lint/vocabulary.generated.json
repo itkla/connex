@@ -94,7 +94,7 @@
             "canonicalExceptions": [],
             "narrowed": false,
             "pattern": {
-                "source": "\\bRelationship\\s+(?:Radarring|Radaring|Radarred|Radared|Radares|Radars|Radar)\\b",
+                "source": "\\bRelationship[\\s-]+(?:Radarring|Radaring|Radarred|Radared|Radares|Radars|Radar)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -146,7 +146,7 @@
             "canonicalExceptions": [],
             "narrowed": false,
             "pattern": {
-                "source": "\\bcease\\s+of\\s+(?:using|used|uses|use)\\b",
+                "source": "\\bcease[\\s-]+of[\\s-]+(?:using|used|uses|use)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -162,7 +162,7 @@
             "canonicalExceptions": [],
             "narrowed": false,
             "pattern": {
-                "source": "\\bconsent\\s+(?:accessing|accessed|accesses|accesss|access)\\b",
+                "source": "\\bconsent[\\s-]+(?:accessing|accessed|accesses|accesss|access)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -178,7 +178,7 @@
             "canonicalExceptions": [],
             "narrowed": false,
             "pattern": {
-                "source": "\\bconsent\\s+and\\s+(?:suppressions|suppressing|suppression|suppressed|suppresses)\\b",
+                "source": "\\bconsent[\\s-]+and[\\s-]+(?:suppressions|suppressing|suppression|suppressed|suppresses)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -194,7 +194,7 @@
             "canonicalExceptions": [],
             "narrowed": false,
             "pattern": {
-                "source": "\\bcontext\\s+(?:spacing|spaced|spaces|space)\\b",
+                "source": "\\bcontext[\\s-]+(?:spacing|spaced|spaces|space)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -210,7 +210,7 @@
             "canonicalExceptions": [],
             "narrowed": false,
             "pattern": {
-                "source": "\\bcorrelation\\s+(?:IDDing|IDDed|IDing|IDed|IDes|IDs|ID)\\b",
+                "source": "\\bcorrelation[\\s-]+(?:IDDing|IDDed|IDing|IDed|IDes|IDs|ID)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -230,7 +230,7 @@
             "canonicalExceptions": [],
             "narrowed": false,
             "pattern": {
-                "source": "\\bdata\\s+(?:subjecting|subjected|subjectes|subjects|subject)\\b",
+                "source": "\\bdata[\\s-]+(?:subjecting|subjected|subjectes|subjects|subject)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -374,7 +374,7 @@
             "canonicalExceptions": [],
             "narrowed": false,
             "pattern": {
-                "source": "\\blegacy\\s+(?:runtiming|runtimed|runtimes|runtime)\\b",
+                "source": "\\blegacy[\\s-]+(?:runtiming|runtimed|runtimes|runtime)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -404,9 +404,9 @@
             "scope": "global",
             "allowFiles": [],
             "canonicalExceptions": [],
-            "narrowed": false,
+            "narrowed": true,
             "pattern": {
-                "source": "\\b(?:noding|noded|nodes|node)\\b",
+                "source": "\\b(?:noding|noded|nodes|node)\\b(?!\\.js)",
                 "flags": "iu"
             },
             "sources": [
@@ -422,7 +422,7 @@
             "canonicalExceptions": [],
             "narrowed": false,
             "pattern": {
-                "source": "\\bopaque\\s+(?:identifierring|identifiering|identifierred|identifiered|identifieres|identifiers|identifier)\\b",
+                "source": "\\bopaque[\\s-]+(?:identifierring|identifiering|identifierred|identifiered|identifieres|identifiers|identifier)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -487,9 +487,9 @@
                 "organization.json#OrgDataRequests"
             ],
             "canonicalExceptions": [],
-            "narrowed": false,
+            "narrowed": true,
             "pattern": {
-                "source": "\\bprocessing\\s+(?:restrictionsing|restrictionsed|restrictionses|restrictionss|restrictions)\\b",
+                "source": "\\b(?:processing[\\s-]+restrictions?|restrict(?:s|ed|ing)?[\\s-]+(?:the[\\s-]+)?processing)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -506,9 +506,9 @@
                 "organization.json#OrgDataRequests"
             ],
             "canonicalExceptions": [],
-            "narrowed": false,
+            "narrowed": true,
             "pattern": {
-                "source": "\\bprocessing\\s+(?:suspending|suspended|suspends)\\b",
+                "source": "\\b(?:processing[\\s-]+suspend(?:ed|ing|s)?|suspend(?:ed|ing|s)?[\\s-]+(?:the[\\s-]+)?processing)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -556,7 +556,7 @@
             "canonicalExceptions": [],
             "narrowed": false,
             "pattern": {
-                "source": "\\bprovider\\s+(?:egressing|egressed|egresses|egresss|egress)\\b",
+                "source": "\\bprovider[\\s-]+(?:egressing|egressed|egresses|egresss|egress)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -573,9 +573,9 @@
                 "organization.json#OrgDataRequests"
             ],
             "canonicalExceptions": [],
-            "narrowed": false,
+            "narrowed": true,
             "pattern": {
-                "source": "\\bprovision\\s+(?:ceasing|ceased|ceases|ceass)\\b",
+                "source": "\\b(?:provision[\\s-]+ceas(?:ed|es|ing)?|ceas(?:e|ed|es|ing)[\\s-]+(?:the[\\s-]+)?provisions?)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -608,7 +608,7 @@
             "canonicalExceptions": [],
             "narrowed": false,
             "pattern": {
-                "source": "\\brelationship\\s+(?:scoring|scored|scores|score)\\b",
+                "source": "\\brelationship[\\s-]+(?:scoring|scored|scores|score)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -624,7 +624,7 @@
             "canonicalExceptions": [],
             "narrowed": false,
             "pattern": {
-                "source": "\\brelationship\\s+(?:temperaturing|temperatured|temperatures|temperature)\\b",
+                "source": "\\brelationship[\\s-]+(?:temperaturing|temperatured|temperatures|temperature)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -727,7 +727,7 @@
             "canonicalExceptions": [],
             "narrowed": false,
             "pattern": {
-                "source": "\\btear\\s+(?:downing|downed|downes|downs|down)\\b",
+                "source": "\\b(?:tearring|tearing|tearred|teared|teares|tears|tear)[\\s-]+(?:downing|downed|downes|downs|down)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -760,7 +760,7 @@
             "canonicalExceptions": [],
             "narrowed": false,
             "pattern": {
-                "source": "\\btemperature\\s+(?:banding|banded|bandes|bands|band)\\b",
+                "source": "\\btemperature[\\s-]+(?:banding|banded|bandes|bands|band)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -772,7 +772,9 @@
             "term": "tenant",
             "locale": "en",
             "scope": "global",
-            "allowFiles": [],
+            "allowFiles": [
+                "legal.json"
+            ],
             "canonicalExceptions": [],
             "narrowed": false,
             "pattern": {
@@ -797,7 +799,7 @@
             "canonicalExceptions": [],
             "narrowed": false,
             "pattern": {
-                "source": "\\bthird-party\\s+(?:provisions|provising|provision|provised|provises)\\b",
+                "source": "\\bthird-party[\\s-]+(?:provisions|provising|provision|provised|provises)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -813,7 +815,7 @@
             "canonicalExceptions": [],
             "narrowed": false,
             "pattern": {
-                "source": "\\btoken\\s+(?:budgetting|budgeting|budgetted|budgeted|budgetes|budgets|budget)\\b",
+                "source": "\\btoken[\\s-]+(?:budgetting|budgeting|budgetted|budgeted|budgetes|budgets|budget)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -867,7 +869,7 @@
             "canonicalExceptions": [],
             "narrowed": false,
             "pattern": {
-                "source": "\\bwarm\\s+(?:pathing|pathed|pathes|paths|path)\\b",
+                "source": "\\bwarm[\\s-]+(?:pathing|pathed|pathes|paths|path)\\b",
                 "flags": "iu"
             },
             "sources": [
@@ -943,7 +945,9 @@
             "term": "テナント",
             "locale": "ja",
             "scope": "global",
-            "allowFiles": [],
+            "allowFiles": [
+                "legal.json"
+            ],
             "canonicalExceptions": [],
             "narrowed": false,
             "pattern": {
