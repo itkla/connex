@@ -109,7 +109,7 @@ export default function CampaignRecipientsDialog({
                     <ResponsiveDialogTitle>{t('title', { counter: counterLabel })}</ResponsiveDialogTitle>
                     {status === 'ready' ? (
                         <ResponsiveDialogDescription>
-                            {t(DESCRIPTION_KEY[counter], { count: total.toLocaleString(locale) })}
+                            {t(DESCRIPTION_KEY[counter], { count: total })}
                         </ResponsiveDialogDescription>
                     ) : status === 'loading' ? (
                         <ResponsiveDialogDescription>{t('loading')}</ResponsiveDialogDescription>

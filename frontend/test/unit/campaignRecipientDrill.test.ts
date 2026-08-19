@@ -121,10 +121,19 @@ describe('a campaign engagement count opens the contacts behind it', () => {
             const described = ENGAGEMENT_COUNTERS.map((counter) => catalog[descriptionKey(counter)]);
             for (const [index, counter] of ENGAGEMENT_COUNTERS.entries()) {
                 expect(described[index], `${locale} is missing a description for ${counter}`).toBeTruthy();
-                expect(described[index]).toContain('{count}');
+                expect(described[index]).toContain('{count');
             }
             expect(new Set(described).size, `${locale} reuses one sentence for several populations`)
                 .toBe(ENGAGEMENT_COUNTERS.length);
+        }
+    });
+
+    it('counts contacts in whole words rather than "1 contacts"', () => {
+        const catalog = messages('en');
+
+        for (const counter of ENGAGEMENT_COUNTERS) {
+            expect(catalog[descriptionKey(counter)], `${counter} must pluralize`)
+                .toContain('{count, plural,');
         }
     });
 
@@ -144,7 +153,7 @@ describe('a campaign engagement count opens the contacts behind it', () => {
         const dialog = source(DIALOG);
 
         expect(dialog).toContain("{status === 'ready' ? (");
-        expect(dialog).toContain("t(DESCRIPTION_KEY[counter], { count: total.toLocaleString(locale) })");
+        expect(dialog).toContain("t(DESCRIPTION_KEY[counter], { count: total })");
         const readyBranch = dialog.indexOf("t(DESCRIPTION_KEY[counter]");
         const loadingBranch = dialog.indexOf("status === 'loading' ? (");
         expect(readyBranch).toBeGreaterThan(-1);

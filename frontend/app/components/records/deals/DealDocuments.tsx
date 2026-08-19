@@ -184,7 +184,10 @@ export default function DealDocuments({
         const section = sectionRef.current;
         if (!section) return;
         scrolledForHash.current = hash;
-        section.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+        const behavior = reduceMotion ? 'auto' : 'smooth';
+        section.scrollIntoView({ behavior, block: 'start' });
+        const frame = requestAnimationFrame(() => section.scrollIntoView({ behavior, block: 'start' }));
+        return () => cancelAnimationFrame(frame);
     }, [hash, reduceMotion]);
 
     useEffect(() => {
