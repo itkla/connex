@@ -357,7 +357,8 @@ jobs:
             exit 0
           fi
           echo "with-deps install failed or timed out; clearing apt state and retrying browser-only"
-          sudo pkill -9 -f 'apt-get|apt|dpkg' 2>/dev/null || true
+          sudo pkill -9 -x apt-get 2>/dev/null || true
+          sudo pkill -9 -x dpkg 2>/dev/null || true
           sudo rm -f /var/lib/apt/lists/lock /var/cache/apt/archives/lock \
             /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock 2>/dev/null || true
           sudo dpkg --configure -a 2>/dev/null || true
