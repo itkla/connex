@@ -45,7 +45,7 @@ export type SettingsEntryPoint =
  * the type rather than restated, so a capability that is renamed or dropped fails to compile here
  * instead of silently gating nothing.
  */
-export type SettingsCapabilityKey =
+export type SettingsCapabilityKey = NonNullable<
     | {
           [K in keyof InstanceCapabilities]: InstanceCapabilities[K] extends boolean ? K : never;
       }[keyof InstanceCapabilities]
@@ -56,7 +56,8 @@ export type SettingsCapabilityKey =
           }
               ? `${K & string}.google` | `${K & string}.microsoft`
               : never;
-      }[keyof InstanceCapabilities];
+      }[keyof InstanceCapabilities]
+>;
 
 /** A capability the destination depends on, and the value that capability must hold. */
 export type SettingsCapabilityRequirement = {
@@ -228,7 +229,7 @@ export const SETTINGS_GROUPS = [
         scope: "personal",
         route: "/settings/personal/notifications",
         order: 4,
-        titleKey: null,
+        titleKey: "SettingsNav.groupNotificationPreferences",
         epicName: "Notification preferences",
     },
     {
@@ -236,7 +237,7 @@ export const SETTINGS_GROUPS = [
         scope: "personal",
         route: "/settings/personal/workspaces",
         order: 5,
-        titleKey: null,
+        titleKey: "SettingsNav.groupWorkspacesInvitations",
         epicName: "Workspaces & invitations",
     },
     {
@@ -252,7 +253,7 @@ export const SETTINGS_GROUPS = [
         scope: "workspace",
         route: "/settings/workspace/people",
         order: 2,
-        titleKey: null,
+        titleKey: "SettingsNav.groupPeopleAccess",
         epicName: "People & access",
     },
     {
@@ -260,7 +261,7 @@ export const SETTINGS_GROUPS = [
         scope: "workspace",
         route: "/settings/workspace/crm",
         order: 3,
-        titleKey: null,
+        titleKey: "SettingsNav.groupCrmConfiguration",
         epicName: "CRM configuration",
     },
     {
@@ -268,7 +269,7 @@ export const SETTINGS_GROUPS = [
         scope: "workspace",
         route: "/settings/workspace/communications",
         order: 4,
-        titleKey: null,
+        titleKey: "SettingsNav.groupCommunications",
         epicName: "Communications",
     },
     {
@@ -276,7 +277,7 @@ export const SETTINGS_GROUPS = [
         scope: "workspace",
         route: "/settings/workspace/data-privacy",
         order: 5,
-        titleKey: null,
+        titleKey: "SettingsNav.groupDataPrivacy",
         epicName: "Data & privacy",
     },
     {
@@ -284,7 +285,7 @@ export const SETTINGS_GROUPS = [
         scope: "workspace",
         route: "/settings/workspace/audit-diagnostics",
         order: 6,
-        titleKey: null,
+        titleKey: "SettingsNav.groupAuditDiagnostics",
         epicName: "Audit & diagnostics",
     },
     {
@@ -292,7 +293,7 @@ export const SETTINGS_GROUPS = [
         scope: "organization",
         route: "/settings/organization/general",
         order: 1,
-        titleKey: null,
+        titleKey: "SettingsNav.groupOrganizationGeneral",
         epicName: "General",
     },
     {
@@ -300,7 +301,7 @@ export const SETTINGS_GROUPS = [
         scope: "organization",
         route: "/settings/organization/identity",
         order: 2,
-        titleKey: null,
+        titleKey: "SettingsNav.groupIdentityAdministrators",
         epicName: "Identity & administrators",
     },
     {
@@ -308,7 +309,7 @@ export const SETTINGS_GROUPS = [
         scope: "organization",
         route: "/settings/organization/ai-governance",
         order: 3,
-        titleKey: null,
+        titleKey: "SettingsNav.groupAiDataGovernance",
         epicName: "AI & data governance",
     },
     {
@@ -324,7 +325,7 @@ export const SETTINGS_GROUPS = [
         scope: "organization",
         route: "/settings/organization/audit-diagnostics",
         order: 5,
-        titleKey: null,
+        titleKey: "SettingsNav.groupAuditDiagnostics",
         epicName: "Audit & diagnostics",
     },
 ] as const satisfies readonly SettingsGroup[];
@@ -729,14 +730,14 @@ export const SETTINGS_ENTRIES = [
     {
         id: "settings.home",
         currentRoute: "/settings",
-        kind: "redirect",
+        kind: "destination",
         group: null,
         canonicalRoute: SETTINGS_HOME_ROUTE,
         canonicalSection: null,
-        redirectsTo: "/settings/members",
+        redirectsTo: null,
         redirectQuery: [],
         conditionalForward: null,
-        titleKey: "WorkspaceSettings.title",
+        titleKey: "SettingsHome.title",
         access: NO_ACCESS_REQUIREMENTS,
         entryPoints: [],
         aliasKey: null,

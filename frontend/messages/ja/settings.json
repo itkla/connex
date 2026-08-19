@@ -1,0 +1,33 @@
+{
+    "SettingsHome": {
+        "title": "設定",
+        "description": "設定できる項目を、適用される範囲ごとにまとめています。",
+        "navLabel": "設定",
+        "sectionsLabel": "設定のセクション",
+        "searchLabel": "設定を検索",
+        "searchPlaceholder": "設定を検索",
+        "searchClear": "検索をクリア",
+        "searchResultsLabel": "検索結果",
+        "noResultsTitle": "「{query}」に一致する設定はありません",
+        "noResultsBody": "短い言葉でお試しください。検索をクリアすると、すべて表示されます。",
+        "emptyTitle": "変更できる設定はありません",
+        "emptyBody": "変更できる設定がここに表示されます。必要な場合はワークスペース管理者にお問い合わせください。",
+        "backTo": "{name}に戻る",
+        "openGroup": "{name}を開く"
+    },
+    "SettingsNav": {
+        "scopePersonal": "個人",
+        "scopeWorkspace": "ワークスペース",
+        "scopeOrganization": "組織",
+        "groupNotificationPreferences": "通知設定",
+        "groupWorkspacesInvitations": "ワークスペースと招待",
+        "groupPeopleAccess": "メンバーとアクセス権",
+        "groupCrmConfiguration": "CRM設定",
+        "groupCommunications": "メールと配信",
+        "groupDataPrivacy": "データとプライバシー",
+        "groupAuditDiagnostics": "監査ログと診断",
+        "groupOrganizationGeneral": "一般",
+        "groupIdentityAdministrators": "ログインと管理者",
+        "groupAiDataGovernance": "AIとデータ管理"
+    }
+}

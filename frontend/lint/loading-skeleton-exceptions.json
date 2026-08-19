@@ -27,11 +27,6 @@
             "reason": "A frozen snapshot renders the same report document board as /overview/reports/[id]; that parent skeleton is already the correct mirror, and a second copy would only drift from it."
         },
         {
-            "route": "/settings",
-            "kind": "redirect-only",
-            "reason": "Renders nothing: redirects straight to /settings/members, which owns the skeleton."
-        },
-        {
             "route": "/settings/membership",
             "kind": "redirect-only",
             "reason": "Renders nothing: redirects to /account/invites, the canonical destination for the membership job."

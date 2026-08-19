@@ -1,0 +1,33 @@
+{
+    "SettingsHome": {
+        "title": "Settings",
+        "description": "Everything you can configure, grouped by what it applies to.",
+        "navLabel": "Settings",
+        "sectionsLabel": "Settings sections",
+        "searchLabel": "Search settings",
+        "searchPlaceholder": "Search settings",
+        "searchClear": "Clear search",
+        "searchResultsLabel": "Search results",
+        "noResultsTitle": "No settings match “{query}”",
+        "noResultsBody": "Try a shorter word, or clear the search to see everything again.",
+        "emptyTitle": "Nothing here you can change",
+        "emptyBody": "Settings you can change appear here. Ask a workspace administrator if you need one.",
+        "backTo": "Back to {name}",
+        "openGroup": "Open {name}"
+    },
+    "SettingsNav": {
+        "scopePersonal": "Personal",
+        "scopeWorkspace": "Workspace",
+        "scopeOrganization": "Organization",
+        "groupNotificationPreferences": "Notification preferences",
+        "groupWorkspacesInvitations": "Workspaces & invitations",
+        "groupPeopleAccess": "People & access",
+        "groupCrmConfiguration": "CRM configuration",
+        "groupCommunications": "Communications",
+        "groupDataPrivacy": "Data & privacy",
+        "groupAuditDiagnostics": "Audit & diagnostics",
+        "groupOrganizationGeneral": "General",
+        "groupIdentityAdministrators": "Identity & administrators",
+        "groupAiDataGovernance": "AI & data governance"
+    }
+}

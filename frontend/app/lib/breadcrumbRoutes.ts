@@ -1,5 +1,6 @@
 import type { NavAccess } from "@/app/lib/navAccess";
 import type { RecordCollection } from "@/app/lib/recordReturnPath";
+import { SETTINGS_HOME_ROUTE } from "@/app/lib/settingsManifest";
 import { isWorkflowRecipeKey } from "@/app/lib/workflowOperations";
 
 export type BreadcrumbMessageKey =
@@ -167,7 +168,6 @@ export const BREADCRUMB_STATIC_ROUTE_PATHS = [...new Set([
 const REDIRECT_ROUTES = new Set([
     "/account",
     "/organization",
-    "/settings",
     "/settings/membership",
     "/settings/notifications",
     "/settings/rules",
@@ -323,6 +323,12 @@ export function resolveBreadcrumbRoute(
             return shell(root ? [{ ...root, current: true }] : [current]);
         }
         return shell(withWorkspace(context, [current]));
+    }
+
+    if (pathname === SETTINGS_HOME_ROUTE) {
+        return shell(withWorkspace(context, [
+            translatedCrumb(SETTINGS_HOME_ROUTE, "settings", context, true),
+        ]));
     }
 
     const settingsRoute = SETTINGS_ROUTES[pathname];
