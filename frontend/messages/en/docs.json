@@ -2668,7 +2668,7 @@
                         "type": "prose",
                         "text": [
                             "A document template is a reusable layout for something you send to a customer, like a quote. You build it once with headings, lists and merge fields, and then generate a document from any deal.",
-                            "Templates live in the library. Documents themselves live on the deal they were generated from."
+                            "Templates live in the library, next to an index of every document the workspace has generated. A document itself still lives on the deal it was generated from, and each row in the index opens that deal."
                         ]
                     },
                     {

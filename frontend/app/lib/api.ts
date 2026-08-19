@@ -3701,6 +3701,18 @@ export function deleteDocumentTemplate(id: number, init: RequestInit = {}) {
     return deleteJson<void[]>(`/api/document-templates/${id}`, init);
 }
 
+/**
+ * One bounded page of generated documents across every deal in the workspace — the cross-deal index
+ * that makes a finished quote findable without already knowing which deal produced it. Returns
+ * summaries only; the immutable content snapshot stays behind the per-deal read.
+ *
+ * @param params - paging, a free-text match over document title and deal name, and the status, type,
+ *   deal, and ownership-scope filters the index offers
+ */
+export function getGeneratedDocuments(params: Types.GeneratedDocumentsPageParams = {}, init: RequestInit = {}) {
+    return getJson<Types.Page<Types.GeneratedDocumentSummary>>(`/api/documents${buildQuery(params)}`, init);
+}
+
 export function getDealDocuments(dealId: number, init: RequestInit = {}) {
     return getJson<Types.DealDocument[]>(`/api/deals/${dealId}/documents`, init);
 }
