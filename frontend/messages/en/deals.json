@@ -11,8 +11,8 @@
         "factorClosingSoonQuiet": "Closing in {days, plural, one {# day} other {# days}} with no recent activity",
         "factorStalled": "No activity logged in {days, plural, one {# day} other {# days}}",
         "factorNoStakeholders": "No stakeholders added to this deal",
-        "factorStakeholderCold": "{contact} has gone cold",
-        "factorStakeholderCooling": "{contact} is cooling off",
+        "factorStakeholderCold": "<person>{contact}</person> has gone cold",
+        "factorStakeholderCooling": "<person>{contact}</person> is cooling off",
         "factorSinceContact": " — {days, plural, one {# day} other {# days}} since last contact"
     },
     "DealBrief": {
@@ -83,8 +83,6 @@
         "peopleOnThisDealTooltipShort": "People associated with this deal.",
         "peopleOnThisDealTooltipLong": "This is a list of people associated with this deal. You can add and remove people from this list by associating and disassociating them from a task.",
         "noPeopleAssociated": "No people associated with this deal.",
-        "lastTouch": "Last touch {when}",
-        "noLastTouch": "No recent touch",
         "timeline": "Timeline",
         "timelineTooltip": "A timeline of the activities, tasks, and notes associated with this deal.",
         "statusWon": "Won",

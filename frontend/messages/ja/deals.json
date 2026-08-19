@@ -11,8 +11,8 @@
         "factorClosingSoonQuiet": "あと{days}日で成約予定ですが、最近の活動がありません",
         "factorStalled": "{days}日間、活動の記録がありません",
         "factorNoStakeholders": "この案件に関係者が登録されていません",
-        "factorStakeholderCold": "{contact}との関係が冷え込んでいます",
-        "factorStakeholderCooling": "{contact}との関係が冷めつつあります",
+        "factorStakeholderCold": "<person>{contact}</person>との関係が冷え込んでいます",
+        "factorStakeholderCooling": "<person>{contact}</person>との関係が冷めつつあります",
         "factorSinceContact": " — 最終接触から{days}日"
     },
     "DealBrief": {
@@ -83,8 +83,6 @@
         "peopleOnThisDealTooltipShort": "この案件に紐づく関係者です。",
         "peopleOnThisDealTooltipLong": "この案件に紐づく関係者の一覧です。タスクへの紐付け・解除を通じて、このリストへの追加や削除ができます。",
         "noPeopleAssociated": "この案件に紐づく関係者はいません。",
-        "lastTouch": "最終接触 {when}",
-        "noLastTouch": "最近の接触なし",
         "timeline": "タイムライン",
         "timelineTooltip": "この案件に紐づくアクティビティ、タスク、メモのタイムラインです。",
         "statusWon": "受注",
