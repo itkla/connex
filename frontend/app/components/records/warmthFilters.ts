@@ -14,6 +14,14 @@ const CONTACTS_BROWSER_PATH = '/records/contacts';
 export const WARMTH_FILTER_KEY = 'warmth';
 
 /**
+ * Sort key that orders a browser page by decayed relationship warmth. It is also the warmth column's
+ * key, because a table header sorts by the column key it carries. Its value coincides with
+ * {@link WARMTH_FILTER_KEY} but the two are separate contracts — one names a `sort` value the
+ * backend resolves, the other a query param the browser's filter state owns.
+ */
+export const WARMTH_SORT_KEY = 'warmth';
+
+/**
  * URL and filter-state key both browsers read as the decay horizon, in whole days. It carries the
  * backend's own parameter name so a link, the browser's filter state, and the request that serves it
  * all spell the horizon the same way.
@@ -118,12 +126,46 @@ export function withoutWarmthHorizon(state: FilterState): FilterState {
 }
 
 /**
+ * Drops a horizon the browser cannot honour, so a crafted `?goesColdWithinDays=0` is inert rather
+ * than half-alive — it would otherwise send no param and draw no chip while still counting as an
+ * active filter and surviving every URL write. Returns the original state when the horizon is valid
+ * or absent, so a browser can memoize on the result without re-rendering on every read.
+ *
+ * @param state - the browser's current filter state
+ */
+export function withValidWarmthHorizon(state: FilterState): FilterState {
+    const raw = state[WARMTH_HORIZON_FILTER_KEY];
+    if (raw === undefined || parseWarmthHorizon(raw) !== undefined) return state;
+    return withoutWarmthHorizon(state);
+}
+
+/**
+ * Removes every warmth key from a filter state, for a surface that cannot apply warmth at all. The
+ * keys stay in the URL so they take effect again once that surface is left, but nothing may count
+ * them, chip them, or send them meanwhile.
+ *
+ * @param state - the browser's current filter state
+ */
+export function withoutWarmth(state: FilterState): FilterState {
+    return Object.fromEntries(
+        Object.entries(state).filter(
+            ([key]) => key !== WARMTH_FILTER_KEY && key !== WARMTH_HORIZON_FILTER_KEY,
+        ),
+    );
+}
+
+/**
  * Builds the warmth facet's options from the counts the backend returned, in the canonical hot→cold
  * order. A band is offered when the workspace holds records in it or when it is already selected, so
  * a shared link never silently drops a filter whose bucket has since emptied — the same rule the
  * lifecycle and lead-source facets follow.
  *
- * @param counts - the `warmthBands` facet counts, or undefined when the facet was not requested
+ * Undefined counts mean the counts are unknown — the facet was not requested, or the aggregate that
+ * produces it timed out. The already-selected options are still offered in that case, because a
+ * selection that is filtering the list has to stay visible and removable; a browser with no warmth
+ * selection is simply offered nothing, which is how the facet hides itself when it is unavailable.
+ *
+ * @param counts - the `warmthBands` facet counts, or undefined when they are unknown
  * @param selected - the currently selected option keys
  * @param bandLabel - resolves a band's user-facing label
  * @param noHistoryLabel - the label for records with no interaction history
@@ -134,13 +176,13 @@ export function warmthFacetOptions(
     bandLabel: (band: TemperatureBand) => string,
     noHistoryLabel: string,
 ): FilterOption[] {
-    if (!counts) return [];
-    const byKey = new Map(counts.map((facet) => [facet.key, facet.count]));
+    const byKey = new Map((counts ?? []).map((facet) => [facet.key, facet.count]));
+    const known = counts !== undefined;
     const chosen = new Set(selected ?? []);
     const options: FilterOption[] = WARMTH_BANDS
-        .filter((band) => (byKey.get(band) ?? 0) > 0 || chosen.has(band))
+        .filter((band) => (known && (byKey.get(band) ?? 0) > 0) || chosen.has(band))
         .map((band) => ({ key: band as string, label: bandLabel(band) }));
-    if ((byKey.get(WARMTH_NONE_FACET_KEY) ?? 0) > 0 || chosen.has(FILTER_EMPTY)) {
+    if ((known && (byKey.get(WARMTH_NONE_FACET_KEY) ?? 0) > 0) || chosen.has(FILTER_EMPTY)) {
         options.push({ key: FILTER_EMPTY, label: noHistoryLabel });
     }
     return options;

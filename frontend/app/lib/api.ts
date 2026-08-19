@@ -835,9 +835,11 @@ function buildQuery(params: Record<string, unknown>): string {
 /**
  * Projects the warmth dimension of a records filter into query params. The page, the
  * select-all-matching id read, and the CSV export each build their own query string, so they share
- * this projection rather than three hand-kept key lists that could drift — a drift the backend now
- * refuses, and that would otherwise let a bulk action reach records the list never showed (#1342).
- * A false `noWarmth` is dropped rather than sent, because the backend reads the param's presence.
+ * this projection rather than three hand-kept key lists that could drift — a drift that would let a
+ * bulk action reach records the list never showed (#1342). A false `noWarmth` is normalized away
+ * rather than sent as `noWarmth=false`: the backend defaults it to false either way, so dropping it
+ * is what makes the three surfaces emit byte-identical warmth params for the same filter, which is
+ * what their parity is actually asserted on.
  */
 function warmthQueryParams(params: Types.WarmthFilterParams): Record<string, unknown> {
     return {
@@ -2019,7 +2021,8 @@ export function getCompanies(init: RequestInit = {}) {
 }
 
 export function getCompaniesPage(params: Types.CompaniesPageParams = {}, init: RequestInit = {}) {
-    return getJson<Types.Page<Types.Company>>(`/api/companies/page${buildQuery(params)}`, init);
+    const query = buildQuery({ ...params, ...warmthQueryParams(params) });
+    return getJson<Types.Page<Types.Company>>(`/api/companies/page${query}`, init);
 }
 
 export function getCompaniesPageResultFromCookie(
@@ -2167,7 +2170,8 @@ export function getContactsFromCookie(cookie: string | null, filters: Types.Cont
 }
 
 export function getContactsPage(params: Types.ContactsPageParams = {}, init: RequestInit = {}) {
-    return getJson<Types.Page<Types.Contact>>(`/api/persons/page${buildQuery(params)}`, init);
+    const query = buildQuery({ ...params, ...warmthQueryParams(params) });
+    return getJson<Types.Page<Types.Contact>>(`/api/persons/page${query}`, init);
 }
 
 export function getContactsPageResultFromCookie(

@@ -8,15 +8,18 @@ import {
     WARMTH_HORIZON_MAX_DAYS,
     WARMTH_HORIZON_MIN_DAYS,
     WARMTH_NONE_FACET_KEY,
+    WARMTH_SORT_KEY,
     hasWarmthFilter,
     parseWarmthHorizon,
     selectedWarmthBands,
     warmthFacetOptions,
     warmthHorizonContactsHref,
     warmthRequestParams,
+    withValidWarmthHorizon,
+    withoutWarmth,
     withoutWarmthHorizon,
 } from "@/app/components/records/warmthFilters";
-import { FILTER_EMPTY, type FilterState } from "@/app/components/records/types";
+import { FILTER_EMPTY, countActiveFilters, type FilterState } from "@/app/components/records/types";
 import { PEEK_PARAM } from "@/app/hooks/useRecordPeek";
 import { SAVED_VIEW_URL_KEY, SERVER_RECORDS_URL_KEYS } from "@/app/hooks/listStateUrl";
 import {
@@ -142,6 +145,38 @@ describe("the decay horizon a shared link can carry", () => {
     it("links a decay figure at the contacts browser with the horizon it counted", () => {
         expect(warmthHorizonContactsHref(60)).toBe("/records/contacts?goesColdWithinDays=60");
     });
+
+    it("is dropped outright when invalid, so it cannot count as a filter it never applied", () => {
+        const invalid: FilterState = { [WARMTH_HORIZON_FILTER_KEY]: ["0"], company: ["Acme"] };
+        const sanitized = withValidWarmthHorizon(invalid);
+
+        expect(sanitized).toEqual({ company: ["Acme"] });
+        expect(countActiveFilters(sanitized)).toBe(1);
+        expect(hasWarmthFilter(sanitized)).toBe(false);
+    });
+
+    it("survives untouched when valid, so a browser can memoize on the result", () => {
+        const valid: FilterState = { [WARMTH_HORIZON_FILTER_KEY]: ["30"] };
+
+        expect(withValidWarmthHorizon(valid)).toBe(valid);
+        expect(withValidWarmthHorizon({ company: ["Acme"] })).toEqual({ company: ["Acme"] });
+    });
+});
+
+describe("a surface that cannot apply warmth at all", () => {
+    it("strips every warmth key so nothing counts, chips, or sends it", () => {
+        const state: FilterState = {
+            [WARMTH_FILTER_KEY]: ["hot"],
+            [WARMTH_HORIZON_FILTER_KEY]: ["30"],
+            industry: ["Software"],
+        };
+        const stripped = withoutWarmth(state);
+
+        expect(stripped).toEqual({ industry: ["Software"] });
+        expect(warmthRequestParams(stripped)).toEqual({});
+        expect(hasWarmthFilter(stripped)).toBe(false);
+        expect(countActiveFilters(stripped)).toBe(1);
+    });
 });
 
 describe("the warmth filter keys a records browser round-trips through the URL", () => {
@@ -186,8 +221,18 @@ describe("the warmth facet options a browser offers", () => {
         expect(options.map((option) => option.key)).toEqual(["hot", "cool"]);
     });
 
-    it("offers nothing at all when the facet was not requested", () => {
-        expect(warmthFacetOptions(undefined, ["hot"], label, "No history")).toEqual([]);
+    it("offers nothing when the counts are unknown and nothing is selected", () => {
+        expect(warmthFacetOptions(undefined, [], label, "No history")).toEqual([]);
+        expect(warmthFacetOptions(undefined, undefined, label, "No history")).toEqual([]);
+    });
+
+    it("still offers a selection when the counts are unknown, so a live filter stays removable", () => {
+        const options = warmthFacetOptions(undefined, ["cool", FILTER_EMPTY], label, "No history");
+
+        expect(options).toEqual([
+            { key: "cool", label: "band:cool" },
+            { key: FILTER_EMPTY, label: "No history" },
+        ]);
     });
 
     it("omits the no-history bucket when the workspace has none and none is selected", () => {
@@ -249,12 +294,19 @@ describe("the warmth params every records surface sends", () => {
         expect(warmthParams(csv)).toEqual(expected);
     });
 
-    it("omit noWarmth entirely when it is off, rather than sending a false the backend would read", async () => {
+    it("omit noWarmth entirely when it is off, on the page as well as the ids and the export", async () => {
         const { urls } = stubBrowser();
+        const filter: ContactsPageParams = { warmthBands: ["hot"], noWarmth: false };
 
-        await getContactIds({ warmthBands: ["hot"], noWarmth: false });
+        await getContactsPage(filter);
+        await getContactIds(filter);
+        await exportContactsCsv(filter);
+        await getCompaniesPage({ warmthBands: ["hot"], noWarmth: false });
 
-        expect(urls[0]).not.toContain("noWarmth");
+        for (const url of urls) {
+            expect(url).not.toContain("noWarmth");
+            expect(warmthParams(url)).toEqual({ warmthBands: ["hot"] });
+        }
     });
 
     it("stay off a request that filters by nothing warmth-related", async () => {
@@ -313,7 +365,7 @@ describe("the browsers' warmth wiring", () => {
     });
 
     it.each(browsers)("asks the $name facets endpoint for the warmth counts it shows", ({ file }) => {
-        expect(source(file)).toContain("{ warmth: true }");
+        expect(source(file)).toMatch(/get(Person|Company)Facets\(\{ warmth: (true|!segmentScoped) \}\)/);
     });
 
     it.each(browsers)("lets a reader order the $name list by warmth", ({ file }) => {
@@ -324,7 +376,78 @@ describe("the browsers' warmth wiring", () => {
     });
 
     it.each(browsers)("hands the $name workflow engine explicit ids when warmth narrowed the list", ({ file }) => {
-        expect(source(file)).toContain("hasWarmthFilter(filterState)");
+        const browser = source(file);
+
+        expect(browser).toContain("const warmthNarrowed = hasWarmthFilter(filterState);");
+        expect(browser).toContain("explicit_selection");
+        expect(browser).not.toContain("page_selection");
+    });
+
+    it.each(browsers)("keeps the $name saved-view scope off a warmth-narrowed selection too", ({ file }) => {
+        expect(source(file)).toContain(
+            "allMatchingActive && activeSavedViewId !== null && !warmthNarrowed",
+        );
+    });
+
+    it.each(browsers)("drops an unhonourable $name horizon before anything can count it", ({ file }) => {
+        const browser = source(file);
+
+        expect(browser).toContain("withValidWarmthHorizon(urlFilterState)");
+        expect(browser).not.toMatch(/filterState,\s*\n\s*setFilterState,/);
+    });
+
+    it.each(browsers)("degrades the $name facet bar to its base facets when warmth counts fail", ({ file }) => {
+        expect(source(file)).toMatch(/\.catch\(\(\) => get(Person|Company)Facets\(\)\)/);
+    });
+
+    it.each(browsers)("clears a warmth sort the $name archived scope cannot honour", ({ file }) => {
+        expect(source(file)).toContain("sortKey === WARMTH_SORT_KEY");
+    });
+});
+
+describe("the companies segment path, which the backend applies no warmth to", () => {
+    const browser = source(COMPANIES_BROWSER);
+
+    it("strips warmth from the filter state the whole surface reads", () => {
+        expect(browser).toContain("const segmentScoped = !showArchived && hasSegments;");
+        expect(browser).toContain("segmentScoped ? withoutWarmth(validatedFilterState) : validatedFilterState");
+    });
+
+    it("offers no warmth facet to select, because selecting one would filter nothing", () => {
+        expect(browser).toContain("const warmthOptions = segmentScoped ? [] : warmthFacetOptions(");
+    });
+
+    it("offers no warmth sort either, because the segment query orders by name instead", () => {
+        expect(browser).toContain("sortable: !showArchived && !segmentScoped");
+        expect(browser).toContain("hasSegmentConditions(evaluableSegmentDefinition(next))");
+    });
+
+    it("does not pay for warmth facet counts it will not show", () => {
+        expect(browser).toContain("getCompanyFacets({ warmth: !segmentScoped })");
+    });
+
+    it("leaves the segment page, ids, and export reading one warmth-free filter object", () => {
+        expect(browser).toContain("warmthRequestParams(filterState)");
+        expect(browser).toContain("getCompaniesSegmentPage({ ...params, definition: evaluable })");
+        expect(browser).toContain("getCompanySegmentIds({ ...params, definition: evaluable })");
+    });
+});
+
+describe("a companies request built while a segment is active", () => {
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it("carries no warmth keys on the export, so the CSV is not secretly narrower than the list", async () => {
+        const { urls } = stubBrowser();
+        const segmentFilter: CompaniesPageParams = { industry: ["Software"] };
+
+        await getCompanyIds(segmentFilter);
+        await exportCompaniesCsv({ ...segmentFilter, ids: [7, 9] });
+
+        for (const url of urls) {
+            expect(warmthParams(url)).toEqual({});
+        }
     });
 });
 

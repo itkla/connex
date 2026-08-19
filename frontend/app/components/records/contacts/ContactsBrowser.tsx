@@ -63,10 +63,12 @@ import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
 import {
     WARMTH_HORIZON_FILTER_KEY,
     WARMTH_FILTER_KEY,
+    WARMTH_SORT_KEY,
     hasWarmthFilter,
     parseWarmthHorizon,
     warmthFacetOptions,
     warmthRequestParams,
+    withValidWarmthHorizon,
     withoutWarmthHorizon,
 } from '@/app/components/records/warmthFilters';
 import { LIFECYCLE_NONE_KEY, LIFECYCLE_STAGES, asLifecycleStage } from '@/app/lib/contactLifecycle';
@@ -139,20 +141,15 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         displayMode,
         effectiveDisplayMode,
         setDisplayMode,
-        filterState,
+        filterState: urlFilterState,
         setFilterState,
         selectedIds,
         setSelectedIds,
         deleteDialogOpen,
         setDeleteDialogOpen,
     } = useRecordsBrowser<Contact>({ items: NO_ITEMS, storageKey: 'contacts:view', searchFields });
+    const filterState = useMemo(() => withValidWarmthHorizon(urlFilterState), [urlFilterState]);
     const showArchived = filterState[ARCHIVED_FILTER_KEY]?.[0] === ARCHIVED_FILTER_VALUE;
-    const setShowArchived = useCallback((next: boolean) => {
-        setFilterState((current) => {
-            const rest = withoutArchived(current);
-            return next ? { ...rest, [ARCHIVED_FILTER_KEY]: [ARCHIVED_FILTER_VALUE] } : rest;
-        });
-    }, [setFilterState]);
 
     const ownerScope = useMemo(() => interpretMemberScope(filterState.owner), [filterState.owner]);
     const filterParams = useMemo(() => {
@@ -239,6 +236,11 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         clearSelection();
         applyServerSort(key, direction);
     }, [clearSelection, applyServerSort]);
+    const setShowArchived = useCallback((next: boolean) => {
+        const rest = withoutArchived(filterState);
+        setFilterState(next ? { ...rest, [ARCHIVED_FILTER_KEY]: [ARCHIVED_FILTER_VALUE] } : rest);
+        if (next && sortKey === WARMTH_SORT_KEY) applySort(null, 'asc');
+    }, [applySort, filterState, setFilterState, sortKey]);
     const handleSelectedIdsChange = useCallback((ids: Set<SelectionId>) => {
         selectAllRequestRef.current += 1;
         setMatchedSignature(null);
@@ -254,7 +256,10 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
 
     const [personFacets, setPersonFacets] = useState<PersonFacets | null>(null);
     const loadFacets = useCallback(() => {
-        getPersonFacets({ warmth: true }).then(setPersonFacets).catch(() => setPersonFacets(null));
+        getPersonFacets({ warmth: true })
+            .catch(() => getPersonFacets())
+            .then(setPersonFacets)
+            .catch(() => setPersonFacets(null));
     }, []);
     useEffect(() => { loadFacets(); }, [loadFacets]);
 
@@ -700,7 +705,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
             ),
         },
         {
-            key: 'warmth',
+            key: WARMTH_SORT_KEY,
             label: t('columnWarmth'),
             getSortValue: (c) => showArchived ? null : tempByContactId.get(c.id)?.score ?? null,
             sortable: !showArchived,
@@ -833,10 +838,9 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
     );
     const workflowSelection = useMemo(() => {
         if (selectedIds.size === 0) return null;
-        const canResolveFilter = allMatchingActive
-            && !showArchived
-            && !hasWarmthFilter(filterState);
-        const scope = allMatchingActive && activeSavedViewId !== null
+        const warmthNarrowed = hasWarmthFilter(filterState);
+        const canResolveFilter = allMatchingActive && !showArchived && !warmthNarrowed;
+        const scope = allMatchingActive && activeSavedViewId !== null && !warmthNarrowed
             ? { kind: 'saved_view' as const, savedViewId: activeSavedViewId }
             : canResolveFilter
             ? {
@@ -850,7 +854,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                     memberIds: filterParams.memberIds,
                 },
             }
-            : { kind: 'page_selection' as const, recordIds: selectedContactIds };
+            : { kind: 'explicit_selection' as const, recordIds: selectedContactIds };
         return {
             type: 'person' as const,
             ids: selectedIds,

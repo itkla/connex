@@ -39,10 +39,17 @@ function cumulativeHorizons(
  * The bars report *cumulative* horizons — "within 30", "within 60", "within 90" — rather than the
  * disjoint 0–30/31–60/61–90 ranges the server counts in. That is what makes each bar a working
  * link: the contacts browser filters by `goesColdWithinDays`, an upper bound, so a disjoint bar
- * would show one count and land the user on a strictly larger list. Summing the server's buckets is
- * exact arithmetic on its own figures, so every number here is both the bar's value and the size of
- * the list it opens. The total keeps its own destination — Radar's cooling family — because Radar is
- * where a cooling relationship is worked, not merely listed.
+ * would show one count and land the user on a strictly larger list.
+ *
+ * Summing the server's buckets is exact arithmetic on its own figures. It is not a promise that the
+ * landed list has exactly this many rows: this figure is computed over the processable persons the
+ * warmth summary scores (suspended members excluded) while the browser's horizon filter carries no
+ * suspension scope, and the two are evaluated at different instants, so decay near a boundary can
+ * move a record between them. The horizon is the same predicate on both sides; the population it
+ * runs over is not guaranteed identical.
+ *
+ * The total keeps its own destination — Radar's cooling family — because Radar is where a cooling
+ * relationship is worked, not merely listed.
  */
 export default function RelationshipDecay({ decay }: { decay: WarmthDecayCounts }) {
     const t = useTranslations('AnalyticsDecay');
