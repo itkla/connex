@@ -39,7 +39,12 @@ import { join, relative, resolve, sep } from "node:path";
  * enforced, not scanned: whether a button opens a menu, and whether two primaries share a region,
  * are facts about a render tree that a text scanner cannot read without lying about its confidence.
  *
- * **Rule-widening note.** 390 → 461 (raised). The gate landed measuring shape and height only, over
+ * **Rule-widening note.** 461 → 444 (lowered). WS11's Radar redesign put the board's filter row on
+ * `SegmentedControl` and rebuilt the signal row on `Button`/`IconButton`, so both radar files left
+ * the ledger: one hand-rolled chip layer and sixteen shape overrides, icon sizes, and untooltipped
+ * icon buttons. No rule changed; the mark follows the total down.
+ *
+ * 390 → 461 (raised). The gate landed measuring shape and height only, over
  * `<button>` tags and `<Button>` call sites. Three holes: button-shaped links and hoisted class
  * strings were invisible however much surface they painted, and the tooltip half of the D4 law went
  * unmeasured entirely while the guide called this list the D4 denominator. Widening added 34
@@ -354,4 +359,4 @@ export function loadBaseline() {
  * The ledger's total after the widening described above. It may fall. It rises only in a commit
  * that widens what the scanner catches — never to make room for new debt.
  */
-export const BASELINE_HIGH_WATER_MARK = 461;
+export const BASELINE_HIGH_WATER_MARK = 444;

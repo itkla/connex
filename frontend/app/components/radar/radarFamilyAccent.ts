@@ -33,18 +33,6 @@ export const RADAR_MARK_FILL = {
     path: 'bg-chart-5',
 } satisfies Record<RadarMarkTone, string>;
 
-/** Foreground colour per tone, for the figures a mark annotates. */
-export const RADAR_MARK_TEXT = {
-    hot: 'text-warmth-hot',
-    warm: 'text-warmth-warm',
-    cool: 'text-warmth-cool',
-    cold: 'text-warmth-cold',
-    high: 'text-risk-high',
-    medium: 'text-risk-medium',
-    low: 'text-risk-low',
-    path: 'text-chart-5',
-} satisfies Record<RadarMarkTone, string>;
-
 /**
  * The family a tone belongs to, so a mark rendered from a tone alone still gets its family shape.
  * Used by the miniature vocabulary other surfaces quote, where only the reading is in hand.

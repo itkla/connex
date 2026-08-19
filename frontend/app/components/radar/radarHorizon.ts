@@ -22,6 +22,16 @@ export const RADAR_HORIZON_BANDS = ['overdue', 'week', 'month', 'later', 'undate
 /** One column of {@link RADAR_HORIZON_BANDS}. */
 export type RadarHorizonBand = (typeof RADAR_HORIZON_BANDS)[number];
 
+/**
+ * How many marks one horizon column draws before it summarises the rest.
+ *
+ * The narrowest supported column is `min-w-28`, which fits roughly six marks across five rows, and
+ * the detectors can hand a single column far more than that (the caps are 30 cooling relationships,
+ * 20 deals, 10 intro paths). Past this point the pile stops being a shape worth reading, so the
+ * residual becomes a number instead of silently overflowing its box.
+ */
+export const RADAR_HORIZON_MARK_LIMIT = 30;
+
 /** Whether a URL-supplied value names a horizon column. */
 export function isRadarHorizonBand(value: string | null): value is RadarHorizonBand {
     return value !== null && RADAR_HORIZON_BANDS.some((band) => band === value);
@@ -240,11 +250,6 @@ export function radarHorizonColumns(signals: readonly RadarSignal[]): RadarHoriz
         band,
         signals: signals.filter((signal) => radarHorizonPlacement(signal).band === band),
     }));
-}
-
-/** How many signals stand in the busiest column, so the columns can share one vertical scale. */
-export function radarHorizonPeak(columns: readonly RadarHorizonColumn[]): number {
-    return columns.reduce((peak, column) => Math.max(peak, column.signals.length), 0);
 }
 
 /**

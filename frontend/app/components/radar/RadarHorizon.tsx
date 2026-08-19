@@ -4,6 +4,7 @@ import { useTranslations } from 'next-intl';
 
 import { RadarMark } from '@/app/components/radar/RadarVocabulary';
 import {
+    RADAR_HORIZON_MARK_LIMIT,
     radarHorizonColumns,
     radarMarkTone,
     type RadarHorizonBand,
@@ -16,6 +17,8 @@ type RadarHorizonProps = {
     signals: readonly RadarSignal[];
     band: RadarHorizonBand | null;
     onBandChange: (band: RadarHorizonBand | null) => void;
+    /** Whether the signals below are a filtered view, so the hint says which picture this is. */
+    filtered: boolean;
 };
 
 /**
@@ -26,7 +29,7 @@ type RadarHorizonProps = {
  * are made of — mass on the left is attention already bleeding, mass on the right is work that can
  * wait. Selecting a column narrows the whole page to that deadline.
  */
-export default function RadarHorizon({ signals, band, onBandChange }: RadarHorizonProps) {
+export default function RadarHorizon({ signals, band, onBandChange, filtered }: RadarHorizonProps) {
     const t = useTranslations('Radar');
     const columns = radarHorizonColumns(signals);
 
@@ -36,7 +39,7 @@ export default function RadarHorizon({ signals, band, onBandChange }: RadarHoriz
                 <h2 id="radar-horizon-heading" className="text-sm font-semibold text-foreground">
                     {t('horizon.heading')}
                 </h2>
-                <p className="text-xs text-muted-foreground">{t('horizon.hint')}</p>
+                <p className="text-xs text-muted-foreground">{t(filtered ? 'horizon.hintFiltered' : 'horizon.hint')}</p>
             </div>
 
             <div
@@ -65,13 +68,20 @@ export default function RadarHorizon({ signals, band, onBandChange }: RadarHoriz
                         >
                             <div
                                 className={cn(
-                                    'flex h-20 flex-wrap-reverse content-start gap-1 transition-opacity duration-(--motion-standard) ease-calm motion-reduce:transition-none',
+                                    'flex h-20 flex-wrap-reverse content-start gap-1 overflow-hidden transition-opacity duration-(--motion-standard) ease-calm',
                                     dimmed && 'opacity-35',
                                 )}
                             >
-                                {column.signals.map((signal) => (
+                                {column.signals.slice(0, RADAR_HORIZON_MARK_LIMIT).map((signal) => (
                                     <RadarMark key={signal.id} tone={radarMarkTone(signal)} family={signal.family} />
                                 ))}
+                                {column.signals.length > RADAR_HORIZON_MARK_LIMIT ? (
+                                    <span className="self-center text-[0.625rem] leading-none font-medium tabular-nums text-muted-foreground">
+                                        {t('horizon.more', {
+                                            count: column.signals.length - RADAR_HORIZON_MARK_LIMIT,
+                                        })}
+                                    </span>
+                                ) : null}
                             </div>
                             <div className="border-t border-border pt-1.5">
                                 <p className="text-base leading-none font-semibold tabular-nums text-foreground">

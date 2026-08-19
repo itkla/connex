@@ -1103,6 +1103,54 @@ describe('Radar action integration', () => {
         await board.unmount();
     });
 
+    it('promotes exactly one action per row, with the dispositions behind the menu', async () => {
+        const cardModule = await vi.importActual<
+            typeof import('@/app/components/radar/RadarSignalCard')
+        >('@/app/components/radar/RadarSignalCard');
+        const { TooltipProvider } = await vi.importActual<
+            typeof import('@/components/ui/tooltip')
+        >('@/components/ui/tooltip');
+        const installed = installInteractiveDocument();
+        const { createRoot } = await import('react-dom/client');
+        const root = createRoot(installed.container, { onCaughtError: vi.fn() });
+
+        await act(async () => {
+            const providerProps: Parameters<typeof TooltipProvider>[0] = {
+                children: createElement(cardModule.default, {
+                    signal: warmPathSignal(),
+                    pageAsOf: '2026-08-08T12:00:00Z',
+                    freshnessStatus: 'current',
+                    busy: false,
+                    snoozeOpen: false,
+                    expanded: false,
+                    onExpandedChange: vi.fn(),
+                    onSnoozeOpenChange: vi.fn(),
+                    onFollow: vi.fn(),
+                    onSnooze: vi.fn(),
+                    onDismiss: vi.fn(),
+                    onCreateTask: vi.fn(),
+                    onRefreshEvidence: vi.fn(),
+                    onOpenContext: vi.fn(),
+                }),
+            };
+            root.render(createElement(TooltipProvider, providerProps));
+        });
+
+        const buttons = installed.elements.filter(
+            (element) => element.tagName === 'BUTTON' && element.parentNode !== null,
+        );
+        const promoted = buttons.filter((button) => (
+            button.getAttribute('aria-controls') !== 'radar-detail-1'
+            && button.getAttribute('aria-haspopup') === null
+        ));
+
+        expect(promoted).toHaveLength(1);
+        expect(promoted[0].getAttribute('aria-label')).toBe('actions.askIntroNamed:Ada Lovelace');
+        expect(buttons.filter((button) => button.getAttribute('aria-haspopup') !== null)).toHaveLength(1);
+
+        await act(async () => root.unmount());
+    });
+
     it('disables every mutating card action while the board-wide gate is occupied, leaving the evidence disclosure usable', async () => {
         const cardModule = await vi.importActual<
             typeof import('@/app/components/radar/RadarSignalCard')

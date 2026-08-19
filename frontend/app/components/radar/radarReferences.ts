@@ -35,8 +35,14 @@ export function radarRecordHref(type: string, id: number): string | null {
     return `${RECORD_PATHS[type]}/${id}`;
 }
 
-/** The record route for a signal's subject. Radar only ships signals whose subject it re-read. */
-export function radarSubjectHref(subject: RadarSubject): string | null {
+/**
+ * The record route for a signal's subject. Radar only ships signals whose subject it re-read.
+ *
+ * Named for the record it opens, not the subject it describes, because `radarLinks.ts` owns
+ * `radarSubjectHref` — the href back to *Radar* filtered to one subject. The two run in opposite
+ * directions and must not share a name.
+ */
+export function radarSubjectRecordHref(subject: RadarSubject): string | null {
     return radarRecordHref(subject.type, subject.id);
 }
 

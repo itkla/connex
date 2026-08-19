@@ -101,6 +101,13 @@ function DecaySummary({ signals }: { signals: readonly RadarSignal[] }) {
 function RiskSummary({ signals }: { signals: readonly RadarSignal[] }) {
     const t = useTranslations('Radar');
     const reasons = radarRiskReasons(signals);
+    const reasonNames: Record<string, string> = {
+        close_overdue: t('reasonShort.close_overdue'),
+        closing_soon_quiet: t('reasonShort.closing_soon_quiet'),
+        stalled: t('reasonShort.stalled'),
+        stakeholder_cold: t('reasonShort.stakeholder_cold'),
+        no_stakeholders: t('reasonShort.no_stakeholders'),
+    };
     if (reasons.length === 0) return null;
 
     return (
@@ -109,7 +116,7 @@ function RiskSummary({ signals }: { signals: readonly RadarSignal[] }) {
                 <li key={reason.code}>
                     <RadarSignalChip
                         tone={reason.severity}
-                        label={t(`reasonShort.${reason.code}`)}
+                        label={reasonNames[reason.code] ?? t('reasonShort.unknown')}
                         count={reason.count}
                     />
                 </li>
@@ -199,29 +206,32 @@ export default function RadarFamilyLayer({
         <Collapsible open={open} onOpenChange={onOpenChange}>
             <section aria-labelledby={headingId} className="rounded-2xl bg-card ring-1 ring-border ring-inset">
                 <div className="space-y-3 px-4 pt-4 pb-3">
-                    <CollapsibleTrigger
-                        id={headingId}
-                        aria-controls={contentId}
-                        className="group/layer flex w-full items-center gap-2 rounded-lg text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-                    >
-                        <RadarMark tone={FAMILY_TONE[family]} family={family} />
-                        <h2 className="text-sm font-semibold text-foreground">{t(`family.${family}`)}</h2>
-                        <span className="text-sm tabular-nums text-muted-foreground">{signals.length}</span>
-                        <ChevronDownIcon
-                            aria-hidden
-                            className={cn(
-                                'ml-auto size-4 text-muted-foreground transition-transform duration-(--motion-micro) motion-reduce:transition-none',
-                                open && 'rotate-180',
-                            )}
-                        />
-                    </CollapsibleTrigger>
+                    <h2 id={headingId} className="flex">
+                        <CollapsibleTrigger
+                            aria-controls={contentId}
+                            className="group/layer flex w-full items-center gap-2 rounded-lg text-left text-sm font-semibold text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                        >
+                            <RadarMark tone={FAMILY_TONE[family]} family={family} />
+                            {t(`family.${family}`)}
+                            <span className="font-normal tabular-nums text-muted-foreground">{signals.length}</span>
+                            <ChevronDownIcon
+                                aria-hidden
+                                className={cn(
+                                    'ml-auto size-4 text-muted-foreground transition-transform duration-(--motion-micro) motion-reduce:transition-none',
+                                    open && 'rotate-180',
+                                )}
+                            />
+                        </CollapsibleTrigger>
+                    </h2>
 
                     {unavailable ? (
                         <p className="text-xs text-warning-foreground" role="status">{t('layer.unavailable')}</p>
                     ) : null}
 
                     {signals.length === 0 ? (
-                        <p className="text-xs text-muted-foreground">{t('layer.empty')}</p>
+                        <p className="text-xs text-muted-foreground">
+                            {t(unavailable ? 'layer.emptyUnavailable' : 'layer.empty')}
+                        </p>
                     ) : family === 'relationship_decay' ? (
                         <DecaySummary signals={signals} />
                     ) : family === 'deal_risk' ? (
@@ -233,7 +243,7 @@ export default function RadarFamilyLayer({
 
                 <CollapsibleContent
                     id={contentId}
-                    className="overflow-hidden duration-(--motion-standard) ease-calm data-[state=closed]:animate-collapsible-up data-[state=closed]:duration-(--motion-micro) data-[state=open]:animate-collapsible-down motion-reduce:animate-none!"
+                    className="overflow-hidden duration-(--motion-standard) ease-calm data-closed:animate-collapsible-up data-closed:duration-(--motion-micro) data-open:animate-collapsible-down motion-reduce:animate-none!"
                 >
                     {signals.length > 0 ? (
                         <div className="border-t border-border">{children}</div>

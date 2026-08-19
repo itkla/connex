@@ -13,6 +13,8 @@
     "horizon": {
       "heading": "対応が必要になる時期",
       "hint": "すべてのシグナルを、残り時間の順に並べています。",
+      "hintFiltered": "この表示のシグナルを、残り時間の順に並べています。",
+      "more": "+{count}",
       "bandNamed": "{band}：{count, plural, =0 {シグナルなし} other {#件}}",
       "band": {
         "overdue": "期限超過",
@@ -24,6 +26,7 @@
     },
     "layer": {
       "empty": "この種別に該当するものはありません。",
+      "emptyUnavailable": "この種別を更新できず、保存されている内容もないため、表示できるものがありません。",
       "unavailable": "この種別を更新できませんでした。以下は最後に取得できた内容です。"
     },
     "family": {
@@ -52,11 +55,12 @@
       "closing_soon_quiet": "クローズ間近で動きなし",
       "stalled": "最近の動きなし",
       "stakeholder_cold": "関係者が冷えている",
-      "no_stakeholders": "関係者が未登録"
+      "no_stakeholders": "関係者が未登録",
+      "unknown": "その他の理由"
     },
     "path": {
       "connectorsHeading": "紹介を頼める方",
-      "opens": "{count}件"
+      "opens": "紹介{count}件"
     },
     "reading": {
       "warmth": "{band}、{trend}。",
@@ -210,6 +214,10 @@
     "noResults": {
       "title": "条件に一致するシグナルがありません",
       "body": "表示する種別、状態、検索語を変更して対象を広げてください。"
+    },
+    "partial": {
+      "title": "一部のシグナルを更新できませんでした",
+      "body": "{families} は最後に取得できた内容を表示しています。その後の変化はまだ反映されていません。"
     },
     "unavailable": {
       "title": "レーダーを利用できません",

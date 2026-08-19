@@ -235,6 +235,7 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
     const unavailableFamilies = unavailableRadarFamilies(payload.families);
     const unavailableLookup = new Set<RadarFamily>(unavailableFamilies);
     const shownFamilies = family === 'all' ? RADAR_SIGNAL_FAMILIES : [family];
+    const filtered = family !== 'all' || state !== 'attention' || query.trim().length > 0;
 
     const restoreListFocus = (id: number) => {
         const target = nextFocusId(visibleSignals, id);
@@ -373,6 +374,13 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
                         families: unavailableFamilies.map((value) => t(`family.${value}`)).join(t('evidence.separator')),
                     })}
                 />
+            ) : unavailableFamilies.length > 0 ? (
+                <SectionUnavailable
+                    title={t('partial.title')}
+                    body={t('partial.body', {
+                        families: unavailableFamilies.map((value) => t(`family.${value}`)).join(t('evidence.separator')),
+                    })}
+                />
             ) : null}
 
             {surface === 'empty' ? (
@@ -390,6 +398,7 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
                         signals={horizonSignals}
                         band={horizonBand}
                         onBandChange={setHorizonBand}
+                        filtered={filtered}
                     />
 
                     <section aria-label={t('filters.label')} className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -437,12 +446,6 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
                         </div>
                     </section>
 
-                    <p className="text-sm text-muted-foreground">
-                        {t(state === 'attention' && horizonBand === null ? 'summary.headline' : 'summary.headlineFiltered', {
-                            count: visibleSignals.length,
-                        })}
-                    </p>
-
                     {surface === 'no_results' ? (
                         <EmptyState
                             icon={AdjustmentsHorizontalIcon}
@@ -450,10 +453,16 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
                             body={t('noResults.body')}
                             tone="muted"
                         />
-                    ) : null}
+                    ) : (
+                        <p className="text-sm text-muted-foreground">
+                            {t(filtered || horizonBand !== null ? 'summary.headlineFiltered' : 'summary.headline', {
+                                count: visibleSignals.length,
+                            })}
+                        </p>
+                    )}
 
                     <div className="space-y-4">
-                        {shownFamilies.map((value) => {
+                        {(surface === 'no_results' ? [] : shownFamilies).map((value) => {
                             const familySignals = visibleSignals.filter((signal) => signal.family === value);
                             return (
                                 <RadarFamilyLayer

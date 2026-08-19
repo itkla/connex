@@ -13,6 +13,8 @@
     "horizon": {
       "heading": "When these need you",
       "hint": "Every signal, placed by how long you have.",
+      "hintFiltered": "The signals in this view, placed by how long you have.",
+      "more": "+{count}",
       "bandNamed": "{band}, {count, plural, =0 {no signals} one {# signal} other {# signals}}",
       "band": {
         "overdue": "Past due",
@@ -24,6 +26,7 @@
     },
     "layer": {
       "empty": "Nothing in this group right now.",
+      "emptyUnavailable": "Couldn't refresh this group and nothing was cached, so there is nothing to show yet.",
       "unavailable": "Couldn't refresh this group. The signals below are the last ones Radar read."
     },
     "family": {
@@ -52,7 +55,8 @@
       "closing_soon_quiet": "Closing quietly",
       "stalled": "No recent activity",
       "stakeholder_cold": "Contact gone cold",
-      "no_stakeholders": "No contacts linked"
+      "no_stakeholders": "No contacts linked",
+      "unknown": "Another reason"
     },
     "path": {
       "connectorsHeading": "Who can open doors",
@@ -79,8 +83,8 @@
     },
     "detail": {
       "why": "Why",
-      "showNamed": "Show evidence for {subject}",
-      "hideNamed": "Hide evidence for {subject}"
+      "showNamed": "Why \u2014 evidence for {subject}",
+      "hideNamed": "Why \u2014 hide the evidence for {subject}"
     },
     "filters": {
       "label": "Radar filters",
@@ -157,13 +161,13 @@
       "openContext": "Open the current record",
       "moreNamed": "More actions for {subject}",
       "followUp": "Schedule follow-up",
-      "followUpNamed": "Schedule a follow-up with {subject}",
+      "followUpNamed": "Schedule follow-up with {subject}",
       "followUpDone": "Follow-up scheduled",
-      "followUpDoneNamed": "A follow-up with {subject} is already scheduled",
+      "followUpDoneNamed": "Follow-up scheduled with {subject}",
       "askIntro": "Ask for the intro",
-      "askIntroNamed": "Ask for an introduction to {subject}",
+      "askIntroNamed": "Ask for the intro to {subject}",
       "introAsked": "Intro requested",
-      "introAskedNamed": "An introduction to {subject} has already been requested",
+      "introAskedNamed": "Intro requested for {subject}",
       "createTaskDeniedNamed": "Task creation is not permitted for {subject}",
       "createTaskPermissionUnavailableNamed": "Task permission could not be checked for {subject}",
       "createWarmPathTaskDeniedNamed": "Intro-path task creation is not permitted for {subject}",
@@ -210,6 +214,10 @@
     "noResults": {
       "title": "No signals match these filters",
       "body": "Change what you are showing, the state, or the search text to widen the view."
+    },
+    "partial": {
+      "title": "Some signals couldn't be refreshed",
+      "body": "Radar is showing the last it read for {families}. Anything that changed there since isn't here yet."
     },
     "unavailable": {
       "title": "Radar is unavailable",

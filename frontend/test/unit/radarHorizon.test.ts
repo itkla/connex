@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
     RADAR_HORIZON_BANDS,
+    RADAR_HORIZON_MARK_LIMIT,
     isRadarHorizonBand,
     radarConnectors,
     radarDecayFacts,
     radarDecaySummary,
     radarHorizonColumns,
-    radarHorizonPeak,
     radarHorizonPlacement,
     radarMarkTone,
     radarPathBridges,
@@ -17,7 +17,7 @@ import {
     radarRecordHref,
     radarReferenceLinks,
     radarSignalNames,
-    radarSubjectHref,
+    radarSubjectRecordHref,
 } from '@/app/components/radar/radarReferences';
 import {
     RADAR_FAMILY_FILTER_KEY,
@@ -140,8 +140,19 @@ describe('the Radar horizon', () => {
         expect(columns.map((column) => column.band)).toEqual([...RADAR_HORIZON_BANDS]);
         expect(columns.find((column) => column.band === 'week')?.signals.map((item) => item.id))
             .toEqual([1, 3]);
-        expect(radarHorizonPeak(columns)).toBe(2);
         expect(radarHorizonColumns([]).every((column) => column.signals.length === 0)).toBe(true);
+    });
+
+    it('caps a column below the volume the detectors can actually deliver', () => {
+        const overdue = Array.from({ length: 45 }, (unused, index) => decay(
+            { band: 'cold' },
+            { id: index + 1, subject: { type: 'person', id: index + 1, label: `Contact ${index + 1}` } },
+        ));
+        const column = radarHorizonColumns(overdue).find((entry) => entry.band === 'overdue');
+
+        expect(column?.signals).toHaveLength(45);
+        expect(RADAR_HORIZON_MARK_LIMIT).toBeLessThan(45);
+        expect((column?.signals.length ?? 0) - RADAR_HORIZON_MARK_LIMIT).toBe(15);
     });
 
     it('accepts only a real column name from the URL', () => {
@@ -251,7 +262,7 @@ describe('every record Radar cites is a named link', () => {
             { type: 'company', id: 42, label: 'Marubeni' },
             { type: 'deal', id: 42, label: 'Apollo renewal' },
         ] as const) {
-            const href = radarSubjectHref(subject);
+            const href = radarSubjectRecordHref(subject);
 
             expect(href).not.toBeNull();
             expect(resolveShippedRoute(href ?? '')).not.toBeNull();

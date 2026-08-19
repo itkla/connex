@@ -31,7 +31,7 @@ import {
     radarRecordHref,
     radarReferenceLinks,
     radarSignalNames,
-    radarSubjectHref,
+    radarSubjectRecordHref,
 } from '@/app/components/radar/radarReferences';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -71,15 +71,18 @@ type RadarSignalCardProps = {
     onOpenContext?: () => void;
 };
 
-/** Evidence parameters that are provenance rather than product: raw ids and model bookkeeping. */
-const INTERNAL_PARAMETERS = new Set(['bridgePersonId', 'personId', 'modelVersion']);
-
 /**
- * The evidence parameters worth showing: everything except the provenance a user would read as
- * noise.
+ * The evidence parameters worth showing: the ones this surface has a product name for.
+ *
+ * An allowlist rather than a denylist, so a parameter the detectors add later stays invisible until
+ * someone writes its label. The alternative fails open — a new raw id or model field would surface
+ * itself under "Additional source value", which is exactly the copy this redesign removed.
  */
-function evidenceParameters(evidence: RadarEvidence): [string, unknown][] {
-    return Object.entries(evidence.parameters).filter(([key]) => !INTERNAL_PARAMETERS.has(key));
+function evidenceParameters(
+    evidence: RadarEvidence,
+    parameterKeys: Record<string, string>,
+): [string, unknown][] {
+    return Object.entries(evidence.parameters).filter(([key]) => key in parameterKeys);
 }
 
 /**
@@ -202,7 +205,7 @@ export default function RadarSignalCard({
     );
     const names = radarSignalNames(signal);
     const evidenceRenderKeys = evidenceKeys(signal.evidence);
-    const subjectHref = radarSubjectHref(signal.subject);
+    const subjectHref = radarSubjectRecordHref(signal.subject);
     const detailId = `radar-detail-${signal.id}`;
 
     const evidenceTypes: Record<string, string> = {
@@ -426,6 +429,7 @@ export default function RadarSignalCard({
                                 type="button"
                                 variant="secondary"
                                 size="toolbar"
+                                className="min-h-11 lg:min-h-9"
                                 onClick={onCreateTask}
                                 disabled={taskDisabled}
                                 aria-label={actionNamedLabel}
@@ -451,6 +455,7 @@ export default function RadarSignalCard({
                                 type="button"
                                 variant="ghost"
                                 size="toolbar"
+                                className="min-h-11 lg:min-h-9"
                                 onClick={() => onExpandedChange(!expanded)}
                                 aria-expanded={expanded}
                                 aria-controls={detailId}
@@ -472,6 +477,7 @@ export default function RadarSignalCard({
                                     <IconButton
                                         label={t('actions.moreNamed', { subject: signal.subject.label })}
                                         variant="ghost"
+                                        className="min-h-11 min-w-11 lg:min-h-9 lg:min-w-9"
                                         disabled={busy}
                                     >
                                         <EllipsisHorizontalIcon aria-hidden />
@@ -533,13 +539,13 @@ export default function RadarSignalCard({
 
                     <CollapsibleContent
                         id={detailId}
-                        className="overflow-hidden duration-(--motion-standard) ease-calm data-[state=closed]:animate-collapsible-up data-[state=closed]:duration-(--motion-micro) data-[state=open]:animate-collapsible-down motion-reduce:animate-none!"
+                        className="overflow-hidden duration-(--motion-standard) ease-calm data-closed:animate-collapsible-up data-closed:duration-(--motion-micro) data-open:animate-collapsible-down motion-reduce:animate-none!"
                     >
                         <div className="mt-4 space-y-4 pl-6">
                             <ul className="space-y-3">
                                 {signal.evidence.map((evidence, index) => {
                                     const links = radarReferenceLinks(evidence.references, names);
-                                    const parameters = evidenceParameters(evidence);
+                                    const parameters = evidenceParameters(evidence, parameterKeys);
                                     return (
                                         <li key={evidenceRenderKeys[index]} className="text-sm">
                                             <p className="font-medium text-foreground">
