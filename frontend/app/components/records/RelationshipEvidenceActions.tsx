@@ -33,18 +33,18 @@ export default function RelationshipEvidenceActions({
 
     return (
         <div className={cn('flex flex-wrap items-center gap-2', className)}>
-            <Button type="button" size="sm" variant="secondary" onClick={onLogInteraction}>
+            <Button type="button" size="dialog" variant="secondary" onClick={onLogInteraction}>
                 <BoltIcon aria-hidden />
                 {t('actionLogInteraction')}
             </Button>
-            <Button type="button" size="sm" variant="secondary" onClick={onScheduleFollowUp}>
+            <Button type="button" size="dialog" variant="secondary" onClick={onScheduleFollowUp}>
                 <CalendarDaysIcon aria-hidden />
                 {t('actionScheduleFollowUp')}
             </Button>
             {bridge ? (
                 <Button
                     type="button"
-                    size="sm"
+                    size="dialog"
                     variant="ghost"
                     disabled={asking || asked}
                     onClick={ask}

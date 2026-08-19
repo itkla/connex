@@ -150,14 +150,14 @@ export default function ContactConnections({
                 {bridge ? (
                     <Button
                         type="button"
-                        size="sm"
+                        size="inline"
                         variant="secondary"
                         className="mt-3"
                         disabled={asking || asked}
                         onClick={ask}
                         title={tIntro('askIntroVia', { name: bridge.personName })}
                     >
-                        <UserPlusIcon className="size-4" />
+                        <UserPlusIcon aria-hidden />
                         {asked ? tIntro('introAsked') : tIntro('askIntro')}
                     </Button>
                 ) : null}
