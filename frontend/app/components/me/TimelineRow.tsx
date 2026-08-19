@@ -2,20 +2,21 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, type ReadonlyURLSearchParams, useRouter, useSearchParams } from 'next/navigation';
 import { useReducedMotion } from 'motion/react';
 import { useLocale, useTranslations } from 'next-intl';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { CheckIcon, EllipsisVerticalIcon, PencilIcon, TrashIcon, UserIcon } from '@heroicons/react/24/outline';
 
-import { type Activity, type Contact, type ContactLifecycleHistoryEntry, type ContactLifecycleStage, type Deal, type Note, type Task, type UserReference } from '@/app/lib/types';
+import { type Contact, type ContactLifecycleStage, type Deal, type UserReference } from '@/app/lib/types';
 import { formatShortDate } from '@/app/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Button } from '@/components/ui/button';
+import { IconButton } from '@/components/ui/icon-button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { deleteActivity, deleteNote, deleteTask } from '@/app/lib/api';
-import { ACTIVITY_URL_KEY, NOTE_URL_KEY, TASK_URL_KEY } from '@/app/hooks/listStateUrl';
+import { ACTIVITY_URL_KEY, COMMENT_URL_KEY, NOTE_URL_KEY, TASK_URL_KEY } from '@/app/hooks/listStateUrl';
+import { type TimelineEntry } from '@/app/components/me/timelineEntries';
 import EditTaskSheet from '@/app/components/activity/tasks/EditTaskSheet';
 import EditActivitySheet from '@/app/components/activity/activities/EditActivitySheet';
 import NoteDialog from '@/app/components/activity/notes/NoteDialog';
@@ -27,24 +28,20 @@ import {
     useDealTargetSearch,
 } from '@/app/hooks/useRecordTargetSearch';
 
-export type TimelineEntry =
-    | { kind: 'task'; sortAt: number; task: Task }
-    | { kind: 'activity'; sortAt: number; activity: Activity }
-    | { kind: 'note'; sortAt: number; note: Note }
-    | { kind: 'lifecycle'; sortAt: number; lifecycle: ContactLifecycleHistoryEntry };
-
 const CHIP_CLASS: Record<TimelineEntry['kind'], string> = {
     task: 'bg-brand-light text-brand-dark',
     activity: 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900',
     note: 'bg-neutral-200 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200',
     lifecycle: 'bg-muted text-muted-foreground',
+    comment: 'bg-secondary text-secondary-foreground',
 };
 
-const CHIP_LABEL_KEY: Record<TimelineEntry['kind'], 'chipTask' | 'chipActivity' | 'chipNote' | 'chipLifecycle'> = {
+const CHIP_LABEL_KEY: Record<TimelineEntry['kind'], 'chipTask' | 'chipActivity' | 'chipNote' | 'chipLifecycle' | 'chipComment'> = {
     task: 'chipTask',
     activity: 'chipActivity',
     note: 'chipNote',
     lifecycle: 'chipLifecycle',
+    comment: 'chipComment',
 };
 
 /**
@@ -52,13 +49,31 @@ const CHIP_LABEL_KEY: Record<TimelineEntry['kind'], 'chipTask' | 'chipActivity' 
  *
  * Task, activity, and note notifications all land on a record page carrying the canonical param key
  * their standalone browser reads, so a row highlights itself by comparing the arriving value with its
- * own id — the same contract the record comment deep link follows.
+ * own id.
+ *
+ * A comment row deliberately has none. `?comment=` belongs to `CommentsSection`, which owns the
+ * thread the comment lives in and scrolls to it; a second claimant would fight it for the scroll.
  */
 function entryDeepLink(entry: TimelineEntry): { key: string; id: number } | null {
     if (entry.kind === 'task') return { key: TASK_URL_KEY, id: entry.task.id };
     if (entry.kind === 'activity') return { key: ACTIVITY_URL_KEY, id: entry.activity.id };
     if (entry.kind === 'note') return { key: NOTE_URL_KEY, id: entry.note.id };
     return null;
+}
+
+/**
+ * The link from a timeline comment row to that comment inside the record's discussion. It keeps
+ * every other list-state param the page is already carrying and only sets its own key, the same
+ * contract `listStateUrl`'s writers follow.
+ */
+function commentThreadHref(
+    pathname: string,
+    searchParams: ReadonlyURLSearchParams,
+    commentId: number,
+): string {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set(COMMENT_URL_KEY, String(commentId));
+    return `${pathname}?${params.toString()}`;
 }
 
 function entryDate(entry: TimelineEntry, locale: string): string {
@@ -95,13 +110,14 @@ export default function TimelineRow({
     const tl = useTranslations('ContactLifecycle');
     const locale = useLocale();
     const router = useRouter();
+    const pathname = usePathname();
     const [editOpen, setEditOpen] = useState(false);
     const rowRef = useRef<HTMLLIElement>(null);
     const searchParams = useSearchParams();
     const reduceMotion = useReducedMotion();
     const deepLink = entryDeepLink(entry);
     const isHighlighted = deepLink !== null && searchParams.get(deepLink.key) === String(deepLink.id);
-    const isLifecycle = entry.kind === 'lifecycle';
+    const readOnlyEntry = entry.kind === 'lifecycle' || entry.kind === 'comment';
     const noteOpen = editOpen && entry.kind === 'note';
     const personSearch = useContactTargetSearch(
         noteOpen,
@@ -140,6 +156,9 @@ export default function TimelineRow({
 
     const date = entryDate(entry, locale);
     const chipLabel = t(CHIP_LABEL_KEY[entry.kind]);
+    const commentAuthor = entry.kind === 'comment' ? entry.comment.author : null;
+    const avatarUrl = commentAuthor?.profilePictureUrl ?? author?.profilePictureUrl;
+    const avatarName = commentAuthor?.displayName ?? author?.displayName ?? author?.username ?? '';
 
     let title: React.ReactNode;
     let subtitle: React.ReactNode = null;
@@ -194,6 +213,29 @@ export default function TimelineRow({
                 ) : null}
             </div>
         );
+    } else if (entry.kind === 'comment') {
+        const { comment } = entry;
+        title = (
+            <p className="line-clamp-2 text-sm text-foreground">
+                <NoteContent content={comment.content ?? ''} references={comment.references} />
+            </p>
+        );
+        subtitle = (
+            <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                <span>
+                    {comment.author
+                        ? t('commentBy', { name: comment.author.displayName })
+                        : t('commentByRemovedMember')}
+                </span>
+                <span aria-hidden>·</span>
+                <Link
+                    href={commentThreadHref(pathname, searchParams, comment.id)}
+                    className="text-foreground underline-offset-2 hover:underline"
+                >
+                    {t('commentViewInThread')}
+                </Link>
+            </p>
+        );
     } else if (entry.kind === 'lifecycle') {
         const { lifecycle } = entry;
         title = (
@@ -227,14 +269,14 @@ export default function TimelineRow({
             <Tooltip>
                 <TooltipTrigger asChild>
                     <Avatar size="default">
-                        <AvatarImage src={author?.profilePictureUrl} />
+                        <AvatarImage src={avatarUrl} />
                         <AvatarFallback>
                             <UserIcon className="size-3 text-muted-foreground" />
                         </AvatarFallback>
                     </Avatar>
                 </TooltipTrigger>
                 <TooltipContent>
-                    {author?.displayName || author?.username || ''}
+                    {avatarName}
                 </TooltipContent>
             </Tooltip>
             <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium inset-ring ${CHIP_CLASS[entry.kind]}`}>
@@ -251,12 +293,12 @@ export default function TimelineRow({
                 </div>
                 {subtitle}
             </div>
-            {!isLifecycle && (entry.kind !== 'activity' || !isProviderOwnedActivity(entry.activity)) ? (
+            {!readOnlyEntry && (entry.kind !== 'activity' || !isProviderOwnedActivity(entry.activity)) ? (
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="rounded-full" aria-label={t('actionsAria')}>
-                            <EllipsisVerticalIcon className="size-3 text-muted-foreground" />
-                        </Button>
+                        <IconButton variant="ghost" size="icon-inline" label={t('actionsAria')}>
+                            <EllipsisVerticalIcon className="text-muted-foreground" />
+                        </IconButton>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                         <DropdownMenuItem onClick={() => setEditOpen(true)}>

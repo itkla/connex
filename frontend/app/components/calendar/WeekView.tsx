@@ -51,7 +51,7 @@ interface WeekViewProps {
     eventsByDay: Map<string, CalendarEvent[]>;
     locale: string;
     onSelectDay: (day: Date) => void;
-    onOpenEvent: (event: CalendarEvent) => void;
+    onOpenEvent: (event: CalendarEvent, anchor: HTMLElement | null) => void;
 }
 
 export default function WeekView({
@@ -146,7 +146,7 @@ export default function WeekView({
                                                 event={event}
                                                 variant="bar"
                                                 timeLabel={event.allDay ? undefined : timeFmt.format(event.startMs)}
-                                                onClick={() => onOpenEvent(event)}
+                                                onClick={(clicked) => onOpenEvent(event, clicked.currentTarget)}
                                                 className="min-h-9"
                                             />
                                         ))

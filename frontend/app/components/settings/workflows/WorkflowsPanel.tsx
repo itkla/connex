@@ -296,7 +296,7 @@ export default function WorkflowsPanel() {
                         body={t(archived ? "archivedEmptyBody" : "emptyBody")}
                         tone={archived ? "muted" : "brand"}
                         action={!archived ? (
-                            <Button onClick={() => router.push("/workflows/new")} variant="outline">
+                            <Button onClick={() => router.push("/workflows/new")} variant="brand">
                                 <PlusIcon className="size-4" />
                                 {t("newWorkflow")}
                             </Button>

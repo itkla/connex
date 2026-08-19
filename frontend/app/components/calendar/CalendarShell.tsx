@@ -32,6 +32,7 @@ import WeekView from './WeekView';
 import DayView from './DayView';
 import AgendaView from './AgendaView';
 import EventDetailSheet from './EventDetailSheet';
+import EventPeekPopover from './EventPeekPopover';
 import QuickCreateHost from './QuickCreateHost';
 import GoToDateDialog from './GoToDateDialog';
 import CalendarShortcuts from './CalendarShortcuts';
@@ -43,6 +44,20 @@ import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 
 const SWIPE_OFFSET = 40;
+
+/**
+ * Any overlay that should swallow the calendar's single-key shortcuts. Base UI marks an open popup
+ * with `data-open` and Radix with `data-state="open"`, and both are in play here — the event peek is
+ * a Base UI popover, so matching only Radix's attribute let ArrowRight navigate out from under it.
+ */
+const OPEN_OVERLAY_SELECTOR = [
+    '[data-state="open"][role="dialog"]',
+    '[data-state="open"][role="alertdialog"]',
+    '[data-state="open"][role="menu"]',
+    '[data-open][role="dialog"]',
+    '[data-open][role="alertdialog"]',
+    '[data-open][role="menu"]',
+].join(',');
 
 const NO_FAILED_SOURCES: ReadonlyArray<CalendarSourceKey> = [];
 const NO_TRUNCATED_SOURCES: ReadonlyArray<CalendarTruncation> = [];
@@ -105,6 +120,7 @@ export default function CalendarShell({
     const now = useNow();
     const today = useMemo(() => startOfDay(new Date(now)), [now]);
     const [openEventId, setOpenEventId] = useState<string | null>(null);
+    const [peek, setPeek] = useState<{ eventId: string; anchor: HTMLElement } | null>(null);
     const [overrides, setOverrides] = useState<Map<string, string>>(() => new Map());
     const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
     const [slotAt, setSlotAt] = useState<string | null>(null);
@@ -265,7 +281,31 @@ export default function CalendarShell({
         () => (openEventId ? events.find((e) => e.id === openEventId) ?? null : null),
         [openEventId, events],
     );
-    const onOpenEvent = (event: CalendarEvent) => setOpenEventId(event.id);
+    const peekEvent = useMemo(
+        () => (peek ? events.find((e) => e.id === peek.eventId) ?? null : null),
+        [peek, events],
+    );
+
+    /**
+     * D5's calendar archetype: a click inspects in an anchored popover, and "Details" expands the
+     * same event into the drawer. A coarse pointer has no anchor worth pointing at and gets the
+     * bottom sheet directly, which is the same rule the responsive overlays follow everywhere else.
+     */
+    const onOpenEvent = (event: CalendarEvent, anchor: HTMLElement | null) => {
+        if (coarse || !anchor) {
+            setPeek(null);
+            setOpenEventId(event.id);
+            return;
+        }
+        setOpenEventId(null);
+        setPeek({ eventId: event.id, anchor });
+    };
+
+    const expandPeek = () => {
+        if (!peek) return;
+        setOpenEventId(peek.eventId);
+        setPeek(null);
+    };
 
     const onSelectDay = (day: Date) => {
         if (isWide) cal.selectDay(day);
@@ -273,6 +313,7 @@ export default function CalendarShell({
     };
 
     const onSlotCreate = (startMs: number) => {
+        setPeek(null);
         const d = new Date(startMs);
         const pad = (n: number) => String(n).padStart(2, '0');
         setSlotAt(
@@ -284,22 +325,16 @@ export default function CalendarShell({
         const onKey = (e: KeyboardEvent) => {
             if (e.metaKey || e.ctrlKey || e.altKey) return;
             if (isTypingTarget(e.target)) return;
-            if (
-                document.querySelector(
-                    '[data-state="open"][role="dialog"],[data-state="open"][role="alertdialog"],[data-state="open"][role="menu"]',
-                )
-            ) {
-                return;
-            }
+            if (document.querySelector(OPEN_OVERLAY_SELECTOR)) return;
             switch (e.key) {
                 case 't': case 'T': cal.goToday(); break;
                 case 'm': case 'M': cal.setView('month'); break;
                 case 'w': case 'W': cal.setView('week'); break;
                 case 'd': case 'D': cal.setView('day'); break;
                 case 'a': case 'A': cal.setView('agenda'); break;
-                case 'g': case 'G': setGoToOpen(true); break;
-                case 'c': case 'C': setCreateOpen(true); break;
-                case '?': setHelpOpen(true); break;
+                case 'g': case 'G': setPeek(null); setGoToOpen(true); break;
+                case 'c': case 'C': setPeek(null); setCreateOpen(true); break;
+                case '?': setPeek(null); setHelpOpen(true); break;
                 case 'ArrowLeft': if (cal.view !== 'agenda') cal.goPrev(); else return; break;
                 case 'ArrowRight': if (cal.view !== 'agenda') cal.goNext(); else return; break;
                 default: return;
@@ -322,6 +357,18 @@ export default function CalendarShell({
                 return 'a';
         }
     }, [cal.view, cal.anchor]);
+
+    /**
+     * The peek is positioned against a DOM node inside the view container, which is keyed on the
+     * period and remounts on every navigation — so the popover has to die with its anchor rather
+     * than float over the next period pointing at nothing.
+     */
+    const peekScope = `${cal.view}:${periodKey}:${[...cal.visibleKinds].sort().join(',')}`;
+    const [peekScopeSeen, setPeekScopeSeen] = useState(peekScope);
+    if (peekScope !== peekScopeSeen) {
+        setPeekScopeSeen(peekScope);
+        if (peek) setPeek(null);
+    }
 
     const enableSwipe = coarse && !reduce && cal.view !== 'agenda';
 
@@ -495,6 +542,24 @@ export default function CalendarShell({
                     </div>
                 </Rise>
             </PageShell>
+
+            <EventPeekPopover
+                event={peekEvent}
+                anchor={peek?.anchor ?? null}
+                open={peekEvent != null}
+                onOpenChange={(next) => {
+                    if (!next) setPeek(null);
+                }}
+                onExpand={expandPeek}
+                onComplete={(event) => {
+                    setPeek(null);
+                    void handleComplete(event);
+                }}
+                locale={locale}
+                personById={personById}
+                dealById={dealById}
+                currentUserId={currentUserId}
+            />
 
             <EventDetailSheet
                 event={openEvent}

@@ -39,7 +39,7 @@ export default function AgendaView({
     today: Date;
     locale: string;
     temperatureByContact: Map<number, RelationshipTemperature>;
-    onOpenEvent: (event: CalendarEvent) => void;
+    onOpenEvent: (event: CalendarEvent, anchor: HTMLElement | null) => void;
 }) {
     const t = useTranslations('Calendar');
     const [pastOpen, setPastOpen] = useState(false);
@@ -87,7 +87,7 @@ export default function AgendaView({
                                 timeLabel={event.allDay ? undefined : timeFmt.format(event.startMs)}
                                 warmthBand={atRisk}
                                 warmthLabel={atRisk ? t(WARMTH_LABEL_KEY[atRisk]) : undefined}
-                                onClick={() => onOpenEvent(event)}
+                                onClick={(clicked) => onOpenEvent(event, clicked.currentTarget)}
                             />
                         </li>
                     );

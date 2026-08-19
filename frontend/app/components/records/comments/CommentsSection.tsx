@@ -136,6 +136,10 @@ export default function CommentsSection({
     }, [loaded, loadError, threads, linkedThreadParam, targetType, targetId]);
 
     useEffect(() => {
+        highlightScrolled.current = false;
+    }, [highlightedCommentId]);
+
+    useEffect(() => {
         if (!loaded || !highlightedCommentId || highlightScrolled.current) return;
         if (!highlightRef.current) return;
         highlightScrolled.current = true;

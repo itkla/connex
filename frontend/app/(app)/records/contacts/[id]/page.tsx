@@ -1,4 +1,4 @@
-import { getAttachmentsFromCookie, getContactById, getContactLifecycle, getContactLifecycleHistory, getContactQualification, getContactConnections, getContactEmployment, getContactEvidence, getContactIntroPath, getContextNotifications, getCurrentUserResultFromCookie, getEffectivePermissionsFromCookie, getEntityCustomFieldsFromCookie, getTags, getUserReferences } from "@/app/lib/api";
+import { getAttachmentsFromCookie, getCommentThreads, getContactById, getContactLifecycle, getContactLifecycleHistory, getContactQualification, getContactConnections, getContactEmployment, getContactEvidence, getContactIntroPath, getContextNotifications, getCurrentUserResultFromCookie, getEffectivePermissionsFromCookie, getEntityCustomFieldsFromCookie, getTags, getUserReferences } from "@/app/lib/api";
 import { notFound, redirect } from "next/navigation";
 import AccessDeniedPage from "@/app/components/AccessDeniedPage";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
@@ -26,6 +26,7 @@ import TagEditor from "@/app/components/records/contacts/TagEditor";
 import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/ui/avatar";
 import InfoRow from "@/app/components/me/InfoRow";
 import Timeline from "@/app/components/me/Timeline";
+import { commentsFromThreads, TIMELINE_COMMENT_LIMIT } from "@/app/components/me/timelineEntries";
 import Attachments from "@/app/components/attachments/Attachments";
 import CommentsSection from "@/app/components/records/comments/CommentsSection";
 import CustomFieldRows from "@/app/components/records/CustomFieldRows";
@@ -58,7 +59,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
         redirect('/auth/login');
     }
 
-    const [t, locale, contactAccess, allTags, attachments, notificationPage, employment, connections, introPath, customFields, evidence, effectivePermissions, lifecycle, lifecycleHistory, qualification] = await Promise.all([
+    const [t, locale, contactAccess, allTags, attachments, notificationPage, employment, connections, introPath, customFields, evidence, effectivePermissions, lifecycle, lifecycleHistory, qualification, commentThreads] = await Promise.all([
         getTranslations("ContactsPage"),
         getLocale(),
         loadRecord<Contact>(() => getContactById(id, init)),
@@ -82,6 +83,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
             (loaded) => ({ loaded }),
             () => ({ failed: true as const }),
         ),
+        getCommentThreads("person", id, { limit: TIMELINE_COMMENT_LIMIT }, init).catch(() => []),
     ]);
     if (contactAccess.kind === "forbidden") {
         return <AccessDeniedPage />;
@@ -451,6 +453,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                 persons={[contact]}
                                 deals={deals}
                                 lifecycleHistory={ownsContact ? lifecycleHistory : []}
+                                comments={commentsFromThreads(commentThreads)}
                                 currentUserId={currentUser.id}
                                 companyId={contact.companyId ?? contact.company?.id ?? null}
                             />

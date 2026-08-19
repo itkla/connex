@@ -28,15 +28,13 @@
         "completed": "Completed",
         "archived": "Archived"
     },
-    "CampaignsNewDialog": {
-        "title": "New campaign",
-        "description": "Name the campaign and set its basics. You can define its audience next.",
+    "CampaignsEditSheet": {
+        "title": "Edit campaign",
+        "description": "Update this campaign's details. Its audience and messages are unchanged.",
         "name": "Name",
-        "namePlaceholder": "Spring re-engagement",
         "objective": "Objective",
         "objectivePlaceholder": "Re-engage cooling companies",
         "type": "Type",
-        "typePlaceholder": "nurture",
         "status": "Status",
         "budget": "Budget",
         "budgetAmountPlaceholder": "0.00",
@@ -45,14 +43,22 @@
         "startAt": "Start",
         "endAt": "End",
         "cancel": "Cancel",
+        "submit": "Save changes",
+        "saving": "Saving…",
+        "statusLockedHint": "A completed or archived campaign cannot change status."
+    },
+    "CampaignsNewDialog": {
+        "title": "New campaign",
+        "description": "Name it and say what kind of campaign it is. You'll build the audience and messages next.",
+        "name": "Name",
+        "namePlaceholder": "Spring re-engagement",
+        "type": "Type",
+        "typePlaceholder": "nurture",
+        "typeHint": "A short label for what kind of campaign this is — nurture, webinar, event.",
+        "cancel": "Cancel",
         "submit": "Create campaign",
         "creating": "Creating…",
-        "editTitle": "Edit campaign",
-        "editDescription": "Update this campaign's details. Its audience and messages are unchanged.",
-        "editSubmit": "Save changes",
-        "editSaving": "Saving…",
-        "statusLockedHint": "A completed or archived campaign cannot change status.",
-        "created": "Campaign created"
+        "createFailed": "Couldn't create the campaign"
     },
     "CampaignDetail": {
         "back": "Campaigns",
