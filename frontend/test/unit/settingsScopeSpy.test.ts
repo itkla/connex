@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { topmostIntersecting, type ObservedSection } from "@/app/lib/settingsScopeSpy";
+import { activeScopeSection } from "@/app/lib/settingsScopeSpy";
 
 /**
  * Gate over the settings scope spine's scroll-spy (#1340 WS4.1).
@@ -10,67 +10,75 @@ import { topmostIntersecting, type ObservedSection } from "@/app/lib/settingsSco
  * scroll directions. Both are replayed here as observation sequences rather than described, because
  * neither is visible without scrolling a real page.
  */
-function replay(sequence: readonly (readonly ObservedSection[])[]): (string | null)[] {
-    const observed = new Map<string, ObservedSection>();
-    const highlights: (string | null)[] = [];
-    for (const batch of sequence) {
-        for (const section of batch) observed.set(section.id, section);
-        highlights.push(topmostIntersecting([...observed.values()]));
-    }
-    return highlights;
+const ORDER = ["settings-scope-personal", "settings-scope-workspace", "settings-scope-organization"];
+
+/** Replays a run of observer callbacks and reports what the spine highlighted after each. */
+function replay(batches: readonly (readonly (readonly [string, boolean])[])[]): (string | null)[] {
+    const intersecting = new Set<string>();
+    return batches.map((batch) => {
+        for (const [id, isIntersecting] of batch) {
+            if (isIntersecting) intersecting.add(id);
+            else intersecting.delete(id);
+        }
+        return activeScopeSection(ORDER, intersecting);
+    });
 }
 
 describe("the scope spine follows the section the reader is in", () => {
-    it("picks the highest section currently in the band", () => {
+    it("picks the first section in document order that is in the band", () => {
+        expect(activeScopeSection(ORDER, new Set(ORDER))).toBe("settings-scope-personal");
         expect(
-            topmostIntersecting([
-                { id: "personal", isIntersecting: true, top: 120 },
-                { id: "workspace", isIntersecting: true, top: 460 },
-            ]),
-        ).toBe("personal");
+            activeScopeSection(ORDER, new Set(["settings-scope-organization", "settings-scope-workspace"])),
+        ).toBe("settings-scope-workspace");
     });
 
     it("ignores a section that has left the band", () => {
-        expect(
-            topmostIntersecting([
-                { id: "personal", isIntersecting: false, top: -320 },
-                { id: "workspace", isIntersecting: true, top: 40 },
-            ]),
-        ).toBe("workspace");
+        expect(activeScopeSection(ORDER, new Set(["settings-scope-organization"]))).toBe(
+            "settings-scope-organization",
+        );
     });
 
     it("stays on the section still topping the band when the next one only enters it", () => {
         const highlights = replay([
-            [{ id: "personal", isIntersecting: true, top: 100 }],
-            [{ id: "workspace", isIntersecting: true, top: 520 }],
+            [["settings-scope-personal", true]],
+            [["settings-scope-workspace", true]],
         ]);
 
         expect(
             highlights,
             "reducing over the changed entries alone would jump to workspace the moment it appears",
-        ).toEqual(["personal", "personal"]);
+        ).toEqual(["settings-scope-personal", "settings-scope-personal"]);
     });
 
     it("follows the reader back up when the last section's exit is the only change", () => {
         const highlights = replay([
             [
-                { id: "personal", isIntersecting: false, top: -900 },
-                { id: "workspace", isIntersecting: false, top: -400 },
-                { id: "organization", isIntersecting: true, top: 60 },
+                ["settings-scope-personal", false],
+                ["settings-scope-workspace", false],
+                ["settings-scope-organization", true],
             ],
-            [{ id: "organization", isIntersecting: false, top: 900 }],
-            [{ id: "workspace", isIntersecting: true, top: 300 }],
-            [{ id: "personal", isIntersecting: true, top: 80 }],
+            [["settings-scope-organization", false]],
+            [["settings-scope-workspace", true]],
+            [["settings-scope-personal", true]],
         ]);
 
         expect(
             highlights,
             "bailing out on an empty visible set would strand the spine on organization forever",
-        ).toEqual(["organization", null, "workspace", "personal"]);
+        ).toEqual([
+            "settings-scope-organization",
+            null,
+            "settings-scope-workspace",
+            "settings-scope-personal",
+        ]);
     });
 
     it("reports nothing when no section is in the band", () => {
-        expect(topmostIntersecting([{ id: "personal", isIntersecting: false, top: 900 }])).toBeNull();
-        expect(topmostIntersecting([])).toBeNull();
+        expect(activeScopeSection(ORDER, new Set())).toBeNull();
+        expect(activeScopeSection([], new Set(["settings-scope-personal"]))).toBeNull();
+    });
+
+    it("never answers with a section the caller did not list", () => {
+        expect(activeScopeSection(ORDER, new Set(["settings-scope-unknown"]))).toBeNull();
     });
 });

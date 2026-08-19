@@ -53,12 +53,17 @@ function GroupDestinations({ group, pathname }: { group: SettingsNavGroup; pathn
  * buttons: this is navigation, and the row that matches the current route says so with
  * `aria-current` instead of with a raised surface.
  *
+ * The trailing space below the last scope is what lets the scope spine reach it. The spy watches a
+ * band near the top of the viewport, and without a scroll tail the final section on a short page
+ * stops scrolling while it is still below that band, so the spine would name the scope above it for
+ * as long as the reader stayed at the bottom.
+ *
  * @param scopes - the resolved navigation
  */
 export default function SettingsDirectory({ scopes }: { scopes: SettingsNavModel }) {
     const pathname = usePathname() ?? "";
     return (
-        <div className="flex flex-col gap-12">
+        <div className="flex flex-col gap-12 lg:pb-96">
             {scopes.map((scope) => (
                 <section key={scope.anchor} id={scope.anchor} className="scroll-mt-24">
                     <h2 className="text-sm font-semibold text-foreground">
