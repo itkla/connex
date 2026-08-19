@@ -40,6 +40,7 @@ import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.PersonConnectionDto;
 import ooo.klae.connex.backend.dto.PersonEmploymentDto;
 import ooo.klae.connex.backend.dto.PersonFacets;
+import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.dto.PersonDetailDto;
 import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.dto.PersonEvaluationDto;
@@ -58,6 +59,7 @@ import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.ConnectionService;
 import ooo.klae.connex.backend.services.EmploymentService;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
+import ooo.klae.connex.backend.services.WarmthFilterResolver;
 import ooo.klae.connex.backend.services.PersonLifecycleService;
 import ooo.klae.connex.backend.services.PersonQualificationService;
 import ooo.klae.connex.backend.services.PersonService;
@@ -89,7 +91,7 @@ public class PersonController {
     private final BulkOperationService bulkOperationService;
     private final WorkspaceService workspaceService;
     private final MemberScopeResolver memberScopeResolver;
-    private static final String WARMTH_SORT = "warmth";
+    private final WarmthFilterResolver warmthFilterResolver;
 
     /**
      * GET endpoint for the "recently moved" feed: contacts who recently changed companies.
@@ -152,22 +154,24 @@ public class PersonController {
         @RequestParam(defaultValue = "false") boolean noLeadSource,
         @RequestParam(required = false) List<PersonFirstResponseState> firstResponseStates,
         @RequestParam(defaultValue = "false") boolean noFirstResponse,
+        @RequestParam(required = false) List<String> warmthBands,
+        @RequestParam(defaultValue = "false") boolean noWarmth,
+        @RequestParam(required = false) Integer goesColdWithinDays,
         @RequestParam(defaultValue = "false") boolean archived
     ) {
-        if (WARMTH_SORT.equalsIgnoreCase(sort)) {
-            throw new BadRequestException("Warmth sorting requires a precomputed score index and is not available for paginated contacts");
-        }
         PageBounds bounds = PageBounds.of(page, size);
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
+        WarmthFilter warmth = warmthFilterResolver.resolve(
+            warmthBands, noWarmth, goesColdWithinDays, sort);
         List<PersonDto> items = personService.getPersonsPage(query, sort, dir, companies, titles, noCompany,
             memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource,
-            firstResponseStates, noFirstResponse, archived,
+            firstResponseStates, noFirstResponse, archived, warmth,
             bounds.size(), bounds.offset())
             .stream().map(PersonDto::from).toList();
         return new PageResponse<>(items, personService.countPersons(
             query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
-            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived));
+            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth));
     }
 
     /**
@@ -194,11 +198,15 @@ public class PersonController {
         @RequestParam(defaultValue = "false") boolean noLeadSource,
         @RequestParam(required = false) List<PersonFirstResponseState> firstResponseStates,
         @RequestParam(defaultValue = "false") boolean noFirstResponse,
+        @RequestParam(required = false) List<String> warmthBands,
+        @RequestParam(defaultValue = "false") boolean noWarmth,
         @RequestParam(defaultValue = "false") boolean archived
     ) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
+        WarmthFilter warmth = warmthFilterResolver.resolve(warmthBands, noWarmth, null, null);
         if (!archived
+            && warmth == null
             && query == null
             && (companies == null || companies.isEmpty())
             && (titles == null || titles.isEmpty())
@@ -214,7 +222,7 @@ public class PersonController {
         }
         return personService.getMatchingPersonIds(
             query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
-            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived);
+            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth);
     }
 
     /**
@@ -232,7 +240,8 @@ public class PersonController {
             personService.countArchivedPersons(),
             personService.countsByLifecycleStage(),
             personService.countsByLeadSource(),
-            personService.countsByFirstResponseState()
+            personService.countsByFirstResponseState(),
+            personService.countsByWarmthBand(warmthFilterResolver.forFacets())
         );
     }
 

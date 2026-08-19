@@ -429,14 +429,16 @@ public class WorkflowManualRunService {
                 Boolean.TRUE.equals(resolved.noLeadSource()),
                 resolved.firstResponseStates(),
                 Boolean.TRUE.equals(resolved.noFirstResponse()),
-                false);
+                false,
+                null);
             case "company" -> companyService.getMatchingCompanyIds(
                 blankToNull(resolved.query()),
                 resolved.industry(),
                 false,
                 null,
                 memberScope,
-                false);
+                false,
+                null);
             case "deal" -> dealService.getMatchingDealIds(
                 blankToNull(resolved.query()),
                 blankToNull(resolved.currency()),

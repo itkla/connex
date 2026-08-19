@@ -29,6 +29,7 @@ import ooo.klae.connex.backend.dto.CompanyEngagementWeekDto;
 import ooo.klae.connex.backend.dto.CompanyRevenueCurrencyDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -230,15 +231,20 @@ public class CompanyService {
      */
     public List<Company> getCompaniesPage(String query, String sort, String dir, List<String> industry,
             boolean noIndustry, List<Integer> ids, MemberScope memberScope, boolean archived,
-            int limit, int offset) {
+            WarmthFilter warmth, int limit, int offset) {
         return companyMapper.getCompaniesPage(workspaceService.getCurrentWorkspaceId(), query, sort, dir,
-            industry, noIndustry, ids, memberScope, archived, limit, offset);
+            industry, noIndustry, ids, memberScope, archived, warmth, limit, offset);
     }
 
     public long countCompanies(String query, List<String> industry, boolean noIndustry, List<Integer> ids,
-            MemberScope memberScope, boolean archived) {
+            MemberScope memberScope, boolean archived, WarmthFilter warmth) {
         return companyMapper.countCompanies(workspaceService.getCurrentWorkspaceId(),
-            query, industry, noIndustry, ids, memberScope, archived);
+            query, industry, noIndustry, ids, memberScope, archived, warmth);
+    }
+
+    /** How many visible companies sit in each relationship-warmth band, plus those with no history. */
+    public List<FacetCount> countsByWarmthBand(WarmthFilter warmth) {
+        return companyMapper.countsByWarmthBand(workspaceService.getCurrentWorkspaceId(), warmth);
     }
 
     /** How many companies the active workspace currently holds archived. */
@@ -305,18 +311,20 @@ public class CompanyService {
      * broad requests before loading the ids.
      */
     public List<Integer> getMatchingCompanyIds(String query, List<String> industry, boolean noIndustry,
-            List<Integer> ids, MemberScope memberScope, boolean archived) {
-        if (!archived && !hasMatchingIdFilter(query, industry, noIndustry, ids, memberScope)) {
+            List<Integer> ids, MemberScope memberScope, boolean archived, WarmthFilter warmth) {
+        if (!archived && warmth == null
+                && !hasMatchingIdFilter(query, industry, noIndustry, ids, memberScope)) {
             throw new BadRequestException("At least one filter is required before selecting matching company ids");
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         long total = companyMapper.countCompanies(
-            workspaceId, query, industry, noIndustry, ids, memberScope, archived);
+            workspaceId, query, industry, noIndustry, ids, memberScope, archived, warmth);
         if (total > MAX_MATCHING_IDS) {
             throw new BadRequestException("Too many matching companies; narrow the filters before selecting all");
         }
         return companyMapper.getCompanyIdsFiltered(
-            workspaceId, query, industry, noIndustry, ids, memberScope, archived, MAX_MATCHING_IDS, 0);
+            workspaceId, query, industry, noIndustry, ids, memberScope, archived, warmth,
+            MAX_MATCHING_IDS, 0);
     }
 
     private static boolean hasMatchingIdFilter(String query, List<String> industry, boolean noIndustry,

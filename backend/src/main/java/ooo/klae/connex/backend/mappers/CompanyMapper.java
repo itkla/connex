@@ -15,6 +15,7 @@ import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.RelationshipEvidenceRowDto;
 import ooo.klae.connex.backend.dto.RelationshipEvidenceTotalsDto;
 import ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto;
+import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.warmth.RelationshipWarmthModel.SqlParameters;
 
 /**
@@ -52,12 +53,12 @@ public interface CompanyMapper {
             @Param("sort") String sort, @Param("dir") String dir,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
             @Param("ids") List<Integer> ids, @Param("memberScope") MemberScope memberScope,
-            @Param("archived") boolean archived,
+            @Param("archived") boolean archived, @Param("warmth") WarmthFilter warmth,
             @Param("limit") int limit, @Param("offset") int offset);
     long countCompanies(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
             @Param("ids") List<Integer> ids, @Param("memberScope") MemberScope memberScope,
-            @Param("archived") boolean archived);
+            @Param("archived") boolean archived, @Param("warmth") WarmthFilter warmth);
     CompanyEngagementCountsDto getCompanyEngagementCounts(
             @Param("workspaceId") int workspaceId,
             @Param("companyId") int companyId);
@@ -89,7 +90,7 @@ public interface CompanyMapper {
     List<Integer> getCompanyIdsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
             @Param("ids") List<Integer> ids, @Param("memberScope") MemberScope memberScope,
-            @Param("archived") boolean archived,
+            @Param("archived") boolean archived, @Param("warmth") WarmthFilter warmth,
             @Param("limit") int limit, @Param("offset") int offset);
     /**
      * CSV export using the browser filters and member scope, mirroring the visible list.
@@ -98,10 +99,22 @@ public interface CompanyMapper {
     List<Company> getCompaniesFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("industry") List<String> industry, @Param("noIndustry") boolean noIndustry,
             @Param("ids") List<Integer> ids, @Param("memberScope") MemberScope memberScope,
-            @Param("archived") boolean archived);
+            @Param("archived") boolean archived, @Param("warmth") WarmthFilter warmth);
     List<String> distinctIndustries(int workspaceId);
     boolean hasCompanyWithoutIndustry(int workspaceId);
     List<FacetCount> countsByOwner(@Param("workspaceId") int workspaceId);
+    /**
+     * How many visible active companies sit in each relationship-warmth band, computed from the same
+     * attributed decayed touch aggregate the scoring service uses. Companies with no logged
+     * interaction at all are counted under the {@code __none__} key rather than {@code cold}, so the
+     * buckets partition the visible set and each count predicts exactly what the band filter returns.
+     *
+     * @param workspaceId owning workspace
+     * @param warmth model parameters and evaluation instant for the decay
+     * @return one bucket per band, plus {@code __none__}
+     */
+    List<FacetCount> countsByWarmthBand(
+            @Param("workspaceId") int workspaceId, @Param("warmth") WarmthFilter warmth);
     /** How many companies the workspace currently holds archived; drives the browser's archived toggle. */
     long countArchivedCompanies(@Param("workspaceId") int workspaceId);
     List<Company> getCompaniesByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);

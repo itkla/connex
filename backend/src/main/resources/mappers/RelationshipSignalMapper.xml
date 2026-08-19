@@ -118,6 +118,20 @@
     ORDER BY s.priority_rank, s.rank_value DESC, s.family, s.subject_type, s.subject_id
   </select>
 
+  <select id="findActiveForActorBySubject" resultMap="SignalResult">
+    SELECT <include refid="SignalColumns"/>
+    FROM relationship_signal s
+    LEFT JOIN relationship_signal_state st
+      ON st.workspace_id = s.workspace_id
+      AND st.signal_id = s.id
+      AND st.user_id = #{userId}
+    WHERE s.workspace_id = #{workspaceId}
+      AND s.resolved_at IS NULL
+      AND s.subject_type = #{subjectType}
+      AND s.subject_id = #{subjectId}
+    ORDER BY s.priority_rank, s.rank_value DESC, s.family, s.subject_type, s.subject_id
+  </select>
+
   <select id="getActiveForActor" resultMap="SignalResult">
     SELECT <include refid="SignalColumns"/>
     FROM relationship_signal s

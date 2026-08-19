@@ -407,7 +407,8 @@ class CompanyServiceTest extends AbstractServiceTest {
     @Test
     void getMatchingCompanyIdsRejectsRequestsWithoutFilters() {
         assertThrows(BadRequestException.class,
-            () -> companyService.getMatchingCompanyIds(null, null, false, null, MemberScope.allTeam(), false));
+            () -> companyService.getMatchingCompanyIds(
+                null, null, false, null, MemberScope.allTeam(), false, null));
     }
 
     @Test
@@ -444,18 +445,19 @@ class CompanyServiceTest extends AbstractServiceTest {
         List<Integer> matchingIds = List.of(3);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(mapper.countCompanies(
-            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false)).thenReturn(1L);
+            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false, null))
+            .thenReturn(1L);
         when(mapper.getCompanyIdsFiltered(
-            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false, 1000, 0))
+            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false, null, 1000, 0))
             .thenReturn(matchingIds);
 
-        assertEquals(matchingIds,
-            service.getMatchingCompanyIds("%Target%", industry, true, requestedIds, MemberScope.allTeam(), false));
+        assertEquals(matchingIds, service.getMatchingCompanyIds(
+            "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false, null));
 
         verify(mapper).countCompanies(
-            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false);
+            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false, null);
         verify(mapper).getCompanyIdsFiltered(
-            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false, 1000, 0);
+            7, "%Target%", industry, true, requestedIds, MemberScope.allTeam(), false, null, 1000, 0);
     }
 
     @Test
@@ -465,13 +467,13 @@ class CompanyServiceTest extends AbstractServiceTest {
         CompanyService service = companyService(mapper, workspaceService);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(mapper.countCompanies(
-            7, "%Target%", null, false, null, MemberScope.allTeam(), false)).thenReturn(1001L);
+            7, "%Target%", null, false, null, MemberScope.allTeam(), false, null)).thenReturn(1001L);
 
-        assertThrows(BadRequestException.class,
-            () -> service.getMatchingCompanyIds("%Target%", null, false, null, MemberScope.allTeam(), false));
+        assertThrows(BadRequestException.class, () -> service.getMatchingCompanyIds(
+            "%Target%", null, false, null, MemberScope.allTeam(), false, null));
 
         verify(mapper, never()).getCompanyIdsFiltered(
-            7, "%Target%", null, false, null, MemberScope.allTeam(), false, 1000, 0);
+            7, "%Target%", null, false, null, MemberScope.allTeam(), false, null, 1000, 0);
     }
 
     @Test

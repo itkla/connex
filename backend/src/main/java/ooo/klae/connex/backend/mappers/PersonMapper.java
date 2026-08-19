@@ -13,6 +13,7 @@ import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.dto.CompanyEngagementPersonDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.dto.PersonBreachRow;
 import ooo.klae.connex.backend.dto.RelationshipEvidenceRowDto;
 import ooo.klae.connex.backend.dto.RelationshipEvidenceTotalsDto;
@@ -98,7 +99,7 @@ public interface PersonMapper {
             @Param("noLeadSource") boolean noLeadSource,
             @Param("firstResponseStates") List<PersonFirstResponseState> firstResponseStates,
             @Param("noFirstResponse") boolean noFirstResponse,
-            @Param("archived") boolean archived,
+            @Param("archived") boolean archived, @Param("warmth") WarmthFilter warmth,
             @Param("limit") int limit, @Param("offset") int offset);
     long countPersons(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("companies") List<String> companies,
@@ -110,7 +111,7 @@ public interface PersonMapper {
             @Param("noLeadSource") boolean noLeadSource,
             @Param("firstResponseStates") List<PersonFirstResponseState> firstResponseStates,
             @Param("noFirstResponse") boolean noFirstResponse,
-            @Param("archived") boolean archived);
+            @Param("archived") boolean archived, @Param("warmth") WarmthFilter warmth);
     /**
      * CSV export using the browser filters and member scope, excluding suspended contacts.
      * Callers pass {@code archived = false}: an export is defined as the active working set.
@@ -124,7 +125,7 @@ public interface PersonMapper {
             @Param("noLeadSource") boolean noLeadSource,
             @Param("firstResponseStates") List<PersonFirstResponseState> firstResponseStates,
             @Param("noFirstResponse") boolean noFirstResponse,
-            @Param("archived") boolean archived);
+            @Param("archived") boolean archived, @Param("warmth") WarmthFilter warmth);
     /** Ids using the browser's filters and member scope; backs "select all matching". */
     List<Integer> getPersonIdsFiltered(@Param("workspaceId") int workspaceId, @Param("query") String query,
             @Param("companies") List<String> companies, @Param("titles") List<String> titles,
@@ -135,7 +136,8 @@ public interface PersonMapper {
             @Param("noLeadSource") boolean noLeadSource,
             @Param("firstResponseStates") List<PersonFirstResponseState> firstResponseStates,
             @Param("noFirstResponse") boolean noFirstResponse,
-            @Param("archived") boolean archived, @Param("limit") int limit);
+            @Param("archived") boolean archived, @Param("warmth") WarmthFilter warmth,
+            @Param("limit") int limit);
     List<String> distinctCompanies(int workspaceId);
     List<String> distinctTitles(int workspaceId);
     boolean hasPersonWithoutCompany(int workspaceId);
@@ -157,6 +159,18 @@ public interface PersonMapper {
      * @return one bucket per source
      */
     List<FacetCount> countsByLeadSource(@Param("workspaceId") int workspaceId);
+    /**
+     * How many visible active contacts sit in each relationship-warmth band, computed from the same
+     * decayed touch aggregate the scoring service uses. Contacts with no logged interaction at all
+     * are counted under the {@code __none__} key rather than {@code cold}, so the buckets partition
+     * the visible set and each count predicts exactly what the matching band filter returns.
+     *
+     * @param workspaceId owning workspace
+     * @param warmth model parameters and evaluation instant for the decay
+     * @return one bucket per band, plus {@code __none__}
+     */
+    List<FacetCount> countsByWarmthBand(
+            @Param("workspaceId") int workspaceId, @Param("warmth") WarmthFilter warmth);
     /**
      * How many active contacts sit in each first-response SLA state, matching the page filter's
      * population. Contacts that have never been put under an SLA are counted under the

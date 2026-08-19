@@ -11,6 +11,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -60,6 +61,7 @@ public class RadarService {
         RelationshipSignalDetectorService.WARM_PATH);
     private static final Set<String> STATES = Set.of(
         "active", "followed", "snoozed", "dismissed");
+    private static final Set<String> SUBJECT_TYPES = Set.of("person", "company", "deal");
     private static final TypeReference<List<RadarResponseDto.Evidence>> EVIDENCE_TYPE =
         new TypeReference<>() {
         };
@@ -85,6 +87,27 @@ public class RadarService {
             List<String> familyFilters,
             List<String> stateFilters,
             @Nullable String query) {
+        return get(familyFilters, stateFilters, query, null, null);
+    }
+
+    /**
+     * Returns a bounded ranked Radar snapshot, optionally narrowed in the database to the signals
+     * whose subject is one record so a record page does not read the whole workspace feed.
+     *
+     * @param familyFilters requested detector families
+     * @param stateFilters requested dispositions
+     * @param query subject label substring
+     * @param subjectType subject record type, required together with {@code subjectId}
+     * @param subjectId subject record id, required together with {@code subjectType}
+     * @return bounded ranked snapshot
+     */
+    public RadarResponseDto get(
+            List<String> familyFilters,
+            List<String> stateFilters,
+            @Nullable String query,
+            @Nullable String subjectType,
+            @Nullable Integer subjectId) {
+        String scopedSubjectType = validatedSubjectType(subjectType, subjectId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
         List<RelationshipSignalFamilyState> familyStates = signalMapper.findFamilyStates(workspaceId);
@@ -100,8 +123,12 @@ public class RadarService {
         familyStates.forEach(state -> unavailable.put(
             state.getFamily(), "unavailable".equals(state.getStatus())));
 
-        List<RelationshipSignal> activeSignals = signalMapper.findActiveForActor(workspaceId, userId);
+        List<RelationshipSignal> activeSignals = scopedSubjectType == null
+            ? signalMapper.findActiveForActor(workspaceId, userId)
+            : signalMapper.findActiveForActorBySubject(
+                workspaceId, userId, scopedSubjectType, subjectId);
         Set<Integer> processablePersonIds = processablePersonIds(workspaceId, activeSignals);
+        Map<Integer, String> personLabels = personLabels(workspaceId, processablePersonIds);
         Set<Integer> visibleEdgeIds = visibleEdgeIds(workspaceId, activeSignals);
         List<RadarResponseDto.Signal> items = new ArrayList<>();
         int position = 0;
@@ -125,7 +152,7 @@ public class RadarService {
             RadarResponseDto.Signal item = toDto(
                 workspaceId, signal, subject, state, position + 1, now,
                 unavailable.getOrDefault(signal.getFamily(), false),
-                processablePersonIds, visibleEdgeIds);
+                processablePersonIds, personLabels, visibleEdgeIds);
             if (item.evidence().isEmpty()) {
                 continue;
             }
@@ -437,6 +464,7 @@ public class RadarService {
             Instant now,
             boolean familyUnavailable,
             Set<Integer> processablePersonIds,
+            Map<Integer, String> personLabels,
             Set<Integer> visibleEdgeIds) {
         RankPayload rank = objectMapper.readValue(
             signal.getRankExplanationJson(), RANK_TYPE);
@@ -456,6 +484,7 @@ public class RadarService {
                 workspaceId,
                 parseEvidence(signal.getEvidenceJson()),
                 processablePersonIds,
+                personLabels,
                 visibleEdgeIds),
             new RadarResponseDto.Rank(position, rank.rule(), rank.factors()));
     }
@@ -464,6 +493,7 @@ public class RadarService {
             int workspaceId,
             List<RadarResponseDto.Evidence> evidence,
             Set<Integer> processablePersonIds,
+            Map<Integer, String> personLabels,
             Set<Integer> visibleEdgeIds) {
         List<RadarResponseDto.Evidence> current = new ArrayList<>();
         for (RadarResponseDto.Evidence item : evidence) {
@@ -481,8 +511,9 @@ public class RadarService {
                 continue;
             }
             List<RadarResponseDto.Reference> references = item.references().stream()
-                .filter(reference -> referenceVisible(
-                    workspaceId, reference, processablePersonIds, visibleEdgeIds))
+                .map(reference -> resolveReference(
+                    workspaceId, reference, personLabels, visibleEdgeIds))
+                .filter(Objects::nonNull)
                 .toList();
             current.add(new RadarResponseDto.Evidence(
                 item.type(), item.parameters(), references));
@@ -499,18 +530,53 @@ public class RadarService {
         return bridgePersonId instanceof Number number ? number.intValue() : null;
     }
 
-    private boolean referenceVisible(
+    /**
+     * Returns the reference carrying the referenced record's current label, or null when the caller
+     * may not see it. Labels are read from the live record for exactly the workspace in context, so
+     * a reference can never disclose a name from another tenant or a name that no longer exists.
+     */
+    private RadarResponseDto.Reference resolveReference(
             int workspaceId,
             RadarResponseDto.Reference reference,
-            Set<Integer> processablePersonIds,
+            Map<Integer, String> personLabels,
             Set<Integer> visibleEdgeIds) {
         return switch (reference.type()) {
-            case "person" -> processablePersonIds.contains(reference.id());
-            case "company" -> companyMapper.getCompanyById(workspaceId, reference.id()) != null;
-            case "deal" -> dealMapper.getDealById(workspaceId, reference.id()) != null;
-            case "person_edge" -> visibleEdgeIds.contains(reference.id());
-            default -> false;
+            case "person" -> personLabels.containsKey(reference.id())
+                ? reference.withLabel(personLabels.get(reference.id()))
+                : null;
+            case "company" -> {
+                Company company = companyMapper.getCompanyById(workspaceId, reference.id());
+                yield company == null
+                    ? null
+                    : reference.withLabel(label(company.getName(), company.getId()));
+            }
+            case "deal" -> {
+                Deal deal = dealMapper.getDealById(workspaceId, reference.id());
+                yield deal == null ? null : reference.withLabel(label(deal.getName(), deal.getId()));
+            }
+            case "person_edge" -> visibleEdgeIds.contains(reference.id()) ? reference : null;
+            default -> null;
         };
+    }
+
+    /**
+     * Current names of every processable person referenced by the supplied signals, read once per
+     * request so evidence labelling never becomes a per-reference query.
+     */
+    private Map<Integer, String> personLabels(int workspaceId, Set<Integer> processablePersonIds) {
+        if (processablePersonIds.isEmpty()) {
+            return Map.of();
+        }
+        List<Integer> ordered = processablePersonIds.stream().sorted().toList();
+        Map<Integer, String> labels = new LinkedHashMap<>();
+        for (int offset = 0; offset < ordered.size(); offset += PERSON_READ_BATCH) {
+            for (Person person : personMapper.getByIds(
+                    workspaceId,
+                    ordered.subList(offset, Math.min(offset + PERSON_READ_BATCH, ordered.size())))) {
+                labels.put(person.getId(), label(person.getName(), person.getId()));
+            }
+        }
+        return Map.copyOf(labels);
     }
 
     private Set<Integer> processablePersonIds(
@@ -641,6 +707,28 @@ public class RadarService {
         } catch (NumberFormatException exception) {
             throw new BadRequestException("Radar version is invalid");
         }
+    }
+
+    /**
+     * Validates the optional record scope, returning null when the caller wants the whole feed.
+     * Both parameters are required together so a half-supplied scope cannot silently widen the read.
+     */
+    private static String validatedSubjectType(
+            @Nullable String subjectType, @Nullable Integer subjectId) {
+        String normalized = subjectType == null ? "" : subjectType.trim().toLowerCase(Locale.ROOT);
+        if (normalized.isEmpty() && subjectId == null) {
+            return null;
+        }
+        if (normalized.isEmpty() || subjectId == null) {
+            throw new BadRequestException("subjectType and subjectId must be supplied together");
+        }
+        if (!SUBJECT_TYPES.contains(normalized)) {
+            throw new BadRequestException("subjectType must be one of: person, company, deal");
+        }
+        if (subjectId < 1) {
+            throw new BadRequestException("subjectId must be a positive integer");
+        }
+        return normalized;
     }
 
     private static Set<String> validatedFamilies(List<String> filters) {

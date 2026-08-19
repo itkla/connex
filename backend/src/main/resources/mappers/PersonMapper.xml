@@ -525,12 +525,78 @@
       WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NOT NULL)
   </select>
 
+  <!-- Decayed relationship warmth for the browser's sort, band facet, and decay horizon. This
+       reuses the same touch union and model parameters as getRelationshipScoreAggregates so the
+       browser and the smart-segment warmth predicates can never read two different scores. The
+       join is emitted only when a warmth sort or filter was requested, so an ordinary page never
+       pays for the aggregate. Binding `model` and `reference` here lets the shared touch-source
+       fragment resolve its parameters unchanged. -->
+  <sql id="warmthJoin">
+    <if test="warmth != null">
+      <bind name="model" value="warmth.model"/>
+      <bind name="reference" value="warmth.reference"/>
+      LEFT JOIN (
+        SELECT touch.entity_id,
+               SUM(touch.weight
+                 * POW(#{model.decayBase}, -touch.age_days / #{model.halfLifeDays})) AS raw_weight,
+               MAX(touch.touched_at) AS last_touch_at
+        FROM (
+          SELECT source.entity_id, source.touched_at, source.weight,
+                 GREATEST(0.0,
+                   TIMESTAMPDIFF(MICROSECOND, source.touched_at, #{reference})
+                     / #{model.microsecondsPerDay}) AS age_days
+          FROM (
+            <include refid="relationshipTouchSources"/>
+          ) source
+          WHERE source.touched_at IS NOT NULL AND source.touched_at &lt;= #{reference}
+        ) touch
+        GROUP BY touch.entity_id
+      ) w ON w.entity_id = p.id
+    </if>
+  </sql>
+
+  <!-- One bucket per contact: the model's band, or __none__ when nothing has ever been logged.
+       The score is strictly increasing in raw weight, so comparing raw weight against the model's
+       published boundaries selects exactly the rows the Java band classifier would. -->
+  <sql id="warmthBandKey">
+    CASE
+      WHEN w.last_touch_at IS NULL THEN '__none__'
+      WHEN w.raw_weight &gt;= #{model.hotMinimumRawWeight} THEN 'hot'
+      WHEN w.raw_weight &gt;= #{model.warmMinimumRawWeight} THEN 'warm'
+      WHEN w.raw_weight &gt;= #{model.coolMinimumRawWeight} THEN 'cool'
+      ELSE 'cold'
+    END
+  </sql>
+
+  <sql id="warmthWhere">
+    <if test="warmth != null">
+      <if test="warmth.bands.size() > 0 or warmth.noWarmth">
+        AND (
+          <trim prefixOverrides="OR ">
+            <if test="warmth.bands.size() > 0">
+              <include refid="warmthBandKey"/> IN
+              <foreach item="band" collection="warmth.bands" open="(" separator="," close=")">#{band}</foreach>
+            </if>
+            <if test="warmth.noWarmth">OR w.last_touch_at IS NULL</if>
+          </trim>
+        )
+      </if>
+      <if test="warmth.goesColdWithinDays != null">
+        AND w.raw_weight &gt; #{model.coldRawWeight}
+        AND ROUND(#{model.halfLifeDays}
+          * LOG(#{model.decayBase}, w.raw_weight / #{model.coldRawWeight}))
+          &lt;= #{warmth.goesColdWithinDays}
+      </if>
+    </if>
+  </sql>
+
   <sql id="pageWhere">
     <where>
       <choose>
         <when test="archived">AND p.workspace_id = #{workspaceId} AND p.archived_at IS NOT NULL</when>
         <otherwise>AND <include refid="visible"/></otherwise>
       </choose>
+      <include refid="warmthWhere"/>
       <if test="query != null">
         AND (p.name LIKE #{query} OR p.email LIKE #{query} OR p.phone LIKE #{query}
           OR p.title LIKE #{query} OR c.name LIKE #{query})
@@ -633,6 +699,7 @@
       <when test="sort == 'company'">c.name</when>
       <when test="sort == 'createdAt'">p.created_at</when>
       <when test="sort == 'updatedAt'">p.updated_at</when>
+      <when test="sort == 'warmth'">COALESCE(w.raw_weight, 0.0)</when>
       <otherwise>p.name</otherwise>
     </choose>
     <choose><when test="dir == 'desc'">DESC</when><otherwise>ASC</otherwise></choose>
@@ -643,6 +710,7 @@
     SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
     FROM person p
     <include refid="companyJoin"/>
+    <include refid="warmthJoin"/>
     <include refid="pageWhere"/>
     <include refid="memberScopePredicate"/>
     <include refid="pageOrderBy"/>
@@ -653,6 +721,7 @@
     SELECT p.id
     FROM person p
     <include refid="companyJoin"/>
+    <include refid="warmthJoin"/>
     <include refid="pageWhere"/>
     <include refid="memberScopePredicate"/>
     ORDER BY p.id
@@ -663,6 +732,7 @@
     SELECT COUNT(*)
     FROM person p
     <include refid="companyJoin"/>
+    <include refid="warmthJoin"/>
     <include refid="pageWhere"/>
     <include refid="memberScopePredicate"/>
   </select>
@@ -671,10 +741,20 @@
     SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
     FROM person p
     <include refid="companyJoin"/>
+    <include refid="warmthJoin"/>
     <include refid="pageWhere"/>
     <include refid="memberScopePredicate"/>
     AND p.suspended_at IS NULL
     ORDER BY p.name
+  </select>
+
+  <select id="countsByWarmthBand" resultType="ooo.klae.connex.backend.dto.FacetCount">
+    SELECT <include refid="warmthBandKey"/> AS `key`,
+           COUNT(*) AS count, NULL AS label
+    FROM person p
+    <include refid="warmthJoin"/>
+    WHERE <include refid="visible"/>
+    GROUP BY `key`
   </select>
 
   <select id="distinctCompanies" resultType="string">

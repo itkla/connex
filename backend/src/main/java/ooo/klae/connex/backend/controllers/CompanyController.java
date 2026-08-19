@@ -24,6 +24,7 @@ import ooo.klae.connex.backend.dto.BulkTagRequest;
 import ooo.klae.connex.backend.dto.CompanyDto;
 import ooo.klae.connex.backend.dto.CompanyEngagementDto;
 import ooo.klae.connex.backend.dto.CompanyFacets;
+import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.dto.CompanyOwnerDto;
 import ooo.klae.connex.backend.dto.CompanySegmentQueryRequest;
 import ooo.klae.connex.backend.dto.CompanyTimelineDto;
@@ -41,6 +42,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
+import ooo.klae.connex.backend.services.WarmthFilterResolver;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.util.LikePattern;
 import ooo.klae.connex.backend.util.PageBounds;
@@ -67,6 +69,7 @@ public class CompanyController {
     private final BulkOperationService bulkOperationService;
     private final WorkspaceService workspaceService;
     private final MemberScopeResolver memberScopeResolver;
+    private final WarmthFilterResolver warmthFilterResolver;
 
     /**
      * Retrieves all companies, optionally filtered by tag.
@@ -97,17 +100,20 @@ public class CompanyController {
         @RequestParam(required = false) List<Integer> ids,
         @RequestParam(required = false) String scope,
         @RequestParam(required = false) List<Integer> memberIds,
+        @RequestParam(required = false) List<String> warmthBands,
+        @RequestParam(defaultValue = "false") boolean noWarmth,
         @RequestParam(defaultValue = "false") boolean archived
     ) {
         PageBounds bounds = PageBounds.of(page, size);
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
+        WarmthFilter warmth = warmthFilterResolver.resolve(warmthBands, noWarmth, null, sort);
         List<CompanyDto> items = companyService.getCompaniesPage(
-            query, sort, dir, industry, noIndustry, ids, memberScope, archived,
+            query, sort, dir, industry, noIndustry, ids, memberScope, archived, warmth,
             bounds.size(), bounds.offset())
             .stream().map(CompanyDto::from).toList();
-        return new PageResponse<>(items,
-            companyService.countCompanies(query, industry, noIndustry, ids, memberScope, archived));
+        return new PageResponse<>(items, companyService.countCompanies(
+            query, industry, noIndustry, ids, memberScope, archived, warmth));
     }
 
     /** Returns bounded company-scoped engagement aggregates for one expanded company card. */
@@ -157,11 +163,15 @@ public class CompanyController {
         @RequestParam(required = false) List<Integer> ids,
         @RequestParam(required = false) String scope,
         @RequestParam(required = false) List<Integer> memberIds,
+        @RequestParam(required = false) List<String> warmthBands,
+        @RequestParam(defaultValue = "false") boolean noWarmth,
         @RequestParam(defaultValue = "false") boolean archived
     ) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
+        WarmthFilter warmth = warmthFilterResolver.resolve(warmthBands, noWarmth, null, null);
         if (!archived
+            && warmth == null
             && query == null
             && (industry == null || industry.isEmpty())
             && !noIndustry
@@ -169,7 +179,8 @@ public class CompanyController {
             && memberScope.mode() == MemberScope.Mode.ALL_TEAM) {
             throw new BadRequestException("At least one filter is required before selecting matching company ids");
         }
-        return companyService.getMatchingCompanyIds(query, industry, noIndustry, ids, memberScope, archived);
+        return companyService.getMatchingCompanyIds(
+            query, industry, noIndustry, ids, memberScope, archived, warmth);
     }
 
     /**
@@ -193,7 +204,8 @@ public class CompanyController {
             companyService.distinctIndustries(),
             companyService.hasCompanyWithoutIndustry(),
             companyService.countsByOwner(),
-            companyService.countArchivedCompanies()
+            companyService.countArchivedCompanies(),
+            companyService.countsByWarmthBand(warmthFilterResolver.forFacets())
         );
     }
 

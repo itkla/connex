@@ -18,18 +18,20 @@ import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.services.ExportService;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
+import ooo.klae.connex.backend.services.WarmthFilterResolver;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 @ExtendWith(MockitoExtension.class)
 class ExportControllerTest {
     @Mock private ExportService exportService;
     @Mock private MemberScopeResolver memberScopeResolver;
+    @Mock private WarmthFilterResolver warmthFilterResolver;
     @Mock private WorkspaceService workspaceService;
 
     @Test
     void segmentDealExportPreservesTheValidatedBodyScope() {
         ExportController controller = new ExportController(
-            exportService, memberScopeResolver, workspaceService);
+            exportService, memberScopeResolver, warmthFilterResolver, workspaceService);
         SegmentDefinition definition = new SegmentDefinition();
         definition.setMatch("all");
         definition.setConditions(List.of());
@@ -71,7 +73,7 @@ class ExportControllerTest {
     @Test
     void productExportNormalizesSearchAndReturnsBomPrefixedCsv() {
         ExportController controller = new ExportController(
-            exportService, memberScopeResolver, workspaceService);
+            exportService, memberScopeResolver, warmthFilterResolver, workspaceService);
         when(exportService.exportProducts("%100\\%\\_ready%"))
             .thenReturn("id,name\r\n7,Product\r\n");
 

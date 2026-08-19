@@ -33,6 +33,7 @@ import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
+import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -131,22 +132,22 @@ public class PersonService {
             List<PersonLifecycleStage> lifecycleStages, boolean noLifecycle,
             List<PersonLeadSource> leadSources, boolean noLeadSource,
             List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
-            boolean archived, int limit, int offset) {
+            boolean archived, WarmthFilter warmth, int limit, int offset) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         return personMapper.getPersonsPage(workspaceId, query, sort, dir,
             companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
             leadSources, noLeadSource, firstResponseStates, noFirstResponse,
-            archived, limit, offset);
+            archived, warmth, limit, offset);
     }
 
     public long countPersons(String query, List<String> companies, List<String> titles, boolean noCompany,
             MemberScope memberScope, List<PersonLifecycleStage> lifecycleStages, boolean noLifecycle,
             List<PersonLeadSource> leadSources, boolean noLeadSource,
             List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
-            boolean archived) {
+            boolean archived, WarmthFilter warmth) {
         return personMapper.countPersons(workspaceService.getCurrentWorkspaceId(),
             query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
-            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived);
+            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth);
     }
 
     /** How many contacts the active workspace currently holds archived. */
@@ -163,8 +164,8 @@ public class PersonService {
             boolean noCompany, MemberScope memberScope, List<PersonLifecycleStage> lifecycleStages,
             boolean noLifecycle, List<PersonLeadSource> leadSources, boolean noLeadSource,
             List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
-            boolean archived) {
-        if (!archived && !hasMatchingIdFilter(
+            boolean archived, WarmthFilter warmth) {
+        if (!archived && warmth == null && !hasMatchingIdFilter(
                 query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
                 leadSources, noLeadSource, firstResponseStates, noFirstResponse)) {
             throw new BadRequestException("At least one filter is required before selecting matching contact ids");
@@ -173,14 +174,14 @@ public class PersonService {
         long total = personMapper.countPersons(
             workspaceId, query, companies, titles, noCompany, memberScope,
             lifecycleStages, noLifecycle, leadSources, noLeadSource,
-            firstResponseStates, noFirstResponse, archived);
+            firstResponseStates, noFirstResponse, archived, warmth);
         if (total > MAX_MATCHING_IDS) {
             throw new BadRequestException("Too many matching contacts; narrow the filters before selecting all");
         }
         return personMapper.getPersonIdsFiltered(
             workspaceId, query, companies, titles, noCompany, memberScope,
             lifecycleStages, noLifecycle, leadSources, noLeadSource,
-            firstResponseStates, noFirstResponse, archived, MAX_MATCHING_IDS);
+            firstResponseStates, noFirstResponse, archived, warmth, MAX_MATCHING_IDS);
     }
 
     private static boolean hasMatchingIdFilter(String query, List<String> companies, List<String> titles,
@@ -227,6 +228,11 @@ public class PersonService {
     }
 
     /** How many active contacts sit in each first-response SLA state, for the browser's filter menu. */
+    /** How many visible contacts sit in each relationship-warmth band, plus those with no history. */
+    public List<FacetCount> countsByWarmthBand(WarmthFilter warmth) {
+        return personMapper.countsByWarmthBand(workspaceService.getCurrentWorkspaceId(), warmth);
+    }
+
     public List<FacetCount> countsByFirstResponseState() {
         return personMapper.countsByFirstResponseState(workspaceService.getCurrentWorkspaceId());
     }
