@@ -79,6 +79,8 @@
         "filterNoCompany": "No company",
         "emptyTitle": "No contacts yet",
         "emptyBody": "Contacts are the people your team knows — add your first one or import a CSV.",
+        "emptyJourneyBody": "Contacts are the people your team knows. Bring some in, then log one interaction and Connex reads how warm each relationship is.",
+        "emptyReadOnlyBody": "Contacts are the people your team knows. Nobody on this workspace has added any yet.",
         "emptyCta": "New contact",
         "entityLabel": "contact",
         "toastContactCreated": "Contact created",

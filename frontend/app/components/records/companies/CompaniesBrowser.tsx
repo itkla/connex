@@ -10,7 +10,7 @@ import { ButtonGroup } from '@/components/ui/button-group';
 import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import { PencilIcon, EllipsisVerticalIcon, EyeIcon, PlusIcon } from '@heroicons/react/24/solid';
+import { PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
 import { ArchiveBoxIcon, ArchiveBoxArrowDownIcon, BuildingOffice2Icon } from '@heroicons/react/24/outline';
 import {
     Squares2X2Icon,
@@ -41,7 +41,11 @@ import { IconButton } from '@/components/ui/icon-button';
 import ArchiveRecordDialog from '@/app/components/records/ArchiveRecordDialog';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { useRecordReturnSelection } from '@/app/hooks/useRecordReturnSelection';
-import { useActionSelection } from '@/app/hooks/useActions';
+import { useActionSelection, useActions } from '@/app/hooks/useActions';
+import { usePermission } from '@/app/hooks/usePermissions';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
+import FirstRunDoors from '@/app/components/FirstRunDoors';
+import { firstRunDoors } from '@/app/lib/firstRunJourney';
 import { useSavedViewScope } from '@/app/hooks/useSavedViewScope';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
 import { type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, FILTER_EMPTY, facetChips, countActiveFilters } from '@/app/components/records/types';
@@ -58,7 +62,7 @@ import {
     removeSegmentCondition,
     segmentConditionEntries,
 } from '@/app/lib/segmentDefinition';
-import { createCompany, createContact, getUsers, updateCompany, getCompaniesPage, getCompaniesSegmentPage, getCompanyEngagement, getCompanyFacets, getCompanyIds, getCompanySegmentIds, getCompanyTemperatures, isFieldError, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkArchiveCompanies, bulkRestoreCompanies, bulkAssignCompanyOwner, getActiveWorkspaceMembers, exportCompaniesCsv, uploadCompanyLogo, uploadContactPicture } from '@/app/lib/api';
+import { createCompany, createContact, getContactsPage, getUsers, updateCompany, getCompaniesPage, getCompaniesSegmentPage, getCompanyEngagement, getCompanyFacets, getCompanyIds, getCompanySegmentIds, getCompanyTemperatures, isFieldError, getSegmentFields, getTags, bulkAddTagToCompanies, bulkRemoveTagFromCompanies, bulkArchiveCompanies, bulkRestoreCompanies, bulkAssignCompanyOwner, getActiveWorkspaceMembers, exportCompaniesCsv, uploadCompanyLogo, uploadContactPicture } from '@/app/lib/api';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
@@ -135,6 +139,8 @@ type CompanyFilterParams = WarmthFilterParams & {
     archived?: boolean;
 };
 
+const IMPORT_COMPANIES_ACTION = 'utility.import-companies';
+
 const NO_ITEMS: Company[] = [];
 const ARCHIVED_FILTER_KEY = 'archived';
 const ARCHIVED_FILTER_VALUE = '1';
@@ -168,6 +174,7 @@ function cleanCompanyPayload(payload: CreateCompanyPayload): CreateCompanyPayloa
 export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUnavailable }: { savedViews: SavedView[]; defaultView: SavedView | null; savedViewsUnavailable?: boolean }) {
     const router = useRouter();
     const t = useTranslations('CompaniesBrowser');
+    const tActions = useTranslations('Actions');
     const tf = useTranslations('Filters');
     const ts = useTranslations('MemberScope');
     const tSeg = useTranslations('SmartSegments');
@@ -802,6 +809,35 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         setFilterState({});
         setDefinition(EMPTY_DEFINITION);
     }, [setQuery, setFilterState]);
+    const { activeWorkspaceId } = useWorkspace();
+    const canCreateCompanies = usePermission('COMPANY_CREATE');
+    const { run: runAction, actions, pendingIds } = useActions();
+    const companyImportPending = pendingIds.has(IMPORT_COMPANIES_ACTION);
+    const firstRunEntryDoors = useMemo(
+        () => firstRunDoors(canCreateCompanies)
+            .filter((door) => door !== 'import'
+                || actions.some((action) => action.id === IMPORT_COMPANIES_ACTION)),
+        [actions, canCreateCompanies],
+    );
+    const runCompanyImport = useCallback(() => {
+        void runAction(IMPORT_COMPANIES_ACTION, { source: 'empty-state' });
+    }, [runAction]);
+    const firstRunEmpty = total === 0 && !hasActiveFiltersOrScope;
+    const [contactsOutstanding, setContactsOutstanding] = useState(false);
+    useEffect(() => {
+        if (!firstRunEmpty) return;
+        let active = true;
+        getContactsPage({ page: 1, size: 1 })
+            .then((page) => {
+                if (active) setContactsOutstanding(page.total === 0);
+            })
+            .catch(() => {
+                if (active) setContactsOutstanding(false);
+            });
+        return () => {
+            active = false;
+        };
+    }, [firstRunEmpty, activeWorkspaceId]);
     const resolveTagName = useCallback(
         (id: string) => segmentFields?.tags.find((tag) => String(tag.id) === id)?.name ?? id,
         [segmentFields],
@@ -1214,12 +1250,21 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                             <EmptyState
                                 icon={BuildingOffice2Icon}
                                 title={t('emptyTitle')}
-                                body={t('emptyBody')}
+                                body={!canCreateCompanies
+                                    ? t('emptyReadOnlyBody')
+                                    : contactsOutstanding
+                                    ? t('emptyContactsFirstBody')
+                                    : t('emptyBody')}
                                 action={
-                                    <Button variant="brand" onClick={openNewDialog}>
-                                        <PlusIcon strokeWidth={2.5} />
-                                        {t('emptyCta')}
-                                    </Button>
+                                    <FirstRunDoors
+                                        doors={firstRunEntryDoors}
+                                        size="page"
+                                        importLabel={tActions('utility.importCompanies')}
+                                        createLabel={t('emptyCta')}
+                                        importPending={companyImportPending}
+                                        onImport={runCompanyImport}
+                                        onCreate={openNewDialog}
+                                    />
                                 }
                             />
                         }

@@ -8,7 +8,7 @@ import RecordsActions from '@/app/components/import/RecordsActions';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toastError, toastInfo, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import { PencilIcon, EllipsisVerticalIcon, EyeIcon, PlusIcon } from '@heroicons/react/24/solid';
+import { PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
 import { BuildingOffice2Icon, NoSymbolIcon, TagIcon, UserCircleIcon, ArchiveBoxIcon, ArchiveBoxArrowDownIcon, UsersIcon } from '@heroicons/react/24/outline';
 import {
     Squares2X2Icon,
@@ -39,7 +39,10 @@ import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { useRecordReturnSelection } from '@/app/hooks/useRecordReturnSelection';
-import { useActionSelection } from '@/app/hooks/useActions';
+import { useActionSelection, useActions } from '@/app/hooks/useActions';
+import { usePermission } from '@/app/hooks/usePermissions';
+import FirstRunDoors from '@/app/components/FirstRunDoors';
+import { firstRunDoors } from '@/app/lib/firstRunJourney';
 import { useSavedViewScope } from '@/app/hooks/useSavedViewScope';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
 import SavedViewsBar from '@/app/components/records/SavedViewsBar';
@@ -126,6 +129,8 @@ function diffDraft(original: ContactDraft, draft: ContactDraft): boolean {
     );
 }
 
+const IMPORT_CONTACTS_ACTION = 'utility.import-contacts';
+
 export default function ContactsBrowser({ savedViews, defaultView, savedViewsUnavailable }: { savedViews: SavedView[]; defaultView: SavedView | null; savedViewsUnavailable?: boolean }) {
     const router = useRouter();
     const t = useTranslations('ContactsBrowser');
@@ -135,6 +140,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
     const tl = useTranslations('ContactLifecycle');
     const tp = useTranslations('ContactProvenance');
     const tsla = useTranslations('ContactResponseSla');
+    const tActions = useTranslations('Actions');
     const ttemp = useTranslations('Temperature');
     const reduce = useReducedMotion() ?? false;
     const {
@@ -364,6 +370,18 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         setQuery('');
         setFilterState({});
     }, [setQuery, setFilterState]);
+    const canCreateContacts = usePermission('PERSON_CREATE');
+    const { run: runAction, actions, pendingIds } = useActions();
+    const importPending = pendingIds.has(IMPORT_CONTACTS_ACTION);
+    const firstRunEntryDoors = useMemo(
+        () => firstRunDoors(canCreateContacts)
+            .filter((door) => door !== 'import'
+                || actions.some((action) => action.id === IMPORT_CONTACTS_ACTION)),
+        [actions, canCreateContacts],
+    );
+    const runContactImport = useCallback(() => {
+        void runAction(IMPORT_CONTACTS_ACTION, { source: 'empty-state' });
+    }, [runAction]);
     const effectiveOwnerValues = ownerScope.mode === 'me'
         ? [MEMBER_SCOPE_ME]
         : ownerScope.mode === 'unassigned'
@@ -1099,12 +1117,17 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                             <EmptyState
                                 icon={UsersIcon}
                                 title={t('emptyTitle')}
-                                body={t('emptyBody')}
+                                body={canCreateContacts ? t('emptyJourneyBody') : t('emptyReadOnlyBody')}
                                 action={
-                                    <Button variant="brand" onClick={openNewContactDialog}>
-                                        <PlusIcon strokeWidth={2.5} />
-                                        {t('emptyCta')}
-                                    </Button>
+                                    <FirstRunDoors
+                                        doors={firstRunEntryDoors}
+                                        size="page"
+                                        importLabel={tActions('utility.importContacts')}
+                                        createLabel={t('emptyCta')}
+                                        importPending={importPending}
+                                        onImport={runContactImport}
+                                        onCreate={openNewContactDialog}
+                                    />
                                 }
                             />
                         }
