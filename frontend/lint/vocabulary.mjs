@@ -28,6 +28,7 @@ const BOLD_SPAN = /\*\*([^*]+)\*\*/g;
 const CODE_SPAN = /`([^`]+)`/g;
 const HAS_CODE_SPAN = /`[^`]+`/;
 const QUALIFIER_WORD = /\s(?:as|except|alone|when|only|unless)\s/;
+const WORD_GAP = "[\\s-]+";
 const CJK_CHARACTER = /[぀-ヿ㐀-䶿一-鿿ｦ-ﾟ]/u;
 const JAPANESE_MIN_OVERLAP = 2;
 
@@ -275,17 +276,20 @@ export const CURATED_DECISIONS = {
     "processing suspended": {
         decision: "ban",
         allowFiles: ALLOWED_SURFACES,
-        reason: "§4 allows the statutory register only as a secondary admin hint and on compliance surfaces.",
+        pattern: { source: "\\b(?:processing[\\s-]+suspend(?:ed|ing|s)?|suspend(?:ed|ing|s)?[\\s-]+(?:the[\\s-]+)?processing)\\b", flags: "iu" },
+        reason: "§4 bans the statutory state, which copy states verb-first as readily as noun-first, and allows it only as a secondary admin hint and on compliance surfaces.",
     },
     "provision ceased": {
         decision: "ban",
         allowFiles: ALLOWED_SURFACES,
-        reason: "§4 allows the statutory register only as a secondary admin hint and on compliance surfaces.",
+        pattern: { source: "\\b(?:provision[\\s-]+ceas(?:ed|es|ing)?|ceas(?:e|ed|es|ing)[\\s-]+(?:the[\\s-]+)?provisions?)\\b", flags: "iu" },
+        reason: "§4 bans the statutory state, which copy states verb-first as readily as noun-first, and allows it only as a secondary admin hint and on compliance surfaces.",
     },
     "processing restrictions": {
         decision: "ban",
         allowFiles: ALLOWED_SURFACES,
-        reason: "§4 allows the statutory register only as a secondary admin hint and on compliance surfaces.",
+        pattern: { source: "\\b(?:processing[\\s-]+restrictions?|restrict(?:s|ed|ing)?[\\s-]+(?:the[\\s-]+)?processing)\\b", flags: "iu" },
+        reason: "§4 bans the statutory state, which copy states verb-first as readily as noun-first, and allows it only as a secondary admin hint and on compliance surfaces.",
     },
     "restricted (unglossed) as headline copy": {
         decision: "skip",
@@ -705,18 +709,20 @@ export function inflections(word) {
 
 /**
  * Builds the pattern for an English term: word-bounded, case-insensitive, and matching
- * the inflections of its last word. Word boundaries already stop an English term from
+ * the inflections of its last word. A multi-word term accepts a hyphen between its words —
+ * copy writes "data-subject request" as readily as "data subject request", and §4 bans the
+ * term rather than one way of setting it. Word boundaries already stop an English term from
  * matching inside a longer canonical term, so no canonical exception is needed.
  * @param {string} term
  * @returns {{pattern: SerializedPattern, canonicalExceptions: string[]}}
  */
 function englishPattern(term) {
     const words = term.split(/\s+/);
-    const lead = words.slice(0, -1).map(escapeRegExp).join("\\s+");
+    const lead = words.slice(0, -1).map(escapeRegExp).join(WORD_GAP);
     const forms = inflections(words[words.length - 1]).map(escapeRegExp);
     const tail = forms.length > 1 ? `(?:${forms.join("|")})` : forms[0];
     return {
-        pattern: { source: `\\b${lead.length > 0 ? `${lead}\\s+` : ""}${tail}\\b`, flags: "iu" },
+        pattern: { source: `\\b${lead.length > 0 ? `${lead}${WORD_GAP}` : ""}${tail}\\b`, flags: "iu" },
         canonicalExceptions: [],
     };
 }

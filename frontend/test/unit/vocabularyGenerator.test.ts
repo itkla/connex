@@ -128,6 +128,31 @@ describe("vocabulary generator", () => {
         expect(expression(term.pattern).test("a Node in the network")).toBe(true);
     });
 
+    it("reads a multi-word term set with a hyphen", () => {
+        const term = bannedTerm("en:data subject");
+
+        expect(expression(term.pattern).test("Log a data subject request")).toBe(true);
+        expect(expression(term.pattern).test("Log a data-subject request")).toBe(true);
+        expect(expression(term.pattern).test("Data-subject name is required.")).toBe(true);
+        expect(expression(term.pattern).test("the subject of that data")).toBe(false);
+    });
+
+    it("catches a statutory state stated verb-first, not only noun-first", () => {
+        const restriction = bannedTerm("en:processing restrictions");
+        const suspension = bannedTerm("en:processing suspended");
+        const cessation = bannedTerm("en:provision ceased");
+
+        expect(expression(restriction.pattern).test("processing restrictions apply")).toBe(true);
+        expect(expression(restriction.pattern).test("We are restricting processing for this contact.")).toBe(true);
+        expect(expression(restriction.pattern).test("Restrict the processing of this record")).toBe(true);
+        expect(expression(restriction.pattern).test("Restrict access to this file")).toBe(false);
+        expect(expression(suspension.pattern).test("processing suspended")).toBe(true);
+        expect(expression(suspension.pattern).test("Connex is suspending processing")).toBe(true);
+        expect(expression(cessation.pattern).test("provision ceased")).toBe(true);
+        expect(expression(cessation.pattern).test("Cease provision")).toBe(true);
+        expect(expression(cessation.pattern).test("ceasing the provision of this data")).toBe(true);
+    });
+
     it("keeps tenant banned everywhere the legal pages are not", () => {
         for (const id of ["en:tenant", "ja:テナント"]) {
             const term = bannedTerm(id);
