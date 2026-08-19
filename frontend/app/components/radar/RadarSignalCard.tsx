@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import {
@@ -195,6 +195,11 @@ export default function RadarSignalCard({
     const taskBlockingExplanation = taskPermissionExplanation ?? taskFreshnessExplanation;
     const followed = signal.state === 'followed';
     const dismissed = signal.state === 'dismissed';
+    const numberFormat = useMemo(() => new Intl.NumberFormat(locale), [locale]);
+    const dateFormat = useMemo(
+        () => new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }),
+        [locale],
+    );
     const names = radarSignalNames(signal);
     const evidenceRenderKeys = evidenceKeys(signal.evidence);
     const subjectHref = radarSubjectHref(signal.subject);
@@ -259,14 +264,14 @@ export default function RadarSignalCard({
     };
 
     const formatValue = (key: string, value: unknown): string => {
-        if (typeof value === 'number') return new Intl.NumberFormat(locale).format(value);
+        if (typeof value === 'number') return numberFormat.format(value);
         if (typeof value === 'boolean') return value ? t('value.yes') : t('value.no');
         if (typeof value === 'string') {
             const enumValues = enumValuesByKey[key];
             if (enumValues) return enumValues[value] ?? t('value.unavailable');
             if (key === 'lastTouchAt' || key === 'goesColdAt') {
                 const timestamp = parseMysqlDateTime(value);
-                if (Number.isFinite(timestamp)) return new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(timestamp);
+                if (Number.isFinite(timestamp)) return dateFormat.format(timestamp);
             }
             return value;
         }
