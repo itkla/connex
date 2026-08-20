@@ -160,6 +160,8 @@
         "searchNoMatches": "「{query}」に一致するメンバーはいません。",
         "inviteAccessTitle": "招待とアクセス",
         "inviteAccessSubtitle": "メールで招待したり、参加リンクを共有したり、信頼できるドメインを自動承認できます。",
+        "inviteMemberTitle": "メンバーを招待",
+        "inviteMemberSubtitle": "メールで招待するか、誰でも使える参加リンクを共有します。",
         "inviteTabEmail": "メール",
         "inviteTabLink": "招待リンク",
         "inviteTabDomains": "ドメイン",

@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
 import {
-    AtSymbolIcon,
     CheckIcon,
     EllipsisHorizontalIcon,
     EnvelopeIcon,
@@ -23,16 +22,13 @@ import type {
     WorkspaceRole,
 } from "@/app/lib/types";
 import {
-    addWorkspaceAllowedDomain,
     assignMemberCustomRole,
     createWorkspaceInvite,
     createWorkspaceInviteLink,
-    getWorkspaceAllowedDomains,
     getWorkspaceInviteLinks,
     getWorkspaceInvites,
     getWorkspaceMembers,
     getWorkspaceRoles,
-    removeWorkspaceAllowedDomain,
     removeWorkspaceMember,
     revokeWorkspaceInvite,
     revokeWorkspaceInviteLink,
@@ -66,14 +62,18 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
 import Rise from "@/app/components/motion/Rise";
+import AllowedDomainsPanel from "@/app/components/settings/AllowedDomainsPanel";
 import { SettingsSection } from "@/app/components/settings/SettingsSection";
+import {
+    EmptyRow,
+    ListCard,
+    TabListHeading,
+    rowActionTrigger,
+} from "@/app/components/settings/SettingsListPrimitives";
 
 const ASSIGNABLE: WorkspaceRole[] = ["member", "admin"];
 
 const SEARCH_THRESHOLD = 6;
-
-const rowActionTrigger =
-    "flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100";
 
 function initial(name: string) {
     return name.trim().charAt(0).toUpperCase() || "?";
@@ -87,33 +87,16 @@ function RoleBadge({ role, label }: { role: string; label: string }) {
     );
 }
 
-function ListCard({ children }: { children: React.ReactNode }) {
-    return (
-        <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
-            {children}
-        </ul>
-    );
-}
-
-function EmptyRow({ children }: { children: React.ReactNode }) {
-    return (
-        <p className="rounded-2xl border border-dashed border-border bg-card/40 px-4 py-6 text-center text-sm text-muted-foreground">
-            {children}
-        </p>
-    );
-}
-
-/** Small heading for a state list nested inside an invite/access tab, with an optional count. */
-function TabListHeading({ title, count }: { title: string; count?: number }) {
-    return (
-        <div className="flex items-center gap-2">
-            <h3 className="text-sm font-medium text-foreground">{title}</h3>
-            {count != null && count > 0 ? (
-                <span className="text-xs text-muted-foreground tabular-nums">{count}</span>
-            ) : null}
-        </div>
-    );
-}
+/**
+ * How the panel presents its invite journey, so one component serves both of its homes while
+ * #1340 migrates the workspace destinations.
+ *
+ * - `legacy` is `/settings/members` exactly as it ships: allowed domains is the third tab of the
+ *   invite strip, under the section's own "Invite & access" name.
+ * - `consolidated` is the People & access page, where allowed domains is its own deep-linkable
+ *   section and the strip is left holding only the two ways of inviting a member.
+ */
+export type MembersPresentation = "legacy" | "consolidated";
 
 /**
  * Workspace membership administration: roles, invites, invite links and allowed domains.
@@ -124,8 +107,15 @@ function TabListHeading({ title, count }: { title: string; count?: number }) {
  * gates and navigation of the role they just left until a full page load.
  *
  * @param currentUserId the viewer, so their own row can be handled differently
+ * @param presentation which of the panel's two homes is rendering it; defaults to the legacy route
  */
-export default function MembersPanel({ currentUserId }: { currentUserId: number | null }) {
+export default function MembersPanel({
+    currentUserId,
+    presentation = "legacy",
+}: {
+    currentUserId: number | null;
+    presentation?: MembersPresentation;
+}) {
     const t = useTranslations("WorkspaceMembers");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const router = useRouter();
@@ -159,10 +149,7 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
     const [busyLinkId, setBusyLinkId] = useState<number | null>(null);
     const [copiedLinkId, setCopiedLinkId] = useState<number | null>(null);
 
-    const [allowedDomains, setAllowedDomains] = useState<string[]>([]);
-    const [domainInput, setDomainInput] = useState("");
-    const [addingDomain, setAddingDomain] = useState(false);
-    const [busyDomain, setBusyDomain] = useState<string | null>(null);
+    const showDomains = presentation === "legacy";
 
     const roleLabel = useCallback(
         (r: string) =>
@@ -184,8 +171,6 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                     if (!cancelled) setInvites(loadedInvites);
                     const loadedLinks = await getWorkspaceInviteLinks(workspaceId);
                     if (!cancelled) setInviteLinks(loadedLinks);
-                    const loadedDomains = await getWorkspaceAllowedDomains(workspaceId);
-                    if (!cancelled) setAllowedDomains(loadedDomains);
                 }
                 if (isOwner) {
                     const loadedRoles = await getWorkspaceRoles(workspaceId);
@@ -370,40 +355,6 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
         }
     };
 
-    const addDomain = async () => {
-        if (!workspaceId || addingDomain) return;
-        resetFieldErrors();
-        setAddingDomain(true);
-        try {
-            const updated = await addWorkspaceAllowedDomain(workspaceId, domainInput.trim());
-            setAllowedDomains(updated);
-            setDomainInput("");
-            toastSuccess(t("domainAdded"));
-        } catch (err) {
-            if (!handlePasskeyStepUpError(err) && !captureFieldErrors(err)) {
-                toastError(err instanceof Error ? err.message : t("domainAddFailed"));
-            }
-        } finally {
-            setAddingDomain(false);
-        }
-    };
-
-    const removeDomain = async (domain: string) => {
-        if (!workspaceId) return;
-        setBusyDomain(domain);
-        try {
-            await removeWorkspaceAllowedDomain(workspaceId, domain);
-            setAllowedDomains((prev) => prev.filter((d) => d !== domain));
-            toastSuccess(t("domainRemoved"));
-        } catch (err) {
-            if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("domainRemoveFailed"));
-            }
-        } finally {
-            setBusyDomain(null);
-        }
-    };
-
     const selectableRoles: WorkspaceRole[] = isOwner ? ["member", "admin", "owner"] : ASSIGNABLE;
 
     const trimmedSearch = memberSearch.trim().toLowerCase();
@@ -552,7 +503,10 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
 
             {isAdmin && (
                 <Rise>
-                    <SettingsSection title={t("inviteAccessTitle")} description={t("inviteAccessSubtitle")}>
+                    <SettingsSection
+                        title={showDomains ? t("inviteAccessTitle") : t("inviteMemberTitle")}
+                        description={showDomains ? t("inviteAccessSubtitle") : t("inviteMemberSubtitle")}
+                    >
                         <Tabs defaultValue="email" className="gap-5">
                             <TabsList className="w-full sm:w-auto">
                                 <TabsTrigger value="email">
@@ -563,10 +517,12 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                                     <LinkIcon />
                                     {t("inviteTabLink")}
                                 </TabsTrigger>
-                                <TabsTrigger value="domains">
-                                    <GlobeAltIcon />
-                                    {t("inviteTabDomains")}
-                                </TabsTrigger>
+                                {showDomains && (
+                                    <TabsTrigger value="domains">
+                                        <GlobeAltIcon />
+                                        {t("inviteTabDomains")}
+                                    </TabsTrigger>
+                                )}
                             </TabsList>
 
                             <TabsContent value="email" className="space-y-5">
@@ -828,98 +784,11 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                                 </div>
                             </TabsContent>
 
-                            <TabsContent value="domains" className="space-y-5">
-                                <p className="max-w-prose text-sm text-muted-foreground">{t("domainsSubtitle")}</p>
-                                <form
-                                    onSubmit={(e) => {
-                                        e.preventDefault();
-                                        addDomain();
-                                    }}
-                                    className="flex flex-col gap-3 sm:flex-row sm:items-start"
-                                >
-                                    <div className="flex-1">
-                                        <InputGroup>
-                                            <InputGroupAddon>
-                                                <AtSymbolIcon />
-                                            </InputGroupAddon>
-                                            <InputGroupInput
-                                                value={domainInput}
-                                                onChange={(e) => {
-                                                    setDomainInput(e.target.value);
-                                                    clearError("domain");
-                                                }}
-                                                placeholder={t("domainPlaceholder")}
-                                                aria-label={t("domainLabel")}
-                                                aria-invalid={Boolean(fieldErrors.domain)}
-                                            />
-                                        </InputGroup>
-                                        {fieldErrors.domain && (
-                                            <p className="mt-1.5 text-sm text-destructive">{fieldErrors.domain}</p>
-                                        )}
-                                    </div>
-                                    <Button
-                                        type="submit"
-                                        variant="brand"
-                                        disabled={addingDomain || domainInput.trim().length === 0}
-                                        className="min-w-28"
-                                    >
-                                        {addingDomain ? <Loader2Icon className="size-4 animate-spin" /> : t("addDomain")}
-                                    </Button>
-                                </form>
-
-                                <div className="space-y-2">
-                                    <TabListHeading title={t("domainsTitle")} count={allowedDomains.length} />
-                                    {allowedDomains.length === 0 ? (
-                                        <EmptyRow>{t("domainsEmpty")}</EmptyRow>
-                                    ) : (
-                                        <ListCard>
-                                            {allowedDomains.map((domain) => {
-                                                const busy = busyDomain === domain;
-                                                return (
-                                                    <li
-                                                        key={domain}
-                                                        className="group flex items-center gap-3 px-4 py-3"
-                                                    >
-                                                        <span
-                                                            aria-hidden
-                                                            className="grid size-8 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground"
-                                                        >
-                                                            <GlobeAltIcon className="size-4" />
-                                                        </span>
-                                                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-                                                            {domain}
-                                                        </span>
-                                                        {busy ? (
-                                                            <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
-                                                        ) : (
-                                                            <DropdownMenu>
-                                                                <DropdownMenuTrigger asChild>
-                                                                    <button
-                                                                        type="button"
-                                                                        aria-label={t("removeDomain")}
-                                                                        className={rowActionTrigger}
-                                                                    >
-                                                                        <EllipsisHorizontalIcon className="size-5" />
-                                                                    </button>
-                                                                </DropdownMenuTrigger>
-                                                                <DropdownMenuContent align="end" className="w-44">
-                                                                    <DropdownMenuItem
-                                                                        variant="destructive"
-                                                                        onSelect={() => removeDomain(domain)}
-                                                                    >
-                                                                        <TrashIcon className="size-4" />
-                                                                        {t("removeDomain")}
-                                                                    </DropdownMenuItem>
-                                                                </DropdownMenuContent>
-                                                            </DropdownMenu>
-                                                        )}
-                                                    </li>
-                                                );
-                                            })}
-                                        </ListCard>
-                                    )}
-                                </div>
-                            </TabsContent>
+                            {showDomains && (
+                                <TabsContent value="domains">
+                                    <AllowedDomainsPanel />
+                                </TabsContent>
+                            )}
                         </Tabs>
                     </SettingsSection>
                 </Rise>

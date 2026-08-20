@@ -160,6 +160,8 @@
         "searchNoMatches": "No members match “{query}”.",
         "inviteAccessTitle": "Invite & access",
         "inviteAccessSubtitle": "Add teammates by email, share a join link, or auto-approve trusted email domains.",
+        "inviteMemberTitle": "Invite member",
+        "inviteMemberSubtitle": "Invite by email, or share a join link anyone can use.",
         "inviteTabEmail": "By email",
         "inviteTabLink": "Invite link",
         "inviteTabDomains": "Domains",
