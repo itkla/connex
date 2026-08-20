@@ -139,12 +139,20 @@ export function capabilityValue(
 }
 
 /**
- * Whether a destination's capability requirements hold.
+ * Whether the navigation may offer a destination given what its capabilities resolved to.
  *
- * A failed capability lookup keeps the destination visible rather than hiding it. That is the
- * shipped behavior the tab strips already implement, and it is the honest one: the reader is told
- * the state on arrival instead of watching a destination they use every day disappear because one
- * request failed.
+ * Three answers, and none of them is "it depends on how the reader got here":
+ *
+ * - **Unresolved.** A failed capability lookup keeps the destination visible. The reader is told the
+ *   state on arrival instead of watching a destination they use every day disappear because one
+ *   request failed.
+ * - **Resolved against, and the destination declares its {@link SettingsAccess.states}.** Still
+ *   visible. #1340 forbids a capability-managed destination from silently vanishing: it stays
+ *   discoverable and explains itself in place, which is exactly what a declared state is a promise
+ *   to do. Hiding it here would leave the explanation reachable only by typing the URL.
+ * - **Resolved against, and it declares nothing.** Hidden, as it is today. A destination that cannot
+ *   say why it is empty has nothing to offer a reader who arrives, and advertising it would be the
+ *   worse half of the same dishonesty.
  */
 function capabilitiesSatisfied(access: SettingsAccess, capabilities: InstanceCapabilities | null): boolean {
     if (access.capabilities.length === 0) return true;
@@ -152,7 +160,8 @@ function capabilitiesSatisfied(access: SettingsAccess, capabilities: InstanceCap
     const met = access.capabilities.map(
         (requirement) => capabilityValue(capabilities, requirement.key) === requirement.expected,
     );
-    return access.capabilityMatch === "all" ? met.every(Boolean) : met.some(Boolean);
+    const satisfied = access.capabilityMatch === "all" ? met.every(Boolean) : met.some(Boolean);
+    return satisfied || access.states.length > 0;
 }
 
 /**
@@ -161,6 +170,13 @@ function capabilitiesSatisfied(access: SettingsAccess, capabilities: InstanceCap
  * Reads the manifest's visibility bucket only — `permissions`, `capabilities`, and `orgAdmin`. The
  * manage bucket (`manage`, `orgWrite`) gates writes on a page that renders for everyone, so hiding
  * on it would hide a page that works today; #1340 codifies that split and this honors it.
+ *
+ * A refused permission and a refused capability are not the same refusal. A permission the reader
+ * does not hold hides the destination: §6's rule is to prefer not rendering the entry point over
+ * showing a locked door, and the permission set is fail-closed, so an unreadable one hides too. A
+ * capability is a fact about the instance rather than about the reader, and every reader gets the
+ * same answer — so a destination that can state that answer keeps its place. See
+ * {@link capabilitiesSatisfied}.
  *
  * @param entry - the manifest entry
  * @param viewer - who is reading

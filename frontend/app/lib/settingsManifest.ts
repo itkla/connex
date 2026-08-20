@@ -67,10 +67,14 @@ export type SettingsCapabilityRequirement = {
 };
 
 /**
- * A capability state under which the shipped page forwards the browser elsewhere instead of
- * explaining itself in place. #1340 forbids exactly this teleport, so it is recorded as evidence:
- * the redirect matrix must retire it and the capability-state work must replace it with an in-place
- * explanation.
+ * A capability state under which a rendering page forwards the browser elsewhere instead of
+ * explaining itself in place. #1340 forbids exactly this teleport, and no entry declares one any
+ * more: `/settings/email` and `/organization/sso` were the complete set the manifest recorded, and
+ * both now render a {@link SettingsAvailabilityState} where they stand.
+ *
+ * The shape survives its last two occupants on purpose. It is what a future forward would have to
+ * be declared as, and the gates over it in `settingsManifest.test.ts` are what would catch one —
+ * they hold at zero forwards today and fail the moment a page starts teleporting again.
  */
 export type SettingsConditionalForward = {
     capability: SettingsCapabilityKey;
@@ -110,8 +114,10 @@ export type SettingsAccess = {
     orgWrite: "owner" | "admin" | null;
     /**
      * The in-place states this destination must be able to explain about itself once #1340 lands.
-     * This is target state, not shipped behavior: several destinations today vanish or forward
-     * instead of explaining, which is what {@link SettingsEntry.conditionalForward} records.
+     * Partly shipped: no destination forwards away from its own capability state any more, and the
+     * navigation keeps a state-declaring destination visible when its capability resolves against
+     * it. Several destinations still answer a refused permission with the shared access-denied
+     * state rather than the `ask-admin` posture, which the scope-group PRs adopt as they move.
      */
     states: readonly SettingsAvailabilityState[];
 };
@@ -690,7 +696,7 @@ export const SETTINGS_ENTRIES = [
         canonicalSection: "sso",
         redirectsTo: null,
         redirectQuery: [],
-        conditionalForward: { capability: "sso", expected: false, to: "/organization/members" },
+        conditionalForward: null,
         titleKey: "Organization.tabSso",
         access: {
             permissions: [],
@@ -852,7 +858,7 @@ export const SETTINGS_ENTRIES = [
         canonicalSection: "email",
         redirectsTo: null,
         redirectQuery: [],
-        conditionalForward: { capability: "mailManaged", expected: true, to: "/settings/members" },
+        conditionalForward: null,
         titleKey: "WorkspaceSettings.tabEmail",
         access: {
             permissions: ["WORKSPACE_SETTINGS"],

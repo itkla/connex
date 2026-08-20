@@ -1,17 +1,13 @@
-import { getTranslations } from "next-intl/server";
+import SettingsAvailabilityNotice from "@/app/components/settings/SettingsAvailabilityNotice";
 
-import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
-import WorkspaceUnavailableRetry from "@/app/components/WorkspaceUnavailableRetry";
-
-/** Fail-closed route state for an instance-capability lookup that could not be completed. */
-export default async function CapabilityUnavailablePage() {
-    const t = await getTranslations("CapabilityUnavailable");
-
-    return (
-        <PermissionsUnavailable
-            title={t("title")}
-            body={t("body")}
-            action={<WorkspaceUnavailableRetry label={t("retry")} pendingLabel={t("retrying")} />}
-        />
-    );
+/**
+ * Fail-closed route state for an instance-capability lookup that could not be completed.
+ *
+ * The `retry` posture of {@link SettingsAvailabilityNotice}, under the name the routes that render
+ * it already import. It stays a component of its own because a route-level dead end reads better as
+ * one named state than as a posture argument, and because the three routes rendering it assert on
+ * that identity.
+ */
+export default function CapabilityUnavailablePage() {
+    return <SettingsAvailabilityNotice state="retry" />;
 }
