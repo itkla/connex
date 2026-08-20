@@ -37,15 +37,42 @@ describe("parseListInt", () => {
 describe("URL writers (multi-writer coexistence contract)", () => {
     const replaceState = vi.fn();
 
-    function stubLocation(search: string, state: unknown = null): void {
+    function stubLocation(search: string, state: unknown = null, hash = ""): void {
         vi.stubGlobal("window", {
-            location: { search },
+            location: { search, hash },
             history: { replaceState, state },
         });
     }
 
     beforeEach(() => replaceState.mockClear());
     afterEach(() => vi.unstubAllGlobals());
+
+    it("carries the reader's fragment through every writer, so a deep link survives a list-state write", () => {
+        const writers: ReadonlyArray<[string, () => void]> = [
+            ["writeListStateToUrl", () => writeListStateToUrl("/settings/workspace/people", { q: "a", sort: null, dir: "asc", page: 1, size: 25 }, 25)],
+            ["writeListQueryToUrl", () => writeListQueryToUrl("/settings/workspace/people", "a")],
+            ["writeSavedViewToUrl", () => writeSavedViewToUrl("/settings/workspace/people", "1:2")],
+            ["writeOwnedParamsToUrl", () => writeOwnedParamsToUrl("/settings/workspace/people", { task: "7" })],
+        ];
+
+        for (const [name, write] of writers) {
+            replaceState.mockClear();
+            stubLocation("?view=table", null, "#directory");
+            write();
+            expect(replaceState, `${name} wrote nothing to assert on`).toHaveBeenCalledTimes(1);
+            expect(
+                String(replaceState.mock.calls[0][2]),
+                `${name} dropped the fragment the reader arrived with`,
+            ).toContain("#directory");
+        }
+    });
+
+    it("writes no fragment when the reader carries none", () => {
+        stubLocation("?view=table");
+        writeListQueryToUrl("/records/contacts", "acme");
+
+        expect(String(replaceState.mock.calls[0][2])).toBe("/records/contacts?view=table&q=acme");
+    });
 
     it("declares exactly the keys the server-records writer owns", () => {
         expect([...SERVER_RECORDS_URL_KEYS]).toEqual(["q", "sort", "dir", "page", "size"]);
@@ -160,22 +187,27 @@ describe("parseDeepLinkId", () => {
 });
 
 describe("shared-link survival across a browser session", () => {
-    function mountUrl(initial: string): { search: () => string } {
-        const state = { search: initial };
+    function mountUrl(initial: string, fragment = ""): { search: () => string; hash: () => string } {
+        const state = { search: initial, hash: fragment };
         vi.stubGlobal("window", {
             location: {
                 get search() {
                     return state.search;
                 },
+                get hash() {
+                    return state.hash;
+                },
             },
             history: {
                 state: null,
                 replaceState: (_data: unknown, _title: string, url: string) => {
-                    state.search = new URL(`http://x${url}`).search;
+                    const parsed = new URL(`http://x${url}`);
+                    state.search = parsed.search;
+                    state.hash = parsed.hash;
                 },
             },
         });
-        return { search: () => state.search };
+        return { search: () => state.search, hash: () => state.hash };
     }
 
     afterEach(() => vi.unstubAllGlobals());

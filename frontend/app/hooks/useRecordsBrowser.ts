@@ -11,7 +11,7 @@ import {
 } from '../components/records/types';
 import { PEEK_PARAM } from './useRecordPeek';
 import { SERVER_RECORDS_URL_KEYS } from './useServerRecords';
-import { parseListQuery, SAVED_VIEW_URL_KEY } from './listStateUrl';
+import { listStateAddress, parseListQuery, SAVED_VIEW_URL_KEY } from './listStateUrl';
 import { useActions } from './useActions';
 import { useIsMobile } from './useIsMobile';
 import { useScopedViewPreference } from './useScopedViewPreference';
@@ -95,7 +95,7 @@ export function useRecordsBrowser<T extends { id: SelectionId }>(
         }
         const next = params.toString();
         if (next === window.location.search.replace(/^\?/, '')) return;
-        window.history.replaceState(null, '', next ? `${pathname}?${next}` : pathname);
+        window.history.replaceState(null, '', listStateAddress(pathname, next));
     }, [displayMode, filterState, pathname, searchParams]);
 
     const effectiveDisplayMode: DisplayMode = effectiveListView(displayMode, isMobile);
