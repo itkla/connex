@@ -10,9 +10,11 @@ import {
 import ConnectionsPanel from "@/app/components/account/ConnectionsPanel";
 import { capabilityAvailability } from "@/app/lib/capabilityAvailability";
 import {
+    capturePanelRequiresCapture,
     captureConnectionsHref,
     parseCaptureRouteState,
     providerCaptureEnabled,
+    providerJourneyEnabled,
 } from "@/app/lib/connectedCapture";
 import { checkPermission, type PermissionsStatus } from "@/app/lib/permissionState";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -67,7 +69,11 @@ export default async function AccountConnectionsPage({
     const permissionsStatus: PermissionsStatus = permissionsResult.ok ? "resolved" : "unavailable";
     const currentSearchParams = toSearchParams(await searchParams);
     const routeState = parseCaptureRouteState(currentSearchParams);
-    const routeUnavailable = capabilitiesResult.ok && routeState.provider
+    const providerUnavailable = capabilitiesResult.ok && routeState.provider
+        && !providerJourneyEnabled(capabilities, routeState.provider);
+    const panelUnavailable = capabilitiesResult.ok && routeState.provider != null
+        && routeState.panel != null
+        && capturePanelRequiresCapture(routeState.panel)
         && !providerCaptureEnabled(capabilities, routeState.provider);
     const workspacePolicyForbidden = capabilitiesResult.ok
         && routeState.panel === "workspace-policy"
@@ -75,9 +81,11 @@ export default async function AccountConnectionsPage({
             === "denied";
     const canonicalHref = captureConnectionsHref(
         currentSearchParams,
-        routeUnavailable || workspacePolicyForbidden
+        providerUnavailable
             ? { provider: null, panel: null, reviewId: null, page: 1 }
-            : routeState,
+            : panelUnavailable || workspacePolicyForbidden
+                ? { panel: null, reviewId: null, page: 1 }
+                : routeState,
     );
     const currentQuery = currentSearchParams.toString();
     const currentHref = currentQuery

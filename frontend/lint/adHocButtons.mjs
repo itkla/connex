@@ -54,6 +54,10 @@ import { join, relative, resolve, sep } from "node:path";
  *    `IconButton`, clearing that file's shape override, legacy size, and missing tooltip at once;
  *    and put the products browser on `RecordsRenderView`, whose own row menu replaced the
  *    hand-sized trigger the browser drew for itself.
+ * 3. 455 → 448 (lowered). #1340's connected-accounts journey rebuilt `CaptureProviderCard.tsx`
+ *    around the button system: the overflow menu that carried the card's five secondary jobs moved
+ *    into the manage drawer, and the actions that stayed took context tiers instead of the `sm`
+ *    sizes the card had been naming, clearing all seven of its findings.
  *
  * **The burndown contract**, deliberately identical to `lint/motionDurations.mjs` so the two gates
  * read the same way. `loadBaseline()` returns the committed inventory of files that still carry
@@ -362,4 +366,4 @@ export function loadBaseline() {
  * The ledger's total after the widening described above. It may fall. It rises only in a commit
  * that widens what the scanner catches — never to make room for new debt.
  */
-export const BASELINE_HIGH_WATER_MARK = 455;
+export const BASELINE_HIGH_WATER_MARK = 448;

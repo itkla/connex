@@ -16,7 +16,6 @@
     "app/components/account/QuietHoursPanel.tsx": 2,
     "app/components/account/SecurityPanel.tsx": 2,
     "app/components/account/connected-accounts/ManagedConnectDialog.tsx": 3,
-    "app/components/account/connected-capture/CaptureProviderCard.tsx": 7,
     "app/components/account/connected-capture/CaptureReviewDialog.tsx": 2,
     "app/components/account/connected-capture/CaptureReviewQueue.tsx": 2,
     "app/components/actions/QuickCreateLauncher.tsx": 3,
