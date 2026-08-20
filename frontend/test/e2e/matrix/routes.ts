@@ -80,7 +80,7 @@ export const MATRIX_ROUTES: readonly MatrixRoute[] = [
     { id: 'reports', path: '/overview/reports', area: 'other', tier: 2, role: 'member' },
     { id: 'analytics', path: '/overview/analytics', area: 'other', tier: 2, role: 'member' },
     { id: 'introductions', path: '/overview/introductions', area: 'ai', tier: 2, role: 'member' },
-    { id: 'settings-root', path: '/settings', area: 'settings', tier: 2, role: 'member', landsOn: ['/settings/members'] },
+    { id: 'settings-root', path: '/settings', area: 'settings', tier: 2, role: 'member' },
     { id: 'settings-members', path: '/settings/members', area: 'settings', tier: 2, role: 'member' },
     { id: 'settings-roles', path: '/settings/roles', area: 'settings', tier: 2, role: 'owner', deniesMember: true },
     { id: 'admin-logs', path: '/admin/logs', area: 'settings', tier: 2, role: 'admin', deniesMember: true },

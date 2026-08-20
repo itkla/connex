@@ -153,6 +153,11 @@ export function capabilityValue(
  * - **Resolved against, and it declares nothing.** Hidden, as it is today. A destination that cannot
  *   say why it is empty has nothing to offer a reader who arrives, and advertising it would be the
  *   worse half of the same dishonesty.
+ *
+ * <p>The "declares states" test reads {@code access.states.length} rather than checking for the
+ * capability-explaining states specifically ({@code managed}/{@code not-enabled}); that coarser
+ * predicate is safe only because the manifest gate requires every capability-gated entry to declare
+ * one of those two. If that gate ever loosens, tighten this check with it.
  */
 function capabilitiesSatisfied(access: SettingsAccess, capabilities: InstanceCapabilities | null): boolean {
     if (access.capabilities.length === 0) return true;

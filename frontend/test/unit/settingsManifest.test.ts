@@ -394,7 +394,7 @@ function unbackedForwards(candidates: readonly SettingsEntry[]): readonly Settin
  * runs.
  */
 describe("settings manifest forwards only to destinations that exist", () => {
-    it("declares no capability forward at all, which is #1340's acceptance", () => {
+    it("declares no capability forward at all (the manifest's set is empty; redirect stubs that resolve addresses are outside this property)", () => {
         const forwards = entries
             .filter((entry) => entry.conditionalForward !== null)
             .map((entry) => `${entry.id} -> ${entry.conditionalForward?.to}`);
