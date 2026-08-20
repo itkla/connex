@@ -5,6 +5,7 @@ import { usePathname, useSearchParams } from 'next/navigation';
 
 import type { RecordType } from '@/app/lib/actions/types';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { listStateAddress } from '@/app/hooks/listStateUrl';
 
 /** The record types the Peek drawer can open. The contacts browser uses the `person` type. */
 export type PeekType = Extract<RecordType, 'company' | 'person' | 'deal'>;
@@ -60,7 +61,7 @@ export function useRecordPeek(browserType: PeekType, orderedIds: number[]) {
             }
             const query = params.toString();
             if (query === window.location.search.replace(/^\?/, '')) return;
-            window.history.replaceState(null, '', query ? `${pathname}?${query}` : pathname);
+            window.history.replaceState(null, '', listStateAddress(pathname, query));
         },
         [pathname],
     );

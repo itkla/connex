@@ -148,7 +148,7 @@
     "app/components/settings/CustomFieldsPanel.tsx": 3,
     "app/components/settings/DeliveryPanel.tsx": 4,
     "app/components/settings/EmailPanel.tsx": 1,
-    "app/components/settings/MembersPanel.tsx": 2,
+    "app/components/settings/MembersPanel.tsx": 1,
     "app/components/settings/QualificationCriteriaPanel.tsx": 10,
     "app/components/settings/RolesPanel.tsx": 1,
     "app/components/settings/SsoPanel.tsx": 1,

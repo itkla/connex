@@ -61,6 +61,15 @@ export type SettingsNavGroup = {
     /** The group's landing destination today; see {@link resolveSettingsNavigation}. */
     href: string;
     destinations: readonly SettingsNavDestination[];
+    /**
+     * The jobs a served canonical destination absorbed, each addressed at its section of it. Empty
+     * until the group's canonical route exists; see {@link resolveSettingsNavigation}.
+     *
+     * These are not navigation rows — the group offers one destination once it has one. They are
+     * what settings search matches, so a reader who types the name the job used to have arrives at
+     * the section that now holds it instead of finding nothing.
+     */
+    sections: readonly SettingsNavDestination[];
 };
 
 /** One authorization scope as a navigation section. */
@@ -224,6 +233,69 @@ function groupDestinations(
     }));
 }
 
+/**
+ * Whether a section of a served canonical destination may be named to this viewer.
+ *
+ * The scope-level gates are enforced exactly as they are on a destination: an organization role the
+ * viewer does not hold, or a capability the deployment does not have, hides the section outright.
+ * Those answer "does this exist for you at all", and a section name is as much of a disclosure as a
+ * navigation row.
+ *
+ * **Permissions are the deliberate exception, and only permissions.** A section's entry may carry a
+ * visibility permission describing the *old* route, where lacking it refused the whole page. On the
+ * consolidated destination the same permission refuses one section, which the page keeps visible
+ * and explains in place — that is #1340's rule, and the reader must be able to find the name in
+ * order to be told to ask an administrator. Hiding it from search would leave a name they know
+ * leading nowhere, which is the failure this epic exists to remove.
+ */
+export function sectionVisible(entry: SettingsEntry, viewer: SettingsNavViewer): boolean {
+    if (entry.access.orgAdmin && !viewer.isOrgAdmin) return false;
+    return capabilitiesSatisfied(entry.access, viewer.capabilities);
+}
+
+/**
+ * The sections of a group whose canonical destination is served, addressed at their deep links:
+ * every entry the manifest files under it that names a section of that destination, plus the route
+ * gaps the group declares as {@link SettingsGroup.gapSections} — the jobs the consolidation makes
+ * addressable that no route served before, and that no entry can therefore describe.
+ *
+ * A gap section carries no gates of its own. It exists only inside its destination, so the
+ * destination's own visibility already governs whether the reader can reach it, and the page it
+ * lives on explains any permission refusal in place.
+ */
+function groupSections(
+    group: SettingsGroup,
+    context: SettingsNavContext,
+): readonly SettingsNavDestination[] {
+    const absorbed: SettingsNavDestination[] = [];
+    for (const entry of MANIFEST_ENTRIES) {
+        if (
+            entry.group === group.id
+            && entry.kind === "destination"
+            && entry.canonicalSection !== null
+            && entry.canonicalRoute === group.route
+            && entry.titleKey !== null
+            && sectionVisible(entry, context.viewer)
+        ) {
+            absorbed.push({
+                id: entry.id,
+                title: context.translate(entry.titleKey),
+                href: `${entry.canonicalRoute}#${entry.canonicalSection}`,
+                aliases: entry.aliasKey === null ? "" : context.translate(entry.aliasKey),
+            });
+        }
+    }
+
+    const gaps = (group.gapSections ?? []).map((section) => ({
+        id: `${group.id}#${section.slug}`,
+        title: context.translate(section.titleKey),
+        href: `${group.route}#${section.slug}`,
+        aliases: "",
+    }));
+
+    return [...absorbed, ...gaps];
+}
+
 /** The heading for a scope: the scope word, qualified by the thing it governs where there is one. */
 function scopeQualifier(scope: SettingsScope, context: SettingsNavContext): string | null {
     if (scope === "workspace") return context.workspaceName;
@@ -235,11 +307,16 @@ function scopeQualifier(scope: SettingsScope, context: SettingsNavContext): stri
  * Builds the scope-grouped settings navigation from the committed manifest.
  *
  * The navigation renders groups, because a group is the unit of canonical ownership in #1340 and
- * the destination each one will own once the routes move. Until then a group row links to its
- * **landing destination**: the first entry the manifest files under it that the viewer can actually
- * reach. `SETTINGS_ENTRIES` is committed in route order, so that resolution is deterministic and
- * needs no second ordering to maintain — but it is also not editorial, which the manifest currently
- * has no field to express.
+ * the destination each one will own once the routes move.
+ *
+ * A group's landing destination follows the migration rather than being re-decided per group. Where
+ * the group's canonical route is not served yet, the group links to the first entry the manifest
+ * files under it that the viewer can reach; `SETTINGS_ENTRIES` is committed in route order, so that
+ * resolution is deterministic, though it is not editorial. **Once the canonical route is served,
+ * that destination is the group** — it becomes the landing, and it is the only destination the
+ * group offers, because the entries it consolidated are now sections of it rather than peers
+ * beside it. Offering both would put the same job under two names in one list, which is the failure
+ * #1340 exists to remove. The old addresses keep working; they simply stop being advertised twice.
  *
  * A group with no reachable destination is dropped, and a scope with no remaining group is dropped
  * with it: a scope heading over nothing would advertise administration the reader cannot perform.
@@ -255,7 +332,10 @@ export function resolveSettingsNavigation(context: SettingsNavContext): Settings
             .slice()
             .sort((left, right) => left.order - right.order);
         for (const group of scoped) {
-            const destinations = groupDestinations(group.id, context);
+            const reachable = groupDestinations(group.id, context);
+            const canonical = reachable.find((destination) => destination.href === group.route);
+            const destinations = canonical ? [canonical] : reachable;
+            const sections = canonical ? groupSections(group, context) : [];
             const landing = destinations[0];
             if (!landing) continue;
             groups.push({
@@ -264,6 +344,7 @@ export function resolveSettingsNavigation(context: SettingsNavContext): Settings
                 title: group.titleKey === null ? group.epicName : context.translate(group.titleKey),
                 href: landing.href,
                 destinations,
+                sections,
             });
         }
         if (groups.length === 0) continue;
@@ -289,6 +370,10 @@ export function resolveSettingsNavigation(context: SettingsNavContext): Settings
  * lead to the same place. Purely client-side over the manifest — there are two dozen destinations,
  * and a settings search that needs the network is a settings search that stutters.
  *
+ * A migrated group's absorbed sections are searched beside its destination, and each carries its
+ * own deep link. Consolidation moves where a job lives; it must not take away the word the reader
+ * has always found it by.
+ *
  * @param model - the resolved navigation
  * @param query - what the reader typed
  * @returns the matching destinations in navigation order; empty for a blank query
@@ -302,7 +387,7 @@ export function searchSettingsNavigation(
     const results: SettingsNavSearchResult[] = [];
     for (const scope of model) {
         for (const group of scope.groups) {
-            for (const destination of group.destinations) {
+            for (const destination of [...group.destinations, ...group.sections]) {
                 const haystack = [destination.title, destination.aliases, group.title, scope.label]
                     .join(" ")
                     .toLocaleLowerCase();

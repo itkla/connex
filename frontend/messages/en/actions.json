@@ -126,7 +126,8 @@
         "keywords": {
             "navigate": {
                 "contacts": "contacts, people, persons",
-                "captureReviews": "capture, reviews, queue, matching, inbox, mail, calendar"
+                "captureReviews": "capture, reviews, queue, matching, inbox, mail, calendar",
+                "users": "users, members, people"
             },
             "create": {
                 "company": "company, org, organization, account",
