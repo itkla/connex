@@ -23,17 +23,20 @@ export type CaptureLifecycleMode = 'purge' | 'disconnect';
 /**
  * Confirms active-workspace erasure, or the provider disconnect that erases before it revokes.
  *
- * Both confirmations state what survives as plainly as what does not. Disconnecting stops future
- * access and removes the mail and meeting activity captured from the provider, and it leaves every
- * contact, company, deal, note, and task in place; the two halves are stated together because
- * "disconnect" reads as reversible and half of this one is not. Erasing captured data stays a
- * separately named action reached from its own disclosure, so it can never be performed by a
- * reader who only meant to stop syncing.
+ * Both confirmations state what survives as plainly as what does not, and both require the reader
+ * to acknowledge the erasure first. Disconnect is unconditionally destructive because the server
+ * makes it so: it pages every workspace and purges this provider's captured data before it deletes
+ * the credential, and it does not consult the instance's capture switch on the way. Gating the
+ * warning on that switch would let an instance that turned capture off after data was captured
+ * promise a reader that nothing is deleted while everything is, so the warning is not gated at all.
+ *
+ * What survives is stated alongside: contacts, companies, deals, notes, and tasks are untouched.
+ * Erasing captured data stays a separately named action reached from its own disclosure, so it can
+ * never be performed by a reader who only meant to stop syncing.
  */
 export default function CapturePurgeDialog({
     mode,
     providerName,
-    captureEnabled,
     open,
     busy,
     onOpenChange,
@@ -41,7 +44,6 @@ export default function CapturePurgeDialog({
 }: {
     mode: CaptureLifecycleMode;
     providerName: string;
-    captureEnabled: boolean;
     open: boolean;
     busy: boolean;
     onOpenChange: (open: boolean) => void;
@@ -49,10 +51,9 @@ export default function CapturePurgeDialog({
 }) {
     const t = useTranslations('AccountCaptureLifecycle');
     const [acknowledged, setAcknowledged] = useState(false);
-    const destructiveCaptureAction = captureEnabled || mode === 'purge';
 
     const confirm = async () => {
-        if (destructiveCaptureAction && !acknowledged) return;
+        if (!acknowledged) return;
         if (await onConfirm()) onOpenChange(false);
     };
 
@@ -73,35 +74,29 @@ export default function CapturePurgeDialog({
                 </ResponsiveDialogHeader>
 
                 <div className="grid gap-4 px-4 py-4 sm:px-0">
-                    {destructiveCaptureAction ? (
-                        <>
-                            <Alert variant="destructive">
-                                <ExclamationTriangleIcon aria-hidden />
-                                <AlertTitle>
-                                    {t(mode === 'purge' ? 'activeWorkspaceTitle' : 'allWorkspacesTitle')}
-                                </AlertTitle>
-                                <AlertDescription>
-                                    {t(mode === 'purge'
-                                        ? 'activeWorkspaceDescription'
-                                        : 'allWorkspacesDescription')}
-                                </AlertDescription>
-                            </Alert>
-                            <p className="text-sm text-muted-foreground">
-                                {t(mode === 'purge' ? 'purgeRetained' : 'disconnectRetained')}
-                            </p>
-                            <Label className="items-start leading-relaxed">
-                                <Checkbox
-                                    checked={acknowledged}
-                                    disabled={busy}
-                                    onCheckedChange={(checked) => setAcknowledged(checked === true)}
-                                    aria-label={t('acknowledge')}
-                                />
-                                <span>{t('acknowledge')}</span>
-                            </Label>
-                        </>
-                    ) : (
-                        <p className="text-sm text-muted-foreground">{t('disconnectRetained')}</p>
-                    )}
+                    <Alert variant="destructive">
+                        <ExclamationTriangleIcon aria-hidden />
+                        <AlertTitle>
+                            {t(mode === 'purge' ? 'activeWorkspaceTitle' : 'allWorkspacesTitle')}
+                        </AlertTitle>
+                        <AlertDescription>
+                            {t(mode === 'purge'
+                                ? 'activeWorkspaceDescription'
+                                : 'allWorkspacesDescription')}
+                        </AlertDescription>
+                    </Alert>
+                    <p className="text-sm text-muted-foreground">
+                        {t(mode === 'purge' ? 'purgeRetained' : 'disconnectRetained')}
+                    </p>
+                    <Label className="items-start leading-relaxed">
+                        <Checkbox
+                            checked={acknowledged}
+                            disabled={busy}
+                            onCheckedChange={(checked) => setAcknowledged(checked === true)}
+                            aria-label={t('acknowledge')}
+                        />
+                        <span>{t('acknowledge')}</span>
+                    </Label>
                 </div>
 
                 <ResponsiveDialogFooter className="border-t border-border px-4 py-4 sm:border-0 sm:px-0 sm:py-0">
@@ -113,7 +108,7 @@ export default function CapturePurgeDialog({
                     <Button
                         type="button"
                         variant="destructive"
-                        disabled={busy || (destructiveCaptureAction && !acknowledged)}
+                        disabled={busy || !acknowledged}
                         onClick={confirm}
                     >
                         {busy

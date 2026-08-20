@@ -7,7 +7,9 @@ import { useLocale, useTranslations } from 'next-intl';
 import { useLiveNow } from '@/app/hooks/useNow';
 import {
     lastCaptureSuccessAt,
-    needsReauthorization,
+    providerCardAction,
+    providerGlanceState,
+    type ProviderGlanceSource,
     type ProviderJourneyState,
 } from '@/app/lib/connectedCapture';
 import { MANAGED_OAUTH_DOC_URL } from '@/app/lib/managedConnect';
@@ -18,7 +20,6 @@ import type {
     ProviderConnectionStatus,
 } from '@/app/lib/types';
 import { formatRelativeTime } from '@/app/lib/utils';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
@@ -32,21 +33,12 @@ const STATUS_CLASS: Record<ProviderConnectionStatus, string> = {
     purge_failed: 'bg-destructive/15 text-destructive ring-destructive/30',
 };
 
-const STREAM_LABEL_KEYS = {
-    calendar: 'stream.calendar',
-    mail: 'stream.mail',
-} as const;
+const GLANCE_SOURCES: readonly ProviderGlanceSource[] = ['mail', 'calendar'];
 
-function streamSummary(
-    capture: ProviderCaptureOverview | null,
-): { mail: 'active' | 'off'; calendar: 'active' | 'off' } | null {
-    if (!capture) return null;
-    const effective = capture.effectivePolicy;
-    return {
-        mail: effective.enabled && (effective.mailInbox || effective.mailSent) ? 'active' : 'off',
-        calendar: effective.enabled && effective.calendar ? 'active' : 'off',
-    };
-}
+const GLANCE_LABEL_KEYS: Record<ProviderGlanceSource, string> = {
+    mail: 'stream.mail',
+    calendar: 'stream.calendar',
+};
 
 /**
  * One row of the card's at-a-glance strip: a muted label above the value it names.
@@ -54,11 +46,24 @@ function streamSummary(
  * Deliberately not a box. The strip sits inside the provider card, and a bordered tile inside a
  * bordered card inside a bordered panel is the nesting this card was rebuilt to remove.
  */
-function GlanceItem({ label, children }: { label: string; children: ReactNode }) {
+function GlanceItem({
+    label,
+    tone = 'normal',
+    children,
+}: {
+    label: string;
+    tone?: 'normal' | 'attention';
+    children: ReactNode;
+}) {
     return (
         <div className="min-w-0">
             <dt className="text-xs text-muted-foreground">{label}</dt>
-            <dd className="mt-0.5 truncate text-sm font-medium text-foreground">{children}</dd>
+            <dd className={cn(
+                'mt-0.5 truncate text-sm font-medium',
+                tone === 'attention' ? 'text-destructive' : 'text-foreground',
+            )}>
+                {children}
+            </dd>
         </div>
     );
 }
@@ -98,6 +103,7 @@ export default function CaptureProviderCard({
     busy,
     onConnect,
     onManage,
+    onReviews,
     onSync,
     onRetryCapture,
 }: {
@@ -116,6 +122,7 @@ export default function CaptureProviderCard({
     busy: boolean;
     onConnect: () => void;
     onManage: () => void;
+    onReviews: () => void;
     onSync: () => void;
     onRetryCapture: () => void;
 }) {
@@ -124,10 +131,10 @@ export default function CaptureProviderCard({
     const locale = useLocale();
     const now = useLiveNow();
     const providerName = t(`provider_${provider}`);
-    const streams = streamSummary(capture);
     const lastSuccess = lastCaptureSuccessAt(capture);
-    const mustReauthorize = needsReauthorization(capture);
-    const showSecondaryAction = captureEnabled || mustReauthorize;
+    const action = providerCardAction(state, connection, captureEnabled, capture);
+    const showSecondaryAction = action === 'reconnect' || action === 'sync';
+    const stalledWithoutRepair = state === 'attention' && action !== 'reconnect';
 
     return (
         <article className="rounded-2xl border border-border bg-card px-4 py-4 sm:px-5">
@@ -147,9 +154,15 @@ export default function CaptureProviderCard({
                             </span>
                         ) : null}
                         {pendingReviews > 0 ? (
-                            <Badge variant="outline">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="inline"
+                                disabled={busy}
+                                onClick={onReviews}
+                            >
                                 {tCapture('reviews', { count: pendingReviews })}
-                            </Badge>
+                            </Button>
                         ) : null}
                     </div>
                     <p className="mt-1 max-w-prose text-sm text-muted-foreground">
@@ -173,13 +186,8 @@ export default function CaptureProviderCard({
                             {showSecondaryAction ? (
                                 <Button
                                     size="toolbar"
-                                    disabled={
-                                        busy
-                                        || (!mustReauthorize
-                                            && (!capture?.effectivePolicy.enabled
-                                                || state !== 'connected'))
-                                    }
-                                    onClick={mustReauthorize ? onConnect : onSync}
+                                    disabled={busy || state === 'syncing'}
+                                    onClick={action === 'reconnect' ? onConnect : onSync}
                                 >
                                     <ArrowPathIcon
                                         data-icon="inline-start"
@@ -187,7 +195,7 @@ export default function CaptureProviderCard({
                                             ? 'animate-spin motion-reduce:animate-none'
                                             : undefined}
                                     />
-                                    {mustReauthorize ? t('reconnect') : tCapture('syncNow')}
+                                    {action === 'reconnect' ? t('reconnect') : tCapture('syncNow')}
                                 </Button>
                             ) : null}
                         </>
@@ -259,19 +267,32 @@ export default function CaptureProviderCard({
                             </Button>
                         </div>
                     ) : (
-                        <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
-                            <GlanceItem label={t(STREAM_LABEL_KEYS.mail)}>
-                                {t(`streamState_${streams?.mail ?? 'off'}`)}
-                            </GlanceItem>
-                            <GlanceItem label={t(STREAM_LABEL_KEYS.calendar)}>
-                                {t(`streamState_${streams?.calendar ?? 'off'}`)}
-                            </GlanceItem>
-                            <GlanceItem label={t('lastSyncLabel')}>
-                                {lastSuccess
-                                    ? formatRelativeTime(lastSuccess, locale, now)
-                                    : t('lastSyncNever')}
-                            </GlanceItem>
-                        </dl>
+                        <>
+                            <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
+                                {GLANCE_SOURCES.map((source) => {
+                                    const glance = providerGlanceState(capture, source);
+                                    return (
+                                        <GlanceItem
+                                            key={source}
+                                            label={t(GLANCE_LABEL_KEYS[source])}
+                                            tone={glance === 'attention' ? 'attention' : 'normal'}
+                                        >
+                                            {t(`streamState_${glance}`)}
+                                        </GlanceItem>
+                                    );
+                                })}
+                                <GlanceItem label={t('lastSyncLabel')}>
+                                    {lastSuccess
+                                        ? formatRelativeTime(lastSuccess, locale, now)
+                                        : t('lastSyncNever')}
+                                </GlanceItem>
+                            </dl>
+                            {stalledWithoutRepair ? (
+                                <p className="mt-3 text-sm text-destructive" role="alert">
+                                    {tCapture('stalledSource')}
+                                </p>
+                            ) : null}
+                        </>
                     )}
                 </div>
             ) : null}

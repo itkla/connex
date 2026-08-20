@@ -89,17 +89,11 @@
     "status_revoked": "Revoked",
     "status_disconnecting": "Disconnecting",
     "status_purge_failed": "Erase didn't finish",
-    "connect": "Connect",
     "reconnect": "Reconnect",
     "pause": "Pause",
     "resume": "Resume",
     "disconnect": "Disconnect",
-    "actions": "Actions",
-    "connectedAs": "Connected as {email}",
     "connectedNoEmail": "Connected",
-    "notConnected": "Not connected",
-    "lastSync": "Synced {time}",
-    "neverSynced": "Sync not yet available",
     "connectedToast": "{provider} account connected",
     "pausedToast": "Connection paused",
     "resumedToast": "Connection resumed",
@@ -115,8 +109,6 @@
     "error_exchange": "The provider rejected the connection. Please try again.",
     "error_no_offline_access": "The provider didn't grant ongoing access. Please try again and approve all requested permissions.",
     "entityLabel": "connection",
-    "mode_managed": "Connex-managed",
-    "mode_custom": "Custom credentials",
     "managedUnavailableTitle": "Connex-managed connections aren't ready yet",
     "managedUnavailableBody": "This instance is set to use the Connex-managed {provider} application, which is still completing provider verification, so connecting is switched off. An administrator can supply custom (bring-your-own) credentials in the meantime.",
     "managedUnavailableLink": "Read the operator guide",
@@ -132,7 +124,10 @@
     "streamState_active": "Active",
     "streamState_off": "Off",
     "lastSyncLabel": "Last sync",
-    "lastSyncNever": "Not yet"
+    "lastSyncNever": "Not yet",
+    "streamState_working": "Syncing",
+    "streamState_paused": "Paused",
+    "streamState_attention": "Needs attention"
   },
   "AccountManagedConnect": {
     "title": "Connect {provider}",
@@ -187,30 +182,21 @@
   },
   "AccountCaptureProvider": {
     "title": "Relationship capture",
-    "connectFirst": "Connect this account before choosing capture sources or starting a sync.",
     "loading": "Loading capture status",
     "loadFailed": "Capture status could not be loaded.",
     "retry": "Retry",
-    "state": {
-      "ready": "Ready",
-      "configured": "Configured",
-      "notIngesting": "Not ingesting",
-      "notConfigured": "Not configured"
-    },
     "stateDescription": {
-      "ready": "Capture is configured and has produced relationship evidence.",
       "configured": "Your policy is saved. Run a sync to begin or continue capture.",
-      "notIngesting": "Your policy is saved, but ingestion is not authorized for this deployment.",
       "notConfigured": "No mail or calendar data is captured until you save a policy."
     },
     "configure": "Configure",
     "editPolicy": "Edit policy",
-    "workspacePolicy": "Workspace policy",
     "purge": "Erase captured data",
     "reviews": "{count, plural, one {Review # item} other {Review # items}}",
     "syncNow": "Sync now",
     "syncStarted": "Capture sync started",
-    "captureOff": "This instance does not capture mail or calendar for this provider. The connection is used for sign-in and access only."
+    "captureOff": "This instance does not capture mail or calendar for this provider. The connection is used for sign-in and access only.",
+    "stalledSource": "A source stopped and Connex could not restart it. Open Manage to see which one and why."
   },
   "AccountCapturePolicy": {
     "title": "Configure relationship capture",
@@ -588,7 +574,7 @@
     "notAllowed": "Not allowed",
     "days": "{count, plural, one {# day} other {# days}}",
     "advanced": "Advanced",
-    "disconnectNote": "Disconnecting stops future syncing and removes Connex's access. Your contacts, companies, deals, notes, and tasks stay exactly as they are.",
+    "disconnectNote": "Disconnecting stops future syncing and removes Connex's access. The mail and meeting activity captured from this provider is erased from every workspace, and cannot be recovered. Your contacts, companies, deals, notes, and tasks stay exactly as they are.",
     "purgeNote": "Erasing removes the mail and meeting activity captured from this provider in this workspace, without touching the connection itself. This cannot be undone."
   }
 }

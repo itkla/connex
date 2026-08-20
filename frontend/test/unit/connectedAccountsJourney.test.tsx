@@ -7,6 +7,8 @@ import CaptureProviderCard from "@/app/components/account/connected-capture/Capt
 import { NowProvider } from "@/app/hooks/useNow";
 import {
     CAPTURE_PANELS,
+    providerCardAction,
+    providerGlanceState,
     capturePanelRequiresCapture,
     captureConnectionsHref,
     lastCaptureSuccessAt,
@@ -131,9 +133,8 @@ const CAPABILITIES: InstanceCapabilities = {
 };
 
 describe("provider journey state machine", () => {
-    it("reports disconnected until this browser hands off, then authorizing", () => {
-        expect(providerJourneyState(null, null, false)).toBe("disconnected");
-        expect(providerJourneyState(null, null, true)).toBe("authorizing");
+    it("reports disconnected when the provider has no connection", () => {
+        expect(providerJourneyState(null, null)).toBe("disconnected");
     });
 
     it("maps every connection status to exactly one card state", () => {
@@ -150,7 +151,6 @@ describe("provider journey state machine", () => {
             expect(providerJourneyState(
                 connection({ status: status as ProviderConnectionStatus }),
                 null,
-                false,
             )).toBe(state);
         }
     });
@@ -159,12 +159,10 @@ describe("provider journey state machine", () => {
         expect(providerJourneyState(
             connection(),
             overview([stream({ status: "backfilling" })]),
-            false,
         )).toBe("syncing");
         expect(providerJourneyState(
             connection(),
             overview([stream({ status: "intervention_required" })]),
-            false,
         )).toBe("attention");
     });
 
@@ -172,17 +170,121 @@ describe("provider journey state machine", () => {
         expect(providerJourneyState(
             connection({ status: "paused" }),
             overview([stream({ status: "intervention_required" })]),
-            false,
         )).toBe("attention");
         expect(providerJourneyState(
             connection({ status: "disconnecting" }),
             overview([stream({ status: "intervention_required" })]),
-            false,
         )).toBe("disconnecting");
     });
+});
 
-    it("ignores an in-flight handoff once a connection exists", () => {
-        expect(providerJourneyState(connection(), null, true)).toBe("connected");
+describe("the action a card offers", () => {
+    /**
+     * The regression this exists for: gating reconnect on capture-derived evidence left a failed or
+     * revoked connection on a capture-disabled provider with no way back, because that provider's
+     * overview is never fetched. Trouble is read from the connection, so the answer cannot depend
+     * on whether the instance happens to capture.
+     */
+    it("offers reconnect for a broken connection even when capture is off", () => {
+        for (const status of ["error", "revoked"] as const) {
+            const broken = connection({ status });
+            const state = providerJourneyState(broken, null);
+
+            expect(state).toBe("attention");
+            expect(providerCardAction(state, broken, false, null)).toBe("reconnect");
+            expect(providerCardAction(state, broken, true, null)).toBe("reconnect");
+        }
+    });
+
+    it("offers reconnect when the effective policy says the authorization is gone", () => {
+        const stale = overview([stream()]);
+        stale.effectivePolicy.restrictionCodes = ["connection_revoked"];
+
+        expect(providerCardAction("connected", connection(), true, stale)).toBe("reconnect");
+    });
+
+    it("offers connect before there is a connection and nothing while one is ending", () => {
+        expect(providerCardAction("disconnected", null, true, null)).toBe("connect");
+        expect(providerCardAction(
+            "disconnecting",
+            connection({ status: "disconnecting" }),
+            true,
+            overview([stream()]),
+        )).toBe("none");
+    });
+
+    it("offers sync only when there is something the policy admits to sync", () => {
+        const admitting = overview([stream()]);
+        expect(providerCardAction("connected", connection(), true, admitting)).toBe("sync");
+
+        const admittingNothing = overview([stream()]);
+        admittingNothing.effectivePolicy.enabled = false;
+        expect(providerCardAction("connected", connection(), true, admittingNothing)).toBe("none");
+        expect(providerCardAction("connected", connection(), false, null)).toBe("none");
+    });
+
+    it("offers no card action for a pause or a stall reconnecting cannot fix", () => {
+        expect(providerCardAction(
+            "paused",
+            connection({ status: "paused" }),
+            true,
+            overview([stream({ status: "paused" })]),
+        )).toBe("none");
+        expect(providerCardAction(
+            "attention",
+            connection(),
+            true,
+            overview([stream({ status: "intervention_required" })]),
+        )).toBe("none");
+    });
+});
+
+describe("what a source reports at a glance", () => {
+    /**
+     * Policy is not health. A calendar the workspace admits and the provider has stopped delivering
+     * must not read "Active" on the surface a reader checks at a glance.
+     */
+    it("reports a stalled source as needing attention rather than active", () => {
+        const stalled = overview([stream({ stream: "calendar", status: "intervention_required" })]);
+
+        expect(providerGlanceState(stalled, "calendar")).toBe("attention");
+    });
+
+    it("reports live work and pauses from the streams", () => {
+        expect(providerGlanceState(
+            overview([stream({ stream: "calendar", status: "backfilling" })]),
+            "calendar",
+        )).toBe("working");
+        expect(providerGlanceState(
+            overview([stream({ stream: "calendar", status: "paused" })]),
+            "calendar",
+        )).toBe("paused");
+    });
+
+    it("aggregates both mail streams and reports trouble in either", () => {
+        const oneStalled = overview([
+            stream({ stream: "mail_inbox", status: "idle" }),
+            stream({ stream: "mail_sent", status: "intervention_required" }),
+        ]);
+
+        expect(providerGlanceState(oneStalled, "mail")).toBe("attention");
+    });
+
+    it("stays a policy answer for a source nobody admitted", () => {
+        const noCalendar = overview([stream({ stream: "calendar", status: "intervention_required" })]);
+        noCalendar.effectivePolicy.calendar = false;
+
+        expect(providerGlanceState(noCalendar, "calendar")).toBe("off");
+        expect(providerGlanceState(null, "mail")).toBe("off");
+    });
+
+    it("names every glance state in both locales", () => {
+        for (const locale of ["en", "ja"] as const) {
+            const catalog = messages(locale).AccountConnections;
+            for (const state of ["active", "off", "working", "paused", "attention"]) {
+                expect(catalog[`streamState_${state}`], `${locale}.${state}`).toBeTruthy();
+            }
+        }
     });
 });
 
@@ -213,6 +315,57 @@ describe("last sync", () => {
     });
 });
 
+describe("a broken connection keeps a way back on the card", () => {
+    function renderBroken(captureEnabled: boolean): string {
+        const broken = connection({ status: "error" });
+        return renderToStaticMarkup(
+            <NowProvider value={Date.parse("2026-08-19T12:00:00Z")}>
+                <CaptureProviderCard
+                    provider="google"
+                    providerIcon={null}
+                    state={providerJourneyState(broken, null)}
+                    managedUnavailable={false}
+                    connection={broken}
+                    connectionEnabled
+                    captureEnabled={captureEnabled}
+                    capture={null}
+                    captureLoading={false}
+                    captureLoadError={false}
+                    pendingReviews={0}
+                    authorizationErrorCode={null}
+                    busy={false}
+                    onConnect={() => undefined}
+                    onManage={() => undefined}
+                    onReviews={() => undefined}
+                    onSync={() => undefined}
+                    onRetryCapture={() => undefined}
+                />
+            </NowProvider>,
+        );
+    }
+
+    /**
+     * The rendered half of the reconnect regression: an errored connection on a capture-disabled
+     * provider used to render `Manage` alone, because the reconnect gate read an overview that
+     * instance never fetches.
+     */
+    it("renders reconnect beside manage whether or not the instance captures", () => {
+        for (const captureEnabled of [false, true]) {
+            const markup = renderBroken(captureEnabled);
+
+            expect(markup, `captureEnabled=${captureEnabled}`)
+                .toContain("AccountConnections.reconnect");
+            expect(markup).toContain("AccountConnections.manage");
+            expect(markup).toContain("AccountConnections.status_error");
+            expect((markup.match(/<button/g) ?? []).length).toBeGreaterThanOrEqual(2);
+        }
+    });
+
+    it("leaves the reconnect action enabled so it can actually be taken", () => {
+        expect(renderBroken(false)).not.toContain("disabled=\"\"");
+    });
+});
+
 describe("two clicks to provider authorization", () => {
     /**
      * The acceptance criterion is a click budget, so the gate counts the interactive steps the
@@ -240,6 +393,7 @@ describe("two clicks to provider authorization", () => {
                     busy={false}
                     onConnect={() => undefined}
                     onManage={() => undefined}
+                    onReviews={() => undefined}
                     onSync={() => undefined}
                     onRetryCapture={() => undefined}
                 />
@@ -372,6 +526,41 @@ describe("disconnect is not erasure", () => {
 
         expect(dialog).toContain("disconnectRetained");
         expect(dialog).toContain("purgeRetained");
+    });
+
+    /**
+     * The server pages every workspace and purges before it revokes, and it never consults the
+     * instance's capture switch on the way. Gating the warning on that switch let an instance that
+     * turned capture off after data was captured promise that nothing is deleted while everything
+     * was, so the confirmation cannot read that switch at all.
+     */
+    it("warns and demands acknowledgement on every disconnect, whatever the capture switch", () => {
+        const dialog = source("app/components/account/connected-capture/CapturePurgeDialog.tsx");
+
+        expect(dialog).not.toContain("captureEnabled");
+        expect(dialog).toContain("allWorkspacesTitle");
+        expect(dialog).toContain("allWorkspacesDescription");
+        expect(dialog).toContain("disabled={busy || !acknowledged}");
+    });
+
+    it("passes no capture switch into the confirmation from the panel", () => {
+        const panel = source("app/components/account/ConnectionsPanel.tsx");
+        const lifecycle = panel.slice(panel.indexOf("<CapturePurgeDialog"));
+
+        expect(lifecycle.slice(0, lifecycle.indexOf("/>"))).not.toContain("captureEnabled");
+    });
+
+    /**
+     * The note a reader weighs while deciding must carry the same facts as the confirmation they
+     * reach afterwards; stating only what survives would read as a promise that nothing is lost.
+     */
+    it("states the erasure in the drawer note, not only in the confirmation", () => {
+        for (const locale of ["en", "ja"] as const) {
+            const note = messages(locale).AccountManageConnection.disconnectNote;
+
+            expect(note, `${locale}`).toMatch(locale === "en" ? /every workspace/ : /すべてのワークスペース/);
+            expect(note).toMatch(locale === "en" ? /stay exactly as they are/ : /そのまま残ります/);
+        }
     });
 
     it("keeps erasure behind its own disclosure, separately named from disconnect", () => {

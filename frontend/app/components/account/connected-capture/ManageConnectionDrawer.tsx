@@ -15,7 +15,11 @@ import { useLocale, useTranslations } from 'next-intl';
 
 import CaptureHealth from '@/app/components/account/connected-capture/CaptureHealth';
 import { useLiveNow } from '@/app/hooks/useNow';
-import { lastCaptureSuccessAt, needsReauthorization } from '@/app/lib/connectedCapture';
+import {
+    lastCaptureSuccessAt,
+    providerCardAction,
+    type ProviderJourneyState,
+} from '@/app/lib/connectedCapture';
 import type {
     ProviderCaptureOverview,
     ProviderConnection,
@@ -111,6 +115,7 @@ function PolicyLine({ label, value }: { label: string; value: string }) {
  */
 export default function ManageConnectionDrawer({
     providerName,
+    state,
     providerIcon,
     connection,
     capture,
@@ -132,6 +137,7 @@ export default function ManageConnectionDrawer({
     onRetryCapture,
 }: {
     providerName: string;
+    state: ProviderJourneyState;
     providerIcon: ReactNode;
     connection: ProviderConnection;
     capture: ProviderCaptureOverview | null;
@@ -160,11 +166,11 @@ export default function ManageConnectionDrawer({
     const locale = useLocale();
     const now = useLiveNow();
     const lastSuccess = lastCaptureSuccessAt(capture);
-    const mustReauthorize = needsReauthorization(capture);
+    const action = providerCardAction(state, connection, captureEnabled, capture);
     const pendingReviews = capture
         ? capture.reviewCount + capture.pendingApprovalCount
         : 0;
-    const paused = connection.status === 'paused';
+    const paused = state === 'paused';
     const workspacePolicy = capture?.workspacePolicy ?? null;
     const yesNo = (value: boolean) => t(value ? 'allowed' : 'notAllowed');
 
@@ -215,23 +221,24 @@ export default function ManageConnectionDrawer({
                             </div>
                         </dl>
                         <div className="mt-3 flex flex-wrap gap-2">
-                            {mustReauthorize ? (
+                            {action === 'reconnect' ? (
                                 <Button type="button" size="toolbar" disabled={busy} onClick={onReconnect}>
                                     <ArrowPathIcon data-icon="inline-start" />
                                     {tConnections('reconnect')}
                                 </Button>
-                            ) : captureEnabled ? (
+                            ) : action === 'sync' ? (
                                 <Button
                                     type="button"
                                     size="toolbar"
-                                    disabled={
-                                        busy
-                                        || !capture?.effectivePolicy.enabled
-                                        || connection.status !== 'connected'
-                                    }
+                                    disabled={busy || state === 'syncing'}
                                     onClick={onSync}
                                 >
-                                    <ArrowPathIcon data-icon="inline-start" />
+                                    <ArrowPathIcon
+                                        data-icon="inline-start"
+                                        className={state === 'syncing'
+                                            ? 'animate-spin motion-reduce:animate-none'
+                                            : undefined}
+                                    />
                                     {tCapture('syncNow')}
                                 </Button>
                             ) : null}

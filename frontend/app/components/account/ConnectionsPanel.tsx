@@ -201,8 +201,6 @@ export default function ConnectionsPanel({
     const [lifecycleTarget, setLifecycleTarget] = useState<LifecycleTarget | null>(null);
     const [managedTarget, setManagedTarget] = useState<ConnectedAccountProvider | null>(null);
     const [consentTarget, setConsentTarget] = useState<ConnectedAccountProvider | null>(null);
-    const [authorizingProvider, setAuthorizingProvider] =
-        useState<ConnectedAccountProvider | null>(null);
     const [authorizationError, setAuthorizationError] = useState<
         { provider: ConnectedAccountProvider | null; code: string } | null
     >(null);
@@ -292,7 +290,6 @@ export default function ConnectionsPanel({
                 setAuthorizationError({ provider: handedOffTo, code });
                 toastError(t(`error_${code}`));
             }
-            setAuthorizingProvider(null);
             const resumed = connected === "google" || connected === "microsoft"
                 ? connected
                 : handedOffTo;
@@ -308,6 +305,20 @@ export default function ConnectionsPanel({
         }, 50);
         return () => window.clearTimeout(timeout);
     }, [capabilities, currentSearchParams, router, searchParams, t]);
+
+    /**
+     * Discards a handoff record that no authorization return ever claimed.
+     *
+     * A reader who starts an authorization and then navigates back, closes the provider's page, or
+     * simply returns here later leaves the record behind. Left alone it would survive until the tab
+     * closed and attach a much later failure to the wrong provider, so arriving without callback
+     * parameters clears it. The callback effect above runs first and consumes the record itself, so
+     * this only ever fires on an arrival that had nothing to resume.
+     */
+    useEffect(() => {
+        if (searchParams.get("connected") || searchParams.get("error")) return;
+        takePendingAuthorization();
+    }, [searchParams]);
 
     useEffect(() => {
         if (
@@ -409,7 +420,6 @@ export default function ConnectionsPanel({
     /** The second click: leaves the app for the provider's authorization page. */
     const startAuthorization = async (provider: ConnectedAccountProvider) => {
         setBusyProvider(provider);
-        setAuthorizingProvider(provider);
         try {
             const { url } = await beginProviderConnection(provider);
             rememberPendingAuthorization(provider);
@@ -419,7 +429,6 @@ export default function ConnectionsPanel({
                 toastError(error instanceof Error ? error.message : t("actionFailed"));
             }
             setBusyProvider(null);
-            setAuthorizingProvider(null);
         }
     };
 
@@ -514,6 +523,12 @@ export default function ConnectionsPanel({
                         (entry) => entry.provider !== target.provider,
                     ) ?? [],
                 }));
+                replaceRouteState({
+                    provider: null,
+                    panel: null,
+                    reviewId: null,
+                    page: 1,
+                });
             },
             t("disconnectedToast"),
         );
@@ -585,11 +600,7 @@ export default function ConnectionsPanel({
                                 key={provider}
                                 provider={provider}
                                 providerIcon={provider === "google" ? <GoogleMark /> : <MicrosoftMark />}
-                                state={providerJourneyState(
-                                    connection,
-                                    capture,
-                                    authorizingProvider === provider,
-                                )}
+                                state={providerJourneyState(connection, capture)}
                                 managedUnavailable={managedIdentityUnavailable(capabilities, provider)}
                                 connection={connection}
                                 connectionEnabled={providerJourneyEnabled(capabilities, provider)}
@@ -616,6 +627,16 @@ export default function ConnectionsPanel({
                                     reviewId: null,
                                     page: 1,
                                 })}
+                                onReviews={() => {
+                                    setReviewPage(null);
+                                    setReviewsError(false);
+                                    replaceRouteState({
+                                        provider,
+                                        panel: "reviews",
+                                        reviewId: null,
+                                        page: 1,
+                                    });
+                                }}
                                 onSync={() => sync(provider)}
                                 onRetryCapture={() =>
                                     setCaptureReloadKey((current) => current + 1)}
@@ -635,6 +656,10 @@ export default function ConnectionsPanel({
                 <ManageConnectionDrawer
                     key={manageProvider}
                     providerName={t(`provider_${manageProvider}`)}
+                    state={providerJourneyState(
+                        manageConnection,
+                        overviewOf(manageProvider),
+                    )}
                     providerIcon={manageProvider === "google" ? <GoogleMark /> : <MicrosoftMark />}
                     connection={manageConnection}
                     capture={overviewOf(manageProvider)}
@@ -768,10 +793,6 @@ export default function ConnectionsPanel({
                     key={`${activeLifecycleTarget.provider}-${activeLifecycleTarget.mode}`}
                     mode={activeLifecycleTarget.mode}
                     providerName={t(`provider_${activeLifecycleTarget.provider}`)}
-                    captureEnabled={providerCaptureEnabled(
-                        capabilities,
-                        activeLifecycleTarget.provider,
-                    )}
                     open
                     busy={busyProvider === activeLifecycleTarget.provider}
                     onOpenChange={(open) => {

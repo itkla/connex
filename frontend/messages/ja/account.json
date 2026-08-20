@@ -89,17 +89,11 @@
     "status_revoked": "無効",
     "status_disconnecting": "連携解除中",
     "status_purge_failed": "消去できませんでした",
-    "connect": "連携する",
     "reconnect": "再連携",
     "pause": "一時停止",
     "resume": "再開",
     "disconnect": "連携を解除",
-    "actions": "操作",
-    "connectedAs": "{email} として連携中",
     "connectedNoEmail": "連携中",
-    "notConnected": "未連携",
-    "lastSync": "{time}に同期",
-    "neverSynced": "同期は今後提供予定",
     "connectedToast": "{provider} アカウントを連携しました",
     "pausedToast": "連携を一時停止しました",
     "resumedToast": "連携を再開しました",
@@ -115,8 +109,6 @@
     "error_exchange": "プロバイダーが連携を拒否しました。もう一度お試しください。",
     "error_no_offline_access": "プロバイダーから継続的なアクセスが許可されませんでした。要求される権限をすべて承認して、もう一度お試しください。",
     "entityLabel": "連携",
-    "mode_managed": "Connex 提供の認証情報",
-    "mode_custom": "独自の認証情報",
     "managedUnavailableTitle": "Connex 提供の連携はまだ利用できません",
     "managedUnavailableBody": "このインスタンスは Connex が提供する {provider} アプリケーションを使う設定ですが、プロバイダーの審査が完了していないため連携は無効になっています。当面は管理者が独自（BYO）の認証情報を設定できます。",
     "managedUnavailableLink": "運用ガイドを読む",
@@ -130,9 +122,12 @@
       "calendar": "カレンダー"
     },
     "streamState_active": "稼働中",
-    "streamState_off": "停止中",
+    "streamState_off": "オフ",
     "lastSyncLabel": "最終同期",
-    "lastSyncNever": "未実施"
+    "lastSyncNever": "未実施",
+    "streamState_working": "同期中",
+    "streamState_paused": "一時停止",
+    "streamState_attention": "要対応"
   },
   "AccountManagedConnect": {
     "title": "{provider} と連携",
@@ -187,30 +182,21 @@
   },
   "AccountCaptureProvider": {
     "title": "関係性データの取り込み",
-    "connectFirst": "取り込み元の選択や同期の開始前に、このアカウントを連携してください。",
     "loading": "取り込み状態を読み込み中",
     "loadFailed": "取り込み状態を読み込めませんでした。",
     "retry": "再試行",
-    "state": {
-      "ready": "準備完了",
-      "configured": "設定済み",
-      "notIngesting": "取り込み停止中",
-      "notConfigured": "未設定"
-    },
     "stateDescription": {
-      "ready": "取り込みが設定され、関係性の根拠が作成されています。",
       "configured": "ポリシーは保存済みです。同期を実行して取り込みを開始または継続してください。",
-      "notIngesting": "ポリシーは保存済みですが、この環境では取り込みが許可されていません。",
       "notConfigured": "ポリシーを保存するまで、メールやカレンダーのデータは取り込まれません。"
     },
     "configure": "設定",
     "editPolicy": "ポリシーを編集",
-    "workspacePolicy": "ワークスペースポリシー",
     "purge": "取り込みデータを消去",
     "reviews": "{count}件を確認",
     "syncNow": "今すぐ同期",
     "syncStarted": "取り込み同期を開始しました",
-    "captureOff": "この環境では、このプロバイダーのメールやカレンダーは取り込みません。連携はサインインとアクセスにのみ使われます。"
+    "captureOff": "この環境では、このプロバイダーのメールやカレンダーは取り込みません。連携はサインインとアクセスにのみ使われます。",
+    "stalledSource": "取り込み元が停止し、Connex では再開できませんでした。「管理」から原因をご確認ください。"
   },
   "AccountCapturePolicy": {
     "title": "関係性データの取り込みを設定",
@@ -588,7 +574,7 @@
     "notAllowed": "不許可",
     "days": "{count}日",
     "advanced": "詳細な操作",
-    "disconnectNote": "連携を解除すると、以後の同期は停止し、Connex からのアクセスがなくなります。連絡先・会社・案件・メモ・タスクはそのまま残ります。",
+    "disconnectNote": "連携を解除すると、以後の同期は停止し、Connex からのアクセスがなくなります。このプロバイダーから取り込んだメールと打ち合わせのアクティビティは、すべてのワークスペースから削除され、元に戻せません。連絡先・会社・案件・メモ・タスクはそのまま残ります。",
     "purgeNote": "消去すると、このワークスペースでこのプロバイダーから取り込んだメールと打ち合わせのアクティビティが削除されます。連携自体はそのままです。元に戻せません。"
   }
 }

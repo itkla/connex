@@ -158,15 +158,17 @@ export function capturePanelRequiresCapture(panel: CapturePanel): boolean {
 }
 
 /**
- * The state one provider's card is in. `disconnected` and `authorizing` describe a provider with no
- * stored connection; the rest are read from the connection row and its stream health.
+ * The state one provider occupies in the journey. Every value changes what the card and the manage
+ * drawer render, which is the only reason a state exists: the status word, which action is offered,
+ * and whether the stream lines report policy or trouble all read this.
  *
- * The consent step is deliberately absent: it is an overlay above a card that is still
- * `disconnected`, so opening it changes nothing underneath and dismissing it restores nothing.
+ * Two candidate states are deliberately absent. The consent step is an overlay above a card that is
+ * still `disconnected`, so opening it changes nothing underneath. An in-flight authorization is the
+ * consent dialog's own busy state, and the card beneath it is covered until the browser leaves for
+ * the provider, so it would render nothing a reader could ever see.
  */
 export type ProviderJourneyState =
     | 'disconnected'
-    | 'authorizing'
     | 'connected'
     | 'syncing'
     | 'paused'
@@ -174,20 +176,21 @@ export type ProviderJourneyState =
     | 'disconnecting';
 
 /**
- * Derives the card state from the connection row, its capture health, and whether this browser has
- * an authorization handoff in flight. Ordered by precedence: a durable disconnect outranks an
- * authorization failure, which outranks a pause, which outranks live sync activity.
+ * Derives the journey state from the connection row and its stream health. Ordered by precedence: a
+ * durable disconnect outranks trouble, which outranks a pause, which outranks live sync activity.
+ *
+ * Trouble is read from the connection before the capture overview, so a provider whose capture is
+ * switched off — and whose overview is therefore never fetched — still reports `attention` on a
+ * failed or revoked authorization rather than looking healthy.
  *
  * @param connection the stored connection, or null when the provider has never been connected
  * @param capture the provider's capture overview, or null when capture is off or not yet loaded
- * @param authorizing whether this browser has started an authorization that has not returned
  */
 export function providerJourneyState(
     connection: ProviderConnection | null,
     capture: ProviderCaptureOverview | null,
-    authorizing: boolean,
 ): ProviderJourneyState {
-    if (!connection) return authorizing ? 'authorizing' : 'disconnected';
+    if (!connection) return 'disconnected';
     if (connection.status === 'disconnecting' || connection.status === 'purge_failed') {
         return 'disconnecting';
     }
@@ -200,6 +203,98 @@ export function providerJourneyState(
         return 'syncing';
     }
     return 'connected';
+}
+
+/**
+ * Reports whether the provider's authorization itself is what needs repair, as opposed to one
+ * capture stream having stalled for a reason reconnecting cannot fix.
+ *
+ * Read from the connection row first and the capture overview second, so this answers the same way
+ * whether or not the instance captures for this provider. That matters: a capture-disabled provider
+ * never loads an overview, and gating reconnect on overview-derived evidence alone would leave a
+ * revoked connection with no way back.
+ */
+export function connectionNeedsAuthorization(
+    connection: ProviderConnection | null,
+    capture: ProviderCaptureOverview | null,
+): boolean {
+    if (!connection) return false;
+    return connection.status === 'error'
+        || connection.status === 'revoked'
+        || needsReauthorization(capture);
+}
+
+/** The one action a provider's card offers beside its permanent entry into the manage drawer. */
+export type ProviderCardAction = 'connect' | 'reconnect' | 'sync' | 'none';
+
+/**
+ * Chooses that action from the journey state.
+ *
+ * `none` is a deliberate outcome rather than a gap. A paused connection resumes from the drawer, a
+ * disconnect in progress cannot be hurried, and a provider whose effective policy admits nothing
+ * has nothing to sync — in each case the card's stream lines already say why, and a permanently
+ * disabled button would only restate it without offering a way out.
+ *
+ * @param state the journey state this provider is in
+ * @param captureEnabled whether this instance captures for the provider at all
+ * @param capture the provider's capture overview, or null when capture is off or still loading
+ */
+export function providerCardAction(
+    state: ProviderJourneyState,
+    connection: ProviderConnection | null,
+    captureEnabled: boolean,
+    capture: ProviderCaptureOverview | null,
+): ProviderCardAction {
+    if (state === 'disconnected') return 'connect';
+    if (state === 'disconnecting') return 'none';
+    if (connectionNeedsAuthorization(connection, capture)) return 'reconnect';
+    if (state === 'attention' || state === 'paused') return 'none';
+    if (!captureEnabled || !capture?.effectivePolicy.enabled) return 'none';
+    return 'sync';
+}
+
+/** The two sources a reader recognizes on the card, each covering the streams behind it. */
+export type ProviderGlanceSource = 'mail' | 'calendar';
+
+/** What one source is doing right now, combining what policy admits with what capture reports. */
+export type ProviderGlanceState = 'active' | 'off' | 'working' | 'paused' | 'attention';
+
+const GLANCE_STREAMS: Record<ProviderGlanceSource, readonly CaptureStream[]> = {
+    mail: ['mail_inbox', 'mail_sent'],
+    calendar: ['calendar'],
+};
+
+function sourceAdmitted(
+    capture: ProviderCaptureOverview,
+    source: ProviderGlanceSource,
+): boolean {
+    const effective = capture.effectivePolicy;
+    if (!effective.enabled) return false;
+    return source === 'mail'
+        ? effective.mailInbox || effective.mailSent
+        : effective.calendar;
+}
+
+/**
+ * Reports what one source is actually doing, not merely what policy permits.
+ *
+ * Policy alone is not health: a calendar the workspace admits and the provider has stopped
+ * delivering is not "active", and saying so on the surface a reader checks at a glance is the
+ * difference between an honest readout and a reassuring one. Trouble and live work are read from
+ * the streams; `off` remains a policy answer, because a source nobody admitted has no health.
+ */
+export function providerGlanceState(
+    capture: ProviderCaptureOverview | null,
+    source: ProviderGlanceSource,
+): ProviderGlanceState {
+    if (!capture || !sourceAdmitted(capture, source)) return 'off';
+    const streams = capture.streams.filter(
+        (stream) => GLANCE_STREAMS[source].includes(stream.stream),
+    );
+    if (streams.some((stream) => stream.status === 'intervention_required')) return 'attention';
+    if (streams.some((stream) => isCaptureOperationActive(stream.status))) return 'working';
+    if (streams.length > 0 && streams.every((stream) => stream.status === 'paused')) return 'paused';
+    return 'active';
 }
 
 /**
