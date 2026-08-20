@@ -107,6 +107,7 @@ const ROUTE_CASES = [
     ["/settings/security", "redirect"],
     ["/settings/sso", "redirect"],
     ["/settings/workflows/1", "redirect"],
+    ["/settings/workspace/people", "shell"],
     ["/users/1", "shell"],
     ["/users", "shell"],
     ["/workflows/1", "owned"],

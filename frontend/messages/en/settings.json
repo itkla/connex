@@ -37,5 +37,11 @@
         "notEnabledBody": "This Connex instance doesn't have this switched on, so there's nothing to set up yet. Ask your administrator if you need it.",
         "askAdminTitle": "Ask a workspace administrator",
         "askAdminBody": "Your role doesn't include this setting. A workspace admin can change it for you, or give you access to it."
+    },
+    "SettingsPeople": {
+        "description": "Who belongs to {workspace}, what each role can do, and who may join without an invite.",
+        "metaDescription": "Manage members, roles, allowed domains, and the member directory for this workspace.",
+        "directoryTitle": "Member directory",
+        "directoryDescription": "Look someone up, then open their page to see their work."
     }
 }

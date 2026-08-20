@@ -31,11 +31,21 @@ import {
 } from "@/app/components/settings/SettingsListPrimitives";
 
 /**
+ * How the panel labels itself, so one component serves both of its homes.
+ *
+ * - `tab` is the legacy invite strip's third tab: the panel introduces and names itself, because
+ *   the tab above it says only "Domains".
+ * - `section` is its own section of the People & access page, whose header already carries the
+ *   name and the explanation, so the panel renders the policy and nothing else.
+ */
+export type AllowedDomainsPresentation = "tab" | "section";
+
+/**
  * The workspace's allowed email domains: who may join through an invite link without being invited
  * one by one.
  *
  * This was the third tab of `MembersPanel`'s invite strip, which gave a standing access policy no
- * address of its own — #1340 records it as a required per-scope destination, so it is now a
+ * address of its own. #1340 records it as a required per-scope destination, so it is now a
  * component both homes render: the legacy `/settings/members` tab, and its own deep-linkable
  * section of `/settings/workspace/people`.
  *
@@ -43,8 +53,14 @@ import {
  * require `WORKSPACE_SETTINGS`, which the backend enforces on every call; each home decides whether
  * to render this at all, so the consolidated page can explain a refusal in place while the legacy
  * tab keeps the admin gate it already sat behind.
+ *
+ * @param presentation which home is rendering it; defaults to the legacy tab
  */
-export default function AllowedDomainsPanel() {
+export default function AllowedDomainsPanel({
+    presentation = "tab",
+}: {
+    presentation?: AllowedDomainsPresentation;
+} = {}) {
     const t = useTranslations("WorkspaceMembers");
     const showApiError = useApiErrorToast("WorkspaceMembers");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
@@ -106,9 +122,11 @@ export default function AllowedDomainsPanel() {
         }
     };
 
+    const labelled = presentation === "tab";
+
     return (
         <div className="space-y-5">
-            <p className="max-w-prose text-sm text-muted-foreground">{t("domainsSubtitle")}</p>
+            {labelled && <p className="max-w-prose text-sm text-muted-foreground">{t("domainsSubtitle")}</p>}
             <form
                 onSubmit={(e) => {
                     e.preventDefault();
@@ -147,7 +165,7 @@ export default function AllowedDomainsPanel() {
             </form>
 
             <div className="space-y-2">
-                <TabListHeading title={t("domainsTitle")} count={allowedDomains.length} />
+                {labelled && <TabListHeading title={t("domainsTitle")} count={allowedDomains.length} />}
                 {allowedDomains.length === 0 ? (
                     <EmptyRow>{t("domainsEmpty")}</EmptyRow>
                 ) : (

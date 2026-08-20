@@ -84,6 +84,7 @@ export const SHIPPED_APP_ROUTES = [
     '/settings/security',
     '/settings/sso',
     '/settings/workflows/[legacyRuleId]',
+    '/settings/workspace/people',
     '/users',
     '/users/[id]',
     '/workflows',

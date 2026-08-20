@@ -61,6 +61,15 @@ export type SettingsNavGroup = {
     /** The group's landing destination today; see {@link resolveSettingsNavigation}. */
     href: string;
     destinations: readonly SettingsNavDestination[];
+    /**
+     * The jobs a served canonical destination absorbed, each addressed at its section of it. Empty
+     * until the group's canonical route exists; see {@link resolveSettingsNavigation}.
+     *
+     * These are not navigation rows — the group offers one destination once it has one. They are
+     * what settings search matches, so a reader who types the name the job used to have arrives at
+     * the section that now holds it instead of finding nothing.
+     */
+    sections: readonly SettingsNavDestination[];
 };
 
 /** One authorization scope as a navigation section. */
@@ -224,6 +233,33 @@ function groupDestinations(
     }));
 }
 
+/**
+ * The sections of a group whose canonical destination is served: every entry the manifest files
+ * under it that names a section of that destination, addressed at its deep link.
+ *
+ * Visibility is deliberately not re-applied here. A section's own entry may carry a visibility gate
+ * describing the *old* route, where the whole page was refused; on the consolidated destination the
+ * same gate refuses one section and the page explains it in place. Hiding the section from search
+ * would put the reader back where #1340 started: a name they know, leading nowhere.
+ */
+function groupSections(
+    group: SettingsGroup,
+    context: SettingsNavContext,
+): readonly SettingsNavDestination[] {
+    return MANIFEST_ENTRIES.filter(
+        (entry) =>
+            entry.group === group.id
+            && entry.canonicalSection !== null
+            && entry.canonicalRoute === group.route
+            && entry.titleKey !== null,
+    ).map((entry) => ({
+        id: entry.id,
+        title: context.translate(entry.titleKey ?? ""),
+        href: `${entry.canonicalRoute}#${entry.canonicalSection}`,
+        aliases: entry.aliasKey === null ? "" : context.translate(entry.aliasKey),
+    }));
+}
+
 /** The heading for a scope: the scope word, qualified by the thing it governs where there is one. */
 function scopeQualifier(scope: SettingsScope, context: SettingsNavContext): string | null {
     if (scope === "workspace") return context.workspaceName;
@@ -235,11 +271,16 @@ function scopeQualifier(scope: SettingsScope, context: SettingsNavContext): stri
  * Builds the scope-grouped settings navigation from the committed manifest.
  *
  * The navigation renders groups, because a group is the unit of canonical ownership in #1340 and
- * the destination each one will own once the routes move. Until then a group row links to its
- * **landing destination**: the first entry the manifest files under it that the viewer can actually
- * reach. `SETTINGS_ENTRIES` is committed in route order, so that resolution is deterministic and
- * needs no second ordering to maintain — but it is also not editorial, which the manifest currently
- * has no field to express.
+ * the destination each one will own once the routes move.
+ *
+ * A group's landing destination follows the migration rather than being re-decided per group. Where
+ * the group's canonical route is not served yet, the group links to the first entry the manifest
+ * files under it that the viewer can reach; `SETTINGS_ENTRIES` is committed in route order, so that
+ * resolution is deterministic, though it is not editorial. **Once the canonical route is served,
+ * that destination is the group** — it becomes the landing, and it is the only destination the
+ * group offers, because the entries it consolidated are now sections of it rather than peers
+ * beside it. Offering both would put the same job under two names in one list, which is the failure
+ * #1340 exists to remove. The old addresses keep working; they simply stop being advertised twice.
  *
  * A group with no reachable destination is dropped, and a scope with no remaining group is dropped
  * with it: a scope heading over nothing would advertise administration the reader cannot perform.
@@ -255,7 +296,10 @@ export function resolveSettingsNavigation(context: SettingsNavContext): Settings
             .slice()
             .sort((left, right) => left.order - right.order);
         for (const group of scoped) {
-            const destinations = groupDestinations(group.id, context);
+            const reachable = groupDestinations(group.id, context);
+            const canonical = reachable.find((destination) => destination.href === group.route);
+            const destinations = canonical ? [canonical] : reachable;
+            const sections = canonical ? groupSections(group, context) : [];
             const landing = destinations[0];
             if (!landing) continue;
             groups.push({
@@ -264,6 +308,7 @@ export function resolveSettingsNavigation(context: SettingsNavContext): Settings
                 title: group.titleKey === null ? group.epicName : context.translate(group.titleKey),
                 href: landing.href,
                 destinations,
+                sections,
             });
         }
         if (groups.length === 0) continue;
@@ -289,6 +334,10 @@ export function resolveSettingsNavigation(context: SettingsNavContext): Settings
  * lead to the same place. Purely client-side over the manifest — there are two dozen destinations,
  * and a settings search that needs the network is a settings search that stutters.
  *
+ * A migrated group's absorbed sections are searched beside its destination, and each carries its
+ * own deep link. Consolidation moves where a job lives; it must not take away the word the reader
+ * has always found it by.
+ *
  * @param model - the resolved navigation
  * @param query - what the reader typed
  * @returns the matching destinations in navigation order; empty for a blank query
@@ -302,7 +351,7 @@ export function searchSettingsNavigation(
     const results: SettingsNavSearchResult[] = [];
     for (const scope of model) {
         for (const group of scope.groups) {
-            for (const destination of group.destinations) {
+            for (const destination of [...group.destinations, ...group.sections]) {
                 const haystack = [destination.title, destination.aliases, group.title, scope.label]
                     .join(" ")
                     .toLocaleLowerCase();

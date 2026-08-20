@@ -49,6 +49,7 @@ export type BreadcrumbMessageKey =
     | "reports"
     | "roles"
     | "run"
+    | "peopleAccess"
     | "search"
     | "security"
     | "settings"
@@ -131,6 +132,7 @@ const SETTINGS_ROUTES: Readonly<Record<string, StaticWorkspaceRoute>> = {
     "/settings/email": { key: "email" },
     "/settings/delivery": { key: "delivery" },
     "/settings/diagnostics": { key: "diagnostics", access: "diagnostics" },
+    "/settings/workspace/people": { key: "peopleAccess" },
 };
 
 const ACCOUNT_ROUTES: Readonly<Record<string, BreadcrumbMessageKey>> = {

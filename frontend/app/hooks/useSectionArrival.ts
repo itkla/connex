@@ -1,0 +1,91 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useReducedMotion } from "motion/react";
+
+import { durationExpressiveMs } from "@/app/lib/motion";
+
+/**
+ * Subscribes to same-document fragment changes. A fragment set by a client-side navigation arrives
+ * in the first snapshot rather than as an event, so this only has to carry the case where the
+ * fragment changes while the page stays mounted.
+ */
+function subscribeToHash(onChange: () => void): () => void {
+    window.addEventListener("hashchange", onChange);
+    return () => window.removeEventListener("hashchange", onChange);
+}
+
+function hashSnapshot(): string {
+    return window.location.hash;
+}
+
+/** What a page needs to make its sections arrive at: a ref registrar, and which one was arrived at. */
+export type SectionArrival = {
+    /** Registers a section's element under its slug; pass to the section wrapper's `ref`. */
+    register: (section: string) => (element: HTMLElement | null) => void;
+    /** The section the current fragment arrived at, while its arrival is still worth marking. */
+    arrived: string | null;
+};
+
+/**
+ * Brings a page's addressable sections into view when the reader arrives at one of them by fragment.
+ *
+ * The browser cannot do this for a consolidated page on its own. A client-side navigation resolves
+ * the fragment against whatever is mounted at the time, which for a route with a `loading.tsx` is
+ * the skeleton, and the resolution is then discarded: the reader lands at the top of a long page
+ * with no sign that they asked for a section of it. So the page scrolls itself, once per
+ * navigation, and re-asserts on the next frame because the sections below the fold are still
+ * settling their own heights when the first call runs.
+ *
+ * The guard is keyed on the fragment rather than set once, so leaving a section and coming back to
+ * it scrolls again instead of silently doing nothing the second time.
+ *
+ * Arrival is also marked, briefly: a reader who followed a deep link into the middle of a page
+ * needs to know which of its sections answered them. The mark clears itself, because it is an
+ * arrival and not a selection.
+ *
+ * @param sections - the slugs this page can be arrived at, so a foreign fragment is ignored
+ * @returns the ref registrar and the section currently arrived at
+ */
+export function useSectionArrival(sections: readonly string[]): SectionArrival {
+    const reduceMotion = useReducedMotion() ?? false;
+    const hash = useSyncExternalStore(subscribeToHash, hashSnapshot, () => "");
+    const elements = useRef(new Map<string, HTMLElement>());
+    const scrolledForHash = useRef<string | null>(null);
+    const [arrived, setArrived] = useState<string | null>(null);
+
+    const target = hash.startsWith("#") ? hash.slice(1) : "";
+    const section = sections.includes(target) ? target : null;
+
+    const register = useCallback(
+        (slug: string) => (element: HTMLElement | null) => {
+            if (element === null) elements.current.delete(slug);
+            else elements.current.set(slug, element);
+        },
+        [],
+    );
+
+    useEffect(() => {
+        if (scrolledForHash.current !== hash) scrolledForHash.current = null;
+    }, [hash]);
+
+    useEffect(() => {
+        if (section === null || scrolledForHash.current === hash) return;
+        const element = elements.current.get(section);
+        if (!element) return;
+        scrolledForHash.current = hash;
+        const behavior = reduceMotion ? "auto" : "smooth";
+        element.scrollIntoView({ behavior, block: "start" });
+        setArrived(section);
+        const frame = requestAnimationFrame(() => element.scrollIntoView({ behavior, block: "start" }));
+        return () => cancelAnimationFrame(frame);
+    }, [hash, section, reduceMotion]);
+
+    useEffect(() => {
+        if (arrived === null) return;
+        const timer = window.setTimeout(() => setArrived(null), durationExpressiveMs * 4);
+        return () => window.clearTimeout(timer);
+    }, [arrived]);
+
+    return { register, arrived };
+}
