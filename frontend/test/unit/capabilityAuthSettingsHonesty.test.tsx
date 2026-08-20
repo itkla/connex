@@ -17,6 +17,7 @@ import LoginPage from "@/app/auth/login/page";
 import { AuthForm } from "@/app/components/AuthForm";
 import CapabilityUnavailablePage from "@/app/components/CapabilityUnavailablePage";
 import EmailPanel from "@/app/components/settings/EmailPanel";
+import SettingsAvailabilityNotice from "@/app/components/settings/SettingsAvailabilityNotice";
 import WorkspaceSettingsChrome from "@/app/components/settings/WorkspaceSettingsChrome";
 import type { InstanceCapabilities } from "@/app/lib/types";
 import {
@@ -189,6 +190,11 @@ function requiredElement(
     const element = elements.find(predicate);
     if (!element) throw new Error(`${label} did not render`);
     return element;
+}
+
+function hasAvailabilityState(value: unknown): value is { state: string } {
+    return typeof value === "object" && value !== null && "state" in value
+        && typeof value.state === "string";
 }
 
 function hasSsoAvailability(value: unknown): value is {
@@ -368,5 +374,21 @@ describe("email settings route capability honesty", () => {
 
         expect(isValidElement(rendered) ? rendered.type : null).toBe(EmailPanel);
         expect(redirectMock).not.toHaveBeenCalled();
+    });
+
+    it("explains the managed state in place instead of forwarding to Members", async () => {
+        stubCapabilities({ ...DISABLED_CAPABILITIES, mailManaged: true });
+
+        const rendered = await EmailSettingsPage();
+
+        expect(isValidElement(rendered) ? rendered.type : null).toBe(SettingsAvailabilityNotice);
+        expect(
+            isValidElement(rendered) && hasAvailabilityState(rendered.props) ? rendered.props.state : null,
+        ).toBe("managed");
+        expect(
+            redirectMock,
+            "#1340: a capability-managed destination never teleports the reader somewhere unrelated",
+        ).not.toHaveBeenCalled();
+        expect(renderToStaticMarkup(rendered)).toContain("SettingsAvailability.managedTitle");
     });
 });
