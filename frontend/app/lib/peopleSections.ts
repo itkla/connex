@@ -40,14 +40,19 @@ export const PEOPLE_ROUTE = "/settings/workspace/people";
  * Read from the manifest rather than restated, so a section slug that is renamed or retired there
  * fails this module's gate instead of leaving a deep link pointing at nothing.
  */
-export const MANIFEST_PEOPLE_SECTIONS: readonly string[] = [
-    ...SETTINGS_ENTRIES.filter(
-        (entry) => entry.group === "workspace.people" && entry.canonicalSection !== null,
-    ).map((entry) => entry.canonicalSection as string),
-    ...(SETTINGS_GROUPS.find((group) => group.id === "workspace.people")?.gapSections ?? []).map(
-        (section) => section.slug,
-    ),
-];
+function manifestPeopleSections(): readonly string[] {
+    const sections: string[] = [];
+    for (const entry of SETTINGS_ENTRIES) {
+        if (entry.group === "workspace.people" && entry.canonicalSection !== null) {
+            sections.push(entry.canonicalSection);
+        }
+    }
+    const group = SETTINGS_GROUPS.find((candidate) => candidate.id === "workspace.people");
+    for (const section of group?.gapSections ?? []) sections.push(section.slug);
+    return sections;
+}
+
+export const MANIFEST_PEOPLE_SECTIONS: readonly string[] = manifestPeopleSections();
 
 /**
  * The deep link to one section of the People & access page.

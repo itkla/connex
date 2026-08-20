@@ -3906,6 +3906,7 @@ export type WorkspaceMember = {
     email: string;
     profilePictureUrl?: string;
     role: string;
+    builtInRole: WorkspaceRole;
     roleId?: number | null;
     status?: string;
 };

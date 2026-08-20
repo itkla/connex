@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
 import { AtSymbolIcon, EllipsisHorizontalIcon, GlobeAltIcon, TrashIcon } from "@heroicons/react/24/outline";
@@ -15,6 +15,8 @@ import { useFieldErrors } from "@/app/hooks/useFieldErrors";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { toastSuccess } from "@/app/lib/toast";
+import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
+import WorkspaceUnavailableRetry from "@/app/components/WorkspaceUnavailableRetry";
 import { Button } from "@/components/ui/button";
 import {
     DropdownMenu,
@@ -23,6 +25,7 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
     EmptyRow,
     ListCard,
@@ -39,6 +42,12 @@ import {
  *   name and the explanation, so the panel renders the policy and nothing else.
  */
 export type AllowedDomainsPresentation = "tab" | "section";
+
+type AllowedDomainsLoadState = "loading" | "ready" | "error";
+
+type AllowedDomainsPanelProps = {
+    presentation?: AllowedDomainsPresentation;
+};
 
 /**
  * The workspace's allowed email domains: who may join through an invite link without being invited
@@ -58,67 +67,104 @@ export type AllowedDomainsPresentation = "tab" | "section";
  */
 export default function AllowedDomainsPanel({
     presentation = "tab",
+}: AllowedDomainsPanelProps = {}) {
+    const { activeWorkspaceId: workspaceId } = useWorkspace();
+    if (!workspaceId) return null;
+    return (
+        <AllowedDomainsWorkspacePanel
+            key={workspaceId}
+            workspaceId={workspaceId}
+            presentation={presentation}
+        />
+    );
+}
+
+function AllowedDomainsWorkspacePanel({
+    workspaceId,
+    presentation,
 }: {
-    presentation?: AllowedDomainsPresentation;
-} = {}) {
+    workspaceId: number;
+    presentation: AllowedDomainsPresentation;
+}) {
     const t = useTranslations("WorkspaceMembers");
+    const tRetry = useTranslations("CapabilityUnavailable");
     const showApiError = useApiErrorToast("WorkspaceMembers");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
-    const { activeWorkspaceId: workspaceId } = useWorkspace();
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
 
     const [allowedDomains, setAllowedDomains] = useState<string[]>([]);
+    const [loadState, setLoadState] = useState<AllowedDomainsLoadState>("loading");
     const [domainInput, setDomainInput] = useState("");
     const [addingDomain, setAddingDomain] = useState(false);
     const [busyDomain, setBusyDomain] = useState<string | null>(null);
+    const mounted = useRef(true);
+
+    const retryAllowedDomains = useCallback(async () => {
+        try {
+            const loaded = await getWorkspaceAllowedDomains(workspaceId);
+            if (!mounted.current) return;
+            setAllowedDomains(loaded);
+            setLoadState("ready");
+        } catch (error) {
+            if (!mounted.current) return;
+            showApiError(error, "domainsLoadFailedTitle");
+            setLoadState("error");
+        }
+    }, [showApiError, workspaceId]);
 
     useEffect(() => {
-        if (!workspaceId) return;
+        mounted.current = true;
         let cancelled = false;
-        (async () => {
-            try {
-                const loaded = await getWorkspaceAllowedDomains(workspaceId);
-                if (!cancelled) setAllowedDomains(loaded);
-            } catch (err) {
-                if (!cancelled) showApiError(err, "loadFailed");
-            }
-        })();
+        void getWorkspaceAllowedDomains(workspaceId).then((loaded) => {
+            if (cancelled) return;
+            setAllowedDomains(loaded);
+            setLoadState("ready");
+        }).catch((error: unknown) => {
+            if (cancelled) return;
+            showApiError(error, "domainsLoadFailedTitle");
+            setLoadState("error");
+        });
         return () => {
             cancelled = true;
+            mounted.current = false;
         };
-    }, [workspaceId, showApiError]);
+    }, [showApiError, workspaceId]);
 
     const addDomain = async () => {
-        if (!workspaceId || addingDomain) return;
+        if (!workspaceId || addingDomain || busyDomain !== null) return;
         resetFieldErrors();
         setAddingDomain(true);
         try {
             const updated = await addWorkspaceAllowedDomain(workspaceId, domainInput.trim());
+            if (!mounted.current) return;
             setAllowedDomains(updated);
             setDomainInput("");
             toastSuccess(t("domainAdded"));
         } catch (err) {
+            if (!mounted.current) return;
             if (!handlePasskeyStepUpError(err) && !captureFieldErrors(err)) {
                 showApiError(err, "domainAddFailed");
             }
         } finally {
-            setAddingDomain(false);
+            if (mounted.current) setAddingDomain(false);
         }
     };
 
     const removeDomain = async (domain: string) => {
-        if (!workspaceId) return;
+        if (!workspaceId || addingDomain || busyDomain !== null) return;
         setBusyDomain(domain);
         try {
             await removeWorkspaceAllowedDomain(workspaceId, domain);
+            if (!mounted.current) return;
             setAllowedDomains((prev) => prev.filter((d) => d !== domain));
             toastSuccess(t("domainRemoved"));
         } catch (err) {
+            if (!mounted.current) return;
             if (!handlePasskeyStepUpError(err)) {
                 showApiError(err, "domainRemoveFailed");
             }
         } finally {
-            setBusyDomain(null);
+            if (mounted.current) setBusyDomain(null);
         }
     };
 
@@ -127,92 +173,121 @@ export default function AllowedDomainsPanel({
     return (
         <div className="space-y-5">
             {labelled && <p className="max-w-prose text-sm text-muted-foreground">{t("domainsSubtitle")}</p>}
-            <form
-                onSubmit={(e) => {
-                    e.preventDefault();
-                    addDomain();
-                }}
-                className="flex flex-col gap-3 sm:flex-row sm:items-start"
-            >
-                <div className="flex-1">
-                    <InputGroup>
-                        <InputGroupAddon>
-                            <AtSymbolIcon />
-                        </InputGroupAddon>
-                        <InputGroupInput
-                            value={domainInput}
-                            onChange={(e) => {
-                                setDomainInput(e.target.value);
-                                clearError("domain");
-                            }}
-                            placeholder={t("domainPlaceholder")}
-                            aria-label={t("domainLabel")}
-                            aria-invalid={Boolean(fieldErrors.domain)}
-                        />
-                    </InputGroup>
-                    {fieldErrors.domain && (
-                        <p className="mt-1.5 text-sm text-destructive">{fieldErrors.domain}</p>
-                    )}
+            {loadState === "loading" ? (
+                <div className="space-y-3" aria-hidden="true">
+                    <Skeleton className="h-9 w-full rounded-full" />
+                    <Skeleton className="h-16 w-full rounded-2xl" />
                 </div>
-                <Button
-                    type="submit"
-                    variant="brand"
-                    disabled={addingDomain || domainInput.trim().length === 0}
-                    className="min-w-28"
-                >
-                    {addingDomain ? <Loader2Icon className="size-4 animate-spin" /> : t("addDomain")}
-                </Button>
-            </form>
+            ) : loadState === "error" ? (
+                <PermissionsUnavailable
+                    variant="inline"
+                    title={t("domainsLoadFailedTitle")}
+                    body={t("domainsLoadFailedBody")}
+                    action={
+                        <WorkspaceUnavailableRetry
+                            label={tRetry("retry")}
+                            pendingLabel={tRetry("retrying")}
+                            onRetry={retryAllowedDomains}
+                            variant="outline"
+                            size="inline"
+                        />
+                    }
+                />
+            ) : (
+                <>
+                    <form
+                        onSubmit={(e) => {
+                            e.preventDefault();
+                            addDomain();
+                        }}
+                        className="flex flex-col gap-3 sm:flex-row sm:items-start"
+                    >
+                        <div className="flex-1">
+                            <InputGroup>
+                                <InputGroupAddon>
+                                    <AtSymbolIcon />
+                                </InputGroupAddon>
+                                <InputGroupInput
+                                    value={domainInput}
+                                    onChange={(e) => {
+                                        setDomainInput(e.target.value);
+                                        clearError("domain");
+                                    }}
+                                    placeholder={t("domainPlaceholder")}
+                                    aria-label={t("domainLabel")}
+                                    aria-invalid={Boolean(fieldErrors.domain)}
+                                />
+                            </InputGroup>
+                            {fieldErrors.domain && (
+                                <p className="mt-1.5 text-sm text-destructive">{fieldErrors.domain}</p>
+                            )}
+                        </div>
+                        <Button
+                            type="submit"
+                            variant="brand"
+                            disabled={
+                                addingDomain
+                                || busyDomain !== null
+                                || domainInput.trim().length === 0
+                            }
+                            className="min-w-28"
+                        >
+                            {addingDomain ? <Loader2Icon className="size-4 animate-spin" /> : t("addDomain")}
+                        </Button>
+                    </form>
 
-            <div className="space-y-2">
-                {labelled && <TabListHeading title={t("domainsTitle")} count={allowedDomains.length} />}
-                {allowedDomains.length === 0 ? (
-                    <EmptyRow>{t("domainsEmpty")}</EmptyRow>
-                ) : (
-                    <ListCard>
-                        {allowedDomains.map((domain) => {
-                            const busy = busyDomain === domain;
-                            return (
-                                <li key={domain} className="group flex items-center gap-3 px-4 py-3">
-                                    <span
-                                        aria-hidden
-                                        className="grid size-8 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground"
-                                    >
-                                        <GlobeAltIcon className="size-4" />
-                                    </span>
-                                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-                                        {domain}
-                                    </span>
-                                    {busy ? (
-                                        <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
-                                    ) : (
-                                        <DropdownMenu>
-                                            <DropdownMenuTrigger asChild>
-                                                <button
-                                                    type="button"
-                                                    aria-label={t("removeDomain")}
-                                                    className={rowActionTrigger}
-                                                >
-                                                    <EllipsisHorizontalIcon className="size-5" />
-                                                </button>
-                                            </DropdownMenuTrigger>
-                                            <DropdownMenuContent align="end" className="w-44">
-                                                <DropdownMenuItem
-                                                    variant="destructive"
-                                                    onSelect={() => removeDomain(domain)}
-                                                >
-                                                    <TrashIcon className="size-4" />
-                                                    {t("removeDomain")}
-                                                </DropdownMenuItem>
-                                            </DropdownMenuContent>
-                                        </DropdownMenu>
-                                    )}
-                                </li>
-                            );
-                        })}
-                    </ListCard>
-                )}
-            </div>
+                    <div className="space-y-2">
+                        {labelled && <TabListHeading title={t("domainsTitle")} count={allowedDomains.length} />}
+                        {allowedDomains.length === 0 ? (
+                            <EmptyRow>{t("domainsEmpty")}</EmptyRow>
+                        ) : (
+                            <ListCard>
+                                {allowedDomains.map((domain) => {
+                                    const busy = busyDomain === domain;
+                                    return (
+                                        <li key={domain} className="group flex items-center gap-3 px-4 py-3">
+                                            <span
+                                                aria-hidden
+                                                className="grid size-8 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground"
+                                            >
+                                                <GlobeAltIcon className="size-4" />
+                                            </span>
+                                            <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                                                {domain}
+                                            </span>
+                                            {busy ? (
+                                                <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
+                                            ) : (
+                                                <DropdownMenu>
+                                                    <DropdownMenuTrigger asChild>
+                                                        <button
+                                                            type="button"
+                                                            aria-label={t("removeDomain")}
+                                                            className={rowActionTrigger}
+                                                            disabled={addingDomain || busyDomain !== null}
+                                                        >
+                                                            <EllipsisHorizontalIcon className="size-5" />
+                                                        </button>
+                                                    </DropdownMenuTrigger>
+                                                    <DropdownMenuContent align="end" className="w-44">
+                                                        <DropdownMenuItem
+                                                            variant="destructive"
+                                                            onSelect={() => removeDomain(domain)}
+                                                        >
+                                                            <TrashIcon className="size-4" />
+                                                            {t("removeDomain")}
+                                                        </DropdownMenuItem>
+                                                    </DropdownMenuContent>
+                                                </DropdownMenu>
+                                            )}
+                                        </li>
+                                    );
+                                })}
+                            </ListCard>
+                        )}
+                    </div>
+                </>
+            )}
         </div>
     );
 }

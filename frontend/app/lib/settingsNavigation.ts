@@ -267,20 +267,24 @@ function groupSections(
     group: SettingsGroup,
     context: SettingsNavContext,
 ): readonly SettingsNavDestination[] {
-    const absorbed = MANIFEST_ENTRIES.filter(
-        (entry) =>
+    const absorbed: SettingsNavDestination[] = [];
+    for (const entry of MANIFEST_ENTRIES) {
+        if (
             entry.group === group.id
             && entry.kind === "destination"
             && entry.canonicalSection !== null
             && entry.canonicalRoute === group.route
             && entry.titleKey !== null
-            && sectionVisible(entry, context.viewer),
-    ).map((entry) => ({
-        id: entry.id,
-        title: context.translate(entry.titleKey ?? ""),
-        href: `${entry.canonicalRoute}#${entry.canonicalSection}`,
-        aliases: entry.aliasKey === null ? "" : context.translate(entry.aliasKey),
-    }));
+            && sectionVisible(entry, context.viewer)
+        ) {
+            absorbed.push({
+                id: entry.id,
+                title: context.translate(entry.titleKey),
+                href: `${entry.canonicalRoute}#${entry.canonicalSection}`,
+                aliases: entry.aliasKey === null ? "" : context.translate(entry.aliasKey),
+            });
+        }
+    }
 
     const gaps = (group.gapSections ?? []).map((section) => ({
         id: `${group.id}#${section.slug}`,

@@ -1129,7 +1129,7 @@ export const SETTINGS_ENTRIES = [
             states: [],
         },
         entryPoints: ["sidebar", "command-palette", "contextual"],
-        aliasKey: null,
+        aliasKey: "Actions.keywords.navigate.users",
     },
     {
         id: "workspace.people-detail",

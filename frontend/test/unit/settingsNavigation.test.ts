@@ -616,6 +616,18 @@ describe("settings search finds destinations by every name they carry", () => {
         expect(searchSettingsNavigation(model, "diagnostics").length).toBeGreaterThan(0);
     });
 
+    it.each(LOCALES)("keeps the retired directory label as a hidden migration alias in %s", (locale) => {
+        const catalog = catalogs.get(locale);
+        if (!catalog) throw new Error(`no catalog for ${locale}`);
+        const model = resolveSettingsNavigation(context(locale));
+        const retiredLabel = resolveMessage(catalog, "Actions.keywords.navigate.users").split(",")[0] ?? "";
+        const result = searchSettingsNavigation(model, retiredLabel)
+            .find((candidate) => candidate.id === "workspace.people-directory");
+
+        expect(result?.href).toBe("/settings/workspace/people#directory");
+        expect(result?.title).toBe(resolveMessage(catalog, "SettingsPeople.directoryTitle"));
+    });
+
     it("matches without regard to case and reports nothing for a blank query", () => {
         const model = resolveSettingsNavigation(context("en"));
 

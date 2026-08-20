@@ -287,6 +287,38 @@ describe("people & access gates its sections without hiding them", () => {
             "the legacy route still refuses the whole page; only the consolidated one refuses a section of it",
         ).toEqual(["ROLE_MANAGE"]);
     });
+
+    it("uses effective permissions for delegated member and role management", () => {
+        const panel = source(MEMBERS_PANEL);
+
+        expect(panel).toContain('usePermission("MEMBER_MANAGE")');
+        expect(panel).toContain('usePermission("ROLE_MANAGE")');
+        expect(panel).toContain("const grantedPermissions = useGrantedPermissions();");
+        expect(
+            panel,
+            "a custom role carrying member management must receive the invite journey and member actions",
+        ).toContain("{canManageMembers && (");
+        expect(
+            panel,
+            "role choices are filtered against the permissions the viewer may grant",
+        ).toContain("candidate.permissions.every((permission) => grantedPermissions.has(permission))");
+        expect(panel).toContain('const targetIsOwner = member.builtInRole === "owner";');
+        expect(panel).toContain('candidate !== "owner"');
+        expect(
+            panel,
+            "role metadata failure stays separate from the roster load and offers a focused retry",
+        ).toContain('<RoleOptionsUnavailable onRetry={retryRoleOptions} />');
+        expect(panel).toContain('roleOptionsLoadState.status === "ready"');
+        expect(
+            panel,
+            "the roster and invite retry controls share one authoritative in-flight request",
+        ).toContain("if (roleOptionsRetry.current) return roleOptionsRetry.current;");
+        expect(
+            panel,
+            "a delegate who cannot grant a complete invitation role receives an explanation instead of dead forms",
+        ).toContain('title={t("inviteRoleUnavailableTitle")}');
+        expect(panel).not.toContain('const isAdmin = role === "admin" || role === "owner";');
+    });
 });
 
 describe("the shipped panels still render in the home they had", () => {
@@ -328,6 +360,26 @@ describe("the shipped panels still render in the home they had", () => {
 
         expect(panel).toContain('const labelled = presentation === "tab";');
         expect(panel).toContain('{labelled && <p className="max-w-prose text-sm text-muted-foreground">');
+    });
+
+    it("keeps domain loading, failed reads, and successful empty policy distinct", () => {
+        const panel = source(DOMAINS_PANEL);
+
+        expect(panel).toContain('useState<AllowedDomainsLoadState>("loading")');
+        expect(panel).toContain('loadState === "loading" ? (');
+        expect(panel).toContain(') : loadState === "error" ? (');
+        expect(panel).toContain('title={t("domainsLoadFailedTitle")}');
+        expect(panel).toContain('onRetry={retryAllowedDomains}');
+        expect(panel).toContain("key={workspaceId}");
+        expect(panel).toContain("if (!mounted.current) return;");
+        expect(
+            panel,
+            "retry keeps its focused pending button mounted instead of replacing it with a skeleton",
+        ).not.toContain('setLoadState("loading");');
+        expect(
+            panel.indexOf('allowedDomains.length === 0 ? ('),
+            "the empty policy is rendered only in the successful-read branch",
+        ).toBeGreaterThan(panel.indexOf(') : loadState === "error" ? ('));
     });
 
     it("leaves the legacy pages pointing at the panels they always rendered", () => {
