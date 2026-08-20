@@ -2,6 +2,7 @@ import type {
     Activity,
     CaptureHealthStatus,
     CaptureStream,
+    CaptureStreamState,
     ConnectedAccountProvider,
     InstanceCapabilities,
     ProviderCapturePolicy,
@@ -195,14 +196,28 @@ export function providerJourneyState(
         return 'disconnecting';
     }
     if (connection.status === 'error' || connection.status === 'revoked') return 'attention';
-    if (capture?.streams.some((stream) => stream.status === 'intervention_required')) {
-        return 'attention';
-    }
+    const live = admittedStreams(capture);
+    if (live.some((stream) => stream.status === 'intervention_required')) return 'attention';
     if (connection.status === 'paused') return 'paused';
-    if (capture?.streams.some((stream) => isCaptureOperationActive(stream.status))) {
-        return 'syncing';
-    }
+    if (live.some((stream) => isCaptureOperationActive(stream.status))) return 'syncing';
     return 'connected';
+}
+
+/**
+ * The streams the effective policy still admits.
+ *
+ * A stream the reader or the workspace has since switched off keeps its last recorded status, so a
+ * calendar that stalled before anyone stopped admitting it would otherwise raise trouble about work
+ * nobody expects to happen. Health is only meaningful for a source something still asks for.
+ */
+function admittedStreams(capture: ProviderCaptureOverview | null): readonly CaptureStreamState[] {
+    if (!capture || !capture.effectivePolicy.enabled) return [];
+    const effective = capture.effectivePolicy;
+    return capture.streams.filter((stream) => {
+        if (stream.stream === 'calendar') return effective.calendar;
+        if (stream.stream === 'mail_inbox') return effective.mailInbox;
+        return effective.mailSent;
+    });
 }
 
 /**
@@ -288,7 +303,7 @@ export function providerGlanceState(
     source: ProviderGlanceSource,
 ): ProviderGlanceState {
     if (!capture || !sourceAdmitted(capture, source)) return 'off';
-    const streams = capture.streams.filter(
+    const streams = admittedStreams(capture).filter(
         (stream) => GLANCE_STREAMS[source].includes(stream.stream),
     );
     if (streams.some((stream) => stream.status === 'intervention_required')) return 'attention';

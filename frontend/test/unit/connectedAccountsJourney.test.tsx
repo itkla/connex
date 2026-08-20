@@ -266,8 +266,17 @@ describe("what a source reports at a glance", () => {
             stream({ stream: "mail_inbox", status: "idle" }),
             stream({ stream: "mail_sent", status: "intervention_required" }),
         ]);
+        oneStalled.effectivePolicy.mailSent = true;
 
         expect(providerGlanceState(oneStalled, "mail")).toBe("attention");
+    });
+
+    it("ignores a stall on a source the policy no longer admits", () => {
+        const retired = overview([stream({ stream: "calendar", status: "intervention_required" })]);
+        retired.effectivePolicy.calendar = false;
+
+        expect(providerJourneyState(connection(), retired)).toBe("connected");
+        expect(providerGlanceState(retired, "calendar")).toBe("off");
     });
 
     it("stays a policy answer for a source nobody admitted", () => {
