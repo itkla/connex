@@ -168,6 +168,14 @@
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND status = 'active'
   </select>
 
+  <select id="hasMembersWithCustomRole" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1
+      FROM workspace_member
+      WHERE workspace_id = #{workspaceId} AND role_id = #{roleId}
+    )
+  </select>
+
   <update id="setMemberCustomRole">
     UPDATE workspace_member SET role_id = #{roleId}
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId}

@@ -21,6 +21,7 @@ import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceMember;
 import ooo.klae.connex.backend.dto.MemberDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
@@ -363,6 +364,30 @@ class WorkspaceNotificationLockOrderTest {
         order.verify(roleMapper).lockRole(7, 11);
         order.verify(roleMapper).lockPermissions(7, 5);
         order.verify(roleMapper).lockPermissions(7, 11);
+        order.verify(workspaceMapper).hasMembersWithCustomRole(7, 5);
+    }
+
+    @Test
+    void roleDeletionAuthorizationRejectsAnAssignedRoleAfterAuthorizationLocks() {
+        WorkspaceMember actorMembership = membership(9, "owner", null, "active");
+        when(userMapper.lockById(9)).thenReturn(9);
+        when(workspaceMapper.lockWorkspace(7)).thenReturn(7);
+        when(workspaceMapper.lockAuthorizationMembership(7, 9)).thenReturn(actorMembership);
+        when(roleMapper.lockRole(7, 5)).thenReturn(5);
+        when(roleMapper.lockPermissions(7, 5)).thenReturn(List.of());
+        when(workspaceMapper.hasMembersWithCustomRole(7, 5)).thenReturn(true);
+
+        assertThrows(
+            BadRequestException.class,
+            () -> service.lockRoleDeletionAuthorization(7, 9, 5));
+
+        InOrder order = inOrder(workspaceMapper, userMapper, roleMapper);
+        order.verify(userMapper).lockById(9);
+        order.verify(workspaceMapper).lockWorkspace(7);
+        order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
+        order.verify(roleMapper).lockRole(7, 5);
+        order.verify(roleMapper).lockPermissions(7, 5);
+        order.verify(workspaceMapper).hasMembersWithCustomRole(7, 5);
     }
 
     @Test

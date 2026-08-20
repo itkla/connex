@@ -2,7 +2,10 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -72,8 +75,12 @@ class RoleServiceLockOrderTest {
 
     @Test
     void customRoleDeletionRejectsAnAssignedRole() {
-        when(roleMapper.deleteRole(7, 5)).thenReturn(0);
+        doThrow(new BadRequestException(
+            "Reassign every member using this role before deleting it"))
+            .when(workspaceService).lockRoleDeletionAuthorization(7, 1, 5);
 
         assertThrows(BadRequestException.class, () -> service.deleteRole(7, 1, 5));
+
+        verify(roleMapper, never()).deleteRole(7, 5);
     }
 }

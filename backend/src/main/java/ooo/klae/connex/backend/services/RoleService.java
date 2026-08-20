@@ -82,8 +82,7 @@ public class RoleService {
         sessionSecurityService.requireRecentAuthentication(actorId);
         workspaceService.lockRoleDeletionAuthorization(workspaceId, actorId, roleId);
         if (roleMapper.deleteRole(workspaceId, roleId) == 0) {
-            throw new BadRequestException(
-                "Reassign every member using this role before deleting it");
+            throw new ResourceNotFoundException("Role not found");
         }
         auditService.record("workspace.role.delete", "workspace", workspaceId, null,
                 "Deleted role " + roleId, null);

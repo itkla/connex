@@ -53,10 +53,6 @@
   <delete id="deleteRole">
     DELETE FROM workspace_role
     WHERE workspace_id = #{workspaceId} AND id = #{id}
-      AND NOT EXISTS (
-        SELECT 1 FROM workspace_member
-        WHERE role_id = #{id}
-      )
   </delete>
 
   <!-- Permission rows carry no workspace_id of their own; every statement anchors

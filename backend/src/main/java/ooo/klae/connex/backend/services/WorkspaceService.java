@@ -1009,6 +1009,10 @@ public class WorkspaceService {
     /** Locks current authorization and the exact custom-role root before deletion. */
     public void lockRoleDeletionAuthorization(int workspaceId, int actorId, int roleId) {
         lockRoleMutationAuthorization(workspaceId, actorId, roleId, Set.of());
+        if (workspaceMapper.hasMembersWithCustomRole(workspaceId, roleId)) {
+            throw new BadRequestException(
+                "Reassign every member using this role before deleting it");
+        }
     }
 
     void lockRoleMutationAuthorization(
