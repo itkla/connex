@@ -468,13 +468,19 @@ function MembersWorkspacePanel({
             : [],
         [roleOptionsLoadState, workspaceId],
     );
-    const grantableBuiltInRoles = useMemo(
-        () => builtInRoleDefinitions
-            .filter((candidate) => candidate.permissions.every((permission) => grantedPermissions.has(permission)))
-            .map((candidate) => candidate.name)
-            .filter(isWorkspaceRole)
-            .filter((candidate) => candidate !== "owner" || isOwner),
-        [builtInRoleDefinitions, grantedPermissions, isOwner],
+    const grantableBuiltInRoles = useMemo(() => {
+        const roles: WorkspaceRole[] = [];
+        for (const candidate of builtInRoleDefinitions) {
+            if (!candidate.permissions.every((permission) => grantedPermissions.has(permission))) continue;
+            if (!isWorkspaceRole(candidate.name)) continue;
+            if (candidate.name === "owner" && !isOwner) continue;
+            roles.push(candidate.name);
+        }
+        return roles;
+    }, [builtInRoleDefinitions, grantedPermissions, isOwner]);
+    const grantableBuiltInRoleSet = useMemo(
+        () => new Set(grantableBuiltInRoles),
+        [grantableBuiltInRoles],
     );
     const grantableInviteRoles = useMemo<WorkspaceRole[]>(
         () => grantableBuiltInRoles.filter((candidate) => candidate !== "owner"),
@@ -551,7 +557,7 @@ function MembersWorkspacePanel({
                                     ? member.role
                                     : null;
                                 const currentBuiltInRoleIsGrantable = currentBuiltInRole != null
-                                    && grantableBuiltInRoles.includes(currentBuiltInRole);
+                                    && grantableBuiltInRoleSet.has(currentBuiltInRole);
                                 return (
                                     <li key={member.id} className="group flex items-center gap-3 px-4 py-3">
                                         <Avatar>
