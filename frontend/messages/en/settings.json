@@ -42,6 +42,6 @@
         "description": "Who belongs to {workspace}, what each role can do, and who may join without an invite.",
         "metaDescription": "Manage members, roles, allowed domains, and the member directory for this workspace.",
         "directoryTitle": "Member directory",
-        "directoryDescription": "Look someone up, then open their page to see their work."
+        "directoryDescription": "Look someone up, then open their page to see their work. Only members who have accepted their invitation appear here; anyone still pending is listed under Members, above."
     }
 }

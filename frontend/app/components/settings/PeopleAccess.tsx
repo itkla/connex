@@ -40,9 +40,10 @@ function PeopleSectionRegion({
         <div
             id={section}
             ref={register(section)}
+            tabIndex={-1}
             data-arrived={arrived === section ? "" : undefined}
             className={cn(
-                "-mx-3 scroll-mt-24 rounded-2xl px-3 py-3 transition-colors duration-(--motion-expressive) ease-calm motion-reduce:transition-none",
+                "-mx-3 scroll-mt-24 rounded-2xl px-3 py-3 outline-none transition-colors duration-(--motion-expressive) ease-calm motion-reduce:transition-none",
                 arrived === section ? "bg-muted/50" : "bg-transparent",
             )}
         >
@@ -73,9 +74,12 @@ function RefusedSection({ check }: { check: Exclude<PermissionCheck, "granted"> 
  * Each is a section with its own deep link, and the page composes the shipped panels rather than
  * restating them, so both homes keep behaving the same until the legacy routes redirect here.
  *
- * Section headings belong to whichever component already owns one, so the page stays one heading
- * level deep: the roster and the roles panel bring their own, and the two bare panels get a
- * `SettingsSection` from here.
+ * **Every section displays the name its deep link is advertised under.** Settings search offers a
+ * reader "Roles"; arriving at `#roles` must therefore show a heading that says Roles, which the
+ * roles panel alone does not — it names its two halves. So where a panel already displays the
+ * advertised name it renders bare (the roster's own first section is "Members"), and where it does
+ * not, the page supplies the `SettingsSection` and the panel steps its own headings down to `h3`.
+ * The page stays one coherent outline either way.
  *
  * The page itself is visible to any member, because the roster is. Its sections carry their own
  * gates, matching what the backend enforces: roles needs `ROLE_MANAGE` to read, allowed domains
@@ -83,14 +87,14 @@ function RefusedSection({ check }: { check: Exclude<PermissionCheck, "granted"> 
  * always was.
  *
  * @param currentUserId - the viewer, so the roster can handle their own row differently
- * @param users - the workspace's members, for the directory section
+ * @param users - the workspace's members for the directory section, or null when that read failed
  */
 export default function PeopleAccess({
     currentUserId,
     users,
 }: {
     currentUserId: number | null;
-    users: User[];
+    users: User[] | null;
 }) {
     const t = useTranslations("SettingsPeople");
     const tNav = useTranslations("SettingsNav");
@@ -115,15 +119,15 @@ export default function PeopleAccess({
             </PeopleSectionRegion>
 
             <PeopleSectionRegion section="roles" arrived={arrived} register={register}>
-                {roles === "granted" ? (
-                    <RolesPanel />
-                ) : (
-                    <Rise>
-                        <SettingsSection title={tRoles("title")} description={tRoles("subtitle")}>
+                <Rise>
+                    <SettingsSection title={tRoles("title")} description={tRoles("subtitle")}>
+                        {roles === "granted" ? (
+                            <RolesPanel presentation="section" />
+                        ) : (
                             <RefusedSection check={roles} />
-                        </SettingsSection>
-                    </Rise>
-                )}
+                        )}
+                    </SettingsSection>
+                </Rise>
             </PeopleSectionRegion>
 
             <PeopleSectionRegion section="allowed-domains" arrived={arrived} register={register}>
@@ -144,8 +148,17 @@ export default function PeopleAccess({
             <PeopleSectionRegion section="directory" arrived={arrived} register={register}>
                 <Rise>
                     <SettingsSection title={t("directoryTitle")} description={t("directoryDescription")}>
-                        <div id="member-detail" ref={register("member-detail")} className="scroll-mt-24">
-                            <UsersBrowser users={users} presentation="section" />
+                        <div
+                            id="member-detail"
+                            ref={register("member-detail")}
+                            tabIndex={-1}
+                            className="scroll-mt-24 outline-none"
+                        >
+                            {users === null ? (
+                                <SettingsAvailabilityNotice variant="inline" state="retry" />
+                            ) : (
+                                <UsersBrowser users={users} presentation="section" />
+                            )}
                         </div>
                     </SettingsSection>
                 </Rise>

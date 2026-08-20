@@ -234,30 +234,62 @@ function groupDestinations(
 }
 
 /**
- * The sections of a group whose canonical destination is served: every entry the manifest files
- * under it that names a section of that destination, addressed at its deep link.
+ * Whether a section of a served canonical destination may be named to this viewer.
  *
- * Visibility is deliberately not re-applied here. A section's own entry may carry a visibility gate
- * describing the *old* route, where the whole page was refused; on the consolidated destination the
- * same gate refuses one section and the page explains it in place. Hiding the section from search
- * would put the reader back where #1340 started: a name they know, leading nowhere.
+ * The scope-level gates are enforced exactly as they are on a destination: an organization role the
+ * viewer does not hold, or a capability the deployment does not have, hides the section outright.
+ * Those answer "does this exist for you at all", and a section name is as much of a disclosure as a
+ * navigation row.
+ *
+ * **Permissions are the deliberate exception, and only permissions.** A section's entry may carry a
+ * visibility permission describing the *old* route, where lacking it refused the whole page. On the
+ * consolidated destination the same permission refuses one section, which the page keeps visible
+ * and explains in place — that is #1340's rule, and the reader must be able to find the name in
+ * order to be told to ask an administrator. Hiding it from search would leave a name they know
+ * leading nowhere, which is the failure this epic exists to remove.
+ */
+export function sectionVisible(entry: SettingsEntry, viewer: SettingsNavViewer): boolean {
+    if (entry.access.orgAdmin && !viewer.isOrgAdmin) return false;
+    return capabilitiesSatisfied(entry.access, viewer.capabilities);
+}
+
+/**
+ * The sections of a group whose canonical destination is served, addressed at their deep links:
+ * every entry the manifest files under it that names a section of that destination, plus the route
+ * gaps the group declares as {@link SettingsGroup.gapSections} — the jobs the consolidation makes
+ * addressable that no route served before, and that no entry can therefore describe.
+ *
+ * A gap section carries no gates of its own. It exists only inside its destination, so the
+ * destination's own visibility already governs whether the reader can reach it, and the page it
+ * lives on explains any permission refusal in place.
  */
 function groupSections(
     group: SettingsGroup,
     context: SettingsNavContext,
 ): readonly SettingsNavDestination[] {
-    return MANIFEST_ENTRIES.filter(
+    const absorbed = MANIFEST_ENTRIES.filter(
         (entry) =>
             entry.group === group.id
+            && entry.kind === "destination"
             && entry.canonicalSection !== null
             && entry.canonicalRoute === group.route
-            && entry.titleKey !== null,
+            && entry.titleKey !== null
+            && sectionVisible(entry, context.viewer),
     ).map((entry) => ({
         id: entry.id,
         title: context.translate(entry.titleKey ?? ""),
         href: `${entry.canonicalRoute}#${entry.canonicalSection}`,
         aliases: entry.aliasKey === null ? "" : context.translate(entry.aliasKey),
     }));
+
+    const gaps = (group.gapSections ?? []).map((section) => ({
+        id: `${group.id}#${section.slug}`,
+        title: context.translate(section.titleKey),
+        href: `${group.route}#${section.slug}`,
+        aliases: "",
+    }));
+
+    return [...absorbed, ...gaps];
 }
 
 /** The heading for a scope: the scope word, qualified by the thing it governs where there is one. */

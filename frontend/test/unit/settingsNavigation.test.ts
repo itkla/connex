@@ -13,6 +13,7 @@ import {
     capabilityValue,
     entryVisible,
     resolveSettingsNavigation,
+    sectionVisible,
     searchSettingsNavigation,
     type SettingsNavContext,
     type SettingsNavViewer,
@@ -146,19 +147,41 @@ function offeredEntries(groupId: string): SettingsEntry[] {
     return canonical ? [canonical] : offerable_;
 }
 
-/** The jobs a served canonical destination absorbed, each addressed at its section of it. */
-function expectedSections(groupId: string): SettingsEntry[] {
+/** Whether every capability an entry declares resolves the way it needs for this viewer. */
+function capabilitiesHold(entry: SettingsEntry, who: SettingsNavViewer): boolean {
+    const { capabilities, capabilityMatch } = entry.access;
+    if (capabilities.length === 0) return true;
+    const resolved = who.capabilities;
+    if (resolved === null) return true;
+    const holds = (requirement: (typeof capabilities)[number]) =>
+        capabilityValue(resolved, requirement.key) === requirement.expected;
+    return capabilityMatch === "all" ? capabilities.every(holds) : capabilities.some(holds);
+}
+
+/**
+ * The section ids a served canonical destination offers: the jobs it absorbed, then the route gaps
+ * its group declares. Derived from the manifest so the suite follows a group across its migration.
+ */
+function expectedSectionIds(groupId: string, who: SettingsNavViewer = viewer()): string[] {
     const route = groupRoute(groupId);
     if (!entries.some((entry) => entry.group === groupId && offerable(entry) && entry.currentRoute === route)) {
         return [];
     }
-    return entries.filter(
-        (entry) =>
-            entry.group === groupId
-            && entry.canonicalSection !== null
-            && entry.canonicalRoute === route
-            && entry.titleKey !== null,
-    );
+    const group = groups.find((candidate) => candidate.id === groupId);
+    const absorbed = entries
+        .filter(
+            (entry) =>
+                entry.group === groupId
+                && entry.kind === "destination"
+                && entry.canonicalSection !== null
+                && entry.canonicalRoute === route
+                && entry.titleKey !== null
+                && !(entry.access.orgAdmin && !who.isOrgAdmin)
+                && capabilitiesHold(entry, who),
+        )
+        .map((entry) => entry.id);
+    const gaps = (group?.gapSections ?? []).map((section) => `${groupId}#${section.slug}`);
+    return [...absorbed, ...gaps];
 }
 
 describe("settings navigation equals the manifest", () => {
@@ -179,9 +202,7 @@ describe("settings navigation equals the manifest", () => {
                 expect(group.destinations.map((destination) => destination.href)).toEqual(
                     manifestEntries.map((entry) => entry.currentRoute),
                 );
-                expect(group.sections.map((section) => section.id)).toEqual(
-                    expectedSections(group.id).map((entry) => entry.id),
-                );
+                expect(group.sections.map((section) => section.id)).toEqual(expectedSectionIds(group.id));
             }
         }
     });
@@ -381,6 +402,84 @@ describe("settings navigation gates on the manifest's visibility bucket", () => 
         expect(hrefs).not.toContain(detail?.currentRoute);
     });
 
+    it("gates a section on the scope gates its entry declares, so a name is no more disclosed than a row", () => {
+        const section = (access: Partial<SettingsEntry["access"]>): SettingsEntry => ({
+            id: "probe",
+            currentRoute: "/settings/probe",
+            kind: "destination",
+            group: "workspace.people",
+            canonicalRoute: "/settings/workspace/people",
+            canonicalSection: "probe",
+            redirectsTo: null,
+            redirectQuery: [],
+            conditionalForward: null,
+            titleKey: "WorkspaceSettings.tabRoles",
+            access: {
+                permissions: [],
+                capabilities: [],
+                capabilityMatch: "all",
+                orgAdmin: false,
+                manage: [],
+                orgWrite: null,
+                states: [],
+                ...access,
+            },
+            entryPoints: [],
+            aliasKey: null,
+        });
+
+        expect(
+            sectionVisible(section({ orgAdmin: true }), viewer({ isOrgAdmin: false })),
+            "an organization-gated job's name must not reach a viewer who holds no organization role",
+        ).toBe(false);
+        expect(sectionVisible(section({ orgAdmin: true }), viewer({ isOrgAdmin: true }))).toBe(true);
+        expect(
+            sectionVisible(
+                section({ capabilities: [{ key: "sso", expected: true }] }),
+                viewer({ capabilities: { ...ALL_CAPABILITIES, sso: false } }),
+            ),
+            "a section of a capability the deployment does not have is not a section",
+        ).toBe(false);
+        expect(
+            sectionVisible(section({ permissions: ["ROLE_MANAGE"] }), viewer({ permissions: new Set() })),
+            "permissions are the deliberate carve-out: the page explains that refusal in place",
+        ).toBe(true);
+    });
+
+    it("actually applies that predicate where sections are built", () => {
+        const source = readFileSync(path.join(process.cwd(), "app", "lib", "settingsNavigation.ts"), "utf8");
+        const builder = source.slice(source.indexOf("function groupSections("));
+
+        expect(
+            builder.slice(0, builder.indexOf("\n}")),
+            "groupSections must filter on sectionVisible; today no served group has a scope-gated section, so the model-level invariant above cannot yet see this wiring and would pass without it",
+        ).toContain("sectionVisible(entry, context.viewer)");
+    });
+
+    it("still names a permission-refused section, because the reader must find it to be told to ask", () => {
+        const model = resolveSettingsNavigation(context("en", { permissions: new Set() }));
+        const sections = model.flatMap((scope) => scope.groups.flatMap((group) => group.sections));
+
+        expect(
+            sections.map((section) => section.id),
+            "roles is permission-gated and explains itself in place; hiding its name would strand the reader",
+        ).toContain("workspace.roles");
+    });
+
+    it("matches groupSections against the same gates for every group, not just the migrated one", () => {
+        for (const who of [viewer(), viewer({ isOrgAdmin: false }), viewer({ permissions: new Set() })]) {
+            const model = resolveSettingsNavigation({ ...context("en"), viewer: who });
+            const byGroup = new Map(
+                model.flatMap((scope) => scope.groups).map((group) => [group.id, group.sections.map((s) => s.id)]),
+            );
+            for (const group of groups) {
+                expect(byGroup.get(group.id) ?? [], `${group.id} sections`).toEqual(
+                    byGroup.has(group.id) ? expectedSectionIds(group.id, who) : [],
+                );
+            }
+        }
+    });
+
     it("agrees with entryVisible on every entry it renders", () => {
         const restricted = viewer({ permissions: new Set(["WORKSPACE_SETTINGS"]), isOrgAdmin: false });
         const model = resolveSettingsNavigation({ ...context("en"), viewer: restricted });
@@ -434,11 +533,16 @@ describe("settings navigation resolves a landing for every group", () => {
             "workspace.members",
             "workspace.roles",
             "workspace.people-directory",
+            "workspace.people#allowed-domains",
         ]);
-        expect(people?.sections.map((section) => section.href)).toEqual([
+        expect(
+            people?.sections.map((section) => section.href),
+            "the route gap the group declares is addressable on the same terms as the jobs it absorbed",
+        ).toEqual([
             "/settings/workspace/people#members",
             "/settings/workspace/people#roles",
             "/settings/workspace/people#directory",
+            "/settings/workspace/people#allowed-domains",
         ]);
     });
 
@@ -495,7 +599,13 @@ describe("settings search finds destinations by every name they carry", () => {
         const results = searchSettingsNavigation(model, resolveMessage(catalog, "SettingsNav.groupPeopleAccess"));
 
         expect(results.map((result) => result.id).sort()).toEqual(
-            ["workspace.members", "workspace.people", "workspace.people-directory", "workspace.roles"].sort(),
+            [
+                "workspace.members",
+                "workspace.people",
+                "workspace.people#allowed-domains",
+                "workspace.people-directory",
+                "workspace.roles",
+            ].sort(),
         );
     });
 

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
     MAX_URL_PAGE_SIZE,
@@ -65,6 +67,37 @@ describe("URL writers (multi-writer coexistence contract)", () => {
                 `${name} dropped the fragment the reader arrived with`,
             ).toContain("#directory");
         }
+    });
+
+    it("routes every writer in the app through the shared address builder", () => {
+        const writers = [
+            "app/hooks/listStateUrl.ts",
+            "app/hooks/useRecordsBrowser.ts",
+            "app/hooks/useRecordPeek.ts",
+            "app/components/map/MapView.tsx",
+        ];
+        const rebuilt: string[] = [];
+
+        for (const file of writers) {
+            const source = readFileSync(path.join(process.cwd(), file), "utf8");
+            for (const line of source.split("\n")) {
+                const code = line.trim();
+                if (code.startsWith("*") || code.startsWith("//")) continue;
+                if (!code.includes("history.replaceState")) continue;
+                if (!code.includes("listStateAddress(")) rebuilt.push(`${file}: ${code}`);
+            }
+        }
+
+        expect(
+            rebuilt,
+            "a writer rebuilding the address from a pathname and a query string drops the reader's fragment",
+        ).toEqual([]);
+        const calls = writers.flatMap((file) =>
+            readFileSync(path.join(process.cwd(), file), "utf8")
+                .split("\n")
+                .filter((line) => line.includes("listStateAddress(") && line.includes("replaceState")),
+        );
+        expect(calls.length, "the scan must be finding real writers, not an empty file set").toBe(8);
     });
 
     it("writes no fragment when the reader carries none", () => {

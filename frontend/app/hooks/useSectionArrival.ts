@@ -19,6 +19,17 @@ function hashSnapshot(): string {
     return window.location.hash;
 }
 
+/**
+ * How long after an arrival the sections above the target are still allowed to move it.
+ *
+ * A consolidated destination's sections load their own data, so the content above the target keeps
+ * growing after the first scroll: a roster resolving four serial requests can add hundreds of pixels
+ * and push the target back off the top of the viewport. One animation frame catches a layout that
+ * has already settled and nothing else, so the scroll is held against the geometry until the page
+ * has plausibly finished arriving. Bounded, because after that a movement is the reader's own.
+ */
+const SETTLE_WINDOW_MS = 2000;
+
 /** What a page needs to make its sections arrive at: a ref registrar, and which one was arrived at. */
 export type SectionArrival = {
     /** Registers a section's element under its slug; pass to the section wrapper's `ref`. */
@@ -39,6 +50,10 @@ export type SectionArrival = {
  *
  * The guard is keyed on the fragment rather than set once, so leaving a section and coming back to
  * it scrolls again instead of silently doing nothing the second time.
+ *
+ * Only the first scroll animates. The corrections that follow it are instant, because they are the
+ * page holding its position while content settles above the target, and a surface that re-animates
+ * every time a list resolves reads as a page that cannot make up its mind.
  *
  * Arrival is also marked, briefly: a reader who followed a deep link into the middle of a page
  * needs to know which of its sections answered them. The mark clears itself, because it is an
@@ -74,11 +89,26 @@ export function useSectionArrival(sections: readonly string[]): SectionArrival {
         const element = elements.current.get(section);
         if (!element) return;
         scrolledForHash.current = hash;
-        const behavior = reduceMotion ? "auto" : "smooth";
-        element.scrollIntoView({ behavior, block: "start" });
+        const hold = () => element.scrollIntoView({ block: "start" });
+
+        element.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
         setArrived(section);
-        const frame = requestAnimationFrame(() => element.scrollIntoView({ behavior, block: "start" }));
-        return () => cancelAnimationFrame(frame);
+        const frame = requestAnimationFrame(hold);
+
+        const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(hold);
+        if (observer) {
+            for (const registered of elements.current.values()) {
+                const relation = registered.compareDocumentPosition(element);
+                if (relation & Node.DOCUMENT_POSITION_FOLLOWING) observer.observe(registered);
+            }
+        }
+        const stop = window.setTimeout(() => observer?.disconnect(), SETTLE_WINDOW_MS);
+
+        return () => {
+            cancelAnimationFrame(frame);
+            window.clearTimeout(stop);
+            observer?.disconnect();
+        };
     }, [hash, section, reduceMotion]);
 
     useEffect(() => {

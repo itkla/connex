@@ -123,6 +123,22 @@ export type SettingsAccess = {
 };
 
 /**
+ * A job #1340 makes addressable that no route served before.
+ *
+ * `SETTINGS_ENTRIES` can only describe destinations that exist today, so a job the epic requires but
+ * that ships as a block inside another page has nowhere to be recorded — #1398 enumerated three of
+ * them (workspace allowed domains, workspace notification defaults, workflow configuration) as
+ * route gaps. A group declares them here, so the section a consolidation *creates* is navigable and
+ * searchable on the same terms as the sections it absorbs.
+ */
+export type SettingsGroupSection = {
+    /** The section slug, giving the job its deep link at `{group.route}#{slug}`. */
+    slug: string;
+    /** The shipped message key that labels the section. */
+    titleKey: string;
+};
+
+/**
  * One destination in the target information architecture of #1340 — a row of the scope-grouped
  * Settings navigation. Groups are the unit of canonical ownership: every settings job resolves to
  * exactly one of them.
@@ -143,6 +159,12 @@ export type SettingsGroup = {
     titleKey: string | null;
     /** The group's name in #1340, verbatim, so the copy task is enumerated rather than remembered. */
     epicName: string;
+    /**
+     * The route gaps this group's canonical destination fills — jobs it makes addressable that no
+     * entry can describe because no route ever served them. Empty for a group that only absorbs
+     * existing destinations.
+     */
+    gapSections?: readonly SettingsGroupSection[];
 };
 
 /**
@@ -261,6 +283,7 @@ export const SETTINGS_GROUPS = [
         order: 2,
         titleKey: "SettingsNav.groupPeopleAccess",
         epicName: "People & access",
+        gapSections: [{ slug: "allowed-domains", titleKey: "WorkspaceMembers.domainsTitle" }],
     },
     {
         id: "workspace.crm",
@@ -1087,7 +1110,15 @@ export const SETTINGS_ENTRIES = [
         redirectsTo: null,
         redirectQuery: [],
         conditionalForward: null,
-        titleKey: "CommonSidebar.navUsers",
+        /**
+         * The consolidated name, not the shipped one. `CommonSidebar.navUsers` renders "Users" /
+         * 「ユーザー」, which PRODUCT.md §4 bans for a person in a workspace, and the banned-terms gate
+         * cannot catch it there because `user` is unclassifiable in the general case. This key is
+         * what the navigation and settings search show, and both now lead to the section of People &
+         * access that owns this job, which is named for members. The standalone `/users` page keeps
+         * its shipped label until its redirect lands.
+         */
+        titleKey: "SettingsPeople.directoryTitle",
         access: {
             permissions: [],
             capabilities: [],

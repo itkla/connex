@@ -63,14 +63,14 @@ describe("people & access owns the sections the manifest promises", () => {
         expect(
             MANIFEST_PEOPLE_SECTIONS.length,
             "the manifest must still file the sections this page exists to hold",
-        ).toBe(4);
+        ).toBe(5);
         expect(
             missing,
             "a section the manifest promises a deep link for has no anchor on the page that owns it",
         ).toEqual([]);
     });
 
-    it("holds every manifest section, and the one destination the manifest recorded as a gap", () => {
+    it("holds exactly the sections the manifest declares, absorbed and created alike", () => {
         expect([...PEOPLE_SECTIONS]).toEqual([
             "members",
             "roles",
@@ -78,13 +78,21 @@ describe("people & access owns the sections the manifest promises", () => {
             "directory",
             "member-detail",
         ]);
-        for (const section of MANIFEST_PEOPLE_SECTIONS) {
-            expect(PEOPLE_SECTIONS as readonly string[]).toContain(section);
-        }
+        expect([...PEOPLE_SECTIONS].sort()).toEqual([...MANIFEST_PEOPLE_SECTIONS].sort());
+    });
+
+    it("declares allowed domains as a route gap, because no route ever served it", () => {
+        const group = SETTINGS_GROUPS.find((candidate) => candidate.id === "workspace.people");
+
+        expect(group?.gapSections?.map((section) => section.slug)).toEqual(["allowed-domains"]);
+        const deepLinks: readonly string[] = SETTINGS_ENTRIES.map(
+            (entry) => `${entry.canonicalRoute}#${entry.canonicalSection ?? ""}`,
+        );
+
         expect(
-            MANIFEST_PEOPLE_SECTIONS,
-            "allowed domains shipped as a tab with no route, which is why it is this page's own section",
-        ).not.toContain("allowed-domains");
+            deepLinks.filter((link) => link === `${PEOPLE_ROUTE}#allowed-domains`),
+            "no entry can describe it: an entry names a route that exists, and this job never had one",
+        ).toEqual([]);
     });
 
     it("gives each section a real element to arrive at", () => {
@@ -115,8 +123,8 @@ describe("people & access arrives at the section a deep link asked for", () => {
         const hook = source(ARRIVAL_HOOK);
 
         expect(hook).toContain("element.scrollIntoView(");
-        expect(hook, "the re-assert catches sections still settling their heights on the first call")
-            .toContain("requestAnimationFrame(() => element.scrollIntoView(");
+        expect(hook, "the next frame catches a layout that has not painted yet")
+            .toContain("requestAnimationFrame(hold)");
         expect(hook, "reduced motion is honored").toContain('reduceMotion ? "auto" : "smooth"');
     });
 
@@ -133,12 +141,106 @@ describe("people & access arrives at the section a deep link asked for", () => {
         expect(hook).toContain("sections.includes(target) ? target : null");
     });
 
+    it("holds the scroll while the sections above the target are still loading", () => {
+        const hook = source(ARRIVAL_HOOK);
+
+        expect(
+            hook,
+            "one frame catches a settled layout and nothing else; a roster resolving four requests moves the target after it",
+        ).toContain("new ResizeObserver(hold)");
+        expect(hook).toContain("Node.DOCUMENT_POSITION_FOLLOWING");
+        expect(hook, "the hold is bounded, because after that a movement is the reader's own")
+            .toContain("SETTLE_WINDOW_MS");
+        expect(hook, "only the first scroll animates; the corrections are the page holding position")
+            .toContain("const hold = () => element.scrollIntoView({ block: \"start\" });");
+    });
+
+    it("lets a keyboard reader land on the section a fragment addressed", () => {
+        const view = source(PEOPLE_ACCESS);
+
+        expect(view, "the router focuses the fragment target; a div is not focusable without this")
+            .toContain("tabIndex={-1}");
+        expect(view.match(/tabIndex=\{-1\}/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+    });
+
     it("marks the section it arrived at, and lets the mark expire", () => {
         const page = source(PEOPLE_ACCESS);
         const hook = source(ARRIVAL_HOOK);
 
         expect(page).toContain("data-arrived");
         expect(hook).toContain("setArrived(null)");
+    });
+});
+
+describe("people & access tells a failed read apart from an empty workspace", () => {
+    it("hands the directory null when its read failed, never an empty list", () => {
+        const page = source(path.join(PAGE, "page.tsx"));
+
+        expect(page).toContain("let users: User[] | null;");
+        expect(
+            page,
+            "an empty array here would let a failed request assert, under a roster that just counted them, that nobody is here",
+        ).toContain("users = null;");
+        expect(page).not.toContain("users = [];");
+    });
+
+    it("reports that failure as a retryable state where the directory stands", () => {
+        const view = source(PEOPLE_ACCESS);
+
+        expect(view).toContain("users: User[] | null;");
+        expect(view).toContain('users === null ? (\n                                <SettingsAvailabilityNotice variant="inline" state="retry" />');
+        expect(
+            view,
+            "the other sections are unaffected: one section's failed read is not a refusal of the destination",
+        ).toContain("<UsersBrowser users={users} presentation=\"section\" />");
+    });
+
+    it("discloses that the directory and the roster count different populations", () => {
+        const english = JSON.parse(
+            readFileSync(path.join(process.cwd(), "messages", "en", "settings.json"), "utf8"),
+        ) as { SettingsPeople: Record<string, string> };
+        const japanese = JSON.parse(
+            readFileSync(path.join(process.cwd(), "messages", "ja", "settings.json"), "utf8"),
+        ) as { SettingsPeople: Record<string, string> };
+
+        expect(
+            english.SettingsPeople.directoryDescription,
+            "the roster counts pending members and the directory does not; on one page that gap must be explained, not discovered",
+        ).toMatch(/accepted their invitation/);
+        expect(english.SettingsPeople.directoryDescription).toMatch(/pending/);
+        expect(japanese.SettingsPeople.directoryDescription).toMatch(/承諾/);
+    });
+});
+
+describe("people & access shows the name each section is advertised under", () => {
+    it("names the roles section Roles, which the panel inside it never does", () => {
+        const view = source(PEOPLE_ACCESS);
+        const roles = source(path.join(process.cwd(), "app", "components", "settings", "RolesPanel.tsx"));
+
+        expect(
+            view,
+            "settings search offers this section as Roles; arriving at it must show a heading that says so",
+        ).toContain('<SettingsSection title={tRoles("title")} description={tRoles("subtitle")}>');
+        expect(view).toContain('<RolesPanel presentation="section" />');
+        expect(
+            roles,
+            "the panel's own two headings sit below the section name rather than repeating its level",
+        ).toContain("const headingLevel = presentation === \"section\" ? 3 : 2;");
+        expect(roles.match(/headingLevel=\{headingLevel\}/g)).toHaveLength(2);
+    });
+
+    it("keeps that name for a refused viewer, so the posture is attached to the job it refuses", () => {
+        const view = source(PEOPLE_ACCESS);
+        const rolesRegion = view.slice(view.indexOf('section="roles"'), view.indexOf('section="allowed-domains"'));
+
+        expect(rolesRegion).toContain('title={tRoles("title")}');
+        expect(rolesRegion).toContain("<RefusedSection check={roles} />");
+    });
+
+    it("leaves the legacy roles route at its shipped heading level", () => {
+        const roles = source(path.join(process.cwd(), "app", "components", "settings", "RolesPanel.tsx"));
+
+        expect(roles).toContain('presentation = "page"');
     });
 });
 

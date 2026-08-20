@@ -24,9 +24,11 @@ export async function generateMetadata(): Promise<Metadata> {
  * belongs here, what a role may do, who may join unasked, and where to look a member up.
  *
  * The directory's members are read here rather than in the client, matching how `/users` already
- * loads them. That read is member-visible, so a failure is not a refusal: the page keeps its other
- * sections and hands the directory an empty list rather than refusing the whole destination over a
- * section of it.
+ * loads them. A failure of that read is not a refusal of the destination — the other sections are
+ * unaffected and still render — but it is emphatically not an empty workspace either. It yields
+ * `null`, which the directory section reports as an unavailable read the viewer can retry. Handing
+ * it an empty list instead would make a failed request state, in the product's own voice and under
+ * a roster that has just counted the members, that nobody is here.
  */
 export default async function PeopleAccessPage() {
     const cookie = (await headers()).get("cookie");
@@ -39,11 +41,11 @@ export default async function PeopleAccessPage() {
         redirect("/auth/login");
     }
 
-    let users: User[] = [];
+    let users: User[] | null;
     try {
         users = await getUsers({ headers: { cookie: cookie ?? "" }, cache: "no-store" });
     } catch {
-        users = [];
+        users = null;
     }
 
     return <PeopleAccess currentUserId={currentUser.id} users={users} />;
