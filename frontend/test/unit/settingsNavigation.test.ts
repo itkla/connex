@@ -230,16 +230,24 @@ describe("settings navigation gates on the manifest's visibility bucket", () => 
         expect(model.map((scope) => scope.scope)).toEqual(["personal", "workspace"]);
     });
 
-    it("hides a capability-gated destination whose capability resolved against it", () => {
+    it("keeps a capability-gated destination that can explain the capability resolving against it", () => {
         const managedMail: InstanceCapabilities = { ...ALL_CAPABILITIES, mailManaged: true };
         const model = resolveSettingsNavigation(context("en", { capabilities: managedMail }));
         const ids = model.flatMap((scope) => scope.groups.flatMap((group) => group.destinations.map((d) => d.id)));
+        const email = entries.find((entry) => entry.id === "workspace.email");
 
-        expect(ids, "the shipped tab strip hides Email on a managed-mail instance").not.toContain("workspace.email");
+        expect(
+            email?.access.states,
+            "Email keeps its place because it can say it is instance-managed; that claim is what makes it visible",
+        ).toContain("managed");
+        expect(
+            ids,
+            "#1340: a capability-managed destination never silently vanishes — it explains itself where its name is",
+        ).toContain("workspace.email");
         expect(ids).toContain("workspace.delivery");
     });
 
-    it("hides a destination whose any-of capabilities all resolved against it", () => {
+    it("keeps a destination whose any-of capabilities all resolved against it", () => {
         const noProviders: InstanceCapabilities = {
             ...ALL_CAPABILITIES,
             connectedAccounts: { google: false, microsoft: false },
@@ -248,8 +256,59 @@ describe("settings navigation gates on the manifest's visibility bucket", () => 
         const model = resolveSettingsNavigation(context("en", { capabilities: noProviders }));
         const ids = model.flatMap((scope) => scope.groups.flatMap((group) => group.destinations.map((d) => d.id)));
 
-        expect(ids).not.toContain("account.connections");
+        expect(ids).toContain("account.connections");
         expect(ids).toContain("account.profile");
+    });
+
+    it("keeps every destination the two retired teleports used to hide", () => {
+        const noCapabilities: InstanceCapabilities = {
+            sso: false,
+            socialLogin: { google: false, microsoft: false },
+            connectedAccounts: { google: false, microsoft: false },
+            connectedCapture: { google: false, microsoft: false },
+            mailManaged: true,
+            businessCardScanning: false,
+            businessCardImport: false,
+            campaignDelivery: false,
+        };
+        const model = resolveSettingsNavigation(context("en", { capabilities: noCapabilities }));
+        const ids = model.flatMap((scope) => scope.groups.flatMap((group) => group.destinations.map((d) => d.id)));
+
+        expect(ids).toContain("workspace.email");
+        expect(ids).toContain("organization.sso");
+        expect(
+            entries.filter((entry) => entry.conditionalForward !== null).map((entry) => entry.id),
+            "these two are visible because neither page forwards away from its own state any more",
+        ).toEqual([]);
+    });
+
+    it("still hides a capability-gated destination that declares no state to explain", () => {
+        const silent: SettingsEntry = {
+            ...(entries.find((entry) => entry.id === "workspace.email") ?? entries[0]),
+            id: "test.silent",
+            access: {
+                permissions: [],
+                capabilities: [{ key: "sso", expected: true }],
+                capabilityMatch: "all",
+                orgAdmin: false,
+                manage: [],
+                orgWrite: null,
+                states: [],
+            },
+        };
+        const noSso: InstanceCapabilities = { ...ALL_CAPABILITIES, sso: false };
+
+        expect(
+            entryVisible(silent, viewer({ capabilities: noSso })),
+            "a destination with nothing to say about being off is not worth advertising",
+        ).toBe(false);
+        expect(entryVisible(silent, viewer({ capabilities: ALL_CAPABILITIES }))).toBe(true);
+        expect(
+            entries.filter(
+                (entry) => entry.access.capabilities.length > 0 && entry.access.states.length === 0,
+            ),
+            "no shipped entry is in this shape — the manifest gate requires a capability-gated entry to explain itself — so the rule is proven on a constructed one",
+        ).toEqual([]);
     });
 
     it("keeps every capability-gated destination when the capability lookup failed", () => {

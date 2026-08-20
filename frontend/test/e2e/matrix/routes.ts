@@ -47,8 +47,9 @@ export type MatrixRoute = {
      * lands on `/auth/login`, which is otherwise indistinguishable from a healthy render because the
      * login page answers 200 and carries its own `<h1>`.
      *
-     * Defaults to the route's own path. Where a redirect is conditional on a capability flag, every
-     * reachable destination is listed.
+     * Defaults to the route's own path. A capability no longer conditions where a settings route
+     * settles: #1340 retired the two forwards that used to send `/settings/email` and
+     * `/organization/sso` elsewhere, so each renders its own path and explains the capability there.
      */
     landsOn?: readonly string[];
 };
@@ -79,7 +80,7 @@ export const MATRIX_ROUTES: readonly MatrixRoute[] = [
     { id: 'reports', path: '/overview/reports', area: 'other', tier: 2, role: 'member' },
     { id: 'analytics', path: '/overview/analytics', area: 'other', tier: 2, role: 'member' },
     { id: 'introductions', path: '/overview/introductions', area: 'ai', tier: 2, role: 'member' },
-    { id: 'settings-root', path: '/settings', area: 'settings', tier: 2, role: 'member', landsOn: ['/settings/members'] },
+    { id: 'settings-root', path: '/settings', area: 'settings', tier: 2, role: 'member' },
     { id: 'settings-members', path: '/settings/members', area: 'settings', tier: 2, role: 'member' },
     { id: 'settings-roles', path: '/settings/roles', area: 'settings', tier: 2, role: 'owner', deniesMember: true },
     { id: 'admin-logs', path: '/admin/logs', area: 'settings', tier: 2, role: 'admin', deniesMember: true },
@@ -104,17 +105,17 @@ export const MATRIX_ROUTES: readonly MatrixRoute[] = [
     { id: 'approval-policies', path: '/records/approval-policies', area: 'other', tier: 3, role: 'admin' },
     { id: 'custom-fields', path: '/settings/custom-fields', area: 'settings', tier: 3, role: 'admin', deniesMember: true },
     { id: 'settings-data', path: '/settings/data', area: 'import', tier: 3, role: 'admin' },
-    { id: 'settings-email', path: '/settings/email', area: 'settings', tier: 3, role: 'admin', deniesMember: true, landsOn: ['/settings/email', '/settings/members'] },
+    { id: 'settings-email', path: '/settings/email', area: 'settings', tier: 3, role: 'admin', deniesMember: true },
     { id: 'settings-delivery', path: '/settings/delivery', area: 'settings', tier: 3, role: 'admin', deniesMember: true },
     { id: 'settings-notifications', path: '/settings/notifications', area: 'settings', tier: 3, role: 'member', landsOn: ['/account/notifications'] },
     { id: 'settings-security', path: '/settings/security', area: 'settings', tier: 3, role: 'admin', landsOn: ['/account/security'] },
     { id: 'settings-membership', path: '/settings/membership', area: 'settings', tier: 3, role: 'member', landsOn: ['/account/invites'] },
     { id: 'settings-rules', path: '/settings/rules', area: 'workflows', tier: 3, role: 'admin', deniesMember: true, landsOn: ['/workflows'] },
-    { id: 'settings-sso', path: '/settings/sso', area: 'settings', tier: 3, role: 'admin', landsOn: ['/organization/sso', '/organization/members'] },
+    { id: 'settings-sso', path: '/settings/sso', area: 'settings', tier: 3, role: 'admin', landsOn: ['/organization/sso'] },
     { id: 'org-members', path: '/organization/members', area: 'settings', tier: 3, role: 'owner' },
     { id: 'org-audit', path: '/organization/audit', area: 'settings', tier: 3, role: 'owner' },
     { id: 'org-ai', path: '/organization/ai', area: 'ai', tier: 3, role: 'owner' },
-    { id: 'org-sso', path: '/organization/sso', area: 'settings', tier: 3, role: 'owner', landsOn: ['/organization/sso', '/organization/members'] },
+    { id: 'org-sso', path: '/organization/sso', area: 'settings', tier: 3, role: 'owner' },
     { id: 'org-domains', path: '/organization/allowed-domains', area: 'settings', tier: 3, role: 'owner' },
     { id: 'org-dsr', path: '/organization/data-requests', area: 'settings', tier: 3, role: 'owner' },
 ];

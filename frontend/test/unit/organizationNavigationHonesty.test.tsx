@@ -17,6 +17,7 @@ import CapabilityUnavailablePage from "@/app/components/CapabilityUnavailablePag
 import { NoAccessCard } from "@/app/components/organization/OrgPrimitives";
 import OrgTabs from "@/app/components/organization/OrgTabs";
 import OrganizationWorkspaceGuard from "@/app/components/organization/OrganizationWorkspaceGuard";
+import SettingsAvailabilityNotice from "@/app/components/settings/SettingsAvailabilityNotice";
 import SsoPanel from "@/app/components/settings/SsoPanel";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import type { MyWorkspaces, Workspace } from "@/app/lib/types";
@@ -244,6 +245,11 @@ function containsText(node: ReactNode, text: string): boolean {
     return containsText(node.props.children, text);
 }
 
+function hasAvailabilityState(value: unknown): value is { state: string } {
+    return typeof value === "object" && value !== null && "state" in value
+        && typeof value.state === "string";
+}
+
 function isOrgTabsProps(value: unknown): value is {
     isOrgAdmin: boolean;
     ssoAvailability: "enabled" | "disabled" | "unavailable";
@@ -414,12 +420,20 @@ describe("organization navigation authority", () => {
         await act(async () => root.unmount());
     });
 
-    it("redirects the SSO route only after a successful disabled-capability result", async () => {
+    it("explains a disabled-capability result in place instead of forwarding to Administrators", async () => {
         capabilityResultMock.mockResolvedValue({ ok: true, data: { sso: false } });
 
-        await OrgSsoPage();
+        const rendered = await OrgSsoPage();
 
-        expect(redirectMock).toHaveBeenCalledWith("/organization/members");
+        expect(isValidElement(rendered) ? rendered.type : null).toBe(SettingsAvailabilityNotice);
+        expect(
+            isValidElement(rendered) && hasAvailabilityState(rendered.props) ? rendered.props.state : null,
+        ).toBe("not-enabled");
+        expect(
+            redirectMock,
+            "#1340: an instance without single sign-on says so where single sign-on lives",
+        ).not.toHaveBeenCalled();
+        expect(renderToStaticMarkup(rendered)).toContain("notEnabledTitle");
     });
 
     it("renders SSO after a successful enabled-capability result without redirecting", async () => {

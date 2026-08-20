@@ -361,7 +361,50 @@ describe("settings manifest names real authorization", () => {
     });
 });
 
+/** Forwards naming a route the app does not serve. */
+function danglingForwards(candidates: readonly SettingsEntry[]): readonly SettingsEntry[] {
+    return candidates
+        .filter((entry) => entry.conditionalForward !== null)
+        .filter(
+            (entry) =>
+                !registeredRoutes.has(entry.conditionalForward?.to ?? "") &&
+                !(SHIPPED_APP_ROUTES as readonly string[]).includes(entry.conditionalForward?.to ?? ""),
+        );
+}
+
+/** Forwards fired by a capability their own entry declares no requirement on. */
+function unbackedForwards(candidates: readonly SettingsEntry[]): readonly SettingsEntry[] {
+    return candidates
+        .filter((entry) => entry.conditionalForward !== null)
+        .filter(
+            (entry) =>
+                !entry.access.capabilities.some(
+                    (requirement) => requirement.key === entry.conditionalForward?.capability,
+                ),
+        );
+}
+
+/**
+ * The two gates over `conditionalForward` below hold vacuously: #1340's capability-state work
+ * retired `/settings/email`'s and `/organization/sso`'s forwards, and the manifest recorded those
+ * two as the complete set, so there is nothing left for them to match. They stay because a future
+ * forward must still be caught — the first entry that declares one is checked for a real target and
+ * for a capability it actually depends on. The count assertion is what keeps the vacuity honest: it
+ * fails if a forward comes back, rather than letting two silent gates imply a check that no longer
+ * runs.
+ */
 describe("settings manifest forwards only to destinations that exist", () => {
+    it("declares no capability forward at all (the manifest's set is empty; redirect stubs that resolve addresses are outside this property)", () => {
+        const forwards = entries
+            .filter((entry) => entry.conditionalForward !== null)
+            .map((entry) => `${entry.id} -> ${entry.conditionalForward?.to}`);
+
+        expect(
+            forwards,
+            "a capability-managed destination explains its state in place; it never forwards the reader somewhere else",
+        ).toEqual([]);
+    });
+
     it("resolves every redirect target to a registered route or a shipped route", () => {
         const dangling = entries
             .filter((entry) => entry.redirectsTo !== null)
@@ -378,31 +421,37 @@ describe("settings manifest forwards only to destinations that exist", () => {
     });
 
     it("resolves every capability forward to a registered route or a shipped route", () => {
-        const dangling = entries
-            .filter((entry) => entry.conditionalForward !== null)
-            .filter(
-                (entry) =>
-                    !registeredRoutes.has(entry.conditionalForward?.to ?? "") &&
-                    !(SHIPPED_APP_ROUTES as readonly string[]).includes(entry.conditionalForward?.to ?? ""),
-            );
+        const dangling = danglingForwards(entries);
 
         expect(dangling.map((entry) => entry.id)).toEqual([]);
     });
 
     it("records a capability forward only where a capability the entry declares could fire it", () => {
-        const unbacked = entries
-            .filter((entry) => entry.conditionalForward !== null)
-            .filter(
-                (entry) =>
-                    !entry.access.capabilities.some(
-                        (requirement) => requirement.key === entry.conditionalForward?.capability,
-                    ),
-            );
+        const unbacked = unbackedForwards(entries);
 
         expect(
             unbacked.map((entry) => entry.id),
             "a forward names a capability the entry does not declare a requirement on",
         ).toEqual([]);
+    });
+
+    it("still catches a forward, so its two gates are vacuous rather than retired", () => {
+        const template = entries.find((entry) => entry.id === "workspace.email");
+        if (template === undefined) throw new Error("workspace.email left the manifest");
+        const reintroduced: SettingsEntry = {
+            ...template,
+            id: "test.teleporting",
+            conditionalForward: { capability: "mailManaged", expected: true, to: "/settings/members" },
+        };
+        const nowhere: SettingsEntry = {
+            ...reintroduced,
+            conditionalForward: { capability: "sso", expected: false, to: "/settings/nowhere" },
+        };
+
+        expect(danglingForwards([reintroduced])).toEqual([]);
+        expect(danglingForwards([nowhere]).map((entry) => entry.id)).toEqual(["test.teleporting"]);
+        expect(unbackedForwards([reintroduced])).toEqual([]);
+        expect(unbackedForwards([nowhere]).map((entry) => entry.id)).toEqual(["test.teleporting"]);
     });
 });
 

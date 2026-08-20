@@ -6,7 +6,6 @@ import { useTranslations } from "next-intl";
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 
 import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
-import WorkspaceUnavailableRetry from "@/app/components/WorkspaceUnavailableRetry";
 import ManagedConnectDialog from "@/app/components/account/connected-accounts/ManagedConnectDialog";
 import CapturePolicyDialog from "@/app/components/account/connected-capture/CapturePolicyDialog";
 import CaptureProviderCard from "@/app/components/account/connected-capture/CaptureProviderCard";
@@ -16,6 +15,7 @@ import CapturePurgeDialog, {
 import CaptureReviewQueue from "@/app/components/account/connected-capture/CaptureReviewQueue";
 import WorkspaceCapturePolicyDialog from "@/app/components/account/connected-capture/WorkspaceCapturePolicyDialog";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
+import SettingsAvailabilityNotice from "@/app/components/settings/SettingsAvailabilityNotice";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import {
     approveCapturedItem,
@@ -154,7 +154,6 @@ export default function ConnectionsPanel({
     permissionsStatus: PermissionsStatus;
 }) {
     const t = useTranslations("AccountConnections");
-    const tCapability = useTranslations("CapabilityUnavailable");
     const tPolicy = useTranslations("AccountCapturePolicy");
     const tWorkspacePolicy = useTranslations("AccountWorkspaceCapturePolicy");
     const tCapture = useTranslations("AccountCaptureProvider");
@@ -492,17 +491,7 @@ export default function ConnectionsPanel({
             </div>
 
             {capabilitiesAvailability === "unavailable" ? (
-                <PermissionsUnavailable
-                    variant="inline"
-                    title={tCapability("title")}
-                    body={tCapability("body")}
-                    action={(
-                        <WorkspaceUnavailableRetry
-                            label={tCapability("retry")}
-                            pendingLabel={tCapability("retrying")}
-                        />
-                    )}
-                />
+                <SettingsAvailabilityNotice variant="inline" state="retry" />
             ) : null}
 
             {connections === null ? (
@@ -526,12 +515,12 @@ export default function ConnectionsPanel({
                     </Button>
                 </div>
             ) : providersToShow.length === 0 && capabilitiesAvailability === "disabled" ? (
-                <div className="rounded-2xl border border-dashed border-border bg-card px-6 py-12 text-center">
-                    <p className="text-sm font-medium text-foreground">{t("unavailableTitle")}</p>
-                    <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-                        {t("unavailableBody")}
-                    </p>
-                </div>
+                <SettingsAvailabilityNotice
+                    variant="inline"
+                    state="not-enabled"
+                    title={t("unavailableTitle")}
+                    body={t("unavailableBody")}
+                />
             ) : providersToShow.length > 0 ? (
                 <div className="grid gap-3">
                     {providersToShow.map((provider) => {
