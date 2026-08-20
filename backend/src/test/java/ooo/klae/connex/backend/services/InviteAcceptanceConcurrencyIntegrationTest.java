@@ -52,7 +52,7 @@ class InviteAcceptanceConcurrencyIntegrationTest {
 
     @Autowired private InviteService inviteService;
     @Autowired private OrganizationMapper organizationMapper;
-    @Autowired private UserMapper userMapper;
+    @MockitoSpyBean private UserMapper userMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private SqlSessionTemplate sqlSessionTemplate;
@@ -115,33 +115,32 @@ class InviteAcceptanceConcurrencyIntegrationTest {
     @Test
     void committedRevocationMakesWaitingAcceptanceFailWithoutMembership() throws Exception {
         InviteMapper realMapper = sqlSessionTemplate.getMapper(InviteMapper.class);
-        CountDownLatch claimReached = new CountDownLatch(1);
-        CountDownLatch releaseClaim = new CountDownLatch(1);
+        UserMapper realUserMapper = sqlSessionTemplate.getMapper(UserMapper.class);
+        CountDownLatch creatorLockReached = new CountDownLatch(1);
+        CountDownLatch releaseCreatorLock = new CountDownLatch(1);
         doAnswer(invocation -> {
-            claimReached.countDown();
-            if (!releaseClaim.await(10, TimeUnit.SECONDS)) {
-                throw new IllegalStateException("Acceptance claim was not released");
+            creatorLockReached.countDown();
+            if (!releaseCreatorLock.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Creator lock was not released");
             }
-            return realMapper.claimAcceptance(
-                invite.getId(), invite.getToken(), workspace.getId(), recipient.getId());
-        }).when(inviteMapper).claimAcceptance(
-            invite.getId(), invite.getToken(), workspace.getId(), recipient.getId());
+            return realUserMapper.lockById(inviter.getId());
+        }).when(userMapper).lockById(inviter.getId());
 
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
             Future<BadRequestException> acceptance = executor.submit(() -> assertThrows(
                 BadRequestException.class,
                 () -> inviteService.acceptInvite(invite.getToken(), recipient)));
-            assertTrue(claimReached.await(10, TimeUnit.SECONDS));
+            assertTrue(creatorLockReached.await(10, TimeUnit.SECONDS));
 
             assertEquals(1, realMapper.markRevoked(invite.getId(), workspace.getId()));
-            releaseClaim.countDown();
+            releaseCreatorLock.countDown();
 
             assertEquals(
                 "This invite is no longer available",
                 acceptance.get(20, TimeUnit.SECONDS).getMessage());
         } finally {
-            releaseClaim.countDown();
+            releaseCreatorLock.countDown();
             executor.shutdownNow();
             assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
         }
