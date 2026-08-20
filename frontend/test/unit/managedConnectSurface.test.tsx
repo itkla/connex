@@ -1,4 +1,3 @@
-import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
@@ -11,28 +10,29 @@ vi.mock("next-intl", () => ({
 }));
 
 function renderCard(overrides: { managedUnavailable: boolean }): string {
-    return renderToStaticMarkup(createElement(NowProvider, {
-        value: Date.parse("2026-08-19T12:00:00Z"),
-        children: createElement(CaptureProviderCard, {
-            provider: "google" as const,
-            providerIcon: null,
-            state: "disconnected" as const,
-            managedUnavailable: overrides.managedUnavailable,
-            connection: null,
-            connectionEnabled: !overrides.managedUnavailable,
-            captureEnabled: false,
-            capture: null,
-            captureLoading: false,
-            captureLoadError: false,
-            pendingReviews: 0,
-            authorizationErrorCode: null,
-            busy: false,
-            onConnect: () => undefined,
-            onManage: () => undefined,
-            onSync: () => undefined,
-            onRetryCapture: () => undefined,
-        }),
-    }));
+    return renderToStaticMarkup(
+        <NowProvider value={Date.parse("2026-08-19T12:00:00Z")}>
+            <CaptureProviderCard
+                provider="google"
+                providerIcon={null}
+                state="disconnected"
+                managedUnavailable={overrides.managedUnavailable}
+                connection={null}
+                connectionEnabled={!overrides.managedUnavailable}
+                captureEnabled={false}
+                capture={null}
+                captureLoading={false}
+                captureLoadError={false}
+                pendingReviews={0}
+                authorizationErrorCode={null}
+                busy={false}
+                onConnect={() => undefined}
+                onManage={() => undefined}
+                onSync={() => undefined}
+                onRetryCapture={() => undefined}
+            />
+        </NowProvider>,
+    );
 }
 
 describe("connected-account credential modes", () => {

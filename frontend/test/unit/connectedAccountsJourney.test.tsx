@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
+import CaptureProviderCard from "@/app/components/account/connected-capture/CaptureProviderCard";
 import { NowProvider } from "@/app/hooks/useNow";
 import {
     CAPTURE_PANELS,
@@ -221,32 +221,30 @@ describe("two clicks to provider authorization", () => {
      * assertion is what makes the second step terminal: the confirm performs the handoff itself
      * rather than advancing to another surface.
      */
-    it("offers exactly one enabled control on a disconnected card", async () => {
-        const { default: CaptureProviderCard } = await import(
-            "@/app/components/account/connected-capture/CaptureProviderCard"
+    it("offers exactly one enabled control on a disconnected card", () => {
+        const markup = renderToStaticMarkup(
+            <NowProvider value={Date.parse("2026-08-19T12:00:00Z")}>
+                <CaptureProviderCard
+                    provider="google"
+                    providerIcon={null}
+                    state="disconnected"
+                    managedUnavailable={false}
+                    connection={null}
+                    connectionEnabled
+                    captureEnabled={false}
+                    capture={null}
+                    captureLoading={false}
+                    captureLoadError={false}
+                    pendingReviews={0}
+                    authorizationErrorCode={null}
+                    busy={false}
+                    onConnect={() => undefined}
+                    onManage={() => undefined}
+                    onSync={() => undefined}
+                    onRetryCapture={() => undefined}
+                />
+            </NowProvider>,
         );
-        const markup = renderToStaticMarkup(createElement(NowProvider, {
-            value: Date.parse("2026-08-19T12:00:00Z"),
-            children: createElement(CaptureProviderCard, {
-                provider: "google" as const,
-                providerIcon: null,
-                state: "disconnected" as const,
-                managedUnavailable: false,
-                connection: null,
-                connectionEnabled: true,
-                captureEnabled: false,
-                capture: null,
-                captureLoading: false,
-                captureLoadError: false,
-                pendingReviews: 0,
-                authorizationErrorCode: null,
-                busy: false,
-                onConnect: () => undefined,
-                onManage: () => undefined,
-                onSync: () => undefined,
-                onRetryCapture: () => undefined,
-            }),
-        }));
 
         const buttons = markup.match(/<button/g) ?? [];
         expect(buttons).toHaveLength(1);

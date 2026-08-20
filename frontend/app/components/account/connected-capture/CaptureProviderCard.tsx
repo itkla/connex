@@ -127,6 +127,7 @@ export default function CaptureProviderCard({
     const streams = streamSummary(capture);
     const lastSuccess = lastCaptureSuccessAt(capture);
     const mustReauthorize = needsReauthorization(capture);
+    const showSecondaryAction = captureEnabled || mustReauthorize;
 
     return (
         <article className="rounded-2xl border border-border bg-card px-4 py-4 sm:px-5">
@@ -162,36 +163,37 @@ export default function CaptureProviderCard({
                     {connection ? (
                         <>
                             <Button
-                                variant="outline"
-                                size="sm"
+                                variant={showSecondaryAction ? 'outline' : 'default'}
+                                size="toolbar"
                                 onClick={onManage}
                                 disabled={busy}
                             >
                                 {t('manage')}
                             </Button>
-                            <Button
-                                size="sm"
-                                disabled={
-                                    busy
-                                    || (!mustReauthorize
-                                        && (!captureEnabled
-                                            || !capture?.effectivePolicy.enabled
-                                            || state !== 'connected'))
-                                }
-                                onClick={mustReauthorize ? onConnect : onSync}
-                            >
-                                <ArrowPathIcon
-                                    data-icon="inline-start"
-                                    className={state === 'syncing'
-                                        ? 'animate-spin motion-reduce:animate-none'
-                                        : undefined}
-                                />
-                                {mustReauthorize ? t('reconnect') : tCapture('syncNow')}
-                            </Button>
+                            {showSecondaryAction ? (
+                                <Button
+                                    size="toolbar"
+                                    disabled={
+                                        busy
+                                        || (!mustReauthorize
+                                            && (!capture?.effectivePolicy.enabled
+                                                || state !== 'connected'))
+                                    }
+                                    onClick={mustReauthorize ? onConnect : onSync}
+                                >
+                                    <ArrowPathIcon
+                                        data-icon="inline-start"
+                                        className={state === 'syncing'
+                                            ? 'animate-spin motion-reduce:animate-none'
+                                            : undefined}
+                                    />
+                                    {mustReauthorize ? t('reconnect') : tCapture('syncNow')}
+                                </Button>
+                            ) : null}
                         </>
                     ) : (
                         <Button
-                            size="sm"
+                            size="toolbar"
                             onClick={onConnect}
                             disabled={!connectionEnabled || busy || managedUnavailable}
                         >
@@ -210,7 +212,7 @@ export default function CaptureProviderCard({
                     <Button
                         type="button"
                         variant="outline"
-                        size="sm"
+                        size="toolbar"
                         className="mt-3"
                         disabled={!connectionEnabled || busy || managedUnavailable}
                         onClick={onConnect}
@@ -252,7 +254,7 @@ export default function CaptureProviderCard({
                             <p className="text-sm text-destructive" role="alert">
                                 {tCapture('loadFailed')}
                             </p>
-                            <Button type="button" variant="outline" size="sm" onClick={onRetryCapture}>
+                            <Button type="button" variant="outline" size="toolbar" onClick={onRetryCapture}>
                                 {tCapture('retry')}
                             </Button>
                         </div>
