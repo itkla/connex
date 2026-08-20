@@ -188,7 +188,12 @@ describe("people & access tells a failed read apart from an empty workspace", ()
         const view = source(PEOPLE_ACCESS);
 
         expect(view).toContain("users: User[] | null;");
-        expect(view).toContain('users === null ? (\n                                <SettingsAvailabilityNotice variant="inline" state="retry" />');
+        expect(view).toContain("users === null ? (");
+        expect(view).toContain('title={t("directoryFailedTitle")}');
+        expect(
+            view,
+            "the shared notice's own retry copy is about a feature's availability; the read that failed here is the member list",
+        ).toContain('body={t("directoryFailedBody")}');
         expect(
             view,
             "the other sections are unaffected: one section's failed read is not a refusal of the destination",
@@ -252,7 +257,13 @@ describe("people & access gates its sections without hiding them", () => {
         expect(page).toContain('usePermissionCheck("WORKSPACE_SETTINGS")');
         expect(page, "a refused section explains itself where it stands rather than vanishing")
             .toContain("SettingsAvailabilityNotice");
-        expect(page).toContain('state={check === "denied" ? "ask-admin" : "retry"}');
+        expect(page, "a refusal and a failed lookup are different things to be told").toContain(
+            'if (check === "denied") return <SettingsAvailabilityNotice variant="inline" state="ask-admin" />;',
+        );
+        expect(
+            page,
+            "the unresolved case names the lookup that failed: the viewer's permissions, not a feature's availability",
+        ).toContain('title={t("accessCheckFailedTitle")}');
     });
 
     it("keeps the page itself ungated, because its roster renders for any member", () => {

@@ -39,9 +39,13 @@
         "askAdminBody": "Your role doesn't include this setting. A workspace admin can change it for you, or give you access to it."
     },
     "SettingsPeople": {
+        "accessCheckFailedBody": "This is a problem reading your permissions, not a decision about them. Try again in a moment.",
+        "accessCheckFailedTitle": "Couldn't check your access",
         "description": "Who belongs to {workspace}, what each role can do, and who may join without an invite.",
-        "metaDescription": "Manage members, roles, allowed domains, and the member directory for this workspace.",
+        "directoryDescription": "Look someone up, then open their page to see their work. Only members who have accepted their invitation appear here; anyone still pending is listed under Members, above.",
+        "directoryFailedBody": "Nobody's access changed. The list itself didn't load, so try again in a moment.",
+        "directoryFailedTitle": "Couldn't load the member directory",
         "directoryTitle": "Member directory",
-        "directoryDescription": "Look someone up, then open their page to see their work. Only members who have accepted their invitation appear here; anyone still pending is listed under Members, above."
+        "metaDescription": "Manage members, roles, allowed domains, and the member directory for this workspace."
     }
 }

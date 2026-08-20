@@ -59,9 +59,23 @@ function PeopleSectionRegion({
  * cannot read roles still sees that roles exist here and is told who can change that, rather than
  * finding a page with a hole in it. A failed permission lookup is kept apart from a refusal,
  * because "we could not check" and "you may not" are different things to be told.
+ *
+ * The unresolved case says what actually failed. The shared notice's own retry copy is about
+ * checking whether a *feature* is available, which is the state its first consumers were in; here
+ * the lookup that failed is the viewer's permissions, and a member reading "we couldn't check
+ * feature availability" under Roles would be told about the wrong thing entirely.
  */
 function RefusedSection({ check }: { check: Exclude<PermissionCheck, "granted"> }) {
-    return <SettingsAvailabilityNotice variant="inline" state={check === "denied" ? "ask-admin" : "retry"} />;
+    const t = useTranslations("SettingsPeople");
+    if (check === "denied") return <SettingsAvailabilityNotice variant="inline" state="ask-admin" />;
+    return (
+        <SettingsAvailabilityNotice
+            variant="inline"
+            state="retry"
+            title={t("accessCheckFailedTitle")}
+            body={t("accessCheckFailedBody")}
+        />
+    );
 }
 
 /**
@@ -155,7 +169,12 @@ export default function PeopleAccess({
                             className="scroll-mt-24 outline-none"
                         >
                             {users === null ? (
-                                <SettingsAvailabilityNotice variant="inline" state="retry" />
+                                <SettingsAvailabilityNotice
+                                    variant="inline"
+                                    state="retry"
+                                    title={t("directoryFailedTitle")}
+                                    body={t("directoryFailedBody")}
+                                />
                             ) : (
                                 <UsersBrowser users={users} presentation="section" />
                             )}
