@@ -1,37 +1,25 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import {
-    AdjustmentsHorizontalIcon,
-    ArrowPathIcon,
-    EllipsisHorizontalIcon,
-    LinkIcon,
-    PauseIcon,
-    PlayIcon,
-    ShieldCheckIcon,
-    TrashIcon,
-    UserGroupIcon,
-} from '@heroicons/react/24/outline';
-import { useTranslations } from 'next-intl';
+import { ArrowPathIcon, LinkIcon } from '@heroicons/react/24/outline';
+import { useLocale, useTranslations } from 'next-intl';
 
-import CaptureHealth from '@/app/components/account/connected-capture/CaptureHealth';
+import { useLiveNow } from '@/app/hooks/useNow';
+import {
+    lastCaptureSuccessAt,
+    needsReauthorization,
+    type ProviderJourneyState,
+} from '@/app/lib/connectedCapture';
 import { MANAGED_OAUTH_DOC_URL } from '@/app/lib/managedConnect';
 import type {
-    ConnectedAccountMode,
     ConnectedAccountProvider,
     ProviderCaptureOverview,
     ProviderConnection,
     ProviderConnectionStatus,
 } from '@/app/lib/types';
+import { formatRelativeTime } from '@/app/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuSeparator,
-    DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
@@ -39,30 +27,65 @@ const STATUS_CLASS: Record<ProviderConnectionStatus, string> = {
     connected: 'bg-brand text-brand-foreground ring-brand',
     paused: 'bg-risk-medium/15 text-risk-medium ring-risk-medium/30',
     error: 'bg-destructive/15 text-destructive ring-destructive/30',
-    revoked: 'bg-muted text-muted-foreground ring-border',
+    revoked: 'bg-destructive/15 text-destructive ring-destructive/30',
     disconnecting: 'bg-risk-medium/15 text-risk-medium ring-risk-medium/30',
     purge_failed: 'bg-destructive/15 text-destructive ring-destructive/30',
 };
 
-function captureState(overview: ProviderCaptureOverview): 'ready' | 'configured' | 'notIngesting' | 'notConfigured' {
-    if (!overview.userPolicy.enabled) return 'notConfigured';
-    if (!overview.effectivePolicy.enabled) return 'notIngesting';
-    return overview.activationReady ? 'ready' : 'configured';
+const STREAM_LABEL_KEYS = {
+    calendar: 'stream.calendar',
+    mail: 'stream.mail',
+} as const;
+
+function streamSummary(
+    capture: ProviderCaptureOverview | null,
+): { mail: 'active' | 'off'; calendar: 'active' | 'off' } | null {
+    if (!capture) return null;
+    const effective = capture.effectivePolicy;
+    return {
+        mail: effective.enabled && (effective.mailInbox || effective.mailSent) ? 'active' : 'off',
+        calendar: effective.enabled && effective.calendar ? 'active' : 'off',
+    };
 }
 
 /**
- * Shows OAuth custody and capture readiness as separate states for one provider.
+ * One row of the card's at-a-glance strip: a muted label above the value it names.
  *
- * The credential mode is named on the card because the two modes have different operator
- * obligations: a Connex-managed provider uses the Connex-owned verified OAuth application, while a
- * custom provider uses credentials this installation's operator created. When managed mode is
- * selected but its application is not usable in this build, the card says so instead of offering a
- * connect action that cannot succeed.
+ * Deliberately not a box. The strip sits inside the provider card, and a bordered tile inside a
+ * bordered card inside a bordered panel is the nesting this card was rebuilt to remove.
+ */
+function GlanceItem({ label, children }: { label: string; children: ReactNode }) {
+    return (
+        <div className="min-w-0">
+            <dt className="text-xs text-muted-foreground">{label}</dt>
+            <dd className="mt-0.5 truncate text-sm font-medium text-foreground">{children}</dd>
+        </div>
+    );
+}
+
+/**
+ * One provider's place in the connected-accounts journey.
+ *
+ * The card carries only what the reader must decide from: disconnected, it states the concrete
+ * value and offers the single action that starts authorization; connected, it states who is
+ * connected, whether mail and calendar are running, and when capture last succeeded, then hands
+ * everything else to the manage drawer. Sync lifecycle, capture policy, workspace defaults, the
+ * review queue, disconnect, and erasure all live behind `Manage`, so the card never becomes a
+ * control plane again.
+ *
+ * The credential mode is not named here. Which OAuth application an instance uses is an operator
+ * concern, and the card says what the reader must do rather than how authorization is arranged.
+ * The one exception is a managed application that cannot be used in this build: that blocks the
+ * reader's own action, so it is stated in place instead of offering a connect that cannot succeed.
+ *
+ * @param state the journey state this card renders, derived once by the panel
+ * @param capture the provider's capture overview, or null when capture is off or still loading
+ * @param pendingReviews items waiting on this reader, surfaced only when there are any
  */
 export default function CaptureProviderCard({
     provider,
     providerIcon,
-    mode,
+    state,
     managedUnavailable,
     connection,
     connectionEnabled,
@@ -70,21 +93,17 @@ export default function CaptureProviderCard({
     capture,
     captureLoading,
     captureLoadError,
-    canManageWorkspacePolicy,
+    pendingReviews,
+    authorizationErrorCode,
     busy,
     onConnect,
-    onTogglePause,
-    onConfigure,
-    onWorkspacePolicy,
+    onManage,
     onSync,
-    onReviews,
-    onPurge,
-    onDisconnect,
     onRetryCapture,
 }: {
     provider: ConnectedAccountProvider;
     providerIcon: ReactNode;
-    mode: ConnectedAccountMode;
+    state: ProviderJourneyState;
     managedUnavailable: boolean;
     connection: ProviderConnection | null;
     connectionEnabled: boolean;
@@ -92,37 +111,32 @@ export default function CaptureProviderCard({
     capture: ProviderCaptureOverview | null;
     captureLoading: boolean;
     captureLoadError: boolean;
-    canManageWorkspacePolicy: boolean;
+    pendingReviews: number;
+    authorizationErrorCode: string | null;
     busy: boolean;
     onConnect: () => void;
-    onTogglePause: () => void;
-    onConfigure: () => void;
-    onWorkspacePolicy: () => void;
+    onManage: () => void;
     onSync: () => void;
-    onReviews: () => void;
-    onPurge: () => void;
-    onDisconnect: () => void;
     onRetryCapture: () => void;
 }) {
     const t = useTranslations('AccountConnections');
     const tCapture = useTranslations('AccountCaptureProvider');
-    const needsReconnect = capture?.effectivePolicy.restrictionCodes.some(
-        (code) => code === 'not_connected'
-            || code === 'connection_error'
-            || code === 'connection_revoked',
-    ) ?? false;
+    const locale = useLocale();
+    const now = useLiveNow();
+    const providerName = t(`provider_${provider}`);
+    const streams = streamSummary(capture);
+    const lastSuccess = lastCaptureSuccessAt(capture);
+    const mustReauthorize = needsReauthorization(capture);
 
     return (
-        <article className="overflow-hidden rounded-2xl border border-border bg-card">
-            <div className="flex items-start gap-3 px-4 py-4 sm:px-5">
+        <article className="rounded-2xl border border-border bg-card px-4 py-4 sm:px-5">
+            <div className="flex flex-wrap items-start gap-3">
                 <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-muted ring-1 ring-border">
                     {providerIcon}
                 </div>
                 <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="text-sm font-semibold text-foreground">
-                            {t(`provider_${provider}`)}
-                        </h2>
+                        <h2 className="text-sm font-semibold text-foreground">{providerName}</h2>
                         {connection ? (
                             <span className={cn(
                                 'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset',
@@ -131,87 +145,92 @@ export default function CaptureProviderCard({
                                 {t(`status_${connection.status}`)}
                             </span>
                         ) : null}
-                        <Badge variant="outline">{t(`mode_${mode}`)}</Badge>
+                        {pendingReviews > 0 ? (
+                            <Badge variant="outline">
+                                {tCapture('reviews', { count: pendingReviews })}
+                            </Badge>
+                        ) : null}
                     </div>
-                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                    <p className="mt-1 max-w-prose text-sm text-muted-foreground">
                         {connection
-                            ? connection.providerAccountEmail
-                                ? t('connectedAs', { email: connection.providerAccountEmail })
-                                : t('connectedNoEmail')
-                            : t('notConnected')}
+                            ? connection.providerAccountEmail ?? t('connectedNoEmail')
+                            : t(`value_${provider}`)}
                     </p>
                 </div>
 
-                {connection ? (
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                    {connection ? (
+                        <>
                             <Button
-                                variant="ghost"
-                                size="icon-xs"
-                                aria-label={t('actions')}
+                                variant="outline"
+                                size="sm"
+                                onClick={onManage}
                                 disabled={busy}
                             >
-                                <EllipsisHorizontalIcon className="size-4" />
+                                {t('manage')}
                             </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                            {(connection.status === 'connected' || connection.status === 'paused') ? (
-                                <DropdownMenuItem onSelect={onTogglePause}>
-                                    {connection.status === 'paused' ? (
-                                        <><PlayIcon className="size-4" />{t('resume')}</>
-                                    ) : (
-                                        <><PauseIcon className="size-4" />{t('pause')}</>
-                                    )}
-                                </DropdownMenuItem>
-                            ) : null}
-                            {connectionEnabled && !managedUnavailable ? (
-                                <DropdownMenuItem onSelect={onConnect}>
-                                    <ArrowPathIcon className="size-4" />
-                                    {t('reconnect')}
-                                </DropdownMenuItem>
-                            ) : null}
-                            {captureEnabled && capture && canManageWorkspacePolicy ? (
-                                <DropdownMenuItem onSelect={onWorkspacePolicy}>
-                                    <ShieldCheckIcon className="size-4" />
-                                    {tCapture('workspacePolicy')}
-                                </DropdownMenuItem>
-                            ) : null}
-                            {captureEnabled && capture ? (
-                                <DropdownMenuItem onSelect={onPurge}>
-                                    <TrashIcon className="size-4" />
-                                    {tCapture('purge')}
-                                </DropdownMenuItem>
-                            ) : null}
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem variant="destructive" onSelect={onDisconnect}>
-                                <TrashIcon className="size-4" />
-                                {t('disconnect')}
-                            </DropdownMenuItem>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
-                ) : (
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={onConnect}
-                        disabled={!connectionEnabled || busy || managedUnavailable}
-                    >
-                        <LinkIcon className="size-4" />
-                        {t('connect')}
-                    </Button>
-                )}
+                            <Button
+                                size="sm"
+                                disabled={
+                                    busy
+                                    || (!mustReauthorize
+                                        && (!captureEnabled
+                                            || !capture?.effectivePolicy.enabled
+                                            || state !== 'connected'))
+                                }
+                                onClick={mustReauthorize ? onConnect : onSync}
+                            >
+                                <ArrowPathIcon
+                                    data-icon="inline-start"
+                                    className={state === 'syncing'
+                                        ? 'animate-spin motion-reduce:animate-none'
+                                        : undefined}
+                                />
+                                {mustReauthorize ? t('reconnect') : tCapture('syncNow')}
+                            </Button>
+                        </>
+                    ) : (
+                        <Button
+                            size="sm"
+                            onClick={onConnect}
+                            disabled={!connectionEnabled || busy || managedUnavailable}
+                        >
+                            <LinkIcon data-icon="inline-start" />
+                            {t('connectProvider', { provider: providerName })}
+                        </Button>
+                    )}
+                </div>
             </div>
 
+            {authorizationErrorCode ? (
+                <div className="mt-4 border-t border-border pt-4">
+                    <p className="max-w-prose text-sm text-destructive" role="alert">
+                        {t(`error_${authorizationErrorCode}`)}
+                    </p>
+                    <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="mt-3"
+                        disabled={!connectionEnabled || busy || managedUnavailable}
+                        onClick={onConnect}
+                    >
+                        <ArrowPathIcon data-icon="inline-start" />
+                        {t('tryAgain')}
+                    </Button>
+                </div>
+            ) : null}
+
             {managedUnavailable ? (
-                <div className="border-t border-border bg-muted/20 px-4 py-4 sm:px-5">
+                <div className="mt-4 border-t border-border pt-4">
                     <h3 className="text-sm font-medium text-foreground">
                         {t('managedUnavailableTitle')}
                     </h3>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                        {t('managedUnavailableBody', { provider: t(`provider_${provider}`) })}
+                    <p className="mt-1 max-w-prose text-sm text-muted-foreground">
+                        {t('managedUnavailableBody', { provider: providerName })}
                     </p>
                     <a
-                        className="mt-2 inline-block text-xs text-primary underline underline-offset-4"
+                        className="mt-2 inline-block text-sm text-primary underline underline-offset-4"
                         href={MANAGED_OAUTH_DOC_URL}
                         target="_blank"
                         rel="noreferrer"
@@ -221,23 +240,16 @@ export default function CaptureProviderCard({
                 </div>
             ) : null}
 
-            {captureEnabled ? (
-                <div className="border-t border-border bg-muted/20 px-4 py-4 sm:px-5">
-                    {!connection ? (
-                        <div>
-                            <h3 className="text-sm font-medium text-foreground">{tCapture('title')}</h3>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                                {tCapture('connectFirst')}
-                            </p>
-                        </div>
-                    ) : captureLoading ? (
+            {connection && captureEnabled ? (
+                <div className="mt-4 border-t border-border pt-4">
+                    {captureLoading ? (
                         <div className="grid gap-2" role="status" aria-label={tCapture('loading')}>
-                            <Skeleton className="h-5 w-40" />
-                            <Skeleton className="h-14 w-full" />
+                            <Skeleton className="h-4 w-40" />
+                            <Skeleton className="h-4 w-56" />
                         </div>
                     ) : captureLoadError || !capture ? (
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                            <p className="text-xs text-destructive" role="alert">
+                            <p className="text-sm text-destructive" role="alert">
                                 {tCapture('loadFailed')}
                             </p>
                             <Button type="button" variant="outline" size="sm" onClick={onRetryCapture}>
@@ -245,65 +257,27 @@ export default function CaptureProviderCard({
                             </Button>
                         </div>
                     ) : (
-                        <div className="grid gap-4">
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                <div>
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        <h3 className="text-sm font-medium text-foreground">{tCapture('title')}</h3>
-                                        <Badge variant="outline">
-                                            {tCapture(`state.${captureState(capture)}`)}
-                                        </Badge>
-                                    </div>
-                                    <p className="mt-1 text-xs text-muted-foreground">
-                                        {tCapture(`stateDescription.${captureState(capture)}`)}
-                                    </p>
-                                </div>
-                                <div className="flex flex-wrap gap-2">
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        disabled={busy}
-                                        onClick={onConfigure}
-                                    >
-                                        <AdjustmentsHorizontalIcon className="size-4" />
-                                        {capture.userPolicy.enabled
-                                            ? tCapture('editPolicy')
-                                            : tCapture('configure')}
-                                    </Button>
-                                    {capture.reviewCount > 0 || capture.pendingApprovalCount > 0 ? (
-                                        <Button
-                                            type="button"
-                                            variant="outline"
-                                            size="sm"
-                                            disabled={busy}
-                                            onClick={onReviews}
-                                        >
-                                            <UserGroupIcon className="size-4" />
-                                            {tCapture('reviews', {
-                                                count: capture.reviewCount + capture.pendingApprovalCount,
-                                            })}
-                                        </Button>
-                                    ) : null}
-                                    <Button
-                                        type="button"
-                                        size="sm"
-                                        disabled={
-                                            busy
-                                            || !capture.effectivePolicy.enabled
-                                            || connection.status !== 'connected'
-                                        }
-                                        onClick={needsReconnect ? onConnect : onSync}
-                                    >
-                                        <ArrowPathIcon className="size-4" />
-                                        {needsReconnect ? t('reconnect') : tCapture('syncNow')}
-                                    </Button>
-                                </div>
-                            </div>
-                            <CaptureHealth streams={capture.streams} />
-                        </div>
+                        <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">
+                            <GlanceItem label={t(STREAM_LABEL_KEYS.mail)}>
+                                {t(`streamState_${streams?.mail ?? 'off'}`)}
+                            </GlanceItem>
+                            <GlanceItem label={t(STREAM_LABEL_KEYS.calendar)}>
+                                {t(`streamState_${streams?.calendar ?? 'off'}`)}
+                            </GlanceItem>
+                            <GlanceItem label={t('lastSyncLabel')}>
+                                {lastSuccess
+                                    ? formatRelativeTime(lastSuccess, locale, now)
+                                    : t('lastSyncNever')}
+                            </GlanceItem>
+                        </dl>
                     )}
                 </div>
+            ) : null}
+
+            {connection && !captureEnabled ? (
+                <p className="mt-4 border-t border-border pt-4 text-sm text-muted-foreground">
+                    {tCapture('captureOff')}
+                </p>
             ) : null}
         </article>
     );

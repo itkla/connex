@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
 
 import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
+import ConnectionConsentDialog from "@/app/components/account/connected-accounts/ConnectionConsentDialog";
 import ManagedConnectDialog from "@/app/components/account/connected-accounts/ManagedConnectDialog";
 import CapturePolicyDialog from "@/app/components/account/connected-capture/CapturePolicyDialog";
 import CaptureProviderCard from "@/app/components/account/connected-capture/CaptureProviderCard";
@@ -13,6 +14,7 @@ import CapturePurgeDialog, {
     type CaptureLifecycleMode,
 } from "@/app/components/account/connected-capture/CapturePurgeDialog";
 import CaptureReviewQueue from "@/app/components/account/connected-capture/CaptureReviewQueue";
+import ManageConnectionDrawer from "@/app/components/account/connected-capture/ManageConnectionDrawer";
 import WorkspaceCapturePolicyDialog from "@/app/components/account/connected-capture/WorkspaceCapturePolicyDialog";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import SettingsAvailabilityNotice from "@/app/components/settings/SettingsAvailabilityNotice";
@@ -39,6 +41,10 @@ import {
     isCaptureOperationActive,
     parseCaptureRouteState,
     providerCaptureEnabled,
+    providerJourneyEnabled,
+    providerJourneyState,
+    rememberPendingAuthorization,
+    takePendingAuthorization,
 } from "@/app/lib/connectedCapture";
 import {
     connectedAccountMode,
@@ -194,6 +200,12 @@ export default function ConnectionsPanel({
     const [busyProvider, setBusyProvider] = useState<ConnectedAccountProvider | null>(null);
     const [lifecycleTarget, setLifecycleTarget] = useState<LifecycleTarget | null>(null);
     const [managedTarget, setManagedTarget] = useState<ConnectedAccountProvider | null>(null);
+    const [consentTarget, setConsentTarget] = useState<ConnectedAccountProvider | null>(null);
+    const [authorizingProvider, setAuthorizingProvider] =
+        useState<ConnectedAccountProvider | null>(null);
+    const [authorizationError, setAuthorizationError] = useState<
+        { provider: ConnectedAccountProvider | null; code: string } | null
+    >(null);
     const callbackAnnounced = useRef(false);
 
     const replaceRouteState = useCallback((next: Partial<typeof routeState>) => {
@@ -265,20 +277,34 @@ export default function ConnectionsPanel({
         const callbackError = searchParams.get("error");
         if ((!connected && !callbackError) || callbackAnnounced.current) return;
         callbackAnnounced.current = true;
+        const handedOffTo = takePendingAuthorization();
         const timeout = window.setTimeout(() => {
             if (connected === "google" || connected === "microsoft") {
                 toastSuccess(t("connectedToast", { provider: t(`provider_${connected}`) }));
+                setAuthorizationError(null);
                 setConnectionsReloadKey((current) => current + 1);
                 if (providerCaptureEnabled(capabilities, connected)) {
                     setCaptureReloadKey((current) => current + 1);
                 }
             } else if (callbackError) {
                 const known = ["state", "denied", "exchange", "no_offline_access"].includes(callbackError);
-                toastError(t(known ? `error_${callbackError}` : "error_exchange"));
+                const code = known ? callbackError : "exchange";
+                setAuthorizationError({ provider: handedOffTo, code });
+                toastError(t(`error_${code}`));
             }
-            router.replace(connectionsHrefWithoutOAuthCallback(currentSearchParams), {
-                scroll: false,
-            });
+            setAuthorizingProvider(null);
+            const resumed = connected === "google" || connected === "microsoft"
+                ? connected
+                : handedOffTo;
+            const withoutCallback = new URLSearchParams(currentSearchParams.toString());
+            withoutCallback.delete("connected");
+            withoutCallback.delete("error");
+            router.replace(
+                resumed
+                    ? captureConnectionsHref(withoutCallback, { provider: resumed })
+                    : connectionsHrefWithoutOAuthCallback(currentSearchParams),
+                { scroll: false },
+            );
         }, 50);
         return () => window.clearTimeout(timeout);
     }, [capabilities, currentSearchParams, router, searchParams, t]);
@@ -327,6 +353,19 @@ export default function ConnectionsPanel({
     const overviewOf = (provider: ConnectedAccountProvider) =>
         providerOverview(captureOverview, provider);
 
+    /**
+     * Returns a focused panel to the manage drawer it was opened from, so the drawer stays the one
+     * place the journey's secondary jobs live. A provider with no connection has no drawer to
+     * return to, which is the case a review deep link lands in after a disconnect.
+     */
+    const closePanel = (provider: ConnectedAccountProvider | null) => {
+        replaceRouteState({
+            panel: provider && connectionOf(provider) ? "manage" : null,
+            reviewId: null,
+            page: 1,
+        });
+    };
+
     const runProviderMutation = async <T,>(
         provider: ConnectedAccountProvider,
         request: () => Promise<T>,
@@ -354,20 +393,35 @@ export default function ConnectionsPanel({
         setCaptureReloadKey((current) => current + 1);
     }, []);
 
-    const connect = async (provider: ConnectedAccountProvider) => {
+    /**
+     * First of the two clicks any Connect action costs. A managed instance hands straight to the
+     * pairing dialog, whose own first screen is its expectation step; a custom instance opens the
+     * consent step here. Neither branch adds a screen the other does not have, so both reach
+     * provider authorization on the second click.
+     */
+    const connect = (provider: ConnectedAccountProvider) => {
+        setAuthorizationError(null);
         if (connectedAccountMode(capabilities, provider) === "managed") {
             setManagedTarget(provider);
             return;
         }
+        setConsentTarget(provider);
+    };
+
+    /** The second click: leaves the app for the provider's authorization page. */
+    const startAuthorization = async (provider: ConnectedAccountProvider) => {
         setBusyProvider(provider);
+        setAuthorizingProvider(provider);
         try {
             const { url } = await beginProviderConnection(provider);
+            rememberPendingAuthorization(provider);
             window.location.assign(url);
         } catch (error) {
             if (!handlePasskeyStepUpError(error)) {
                 toastError(error instanceof Error ? error.message : t("actionFailed"));
             }
             setBusyProvider(null);
+            setAuthorizingProvider(null);
         }
     };
 
@@ -477,11 +531,12 @@ export default function ConnectionsPanel({
     const activeLifecycleTarget = lifecycleTarget ?? purgeTarget;
     const providersToShow = PROVIDERS.filter(
         (provider) =>
-            connectionEnabled(provider)
-            || providerCaptureEnabled(capabilities, provider)
+            providerJourneyEnabled(capabilities, provider)
             || connectedAccountMode(capabilities, provider) === "managed"
             || connectionOf(provider) != null,
     );
+    const manageProvider = routeState.panel === "manage" ? routeState.provider : null;
+    const manageConnection = manageProvider ? connectionOf(manageProvider) : null;
 
     return (
         <div className="space-y-4">
@@ -532,55 +587,38 @@ export default function ConnectionsPanel({
                                 key={provider}
                                 provider={provider}
                                 providerIcon={provider === "google" ? <GoogleMark /> : <MicrosoftMark />}
-                                mode={connectedAccountMode(capabilities, provider)}
+                                state={providerJourneyState(
+                                    connection,
+                                    capture,
+                                    authorizingProvider === provider,
+                                )}
                                 managedUnavailable={managedIdentityUnavailable(capabilities, provider)}
                                 connection={connection}
-                                connectionEnabled={
-                                    connectionEnabled(provider) || captureEnabled
-                                }
+                                connectionEnabled={providerJourneyEnabled(capabilities, provider)}
                                 captureEnabled={captureEnabled}
                                 capture={capture}
                                 captureLoading={captureEnabled && captureLoading}
                                 captureLoadError={captureEnabled && captureError}
-                                canManageWorkspacePolicy={canManageWorkspacePolicy}
+                                pendingReviews={capture
+                                    ? capture.reviewCount + capture.pendingApprovalCount
+                                    : 0}
+                                authorizationErrorCode={
+                                    authorizationError
+                                        && (authorizationError.provider === provider
+                                            || (authorizationError.provider === null
+                                                && providersToShow.length === 1))
+                                        ? authorizationError.code
+                                        : null
+                                }
                                 busy={busyProvider === provider}
                                 onConnect={() => connect(provider)}
-                                onTogglePause={() => {
-                                    if (connection) togglePause(connection);
-                                }}
-                                onConfigure={() => replaceRouteState({
+                                onManage={() => replaceRouteState({
                                     provider,
-                                    panel: "policy",
-                                    reviewId: null,
-                                    page: 1,
-                                })}
-                                onWorkspacePolicy={() => replaceRouteState({
-                                    provider,
-                                    panel: "workspace-policy",
+                                    panel: "manage",
                                     reviewId: null,
                                     page: 1,
                                 })}
                                 onSync={() => sync(provider)}
-                                onReviews={() => {
-                                    setReviewPage(null);
-                                    setReviewsError(false);
-                                    replaceRouteState({
-                                        provider,
-                                        panel: "reviews",
-                                        reviewId: null,
-                                        page: 1,
-                                    });
-                                }}
-                                onPurge={() => replaceRouteState({
-                                    provider,
-                                    panel: "purge",
-                                    reviewId: null,
-                                    page: 1,
-                                })}
-                                onDisconnect={() => setLifecycleTarget({
-                                    provider,
-                                    mode: "disconnect",
-                                })}
                                 onRetryCapture={() =>
                                     setCaptureReloadKey((current) => current + 1)}
                             />
@@ -595,6 +633,60 @@ export default function ConnectionsPanel({
 
             <p className="max-w-2xl px-6 text-xs text-muted-foreground">{t("privacyNote")}</p>
 
+            {manageProvider && manageConnection ? (
+                <ManageConnectionDrawer
+                    key={manageProvider}
+                    providerName={t(`provider_${manageProvider}`)}
+                    providerIcon={manageProvider === "google" ? <GoogleMark /> : <MicrosoftMark />}
+                    connection={manageConnection}
+                    capture={overviewOf(manageProvider)}
+                    captureEnabled={providerCaptureEnabled(capabilities, manageProvider)}
+                    captureLoading={
+                        providerCaptureEnabled(capabilities, manageProvider) && captureLoading
+                    }
+                    captureLoadError={
+                        providerCaptureEnabled(capabilities, manageProvider) && captureError
+                    }
+                    canManageWorkspacePolicy={canManageWorkspacePolicy}
+                    busy={busyProvider === manageProvider}
+                    open
+                    onOpenChange={(open) => {
+                        if (!open) replaceRouteState({ panel: null, reviewId: null, page: 1 });
+                    }}
+                    onSync={() => sync(manageProvider)}
+                    onTogglePause={() => togglePause(manageConnection)}
+                    onReconnect={() => connect(manageProvider)}
+                    onEditPolicy={() => replaceRouteState({ panel: "policy" })}
+                    onWorkspacePolicy={() => replaceRouteState({ panel: "workspace-policy" })}
+                    onReviews={() => {
+                        setReviewPage(null);
+                        setReviewsError(false);
+                        replaceRouteState({ panel: "reviews", reviewId: null, page: 1 });
+                    }}
+                    onDisconnect={() => setLifecycleTarget({
+                        provider: manageProvider,
+                        mode: "disconnect",
+                    })}
+                    onPurge={() => replaceRouteState({ panel: "purge" })}
+                    onRetryCapture={() => setCaptureReloadKey((current) => current + 1)}
+                />
+            ) : null}
+
+            {consentTarget ? (
+                <ConnectionConsentDialog
+                    key={consentTarget}
+                    provider={consentTarget}
+                    providerName={t(`provider_${consentTarget}`)}
+                    captureEnabled={providerCaptureEnabled(capabilities, consentTarget)}
+                    open
+                    busy={busyProvider === consentTarget}
+                    onOpenChange={(open) => {
+                        if (!open && busyProvider !== consentTarget) setConsentTarget(null);
+                    }}
+                    onConfirm={() => startAuthorization(consentTarget)}
+                />
+            ) : null}
+
             {routeOverview && routeState.panel === "policy" ? (
                 <CapturePolicyDialog
                     key={`${routeOverview.provider}-${routeOverview.userPolicy.version}`}
@@ -602,7 +694,7 @@ export default function ConnectionsPanel({
                     open
                     saving={busyProvider === routeOverview.provider}
                     onOpenChange={(open) => {
-                        if (!open) replaceRouteState({ panel: null, reviewId: null, page: 1 });
+                        if (!open) closePanel(routeOverview.provider);
                     }}
                     onSave={(policy) => savePolicy(routeOverview.provider, policy)}
                 />
@@ -617,7 +709,7 @@ export default function ConnectionsPanel({
                         open
                         saving={busyProvider === routeOverview.provider}
                         onOpenChange={(open) => {
-                            if (!open) replaceRouteState({ panel: null, reviewId: null, page: 1 });
+                            if (!open) closePanel(routeOverview.provider);
                         }}
                         onSave={(policy) =>
                             saveWorkspacePolicy(routeOverview.provider, policy)}
@@ -638,7 +730,7 @@ export default function ConnectionsPanel({
                         if (!open) {
                             setReviewPage(null);
                             setReviewsError(false);
-                            replaceRouteState({ panel: null, reviewId: null, page: 1 });
+                            closePanel(routeOverview.provider);
                         }
                     }}
                     onPageChange={(page) => {
@@ -687,7 +779,7 @@ export default function ConnectionsPanel({
                     onOpenChange={(open) => {
                         if (open) return;
                         if (activeLifecycleTarget.mode === "purge") {
-                            replaceRouteState({ panel: null, reviewId: null, page: 1 });
+                            closePanel(activeLifecycleTarget.provider);
                         }
                         setLifecycleTarget(null);
                     }}

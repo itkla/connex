@@ -119,7 +119,20 @@
     "mode_custom": "独自の認証情報",
     "managedUnavailableTitle": "Connex 提供の連携はまだ利用できません",
     "managedUnavailableBody": "このインスタンスは Connex が提供する {provider} アプリケーションを使う設定ですが、プロバイダーの審査が完了していないため連携は無効になっています。当面は管理者が独自（BYO）の認証情報を設定できます。",
-    "managedUnavailableLink": "運用ガイドを読む"
+    "managedUnavailableLink": "運用ガイドを読む",
+    "value_google": "Gmail と Google カレンダーを連携すると、選んだ関係性のやり取りや打ち合わせが自動で最新に保たれます。",
+    "value_microsoft": "Outlook のメールとカレンダーを連携すると、選んだ関係性のやり取りや打ち合わせが自動で最新に保たれます。",
+    "connectProvider": "{provider} を連携",
+    "manage": "管理",
+    "tryAgain": "もう一度試す",
+    "stream": {
+      "mail": "メール",
+      "calendar": "カレンダー"
+    },
+    "streamState_active": "稼働中",
+    "streamState_off": "停止中",
+    "lastSyncLabel": "最終同期",
+    "lastSyncNever": "未実施"
   },
   "AccountManagedConnect": {
     "title": "{provider} と連携",
@@ -196,7 +209,8 @@
     "purge": "取り込みデータを消去",
     "reviews": "{count}件を確認",
     "syncNow": "今すぐ同期",
-    "syncStarted": "取り込み同期を開始しました"
+    "syncStarted": "取り込み同期を開始しました",
+    "captureOff": "この環境では、このプロバイダーのメールやカレンダーは取り込みません。連携はサインインとアクセスにのみ使われます。"
   },
   "AccountCapturePolicy": {
     "title": "関係性データの取り込みを設定",
@@ -370,7 +384,9 @@
     "create": "作成して紐づける",
     "rememberExact": "同じ完全一致かつ有効で一意な識別情報にのみ、この判断を記憶します。",
     "ignore": "この参加者を無視",
-    "resolved": "取り込み確認を解決しました"
+    "resolved": "取り込み確認を解決しました",
+    "drawerLabel": "確認が必要な項目",
+    "drawerDescription": "取り込んだ項目のうち、誰のものかの確認をお待ちしているものです。"
   },
   "AccountCaptureDisclosure": {
     "summary": "権限範囲・データ・可視性・保存期間を確認",
@@ -435,7 +451,9 @@
     "confirmDisconnect": "アカウント連携を解除",
     "purging": "消去を開始中",
     "disconnecting": "連携解除中",
-    "purgeStarted": "取り込みデータの消去を開始しました"
+    "purgeStarted": "取り込みデータの消去を開始しました",
+    "disconnectRetained": "連絡先・会社・案件・メモ・タスクはそのまま残ります。",
+    "purgeRetained": "連携自体は残ります。連絡先・会社・案件・メモ・タスクもそのまま残ります。"
   },
   "AccountChangeEmail": {
     "title": "メールアドレスを変更",
@@ -539,5 +557,38 @@
   "AccountLayout": {
     "title": "アカウント設定",
     "description": "プロフィール・セキュリティ・Connex の動作の管理"
+  },
+  "AccountConnectionConsent": {
+    "title": "{provider} を連携",
+    "expectationAuthorization": "アクセスの許可は {provider} のサインイン画面で行います。パスワードが Connex に渡ることはありません。",
+    "expectationNoCaptureYet": "連携しただけでは何も読み取りません。メールとカレンダーの取り込みは、取り込みポリシーを保存してから始まります。",
+    "expectationReversible": "このアカウントの一時停止や連携解除は、いつでも行えます。",
+    "cancel": "キャンセル",
+    "continue": "{provider} に進む",
+    "continuing": "{provider} を開いています"
+  },
+  "AccountManageConnection": {
+    "title": "{provider} の連携",
+    "sectionConnection": "連携の状態",
+    "sectionActivity": "取り込みの状況",
+    "sectionPreferences": "自分の設定",
+    "sectionWorkspaceDefaults": "ワークスペースの既定値",
+    "sectionEnding": "連携を終える",
+    "statusLabel": "状態",
+    "pausedNote": "一時停止中は新しい取り込みは行われません。すでに取り込まれた内容はそのまま残ります。",
+    "workspaceDefaultsNote": "これらの上限はワークスペース全体に設定されています。自分の設定でさらに絞り込むことはできますが、広げることはできません。",
+    "workspaceCaptureLabel": "このワークスペースでの取り込み",
+    "workspaceBodiesLabel": "メール本文",
+    "workspaceReviewLabel": "取り込み前の確認",
+    "workspaceReviewRequired": "必須",
+    "workspaceReviewOptional": "任意",
+    "editWorkspaceDefaults": "ワークスペースの既定値を編集",
+    "workspaceDefaultsAskAdmin": "これらの上限の変更は、ワークスペース管理者にご依頼ください。",
+    "allowed": "許可",
+    "notAllowed": "不許可",
+    "days": "{count}日",
+    "advanced": "詳細な操作",
+    "disconnectNote": "連携を解除すると、以後の同期は停止し、Connex からのアクセスがなくなります。連絡先・会社・案件・メモ・タスクはそのまま残ります。",
+    "purgeNote": "消去すると、このワークスペースでこのプロバイダーから取り込んだメールと打ち合わせのアクティビティが削除されます。連携自体はそのままです。元に戻せません。"
   }
 }

@@ -5,6 +5,8 @@ import type {
     ConnectedAccountProvider,
     InstanceCapabilities,
     ProviderCapturePolicy,
+    ProviderCaptureOverview,
+    ProviderConnection,
     WorkspaceCapturePolicy,
 } from '@/app/lib/types';
 
@@ -15,6 +17,7 @@ export const CAPTURE_STREAMS = [
 ] as const satisfies readonly CaptureStream[];
 
 export const CAPTURE_PANELS = [
+    'manage',
     'policy',
     'workspace-policy',
     'reviews',
@@ -96,12 +99,137 @@ export function connectionsHrefWithoutOAuthCallback(current: URLSearchParams): s
     return captureConnectionsHref(params, parseCaptureRouteState(params));
 }
 
+const PENDING_AUTHORIZATION_KEY = 'connex.connectedAccounts.pendingAuthorization';
+
+/**
+ * Records which provider this browser handed off to before authorization leaves the app.
+ *
+ * Authorization is a full-page departure and the provider's own error return carries only
+ * `?error=<code>`, never which provider failed. Without this, a denied Google authorization comes
+ * back indistinguishable from a denied Microsoft one and the journey cannot resume where it left.
+ * Session storage is the right lifetime: it survives the round trip and dies with the tab.
+ */
+export function rememberPendingAuthorization(provider: ConnectedAccountProvider): void {
+    try {
+        window.sessionStorage.setItem(PENDING_AUTHORIZATION_KEY, provider);
+    } catch {
+        return;
+    }
+}
+
+/** Reads and clears the provider this browser handed off to, or null when there was no handoff. */
+export function takePendingAuthorization(): ConnectedAccountProvider | null {
+    try {
+        const stored = window.sessionStorage.getItem(PENDING_AUTHORIZATION_KEY);
+        window.sessionStorage.removeItem(PENDING_AUTHORIZATION_KEY);
+        return isProvider(stored) ? stored : null;
+    } catch {
+        return null;
+    }
+}
+
 /** Reports whether the provider's capture surface is enabled independently of OAuth custody. */
 export function providerCaptureEnabled(
     capabilities: InstanceCapabilities,
     provider: ConnectedAccountProvider,
 ): boolean {
     return capabilities.connectedCapture[provider];
+}
+
+/**
+ * Reports whether the provider has a journey at all: either its OAuth custody or its capture
+ * surface is switched on. A provider whose capture is off is still connectable and still
+ * manageable, so the manage drawer answers to this rather than to capture alone.
+ */
+export function providerJourneyEnabled(
+    capabilities: InstanceCapabilities,
+    provider: ConnectedAccountProvider,
+): boolean {
+    return capabilities.connectedAccounts[provider] || capabilities.connectedCapture[provider];
+}
+
+/**
+ * Reports whether a panel reads capture data and therefore needs the capture capability. Only the
+ * manage drawer survives a capture-disabled provider; every other panel edits or lists something
+ * the capture surface owns.
+ */
+export function capturePanelRequiresCapture(panel: CapturePanel): boolean {
+    return panel !== 'manage';
+}
+
+/**
+ * The state one provider's card is in. `disconnected` and `authorizing` describe a provider with no
+ * stored connection; the rest are read from the connection row and its stream health.
+ *
+ * The consent step is deliberately absent: it is an overlay above a card that is still
+ * `disconnected`, so opening it changes nothing underneath and dismissing it restores nothing.
+ */
+export type ProviderJourneyState =
+    | 'disconnected'
+    | 'authorizing'
+    | 'connected'
+    | 'syncing'
+    | 'paused'
+    | 'attention'
+    | 'disconnecting';
+
+/**
+ * Derives the card state from the connection row, its capture health, and whether this browser has
+ * an authorization handoff in flight. Ordered by precedence: a durable disconnect outranks an
+ * authorization failure, which outranks a pause, which outranks live sync activity.
+ *
+ * @param connection the stored connection, or null when the provider has never been connected
+ * @param capture the provider's capture overview, or null when capture is off or not yet loaded
+ * @param authorizing whether this browser has started an authorization that has not returned
+ */
+export function providerJourneyState(
+    connection: ProviderConnection | null,
+    capture: ProviderCaptureOverview | null,
+    authorizing: boolean,
+): ProviderJourneyState {
+    if (!connection) return authorizing ? 'authorizing' : 'disconnected';
+    if (connection.status === 'disconnecting' || connection.status === 'purge_failed') {
+        return 'disconnecting';
+    }
+    if (connection.status === 'error' || connection.status === 'revoked') return 'attention';
+    if (capture?.streams.some((stream) => stream.status === 'intervention_required')) {
+        return 'attention';
+    }
+    if (connection.status === 'paused') return 'paused';
+    if (capture?.streams.some((stream) => isCaptureOperationActive(stream.status))) {
+        return 'syncing';
+    }
+    return 'connected';
+}
+
+/**
+ * The most recent moment any of the provider's streams last succeeded, or null when none has.
+ *
+ * `ProviderConnection.lastSyncAt` is not this value: the column survives from an earlier connection
+ * model and no write path sets it, so reading it would report "never" on a provider that is
+ * syncing. Stream success is the only recorded truth about when capture last ran.
+ */
+export function lastCaptureSuccessAt(capture: ProviderCaptureOverview | null): string | null {
+    if (!capture) return null;
+    let latest: string | null = null;
+    let latestValue = Number.NEGATIVE_INFINITY;
+    for (const stream of capture.streams) {
+        if (!stream.lastSuccessAt) continue;
+        const parsed = Date.parse(stream.lastSuccessAt);
+        if (Number.isNaN(parsed) || parsed <= latestValue) continue;
+        latestValue = parsed;
+        latest = stream.lastSuccessAt;
+    }
+    return latest;
+}
+
+/** Reports whether the provider's authorization must be renewed before capture can resume. */
+export function needsReauthorization(capture: ProviderCaptureOverview | null): boolean {
+    return capture?.effectivePolicy.restrictionCodes.some(
+        (code) => code === 'not_connected'
+            || code === 'connection_error'
+            || code === 'connection_revoked',
+    ) ?? false;
 }
 
 /** Builds the privacy-preserving first policy shown before a user has saved capture settings. */
