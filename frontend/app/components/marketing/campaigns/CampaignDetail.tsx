@@ -26,7 +26,7 @@ import CampaignDelivery from "@/app/components/marketing/campaigns/CampaignDeliv
 import CampaignEngagement from "@/app/components/marketing/campaigns/CampaignEngagement";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import CampaignExportPanel from "@/app/components/marketing/campaigns/CampaignExportPanel";
-import CampaignFormDialog from "@/app/components/marketing/campaigns/CampaignFormDialog";
+import EditCampaignSheet from "@/app/components/marketing/campaigns/EditCampaignSheet";
 import { PageShell } from "@/app/components/PageShell";
 import {
     type Campaign,
@@ -55,6 +55,7 @@ import {
 import {
     canEstimateAudience,
     canFreezeSnapshot,
+    canReadRecipients,
     type CampaignAccess,
 } from "@/app/lib/campaignAccess";
 import AccessDenied from "@/app/components/AccessDenied";
@@ -296,7 +297,7 @@ export default function CampaignDetail({
 
     return (
         <>
-            <PageShell tier="reading">
+            <PageShell>
                 <Rise className="flex flex-col gap-4">
                     <CrumbLabel value={current.name} />
                     <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
@@ -328,7 +329,7 @@ export default function CampaignDetail({
 
                 <Rise delay={0.06}>
                     <Tabs value={tab} onValueChange={setTab} className="gap-6">
-                    <div className="-mx-2 overflow-x-auto px-2 pb-px">
+                    <div className="-mx-2 overflow-x-auto px-2 pb-px 2xl:-mx-6 2xl:px-6">
                         <TabsList className="w-max">
                             <TabsTrigger value="overview">{t("tabOverview")}</TabsTrigger>
                             <TabsTrigger value="audience">{t("tabAudience")}</TabsTrigger>
@@ -579,7 +580,11 @@ export default function CampaignDetail({
                     </TabsContent>
 
                     <TabsContent value="engagement" forceMount className="data-[state=inactive]:hidden">
-                        <CampaignEngagement engagement={initialEngagement} />
+                        <CampaignEngagement
+                            campaignId={current.id}
+                            engagement={initialEngagement}
+                            canReadRecipients={canReadRecipients(access)}
+                        />
                     </TabsContent>
 
                     <TabsContent value="exports" forceMount className="data-[state=inactive]:hidden">
@@ -595,8 +600,7 @@ export default function CampaignDetail({
                 </Rise>
             </PageShell>
 
-            <CampaignFormDialog
-                mode="edit"
+            <EditCampaignSheet
                 open={editOpen}
                 onOpenChange={setEditOpen}
                 payload={editPayload}

@@ -689,7 +689,7 @@ export default function NotificationsInbox() {
         ?? t("filterWorkspace");
 
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <Rise>
                     <PageHeader
                         className="px-4 sm:px-6"

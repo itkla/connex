@@ -1,5 +1,5 @@
 import { ExclamationTriangleIcon } from '@heroicons/react/24/outline';
-import type { ReactNode } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 
 import PageState, { type PageStateAction } from '@/app/components/PageState';
 
@@ -25,10 +25,15 @@ const NO_ACTIONS: ReadonlyArray<PageStateAction> = [];
  * @param title localized heading; required for the full-page variant, which must never render a
  * headingless state, and optional for the compact in-panel card
  * @param body localized explanation that the check, not the caller, is what failed
+ * @param icon the muted tile's heroicon, for a caller whose state is not a failed check; defaults
+ * to the warning this component was named for
  * @param actions destinations offered from the full-page variant; the first is emphasized
  * @param action a recovery control supplied by the client tree that owns the failed check
  */
-export type PermissionsUnavailableProps = { body: string } & (
+export type PermissionsUnavailableProps = {
+    body: string;
+    icon?: ComponentType<{ className?: string }>;
+} & (
     | {
         variant?: 'page';
         title: string;
@@ -39,11 +44,12 @@ export type PermissionsUnavailableProps = { body: string } & (
 );
 
 export default function PermissionsUnavailable(props: PermissionsUnavailableProps) {
+    const Icon = props.icon ?? ExclamationTriangleIcon;
     if (props.variant === 'inline') {
         return (
             <div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card px-6 py-12 text-center">
                 <span aria-hidden className="grid size-10 place-items-center rounded-full bg-muted text-muted-foreground">
-                    <ExclamationTriangleIcon className="size-5" />
+                    <Icon className="size-5" />
                 </span>
                 <div className="space-y-1">
                     {props.title ? <p className="text-sm font-semibold text-foreground">{props.title}</p> : null}
@@ -55,7 +61,7 @@ export default function PermissionsUnavailable(props: PermissionsUnavailableProp
     }
     return (
         <PageState
-            icon={ExclamationTriangleIcon}
+            icon={Icon}
             title={props.title}
             body={props.body}
             actions={props.actions ?? NO_ACTIONS}

@@ -18,7 +18,7 @@ export default function DayView({
     today: Date;
     eventsByDay: Map<string, CalendarEvent[]>;
     locale: string;
-    onOpenEvent: (event: CalendarEvent) => void;
+    onOpenEvent: (event: CalendarEvent, anchor: HTMLElement | null) => void;
     onSlotCreate?: (startMs: number) => void;
 }) {
     const events = useMemo(() => eventsByDay.get(dayKeyOf(day)) ?? [], [eventsByDay, day]);

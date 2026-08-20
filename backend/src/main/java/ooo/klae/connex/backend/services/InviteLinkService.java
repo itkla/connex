@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
@@ -46,11 +47,14 @@ public class InviteLinkService {
     private final FreshMembershipTransaction freshMembershipTransaction;
 
     /** Creates a shareable link. Defaults: member role, 14-day expiry, unlimited uses. */
+    @Transactional
     public InviteLinkDto createLink(int workspaceId, User actor, String roleRaw,
             Integer expiresInDays, Integer maxUses) {
         workspaceService.requirePermission(workspaceId, actor.getId(), Permission.MEMBER_MANAGE);
         sessionSecurityService.requireRecentAuthentication(actor.getId());
         String role = normalizeRole(roleRaw);
+        workspaceService.lockInviteGrantAuthorization(
+            workspaceId, actor.getId(), null, role);
         int days = (expiresInDays == null || expiresInDays <= 0) ? DEFAULT_EXPIRES_IN_DAYS : expiresInDays;
         String token = OneTimeTokenDigest.generate();
         String tokenHash = OneTimeTokenDigest.sha256(token);
@@ -176,6 +180,14 @@ public class InviteLinkService {
 
         // Already an active member: idempotent no-op, regardless of prior redemption.
         if (workspaceMapper.isMember(workspaceId, user.getId())) {
+            return membership(user.getId(), workspaceId);
+        }
+        Integer creatorId = link.getCreatedById();
+        if (creatorId == null) {
+            throw invalidLink();
+        }
+        if (workspaceService.lockPersistedInviteGrantAuthorization(
+                workspaceId, creatorId, user.getId(), link.getRole())) {
             return membership(user.getId(), workspaceId);
         }
 

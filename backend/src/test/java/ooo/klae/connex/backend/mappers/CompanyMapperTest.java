@@ -195,7 +195,7 @@ class CompanyMapperTest extends AbstractMapperTest {
         Company foreign = newCompany();
 
         List<Company> page = companyMapper.getCompaniesPage(
-            pageWorkspace.getId(), null, null, null, null, false, null, allTeamScope(), false, 2, 0);
+            pageWorkspace.getId(), null, null, null, null, false, null, allTeamScope(), false, null, 2, 0);
 
         assertEquals(List.of(first.getId(), second.getId()), page.stream().map(Company::getId).toList());
         List<Integer> stableIds = List.of(first.getId(), second.getId(), third.getId());
@@ -204,7 +204,7 @@ class CompanyMapperTest extends AbstractMapperTest {
             assertEquals(stableIds, companyPageIds(pageWorkspace, sort, "desc"));
         }
         assertEquals(3, companyMapper.countCompanies(
-            pageWorkspace.getId(), null, null, false, null, allTeamScope(), false));
+            pageWorkspace.getId(), null, null, false, null, allTeamScope(), false, null));
         assertTrue(page.stream().noneMatch(company -> company.getId() == foreign.getId()));
     }
 
@@ -265,9 +265,9 @@ class CompanyMapperTest extends AbstractMapperTest {
             filteredCompanyIds(pageWorkspace, null, List.of("Technology"), true, null));
         assertEquals(List.of(finance.getId(), noIndustry.getId()),
             companyMapper.getCompanyIdsFiltered(pageWorkspace.getId(), null, null, false,
-                List.of(noIndustry.getId(), finance.getId(), foreign.getId()), allTeamScope(), false, 100, 0));
+                List.of(noIndustry.getId(), finance.getId(), foreign.getId()), allTeamScope(), false, null, 100, 0));
         assertEquals(2, companyMapper.countCompanies(pageWorkspace.getId(), null, null, false,
-            List.of(noIndustry.getId(), finance.getId(), foreign.getId()), allTeamScope(), false));
+            List.of(noIndustry.getId(), finance.getId(), foreign.getId()), allTeamScope(), false, null));
         assertFalse(filteredCompanyIds(pageWorkspace, null, List.of("Finance"), false, null)
             .contains(foreign.getId()));
         assertFalse(filteredCompanyIds(pageWorkspace, null, null, false, List.of(other.getId()))
@@ -286,11 +286,11 @@ class CompanyMapperTest extends AbstractMapperTest {
 
         List<Company> page = companyMapper.getCompaniesPage(
             pageWorkspace.getId(), "%Target%", "name", "asc", List.of("Technology"), false, ids,
-            allTeamScope(), false, 100, 0);
+            allTeamScope(), false, null, 100, 0);
         long count = companyMapper.countCompanies(
-            pageWorkspace.getId(), "%Target%", List.of("Technology"), false, ids, allTeamScope(), false);
+            pageWorkspace.getId(), "%Target%", List.of("Technology"), false, ids, allTeamScope(), false, null);
         List<Integer> matchingIds = companyMapper.getCompanyIdsFiltered(
-            pageWorkspace.getId(), "%Target%", List.of("Technology"), false, ids, allTeamScope(), false, 100, 0);
+            pageWorkspace.getId(), "%Target%", List.of("Technology"), false, ids, allTeamScope(), false, null, 100, 0);
 
         assertEquals(List.of(alpha.getId(), bravo.getId()), page.stream().map(Company::getId).toList());
         assertEquals(2, count);
@@ -752,11 +752,11 @@ class CompanyMapperTest extends AbstractMapperTest {
 
     private void assertOwnerScope(Workspace ws, MemberScope memberScope, List<Integer> expectedIds) {
         List<Integer> actualIds = companyMapper.getCompaniesPage(
-            ws.getId(), null, "id", "asc", null, false, null, memberScope, false, 100, 0)
+            ws.getId(), null, "id", "asc", null, false, null, memberScope, false, null, 100, 0)
             .stream().map(Company::getId).toList();
         assertEquals(expectedIds.stream().sorted().toList(), actualIds.stream().sorted().toList());
         assertEquals(expectedIds.size(), companyMapper.countCompanies(
-            ws.getId(), null, null, false, null, memberScope, false));
+            ws.getId(), null, null, false, null, memberScope, false, null));
     }
 
     private Map<String, Long> facetCounts(List<FacetCount> counts) {
@@ -765,20 +765,20 @@ class CompanyMapperTest extends AbstractMapperTest {
 
     private List<Integer> companyPageIds(Workspace ws, String sort, String dir) {
         return companyMapper.getCompaniesPage(
-            ws.getId(), null, sort, dir, null, false, null, allTeamScope(), false, 100, 0)
+            ws.getId(), null, sort, dir, null, false, null, allTeamScope(), false, null, 100, 0)
             .stream().map(Company::getId).toList();
     }
 
     private List<Integer> companySearchIds(Workspace ws, String query) {
         return companyMapper.getCompaniesPage(
-            ws.getId(), query, "name", "asc", null, false, null, allTeamScope(), false, 100, 0)
+            ws.getId(), query, "name", "asc", null, false, null, allTeamScope(), false, null, 100, 0)
             .stream().map(Company::getId).toList();
     }
 
     private List<Integer> filteredCompanyIds(Workspace ws, String query, List<String> industry,
             boolean noIndustry, List<Integer> ids) {
         return companyMapper.getCompaniesPage(
-            ws.getId(), query, "name", "asc", industry, noIndustry, ids, allTeamScope(), false, 100, 0)
+            ws.getId(), query, "name", "asc", industry, noIndustry, ids, allTeamScope(), false, null, 100, 0)
             .stream().map(Company::getId).toList();
     }
 

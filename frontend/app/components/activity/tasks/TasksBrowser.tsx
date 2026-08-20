@@ -805,7 +805,7 @@ export default function TasksBrowser({
 
     return (
         <>
-            <PageShell tier="wide">
+            <PageShell>
                 <Rise>
                     <PageHeader
                         title={t('title')}

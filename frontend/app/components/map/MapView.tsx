@@ -12,6 +12,7 @@ import {
     toComputedFrames,
     type ComputedFrame,
 } from '@/app/components/map/graph/replay';
+import { listStateAddress } from '@/app/hooks/listStateUrl';
 import { getMapReplay } from '@/app/lib/api';
 import { toastError, toastInfo } from '@/app/lib/toast';
 import { useReplayClock } from '@/app/hooks/useReplayClock';
@@ -37,7 +38,7 @@ function reflectUrl(on: boolean, weeks: number) {
         params.delete('weeks');
     }
     const qs = params.toString();
-    window.history.replaceState(null, '', qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
+    window.history.replaceState(null, '', listStateAddress(window.location.pathname, qs));
 }
 
 type ReplayData = { extraEdges: RelationEdge[]; computed: ComputedFrame[]; frames: ReplayFrame[] };

@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.dto.BulkOperationResult;
 import ooo.klae.connex.backend.dto.BulkOwnerRequest;
 import ooo.klae.connex.backend.dto.BulkTagRequest;
 import ooo.klae.connex.backend.dto.ConnectionRequestDto;
+import ooo.klae.connex.backend.dto.ContactMarketingStatusDto;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.CustomFieldValueRequest;
 import ooo.klae.connex.backend.dto.CustomFieldValuesRequest;
@@ -37,9 +38,11 @@ import ooo.klae.connex.backend.dto.JobMoveDto;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.NoteDto;
 import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.dto.PersonCampaignTouchDto;
 import ooo.klae.connex.backend.dto.PersonConnectionDto;
 import ooo.klae.connex.backend.dto.PersonEmploymentDto;
 import ooo.klae.connex.backend.dto.PersonFacets;
+import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.dto.PersonDetailDto;
 import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.dto.PersonEvaluationDto;
@@ -56,8 +59,10 @@ import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.ConnectionService;
+import ooo.klae.connex.backend.services.ContactMarketingService;
 import ooo.klae.connex.backend.services.EmploymentService;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
+import ooo.klae.connex.backend.services.WarmthFilterResolver;
 import ooo.klae.connex.backend.services.PersonLifecycleService;
 import ooo.klae.connex.backend.services.PersonQualificationService;
 import ooo.klae.connex.backend.services.PersonService;
@@ -86,10 +91,11 @@ public class PersonController {
     private final PersonQualificationService personQualificationService;
     private final EmploymentService employmentService;
     private final ConnectionService connectionService;
+    private final ContactMarketingService contactMarketingService;
     private final BulkOperationService bulkOperationService;
     private final WorkspaceService workspaceService;
     private final MemberScopeResolver memberScopeResolver;
-    private static final String WARMTH_SORT = "warmth";
+    private final WarmthFilterResolver warmthFilterResolver;
 
     /**
      * GET endpoint for the "recently moved" feed: contacts who recently changed companies.
@@ -152,22 +158,25 @@ public class PersonController {
         @RequestParam(defaultValue = "false") boolean noLeadSource,
         @RequestParam(required = false) List<PersonFirstResponseState> firstResponseStates,
         @RequestParam(defaultValue = "false") boolean noFirstResponse,
+        @RequestParam(required = false) List<String> warmthBands,
+        @RequestParam(defaultValue = "false") boolean noWarmth,
+        @RequestParam(required = false) Integer goesColdWithinDays,
         @RequestParam(defaultValue = "false") boolean archived
     ) {
-        if (WARMTH_SORT.equalsIgnoreCase(sort)) {
-            throw new BadRequestException("Warmth sorting requires a precomputed score index and is not available for paginated contacts");
-        }
         PageBounds bounds = PageBounds.of(page, size);
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
+        String sortKey = WarmthFilter.canonicalSort(sort);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
-        List<PersonDto> items = personService.getPersonsPage(query, sort, dir, companies, titles, noCompany,
+        WarmthFilter warmth = warmthFilterResolver.resolve(
+            warmthBands, noWarmth, goesColdWithinDays, sortKey);
+        List<PersonDto> items = personService.getPersonsPage(query, sortKey, dir, companies, titles, noCompany,
             memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource,
-            firstResponseStates, noFirstResponse, archived,
+            firstResponseStates, noFirstResponse, archived, warmth,
             bounds.size(), bounds.offset())
             .stream().map(PersonDto::from).toList();
         return new PageResponse<>(items, personService.countPersons(
             query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
-            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived));
+            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth));
     }
 
     /**
@@ -194,11 +203,17 @@ public class PersonController {
         @RequestParam(defaultValue = "false") boolean noLeadSource,
         @RequestParam(required = false) List<PersonFirstResponseState> firstResponseStates,
         @RequestParam(defaultValue = "false") boolean noFirstResponse,
+        @RequestParam(required = false) List<String> warmthBands,
+        @RequestParam(defaultValue = "false") boolean noWarmth,
+        @RequestParam(required = false) Integer goesColdWithinDays,
         @RequestParam(defaultValue = "false") boolean archived
     ) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
+        WarmthFilter warmth = warmthFilterResolver.resolve(
+            warmthBands, noWarmth, goesColdWithinDays, null);
         if (!archived
+            && (warmth == null || !warmth.restrictsRows())
             && query == null
             && (companies == null || companies.isEmpty())
             && (titles == null || titles.isEmpty())
@@ -214,7 +229,7 @@ public class PersonController {
         }
         return personService.getMatchingPersonIds(
             query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
-            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived);
+            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth);
     }
 
     /**
@@ -223,7 +238,9 @@ public class PersonController {
      * @return
      */
     @GetMapping("/facets")
-    public PersonFacets getPersonFacets() {
+    public PersonFacets getPersonFacets(
+        @RequestParam(defaultValue = "false") boolean warmth
+    ) {
         return new PersonFacets(
             personService.distinctCompanies(),
             personService.distinctTitles(),
@@ -232,7 +249,8 @@ public class PersonController {
             personService.countArchivedPersons(),
             personService.countsByLifecycleStage(),
             personService.countsByLeadSource(),
-            personService.countsByFirstResponseState()
+            personService.countsByFirstResponseState(),
+            warmth ? personService.countsByWarmthBand(warmthFilterResolver.forFacets()) : null
         );
     }
 
@@ -550,6 +568,35 @@ public class PersonController {
     @GetMapping("/{id}/tasks")
     public List<TaskDto> getTasksForPerson(@PathVariable int id) {
         return personService.getTasksByPersonId(id).stream().map(TaskDto::from).toList();
+    }
+
+    /**
+     * GET endpoint for a contact's marketing exclusion state, so a member can see that someone
+     * opted out — or is on a privacy hold — before contacting them.
+     *
+     * @param id the contact id
+     * @return the per-channel marketing state plus the contact-level privacy hold
+     */
+    @GetMapping("/{id}/marketing-status")
+    public ContactMarketingStatusDto getMarketingStatus(@PathVariable int id) {
+        return contactMarketingService.getStatus(id);
+    }
+
+    /**
+     * GET endpoint for the campaign touches on a contact's timeline, newest first.
+     *
+     * @param id the contact id
+     * @param page the one-based page number
+     * @param size the page size, capped by {@link PageBounds#MAX_SIZE}
+     * @return the page of campaign touches and the total it was drawn from
+     */
+    @GetMapping("/{id}/campaign-touches")
+    public PageResponse<PersonCampaignTouchDto> getCampaignTouches(
+            @PathVariable int id,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "25") int size) {
+        PageBounds bounds = PageBounds.of(page, size);
+        return contactMarketingService.getCampaignTouches(id, bounds.size(), bounds.offset());
     }
 
     /**

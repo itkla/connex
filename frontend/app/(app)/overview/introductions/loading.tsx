@@ -59,7 +59,7 @@ function LineageRowSkeleton() {
 
 export default function IntroductionsLoading() {
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <header className="px-6">
                     <Skeleton className="h-8 w-56" />
                     <Skeleton className="mt-2 h-4 w-80" />

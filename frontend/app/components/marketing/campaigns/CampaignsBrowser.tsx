@@ -1,37 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { ChevronRightIcon, MegaphoneIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { Button } from "@/components/ui/button";
 import Rise from "@/app/components/motion/Rise";
-import { type Campaign, type CampaignPayload } from "@/app/lib/types";
-import { createCampaign, isFieldError } from "@/app/lib/api";
-import { toastError } from "@/app/lib/toast";
+import { type Campaign } from "@/app/lib/types";
 import { formatCurrency, formatShortDate } from "@/app/lib/utils";
-import CampaignFormDialog from "@/app/components/marketing/campaigns/CampaignFormDialog";
+import NewCampaignDialog from "@/app/components/marketing/campaigns/NewCampaignDialog";
 import CampaignStatusBadge from "@/app/components/marketing/campaigns/CampaignStatusBadge";
+import { campaignBuilderPath } from "@/app/components/marketing/campaigns/campaignInstantCreate";
 import { PageHeader } from "@/app/components/PageHeader";
 import { PageShell } from "@/app/components/PageShell";
 
-const EMPTY_PAYLOAD: CampaignPayload = {
-    name: "",
-    objective: null,
-    type: "",
-    status: "draft",
-    budgetAmount: null,
-    budgetCurrency: null,
-    startAt: null,
-    endAt: null,
-    parentCampaignId: null,
-};
-
 /**
- * The Campaigns list surface: a roster with an inline create flow, offered only to a viewer who
- * may actually create one. `POST /api/campaigns` requires `CAMPAIGN_MANAGE`, which the built-in
- * `member` role does not hold.
+ * The Campaigns list surface: a roster with the D5 instant-create entry point, offered only to a
+ * viewer who may actually create one. `POST /api/campaigns` requires `CAMPAIGN_MANAGE`, which the
+ * built-in `member` role does not hold.
  */
 export default function CampaignsBrowser({
     campaigns,
@@ -42,38 +28,13 @@ export default function CampaignsBrowser({
 }) {
     const t = useTranslations("CampaignsPage");
     const locale = useLocale();
-    const router = useRouter();
     const [open, setOpen] = useState(false);
-    const [payload, setPayload] = useState<CampaignPayload>(EMPTY_PAYLOAD);
-    const [isCreating, setIsCreating] = useState(false);
-    const [isSuccess, setIsSuccess] = useState(false);
 
-    const openDialog = () => {
-        setPayload(EMPTY_PAYLOAD);
-        setIsSuccess(false);
-        setOpen(true);
-    };
-
-    const createNewCampaign = async () => {
-        setIsCreating(true);
-        try {
-            const created = await createCampaign({
-                ...payload,
-                objective: payload.objective?.trim() || null,
-            });
-            setIsSuccess(true);
-            router.push(`/marketing/campaigns/${created.id}`);
-        } catch (err) {
-            setIsCreating(false);
-            if (isFieldError(err)) throw err;
-            toastError(err instanceof Error ? err.message : String(err));
-            return;
-        }
-    };
+    const openDialog = () => setOpen(true);
 
     return (
         <>
-            <PageShell tier="wide">
+            <PageShell>
                 <Rise>
                     <PageHeader
                         title={t("title")}
@@ -127,7 +88,7 @@ export default function CampaignsBrowser({
                                 return (
                                     <li key={campaign.id}>
                                         <Link
-                                            href={`/marketing/campaigns/${campaign.id}`}
+                                            href={campaignBuilderPath(campaign.id)}
                                             className="group flex items-center gap-3 px-4 py-3.5 outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 sm:px-5"
                                         >
                                             <div className="min-w-0 flex-1">
@@ -177,16 +138,7 @@ export default function CampaignsBrowser({
                 )}
             </PageShell>
 
-            <CampaignFormDialog
-                mode="create"
-                open={open}
-                onOpenChange={setOpen}
-                payload={payload}
-                setPayload={setPayload}
-                isSubmitting={isCreating}
-                isSuccess={isSuccess}
-                onSubmit={createNewCampaign}
-            />
+            <NewCampaignDialog open={open} onOpenChange={setOpen} />
         </>
     );
 }

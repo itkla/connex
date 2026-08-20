@@ -5,6 +5,7 @@ import {
     buildVocabularyModel,
     canonicalTerms,
     CURATED_DECISIONS,
+    exemptionSurfaces,
     inflections,
     JAPANESE_RENDERINGS,
     loadVocabularyModel,
@@ -34,7 +35,7 @@ function bannedTerm(id: string) {
 }
 
 const GLOSSARY_ROW = "| Task ownership | **Assignee** | **担当者** | Assigned to |";
-const GENERATOR_NOTE = "Generator note: where a banned term is a substring of a canonical term";
+const GENERATOR_NOTE = "where a banned term is a substring of a canonical term";
 
 function mutate(replacement: string, target: string = GLOSSARY_ROW): string {
     const guide = readProductGuide();
@@ -87,12 +88,20 @@ describe("vocabulary generator", () => {
         }
     });
 
-    it("decides every §4 item that carries a qualifier", () => {
+    it("decides every §4 item that carries a qualifier it cannot read", () => {
         const undecided = items
-            .filter((item) => item.qualified && !Object.hasOwn(CURATED_DECISIONS, item.text))
+            .filter((item) => item.qualified
+                && !Object.hasOwn(CURATED_DECISIONS, item.text)
+                && exemptionSurfaces(item.statement) === null)
             .map((item) => item.text);
+        const annotated = items
+            .filter((item) => item.qualified && exemptionSurfaces(item.statement) !== null)
+            .map((item) => item.term);
 
         expect(undecided).toEqual([]);
+        expect([...new Set(annotated)].sort()).toEqual(
+            ["cease of use", "data subject", "tenant", "third-party provision", "テナント"],
+        );
     });
 
     it("keeps the terms #1323 names in the model", () => {
@@ -116,6 +125,62 @@ describe("vocabulary generator", () => {
         expect(expression(bare.pattern).test("温度感の分布")).toBe(false);
         expect(expression(bare.pattern).test("温度帯")).toBe(false);
         expect(expression(bare.pattern).test("関係の温度感を読み取ります")).toBe(false);
+    });
+
+    it("excepts the Node.js proper noun without dropping the ban on node", () => {
+        const term = bannedTerm("en:node");
+
+        expect(expression(term.pattern).test("Node.js 18 or newer is required.")).toBe(false);
+        expect(expression(term.pattern).test("ノードは Node.js で動きます")).toBe(false);
+        expect(expression(term.pattern).test("Each node of the graph")).toBe(true);
+        expect(expression(term.pattern).test("the nodes it traverses")).toBe(true);
+        expect(expression(term.pattern).test("a Node in the network")).toBe(true);
+    });
+
+    it("reads a multi-word term set with a hyphen", () => {
+        const term = bannedTerm("en:data subject");
+
+        expect(expression(term.pattern).test("Log a data subject request")).toBe(true);
+        expect(expression(term.pattern).test("Log a data-subject request")).toBe(true);
+        expect(expression(term.pattern).test("Data-subject name is required.")).toBe(true);
+        expect(expression(term.pattern).test("the subject of that data")).toBe(false);
+    });
+
+    it("inflects the verb of a phrasal verb, not only its particle", () => {
+        const term = bannedTerm("en:tear down");
+
+        expect(expression(term.pattern).test("permanently tear down workspaces")).toBe(true);
+        expect(expression(term.pattern).test("Connex permanently tears down the organization")).toBe(true);
+        expect(expression(term.pattern).test("Connex is tearing down the organization")).toBe(true);
+        expect(expression(term.pattern).test("the tear-down starts")).toBe(true);
+        expect(expression(term.pattern).test("permanently deletes this organization")).toBe(false);
+    });
+
+    it("catches a statutory state stated verb-first, not only noun-first", () => {
+        const restriction = bannedTerm("en:processing restrictions");
+        const suspension = bannedTerm("en:processing suspended");
+        const cessation = bannedTerm("en:provision ceased");
+
+        expect(expression(restriction.pattern).test("processing restrictions apply")).toBe(true);
+        expect(expression(restriction.pattern).test("We are restricting processing for this contact.")).toBe(true);
+        expect(expression(restriction.pattern).test("Restrict the processing of this record")).toBe(true);
+        expect(expression(restriction.pattern).test("Restrict access to this file")).toBe(false);
+        expect(expression(suspension.pattern).test("processing suspended")).toBe(true);
+        expect(expression(suspension.pattern).test("Connex is suspending processing")).toBe(true);
+        expect(expression(cessation.pattern).test("provision ceased")).toBe(true);
+        expect(expression(cessation.pattern).test("Cease provision")).toBe(true);
+        expect(expression(cessation.pattern).test("ceasing the provision of this data")).toBe(true);
+    });
+
+    it("keeps tenant banned everywhere the legal pages are not", () => {
+        for (const id of ["en:tenant", "ja:テナント"]) {
+            const term = bannedTerm(id);
+
+            expect(term.allowFiles).toEqual(["legal.json"]);
+            expect(term.scope).toBe("global");
+        }
+        expect(expression(bannedTerm("en:tenant").pattern).test("every tenant is isolated")).toBe(true);
+        expect(expression(bannedTerm("ja:テナント").pattern).test("テナントの分離")).toBe(true);
     });
 
     it("detects substring overlaps in either direction", () => {
@@ -172,15 +237,29 @@ describe("vocabulary generator", () => {
     });
 
     it("fails closed on a banned-list entry that names no term", () => {
-        expect(() => buildVocabularyModel(mutate("`tenant` · nothing in particular ·", "`tenant` ·")))
+        expect(() => buildVocabularyModel(mutate("`teardown` · nothing in particular ·", "`teardown` ·")))
             .toThrow(/without naming a term in backticks/);
+    });
+
+    it("fails closed when §4 states one term's exemption two different ways", () => {
+        const bare = "| Where records live and are shared | **workspace** | **ワークスペース** | organization (for workspace scope), team (as a scope; fine informally for the humans), tenant |";
+        const annotated = `${bare.slice(0, -2)} (legal pages: allowed) |`;
+
+        expect(() => buildVocabularyModel(mutate(bare, annotated)))
+            .toThrow(/allows "tenant" on legal\.json, while .+ allows it on no surface/);
+        expect(buildVocabularyModel(mutate(annotated, annotated))).toEqual(committed);
+    });
+
+    it("fails closed on an exemption idiom it does not know", () => {
+        expect(() => buildVocabularyModel(mutate("`tenant` (marketing pages: allowed) ·", "`tenant` (legal pages: allowed) ·")))
+            .toThrow(/exempts a term on "marketing pages"/);
     });
 
     it("reads every line of the banned-terms list, not only the first", () => {
         const extended = mutate("`preflight` · `idempotency`\n\n`sharding` · `quorum`", "`preflight` · `idempotency`");
         const texts = bannedListEntries(vocabularySection(extended)).map((entry) => entry.text);
 
-        expect(texts).toContain("`tenant`");
+        expect(texts).toContain("`teardown`");
         expect(texts).toContain("`sharding`");
     });
 

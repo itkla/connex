@@ -44,6 +44,23 @@ export function parseListQuery(value: string | null): string {
 }
 
 /**
+ * Rebuilds the address a list-state writer is about to replace, carrying the fragment through.
+ *
+ * A writer that rebuilds the URL from a pathname and a query string silently drops whatever fragment
+ * the reader arrived with. That did not show while every browser owned a whole page and nothing
+ * addressed a part of one, but a browser embedded as a section of a consolidated settings
+ * destination (#1340) is reached at `#section` — and the first list-state write after mount would
+ * throw that fragment away, leaving a URL the reader could no longer share or reload back into.
+ *
+ * @param pathname - the current path
+ * @param search - the query string this writer produced, without its leading `?`
+ * @returns the address to hand `history.replaceState`
+ */
+export function listStateAddress(pathname: string, search: string): string {
+    return `${pathname}${search ? `?${search}` : ''}${window.location.hash}`;
+}
+
+/**
  * Reflects the active saved-view pointer into the URL via shallow `history.replaceState`, following the
  * same #405 records-browser contract as {@link writeListStateToUrl}: it reads live
  * `window.location.search` and only ever set/deletes its own {@link SAVED_VIEW_URL_KEY}, so the
@@ -59,7 +76,7 @@ export function writeSavedViewToUrl(pathname: string, sv: string | null): void {
     else params.delete(SAVED_VIEW_URL_KEY);
     const next = params.toString();
     if (next === window.location.search.replace(/^\?/, '')) return;
-    window.history.replaceState(null, '', next ? `${pathname}?${next}` : pathname);
+    window.history.replaceState(null, '', listStateAddress(pathname, next));
 }
 
 /**
@@ -87,7 +104,7 @@ export function writeOwnedParamsToUrl(
     }
     const next = params.toString();
     if (next === window.location.search.replace(/^\?/, '')) return;
-    window.history.replaceState(window.history.state, '', next ? `${pathname}?${next}` : pathname);
+    window.history.replaceState(window.history.state, '', listStateAddress(pathname, next));
 }
 
 /** Reflects only the query owner into the URL while preserving sort, pagination, filters, and deep links. */
@@ -97,7 +114,7 @@ export function writeListQueryToUrl(pathname: string, query: string): void {
     else params.delete('q');
     const next = params.toString();
     if (next === window.location.search.replace(/^\?/, '')) return;
-    window.history.replaceState(null, '', next ? `${pathname}?${next}` : pathname);
+    window.history.replaceState(null, '', listStateAddress(pathname, next));
 }
 
 /**
@@ -112,7 +129,7 @@ export function writeWorkspaceSavedViewToUrl(pathname: string, sv: string): void
     const params = new URLSearchParams({ [SAVED_VIEW_URL_KEY]: sv });
     const next = params.toString();
     if (next === window.location.search.replace(/^\?/, '')) return;
-    window.history.replaceState(null, '', `${pathname}?${next}`);
+    window.history.replaceState(null, '', listStateAddress(pathname, next));
 }
 
 /**
@@ -166,5 +183,5 @@ export function writeListStateToUrl(pathname: string, state: ListUrlState, defau
     set('size', state.size !== defaultSize ? String(state.size) : '');
     const next = params.toString();
     if (next === window.location.search.replace(/^\?/, '')) return;
-    window.history.replaceState(null, '', next ? `${pathname}?${next}` : pathname);
+    window.history.replaceState(null, '', listStateAddress(pathname, next));
 }

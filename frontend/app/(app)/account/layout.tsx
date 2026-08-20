@@ -17,7 +17,7 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function AccountLayout({ children }: { children: React.ReactNode }) {
     const t = await getTranslations("Account");
     return (
-        <PageShell tier="reading">
+        <PageShell>
             <Rise>
                 <PageHeader title={t("title")} description={t("subtitle")} />
             </Rise>

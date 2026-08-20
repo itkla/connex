@@ -235,7 +235,7 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
             () -> slaService.startFirstResponseClock(person.getId(), 4));
         assertEquals(0L, personService.countPersons(null, null, null, false,
             MemberScope.allTeam(), null, false, null, false,
-            List.of(PersonFirstResponseState.OVERDUE), false, false));
+            List.of(PersonFirstResponseState.OVERDUE), false, false, null));
         assertTrue(breachingIds(grantee.getId()).isEmpty());
     }
 
@@ -269,7 +269,7 @@ class LeadResponseSlaServiceTest extends AbstractServiceTest {
     private List<Integer> filteredIds(PersonFirstResponseState state, boolean noFirstResponse) {
         return personService.getPersonsPage(null, null, null, null, null, false,
                 MemberScope.allTeam(), null, false, null, false,
-                state == null ? null : List.of(state), noFirstResponse, false, 100, 0)
+                state == null ? null : List.of(state), noFirstResponse, false, null, 100, 0)
             .stream().map(Person::getId).toList();
     }
 

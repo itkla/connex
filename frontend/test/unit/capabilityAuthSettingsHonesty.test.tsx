@@ -17,7 +17,8 @@ import LoginPage from "@/app/auth/login/page";
 import { AuthForm } from "@/app/components/AuthForm";
 import CapabilityUnavailablePage from "@/app/components/CapabilityUnavailablePage";
 import EmailPanel from "@/app/components/settings/EmailPanel";
-import SettingsTabs from "@/app/components/settings/SettingsTabs";
+import SettingsAvailabilityNotice from "@/app/components/settings/SettingsAvailabilityNotice";
+import WorkspaceSettingsChrome from "@/app/components/settings/WorkspaceSettingsChrome";
 import type { InstanceCapabilities } from "@/app/lib/types";
 import {
     installInteractiveDocument,
@@ -191,6 +192,11 @@ function requiredElement(
     return element;
 }
 
+function hasAvailabilityState(value: unknown): value is { state: string } {
+    return typeof value === "object" && value !== null && "state" in value
+        && typeof value.state === "string";
+}
+
 function hasSsoAvailability(value: unknown): value is {
     ssoAvailability: "enabled" | "disabled" | "unavailable";
 } {
@@ -323,7 +329,7 @@ describe("settings navigation capability honesty", () => {
         stubCapabilities(null);
 
         const rendered = await SettingsLayout({ children: createElement("p", null, "settings content") });
-        const tabs = findByType(rendered, SettingsTabs);
+        const tabs = findByType(rendered, WorkspaceSettingsChrome);
         if (tabs === null || !hasMailManagementAvailability(tabs.props)) {
             throw new Error("Settings did not render the expected capability contract");
         }
@@ -339,7 +345,7 @@ describe("settings navigation capability honesty", () => {
         stubCapabilities(DISABLED_CAPABILITIES);
 
         const rendered = await SettingsLayout({ children: createElement("p", null, "settings content") });
-        const tabs = findByType(rendered, SettingsTabs);
+        const tabs = findByType(rendered, WorkspaceSettingsChrome);
         if (tabs === null || !hasMailManagementAvailability(tabs.props)) {
             throw new Error("Settings did not render the expected capability contract");
         }
@@ -368,5 +374,21 @@ describe("email settings route capability honesty", () => {
 
         expect(isValidElement(rendered) ? rendered.type : null).toBe(EmailPanel);
         expect(redirectMock).not.toHaveBeenCalled();
+    });
+
+    it("explains the managed state in place instead of forwarding to Members", async () => {
+        stubCapabilities({ ...DISABLED_CAPABILITIES, mailManaged: true });
+
+        const rendered = await EmailSettingsPage();
+
+        expect(isValidElement(rendered) ? rendered.type : null).toBe(SettingsAvailabilityNotice);
+        expect(
+            isValidElement(rendered) && hasAvailabilityState(rendered.props) ? rendered.props.state : null,
+        ).toBe("managed");
+        expect(
+            redirectMock,
+            "#1340: a capability-managed destination never teleports the reader somewhere unrelated",
+        ).not.toHaveBeenCalled();
+        expect(renderToStaticMarkup(rendered)).toContain("SettingsAvailability.managedTitle");
     });
 });

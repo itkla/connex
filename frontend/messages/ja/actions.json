@@ -1,154 +1,155 @@
 {
-  "Actions": {
-    "quickCreate": {
-      "trigger": "新規作成",
-      "title": "作成",
-      "description": "レコードを作成",
-      "close": "閉じる",
-      "back": "種類に戻る"
-    },
-    "palette": {
-      "trigger": "検索とコマンド",
-      "placeholder": "検索・移動…",
-      "loading": "検索中…",
-      "noResults": "「{query}」に一致する結果がありません"
-    },
-    "group": {
-      "create": "作成",
-      "navigate": "移動",
-      "record": "このレコード",
-      "workspace": "ワークスペース",
-      "utility": "ユーティリティ"
-    },
-    "navigate": {
-      "dashboard": "ダッシュボード",
-      "radar": "レーダー",
-      "companies": "会社",
-      "contacts": "連絡先",
-      "deals": "案件",
-      "pipelines": "パイプライン",
-      "analytics": "分析",
-      "calendar": "カレンダー",
-      "reports": "レポート",
-      "goals": "目標",
-      "settings": "設定",
-      "products": "商品",
-      "organization": "組織",
-      "tasks": "タスク",
-      "activities": "アクティビティ",
-      "notes": "メモ",
-      "notifications": "通知",
-      "introductions": "紹介",
-      "map": "マップ",
-      "campaigns": "キャンペーン",
-      "documents": "ドキュメント",
-      "tags": "タグ",
-      "files": "ファイル",
-      "workflows": "ワークフロー",
-      "captureReviews": "取り込みの確認",
-      "users": "ユーザー",
-      "approvalPolicies": "承認ポリシー",
-      "auditLog": "監査ログ",
-      "me": "プロフィール",
-      "account": "アカウント設定",
-      "search": "検索",
-      "docs": "ヘルプドキュメント",
-      "savedView": "保存済みビュー",
-      "recentRecord": "最近のレコード",
-      "diagnostics": "診断"
-    },
-    "create": {
-      "company": "新しい会社",
-      "person": "新しい連絡先",
-      "deal": "新しい案件",
-      "task": "新しいタスク",
-      "note": "新しいメモ",
-      "activity": "アクティビティを記録"
-    },
-    "record": {
-      "open": "レコードを開く",
-      "openNewTab": "新しいタブで開く",
-      "copyLink": "このレコードのリンクをコピー",
-      "runWorkflow": "ワークフローを実行"
-    },
-    "workspace": {
-      "themeLight": "ライトテーマ",
-      "themeDark": "ダークテーマ",
-      "themeSystem": "システムテーマ",
-      "languageEnglish": "言語: English",
-      "languageJapanese": "言語: 日本語"
-    },
-    "utility": {
-      "copyPageLink": "このページのリンクをコピー",
-      "markAllNotificationsRead": "すべての通知を既読にする",
-      "importCompanies": "会社をインポート",
-      "importContacts": "連絡先をインポート",
-      "importDeals": "案件をインポート",
-      "exportCurrentCompanies": "現在の会社ビューをエクスポート",
-      "exportCurrentContacts": "現在の連絡先ビューをエクスポート",
-      "exportCurrentDeals": "現在の案件ビューをエクスポート",
-      "exportCurrentProducts": "現在の商品ビューをエクスポート"
-    },
-    "description": {
-      "record": {
-        "runWorkflow": "このレコードを対象に選び、内容を確認してからワークフローを実行します。"
-      },
-      "utility": {
-        "exportCurrentCompanies": "このビューの検索・フィルター・セグメントに一致する会社をすべてダウンロードします。",
-        "exportCurrentContacts": "このビューの検索とフィルターに一致する連絡先をすべてダウンロードします。",
-        "exportCurrentDeals": "このビューの検索・フィルター・通貨に一致する案件をすべてダウンロードします。",
-        "exportCurrentProducts": "このビューの検索に一致する商品をすべてダウンロードします。"
-      }
-    },
-    "feedback": {
-      "linkCopied": "リンクをクリップボードにコピーしました",
-      "recordLinkCopied": "{label} のリンクをコピーしました",
-      "allNotificationsRead": "すべての通知を既読にしました",
-      "runFailed": "アクションを実行できませんでした",
-      "companyCreated": "会社を作成しました",
-      "companyLogoUploadFailed": "会社は作成しましたが、ロゴをアップロードできませんでした。会社プロフィールから追加してください。",
-      "personCreated": "連絡先を作成しました",
-      "businessCardAttached": "名刺を添付しました",
-      "dealCreated": "案件を作成しました",
-      "createFailed": "作成できませんでした。もう一度お試しください。",
-      "linkedRecordLoadFailed": "関連レコードを読み込めませんでした。もう一度お試しください。",
-      "restoredLinkUnavailable": "保存されていた人物または案件は利用できません。作成する前に関連レコードを確認してください。",
-      "restoredAssigneeUnavailable": "保存されていた担当者は利用できません。タスクを作成する前に担当者を確認してください。",
-      "radarTaskRefreshing": "レーダーのシグナルを更新しています。タスクの下書きはこのまま保持されます。",
-      "radarTaskChanged": "編集中にレーダーのシグナルが変更されました。レーダーの更新後に閉じて開き直してください。タスクの下書きは復元されます。",
-      "radarTaskUnavailable": "レーダーのシグナルを確認できませんでした。閉じてレーダーを再読み込みしてください。タスクの下書きは復元されます。",
-      "companyContactsAllFailed": "会社は作成しましたが、{count} 件の連絡先を追加できませんでした。",
-      "companyContactsPartial": "{total} 件中 {succeeded} 件の連絡先を追加しました。",
-      "taskCreated": "タスクを作成しました",
-      "noteCreated": "メモを作成しました",
-      "activityCreated": "アクティビティを記録しました"
-    },
-    "keywords": {
-      "navigate": {
-        "contacts": "連絡先, 人, 担当者, コンタクト",
-        "captureReviews": "取り込みの確認, 取り込み, 照合, 受信トレイ, メール, カレンダー"
-      },
-      "create": {
-        "company": "会社, 企業, 組織, 取引先, アカウント",
-        "person": "連絡先, コンタクト, 人, 担当者, リード",
-        "deal": "案件, 商談",
-        "task": "タスク, todo, やること, リマインダー",
-        "note": "メモ, ノート",
-        "activity": "アクティビティ, ログ, 通話, 会議, メール"
-      },
-      "workspace": {
-        "theme": "テーマ, 外観, ダーク, ライト, モード",
-        "language": "言語, ロケール, 翻訳, english, japanese, 日本語"
-      },
-      "utility": {
-        "importCompanies": "会社をインポート, 企業, csv, アップロード, 一括",
-        "importContacts": "連絡先をインポート, コンタクト, 人, 担当者, csv, アップロード, 一括",
-        "importDeals": "案件をインポート, 商談, csv, アップロード, 一括",
-        "exportCurrentCompanies": "会社をエクスポート, 会社をダウンロード, 企業, csv, 現在のビュー, フィルター, 絞り込み, セグメント",
-        "exportCurrentContacts": "連絡先をエクスポート, 連絡先をダウンロード, コンタクト, 人, 担当者, csv, 現在のビュー, フィルター, 絞り込み",
-        "exportCurrentDeals": "案件をエクスポート, 案件をダウンロード, 商談, csv, 現在のビュー, フィルター, 絞り込み",
-        "exportCurrentProducts": "商品をエクスポート, 商品をダウンロード, カタログ, サービス, csv, 現在のビュー, フィルター, 絞り込み"
-      }
+    "Actions": {
+        "quickCreate": {
+            "trigger": "新規作成",
+            "title": "作成",
+            "description": "レコードを作成",
+            "close": "閉じる",
+            "back": "種類に戻る"
+        },
+        "palette": {
+            "trigger": "検索とコマンド",
+            "placeholder": "検索・移動…",
+            "loading": "検索中…",
+            "noResults": "「{query}」に一致する結果がありません"
+        },
+        "group": {
+            "create": "作成",
+            "navigate": "移動",
+            "record": "このレコード",
+            "workspace": "ワークスペース",
+            "utility": "ユーティリティ"
+        },
+        "navigate": {
+            "dashboard": "ダッシュボード",
+            "radar": "レーダー",
+            "companies": "会社",
+            "contacts": "連絡先",
+            "deals": "案件",
+            "pipelines": "パイプライン",
+            "analytics": "分析",
+            "calendar": "カレンダー",
+            "reports": "レポート",
+            "goals": "目標",
+            "settings": "設定",
+            "products": "商品",
+            "organization": "組織",
+            "tasks": "タスク",
+            "activities": "アクティビティ",
+            "notes": "メモ",
+            "notifications": "通知",
+            "introductions": "紹介",
+            "map": "マップ",
+            "campaigns": "キャンペーン",
+            "documents": "ドキュメント",
+            "tags": "タグ",
+            "files": "ファイル",
+            "workflows": "ワークフロー",
+            "captureReviews": "取り込みの確認",
+            "users": "ユーザー",
+            "approvalPolicies": "承認ポリシー",
+            "auditLog": "監査ログ",
+            "me": "プロフィール",
+            "account": "アカウント設定",
+            "search": "検索",
+            "docs": "ヘルプドキュメント",
+            "savedView": "保存済みビュー",
+            "recentRecord": "最近のレコード",
+            "diagnostics": "診断"
+        },
+        "create": {
+            "company": "新しい会社",
+            "person": "新しい連絡先",
+            "deal": "新しい案件",
+            "task": "新しいタスク",
+            "note": "新しいメモ",
+            "activity": "アクティビティを記録"
+        },
+        "record": {
+            "open": "レコードを開く",
+            "openNewTab": "新しいタブで開く",
+            "copyLink": "このレコードのリンクをコピー",
+            "runWorkflow": "ワークフローを実行"
+        },
+        "workspace": {
+            "themeLight": "ライトテーマ",
+            "themeDark": "ダークテーマ",
+            "themeSystem": "システムテーマ",
+            "languageEnglish": "言語: English",
+            "languageJapanese": "言語: 日本語"
+        },
+        "utility": {
+            "copyPageLink": "このページのリンクをコピー",
+            "markAllNotificationsRead": "すべての通知を既読にする",
+            "importCompanies": "会社をインポート",
+            "importContacts": "連絡先をインポート",
+            "importDeals": "案件をインポート",
+            "exportCurrentCompanies": "現在の会社ビューをエクスポート",
+            "exportCurrentContacts": "現在の連絡先ビューをエクスポート",
+            "exportCurrentDeals": "現在の案件ビューをエクスポート",
+            "exportCurrentProducts": "この検索に一致する商品をエクスポート"
+        },
+        "description": {
+            "record": {
+                "runWorkflow": "このレコードを対象に選び、内容を確認してからワークフローを実行します。"
+            },
+            "utility": {
+                "exportCurrentCompanies": "このビューの検索・フィルター・セグメントに一致する会社をすべてダウンロードします。",
+                "exportCurrentContacts": "このビューの検索とフィルターに一致する連絡先をすべてダウンロードします。",
+                "exportCurrentDeals": "このビューの検索・フィルター・通貨に一致する案件をすべてダウンロードします。",
+                "exportCurrentProducts": "このビューの検索に一致する商品をすべてダウンロードします。配信種別・提供状況・有効期間の絞り込みは反映されません。"
+            }
+        },
+        "feedback": {
+            "linkCopied": "リンクをクリップボードにコピーしました",
+            "recordLinkCopied": "{label} のリンクをコピーしました",
+            "allNotificationsRead": "すべての通知を既読にしました",
+            "runFailed": "アクションを実行できませんでした",
+            "companyCreated": "会社を作成しました",
+            "companyLogoUploadFailed": "会社は作成しましたが、ロゴをアップロードできませんでした。会社プロフィールから追加してください。",
+            "personCreated": "連絡先を作成しました",
+            "businessCardAttached": "名刺を添付しました",
+            "dealCreated": "案件を作成しました",
+            "createFailed": "作成できませんでした。もう一度お試しください。",
+            "linkedRecordLoadFailed": "関連レコードを読み込めませんでした。もう一度お試しください。",
+            "restoredLinkUnavailable": "保存されていた人物または案件は利用できません。作成する前に関連レコードを確認してください。",
+            "restoredAssigneeUnavailable": "保存されていた担当者は利用できません。タスクを作成する前に担当者を確認してください。",
+            "radarTaskRefreshing": "レーダーのシグナルを更新しています。タスクの下書きはこのまま保持されます。",
+            "radarTaskChanged": "編集中にレーダーのシグナルが変更されました。レーダーの更新後に閉じて開き直してください。タスクの下書きは復元されます。",
+            "radarTaskUnavailable": "レーダーのシグナルを確認できませんでした。閉じてレーダーを再読み込みしてください。タスクの下書きは復元されます。",
+            "companyContactsAllFailed": "会社は作成しましたが、{count} 件の連絡先を追加できませんでした。",
+            "companyContactsPartial": "{total} 件中 {succeeded} 件の連絡先を追加しました。",
+            "taskCreated": "タスクを作成しました",
+            "noteCreated": "メモを作成しました",
+            "activityCreated": "アクティビティを記録しました"
+        },
+        "keywords": {
+            "navigate": {
+                "contacts": "連絡先, 人, 担当者, コンタクト",
+                "captureReviews": "取り込みの確認, 取り込み, 照合, 受信トレイ, メール, カレンダー",
+                "users": "ユーザー, メンバー, 人"
+            },
+            "create": {
+                "company": "会社, 企業, 組織, 取引先, アカウント",
+                "person": "連絡先, コンタクト, 人, 担当者, リード",
+                "deal": "案件, 商談",
+                "task": "タスク, todo, やること, リマインダー",
+                "note": "メモ, ノート",
+                "activity": "アクティビティ, ログ, 通話, 会議, メール"
+            },
+            "workspace": {
+                "theme": "テーマ, 外観, ダーク, ライト, モード",
+                "language": "言語, ロケール, 翻訳, english, japanese, 日本語"
+            },
+            "utility": {
+                "importCompanies": "会社をインポート, 企業, csv, アップロード, 一括",
+                "importContacts": "連絡先をインポート, コンタクト, 人, 担当者, csv, アップロード, 一括",
+                "importDeals": "案件をインポート, 商談, csv, アップロード, 一括",
+                "exportCurrentCompanies": "会社をエクスポート, 会社をダウンロード, 企業, csv, 現在のビュー, フィルター, 絞り込み, セグメント",
+                "exportCurrentContacts": "連絡先をエクスポート, 連絡先をダウンロード, コンタクト, 人, 担当者, csv, 現在のビュー, フィルター, 絞り込み",
+                "exportCurrentDeals": "案件をエクスポート, 案件をダウンロード, 商談, csv, 現在のビュー, フィルター, 絞り込み",
+                "exportCurrentProducts": "商品をエクスポート, 商品をダウンロード, カタログ, サービス, csv, 検索結果"
+            }
+        }
     }
-  }
 }

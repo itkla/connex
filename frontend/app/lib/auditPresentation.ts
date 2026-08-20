@@ -1,7 +1,6 @@
 import type { AuditChange, AuditLogEntry } from '@/app/lib/types';
 
 export type AuditMetadataLabelKey =
-    | 'metaOperation'
     | 'metaResult'
     | 'metaTarget'
     | 'metaSecretReference'
@@ -271,25 +270,42 @@ function metadataRows(
     });
 }
 
-function fixedMetadata(entry: Pick<AuditLogEntry, 'action' | 'entityType' | 'entityId' | 'targetLabel' | 'outcome'>) {
+function fixedMetadata(entry: Pick<AuditLogEntry, 'entityType' | 'entityId' | 'targetLabel' | 'outcome'>) {
     const target = entry.targetLabel
         ?? (entry.entityType && entry.entityId != null ? `${entry.entityType} #${entry.entityId}` : null);
     return [
-        { key: 'operation', labelKey: 'metaOperation' as const, value: entry.action, mono: true },
         { key: 'result', labelKey: 'metaResult' as const, value: entry.outcome, mono: false },
         { key: 'target', labelKey: 'metaTarget' as const, value: target, mono: false },
     ];
+}
+
+/** Whether an entry belongs to the secret-store family the server redacts to allowlisted metadata. */
+function isSecretEntry(entry: Pick<AuditLogEntry, 'action'>): boolean {
+    return entry.action.startsWith('secret_store.');
+}
+
+/** Whether an entry records one provider request the server redacts to allowlisted metadata. */
+function isAiEntry(entry: Pick<AuditLogEntry, 'action' | 'entityType'>): boolean {
+    return entry.entityType === 'ai_call' || entry.action === 'ai.llm.call';
+}
+
+/**
+ * Whether the server redacted this entry to allowlisted metadata. Those families carry a summary
+ * the server writes in English for the record itself, so a surface must state them in its own
+ * translated words rather than rendering what the entry holds.
+ */
+export function isSensitiveAuditEntry(entry: Pick<AuditLogEntry, 'action' | 'entityType'>): boolean {
+    return isSecretEntry(entry) || isAiEntry(entry);
 }
 
 /** Resolves the domain outcome used by audit filtering, counts, badges, and details. */
 export function auditOutcome(
     entry: Pick<AuditLogEntry, 'action' | 'entityType' | 'outcome' | 'changes'>,
 ): string | null {
-    if (entry.action.startsWith('secret_store.')) {
+    if (isSecretEntry(entry)) {
         return entry.outcome === 'success' || entry.outcome === 'failure' ? entry.outcome : null;
     }
-    const aiEntry = entry.entityType === 'ai_call' || entry.action === 'ai.llm.call';
-    if (!aiEntry) return entry.outcome;
+    if (!isAiEntry(entry)) return entry.outcome;
     const metadataOutcome = knownString(AI_OUTCOMES)(entry.changes?.outcome);
     if (typeof metadataOutcome === 'string') return metadataOutcome;
     return entry.outcome != null && AI_OUTCOMES.has(entry.outcome) ? entry.outcome : null;
@@ -299,14 +315,14 @@ export function auditOutcome(
 export function auditTargetLabel(
     entry: Pick<AuditLogEntry, 'action' | 'entityType' | 'targetLabel' | 'changes'>,
 ): string | null {
-    if (entry.action.startsWith('secret_store.')) {
+    if (isSecretEntry(entry)) {
         const purpose = knownString(SECRET_PURPOSES)(entry.changes?.purpose);
         if (typeof purpose === 'string') return purpose;
         return entry.targetLabel != null && SECRET_PURPOSES.has(entry.targetLabel)
             ? entry.targetLabel
             : 'secret_store';
     }
-    if (entry.entityType === 'ai_call' || entry.action === 'ai.llm.call') {
+    if (isAiEntry(entry)) {
         const provider = knownString(AI_PROVIDERS)(entry.changes?.provider);
         const safeRegion = region(entry.changes?.region);
         const safeProvider = typeof provider === 'string' ? provider : 'ai_call';
@@ -315,23 +331,15 @@ export function auditTargetLabel(
     return entry.targetLabel;
 }
 
-/** Returns the summary that may be rendered for an audit row. */
+/**
+ * Returns the summary that may be rendered for an audit row. A redacted entry carries the
+ * server's own English record of what happened, so it gets none: the surface says it in the
+ * reader's language from the action instead.
+ */
 export function auditSummary(
-    entry: Pick<AuditLogEntry, 'action' | 'entityType' | 'summary' | 'outcome' | 'changes'>,
+    entry: Pick<AuditLogEntry, 'action' | 'entityType' | 'summary'>,
 ): string | null {
-    if (entry.entityType === 'ai_call' || entry.action === 'ai.llm.call') {
-        const outcome = auditOutcome(entry);
-        return outcome == null ? 'AI call' : `AI call ${outcome}`;
-    }
-    if (!entry.action.startsWith('secret_store.')) return entry.summary;
-    const summaries: Readonly<Record<string, string>> = {
-        'secret_store.secret.use': 'Secret used',
-        'secret_store.secret.use_failed': 'Secret use failed',
-        'secret_store.secret.rewrap': 'Secret rewrapped',
-        'secret_store.secret.rewrap_failed': 'Secret rewrap failed',
-        'secret_store.diagnostics.read': 'Secret store diagnostics read',
-    };
-    return summaries[entry.action] ?? 'Secret store operation';
+    return isSensitiveAuditEntry(entry) ? null : entry.summary;
 }
 
 /** Returns a controlled error category for sensitive audit rows. */
@@ -340,10 +348,7 @@ export function auditError(
 ): string | null {
     const error = entry.context?.error;
     if (typeof error !== 'string') return null;
-    const sensitive = entry.action.startsWith('secret_store.')
-        || entry.entityType === 'ai_call'
-        || entry.action === 'ai.llm.call';
-    return sensitive && !SAFE_ERROR.test(error) ? null : error;
+    return isSensitiveAuditEntry(entry) && !SAFE_ERROR.test(error) ? null : error;
 }
 
 /** Builds a fail-closed audit presentation without exposing arbitrary metadata fields. */
@@ -351,9 +356,8 @@ export function presentAuditEntry(
     entry: Pick<AuditLogEntry, 'action' | 'entityType' | 'entityId' | 'targetLabel' | 'outcome' | 'changes'>,
 ): AuditPresentation {
     const changes = entry.changes;
-    const secretEntry = entry.action.startsWith('secret_store.');
-    const aiEntry = entry.entityType === 'ai_call' || entry.action === 'ai.llm.call';
-    if (secretEntry || aiEntry) {
+    const secretEntry = isSecretEntry(entry);
+    if (secretEntry || isAiEntry(entry)) {
         const result = auditOutcome(entry);
         const targetLabel = auditTargetLabel(entry);
         return {

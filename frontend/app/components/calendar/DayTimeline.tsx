@@ -39,7 +39,7 @@ export default function DayTimeline({
     events: CalendarEvent[];
     today: Date;
     locale: string;
-    onOpenEvent: (event: CalendarEvent) => void;
+    onOpenEvent: (event: CalendarEvent, anchor: HTMLElement | null) => void;
     /** Fine-pointer create: click an empty slot to add something at that time (ms). Omitted on touch. */
     onSlotCreate?: (startMs: number) => void;
     className?: string;
@@ -100,7 +100,7 @@ export default function DayTimeline({
                                 key={event.id}
                                 event={event}
                                 variant="chip"
-                                onClick={() => onOpenEvent(event)}
+                                onClick={(clicked) => onOpenEvent(event, clicked.currentTarget)}
                                 className="w-auto max-w-full"
                             />
                         ))}
@@ -163,7 +163,7 @@ export default function DayTimeline({
                                         event={event}
                                         variant="bar"
                                         timeLabel={timeFmt.format(event.startMs)}
-                                        onClick={() => onOpenEvent(event)}
+                                        onClick={(clicked) => onOpenEvent(event, clicked.currentTarget)}
                                     />
                                 </div>
                             );

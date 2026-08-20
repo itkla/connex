@@ -21,7 +21,7 @@ export default function UpNext({
 }: {
     events: CalendarEvent[];
     locale: string;
-    onOpenEvent: (event: CalendarEvent) => void;
+    onOpenEvent: (event: CalendarEvent, anchor: HTMLElement | null) => void;
 }) {
     const t = useTranslations('Calendar');
     const [now, setNow] = useState<number | null>(null);
@@ -82,7 +82,7 @@ export default function UpNext({
         <Rise>
         <button
             type="button"
-            onClick={() => onOpenEvent(next)}
+            onClick={(clicked) => onOpenEvent(next, clicked.currentTarget)}
             className="group flex w-full items-center gap-3 rounded-2xl border border-border bg-card px-3 py-2.5 text-left outline-none transition-colors hover:border-brand/30 focus-visible:ring-2 focus-visible:ring-brand/40"
         >
             <span className={cn('grid size-9 shrink-0 place-items-center rounded-full', KIND_CHIP_CLASS[next.kind])}>

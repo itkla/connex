@@ -362,7 +362,7 @@ export default function ActivitiesBrowser({
 
     return (
         <>
-            <PageShell tier="wide">
+            <PageShell>
                 <Rise>
                     <PageHeader
                         title={t('title')}

@@ -99,7 +99,7 @@ export default function ApprovalPoliciesBrowser({ policies: initial }: { policie
 
     return (
         <>
-            <PageShell tier="wide">
+            <PageShell>
                 <Rise>
                     <PageHeader
                         title={t('title')}

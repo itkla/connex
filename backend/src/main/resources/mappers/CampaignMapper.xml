@@ -29,6 +29,14 @@
     ORDER BY updated_at DESC, id DESC
   </select>
 
+  <select id="searchCampaigns" resultType="ooo.klae.connex.backend.dto.CampaignSummaryDto">
+    SELECT id, name, type, status, start_at, end_at, updated_at FROM campaign
+    WHERE workspace_id = #{workspaceId}
+      AND (name LIKE #{query} OR objective LIKE #{query})
+    ORDER BY name, id
+    LIMIT 10
+  </select>
+
   <select id="getCampaign" resultType="Campaign">
     SELECT <include refid="campaignColumns"/> FROM campaign
     WHERE workspace_id = #{workspaceId} AND id = #{id}

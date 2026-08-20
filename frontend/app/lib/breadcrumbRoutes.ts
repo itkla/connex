@@ -1,5 +1,6 @@
 import type { NavAccess } from "@/app/lib/navAccess";
 import type { RecordCollection } from "@/app/lib/recordReturnPath";
+import { SETTINGS_HOME_ROUTE } from "@/app/lib/settingsManifest";
 import { isWorkflowRecipeKey } from "@/app/lib/workflowOperations";
 
 export type BreadcrumbMessageKey =
@@ -39,6 +40,7 @@ export type BreadcrumbMessageKey =
     | "operations"
     | "organization"
     | "overview"
+    | "peopleAccess"
     | "pipelines"
     | "products"
     | "profile"
@@ -130,6 +132,7 @@ const SETTINGS_ROUTES: Readonly<Record<string, StaticWorkspaceRoute>> = {
     "/settings/email": { key: "email" },
     "/settings/delivery": { key: "delivery" },
     "/settings/diagnostics": { key: "diagnostics", access: "diagnostics" },
+    "/settings/workspace/people": { key: "peopleAccess" },
 };
 
 const ACCOUNT_ROUTES: Readonly<Record<string, BreadcrumbMessageKey>> = {
@@ -167,7 +170,6 @@ export const BREADCRUMB_STATIC_ROUTE_PATHS = [...new Set([
 const REDIRECT_ROUTES = new Set([
     "/account",
     "/organization",
-    "/settings",
     "/settings/membership",
     "/settings/notifications",
     "/settings/rules",
@@ -323,6 +325,12 @@ export function resolveBreadcrumbRoute(
             return shell(root ? [{ ...root, current: true }] : [current]);
         }
         return shell(withWorkspace(context, [current]));
+    }
+
+    if (pathname === SETTINGS_HOME_ROUTE) {
+        return shell(withWorkspace(context, [
+            translatedCrumb(SETTINGS_HOME_ROUTE, "settings", context, true),
+        ]));
     }
 
     const settingsRoute = SETTINGS_ROUTES[pathname];

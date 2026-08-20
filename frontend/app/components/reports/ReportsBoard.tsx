@@ -257,7 +257,7 @@ export default function ReportsBoard({
 
     return (
         <>
-            <PageShell tier="wide">
+            <PageShell>
                 <Rise>
                     <PageHeader
                         title={t('landing.title')}

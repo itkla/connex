@@ -1,154 +1,155 @@
 {
-  "Actions": {
-    "quickCreate": {
-      "trigger": "New",
-      "title": "Create",
-      "description": "Create a record",
-      "close": "Close",
-      "back": "Back to types"
-    },
-    "palette": {
-      "trigger": "Search & commands",
-      "placeholder": "Search or jump to…",
-      "loading": "Searching…",
-      "noResults": "No results for “{query}”"
-    },
-    "group": {
-      "create": "Create",
-      "navigate": "Go to",
-      "record": "This record",
-      "workspace": "Workspace",
-      "utility": "Utilities"
-    },
-    "navigate": {
-      "dashboard": "Dashboard",
-      "radar": "Radar",
-      "companies": "Companies",
-      "contacts": "Contacts",
-      "deals": "Deals",
-      "pipelines": "Pipelines",
-      "analytics": "Analytics",
-      "calendar": "Calendar",
-      "reports": "Reports",
-      "goals": "Goals",
-      "settings": "Settings",
-      "products": "Products",
-      "organization": "Organization",
-      "tasks": "Tasks",
-      "activities": "Activities",
-      "notes": "Notes",
-      "notifications": "Notifications",
-      "introductions": "Introductions",
-      "map": "Map",
-      "campaigns": "Campaigns",
-      "documents": "Documents",
-      "tags": "Tags",
-      "files": "Files",
-      "workflows": "Workflows",
-      "captureReviews": "Capture reviews",
-      "users": "Users",
-      "approvalPolicies": "Approval policies",
-      "auditLog": "Audit log",
-      "me": "Profile",
-      "account": "Account settings",
-      "search": "Search",
-      "docs": "Documentation",
-      "savedView": "Saved view",
-      "recentRecord": "Recent record",
-      "diagnostics": "Diagnostics"
-    },
-    "create": {
-      "company": "New company",
-      "person": "New contact",
-      "deal": "New deal",
-      "task": "New task",
-      "note": "New note",
-      "activity": "Log activity"
-    },
-    "record": {
-      "open": "Open record",
-      "openNewTab": "Open in new tab",
-      "copyLink": "Copy link to this record",
-      "runWorkflow": "Run workflow"
-    },
-    "workspace": {
-      "themeLight": "Light theme",
-      "themeDark": "Dark theme",
-      "themeSystem": "System theme",
-      "languageEnglish": "Language: English",
-      "languageJapanese": "Language: 日本語"
-    },
-    "utility": {
-      "copyPageLink": "Copy link to this page",
-      "markAllNotificationsRead": "Mark all notifications read",
-      "importCompanies": "Import companies",
-      "importContacts": "Import contacts",
-      "importDeals": "Import deals",
-      "exportCurrentCompanies": "Export current company view",
-      "exportCurrentContacts": "Export current contact view",
-      "exportCurrentDeals": "Export current deal view",
-      "exportCurrentProducts": "Export current product view"
-    },
-    "description": {
-      "record": {
-        "runWorkflow": "Pick this record, review the selection, and start a workflow run."
-      },
-      "utility": {
-        "exportCurrentCompanies": "Download all companies matching this view's search, filters, and segment.",
-        "exportCurrentContacts": "Download all contacts matching this view's search and filters.",
-        "exportCurrentDeals": "Download all deals matching this view's search, filters, and currency.",
-        "exportCurrentProducts": "Download all products matching this view's search."
-      }
-    },
-    "feedback": {
-      "linkCopied": "Link copied to clipboard",
-      "recordLinkCopied": "Link to {label} copied",
-      "allNotificationsRead": "All notifications marked as read",
-      "runFailed": "Couldn't run that action",
-      "companyCreated": "Company created",
-      "companyLogoUploadFailed": "The company was created, but its logo couldn't be uploaded. Add it from the company profile.",
-      "personCreated": "Contact created",
-      "businessCardAttached": "Business card attached",
-      "dealCreated": "Deal created",
-      "createFailed": "Couldn't create. Please try again.",
-      "linkedRecordLoadFailed": "Couldn't load the linked record. Please try again.",
-      "restoredLinkUnavailable": "A saved person or deal is no longer available. Review the linked records before creating this item.",
-      "restoredAssigneeUnavailable": "The saved assignee is no longer available. Review the assignee before creating this task.",
-      "radarTaskRefreshing": "Refreshing this Radar signal. Your task draft will stay here.",
-      "radarTaskChanged": "This Radar signal changed while you were editing. Close and reopen this task after Radar refreshes; your draft will be restored.",
-      "radarTaskUnavailable": "Radar could not verify this signal. Close and retry the Radar refresh; your task draft will be restored.",
-      "companyContactsAllFailed": "Company created, but its {count} contacts couldn't be added.",
-      "companyContactsPartial": "Added {succeeded} of {total} contacts.",
-      "taskCreated": "Task created",
-      "noteCreated": "Note created",
-      "activityCreated": "Activity logged"
-    },
-    "keywords": {
-      "navigate": {
-        "contacts": "contacts, people, persons",
-        "captureReviews": "capture, reviews, queue, matching, inbox, mail, calendar"
-      },
-      "create": {
-        "company": "company, org, organization, account",
-        "person": "person, contact, people, lead",
-        "deal": "deal, opportunity, sale",
-        "task": "task, todo, to-do, reminder",
-        "note": "note, memo",
-        "activity": "activity, log, call, meeting, email"
-      },
-      "workspace": {
-        "theme": "theme, appearance, dark, light, mode",
-        "language": "language, locale, translation, english, japanese, 日本語, 言語"
-      },
-      "utility": {
-        "importCompanies": "import companies, csv, upload, bulk",
-        "importContacts": "import contacts, people, persons, csv, upload, bulk",
-        "importDeals": "import deals, opportunities, csv, upload, bulk",
-        "exportCurrentCompanies": "export companies, download companies, csv, current view, filtered companies, segment",
-        "exportCurrentContacts": "export contacts, download contacts, people, persons, csv, current view, filtered contacts",
-        "exportCurrentDeals": "export deals, download deals, opportunities, csv, current view, filtered deals",
-        "exportCurrentProducts": "export products, download products, catalog, services, csv, current view, filtered products"
-      }
+    "Actions": {
+        "quickCreate": {
+            "trigger": "New",
+            "title": "Create",
+            "description": "Create a record",
+            "close": "Close",
+            "back": "Back to types"
+        },
+        "palette": {
+            "trigger": "Search & commands",
+            "placeholder": "Search or jump to…",
+            "loading": "Searching…",
+            "noResults": "No results for “{query}”"
+        },
+        "group": {
+            "create": "Create",
+            "navigate": "Go to",
+            "record": "This record",
+            "workspace": "Workspace",
+            "utility": "Utilities"
+        },
+        "navigate": {
+            "dashboard": "Dashboard",
+            "radar": "Radar",
+            "companies": "Companies",
+            "contacts": "Contacts",
+            "deals": "Deals",
+            "pipelines": "Pipelines",
+            "analytics": "Analytics",
+            "calendar": "Calendar",
+            "reports": "Reports",
+            "goals": "Goals",
+            "settings": "Settings",
+            "products": "Products",
+            "organization": "Organization",
+            "tasks": "Tasks",
+            "activities": "Activities",
+            "notes": "Notes",
+            "notifications": "Notifications",
+            "introductions": "Introductions",
+            "map": "Map",
+            "campaigns": "Campaigns",
+            "documents": "Documents",
+            "tags": "Tags",
+            "files": "Files",
+            "workflows": "Workflows",
+            "captureReviews": "Capture reviews",
+            "users": "Users",
+            "approvalPolicies": "Approval policies",
+            "auditLog": "Audit log",
+            "me": "Profile",
+            "account": "Account settings",
+            "search": "Search",
+            "docs": "Documentation",
+            "savedView": "Saved view",
+            "recentRecord": "Recent record",
+            "diagnostics": "Diagnostics"
+        },
+        "create": {
+            "company": "New company",
+            "person": "New contact",
+            "deal": "New deal",
+            "task": "New task",
+            "note": "New note",
+            "activity": "Log activity"
+        },
+        "record": {
+            "open": "Open record",
+            "openNewTab": "Open in new tab",
+            "copyLink": "Copy link to this record",
+            "runWorkflow": "Run workflow"
+        },
+        "workspace": {
+            "themeLight": "Light theme",
+            "themeDark": "Dark theme",
+            "themeSystem": "System theme",
+            "languageEnglish": "Language: English",
+            "languageJapanese": "Language: 日本語"
+        },
+        "utility": {
+            "copyPageLink": "Copy link to this page",
+            "markAllNotificationsRead": "Mark all notifications read",
+            "importCompanies": "Import companies",
+            "importContacts": "Import contacts",
+            "importDeals": "Import deals",
+            "exportCurrentCompanies": "Export current company view",
+            "exportCurrentContacts": "Export current contact view",
+            "exportCurrentDeals": "Export current deal view",
+            "exportCurrentProducts": "Export products matching this search"
+        },
+        "description": {
+            "record": {
+                "runWorkflow": "Pick this record, review the selection, and start a workflow run."
+            },
+            "utility": {
+                "exportCurrentCompanies": "Download all companies matching this view's search, filters, and segment.",
+                "exportCurrentContacts": "Download all contacts matching this view's search and filters.",
+                "exportCurrentDeals": "Download all deals matching this view's search, filters, and currency.",
+                "exportCurrentProducts": "Download every product matching this view's search. The Billing, Availability, and Effective dates filters aren't applied."
+            }
+        },
+        "feedback": {
+            "linkCopied": "Link copied to clipboard",
+            "recordLinkCopied": "Link to {label} copied",
+            "allNotificationsRead": "All notifications marked as read",
+            "runFailed": "Couldn't run that action",
+            "companyCreated": "Company created",
+            "companyLogoUploadFailed": "The company was created, but its logo couldn't be uploaded. Add it from the company profile.",
+            "personCreated": "Contact created",
+            "businessCardAttached": "Business card attached",
+            "dealCreated": "Deal created",
+            "createFailed": "Couldn't create. Please try again.",
+            "linkedRecordLoadFailed": "Couldn't load the linked record. Please try again.",
+            "restoredLinkUnavailable": "A saved person or deal is no longer available. Review the linked records before creating this item.",
+            "restoredAssigneeUnavailable": "The saved assignee is no longer available. Review the assignee before creating this task.",
+            "radarTaskRefreshing": "Refreshing this Radar signal. Your task draft will stay here.",
+            "radarTaskChanged": "This Radar signal changed while you were editing. Close and reopen this task after Radar refreshes; your draft will be restored.",
+            "radarTaskUnavailable": "Radar could not verify this signal. Close and retry the Radar refresh; your task draft will be restored.",
+            "companyContactsAllFailed": "Company created, but its {count} contacts couldn't be added.",
+            "companyContactsPartial": "Added {succeeded} of {total} contacts.",
+            "taskCreated": "Task created",
+            "noteCreated": "Note created",
+            "activityCreated": "Activity logged"
+        },
+        "keywords": {
+            "navigate": {
+                "contacts": "contacts, people, persons",
+                "captureReviews": "capture, reviews, queue, matching, inbox, mail, calendar",
+                "users": "users, members, people"
+            },
+            "create": {
+                "company": "company, org, organization, account",
+                "person": "person, contact, people, lead",
+                "deal": "deal, opportunity, sale",
+                "task": "task, todo, to-do, reminder",
+                "note": "note, memo",
+                "activity": "activity, log, call, meeting, email"
+            },
+            "workspace": {
+                "theme": "theme, appearance, dark, light, mode",
+                "language": "language, locale, translation, english, japanese, 日本語, 言語"
+            },
+            "utility": {
+                "importCompanies": "import companies, csv, upload, bulk",
+                "importContacts": "import contacts, people, persons, csv, upload, bulk",
+                "importDeals": "import deals, opportunities, csv, upload, bulk",
+                "exportCurrentCompanies": "export companies, download companies, csv, current view, filtered companies, segment",
+                "exportCurrentContacts": "export contacts, download contacts, people, persons, csv, current view, filtered contacts",
+                "exportCurrentDeals": "export deals, download deals, opportunities, csv, current view, filtered deals",
+                "exportCurrentProducts": "export products, download products, catalog, services, csv, search results"
+            }
+        }
     }
-  }
 }

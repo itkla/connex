@@ -90,8 +90,10 @@ ESP delivery provider. It is not an SMTP transport and `MailConfigResolver` neve
 
 `connex.mail.managed=true` means the instance transport is authoritative for **all** workspace mail
 and per-workspace overrides are refused outright (`403 Workspace SMTP overrides are disabled on this
-instance`). The frontend follows suit: the **Email** tab disappears from settings and
-`/settings/email` redirects to `/settings/members`.
+instance`). The frontend follows suit: `/settings/email` renders "Managed by your Connex instance"
+in place of its settings, and the legacy workspace-settings tab strip drops the **Email** tab while
+that strip still exists (#1340 replaces it with the settings navigation, which keeps the destination
+visible so the state is readable where the reader expects it).
 
 **`on-prem` forbids `connex.mail.managed` and fails startup if it is set.** Instance-managed mail is
 transport Connex operates, which cannot exist in an installation Connex does not run. An on-prem

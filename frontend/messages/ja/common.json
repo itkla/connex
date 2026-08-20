@@ -236,7 +236,13 @@
     "groupNotes": "メモ",
     "groupTasks": "タスク",
     "groupUsers": "ユーザー",
-    "groupAttachments": "ファイル"
+    "groupAttachments": "ファイル",
+    "groupProducts": "商品",
+    "groupCampaigns": "キャンペーン",
+    "groupReports": "レポート",
+    "groupDocuments": "ドキュメント",
+    "groupDocumentTemplates": "ドキュメントテンプレート",
+    "groupWorkflows": "ワークフロー"
   },
   "CommonProfileCard": {
     "defaultName": "プロフィール名",
@@ -292,6 +298,7 @@
     "workflows": "ワークフロー",
     "auditLog": "監査ログ",
     "general": "一般",
+    "peopleAccess": "メンバーとアクセス権",
     "members": "メンバー",
     "roles": "ロール",
     "customFields": "カスタムフィールド",

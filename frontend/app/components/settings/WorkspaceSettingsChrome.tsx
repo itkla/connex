@@ -1,0 +1,56 @@
+"use client";
+
+import { usePathname } from "next/navigation";
+
+import Rise from "@/app/components/motion/Rise";
+import { PageHeader } from "@/app/components/PageHeader";
+import SettingsTabs from "@/app/components/settings/SettingsTabs";
+import type { CapabilityAvailability } from "@/app/lib/capabilityAvailability";
+import { SETTINGS_GROUPS, SETTINGS_HOME_ROUTE } from "@/app/lib/settingsManifest";
+
+/**
+ * The routes that own their own chrome: the unified Settings home, and every canonical scope-group
+ * destination as it lands. Read from the manifest rather than listed here, so a group that moves in
+ * a later PR steps out of the legacy chrome by existing, not by being remembered.
+ */
+const OWN_CHROME_ROUTES = new Set<string>([
+    SETTINGS_HOME_ROUTE,
+    ...SETTINGS_GROUPS.map((group) => group.route),
+]);
+
+/**
+ * The workspace-settings page chrome — the "Settings" header and the peer tab strip — for the
+ * destinations that still live directly under `/settings` while #1340 migrates them to
+ * `/settings/workspace/*`.
+ *
+ * The unified Settings home shares this route segment but not this chrome: it owns its own header
+ * and renders the scope-grouped navigation that replaces the strip, so the chrome steps aside for
+ * it rather than stacking a second header and a tab dump above it. A migrated scope-group
+ * destination is the same case one step further along: it is named for the job it owns rather than
+ * for "Settings", and the strip it replaced must not reappear above it. This whole component
+ * dissolves when the workspace destinations have all moved and the strip is retired.
+ *
+ * @param title - the workspace-settings page title, resolved by the layout
+ * @param description - the page description
+ * @param mailManagementAvailability - whether managed mail is enabled, disabled, or unresolved
+ */
+export default function WorkspaceSettingsChrome({
+    title,
+    description,
+    mailManagementAvailability,
+}: {
+    title: string;
+    description: string;
+    mailManagementAvailability: CapabilityAvailability;
+}) {
+    const pathname = usePathname() ?? "";
+    if (OWN_CHROME_ROUTES.has(pathname)) return null;
+    return (
+        <>
+            <Rise>
+                <PageHeader title={title} description={description} />
+            </Rise>
+            <SettingsTabs mailManagementAvailability={mailManagementAvailability} />
+        </>
+    );
+}

@@ -15,6 +15,7 @@ import { getLocale, getTranslations } from 'next-intl/server';
 import {
     getActivitiesForDeal,
     getAttachmentsFromCookie,
+    getCommentThreads,
     getCompanyById,
     getContacts,
     getContactTemperatures,
@@ -65,6 +66,7 @@ import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import WarmthPill from '@/app/components/records/WarmthPill';
 import InfoRow from '@/app/components/me/InfoRow';
 import Timeline from '@/app/components/me/Timeline';
+import { commentsFromThreads, TIMELINE_COMMENT_LIMIT } from '@/app/components/me/timelineEntries';
 import Attachments from '@/app/components/attachments/Attachments';
 import CommentsSection from '@/app/components/records/comments/CommentsSection';
 import SummaryTile from '@/app/components/SummaryTile';
@@ -147,7 +149,7 @@ export default async function DealPage({ params }: DealPageProps) {
     if (dealAccess.kind === 'missing') notFound();
     const deal = dealAccess.record;
 
-    const [lineItems, documents, effectivePermissions, company, dealContacts, pipeline, stages] = await Promise.all([
+    const [lineItems, documents, effectivePermissions, company, dealContacts, pipeline, stages, commentThreads] = await Promise.all([
         getDealLineItemsFromCookie(deal.id, cookie)
             .catch(() => ({ items: [], totals: { currency: deal.currency ?? 'USD', subtotal: 0, tax: 0, oneTimeTotal: 0, recurringTotal: 0, grandTotal: 0 } })),
         getDealDocumentsFromCookie(deal.id, cookie).catch(() => []),
@@ -162,6 +164,7 @@ export default async function DealPage({ params }: DealPageProps) {
         deal.pipeline != null
             ? getStagesByPipelineId(deal.pipeline, init).catch(() => [] as Stage[])
             : Promise.resolve([] as Stage[]),
+        getCommentThreads('deal', id, { limit: TIMELINE_COMMENT_LIMIT }, init).catch(() => []),
     ]);
     const roleByPersonId = new Map(peopleRefs.map((ref) => [ref.person, ref.role]));
     const dealPeople: ResolvedDealPerson[] = dealContacts.map((person) => ({
@@ -236,7 +239,7 @@ export default async function DealPage({ params }: DealPageProps) {
     );
 
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <RecordStickyContext
                     anchorId="deal-record-identity"
                     name={deal.name}
@@ -590,6 +593,7 @@ export default async function DealPage({ params }: DealPageProps) {
                                     users={relatedUsers}
                                     persons={personSeeds}
                                     deals={dealSeeds}
+                                    comments={commentsFromThreads(commentThreads)}
                                     currentUserId={currentUser.id}
                                     companyId={deal.company ?? null}
                                 />

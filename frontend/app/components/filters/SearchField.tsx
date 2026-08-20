@@ -14,6 +14,7 @@ export default function SearchField({
     clearAria,
     shortcut = "/",
     inputRef,
+    controls,
     className,
 }: {
     value: string;
@@ -24,6 +25,8 @@ export default function SearchField({
     clearAria: string;
     shortcut?: string | null;
     inputRef?: React.RefObject<HTMLInputElement | null>;
+    /** The id of the region this field filters, published as `aria-controls`. */
+    controls?: string;
     className?: string;
 }) {
     const internalRef = useRef<HTMLInputElement>(null);
@@ -49,6 +52,7 @@ export default function SearchField({
                 type="text"
                 value={value}
                 aria-label={searchAria}
+                aria-controls={controls}
                 onChange={(e) => onChange(e.target.value)}
                 onKeyDown={(e) => {
                     if (e.key === "Escape" && value) {

@@ -33,7 +33,7 @@ export type ContactsPageParams = PageParams & MemberScopeParams & {
     noFirstResponse?: boolean;
     /** Selects the archived contacts instead of the active ones (issue #854). */
     archived?: boolean;
-};
+} & WarmthFilterParams;
 
 export type CompaniesPageParams = PageParams & MemberScopeParams & {
     industry?: string[];
@@ -41,6 +41,20 @@ export type CompaniesPageParams = PageParams & MemberScopeParams & {
     ids?: number[];
     /** Selects the archived companies instead of the active ones (issue #854). */
     archived?: boolean;
+} & WarmthFilterParams;
+
+/**
+ * The warmth dimension a records request can filter by (issue #1342). Accepted by the contact and
+ * company page, id, and CSV-export surfaces alike, so select-all-matching and an export return
+ * exactly the records the list showed.
+ */
+export type WarmthFilterParams = {
+    /** Warmth bands to include; records with no interaction history are selected by {@link noWarmth}. */
+    warmthBands?: TemperatureBand[];
+    /** Includes records with no interaction history at all, counted under the `__none__` facet key. */
+    noWarmth?: boolean;
+    /** Selects records predicted to go cold within this many whole days; the backend accepts 1–3650. */
+    goesColdWithinDays?: number;
 };
 
 export type CompanySegmentPageParams = Omit<CompaniesPageParams, 'ids'> & {
@@ -241,6 +255,13 @@ export type PersonFacets = {
      * SLA are counted under the `__none__` key.
      */
     firstResponseStates: FacetCount[];
+    /**
+     * How many active contacts sit in each warmth band (issue #1342); contacts with no interaction
+     * history are counted under the `__none__` key. Absent from the response unless the request
+     * asked for it with `warmth=true`, because the count is a full-workspace decayed-touch
+     * aggregate — treat undefined as "not requested" rather than "no contacts".
+     */
+    warmthBands?: FacetCount[];
 };
 
 export type CompanyFacets = {
@@ -249,6 +270,8 @@ export type CompanyFacets = {
     owners: FacetCount[];
     /** How many companies the workspace currently holds archived (issue #854). */
     archivedCount: number;
+    /** How many active companies sit in each warmth band; opt-in exactly as {@link PersonFacets.warmthBands}. */
+    warmthBands?: FacetCount[];
 };
 
 export type TemperatureBand = 'hot' | 'warm' | 'cool' | 'cold';
@@ -2345,6 +2368,79 @@ export type CampaignEngagement = {
     sends: CampaignSendEngagement[];
 };
 
+/**
+ * One recipient behind a campaign engagement count, carrying the contact record the delivery
+ * reached. `personId` is absent once the contact link was cleared and `personLabel` is absent when
+ * the contact is no longer visible, so a row can name a delivery without ever claiming a record it
+ * cannot open.
+ */
+export type CampaignRecipient = {
+    deliveryId: number;
+    sendId: number;
+    channel: string;
+    personId?: number;
+    personLabel?: string;
+    status: string;
+    skipReason?: string;
+    createdAt?: string;
+    updatedAt?: string;
+};
+
+/** Which population of a campaign's deliveries a recipient page is drawn from. */
+export type CampaignRecipientsPageParams = PageParams & {
+    sendId?: number;
+    status?: string[];
+    event?: string;
+};
+
+/**
+ * Why a contact is excluded from marketing on one channel, most restrictive first. `state` is the
+ * single token a badge renders from and is absent when the channel is still contactable; the flags
+ * stay available so a surface can explain the state without re-deriving it.
+ */
+export type ContactChannelMarketingState = "do_not_contact" | "opted_out";
+
+/** One delivery channel's marketing exclusion state for a contact. */
+export type ContactChannelMarketingStatus = {
+    channel: string;
+    state?: ContactChannelMarketingState;
+    optedOut: boolean;
+    doNotContact: boolean;
+    consentRevoked: boolean;
+    addressable: boolean;
+};
+
+/**
+ * Whether a contact may still be marketed to, and why not.
+ *
+ * A privacy hold is the record-level restriction the contact themself asked for and is reported
+ * once for the whole contact; an opt-out or do-not-contact is a workspace-owned marketing exclusion
+ * and is always per channel. The two are never folded into one badge.
+ */
+export type ContactMarketingStatus = {
+    personId: number;
+    privacyHold: boolean;
+    suspendedAt?: string;
+    provisionCeasedAt?: string;
+    channels: ContactChannelMarketingStatus[];
+};
+
+/**
+ * One campaign touch on a contact's timeline: the campaign that reached them, on which channel, and
+ * what became of that delivery. The delivery's skip reason is deliberately absent — it names the
+ * ground a send was withheld on and stays with the campaign's recipient roster.
+ */
+export type PersonCampaignTouch = {
+    deliveryId: number;
+    campaignId: number;
+    campaignName: string;
+    sendId: number;
+    channel: string;
+    status: string;
+    createdAt?: string;
+    updatedAt?: string;
+};
+
 export type CampaignExportStatus = "draft" | "running" | "completed" | "failed";
 
 /** A campaign audience export bound to a frozen snapshot and an external connector. */
@@ -3613,6 +3709,85 @@ export type WarmthSummary = {
     contactDecay: WarmthDecayCounts;
 };
 
+/**
+ * Bounded catalog-product row carried by the global-search products group. The full {@link Product}
+ * is deliberately not sent: a search row renders a label and a short qualifier, never pricing.
+ */
+export type ProductSearchResult = {
+    id: number;
+    name: string;
+    sku?: string;
+    active: boolean;
+};
+
+/** Bounded campaign row carried by the global-search campaigns group. */
+export type CampaignSearchResult = {
+    id: number;
+    name: string;
+    type: string;
+    status: CampaignStatus;
+    startAt?: string;
+    endAt?: string;
+    updatedAt?: string;
+};
+
+/** Bounded report-definition row carried by the global-search reports group. */
+export type ReportSearchResult = {
+    id: number;
+    name: string;
+    description?: string;
+    cadence: string;
+    updatedAt?: string;
+};
+
+/** Bounded document-template row carried by the global-search document-templates group. */
+export type DocumentTemplateSearchResult = {
+    id: number;
+    name: string;
+    type: DocumentType;
+    locale: string;
+    active: boolean;
+    updatedAt?: string;
+};
+
+/**
+ * A generated commercial document as the cross-deal index and the global-search documents group
+ * see it: the parent deal it belongs to, its state, and when it was generated — never the
+ * immutable content snapshot the full {@link DealDocument} carries.
+ */
+export type GeneratedDocumentSummary = {
+    id: number;
+    dealId: number;
+    dealName?: string;
+    dealOwnerId?: number;
+    type: DocumentType;
+    status: DocumentStatus;
+    version: number;
+    title?: string;
+    currency?: string;
+    createdBy?: number;
+    generatedAt?: string;
+    createdAt?: string;
+    updatedAt?: string;
+};
+
+/** Filters accepted by the cross-deal generated-document index. */
+export type GeneratedDocumentsPageParams = PageParams & MemberScopeParams & {
+    status?: DocumentStatus[];
+    type?: DocumentType[];
+    dealId?: number;
+};
+
+/** Bounded workflow row carried by the global-search workflows group. */
+export type WorkflowSearchResult = {
+    id: number;
+    name: string;
+    description?: string;
+    enabled: boolean;
+    recordType?: string;
+    updatedAt?: string;
+};
+
 export type SearchResults = {
     companies: Company[];
     people: Contact[];
@@ -3624,6 +3799,12 @@ export type SearchResults = {
     tasks: Task[];
     users: User[];
     attachments: Attachment[];
+    products: ProductSearchResult[];
+    campaigns: CampaignSearchResult[];
+    reports: ReportSearchResult[];
+    documentTemplates: DocumentTemplateSearchResult[];
+    documents: GeneratedDocumentSummary[];
+    workflows: WorkflowSearchResult[];
 };
 
 export type AuditChange = {
@@ -3731,6 +3912,7 @@ export type WorkspaceMember = {
     email: string;
     profilePictureUrl?: string;
     role: string;
+    builtInRole: WorkspaceRole;
     roleId?: number | null;
     status?: string;
 };

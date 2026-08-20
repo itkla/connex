@@ -236,7 +236,13 @@
     "groupNotes": "Notes",
     "groupTasks": "Tasks",
     "groupUsers": "Users",
-    "groupAttachments": "Files"
+    "groupAttachments": "Files",
+    "groupProducts": "Products",
+    "groupCampaigns": "Campaigns",
+    "groupReports": "Reports",
+    "groupDocuments": "Documents",
+    "groupDocumentTemplates": "Document templates",
+    "groupWorkflows": "Workflows"
   },
   "CommonProfileCard": {
     "defaultName": "Profile Name",
@@ -292,6 +298,7 @@
     "workflows": "Workflows",
     "auditLog": "Audit log",
     "general": "General",
+    "peopleAccess": "People & access",
     "members": "Members",
     "roles": "Roles",
     "customFields": "Custom fields",

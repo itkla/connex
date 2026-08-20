@@ -39,18 +39,31 @@ import { join, relative, resolve, sep } from "node:path";
  * enforced, not scanned: whether a button opens a menu, and whether two primaries share a region,
  * are facts about a render tree that a text scanner cannot read without lying about its confidence.
  *
- * **Rule-widening note.** 461 → 444 (lowered). WS11's Radar redesign put the board's filter row on
- * `SegmentedControl` and rebuilt the signal row on `Button`/`IconButton`, so both radar files left
- * the ledger: one hand-rolled chip layer and sixteen shape overrides, icon sizes, and untooltipped
- * icon buttons. No rule changed; the mark follows the total down.
+ * **High-water-mark history**, newest last:
  *
- * 390 → 461 (raised). The gate landed measuring shape and height only, over
- * `<button>` tags and `<Button>` call sites. Three holes: button-shaped links and hoisted class
- * strings were invisible however much surface they painted, and the tooltip half of the D4 law went
- * unmeasured entirely while the guide called this list the D4 denominator. Widening added 34
- * `linkAsButton`, 15 `hoistedClass`, and 63 `iconOnlyWithoutTooltip` findings; requiring a reserved
- * control height and rejecting foreign semantics removed 41 tabs, chips, and nav rows that were
- * never button debt. `classNameOf` reading past its own attribute had been feeding several of those.
+ * 1. 390 → 461 (raised). The gate landed measuring shape and height only, over `<button>` tags and
+ *    `<Button>` call sites. Three holes: button-shaped links and hoisted class strings were
+ *    invisible however much surface they painted, and the tooltip half of the D4 law went unmeasured
+ *    entirely while the guide called this list the D4 denominator. Widening added 34 `linkAsButton`,
+ *    15 `hoistedClass`, and 63 `iconOnlyWithoutTooltip` findings; requiring a reserved control
+ *    height and rejecting foreign semantics removed 41 tabs, chips, and nav rows that were never
+ *    button debt. `classNameOf` reading past its own attribute had been feeding several of those.
+ * 2. 461 → 455 (lowered). WS8's D5/D16 overlay pass deleted `CampaignFormDialog.tsx` — campaigns
+ *    create through the instant-create prompt and edit in the shared quick-edit drawer — taking its
+ *    hoisted input-surface class string with it; moved the record timeline's overflow trigger onto
+ *    `IconButton`, clearing that file's shape override, legacy size, and missing tooltip at once;
+ *    and put the products browser on `RecordsRenderView`, whose own row menu replaced the
+ *    hand-sized trigger the browser drew for itself.
+ * 3. 455 → 448 (lowered). #1340's connected-accounts journey rebuilt `CaptureProviderCard.tsx`
+ *    around the button system: the overflow menu that carried the card's five secondary jobs moved
+ *    into the manage drawer, and the actions that stayed took context tiers instead of the `sm`
+ *    sizes the card had been naming, clearing all seven of its findings.
+ * 4. 448 → 447 (lowered). #1340's People & access destination removed the last remaining shape
+ *    override from one of the members-panel actions.
+ * 5. 447 → 430 (lowered). WS11's Radar redesign put the board's filter row on
+ *    `SegmentedControl` and rebuilt the signal row on `Button`/`IconButton`, so both radar files left
+ *    the ledger: one hand-rolled chip layer and sixteen shape overrides, icon sizes, and untooltipped
+ *    icon buttons.
  *
  * **The burndown contract**, deliberately identical to `lint/motionDurations.mjs` so the two gates
  * read the same way. `loadBaseline()` returns the committed inventory of files that still carry
@@ -359,4 +372,4 @@ export function loadBaseline() {
  * The ledger's total after the widening described above. It may fall. It rises only in a commit
  * that widens what the scanner catches — never to make room for new debt.
  */
-export const BASELINE_HIGH_WATER_MARK = 444;
+export const BASELINE_HIGH_WATER_MARK = 430;

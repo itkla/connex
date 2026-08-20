@@ -5,6 +5,7 @@ import {
     auditOutcome,
     auditSummary,
     auditTargetLabel,
+    isSensitiveAuditEntry,
     presentAuditEntry,
 } from '@/app/lib/auditPresentation';
 import type { AuditLogEntry } from '@/app/lib/types';
@@ -113,8 +114,8 @@ describe('presentAuditEntry', () => {
             changes: null,
         }));
 
+        expect(missing.metadata.map((row) => row.key)).not.toContain('operation');
         expect(missing.metadata).toEqual(expect.arrayContaining([
-            expect.objectContaining({ key: 'operation', value: 'secret_store.secret.use_failed' }),
             expect.objectContaining({ key: 'result', value: null }),
             expect.objectContaining({ key: 'target', value: 'secret_store' }),
         ]));
@@ -125,6 +126,16 @@ describe('presentAuditEntry', () => {
         expect(currentFailure.metadata).toEqual(expect.arrayContaining([
             expect.objectContaining({ key: 'target', value: 'org.ai.provider_credential' }),
         ]));
+    });
+
+    it('leaves the server-written summary of a redacted entry to the surface to translate', () => {
+        const secret = entry({ action: 'secret_store.secret.rewrap', entityType: 'organization', summary: 'Secret rewrapped' });
+        const ordinary = entry({ summary: 'Updated company' });
+
+        expect(isSensitiveAuditEntry(secret)).toBe(true);
+        expect(auditSummary(secret)).toBeNull();
+        expect(isSensitiveAuditEntry(ordinary)).toBe(false);
+        expect(auditSummary(ordinary)).toBe('Updated company');
     });
 
     it('preserves ordinary field diffs and ignores malformed legacy payloads', () => {
@@ -173,7 +184,7 @@ describe('presentAuditEntry', () => {
             'mediaTypes',
         ]));
         expect(auditTargetLabel(unsafe)).toBe('ai_call');
-        expect(auditSummary(unsafe)).toBe('AI call blocked');
+        expect(auditSummary(unsafe)).toBeNull();
         expect(auditError(unsafe)).toBeNull();
 
         const compatible = presentAuditEntry(entry({

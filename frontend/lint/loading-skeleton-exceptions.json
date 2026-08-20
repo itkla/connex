@@ -1,5 +1,5 @@
 {
-    "highWaterMark": 10,
+    "highWaterMark": 9,
     "exceptions": [
         {
             "route": "/account",
@@ -25,11 +25,6 @@
             "route": "/overview/reports/[id]/snapshots/[snapshotId]",
             "kind": "shares-parent-skeleton",
             "reason": "A frozen snapshot renders the same report document board as /overview/reports/[id]; that parent skeleton is already the correct mirror, and a second copy would only drift from it."
-        },
-        {
-            "route": "/settings",
-            "kind": "redirect-only",
-            "reason": "Renders nothing: redirects straight to /settings/members, which owns the skeleton."
         },
         {
             "route": "/settings/membership",

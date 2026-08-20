@@ -88,8 +88,8 @@ export default function GoalsBoard({
     };
 
     return (
-        <div className="min-h-full bg-background px-2 pb-12 pt-8">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-8">
+        <div className="min-h-full bg-background px-2 pb-12 pt-8 2xl:px-6">
+            <div className="flex w-full flex-col gap-8">
                 <header className="flex flex-wrap items-end justify-between gap-5">
                     <div>
                         <p className="mb-2 text-xs font-medium uppercase tracking-[0.12em] text-brand-dark">

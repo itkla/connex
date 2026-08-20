@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 /**
  * Banned-term model for the message-catalog vocabulary gate, derived from the canonical
@@ -28,6 +29,8 @@ const BOLD_SPAN = /\*\*([^*]+)\*\*/g;
 const CODE_SPAN = /`([^`]+)`/g;
 const HAS_CODE_SPAN = /`[^`]+`/;
 const QUALIFIER_WORD = /\s(?:as|except|alone|when|only|unless)\s/;
+const WORD_GAP = "[\\s-]+";
+const PHRASAL_PARTICLES = new Set(["away", "back", "down", "in", "off", "out", "over", "up"]);
 const CJK_CHARACTER = /[぀-ヿ㐀-䶿一-鿿ｦ-ﾟ]/u;
 const JAPANESE_MIN_OVERLAP = 2;
 
@@ -42,6 +45,32 @@ export const LOCALES = ["en", "ja"];
  * banned term stays active on these surfaces.
  */
 export const ALLOWED_SURFACES = ["legal.json", "organization.json#OrgDataRequests"];
+
+/**
+ * The public legal pages alone. §4 allows the multi-tenancy vocabulary of the contracts there —
+ * the terms and the privacy and disclosure notices state what tenant isolation is — while every
+ * other surface, the organization data-requests tooling included, must say workspace.
+ */
+export const LEGAL_PAGES = ["legal.json"];
+
+/**
+ * Message keys that are never rendered. The command palette matches a member's query against
+ * these aliases and shows the action's own label instead, so they deliberately hold the words §4
+ * retires: someone who still types the old name has to find the action.
+ */
+export const SEARCH_ALIAS_KEYS = ["actions.json:Actions.keywords"];
+
+/**
+ * §4's exemption idiom. A banned item that names one of these carve-outs after itself — "(legal
+ * pages: allowed)", "(compliance surfaces: allowed)" — is allowed on those surfaces and banned
+ * everywhere else, so the annotation in the document, not a decision in this file, is what makes
+ * the exemption real. §4 must state the same one everywhere it bans the term.
+ */
+const EXEMPTION_SURFACES = {
+    "legal pages": LEGAL_PAGES,
+    "compliance surfaces": ALLOWED_SURFACES,
+};
+const EXEMPTION_NOTE = /\(([^()]+):\s*allowed\)/;
 
 /**
  * The workflow seam: every namespace that names the automation object. §4's automation row
@@ -138,6 +167,7 @@ const RADAR_LABEL_SURFACES = ["actions.json", "radar.json"];
  * @property {string} term
  * @property {TermLocale} locale
  * @property {boolean} qualified
+ * @property {string} statement
  * @property {string} source
  */
 
@@ -157,6 +187,11 @@ const RADAR_LABEL_SURFACES = ["actions.json", "radar.json"];
  * @type {Record<string, CuratedDecision>}
  */
 export const CURATED_DECISIONS = {
+    node: {
+        decision: "ban",
+        pattern: { source: "\\b(?:noding|noded|nodes|node)\\b(?!\\.js)", flags: "iu" },
+        reason: "§4 excepts the proper noun: Node.js names the runtime a member installs, while node stays banned as the engineering term everywhere else.",
+    },
     "温度 alone as the metric name": {
         decision: "ban",
         reason: "§4's generator note keeps the bare metric name banned and excepts the canonical 温度感／温度帯 carriers instead of dropping the ban.",
@@ -246,17 +281,20 @@ export const CURATED_DECISIONS = {
     "processing suspended": {
         decision: "ban",
         allowFiles: ALLOWED_SURFACES,
-        reason: "§4 allows the statutory register only as a secondary admin hint and on compliance surfaces.",
+        pattern: { source: "\\b(?:processing[\\s-]+suspend(?:ed|ing|s)?|suspend(?:ed|ing|s)?[\\s-]+(?:the[\\s-]+)?processing)\\b", flags: "iu" },
+        reason: "§4 bans the statutory state, which copy states verb-first as readily as noun-first, and allows it only as a secondary admin hint and on compliance surfaces.",
     },
     "provision ceased": {
         decision: "ban",
         allowFiles: ALLOWED_SURFACES,
-        reason: "§4 allows the statutory register only as a secondary admin hint and on compliance surfaces.",
+        pattern: { source: "\\b(?:provision[\\s-]+ceas(?:ed|es|ing)?|ceas(?:e|ed|es|ing)[\\s-]+(?:the[\\s-]+)?provisions?)\\b", flags: "iu" },
+        reason: "§4 bans the statutory state, which copy states verb-first as readily as noun-first, and allows it only as a secondary admin hint and on compliance surfaces.",
     },
     "processing restrictions": {
         decision: "ban",
         allowFiles: ALLOWED_SURFACES,
-        reason: "§4 allows the statutory register only as a secondary admin hint and on compliance surfaces.",
+        pattern: { source: "\\b(?:processing[\\s-]+restrictions?|restrict(?:s|ed|ing)?[\\s-]+(?:the[\\s-]+)?processing)\\b", flags: "iu" },
+        reason: "§4 bans the statutory state, which copy states verb-first as readily as noun-first, and allows it only as a secondary admin hint and on compliance surfaces.",
     },
     "restricted (unglossed) as headline copy": {
         decision: "skip",
@@ -291,21 +329,6 @@ export const CURATED_DECISIONS = {
         decision: "ban",
         pattern: { source: "\\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\\b", flags: "u" },
         reason: "§4 bans permission constants as a class (\"RULE_MANAGE etc.\"), so the pattern matches the constant shape rather than the one example.",
-    },
-    "data subject": {
-        decision: "ban",
-        allowFiles: ALLOWED_SURFACES,
-        reason: "§4 marks it allowed on compliance surfaces only.",
-    },
-    "cease of use": {
-        decision: "ban",
-        allowFiles: ALLOWED_SURFACES,
-        reason: "§4 marks it allowed on compliance surfaces only.",
-    },
-    "third-party provision": {
-        decision: "ban",
-        allowFiles: ALLOWED_SURFACES,
-        reason: "§4 marks it allowed on compliance surfaces only.",
     },
     "turn": {
         decision: "ban",
@@ -562,6 +585,7 @@ export function vocabularyItems(section) {
                 term,
                 locale: termLocale(term),
                 qualified: text !== term,
+                statement: text,
                 source: `§4 glossary row "${row.concept}"`,
             });
         }
@@ -573,11 +597,39 @@ export function vocabularyItems(section) {
                 term,
                 locale: termLocale(term),
                 qualified: entry.qualified,
+                statement: entry.text,
                 source: "§4 banned-on-all-product-surfaces list",
             });
         }
     }
     return items;
+}
+
+/**
+ * The surfaces an §4 item exempts itself on, read from the annotation §4 writes after the term.
+ * An annotation the generator does not know fails closed rather than being read as no exemption.
+ * @param {string} statement
+ * @returns {Surface[] | null}
+ */
+export function exemptionSurfaces(statement) {
+    const match = EXEMPTION_NOTE.exec(statement);
+    if (!match) return null;
+    const carveOut = match[1].trim();
+    if (!Object.hasOwn(EXEMPTION_SURFACES, carveOut)) {
+        throw new Error(
+            `docs/PRODUCT.md §4 exempts a term on "${carveOut}", which frontend/lint/vocabulary.mjs does not know. `
+            + `Add it to EXEMPTION_SURFACES or state one of: ${Object.keys(EXEMPTION_SURFACES).join(", ")}.`,
+        );
+    }
+    return EXEMPTION_SURFACES[carveOut];
+}
+
+/**
+ * @param {Surface[]} surfaces
+ * @returns {string}
+ */
+function describeSurfaces(surfaces) {
+    return surfaces.length === 0 ? "no surface" : surfaces.join(", ");
 }
 
 /**
@@ -675,19 +727,35 @@ export function inflections(word) {
 }
 
 /**
+ * The alternation matching every regular form of one word.
+ * @param {string} word
+ * @returns {string}
+ */
+function wordForms(word) {
+    const forms = inflections(word).map(escapeRegExp);
+    return forms.length > 1 ? `(?:${forms.join("|")})` : forms[0];
+}
+
+/**
  * Builds the pattern for an English term: word-bounded, case-insensitive, and matching
- * the inflections of its last word. Word boundaries already stop an English term from
- * matching inside a longer canonical term, so no canonical exception is needed.
+ * the inflections of its last word. A multi-word term accepts a hyphen between its words —
+ * copy writes "data-subject request" as readily as "data subject request", and §4 bans the
+ * term rather than one way of setting it. A phrasal verb inflects on its verb rather than on
+ * its particle, so "tear down" is also read as "tears down" and "tearing down". Word
+ * boundaries already stop an English term from matching inside a longer canonical term, so no
+ * canonical exception is needed.
  * @param {string} term
  * @returns {{pattern: SerializedPattern, canonicalExceptions: string[]}}
  */
 function englishPattern(term) {
     const words = term.split(/\s+/);
-    const lead = words.slice(0, -1).map(escapeRegExp).join("\\s+");
-    const forms = inflections(words[words.length - 1]).map(escapeRegExp);
-    const tail = forms.length > 1 ? `(?:${forms.join("|")})` : forms[0];
+    const phrasal = words.length === 2 && PHRASAL_PARTICLES.has(words[1].toLowerCase());
+    const lead = phrasal
+        ? wordForms(words[0])
+        : words.slice(0, -1).map(escapeRegExp).join(WORD_GAP);
+    const tail = wordForms(words[words.length - 1]);
     return {
-        pattern: { source: `\\b${lead.length > 0 ? `${lead}\\s+` : ""}${tail}\\b`, flags: "iu" },
+        pattern: { source: `\\b${lead.length > 0 ? `${lead}${WORD_GAP}` : ""}${tail}\\b`, flags: "iu" },
         canonicalExceptions: [],
     };
 }
@@ -746,10 +814,19 @@ export function buildVocabularyModel(markdown) {
     for (const item of items) {
         const curated = Object.hasOwn(CURATED_DECISIONS, item.text) ? CURATED_DECISIONS[item.text] : undefined;
         if (curated) decided.add(item.text);
-        if (!curated && item.qualified) {
+        const exemption = exemptionSurfaces(item.statement);
+        if (!curated && item.qualified && exemption === null) {
             throw new Error(
                 `docs/PRODUCT.md ${item.source} bans "${item.text}" with a qualifier the gate cannot judge from a message value. `
                 + "Add an explicit ban or skip for it to CURATED_DECISIONS in frontend/lint/vocabulary.mjs.",
+            );
+        }
+        const allowFiles = exemption ?? curated?.allowFiles ?? [];
+        if (exemption !== null && curated?.allowFiles !== undefined
+            && describeSurfaces(curated.allowFiles) !== describeSurfaces(exemption)) {
+            throw new Error(
+                `docs/PRODUCT.md ${item.source} exempts "${item.term}" on ${describeSurfaces(exemption)}, `
+                + `while CURATED_DECISIONS in frontend/lint/vocabulary.mjs exempts it on ${describeSurfaces(curated.allowFiles)}.`,
             );
         }
         const id = `${item.locale}:${item.term}`;
@@ -764,6 +841,13 @@ export function buildVocabularyModel(markdown) {
         }
         const existing = terms.get(id);
         if (existing) {
+            if (describeSurfaces(existing.allowFiles) !== describeSurfaces(allowFiles)) {
+                throw new Error(
+                    `docs/PRODUCT.md ${item.source} allows "${item.term}" on ${describeSurfaces(allowFiles)}, `
+                    + `while ${existing.sources.join(" and ")} allows it on ${describeSurfaces(existing.allowFiles)}. `
+                    + "State the same exemption everywhere §4 bans the term.",
+                );
+            }
             existing.sources.push(item.source);
             continue;
         }
@@ -775,7 +859,7 @@ export function buildVocabularyModel(markdown) {
             term: item.term,
             locale: item.locale,
             scope: curated?.scope ?? "global",
-            allowFiles: curated?.allowFiles ?? [],
+            allowFiles,
             canonicalExceptions: built.canonicalExceptions,
             narrowed: curated?.pattern !== undefined,
             pattern: built.pattern,
@@ -840,9 +924,10 @@ export function loadBaseline() {
  * it, so the WS3 burndown cannot be undone by re-baselining. Widening the rules — a new
  * §4 ban, a wider inflection, a newly scanned surface — legitimately surfaces violations
  * that were always there, and may raise this number **in the same commit that widens
- * them**, never on its own.
+ * them**, never on its own. Lower it whenever a tranche lands: slack between the mark and
+ * today's baseline is room for a regression to hide in.
  */
-export const BASELINE_HIGH_WATER_MARK = 384;
+export const BASELINE_HIGH_WATER_MARK = 52;
 
 /**
  * The surfaces that still say "at a glance". §4 allows the phrase on one surface only,
@@ -952,6 +1037,35 @@ export function scopeCovers(scope, file, namespace) {
 }
 
 /**
+ * Whether a message entry is one of the search aliases {@link SEARCH_ALIAS_KEYS} names, matched
+ * on the alias key itself and on every key below it.
+ * @param {string} file
+ * @param {string} keyPath
+ * @returns {boolean}
+ */
+export function isSearchAlias(file, keyPath) {
+    return SEARCH_ALIAS_KEYS.some((alias) => {
+        const [aliasFile, aliasKeyPath] = alias.split(":");
+        return aliasFile === file && (keyPath === aliasKeyPath || keyPath.startsWith(`${aliasKeyPath}.`));
+    });
+}
+
+/**
+ * Whether a banned term is scanned against a message entry. A Japanese pattern runs against the
+ * Japanese catalog only, while a Latin-script term is scanned in both — Japanese copy states
+ * terms such as `ESP` and `RBAC` verbatim. The term's own scope and the §4 compliance carve-outs
+ * it records in `allowFiles` narrow it from there.
+ * @param {BannedTerm} term
+ * @param {{locale: string, file: string, namespace: string}} entry
+ * @returns {boolean}
+ */
+export function termApplies(term, entry) {
+    if (term.locale === "ja" && entry.locale !== "ja") return false;
+    if (!scopeCovers(term.scope, entry.file, entry.namespace)) return false;
+    return !matchesAnySurface(term.allowFiles, entry.file, entry.namespace);
+}
+
+/**
  * @typedef {object} MessageEntry
  * @property {string} locale
  * @property {string} file
@@ -1037,7 +1151,8 @@ export function messageEntries() {
  * Scans every message catalog for banned terms, honouring each term's scope and the §4
  * compliance carve-outs it records in `allowFiles`. English patterns run against both
  * catalogs — a Latin term such as `ESP` or `RBAC` appears verbatim in Japanese copy —
- * while Japanese patterns run against the Japanese catalog only.
+ * while Japanese patterns run against the Japanese catalog only. The unrendered search
+ * aliases of {@link SEARCH_ALIAS_KEYS} are left out: §4 governs the copy a member reads.
  * @param {VocabularyModel} model
  * @returns {Violation[]}
  */
@@ -1045,10 +1160,9 @@ export function scanMessageCatalogs(model) {
     const compiled = model.terms.map((term) => ({ term, expression: new RegExp(term.pattern.source, term.pattern.flags) }));
     const violations = [];
     for (const entry of messageEntries()) {
+        if (isSearchAlias(entry.file, entry.keyPath)) continue;
         for (const { term, expression } of compiled) {
-            if (term.locale === "ja" && entry.locale !== "ja") continue;
-            if (!scopeCovers(term.scope, entry.file, entry.namespace)) continue;
-            if (matchesAnySurface(term.allowFiles, entry.file, entry.namespace)) continue;
+            if (!termApplies(term, entry)) continue;
             const match = expression.exec(entry.value);
             if (!match) continue;
             violations.push({
@@ -1101,4 +1215,37 @@ export function parseBaselineEntry(entry) {
         throw new Error(`"${entry}" is not a <locale>/<file>:<key path>#<term> baseline entry`);
     }
     return { locale, file, namespace: namespaceOf(keyPath), keyPath, term };
+}
+
+/**
+ * Runs the gate from the command line: `node lint/vocabulary.mjs`. It reports the committed
+ * baseline, what the catalogs hold now, and the drift between them — a violation the baseline
+ * does not know, or a baseline entry the copy has already fixed — and exits non-zero on any of
+ * it. `test/unit/vocabularyLint.test.ts` remains the authoritative gate; this is the same scan
+ * in a form a person can run.
+ * @returns {number}
+ */
+export function reportVocabularyGate() {
+    const model = loadVocabularyModel();
+    const current = baselineEntries(scanMessageCatalogs(model));
+    const baseline = loadBaseline();
+    const known = new Set(baseline);
+    const remaining = new Set(current);
+    const added = current.filter((entry) => !known.has(entry));
+    const fixed = baseline.filter((entry) => !remaining.has(entry));
+    const overMark = baseline.length > BASELINE_HIGH_WATER_MARK;
+
+    process.stdout.write(
+        `baseline ${baseline.length} / violations ${current.length} / drift ${added.length + fixed.length}\n`,
+    );
+    for (const entry of added) process.stdout.write(`  new: ${entry}\n`);
+    for (const entry of fixed) process.stdout.write(`  fixed, delete from the baseline: ${entry}\n`);
+    if (overMark) {
+        process.stdout.write(`  baseline is over BASELINE_HIGH_WATER_MARK (${BASELINE_HIGH_WATER_MARK})\n`);
+    }
+    return added.length + fixed.length === 0 && !overMark ? 0 : 1;
+}
+
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+    process.exitCode = reportVocabularyGate();
 }

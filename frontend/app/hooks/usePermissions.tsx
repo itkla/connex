@@ -131,6 +131,22 @@ export function usePermissionCheck(permission: string): PermissionCheck {
 }
 
 /**
+ * The viewer's effective permissions as a whole, for a surface that gates many affordances from one
+ * data source rather than naming each permission it cares about.
+ *
+ * Fail-closed like {@link usePermission}: an unresolved lookup publishes an empty set, so a
+ * privileged destination stays hidden rather than being offered and then refused. Prefer
+ * {@link usePermission} or {@link usePermissionCheck} whenever the surface knows which permission
+ * it needs; this exists for the settings navigation, whose gates are data, not code.
+ *
+ * @returns the permission keys the viewer holds in the active workspace
+ * @throws when called outside a {@link PermissionsProvider}
+ */
+export function useGrantedPermissions(): ReadonlySet<string> {
+    return usePermissionsContext().granted;
+}
+
+/**
  * Re-reads the viewer's effective permissions and re-renders the server tree if they changed.
  *
  * For a surface offering the viewer a way out of a failed permission lookup, rather than waiting

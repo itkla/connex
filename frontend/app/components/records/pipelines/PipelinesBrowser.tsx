@@ -525,7 +525,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
     );
 
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <Rise>
                     <PageHeader
                         title={t('title')}

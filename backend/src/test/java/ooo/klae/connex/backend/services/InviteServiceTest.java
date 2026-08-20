@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.InvitePreviewDto;
 import ooo.klae.connex.backend.dto.InviteResultDto;
 import ooo.klae.connex.backend.dto.MemberDto;
@@ -21,11 +23,13 @@ import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.tenant.Permission;
 
 class InviteServiceTest extends AbstractServiceTest {
 
     @Autowired InviteService inviteService;
     @Autowired WorkspaceService workspaceService;
+    @Autowired RoleService roleService;
     @Autowired NotificationMapper notificationMapper;
 
     @Test
@@ -45,6 +49,26 @@ class InviteServiceTest extends AbstractServiceTest {
         assertEquals(ws.getId(), membership.getId());
         assertEquals("member", membership.getRole());
         assertTrue(workspaceMapper.isMember(ws.getId(), invitee.getId()));
+    }
+
+    @Test
+    void acceptInvite_revalidatesInvitersCurrentGrantAuthority() {
+        WorkspaceMembershipDto ws = workspaceService.createWorkspace(
+            "Stored Invite Grant WS", currentUser.getId());
+        String email = "stored-invite-" + unique() + "@example.com";
+        InviteResultDto result = inviteService.createInvite(
+            ws.getId(), currentUser, email, "member");
+        WorkspaceRole restricted = roleService.createRole(
+            ws.getId(), currentUser.getId(), "Restricted invite creator",
+            List.of(Permission.MEMBER_MANAGE.name()));
+        workspaceService.assignCustomRole(
+            ws.getId(), currentUser.getId(), currentUser.getId(), restricted.getId());
+        User invitee = register(email);
+
+        assertThrows(
+            ForbiddenException.class,
+            () -> inviteService.acceptInvite(result.getInvite().getToken(), invitee));
+        assertFalse(workspaceMapper.isMember(ws.getId(), invitee.getId()));
     }
 
     @Test
@@ -125,6 +149,36 @@ class InviteServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void memberManageDelegateCanInviteMemberButNotAdmin() {
+        WorkspaceMembershipDto ws = workspaceService.createWorkspace(
+            "Invite Ceiling WS", currentUser.getId());
+        User delegate = memberManagingDelegate(ws);
+        authenticateAs(delegate, ws.getId());
+
+        InviteResultDto memberInvite = inviteService.createInvite(
+            ws.getId(), delegate, "member-" + unique() + "@example.com", "member");
+        assertNotNull(memberInvite.getInvite());
+        assertThrows(
+            ForbiddenException.class,
+            () -> inviteService.createInvite(
+                ws.getId(), delegate, "admin-" + unique() + "@example.com", "admin"));
+    }
+
+    @Test
+    void memberManageDelegateCannotAddExistingAdmin() {
+        WorkspaceMembershipDto ws = workspaceService.createWorkspace(
+            "Existing Invite Ceiling WS", currentUser.getId());
+        User delegate = memberManagingDelegate(ws);
+        User existing = newUser();
+        authenticateAs(delegate, ws.getId());
+
+        assertThrows(
+            ForbiddenException.class,
+            () -> inviteService.addExistingMember(
+                ws.getId(), delegate.getId(), existing.getEmail(), "admin"));
+    }
+
+    @Test
     void addExistingMember_createsPendingMembership() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace("Direct WS", currentUser.getId());
         User existing = newUser();
@@ -155,5 +209,21 @@ class InviteServiceTest extends AbstractServiceTest {
         user.setTimezone("UTC");
         userMapper.insert(user);
         return user;
+    }
+
+    private User memberManagingDelegate(WorkspaceMembershipDto workspace) {
+        User delegate = newUser();
+        workspaceMapper.addMember(workspace.getId(), delegate.getId(), "member");
+        WorkspaceRole memberRole = workspaceService.builtInRoles().stream()
+            .filter(role -> "member".equals(role.getName()))
+            .findFirst()
+            .orElseThrow();
+        List<String> permissions = new ArrayList<>(memberRole.getPermissions());
+        permissions.add(Permission.MEMBER_MANAGE.name());
+        WorkspaceRole manager = roleService.createRole(
+            workspace.getId(), currentUser.getId(), "Member Inviter", permissions);
+        workspaceService.assignCustomRole(
+            workspace.getId(), currentUser.getId(), delegate.getId(), manager.getId());
+        return delegate;
     }
 }

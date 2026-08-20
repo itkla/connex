@@ -54,7 +54,7 @@ interface MonthViewProps {
     /** Fine-pointer only: chips are draggable on the desktop grid, never on touch (swipe owns touch). */
     dragEnabled: boolean;
     onSelectDay: (day: Date) => void;
-    onOpenEvent: (event: CalendarEvent) => void;
+    onOpenEvent: (event: CalendarEvent, anchor: HTMLElement | null) => void;
     onReschedule: (event: CalendarEvent, dayKey: string) => void;
     /** Fine-pointer create in the desktop day pane: click an empty slot to add at that time. */
     onSlotCreate?: (startMs: number) => void;
@@ -229,7 +229,7 @@ interface MonthCellProps {
     pendingIds: Set<string>;
     dragEnabled: boolean;
     onSelectDay: (day: Date) => void;
-    onOpenEvent: (event: CalendarEvent) => void;
+    onOpenEvent: (event: CalendarEvent, anchor: HTMLElement | null) => void;
 }
 
 function MonthCell({
@@ -338,7 +338,7 @@ interface DraggableChipProps {
     event: CalendarEvent;
     pending: boolean;
     dragEnabled: boolean;
-    onOpenEvent: (event: CalendarEvent) => void;
+    onOpenEvent: (event: CalendarEvent, anchor: HTMLElement | null) => void;
 }
 
 function DraggableChip({ event, pending, dragEnabled, onOpenEvent }: DraggableChipProps) {
@@ -354,7 +354,7 @@ function DraggableChip({ event, pending, dragEnabled, onOpenEvent }: DraggableCh
             event={event}
             variant="chip"
             dragging={isDragging}
-            onClick={() => onOpenEvent(event)}
+            onClick={(clicked) => onOpenEvent(event, clicked.currentTarget)}
             className={cn(
                 'pointer-events-auto',
                 canDrag && 'cursor-grab touch-none',

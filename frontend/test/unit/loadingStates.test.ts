@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -83,8 +83,47 @@ function layoutSource(route: string): string {
     return readFileSync(file, "utf8");
 }
 
-function pageShellTier(source: string): string | null {
-    return /<PageShell\s+tier="([a-z]+)"/.exec(source)?.[1] ?? null;
+/** Every `.tsx` source file under `app/`, so a shell rule can be checked everywhere the shell is used. */
+function appSources(directory = path.join(process.cwd(), "app")): string[] {
+    return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+        const full = path.join(directory, entry.name);
+        if (entry.isDirectory()) return appSources(full);
+        return entry.name.endsWith(".tsx") ? [full] : [];
+    });
+}
+
+/**
+ * The `PageShell` opening tag a routed surface renders, normalized for whitespace. Comparing the whole
+ * tag — not one prop — is what keeps a skeleton and its page from drifting apart on any wrapper concern.
+ */
+function pageShellTag(source: string): string | null {
+    const match = /<PageShell(\s[^>]*)?>/.exec(source);
+    if (!match) return null;
+    return `<PageShell${(match[1] ?? "").replace(/\s+/g, " ").trimEnd()}>`;
+}
+
+/**
+ * The `PageShell` tag a page renders, following one hop into its directly imported components when the
+ * page delegates the whole surface to a board. Reading `page.tsx` alone silently skips every delegating
+ * route, which is exactly where a skeleton and its page can drift unnoticed. `resolved` is false when the
+ * page owns no shell and no single imported component claims one, so the caller can fail loudly instead
+ * of scoring the route as agreement.
+ */
+function resolvedPageShellTag(source: string): { tag: string | null; resolved: boolean } {
+    const own = pageShellTag(source);
+    if (own) return { tag: own, resolved: true };
+
+    const delegated = new Set<string>();
+    for (const specifier of importSources(source)) {
+        if (!specifier.startsWith("@/app/")) continue;
+        const file = path.join(process.cwd(), `${specifier.slice(2)}.tsx`);
+        if (!existsSync(file)) continue;
+        const tag = pageShellTag(readFileSync(file, "utf8"));
+        if (tag) delegated.add(tag);
+    }
+
+    if (delegated.size !== 1) return { tag: null, resolved: false };
+    return { tag: [...delegated][0], resolved: true };
 }
 
 const SKELETON_PRIMITIVE = "@/components/ui/skeleton";
@@ -351,19 +390,59 @@ describe("loading skeletons mirror rather than decorate", () => {
         expect(localCopies, "delete the local skeleton and render the shared one instead").toEqual([]);
     });
 
-    it("agrees with its page about the shell tier", () => {
-        const disagreements = skeletonRoutes
+    it("agrees with its page about the page wrapper", () => {
+        const pairs = skeletonRoutes
             .filter((route) => existsSync(path.join(routeDirectory(route), "page.tsx")))
-            .map((route) => ({
-                route,
-                page: pageShellTier(readRouteFile(route, "page.tsx")),
-                skeleton: pageShellTier(readRouteFile(route, "loading.tsx")),
-            }))
-            .filter((entry) => entry.page !== null && entry.page !== entry.skeleton);
+            .map((route) => {
+                const page = resolvedPageShellTag(readRouteFile(route, "page.tsx"));
+                return {
+                    route,
+                    page: page.tag,
+                    skeleton: pageShellTag(readRouteFile(route, "loading.tsx")),
+                    resolved: page.resolved,
+                };
+            });
+
+        const unresolved = pairs
+            .filter((entry) => entry.skeleton !== null && !entry.resolved)
+            .map((entry) => entry.route);
+
+        expect(
+            unresolved,
+            "this page delegates its shell to a component the test cannot pin down — import exactly one shell-owning component directly from the page, or the skeleton and page drift unchecked",
+        ).toEqual([]);
+
+        const disagreements = pairs
+            .filter((entry) => entry.page !== null || entry.skeleton !== null)
+            .filter((entry) => entry.page !== entry.skeleton)
+            .map(({ route, page, skeleton }) => ({ route, page, skeleton }));
 
         expect(
             disagreements,
             "a skeleton and its page must not disagree about the wrapper, or the page jumps when data arrives",
+        ).toEqual([]);
+    });
+
+    it("caps no page at the shell", () => {
+        const capped = appSources()
+            .filter((file) => /<PageShell\s[^>]*max-w-/.test(readFileSync(file, "utf8")))
+            .map((file) => path.relative(process.cwd(), file));
+
+        expect(
+            capped,
+            "pages span the full content area; a readable measure belongs on the text block, never on the shell",
+        ).toEqual([]);
+    });
+
+    it("caps no page at the wrapper immediately inside the shell", () => {
+        const centeredCap = /<PageShell(?:\s[^>]*)?>\s*<[a-zA-Z][^>]*?(?:mx-auto[^>]*max-w-|max-w-[^>]*mx-auto)[^>]*>/;
+        const capped = appSources()
+            .filter((file) => centeredCap.test(readFileSync(file, "utf8")))
+            .map((file) => path.relative(process.cwd(), file));
+
+        expect(
+            capped,
+            "a centered max-width wrapper as the shell's first child is the page cap by another name; measure the text block instead",
         ).toEqual([]);
     });
 });

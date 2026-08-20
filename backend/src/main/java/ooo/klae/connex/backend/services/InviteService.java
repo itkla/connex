@@ -15,6 +15,7 @@ import ooo.klae.connex.backend.dto.InviteResultDto;
 import ooo.klae.connex.backend.dto.MemberDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.InviteMapper;
@@ -68,15 +69,19 @@ public class InviteService {
         requireOrgDomainAllowed(workspaceId, email);
 
         User existing = userMapper.getUserByEmail(email);
+        workspaceService.lockInviteGrantAuthorization(
+            workspaceId,
+            actor.getId(),
+            existing == null ? null : existing.getId(),
+            role);
         if (existing != null) {
-            if (workspaceMapper.getMember(workspaceId, existing.getId()) != null) {
-                throw new BadRequestException("That person is already a member of or invited to this workspace");
+            User lockedExisting = userMapper.getUserById(existing.getId());
+            if (lockedExisting == null || !email.equalsIgnoreCase(lockedExisting.getEmail())) {
+                throw new ConflictException("Invite recipient changed; refresh and retry");
             }
             inviteMapper.revokePendingForEmail(workspaceId, email);
-            if (workspaceMapper.lockAuthorizationMembership(workspaceId, existing.getId()) != null) {
-                throw new BadRequestException("That person is already a member of or invited to this workspace");
-            }
-            MemberDto member = workspaceService.addPendingMember(workspaceId, actor, existing, role);
+            MemberDto member = workspaceService.addPendingMember(
+                workspaceId, actor, lockedExisting, role);
             return new InviteResultDto(null, member);
         }
 
@@ -231,6 +236,12 @@ public class InviteService {
     private WorkspaceMembershipDto acceptResolvedInvite(
             WorkspaceInvite invite, User user, String credential, boolean exchanged) {
         int workspaceId = invite.getWorkspaceId();
+        Integer inviterId = invite.getInvitedById();
+        if (inviterId == null) {
+            throw invalidLink();
+        }
+        workspaceService.lockPersistedInviteGrantAuthorization(
+            workspaceId, inviterId, user.getId(), invite.getRole());
         int orgId = requireOrgDomainAllowed(workspaceId, user.getEmail());
         User lockedUser = userMapper.getUserByIdForShare(user.getId());
         if (lockedUser == null) {
@@ -287,11 +298,14 @@ public class InviteService {
         if (user == null) {
             throw new BadRequestException("No Connex account uses that email; send an invite instead");
         }
-        if (workspaceMapper.getMember(workspaceId, user.getId()) != null) {
-            throw new BadRequestException("That person is already a member of or invited to this workspace");
+        workspaceService.lockInviteGrantAuthorization(
+            workspaceId, actorId, user.getId(), role);
+        User lockedUser = userMapper.getUserById(user.getId());
+        if (lockedUser == null || !email.equalsIgnoreCase(lockedUser.getEmail())) {
+            throw new ConflictException("Invite recipient changed; refresh and retry");
         }
         User actor = userMapper.getUserById(actorId);
-        return workspaceService.addPendingMember(workspaceId, actor, user, role);
+        return workspaceService.addPendingMember(workspaceId, actor, lockedUser, role);
     }
 
     /**

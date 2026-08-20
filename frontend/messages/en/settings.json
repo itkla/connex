@@ -1,0 +1,51 @@
+{
+    "SettingsHome": {
+        "title": "Settings",
+        "description": "Everything you can configure, grouped by what it applies to.",
+        "navLabel": "Settings",
+        "sectionsLabel": "Settings sections",
+        "searchLabel": "Search settings",
+        "searchPlaceholder": "Search settings",
+        "searchClear": "Clear search",
+        "searchResultsLabel": "Search results",
+        "noResultsTitle": "No settings match “{query}”",
+        "noResultsBody": "Try a shorter word, or clear the search to see everything again.",
+        "emptyTitle": "Nothing here you can change",
+        "emptyBody": "Settings you can change appear here. Ask a workspace administrator if you need one.",
+        "backTo": "Back to {name}",
+        "resultCount": "{count, plural, =0 {No settings match} one {# setting matches} other {# settings match}}"
+    },
+    "SettingsNav": {
+        "scopePersonal": "Personal",
+        "scopeWorkspace": "Workspace",
+        "scopeOrganization": "Organization",
+        "groupNotificationPreferences": "Notification preferences",
+        "groupWorkspacesInvitations": "Workspaces & invitations",
+        "groupPeopleAccess": "People & access",
+        "groupCrmConfiguration": "CRM configuration",
+        "groupCommunications": "Communications",
+        "groupDataPrivacy": "Data & privacy",
+        "groupAuditDiagnostics": "Audit & diagnostics",
+        "groupOrganizationGeneral": "General",
+        "groupIdentityAdministrators": "Identity & administrators",
+        "groupAiDataGovernance": "AI & data governance"
+    },
+    "SettingsAvailability": {
+        "managedTitle": "Managed by your Connex instance",
+        "managedBody": "This is set up once for everyone on this instance, so there's nothing to change here. Ask your administrator if it needs to be different.",
+        "notEnabledTitle": "Not enabled for this deployment",
+        "notEnabledBody": "This Connex instance doesn't have this switched on, so there's nothing to set up yet. Ask your administrator if you need it.",
+        "askAdminTitle": "Ask a workspace administrator",
+        "askAdminBody": "Your role doesn't include this setting. A workspace admin can change it for you, or give you access to it."
+    },
+    "SettingsPeople": {
+        "accessCheckFailedBody": "This is a problem reading your permissions, not a decision about them. Try again in a moment.",
+        "accessCheckFailedTitle": "Couldn't check your access",
+        "description": "Who belongs to {workspace}, what each role can do, and who may join without an invite.",
+        "directoryDescription": "Look someone up, then open their page to see their work. Only members who have accepted their invitation appear here; anyone still pending is listed under Members, above.",
+        "directoryFailedBody": "Nobody's access changed. The list itself didn't load, so try again in a moment.",
+        "directoryFailedTitle": "Couldn't load the member directory",
+        "directoryTitle": "Member directory",
+        "metaDescription": "Manage members, roles, allowed domains, and the member directory for this workspace."
+    }
+}

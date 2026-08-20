@@ -3,7 +3,7 @@ import { PageShell } from '@/app/components/PageShell';
 
 export default function UserLoading() {
     return (
-        <PageShell tier="reading">
+        <PageShell>
                 <div className="flex flex-col gap-8">
                     <Skeleton className="h-5 w-24" />
 

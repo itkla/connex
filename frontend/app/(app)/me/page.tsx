@@ -95,7 +95,7 @@ export default async function MePage() {
         && permissionsResult.data.includes("DOCUMENT_APPROVE");
 
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <Rise>
                     <MeHero
                         user={user}

@@ -2,10 +2,8 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { getTranslations } from "next-intl/server";
 
-import Rise from "@/app/components/motion/Rise";
 import { PageShell } from "@/app/components/PageShell";
-import { PageHeader } from "@/app/components/PageHeader";
-import SettingsTabs from "@/app/components/settings/SettingsTabs";
+import WorkspaceSettingsChrome from "@/app/components/settings/WorkspaceSettingsChrome";
 import { getCapabilitiesResultFromCookie } from "@/app/lib/api";
 import { capabilityAvailability } from "@/app/lib/capabilityAvailability";
 
@@ -27,11 +25,12 @@ export default async function SettingsLayout({ children }: { children: React.Rea
         capabilitiesResult.ok ? capabilitiesResult.data.mailManaged : null,
     );
     return (
-        <PageShell tier="wide">
-            <Rise>
-                <PageHeader title={t("title")} description={t("subtitle")} />
-            </Rise>
-            <SettingsTabs mailManagementAvailability={mailManagementAvailability} />
+        <PageShell>
+            <WorkspaceSettingsChrome
+                title={t("title")}
+                description={t("subtitle")}
+                mailManagementAvailability={mailManagementAvailability}
+            />
             <div>{children}</div>
         </PageShell>
     );

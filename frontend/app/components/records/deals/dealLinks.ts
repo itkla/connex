@@ -2,6 +2,15 @@
 const DEALS_BROWSER_PATH = '/records/deals';
 
 /**
+ * DOM id of the generated-documents panel on a deal page, and the only anchor that addresses it.
+ *
+ * `DealDocuments` renders it and every producer — the approval inbox, global search, the library
+ * index — links it through this constant, because two spellings of the same anchor is how one of
+ * them silently stops resolving.
+ */
+export const DEAL_DOCUMENTS_ANCHOR = 'deal-documents';
+
+/**
  * URL query key the deals browser reads as its company facet. A link that wants the browser to open
  * pre-filtered to one company must emit this key with the company id, because the browser resolves a
  * facet value to a `companyId` server filter (#1338).
@@ -63,4 +72,20 @@ export function stageDealsHref(pipelineId: number, stageId: number): string {
     return `${DEALS_BROWSER_PATH}?${DEAL_PIPELINE_FILTER_KEY}=${pipelineId}`
         + `&${DEAL_STAGE_FILTER_KEY}=${stageId}`
         + `&${DEAL_STATUS_FILTER_KEY}=open`;
+}
+
+/**
+ * Href for a generated document's canonical surface. A generated document has no page of its own —
+ * it is authored, approved, and superseded inside its parent deal — so every surface that finds one
+ * without its deal (global search, the library index) lands on that deal's documents panel rather
+ * than inventing a destination.
+ *
+ * The hash alone does not scroll the page: these links are followed client-side, where the fragment
+ * resolves while the route's loading fallback is still mounted and is then discarded. `DealDocuments`
+ * therefore scrolls itself when it mounts under this anchor.
+ *
+ * @param dealId - the parent deal the document belongs to
+ */
+export function dealDocumentsHref(dealId: number): string {
+    return `${DEALS_BROWSER_PATH}/${dealId}#${DEAL_DOCUMENTS_ANCHOR}`;
 }

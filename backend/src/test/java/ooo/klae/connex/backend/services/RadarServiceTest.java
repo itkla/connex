@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -20,6 +21,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -28,12 +30,15 @@ import org.mockito.InOrder;
 
 import tools.jackson.databind.ObjectMapper;
 
+import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.RelationshipSignal;
 import ooo.klae.connex.backend.beans.RelationshipSignalFamilyState;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.WorkspaceMember;
+import ooo.klae.connex.backend.dto.RadarResponseDto;
 import ooo.klae.connex.backend.dto.RadarTaskRequestDto;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
@@ -58,6 +63,7 @@ class RadarServiceTest {
     private PersonEdgeReadService personEdgeReadService;
     private TaskService taskService;
     private WarmPathService warmPathService;
+    private DealMapper dealMapper;
     private RadarService service;
 
     @BeforeEach
@@ -70,6 +76,7 @@ class RadarServiceTest {
         personEdgeReadService = mock(PersonEdgeReadService.class);
         taskService = mock(TaskService.class);
         warmPathService = mock(WarmPathService.class);
+        dealMapper = mock(DealMapper.class);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
         when(workspaceService.getCurrentUserId()).thenReturn(USER_ID);
         when(signalMapper.findFamilyStates(WORKSPACE_ID)).thenReturn(List.of(availableFamily()));
@@ -83,6 +90,14 @@ class RadarServiceTest {
                     .filter(id -> personMapper.getPersonById(WORKSPACE_ID, id) != null)
                     .toList();
             });
+        when(personMapper.getByIds(eq(WORKSPACE_ID), anyList()))
+            .thenAnswer(invocation -> {
+                List<Integer> requested = invocation.getArgument(1);
+                return requested.stream()
+                    .map(id -> personMapper.getPersonById(WORKSPACE_ID, id))
+                    .filter(Objects::nonNull)
+                    .toList();
+            });
         service = new RadarService(
             signalMapper,
             mock(RelationshipSignalReconciliationService.class),
@@ -92,7 +107,7 @@ class RadarServiceTest {
             personMapper,
             personEdgeReadService,
             mock(CompanyMapper.class),
-            mock(DealMapper.class),
+            dealMapper,
             taskService,
             warmPathService,
             new ObjectMapper(),
@@ -416,6 +431,108 @@ class RadarServiceTest {
         assertEquals(Permission.TASK_CREATE, permission.value());
     }
 
+    @Test
+    void evidenceReferencesCarryTheCurrentRecordNameRatherThanAPersistedOne() {
+        RelationshipSignal signal = signal("relationship_decay", evidenceForSubject());
+        currentPerson(signal.getSubjectId(), "Renamed Today");
+        when(signalMapper.findActiveForActor(WORKSPACE_ID, USER_ID)).thenReturn(List.of(signal));
+
+        var item = service.get(List.of(), List.of(), null).items().getFirst();
+        var reference = item.evidence().getFirst().references().getFirst();
+
+        assertEquals("person", reference.type());
+        assertEquals(signal.getSubjectId(), reference.id());
+        assertEquals("Renamed Today", reference.label());
+        assertEquals("Renamed Today", item.subject().label());
+        assertEquals("Persisted", signal.getSubjectLabel());
+    }
+
+    @Test
+    void unnamedReferencedRecordsFallBackToTheirIdRatherThanRenderingBlank() {
+        RelationshipSignal signal = signal("relationship_decay", evidenceForSubject());
+        currentPerson(signal.getSubjectId(), "  ");
+        when(signalMapper.findActiveForActor(WORKSPACE_ID, USER_ID)).thenReturn(List.of(signal));
+
+        var reference = service.get(List.of(), List.of(), null).items().getFirst()
+            .evidence().getFirst().references().getFirst();
+
+        assertEquals("#" + signal.getSubjectId(), reference.label());
+    }
+
+    @Test
+    void referencesToRecordsTheCallerCannotSeeAreDroppedRatherThanLabelled() {
+        RelationshipSignal signal = signal("relationship_decay", evidenceForSubjectAndCompany(99));
+        currentPerson(signal.getSubjectId(), "Visible");
+        when(signalMapper.findActiveForActor(WORKSPACE_ID, USER_ID)).thenReturn(List.of(signal));
+
+        var references = service.get(List.of(), List.of(), null).items().getFirst()
+            .evidence().getFirst().references();
+
+        assertEquals(List.of(signal.getSubjectId()), references.stream()
+            .map(RadarResponseDto.Reference::id).toList());
+        assertEquals("Visible", references.getFirst().label());
+    }
+
+    /**
+     * Deal-risk evidence deliberately does not persist the cold stakeholder's name, so the browser
+     * can only name them if the person reference resolves its label at read time.
+     */
+    @Test
+    void aColdStakeholderIsNameableFromItsReferenceWithoutAPersistedName() {
+        RelationshipSignal signal = signal("deal_risk", stakeholderColdEvidence(21));
+        signal.setSubjectType("deal");
+        signal.setSubjectId(4);
+        currentDeal(4, "Renewal");
+        currentPerson(21, "Aiko Tanaka");
+        when(signalMapper.findActiveForActor(WORKSPACE_ID, USER_ID)).thenReturn(List.of(signal));
+
+        var evidence = service.get(List.of(), List.of(), null).items().getFirst()
+            .evidence().getFirst();
+
+        assertFalse(evidence.parameters().containsKey("person"));
+        assertEquals("Aiko Tanaka", evidence.references().stream()
+            .filter(reference -> "person".equals(reference.type()))
+            .findFirst()
+            .orElseThrow()
+            .label());
+    }
+
+    @Test
+    void recordScopedReadNarrowsInTheDatabaseRatherThanFilteringTheWholeFeed() {
+        RelationshipSignal signal = signal("relationship_decay", evidenceForSubject());
+        currentPerson(signal.getSubjectId(), "Visible");
+        when(signalMapper.findActiveForActorBySubject(WORKSPACE_ID, USER_ID, "person", 18))
+            .thenReturn(List.of(signal));
+
+        var response = service.get(List.of(), List.of(), null, "Person", 18);
+
+        assertEquals(1, response.items().size());
+        verify(signalMapper).findActiveForActorBySubject(WORKSPACE_ID, USER_ID, "person", 18);
+        verify(signalMapper, never()).findActiveForActor(WORKSPACE_ID, USER_ID);
+    }
+
+    @Test
+    void recordScopeRefusesHalfSuppliedUnknownOrNonPositiveSubjects() {
+        assertThrows(BadRequestException.class,
+            () -> service.get(List.of(), List.of(), null, "person", null));
+        assertThrows(BadRequestException.class,
+            () -> service.get(List.of(), List.of(), null, null, 18));
+        assertThrows(BadRequestException.class,
+            () -> service.get(List.of(), List.of(), null, "workspace", 18));
+        assertThrows(BadRequestException.class,
+            () -> service.get(List.of(), List.of(), null, "person", 0));
+        verify(signalMapper, never()).findActiveForActorBySubject(anyInt(), anyInt(), any(), anyInt());
+    }
+
+    @Test
+    void recordScopedReadStillHidesSignalsWhoseSubjectLeftTheWorkspace() {
+        RelationshipSignal signal = signal("relationship_decay", evidenceForSubject());
+        when(signalMapper.findActiveForActorBySubject(WORKSPACE_ID, USER_ID, "person", 18))
+            .thenReturn(List.of(signal));
+
+        assertTrue(service.get(List.of(), List.of(), null, "person", 18).items().isEmpty());
+    }
+
     private RelationshipSignal signal(String family, String evidence) {
         RelationshipSignal signal = new RelationshipSignal();
         signal.setId("warm_path".equals(family) ? 2 : 1);
@@ -441,6 +558,18 @@ class RadarServiceTest {
             + "\"references\":[{\"type\":\"person\",\"id\":18}]}]";
     }
 
+    private static String stakeholderColdEvidence(int personId) {
+        return "[{\"type\":\"stakeholder_cold\",\"parameters\":{\"severity\":\"high\","
+            + "\"personId\":" + personId + "},\"references\":["
+            + "{\"type\":\"deal\",\"id\":4},{\"type\":\"person\",\"id\":" + personId + "}]}]";
+    }
+
+    private static String evidenceForSubjectAndCompany(int companyId) {
+        return "[{\"type\":\"relationship_temperature\",\"parameters\":{},"
+            + "\"references\":[{\"type\":\"person\",\"id\":18},"
+            + "{\"type\":\"company\",\"id\":" + companyId + "}]}]";
+    }
+
     private static String evidenceForBridge(int bridgeId) {
         return "[{\"type\":\"warm_path\",\"parameters\":{\"bridgePersonId\":"
             + bridgeId + ",\"bridgeName\":\"Persisted bridge\"},\"references\":["
@@ -460,6 +589,13 @@ class RadarServiceTest {
         person.setId(id);
         person.setName(name);
         when(personMapper.getPersonById(WORKSPACE_ID, id)).thenReturn(person);
+    }
+
+    private void currentDeal(int id, String name) {
+        Deal deal = new Deal();
+        deal.setId(id);
+        deal.setName(name);
+        when(dealMapper.getDealById(WORKSPACE_ID, id)).thenReturn(deal);
     }
 
     private void memberLock() {

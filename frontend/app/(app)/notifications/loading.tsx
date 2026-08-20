@@ -3,7 +3,7 @@ import { PageShell } from "@/app/components/PageShell";
 
 export default function NotificationsLoading() {
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <div className="flex flex-wrap items-end justify-between gap-4 px-4 sm:px-6">
                     <div>
                         <Skeleton className="h-8 w-56" />

@@ -104,7 +104,6 @@ export const RAW_ERROR_TOAST_EXCLUSIONS = [
     "app/components/records/deals/EditDealSheet.tsx",
     "app/components/records/pipelines/EditPipelineSheet.tsx",
     "app/components/records/pipelines/PipelinesBrowser.tsx",
-    "app/components/records/products/ProductsBrowser.tsx",
     "app/components/records/users/NewUserDialog.tsx",
     "app/components/reports/AskConnexComposer.tsx",
     "app/components/reports/GoalsBoard.tsx",
@@ -129,7 +128,7 @@ export const RAW_ERROR_TOAST_EXCLUSIONS = [
  */
 export const EXCLUSION_BASELINE = {
     sonnerImports: 13,
-    rawErrorToasts: 76,
+    rawErrorToasts: 75,
 };
 
 const SONNER_IMPORT_MESSAGE =

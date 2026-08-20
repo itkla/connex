@@ -1,10 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import CountUp from "@/app/components/dashboard/CountUp";
 import Panel from "@/app/components/overview/analytics/Panel";
 import CampaignCounter from "@/app/components/marketing/campaigns/CampaignCounter";
+import CampaignRecipientsDialog from "@/app/components/marketing/campaigns/CampaignRecipientsDialog";
 import SendStatusBadge from "@/app/components/marketing/campaigns/SendStatusBadge";
+import { type EngagementCounter } from "@/app/components/marketing/campaigns/recipientFilters";
 import {
     type CampaignEngagement as CampaignEngagementData,
     type CampaignSendEngagement,
@@ -36,7 +39,7 @@ function isSendStatus(status: string): status is CampaignSendStatus {
 }
 
 type CountTile = {
-    key: string;
+    key: EngagementCounter;
     label: string;
     value: number;
     unavailable: boolean;
@@ -49,26 +52,57 @@ type RateRow = {
     receiptsAvailable: boolean;
 };
 
-function CountTiles({ tiles, notMeasuredHint }: { tiles: CountTile[]; notMeasuredHint: string }) {
+function CountTiles({
+    tiles,
+    notMeasuredHint,
+    drillLabel,
+    onDrill,
+}: {
+    tiles: CountTile[];
+    notMeasuredHint: string;
+    drillLabel: (tile: CountTile) => string;
+    onDrill: ((tile: CountTile) => void) | null;
+}) {
     return (
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl bg-border ring-1 ring-border sm:grid-cols-4 lg:grid-cols-7">
-            {tiles.map((tile) => (
-                <div key={tile.key} className="flex flex-col gap-1.5 bg-card p-4 sm:p-5">
-                    <span className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                        {tile.label}
-                    </span>
-                    {tile.unavailable ? (
-                        <span aria-hidden className="text-2xl leading-none text-muted-foreground tabular-nums">
-                            —
+            {tiles.map((tile) => {
+                const body = (
+                    <>
+                        <span className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                            {tile.label}
                         </span>
-                    ) : (
-                        <CountUp value={tile.value} className="text-2xl leading-none text-foreground tabular-nums" />
-                    )}
-                    {tile.unavailable && (
-                        <span className="text-xs text-muted-foreground">{notMeasuredHint}</span>
-                    )}
-                </div>
-            ))}
+                        {tile.unavailable ? (
+                            <span aria-hidden className="text-2xl leading-none text-muted-foreground tabular-nums">
+                                —
+                            </span>
+                        ) : (
+                            <CountUp value={tile.value} className="text-2xl leading-none text-foreground tabular-nums" />
+                        )}
+                        {tile.unavailable && (
+                            <span className="text-xs text-muted-foreground">{notMeasuredHint}</span>
+                        )}
+                    </>
+                );
+                const drillable = onDrill !== null && !tile.unavailable && tile.value > 0;
+                if (!drillable) {
+                    return (
+                        <div key={tile.key} className="flex flex-col gap-1.5 bg-card p-4 sm:p-5">
+                            {body}
+                        </div>
+                    );
+                }
+                return (
+                    <button
+                        key={tile.key}
+                        type="button"
+                        aria-label={drillLabel(tile)}
+                        onClick={() => onDrill(tile)}
+                        className="flex flex-col gap-1.5 bg-card p-4 text-left outline-none transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 sm:p-5"
+                    >
+                        {body}
+                    </button>
+                );
+            })}
         </div>
     );
 }
@@ -121,14 +155,26 @@ function RateTiles({
  * rates, a channel and skip-reason breakdown, and a per-send counter list. Receipt-derived figures
  * (delivered, bounced, complained, unsubscribed) and every rate render "Not measured" — never a
  * misleading zero — when delivery receipts are unavailable or the rate is {@code null}.
+ *
+ * A measured, non-zero tile opens the contacts it counted, but only for a reader with consent
+ * access: the roster behind a count is per-contact marketing data the server guards separately, so
+ * a reader without it is shown the plain counts rather than an affordance that would be refused.
+ *
+ * @param campaignId - the campaign the counts belong to
+ * @param canReadRecipients - whether the reader may open the contacts behind a count
  */
 export default function CampaignEngagement({
+    campaignId,
     engagement,
+    canReadRecipients,
 }: {
+    campaignId: number;
     engagement: CampaignEngagementData | null;
+    canReadRecipients: boolean;
 }) {
     const t = useTranslations("CampaignEngagement");
     const locale = useLocale();
+    const [openCounter, setOpenCounter] = useState<CountTile | null>(null);
 
     const channelLabel = (channel: string) => {
         if (channel === "email") return t("channels.email");
@@ -192,7 +238,14 @@ export default function CampaignEngagement({
     return (
         <Panel title={t("title")} subtitle={t("subtitle")}>
             <div className="flex flex-col gap-6">
-                <CountTiles tiles={tiles} notMeasuredHint={t("notMeasuredHint")} />
+                <CountTiles
+                    tiles={tiles}
+                    notMeasuredHint={t("notMeasuredHint")}
+                    drillLabel={(tile) =>
+                        t("drillThrough", { counter: tile.label, count: tile.value.toLocaleString(locale) })
+                    }
+                    onDrill={canReadRecipients ? setOpenCounter : null}
+                />
 
                 <RateTiles
                     rates={rates}
@@ -301,6 +354,19 @@ export default function CampaignEngagement({
                     </ul>
                 </div>
             </div>
+
+            {openCounter ? (
+                <CampaignRecipientsDialog
+                    key={openCounter.key}
+                    campaignId={campaignId}
+                    counter={openCounter.key}
+                    counterLabel={openCounter.label}
+                    open
+                    onOpenChange={(next) => {
+                        if (!next) setOpenCounter(null);
+                    }}
+                />
+            ) : null}
         </Panel>
     );
 }
