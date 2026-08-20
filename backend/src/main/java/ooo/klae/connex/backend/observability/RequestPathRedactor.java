@@ -98,6 +98,7 @@ public final class RequestPathRedactor {
         "/settings/security",
         "/settings/sso",
         "/settings/workflows/{legacyRuleId}",
+        "/settings/workspace/people",
         "/sso/link",
         "/tokushoho",
         "/unsubscribe/{token}",

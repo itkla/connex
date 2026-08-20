@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -33,7 +34,12 @@ public class RoleService {
     }
 
     public List<WorkspaceRole> builtInRoles(int workspaceId, int actorId) {
-        workspaceService.requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);
+        Set<Permission> permissions = workspaceService.permissionsFor(workspaceId, actorId);
+        if (!permissions.contains(Permission.MEMBER_MANAGE)
+                && !permissions.contains(Permission.ROLE_MANAGE)) {
+            throw new ForbiddenException(
+                "Requires member or role management permission in this workspace");
+        }
         return workspaceService.builtInRoles();
     }
 
@@ -76,7 +82,8 @@ public class RoleService {
         sessionSecurityService.requireRecentAuthentication(actorId);
         workspaceService.lockRoleDeletionAuthorization(workspaceId, actorId, roleId);
         if (roleMapper.deleteRole(workspaceId, roleId) == 0) {
-            throw new ResourceNotFoundException("Role not found");
+            throw new BadRequestException(
+                "Reassign every member using this role before deleting it");
         }
         auditService.record("workspace.role.delete", "workspace", workspaceId, null,
                 "Deleted role " + roleId, null);

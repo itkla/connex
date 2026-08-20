@@ -82,7 +82,8 @@ reference a role (built-in or custom). Independent of tenant isolation — seque
 > **✅ Backend implemented (2026-06-24, #11):** `Permission` enum catalog (per-entity create/update/delete
 > for records + `PIPELINE_MANAGE`/`TAG_MANAGE`/`MEMBER_MANAGE`/`ROLE_MANAGE`/`AUDIT_READ`/`WORKSPACE_*`).
 > V13 adds `workspace_role`, `workspace_role_permission`, and an additive nullable `workspace_member.role_id`
-> (custom role wins when set; `ON DELETE SET NULL` reverts to the built-in — non-destructive). Built-in
+> (custom role wins when set; assigned roles must be explicitly reassigned before deletion so the
+> underlying `ON DELETE SET NULL` cannot expose a broader built-in role). Built-in
 > roles map to fixed permission bundles; `WorkspaceService.requirePermission(...)` is wired into every entity
 > mutation + structural/member/audit gate (replacing the `requireRole` sites). `RoleController`
 > (`/api/workspaces/{id}/roles` CRUD) + `GET /api/permissions` catalog + custom-role assignment via the

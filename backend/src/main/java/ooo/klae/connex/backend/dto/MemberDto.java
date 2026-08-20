@@ -17,6 +17,7 @@ public class MemberDto {
     private String email;
     private String profilePictureUrl;
     private String role;
+    private String builtInRole;
     private Integer roleId;
     private String status;
 }

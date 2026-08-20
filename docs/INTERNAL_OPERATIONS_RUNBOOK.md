@@ -206,18 +206,14 @@ DELETE /api/workspaces/{workspaceId}/roles/{roleId}
 - **A custom role replaces the built-in bundle entirely.** A member with a custom role assigned gets
   that role's exact permission set; the built-in bundle for their `MEMBER`/`ADMIN`/`OWNER` role no
   longer applies. Assigning an under-specified custom role is how people accidentally remove access.
-- Deleting a custom role nulls the reference, so its members fall back to their built-in role rather
-  than losing everything.
+- An assigned custom role cannot be deleted. Reassign every affected member first; this makes the
+  resulting built-in or replacement role explicit and subjects it to the normal grant ceiling.
 - **No one can confer a permission they do not themselves hold.** This cap is enforced on role
   **create** and **update**, on custom-role assignment, and on built-in role change. Non-grantable
   values are rejected on input and silently dropped on read.
-- **Deletion is the exception, and it is not a cap at all.** `deleteRole` runs the same
-  authorization lock but passes an **empty** requested-permission set into the grantable check, so
-  the check iterates nothing: **any `ROLE_MANAGE` holder can delete a custom role that grants
-  permissions they do not hold.** The blast radius is a privilege *reduction* — deleted members fall
-  back to their built-in bundle — but do not describe deletion to a customer as
-  permission-capped, and treat "someone deleted the role that held our elevated access" as a
-  reachable state for any `ROLE_MANAGE` holder.
+- Deletion requires `ROLE_MANAGE`, recent step-up, the locked role-mutation protocol, and zero
+  assignees. Because deletion cannot change anyone's effective permissions, it does not need a
+  separate grant-ceiling comparison after those checks.
 - `GET /api/permissions` lists grantable names; `GET /api/permissions/effective` returns the calling
   member's effective set — that endpoint is the fastest way to settle a "why can't I do X" ticket.
 

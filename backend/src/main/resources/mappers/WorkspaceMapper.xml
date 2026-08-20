@@ -143,7 +143,8 @@
   <select id="getMembersWithRoles" resultType="ooo.klae.connex.backend.dto.MemberDto">
     SELECT u.id, u.username, u.display_name AS displayName, u.email,
            u.profile_picture_url AS profilePictureUrl,
-           COALESCE(wr.name, wm.role) AS role, wm.role_id AS roleId, wm.status AS status
+           COALESCE(wr.name, wm.role) AS role, wm.role AS builtInRole,
+           wm.role_id AS roleId, wm.status AS status
     FROM app_user u
     JOIN workspace_member wm ON wm.user_id = u.id
     LEFT JOIN workspace_role wr ON wr.id = wm.role_id
@@ -154,7 +155,8 @@
   <select id="getMember" resultType="ooo.klae.connex.backend.dto.MemberDto">
     SELECT u.id, u.username, u.display_name AS displayName, u.email,
            u.profile_picture_url AS profilePictureUrl,
-           COALESCE(wr.name, wm.role) AS role, wm.role_id AS roleId, wm.status AS status
+           COALESCE(wr.name, wm.role) AS role, wm.role AS builtInRole,
+           wm.role_id AS roleId, wm.status AS status
     FROM app_user u
     JOIN workspace_member wm ON wm.user_id = u.id
     LEFT JOIN workspace_role wr ON wr.id = wm.role_id
@@ -337,18 +339,22 @@
   </insert>
 
   <update id="updateMemberRole">
-    UPDATE workspace_member SET role = #{role}, role_id = NULL
+    UPDATE workspace_member
+    SET role = #{role}, role_id = NULL, grant_authorization_version = 1
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
   </update>
 
   <insert id="addPendingMember">
-    INSERT INTO workspace_member (workspace_id, user_id, role, status)
-    VALUES (#{workspaceId}, #{userId}, #{role}, 'pending')
+    INSERT INTO workspace_member (
+      workspace_id, user_id, role, status, grant_authorization_version
+    )
+    VALUES (#{workspaceId}, #{userId}, #{role}, 'pending', 1)
   </insert>
 
   <update id="activateMember">
     UPDATE workspace_member SET status = 'active'
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND status = 'pending'
+      AND grant_authorization_version &gt;= 1
   </update>
 
   <select id="getPendingMemberships" resultType="ooo.klae.connex.backend.dto.WorkspaceMembershipDto">

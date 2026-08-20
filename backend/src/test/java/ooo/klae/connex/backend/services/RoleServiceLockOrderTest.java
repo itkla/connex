@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.when;
@@ -15,6 +16,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.beans.WorkspaceRole;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 
@@ -66,5 +68,12 @@ class RoleServiceLockOrderTest {
         order.verify(roleMapper).deleteRole(7, 5);
         order.verify(auditService).record(
             "workspace.role.delete", "workspace", 7, null, "Deleted role 5", null);
+    }
+
+    @Test
+    void customRoleDeletionRejectsAnAssignedRole() {
+        when(roleMapper.deleteRole(7, 5)).thenReturn(0);
+
+        assertThrows(BadRequestException.class, () -> service.deleteRole(7, 1, 5));
     }
 }
