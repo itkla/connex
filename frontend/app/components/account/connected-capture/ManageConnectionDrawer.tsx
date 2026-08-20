@@ -220,13 +220,12 @@ export default function ManageConnectionDrawer({
                                     <ArrowPathIcon data-icon="inline-start" />
                                     {tConnections('reconnect')}
                                 </Button>
-                            ) : (
+                            ) : captureEnabled ? (
                                 <Button
                                     type="button"
                                     size="toolbar"
                                     disabled={
                                         busy
-                                        || !captureEnabled
                                         || !capture?.effectivePolicy.enabled
                                         || connection.status !== 'connected'
                                     }
@@ -235,7 +234,7 @@ export default function ManageConnectionDrawer({
                                     <ArrowPathIcon data-icon="inline-start" />
                                     {tCapture('syncNow')}
                                 </Button>
-                            )}
+                            ) : null}
                             {connection.status === 'connected' || paused ? (
                                 <Button
                                     type="button"

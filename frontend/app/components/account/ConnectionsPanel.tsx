@@ -346,8 +346,6 @@ export default function ConnectionsPanel({
         routeState.provider,
     ]);
 
-    const connectionEnabled = (provider: ConnectedAccountProvider) =>
-        capabilities.connectedAccounts[provider];
     const connectionOf = (provider: ConnectedAccountProvider) =>
         connections?.find((connection) => connection.provider === provider) ?? null;
     const overviewOf = (provider: ConnectedAccountProvider) =>
