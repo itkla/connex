@@ -54,6 +54,7 @@ import ooo.klae.connex.backend.mappers.WorkflowOperationsMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.util.LikePattern;
 
 /** Freezes, confirms, and reports exact-scope canonical manual workflow invocations. */
 @Service
@@ -399,7 +400,7 @@ public class WorkflowManualRunService {
                 throw new BadRequestException("Saved view scope is malformed");
             }
         }
-        WorkflowManualFilter filter = filterFromSavedView(config);
+        WorkflowManualFilter filter = filterFromSavedView(config, recordType);
         boolean nativeFilterConfigured = hasNativeFilter(filter);
         List<Integer> nativeMatches = nativeFilterConfigured
             ? resolveFilterForRecordType(view.getRecordType(), filter, requesterId)
@@ -432,9 +433,10 @@ public class WorkflowManualRunService {
             : filter;
         MemberScope memberScope = memberScopeResolver.resolve(
             resolved.memberScope(), resolved.memberIds(), requesterId);
+        String query = containingQuery(resolved.query());
         return switch (recordType) {
             case "person" -> personService.getMatchingPersonIds(
-                blankToNull(resolved.query()),
+                query,
                 resolved.companies(),
                 resolved.titles(),
                 Boolean.TRUE.equals(resolved.noCompany()),
@@ -448,7 +450,7 @@ public class WorkflowManualRunService {
                 false,
                 null);
             case "company" -> companyService.getMatchingCompanyIds(
-                blankToNull(resolved.query()),
+                query,
                 resolved.industry(),
                 false,
                 null,
@@ -456,7 +458,7 @@ public class WorkflowManualRunService {
                 false,
                 null);
             case "deal" -> dealService.getMatchingDealIds(
-                blankToNull(resolved.query()),
+                query,
                 blankToNull(resolved.currency()),
                 resolved.pipelineIds(),
                 resolved.stageIds(),
@@ -701,7 +703,7 @@ public class WorkflowManualRunService {
         return deal.getName();
     }
 
-    private WorkflowManualFilter filterFromSavedView(JsonNode config) {
+    private WorkflowManualFilter filterFromSavedView(JsonNode config, String recordType) {
         if (config == null || config.isNull()) {
             return new WorkflowManualFilter(
                 null, null, null, null, false, null, null, null,
@@ -711,21 +713,24 @@ public class WorkflowManualRunService {
         List<String> lifecycle = textValues(filters, "lifecycle");
         List<String> leadSource = textValues(filters, "leadSource");
         List<String> firstResponse = textValues(filters, "firstResponse");
+        List<String> companies = textValues(filters, "company");
+        SavedViewMemberScope memberScope = savedViewMemberScope(filters);
+        boolean deal = "deal".equals(recordType);
         return new WorkflowManualFilter(
             text(config.get("query")),
-            textValues(filters, "company"),
+            companies,
             textValues(filters, "title"),
             textValues(filters, "industry"),
-            booleanValue(filters, "noCompany"),
+            booleanValue(filters, "noCompany") || containsEmptySentinel(companies),
             firstValue(filters, "currency"),
-            integerValues(filters, "pipelineId"),
-            integerValues(filters, "stageId"),
-            integerValues(filters, "companyId"),
-            integerValues(filters, "contact"),
+            deal ? preferredIdentifierValues(filters, "pipeline", "pipelineId") : null,
+            deal ? preferredIdentifierValues(filters, "stage", "stageId") : null,
+            deal ? preferredIdentifierValues(filters, "company", "companyId") : null,
+            deal ? integerValues(filters, "contact") : null,
             textValues(filters, "status"),
             textValues(filters, "risk"),
-            firstValue(filters, "scope"),
-            integerValues(filters, "memberId"),
+            memberScope.scope(),
+            memberScope.memberIds(),
             enumValues(lifecycle, PersonLifecycleStage.class),
             containsEmptySentinel(lifecycle),
             enumValues(leadSource, PersonLeadSource.class),
@@ -813,6 +818,21 @@ public class WorkflowManualRunService {
 
     private static List<Integer> integerValues(JsonNode object, String key) {
         List<String> values = textValues(object, key);
+        return integerValues(values);
+    }
+
+    private static List<Integer> preferredIdentifierValues(
+            JsonNode object, String primaryKey, String legacyKey) {
+        List<String> values = textValues(object, primaryKey);
+        if (values == null) {
+            return integerValues(object, legacyKey);
+        }
+        return integerValues(values.stream()
+            .filter(value -> !EMPTY_FACET_SENTINEL.equals(value))
+            .toList());
+    }
+
+    private static List<Integer> integerValues(List<String> values) {
         if (values == null) {
             return null;
         }
@@ -821,6 +841,23 @@ public class WorkflowManualRunService {
         } catch (NumberFormatException exception) {
             throw new BadRequestException("Saved view identifier filter is malformed");
         }
+    }
+
+    private static SavedViewMemberScope savedViewMemberScope(JsonNode filters) {
+        List<String> owner = textValues(filters, "owner");
+        if (owner == null) {
+            return new SavedViewMemberScope(
+                firstValue(filters, "scope"),
+                preferredIdentifierValues(filters, "memberIds", "memberId"));
+        }
+        if (owner.contains("me")) {
+            return new SavedViewMemberScope("me", null);
+        }
+        if (owner.contains(EMPTY_FACET_SENTINEL)) {
+            return new SavedViewMemberScope("unassigned", null);
+        }
+        return new SavedViewMemberScope(
+            "members", integerValues(owner).stream().distinct().toList());
     }
 
     private static String firstValue(JsonNode object, String key) {
@@ -861,8 +898,16 @@ public class WorkflowManualRunService {
         return query;
     }
 
+    private static String containingQuery(String value) {
+        String query = blankToNull(value);
+        return query == null ? null : LikePattern.containing(query);
+    }
+
     private static String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private record SavedViewMemberScope(String scope, List<Integer> memberIds) {
     }
 
     private static String requireToken(String value) {

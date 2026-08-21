@@ -63,6 +63,8 @@ class FigureReconciliationArchTest {
         "(?:FROM|JOIN)\\s+[`\"]?company_share[`\"]?(?:\\s|$)", Pattern.CASE_INSENSITIVE);
     private static final Pattern PIPELINE_SHARE_READ = Pattern.compile(
         "(?:FROM|JOIN)\\s+[`\"]?pipeline_share[`\"]?(?:\\s|$)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern PERSON_SHARE_READ = Pattern.compile(
+        "(?:FROM|JOIN)\\s+[`\"]?person_share[`\"]?(?:\\s|$)", Pattern.CASE_INSENSITIVE);
     private static final Pattern OWNER_PREDICATE = Pattern.compile(
         "\\bd\\.owner_id\\s*(?:=|IN\\b|IS\\s+NULL)", Pattern.CASE_INSENSITIVE);
     private static final List<String> PERIOD_PARAMETERS = List.of(
@@ -164,7 +166,7 @@ class FigureReconciliationArchTest {
                 verifyValueSource(definition, evidence, sql, measureSql, violations);
                 verifyNoLineItemSource(definition, evidence, sql, violations);
                 verifyArchivePosture(definition, evidence, sql, violations);
-                verifyRestrictionPosture(definition, evidence, sql, violations);
+                verifyRestrictionPosture(definition, evidence, statement, sql, violations);
                 verifySharingPosture(definition, evidence, sql, violations);
                 verifyPeriodBasis(
                     definition, evidence, statement, sql, measureSql, violations);
@@ -262,16 +264,36 @@ class FigureReconciliationArchTest {
     private void verifyRestrictionPosture(
             FigureDefinition definition,
             StatementEvidence evidence,
+            Statement statement,
             String sql,
             List<String> violations) {
         RestrictionPosture posture = definition.restrictionPosture();
-        if (PERSON_READ.matcher(sql).find()) {
-            violations.add(failure(definition, evidence, posture,
-                "no FROM/JOIN person evidence", sql));
-        }
-        if (PERSON_RESTRICTION.matcher(sql).find()) {
-            violations.add(failure(definition, evidence, posture,
-                "no suspended_at or provision_ceased_at predicate", sql));
+        switch (posture) {
+            case CONTACT_FILTER_EXCLUDES_UNAVAILABLE_PERSONS -> {
+                String contactFilterSql = statement.conditionals().stream()
+                    .filter(conditional -> conditional.condition().contains("personIds != null"))
+                    .map(ConditionalSql::sql)
+                    .findFirst()
+                    .orElse("");
+                requireContains(definition, evidence, posture,
+                    "JOIN person filtered_person", contactFilterSql, violations);
+                requireContains(definition, evidence, posture,
+                    "filtered_person.archived_at IS NULL", contactFilterSql, violations);
+                requireContains(definition, evidence, posture,
+                    "filtered_person.suspended_at IS NULL", contactFilterSql, violations);
+                requireContains(definition, evidence, posture,
+                    "filtered_person.provision_ceased_at IS NULL", contactFilterSql, violations);
+            }
+            case NO_PERSON_RESTRICTION_PREDICATE -> {
+                if (PERSON_READ.matcher(sql).find()) {
+                    violations.add(failure(definition, evidence, posture,
+                        "no FROM/JOIN person evidence", sql));
+                }
+                if (PERSON_RESTRICTION.matcher(sql).find()) {
+                    violations.add(failure(definition, evidence, posture,
+                        "no suspended_at or provision_ceased_at predicate", sql));
+                }
+            }
         }
     }
 
@@ -282,9 +304,11 @@ class FigureReconciliationArchTest {
             List<String> violations) {
         SharingPosture posture = definition.sharingPosture();
         switch (posture) {
-            case COMPANY_AND_PIPELINE_SHARE_TRAVERSAL -> {
+            case COMPANY_PERSON_AND_PIPELINE_SHARE_TRAVERSAL -> {
                 requirePattern(definition, evidence, posture, COMPANY_SHARE_READ,
                     "a FROM/JOIN company_share table reference", sql, violations);
+                requirePattern(definition, evidence, posture, PERSON_SHARE_READ,
+                    "a FROM/JOIN person_share table reference", sql, violations);
                 requirePattern(definition, evidence, posture, PIPELINE_SHARE_READ,
                     "a FROM/JOIN pipeline_share table reference", sql, violations);
             }

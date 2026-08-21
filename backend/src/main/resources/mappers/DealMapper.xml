@@ -74,10 +74,10 @@
   <sql id="visibleFilteredPersonJoin">
     (filtered_person.workspace_id = #{workspaceId}
      OR EXISTS (SELECT 1 FROM person_share filtered_ps
-        JOIN workspace filtered_vws ON filtered_vws.id = filtered_ps.workspace_id
-        JOIN workspace filtered_ows
-          ON filtered_ows.id = filtered_person.workspace_id
-         AND filtered_ows.org_id = filtered_vws.org_id
+        JOIN workspace vws ON vws.id = filtered_ps.workspace_id
+        JOIN workspace ows
+          ON ows.id = filtered_person.workspace_id
+         AND ows.org_id = vws.org_id
         WHERE filtered_ps.person_id = filtered_person.id
           AND filtered_ps.workspace_id = #{workspaceId}))
     AND filtered_person.archived_at IS NULL

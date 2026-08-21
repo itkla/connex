@@ -36,6 +36,7 @@ import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowInvocation;
 import ooo.klae.connex.backend.beans.WorkflowInvocationRecord;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
@@ -208,6 +209,52 @@ class WorkflowManualRunServiceTest {
         assertEquals(0, result.exactCount());
         verify(dealService).getMatchingDealIds(
             null, null, null, null, null, List.of(13, 13), false, null, null, null);
+    }
+
+    @Test
+    void savedViewDealFacetsAndOwnerScopeMatchTheBrowserContractExactly() throws Exception {
+        stubSavedView(
+            "{\"query\":\"Acme_100%\",\"filters\":"
+                + "{\"currency\":[\"JPY\"],\"pipeline\":[\"2\"],\"stage\":[\"3\"],"
+                + "\"company\":[\"5\",\"__empty__\"],\"contact\":[\"13\"],"
+                + "\"status\":[\"won\"],\"risk\":[\"high\"],"
+                + "\"owner\":[\"17\",\"19\",\"17\"]}}");
+        MemberScope memberScope = MemberScope.fromRequest("members", List.of(17, 19), 41);
+        when(memberScopeResolver.resolve("members", List.of(17, 19), 41))
+            .thenReturn(memberScope);
+        when(dealService.getMatchingDealIds(
+            "%Acme\\_100\\%%", "JPY", List.of(2), List.of(3), List.of(5), List.of(13),
+            true, List.of("won"), List.of("high"), memberScope))
+            .thenReturn(List.of());
+
+        WorkflowManualPreparationDto result = service.prepare(
+            11,
+            new WorkflowManualPrepareRequest(
+                "saved_view", new WorkflowManualScope.SavedView(5)));
+
+        assertEquals(0, result.exactCount());
+        verify(dealService).getMatchingDealIds(
+            "%Acme\\_100\\%%", "JPY", List.of(2), List.of(3), List.of(5), List.of(13),
+            true, List.of("won"), List.of("high"), memberScope);
+    }
+
+    @Test
+    void savedViewOwnerSentinelTakesPrecedenceOverMemberIds() throws Exception {
+        stubSavedView("{\"filters\":{\"owner\":[\"me\",\"17\"]}}");
+        MemberScope memberScope = MemberScope.fromRequest("me", null, 41);
+        when(memberScopeResolver.resolve("me", null, 41)).thenReturn(memberScope);
+        when(dealService.getMatchingDealIds(
+            null, null, null, null, null, null, false, null, null, memberScope))
+            .thenReturn(List.of());
+
+        WorkflowManualPreparationDto result = service.prepare(
+            11,
+            new WorkflowManualPrepareRequest(
+                "saved_view", new WorkflowManualScope.SavedView(5)));
+
+        assertEquals(0, result.exactCount());
+        verify(dealService).getMatchingDealIds(
+            null, null, null, null, null, null, false, null, null, memberScope);
     }
 
     @Test
