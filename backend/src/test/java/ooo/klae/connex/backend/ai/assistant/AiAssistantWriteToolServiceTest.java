@@ -135,6 +135,7 @@ class AiAssistantWriteToolServiceTest {
                 dealService,
                 activityService,
                 taskService,
+                mock(AiAssistantHistoryService.class),
                 mock(ScoringService.class),
                 workspaceService,
                 personMapper,

@@ -29,6 +29,32 @@
     created_at, updated_at
   </sql>
 
+  <sql id="assistantProcessablePerson">
+    p.archived_at IS NULL
+    AND p.suspended_at IS NULL
+    AND p.provision_ceased_at IS NULL
+    AND (p.workspace_id = #{workspaceId}
+      OR (p.workspace_id IN
+        <foreach item="organizationWorkspaceId" collection="organizationWorkspaceIds"
+                 open="(" separator="," close=")">#{organizationWorkspaceId}</foreach>
+        AND EXISTS (SELECT 1 FROM person_share ps
+          WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId})))
+  </sql>
+
+  <sql id="assistantLinkedPeopleProcessable">
+    (t.person_id IS NULL OR EXISTS (SELECT 1 FROM person p
+      WHERE p.id = t.person_id
+        AND <include refid="assistantProcessablePerson"/>))
+    AND NOT EXISTS (SELECT 1 FROM entity_reference linked_reference
+      WHERE linked_reference.workspace_id = #{workspaceId}
+        AND linked_reference.source_type = 'task'
+        AND linked_reference.source_id = t.id
+        AND linked_reference.ref_type = 'person'
+        AND NOT EXISTS (SELECT 1 FROM person p
+          WHERE p.id = linked_reference.ref_id
+            AND <include refid="assistantProcessablePerson"/>))
+  </sql>
+
   <select id="getAllTasks" resultMap="TaskResult">
     SELECT <include refid="taskColumns"/>
     FROM task
@@ -93,6 +119,16 @@
     ORDER BY due_date IS NULL, due_date, id
   </select>
 
+  <select id="getAiAssistantTasksByPersonId" resultMap="TaskResult">
+    SELECT t.id, t.workspace_id, t.description, t.completed, t.status, t.position, t.due_date,
+      t.assigned_to_id, t.person_id, t.deal_id, t.created_at, t.updated_at
+    FROM task t
+    WHERE t.workspace_id = #{workspaceId} AND t.person_id = #{personId}
+      AND <include refid="assistantLinkedPeopleProcessable"/>
+    ORDER BY t.due_date IS NULL, t.due_date, t.id
+    LIMIT #{limit}
+  </select>
+
   <select id="getTasksByPersonIds" resultMap="TaskResult">
     SELECT <include refid="taskColumns"/>
     FROM task
@@ -121,6 +157,16 @@
     ORDER BY due_date IS NULL, due_date, id
   </select>
 
+  <select id="getAiAssistantTasksByDealId" resultMap="TaskResult">
+    SELECT t.id, t.workspace_id, t.description, t.completed, t.status, t.position, t.due_date,
+      t.assigned_to_id, t.person_id, t.deal_id, t.created_at, t.updated_at
+    FROM task t
+    WHERE t.workspace_id = #{workspaceId} AND t.deal_id = #{dealId}
+      AND <include refid="assistantLinkedPeopleProcessable"/>
+    ORDER BY t.due_date IS NULL, t.due_date, t.id
+    LIMIT #{limit}
+  </select>
+
   <select id="getCompanyTasks" resultMap="TaskResult">
     SELECT <include refid="taskColumns"/> FROM task t
     WHERE t.workspace_id = #{workspaceId}
@@ -130,6 +176,21 @@
       AND (EXISTS (SELECT 1 FROM person p
           WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id
             AND p.company_id = #{companyId} AND p.archived_at IS NULL)
+        OR EXISTS (SELECT 1 FROM deal d
+          WHERE d.workspace_id = #{workspaceId} AND d.id = t.deal_id AND d.company_id = #{companyId}))
+    ORDER BY t.updated_at DESC, t.id DESC
+    LIMIT #{limit}
+  </select>
+
+  <select id="getAiAssistantTasksByCompanyId" resultMap="TaskResult">
+    SELECT t.id, t.workspace_id, t.description, t.completed, t.status, t.position, t.due_date,
+      t.assigned_to_id, t.person_id, t.deal_id, t.created_at, t.updated_at
+    FROM task t
+    WHERE t.workspace_id = #{workspaceId}
+      AND <include refid="assistantLinkedPeopleProcessable"/>
+      AND (EXISTS (SELECT 1 FROM person p
+          WHERE p.id = t.person_id AND p.company_id = #{companyId}
+            AND <include refid="assistantProcessablePerson"/>)
         OR EXISTS (SELECT 1 FROM deal d
           WHERE d.workspace_id = #{workspaceId} AND d.id = t.deal_id AND d.company_id = #{companyId}))
     ORDER BY t.updated_at DESC, t.id DESC

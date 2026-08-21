@@ -309,6 +309,60 @@ class TaskMapperTest extends AbstractMapperTest {
         assertTrue(matched.stream().noneMatch(x -> x.getId() == task2.getId()));
     }
 
+    @Test
+    void assistantTaskPagesBoundVisibleRecordReadsWithoutChangingTheirOrder() {
+        User user = newUser();
+        Person person = newPerson(newCompany());
+        Person restrictedPerson = newPerson(newCompany());
+        personMapper.updateProcessingRestrictions(
+                workspace.getId(), restrictedPerson.getId(), true, false);
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        Task laterPersonTask = build("later person", user, person, null);
+        laterPersonTask.setDueDate("2026-08-12");
+        Task earlierPersonTask = build("earlier person", user, person, null);
+        earlierPersonTask.setDueDate("2026-08-11");
+        Task laterDealTask = build("later deal", user, null, deal);
+        laterDealTask.setDueDate("2026-08-12");
+        Task earlierDealTask = build("earlier deal", user, null, deal);
+        earlierDealTask.setDueDate("2026-08-11");
+        Task restrictedPersonReference = build(
+                "restricted person reference", user, person, deal);
+        restrictedPersonReference.setDueDate("2026-08-10");
+        Task restrictedDealPerson = build(
+                "restricted deal person", user, restrictedPerson, deal);
+        restrictedDealPerson.setDueDate("2026-08-10");
+        taskMapper.insert(laterPersonTask);
+        taskMapper.insert(earlierPersonTask);
+        taskMapper.insert(laterDealTask);
+        taskMapper.insert(earlierDealTask);
+        taskMapper.insert(restrictedPersonReference);
+        taskMapper.insert(restrictedDealPerson);
+        jdbcTemplate.update(
+                "INSERT INTO entity_reference "
+                    + "(workspace_id, source_type, source_id, ref_type, ref_id, label) "
+                    + "VALUES (?, 'task', ?, 'person', ?, ?)",
+                workspace.getId(),
+                restrictedPersonReference.getId(),
+                restrictedPerson.getId(),
+                restrictedPerson.getName());
+
+        List<Task> personPage = taskMapper.getAiAssistantTasksByPersonId(
+                workspace.getId(), person.getId(), List.of(workspace.getId()), 1);
+        List<Task> dealPage = taskMapper.getAiAssistantTasksByDealId(
+                workspace.getId(), deal.getId(), List.of(workspace.getId()), 1);
+        List<Task> companyPage = taskMapper.getAiAssistantTasksByCompanyId(
+                workspace.getId(), deal.getCompanyId(), List.of(workspace.getId()), 1);
+
+        assertEquals(List.of(earlierPersonTask.getId()),
+                personPage.stream().map(Task::getId).toList());
+        assertEquals(List.of(earlierDealTask.getId()),
+                dealPage.stream().map(Task::getId).toList());
+        assertEquals(List.of(earlierDealTask.getId()),
+                companyPage.stream().map(Task::getId).toList());
+    }
+
     /**
      * Gets tasks by deal ID and checks if the returned list includes the inserted task.
      */

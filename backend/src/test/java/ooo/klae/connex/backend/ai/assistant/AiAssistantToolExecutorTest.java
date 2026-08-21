@@ -54,6 +54,7 @@ class AiAssistantToolExecutorTest {
     private DealService dealService;
     private ActivityService activityService;
     private TaskService taskService;
+    private AiAssistantHistoryService historyService;
     private ScoringService scoringService;
     private WorkspaceService workspaceService;
     private PersonMapper personMapper;
@@ -70,6 +71,7 @@ class AiAssistantToolExecutorTest {
         dealService = mock(DealService.class);
         activityService = mock(ActivityService.class);
         taskService = mock(TaskService.class);
+        historyService = mock(AiAssistantHistoryService.class);
         scoringService = mock(ScoringService.class);
         workspaceService = mock(WorkspaceService.class);
         personMapper = mock(PersonMapper.class);
@@ -78,7 +80,7 @@ class AiAssistantToolExecutorTest {
         dateResolver = mock(AiAssistantDateResolver.class);
         executor = new AiAssistantToolExecutor(
                 new AiAssistantToolCatalog(), searchService, personService, companyService,
-                dealService, activityService, taskService, scoringService, workspaceService,
+                dealService, activityService, taskService, historyService, scoringService, workspaceService,
                 personMapper, companyMapper, dealMapper, dateResolver);
     }
 
@@ -152,6 +154,74 @@ class AiAssistantToolExecutorTest {
 
         verify(activityService, never()).getActivitiesByPersonId(17);
         verify(taskService, never()).getTasksByPersonId(17);
+        verifyNoInteractions(historyService);
+    }
+
+    @Test
+    void historyToolsPushTheValidatedLimitIntoTheirRecordSpecificReads() throws Exception {
+        Person person = new Person();
+        person.setId(17);
+        Deal deal = new Deal();
+        deal.setId(8);
+        Company company = new Company();
+        company.setId(5);
+        when(personService.getPersonById(17)).thenReturn(person);
+        when(dealService.getDealById(8)).thenReturn(deal);
+        when(companyService.getCompanyById(5)).thenReturn(company);
+        when(historyService.activitiesForPerson(17, 3)).thenReturn(List.of());
+        when(historyService.activitiesForDeal(8, 4)).thenReturn(List.of());
+        when(historyService.activitiesForCompany(5, 7)).thenReturn(List.of());
+        when(historyService.tasksForPerson(17, 5)).thenReturn(List.of());
+        when(historyService.tasksForDeal(8, 6)).thenReturn(List.of());
+        when(historyService.tasksForCompany(5, 8)).thenReturn(List.of());
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register("person", 17);
+        resources.register("deal", 8);
+        resources.register("company", 5);
+
+        executor.execute(
+                "list_activities",
+                objectMapper.readTree("{\"handle\":\"r1\",\"limit\":3}"),
+                resources,
+                true);
+        executor.execute(
+                "list_activities",
+                objectMapper.readTree("{\"handle\":\"r2\",\"limit\":4}"),
+                resources,
+                true);
+        executor.execute(
+                "list_tasks",
+                objectMapper.readTree("{\"handle\":\"r1\",\"limit\":5}"),
+                resources,
+                true);
+        executor.execute(
+                "list_tasks",
+                objectMapper.readTree("{\"handle\":\"r2\",\"limit\":6}"),
+                resources,
+                true);
+        executor.execute(
+                "list_activities",
+                objectMapper.readTree("{\"handle\":\"r3\",\"limit\":7}"),
+                resources,
+                true);
+        executor.execute(
+                "list_tasks",
+                objectMapper.readTree("{\"handle\":\"r3\",\"limit\":8}"),
+                resources,
+                true);
+
+        verify(historyService).activitiesForPerson(17, 3);
+        verify(historyService).activitiesForDeal(8, 4);
+        verify(historyService).activitiesForCompany(5, 7);
+        verify(historyService).tasksForPerson(17, 5);
+        verify(historyService).tasksForDeal(8, 6);
+        verify(historyService).tasksForCompany(5, 8);
+        verify(activityService, never()).getActivitiesByPersonId(17);
+        verify(activityService, never()).getActivitiesByDealId(8);
+        verify(taskService, never()).getTasksByPersonId(17);
+        verify(taskService, never()).getTasksByDealId(8);
+        verify(companyService, never()).getCompanyTimeline(5, 7);
+        verify(companyService, never()).getCompanyTimeline(5, 8);
     }
 
     @Test
@@ -229,14 +299,12 @@ class AiAssistantToolExecutorTest {
         deal.setId(8);
         deal.setName("Example Deal");
         when(companyService.getCompanyById(5)).thenReturn(company);
-        when(companyService.getCompanyTimeline(5, 5)).thenReturn(
-                new CompanyService.CompanyTimelineData(
-                        List.of(activity, referencedActivity), List.of(task), List.of(note)));
-        when(companyService.getCompanyTimeline(5, 10)).thenReturn(
-                new CompanyService.CompanyTimelineData(
-                        List.of(activity, referencedActivity), List.of(task), List.of(note)));
+        when(historyService.activitiesForCompany(5, 5)).thenReturn(
+                List.of(activity, referencedActivity));
+        when(historyService.tasksForCompany(5, 5)).thenReturn(List.of(task));
+        when(historyService.notesForCompany(5, 10)).thenReturn(List.of(note));
         when(dealService.getDealById(8)).thenReturn(deal);
-        when(activityService.getActivitiesByDealId(8)).thenReturn(
+        when(historyService.activitiesForDeal(8, 5)).thenReturn(
                 List.of(activity, referencedActivity));
         when(dealService.getNotesByDealId(8)).thenReturn(List.of(note));
         AiChatResourceRegistry resources = new AiChatResourceRegistry();

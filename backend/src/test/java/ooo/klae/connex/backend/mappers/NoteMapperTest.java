@@ -9,7 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
+import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
@@ -21,6 +23,7 @@ import ooo.klae.connex.backend.beans.Workspace;
 class NoteMapperTest extends AbstractMapperTest {
 
     @Autowired NoteMapper noteMapper;
+    @Autowired JdbcTemplate jdbcTemplate;
 
     // Builds note object
     private Note build(String content, User author, Person person, Deal deal) {
@@ -104,6 +107,45 @@ class NoteMapperTest extends AbstractMapperTest {
         List<Note> all = noteMapper.getAllNotes(workspace.getId());
 
         assertTrue(all.stream().anyMatch(x -> x.getId() == note.getId()));
+    }
+
+    @Test
+    void assistantCompanyNotesApplyProcessingRestrictionsBeforeTheirLimit() {
+        User user = newUser();
+        Company company = newCompany();
+        Person visiblePerson = newPerson(company);
+        Person restrictedPerson = newPerson(company);
+        personMapper.updateProcessingRestrictions(
+                workspace.getId(), restrictedPerson.getId(), true, false);
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, company);
+        Note visibleNote = build("visible", user, visiblePerson, deal);
+        Note restrictedDirectNote = build("restricted direct", user, restrictedPerson, deal);
+        Note restrictedReferenceNote = build("restricted reference", user, visiblePerson, deal);
+        visibleNote.setVisibility("workspace");
+        restrictedDirectNote.setVisibility("workspace");
+        restrictedReferenceNote.setVisibility("workspace");
+        noteMapper.insert(visibleNote);
+        noteMapper.insert(restrictedDirectNote);
+        noteMapper.insert(restrictedReferenceNote);
+        jdbcTemplate.update(
+                "INSERT INTO entity_reference "
+                    + "(workspace_id, source_type, source_id, ref_type, ref_id, label) "
+                    + "VALUES (?, 'note', ?, 'person', ?, ?)",
+                workspace.getId(),
+                restrictedReferenceNote.getId(),
+                restrictedPerson.getId(),
+                restrictedPerson.getName());
+
+        List<Note> notes = noteMapper.getAiAssistantVisibleNotesByCompanyId(
+                workspace.getId(),
+                company.getId(),
+                user.getId(),
+                List.of(workspace.getId()),
+                1);
+
+        assertEquals(List.of(visibleNote.getId()), notes.stream().map(Note::getId).toList());
     }
 
     @Test

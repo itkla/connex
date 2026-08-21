@@ -603,6 +603,18 @@ class PersonMapperTest extends AbstractMapperTest {
     @Test
     void findMentionedRecordsMapsMatchingRowsWithoutAssociationColumns() {
         Person person = newPerson(newCompany());
+        Person shortName = newPerson(newCompany());
+        shortName.setName("d");
+        personMapper.update(shortName);
+        Person abbreviation = newPerson(newCompany());
+        abbreviation.setName("Al");
+        personMapper.update(abbreviation);
+        Person japaneseName = newPerson(newCompany());
+        japaneseName.setName("山田");
+        personMapper.update(japaneseName);
+        Person singleCharacterCjkName = newPerson(newCompany());
+        singleCharacterCjkName.setName("李");
+        personMapper.update(singleCharacterCjkName);
         java.util.List<Person> matches = personMapper.findMentionedRecords(
             workspace.getId(), "Tell me about " + person.getName() + " please", 21);
 
@@ -611,5 +623,23 @@ class PersonMapperTest extends AbstractMapperTest {
         org.junit.jupiter.api.Assertions.assertTrue(
             personMapper.findMentionedRecords(
                 workspace.getId(), "No record names appear here", 21).isEmpty());
+        assertTrue(personMapper.findMentionedRecords(
+                workspace.getId(), "deadline", 21).stream()
+                .noneMatch(match -> match.getId() == shortName.getId()));
+        assertTrue(personMapper.findMentionedRecords(
+                workspace.getId(), "Tell me about d?", 21).stream()
+                .anyMatch(match -> match.getId() == shortName.getId()));
+        assertTrue(personMapper.findMentionedRecords(
+                workspace.getId(), "Alice", 21).stream()
+                .noneMatch(match -> match.getId() == abbreviation.getId()));
+        assertTrue(personMapper.findMentionedRecords(
+                workspace.getId(), "Tell me about Al?", 21).stream()
+                .anyMatch(match -> match.getId() == abbreviation.getId()));
+        assertTrue(personMapper.findMentionedRecords(
+                workspace.getId(), "山田さんについて教えて", 21).stream()
+                .anyMatch(match -> match.getId() == japaneseName.getId()));
+        assertTrue(personMapper.findMentionedRecords(
+                workspace.getId(), "李さんについて教えて", 21).stream()
+                .anyMatch(match -> match.getId() == singleCharacterCjkName.getId()));
     }
 }
