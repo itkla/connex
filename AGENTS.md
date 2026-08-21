@@ -2,7 +2,7 @@
 
 Applies repository-wide. A directory's `AGENTS.md` adds rules for that scope. `CLAUDE.md` imports the matching guide; edit `AGENTS.md`, not `CLAUDE.md`.
 
-Keep agent guides concise. Put subsystem contracts, rationale, runbooks, and incident-specific knowledge in authoritative docs and link them under **Task routing** instead of appending them here. Update the relevant guide or linked contract when a change makes it stale.
+Keep agent guides concise. Put subsystem contracts, rationale, runbooks, and incident-specific knowledge in authoritative docs and link them under **Task routing** instead of appending them here. Update the relevant guide or linked contract when a change makes it stale. CI caps the root guide at 10 KiB, each package guide at 20 KiB, and inherited root + package context at 30 KiB.
 
 ## Product and hard invariants
 
@@ -38,6 +38,7 @@ Read only the contracts relevant to the work before editing:
 | OCR | `ocr/AGENTS.md` |
 | User-facing copy, naming, flows, or IA | `docs/PRODUCT.md` |
 | Tenancy, routing, lifecycle, or data planes | `docs/MULTITENANCY_PLAN.md` |
+| Backend security-sensitive subsystem | `docs/backend/SECURITY_BOUNDARIES.md` |
 | Backend transactions or lock ordering | `docs/backend/LOCKING.md` |
 | Backend schema or Flyway migrations | `docs/backend/MIGRATIONS.md` |
 | Object storage | `docs/backend/OBJECT_STORAGE.md` |
