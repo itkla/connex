@@ -19,6 +19,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import CompanyAvatar from "@/app/components/records/companies/CompanyAvatar";
 import { dealDocumentsHref } from "@/app/components/records/deals/dealLinks";
+import { pipelineEditHref } from "@/app/components/records/pipelines/pipelineLinks";
 import UserAvatar from "@/app/components/records/users/UserAvatar";
 import { deriveNoteTitle, noteSnippet } from "@/app/lib/noteText";
 import { formatFileSize } from "@/app/lib/utils";
@@ -127,7 +128,7 @@ export function buildSearchGroups(results: SearchResults | null, t: SearchTransl
     }));
     addGroup("pipelines", t("groupPipelines"), results.pipelines, (p) => ({
         key: `pipeline-${p.id}`,
-        href: "/records/pipelines",
+        href: pipelineEditHref(p.id),
         icon: FunnelIcon,
         label: p.name,
     }));

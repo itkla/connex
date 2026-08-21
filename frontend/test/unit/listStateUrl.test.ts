@@ -111,6 +111,12 @@ describe("URL writers (multi-writer coexistence contract)", () => {
         expect([...SERVER_RECORDS_URL_KEYS]).toEqual(["q", "sort", "dir", "page", "size"]);
     });
 
+    it("reserves the pipeline edit deep link from generic facet ownership", () => {
+        const browser = readFileSync(path.join(process.cwd(), "app/hooks/useRecordsBrowser.ts"), "utf8");
+        expect(browser).toContain("PIPELINE_EDIT_URL_KEY,");
+        expect(browser).toMatch(/RESERVED_PARAM_KEYS = new Set<string>\(\[[\s\S]*PIPELINE_EDIT_URL_KEY/);
+    });
+
     it("preserves params owned by other writers when writing list state", () => {
         stubLocation("?view=table&peek=person%3A7&sv=1%3A2");
         writeListStateToUrl("/records/contacts", { q: "acme", sort: "name", dir: "asc", page: 2, size: 25 }, 25);

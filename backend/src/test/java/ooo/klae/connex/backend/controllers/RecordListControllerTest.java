@@ -486,17 +486,17 @@ class RecordListControllerTest {
         when(workspaceService.getCurrentUserId()).thenReturn(7);
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(memberScope);
         when(dealService.queryDealsPage(
-            null, null, null, null, null, null, null, false, null, null,
+            null, null, null, null, null, null, null, null, false, null, null,
             memberScope, 100, 0))
             .thenReturn(new PageResponse<>(List.of(), 37));
 
         var response = controller.getDealsPage(
-            0, 500, null, null, null, null, null, null, null, false, null, null,
+            0, 500, null, null, null, null, null, null, null, null, false, null, null,
             null, null);
 
         assertEquals(37, response.total());
         verify(dealService).queryDealsPage(
-            null, null, null, null, null, null, null, false, null, null,
+            null, null, null, null, null, null, null, null, false, null, null,
             memberScope, 100, 0);
     }
 
@@ -507,14 +507,14 @@ class RecordListControllerTest {
             workspaceService, memberScopeResolver);
 
         assertThrows(BadRequestException.class, () -> controller.getDealsPage(
-            1, 25, null, null, "sideways", null, null, null, null, false, null, null,
+            1, 25, null, null, "sideways", null, null, null, null, null, false, null, null,
             null, null));
         assertThrows(BadRequestException.class, () -> controller.getDealsPage(
-            1, 25, null, null, null, null, null, null, null, false, List.of("stale"), null,
+            1, 25, null, null, null, null, null, null, null, null, false, List.of("stale"), null,
             null, null));
 
         verify(dealService, never()).queryDealsPage(
-            null, null, null, null, null, null, null, false, null, null,
+            null, null, null, null, null, null, null, null, false, null, null,
             null, 25, 0);
     }
 
@@ -527,20 +527,49 @@ class RecordListControllerTest {
         when(workspaceService.getCurrentUserId()).thenReturn(7);
         when(memberScopeResolver.resolve(null, null, 7)).thenReturn(memberScope);
         when(dealService.queryDealsPage(
-            null, null, null, null, List.of(2, 3), null, null, true,
+            null, null, null, null, List.of(2, 3), null, null, List.of(11, 12), true,
             List.of("open", "won", "lost"), List.of("high", "none"), memberScope, 25, 0))
             .thenReturn(new PageResponse<>(List.of(), 0));
 
         controller.getDealsPage(
-            1, 25, null, null, null, null, List.of(2, 3, 2), null, null, true,
+            1, 25, null, null, null, null, List.of(2, 3, 2), null, null,
+            List.of(11, 12, 11), true,
             List.of("open", "closed"), List.of("high", "none"), null, null);
 
         verify(dealService).queryDealsPage(
-            null, null, null, null, List.of(2, 3), null, null, true,
+            null, null, null, null, List.of(2, 3), null, null, List.of(11, 12), true,
             List.of("open", "won", "lost"), List.of("high", "none"), memberScope, 25, 0);
         assertThrows(BadRequestException.class, () -> controller.getDealsPage(
-            1, 25, null, null, null, null, List.of(0), null, null, false, null, null,
+            1, 25, null, null, null, null, List.of(0), null, null, null, false, null, null,
             null, null));
+    }
+
+    @Test
+    void dealMetricsAndIdsPreserveTheContactFilter() {
+        DealController controller = new DealController(
+            dealService, bulkOperationService, dealRiskService, aiGenerationAdapterService,
+            workspaceService, memberScopeResolver);
+        MemberScope memberScope = MemberScope.fromRequest(null, null, 7);
+        when(workspaceService.getCurrentUserId()).thenReturn(7);
+        when(memberScopeResolver.resolve(null, null, 7)).thenReturn(memberScope);
+        when(dealService.queryDealMetrics(
+            "%Acme%", "JPY", null, null, null, List.of(13), false, null, null, memberScope))
+            .thenReturn(new DealMetricsDto(List.of(), 1));
+        when(dealService.getMatchingDealIds(
+            "%Acme%", "JPY", null, null, null, List.of(13), false, null, null, memberScope))
+            .thenReturn(List.of(19));
+
+        assertEquals(1, controller.getDealMetrics(
+            "JPY", null, null, null, List.of(13, 13), false,
+            null, null, "Acme", null, null).totalCount());
+        assertEquals(List.of(19), controller.getDealIds(
+            "Acme", "JPY", null, null, null, List.of(13, 13), false,
+            null, null, null, null));
+
+        verify(dealService).queryDealMetrics(
+            "%Acme%", "JPY", null, null, null, List.of(13), false, null, null, memberScope);
+        verify(dealService).getMatchingDealIds(
+            "%Acme%", "JPY", null, null, null, List.of(13), false, null, null, memberScope);
     }
 
     @Test
@@ -560,6 +589,7 @@ class RecordListControllerTest {
         request.setCurrency("JPY");
         request.setPipelineId(List.of(2, 3, 2));
         request.setCompanyId(List.of(5, 5));
+        request.setPersonId(List.of(13, 13));
         request.setNoCompany(true);
         request.setStatus(List.of("closed", "open", "closed"));
         request.setRisk(List.of("high", "none", "high"));
@@ -571,14 +601,14 @@ class RecordListControllerTest {
         when(memberScopeResolver.resolve("members", List.of(8, 9), 7)).thenReturn(memberScope);
         when(dealService.querySegmentDealsPage(
             definition, "%Acme%", "value", "desc", "JPY", List.of(2, 3), null,
-            List.of(5), true, List.of("won", "lost", "open"), List.of("high", "none"),
+            List.of(5), List.of(13), true, List.of("won", "lost", "open"), List.of("high", "none"),
             memberScope, 100, 0)).thenReturn(new PageResponse<>(List.of(), 9));
         when(dealService.querySegmentDealMetrics(
-            definition, "%Acme%", "JPY", List.of(2, 3), null, List.of(5), true,
+            definition, "%Acme%", "JPY", List.of(2, 3), null, List.of(5), List.of(13), true,
             List.of("won", "lost", "open"), List.of("high", "none"), memberScope))
             .thenReturn(new DealMetricsDto(List.of(), 0));
         when(dealService.getMatchingSegmentDealIds(
-            definition, "%Acme%", "JPY", List.of(2, 3), null, List.of(5), true,
+            definition, "%Acme%", "JPY", List.of(2, 3), null, List.of(5), List.of(13), true,
             List.of("won", "lost", "open"), List.of("high", "none"), memberScope))
             .thenReturn(List.of(11));
 
@@ -588,13 +618,13 @@ class RecordListControllerTest {
 
         verify(dealService).querySegmentDealsPage(
             definition, "%Acme%", "value", "desc", "JPY", List.of(2, 3), null,
-            List.of(5), true, List.of("won", "lost", "open"), List.of("high", "none"),
+            List.of(5), List.of(13), true, List.of("won", "lost", "open"), List.of("high", "none"),
             memberScope, 100, 0);
         verify(dealService).querySegmentDealMetrics(
-            definition, "%Acme%", "JPY", List.of(2, 3), null, List.of(5), true,
+            definition, "%Acme%", "JPY", List.of(2, 3), null, List.of(5), List.of(13), true,
             List.of("won", "lost", "open"), List.of("high", "none"), memberScope);
         verify(dealService).getMatchingSegmentDealIds(
-            definition, "%Acme%", "JPY", List.of(2, 3), null, List.of(5), true,
+            definition, "%Acme%", "JPY", List.of(2, 3), null, List.of(5), List.of(13), true,
             List.of("won", "lost", "open"), List.of("high", "none"), memberScope);
     }
 

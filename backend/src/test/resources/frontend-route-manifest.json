@@ -1,10 +1,13 @@
 {
-  "$comment": "Shared route-constant fixture (WS2, #1338): shipped Next.js app-shell routes + canonical deep-link param keys. Source of truth is the frontend app directory; frontend/test/unit/routeManifest.test.ts keeps this file in sync; backend NotificationActionUrlIntegrityTest validates every setActionUrl value against it.",
+  "$comment": "Shared route-constant fixture (WS2, #1338): shipped Next.js app-shell routes + each route's consumed deep-link parameters. Source of truth is the frontend app directory; frontend/test/unit/routeManifest.test.ts keeps this file in sync; backend NotificationActionUrlIntegrityTest validates every setActionUrl value against it.",
   "params": {
-    "task": "task",
-    "note": "note",
-    "activity": "activity",
-    "comment": "comment"
+    "/activity/all": ["activity"],
+    "/activity/notes": ["note"],
+    "/activity/tasks": ["task"],
+    "/records/companies/[id]": ["activity", "comment", "note", "task"],
+    "/records/contacts/[id]": ["activity", "comment", "note", "task"],
+    "/records/deals/[id]": ["activity", "comment", "note", "task"],
+    "/records/pipelines": ["edit"]
   },
   "routes": [
     "/account",

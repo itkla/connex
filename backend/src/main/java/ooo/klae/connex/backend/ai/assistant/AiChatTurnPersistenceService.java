@@ -500,7 +500,7 @@ public class AiChatTurnPersistenceService {
         realtimeDispatcher.sessionAfterCommit(
                 turn.workspaceId(), turn.sessionId(), new AiChatStepFrameDto(
                         turn.workspaceId(), turn.sessionId(), turn.turnId(),
-                        0, "state", null, RUNNING, null));
+                        0, "reset", null, RUNNING, null));
     }
 
     /** Cancels one active turn for its requester or session owner. */

@@ -1,0 +1,35 @@
+name: Agent guide context budget
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - AGENTS.md
+      - '**/AGENTS.md'
+      - .github/scripts/check-agent-guide-size.py
+      - .github/workflows/agent-guide-size.yml
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - AGENTS.md
+      - '**/AGENTS.md'
+      - .github/scripts/check-agent-guide-size.py
+      - .github/workflows/agent-guide-size.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-guide-size-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: Agent guides stay within context budget
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Check byte budgets
+        run: python3 .github/scripts/check-agent-guide-size.py

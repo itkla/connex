@@ -78,6 +78,7 @@ public interface DealMapper {
         @Param("pipelineIds") List<Integer> pipelineIds,
         @Param("stageIds") List<Integer> stageIds,
         @Param("companyIds") List<Integer> companyIds,
+        @Param("personIds") List<Integer> personIds,
         @Param("noCompany") boolean noCompany,
         @Param("statuses") List<String> statuses,
         @Param("riskIds") List<Integer> riskIds,
@@ -93,6 +94,7 @@ public interface DealMapper {
         @Param("pipelineIds") List<Integer> pipelineIds,
         @Param("stageIds") List<Integer> stageIds,
         @Param("companyIds") List<Integer> companyIds,
+        @Param("personIds") List<Integer> personIds,
         @Param("noCompany") boolean noCompany,
         @Param("statuses") List<String> statuses,
         @Param("riskIds") List<Integer> riskIds,
@@ -107,6 +109,7 @@ public interface DealMapper {
         @Param("pipelineIds") List<Integer> pipelineIds,
         @Param("stageIds") List<Integer> stageIds,
         @Param("companyIds") List<Integer> companyIds,
+        @Param("personIds") List<Integer> personIds,
         @Param("noCompany") boolean noCompany,
         @Param("statuses") List<String> statuses,
         @Param("riskIds") List<Integer> riskIds,
@@ -120,6 +123,7 @@ public interface DealMapper {
         @Param("pipelineIds") List<Integer> pipelineIds,
         @Param("stageIds") List<Integer> stageIds,
         @Param("companyIds") List<Integer> companyIds,
+        @Param("personIds") List<Integer> personIds,
         @Param("noCompany") boolean noCompany,
         @Param("statuses") List<String> statuses,
         @Param("riskIds") List<Integer> riskIds,
@@ -133,6 +137,7 @@ public interface DealMapper {
         @Param("pipelineIds") List<Integer> pipelineIds,
         @Param("stageIds") List<Integer> stageIds,
         @Param("companyIds") List<Integer> companyIds,
+        @Param("personIds") List<Integer> personIds,
         @Param("noCompany") boolean noCompany,
         @Param("statuses") List<String> statuses,
         @Param("riskIds") List<Integer> riskIds,
@@ -282,6 +287,7 @@ public interface DealMapper {
     List<FacetCount> countsByStage(@Param("workspaceId") int workspaceId);
     List<FacetCount> countsByPipeline(@Param("workspaceId") int workspaceId);
     List<FacetCount> countsByCompany(@Param("workspaceId") int workspaceId);
+    List<FacetCount> countsByPerson(@Param("workspaceId") int workspaceId);
     /**
      * Owner facet counts over the whole workspace: like every facet, the owner picker keeps
      * showing all options (with stable counts) while a member scope is applied.

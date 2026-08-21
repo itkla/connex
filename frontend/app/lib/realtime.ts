@@ -126,6 +126,7 @@ function parseAiChatFrame(parsed: unknown): AiChatRealtimeFrame | null {
         kind !== "session"
         && kind !== "message"
         && kind !== "state"
+        && kind !== "reset"
         && kind !== "step"
         && kind !== "terminal"
     ) return null;

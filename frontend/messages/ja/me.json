@@ -94,7 +94,19 @@
         "taskDeleted": "タスクを削除しました",
         "activityDeleted": "アクティビティを削除しました",
         "noteDeleted": "メモを削除しました",
-        "deleteFailed": "削除できませんでした"
+        "deleteFailed": "削除できませんでした",
+        "linkedItemOutsideWindow": "リンク先の項目は、ここに表示されている履歴より前のものです。",
+        "linkedItemUnavailable": "リンク先の項目は、この履歴では確認できません。",
+        "openLinked": {
+            "task": "タスクを開く",
+            "activity": "アクティビティを開く",
+            "note": "メモを開く"
+        },
+        "viewLinked": {
+            "task": "タスクを見る",
+            "activity": "アクティビティを見る",
+            "note": "メモを見る"
+        }
     },
     "MeLayout": {
         "title": "マイページ",

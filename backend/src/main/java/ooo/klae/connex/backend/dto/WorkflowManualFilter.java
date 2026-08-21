@@ -17,6 +17,7 @@ public record WorkflowManualFilter(
     List<Integer> pipelineIds,
     List<Integer> stageIds,
     List<Integer> companyIds,
+    List<Integer> personIds,
     List<String> statuses,
     List<String> risks,
     String memberScope,

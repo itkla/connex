@@ -46,7 +46,8 @@ class ExportServiceTest {
         deal.setCurrency("USD");
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(42);
         when(dealService.queryDealsForExport(
-            null, null, List.of(), List.of(), List.of(), false, List.of(), List.of(), null))
+            null, null, List.of(), List.of(), List.of(), List.of(), false,
+            List.of(), List.of(), null))
             .thenReturn(List.of(deal));
         when(customFieldDefinitionMapper.getByEntityType(42, "deal")).thenReturn(List.of());
         when(customFieldValueService.getForEntities("deal", List.of(7))).thenReturn(Map.of());
@@ -55,7 +56,8 @@ class ExportServiceTest {
         when(pipelineMapper.getAllPipelines(42)).thenReturn(List.of());
 
         String csv = exportService.exportDeals(
-            null, null, List.of(), List.of(), List.of(), false, List.of(), List.of(), null);
+            null, null, List.of(), List.of(), List.of(), List.of(), false,
+            List.of(), List.of(), null);
 
         assertEquals(
             "id,name,value,currency,company,pipeline,stage,expectedCloseDate,status,tags\r\n"

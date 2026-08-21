@@ -61,12 +61,14 @@ import {
     askConnexMessageContent,
     askConnexSessionStorageKey,
     askConnexTurnStorageKey,
+    completeAskConnexFileUpload,
     hasPendingAskConnexFileOperation,
     loadAskConnexLatestMessages,
     mergeAskConnexToolCalls,
     mergeAskConnexContext,
     parseStoredAskConnexSession,
     parseStoredAskConnexTurn,
+    reconcileAskConnexFileAttachments,
     reduceAskConnexToolCards,
     reduceAskConnexTurn,
     removeReadyAskConnexFile,
@@ -79,6 +81,7 @@ import {
     type StoredAskConnexTurn,
 } from '@/app/lib/askConnex';
 import {
+    absorbAskConnexStreamPartial,
     applyAskConnexStreamDelta,
     createAskConnexFrameCoalescer,
     createAskConnexStream,
@@ -86,6 +89,7 @@ import {
     failAskConnexStreamHydration,
     requestAskConnexTurnCancel,
     settleAskConnexStreamHydration,
+    shouldResetAskConnexStream,
     type AskConnexFrameCoalescer,
     type AskConnexStreamState,
 } from '@/app/lib/askConnexStream';
@@ -271,6 +275,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const submittingRef = useRef(false);
     const toolActionsRef = useRef<Set<number>>(new Set());
     const streamRef = useRef<AskConnexStreamState | null>(null);
+    const streamEpochRef = useRef(0);
     const streamCoalescerRef = useRef<AskConnexFrameCoalescer | null>(null);
     const streamingRef = useRef(false);
     const cancellingRef = useRef(false);
@@ -305,6 +310,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         || fileOperationPending
         || toolActionPending;
     const scoped = stateIdentity === identity && !switching;
+    const presenceSessionId = activeSession?.visibility === 'shared' ? activeSession.id : null;
 
     useEffect(() => {
         activeSessionRef.current = activeSession;
@@ -352,6 +358,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     useEffect(() => () => streamCoalescerRef.current?.dispose(), []);
 
     const resetStream = useCallback(() => {
+        streamEpochRef.current += 1;
         streamRef.current = null;
         streamingRef.current = false;
         setStreaming(false);
@@ -361,6 +368,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const hydrateStream = useCallback(async (sessionId: number, turnId: number): Promise<void> => {
         const signal = identityControllerRef.current?.signal;
         if (!signal || signal.aborted) return;
+        const streamEpoch = streamEpochRef.current;
         for (let attempt = 0; ; attempt++) {
             if (attempt > 0) {
                 try {
@@ -368,6 +376,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 } catch {
                     return;
                 }
+                if (streamEpoch !== streamEpochRef.current) return;
             }
             let partial: string;
             try {
@@ -375,12 +384,14 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 partial = durable.partialContent ?? '';
             } catch {
                 const current = streamRef.current;
-                if (!signal.aborted && current?.turnId === turnId) {
+                if (!signal.aborted
+                        && streamEpoch === streamEpochRef.current
+                        && current?.turnId === turnId) {
                     streamRef.current = failAskConnexStreamHydration(current);
                 }
                 return;
             }
-            if (signal.aborted) return;
+            if (signal.aborted || streamEpoch !== streamEpochRef.current) return;
             const current = streamRef.current;
             if (current?.turnId !== turnId) return;
             const settled = settleAskConnexStreamHydration(current, partial);
@@ -402,14 +413,15 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         if (transition.hydrate) void hydrateStream(active.sessionId, frame.turnId);
     }, [hydrateStream, invalidateStream]);
 
-    const absorbTurnPartial = useCallback((durable: AiChatTurn) => {
+    const absorbTurnPartial = useCallback((durable: AiChatTurn, streamEpoch: number) => {
+        if (streamEpoch !== streamEpochRef.current) return;
         if (!isActiveTurnStatus(durable.status)) return;
         const partial = durable.partialContent ?? '';
         if (partial.length === 0) return;
         const current = streamRef.current?.turnId === durable.turnId
             ? streamRef.current
             : createAskConnexStream(durable.turnId);
-        const settled = settleAskConnexStreamHydration(current, partial);
+        const settled = absorbAskConnexStreamPartial(current, partial);
         streamRef.current = settled.state;
         invalidateStream();
         if (settled.hydrate) void hydrateStream(durable.sessionId, durable.turnId);
@@ -506,7 +518,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             type: 'replace',
             toolCalls: mergeAskConnexToolCalls(historicalToolCalls, pendingToolCalls),
         });
-        setFileAttachments(attachments.map(readyFileAttachment));
+        setFileAttachments((current) => reconcileAskConnexFileAttachments(
+            current,
+            attachments.map(readyFileAttachment),
+        ));
         setActiveSession(firstDetail.session);
         activeSessionRef.current = firstDetail.session;
         if (firstDetail.session.visibility === 'shared') {
@@ -551,13 +566,15 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         sessionId: number,
         turnId: number,
         signal: AbortSignal,
-        initial?: AiChatTurn,
+        initial?: { durable: AiChatTurn; streamEpoch: number },
     ): Promise<AiChatTurn> => {
-        let current = initial ?? await getAiChatTurn(sessionId, turnId, { signal });
+        let streamEpoch = initial?.streamEpoch ?? streamEpochRef.current;
+        let current = initial?.durable ?? await getAiChatTurn(sessionId, turnId, { signal });
         while (isActiveTurnStatus(current.status)) {
             dispatchTurn({ type: 'status', status: current.status, reason: current.terminalReason });
-            absorbTurnPartial(current);
+            absorbTurnPartial(current, streamEpoch);
             await delay(1_000, signal);
+            streamEpoch = streamEpochRef.current;
             current = await getAiChatTurn(sessionId, turnId, { signal });
         }
         return current;
@@ -568,10 +585,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         signal: AbortSignal,
     ): Promise<void> => {
         try {
+            let durableStreamEpoch = streamEpochRef.current;
             let durable = await getAiChatTurn(stored.sessionId, stored.turnId, { signal });
             if (signal.aborted) return;
             dispatchTurn({ type: 'status', status: durable.status, reason: durable.terminalReason });
-            absorbTurnPartial(durable);
+            absorbTurnPartial(durable, durableStreamEpoch);
 
             try {
                 const initial = await getAiGenerationStatus<AiChatTurnGenerationResult>(
@@ -589,12 +607,16 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 if (signal.aborted) return;
                 if (error instanceof ApiError && error.status === 403) throw error;
                 if (!(error instanceof AiGenerationError)) {
+                    durableStreamEpoch = streamEpochRef.current;
                     durable = await getAiChatTurn(stored.sessionId, stored.turnId, { signal });
                 }
             }
 
             if (isActiveTurnStatus(durable.status)) {
-                durable = await pollDurableTurn(stored.sessionId, stored.turnId, signal, durable);
+                durable = await pollDurableTurn(stored.sessionId, stored.turnId, signal, {
+                    durable,
+                    streamEpoch: durableStreamEpoch,
+                });
             }
 
             if (signal.aborted) return;
@@ -792,6 +814,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 if (frame.workspaceId !== activeWorkspaceId) return;
                 const signal = identityControllerRef.current?.signal;
                 if (!signal || signal.aborted) return;
+                if (activeSessionRef.current?.id === frame.sessionId
+                        && shouldResetAskConnexStream(streamRef.current, frame)) {
+                    resetStream();
+                }
                 if (frame.status === 'revoked') {
                     sessionsRefreshVersionRef.current += 1;
                     setSessions((current) => current.filter(
@@ -810,14 +836,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         });
         socket.activate();
         return () => socket.deactivate();
-    }, [activeWorkspaceId, clearActiveSession, enqueueRealtimeRefresh, handleStreamDelta, switching, userId]);
+    }, [activeWorkspaceId, clearActiveSession, enqueueRealtimeRefresh, handleStreamDelta, resetStream, switching, userId]);
 
     useEffect(() => {
-        const session = activeSession;
-        if (!open || session === null || session.visibility !== 'shared' || loadState !== 'ready') {
+        if (!open || presenceSessionId === null || loadState !== 'ready') {
             return;
         }
-        const sessionId = session.id;
+        const sessionId = presenceSessionId;
         const controller = new AbortController();
         let timeout: number | null = null;
         const heartbeat = async () => {
@@ -847,7 +872,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             controller.abort();
             void leaveAiChatPresence(sessionId).catch(() => {});
         };
-    }, [activeSession, loadState, open]);
+    }, [loadState, open, presenceSessionId]);
 
     const shareSession = useCallback(async (shared: boolean): Promise<boolean> => {
         if (!activeSession?.ownedByCurrentUser || sharePermission !== 'granted') return false;
@@ -1020,10 +1045,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     { signal },
                 );
                 if (signal.aborted || operationEpoch !== sessionEpochRef.current) continue;
-                setFileAttachments((current) => current.map((attachment) =>
-                    attachment.clientId === clientId
-                        ? { ...readyFileAttachment(uploaded), clientId }
-                        : attachment));
+                setFileAttachments((current) => completeAskConnexFileUpload(
+                    current,
+                    clientId,
+                    readyFileAttachment(uploaded),
+                ));
             } catch (error) {
                 if (signal.aborted || operationEpoch !== sessionEpochRef.current) continue;
                 setFileAttachments((current) => current.map((attachment) =>

@@ -42,6 +42,7 @@ class ExportControllerTest {
         request.setPipelineId(List.of(2, 2, 3));
         request.setStageId(List.of(5));
         request.setCompanyId(List.of(7));
+        request.setPersonId(List.of(13, 13));
         request.setNoCompany(true);
         request.setStatus(List.of("closed"));
         request.setRisk(List.of("high", "none"));
@@ -50,7 +51,7 @@ class ExportControllerTest {
         when(workspaceService.getCurrentUserId()).thenReturn(11);
         when(memberScopeResolver.resolve("me", null, 11)).thenReturn(memberScope);
         when(exportService.exportSegmentDeals(
-            definition, "%Acme%", "JPY", List.of(2, 3), List.of(5), List.of(7), true,
+            definition, "%Acme%", "JPY", List.of(2, 3), List.of(5), List.of(7), List.of(13), true,
             List.of("won", "lost"), List.of("high", "none"), memberScope))
             .thenReturn("id,name\n17,Deal");
 
@@ -66,8 +67,27 @@ class ExportControllerTest {
         System.arraycopy(csv, 0, expected, 3, csv.length);
         assertArrayEquals(expected, response.getBody());
         verify(exportService).exportSegmentDeals(
-            definition, "%Acme%", "JPY", List.of(2, 3), List.of(5), List.of(7), true,
+            definition, "%Acme%", "JPY", List.of(2, 3), List.of(5), List.of(7), List.of(13), true,
             List.of("won", "lost"), List.of("high", "none"), memberScope);
+    }
+
+    @Test
+    void nativeDealExportPreservesTheContactFilter() {
+        ExportController controller = new ExportController(
+            exportService, memberScopeResolver, warmthFilterResolver, workspaceService);
+        MemberScope memberScope = MemberScope.fromRequest(null, null, 11);
+        when(workspaceService.getCurrentUserId()).thenReturn(11);
+        when(memberScopeResolver.resolve(null, null, 11)).thenReturn(memberScope);
+        when(exportService.exportDeals(
+            "%Acme%", "JPY", null, null, null, List.of(13), false, null, null, memberScope))
+            .thenReturn("id,name\n17,Deal");
+
+        controller.exportDeals(
+            "Acme", "JPY", null, null, null, List.of(13, 13), false,
+            null, null, null, null);
+
+        verify(exportService).exportDeals(
+            "%Acme%", "JPY", null, null, null, List.of(13), false, null, null, memberScope);
     }
 
     @Test

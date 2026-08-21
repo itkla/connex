@@ -190,7 +190,7 @@ class AiChatTurnPersistenceServiceTest {
                 org.mockito.ArgumentMatchers.eq(7),
                 org.mockito.ArgumentMatchers.eq(13),
                 argThat(frame -> frame.seq() == 0
-                        && "state".equals(frame.kind())
+                        && "reset".equals(frame.kind())
                         && "running".equals(frame.status())
                         && frame.text() == null));
     }
