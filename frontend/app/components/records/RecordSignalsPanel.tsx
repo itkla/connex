@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 
@@ -196,7 +196,9 @@ export default function RecordSignalsPanel({
         }
     };
 
-    const href = useMemo(() => radarSubjectHref(subject.label), [subject.label]);
+    const subjectLabel = radarRecordLabel(subject.label)
+        ?? tRadar(`subject.unnamed.${subject.type}`);
+    const href = radarSubjectHref(subjectLabel);
     const unavailable = freshnessStatus === 'unavailable';
     const loading = freshnessStatus === 'checking' && asOf === '';
 

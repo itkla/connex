@@ -939,6 +939,7 @@ describe('Radar action integration', () => {
     });
 
     it('replaces raw-id subject fallbacks before rendering copy or opening an action', async () => {
+        navigation.searchParams.get.mockImplementation((key: string) => key === 'q' ? '#10' : null);
         const currentPayload = payload([warmPathSignal({
             subject: { type: 'person', id: 10, label: '#10' },
         })]);
@@ -952,6 +953,7 @@ describe('Radar action integration', () => {
             && element.getAttribute('aria-label') === 'actions.askIntroNamed:subject.unnamed.person'
         ));
         if (!action) throw new Error('The unnamed Radar subject did not receive safe localized copy');
+        expect(captures.ownedUrlParams?.q).toBeUndefined();
 
         expect(board.elements.flatMap((element) => (
             [element.getAttribute('aria-label'), element.getAttribute('title')]

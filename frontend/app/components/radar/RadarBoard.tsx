@@ -114,7 +114,9 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
     const [state, setState] = useState<RadarStateFilter>(
         isRadarStateFilter(initialState) ? initialState : 'attention',
     );
-    const [query, setQuery] = useState(() => searchParams.get(RADAR_QUERY_FILTER_KEY) ?? '');
+    const [query, setQuery] = useState(() => (
+        radarRecordLabel(searchParams.get(RADAR_QUERY_FILTER_KEY)) ?? ''
+    ));
     const [horizonBand, setHorizonBand] = useState<RadarHorizonBand | null>(
         isRadarHorizonBand(initialWhen) ? initialWhen : null,
     );
@@ -131,14 +133,6 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
     const refreshSessionRef = useRef<RadarRefreshSession | null>(null);
     const radarTaskDraftsRef = useRef(new Map<number, TaskDraft>());
     const activeRadarTaskRef = useRef<ActiveRadarTask | null>(null);
-
-    const withDisplayLabel = (signal: RadarSignal): RadarSignal => {
-        const label = radarRecordLabel(signal.subject.label)
-            ?? t(`subject.unnamed.${signal.subject.type}`);
-        return label === signal.subject.label
-            ? signal
-            : { ...signal, subject: { ...signal.subject, label } };
-    };
 
     const requestRadar = useCallback(async (session: RadarRefreshSession) => {
         while (true) {
@@ -227,9 +221,16 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
 
     useOwnedUrlParams(radarOwnedUrlParams({ family, state, query, horizon: horizonBand }));
 
+    const displaySignals = useMemo(() => payload.items.map((signal) => {
+        const label = radarRecordLabel(signal.subject.label)
+            ?? t(`subject.unnamed.${signal.subject.type}`);
+        return label === signal.subject.label
+            ? signal
+            : { ...signal, subject: { ...signal.subject, label } };
+    }), [payload.items, t]);
     const matchedSignals = useMemo(
-        () => filterRadarSignals(payload.items, { family: 'all', state, query }),
-        [payload.items, query, state],
+        () => filterRadarSignals(displaySignals, { family: 'all', state, query }),
+        [displaySignals, query, state],
     );
     const visibleSignals = useMemo(
         () => matchedSignals.filter((signal) => (
@@ -494,48 +495,45 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
                                     })}
                                 >
                                     <ol aria-label={t(`family.${value}`)}>
-                                        {familySignals.map((rawSignal) => {
-                                            const signal = withDisplayLabel(rawSignal);
-                                            return (
-                                                <RadarSignalCard
-                                                    key={`${signal.id}:${payload.asOf}`}
-                                                    signal={signal}
-                                                    pageAsOf={payload.asOf}
-                                                    freshnessStatus={freshnessStatus}
-                                                    busy={busyId !== null}
-                                                    snoozeOpen={snoozeId === signal.id}
-                                                    onSnoozeOpenChange={(open) => setSnoozeId(open ? signal.id : null)}
-                                                    expanded={expandedIds.has(signal.id)}
-                                                    onExpandedChange={(open) => setExpandedIds((current) => {
-                                                        const next = new Set(current);
-                                                        if (open) next.add(signal.id);
-                                                        else next.delete(signal.id);
-                                                        return next;
-                                                    })}
-                                                    onFollow={() => void mutate(
-                                                        signal,
-                                                        () => followRadarSignal(signal.id, signal.version),
-                                                        t('feedback.followed', { subject: signal.subject.label }),
-                                                        false,
-                                                    )}
-                                                    onSnooze={(until) => void mutate(
-                                                        signal,
-                                                        () => snoozeRadarSignal(signal.id, signal.version, until),
-                                                        t('feedback.snoozed', { subject: signal.subject.label }),
-                                                        true,
-                                                    )}
-                                                    onDismiss={() => void mutate(
-                                                        signal,
-                                                        () => dismissRadarSignal(signal.id, signal.version),
-                                                        t('feedback.dismissed', { subject: signal.subject.label }),
-                                                        true,
-                                                    )}
-                                                    onCreateTask={() => void openTask(signal)}
-                                                    onRefreshEvidence={() => void refreshRadar()}
-                                                    onOpenContext={() => void openContext(signal)}
-                                                />
-                                            );
-                                        })}
+                                        {familySignals.map((signal) => (
+                                            <RadarSignalCard
+                                                key={`${signal.id}:${payload.asOf}`}
+                                                signal={signal}
+                                                pageAsOf={payload.asOf}
+                                                freshnessStatus={freshnessStatus}
+                                                busy={busyId !== null}
+                                                snoozeOpen={snoozeId === signal.id}
+                                                onSnoozeOpenChange={(open) => setSnoozeId(open ? signal.id : null)}
+                                                expanded={expandedIds.has(signal.id)}
+                                                onExpandedChange={(open) => setExpandedIds((current) => {
+                                                    const next = new Set(current);
+                                                    if (open) next.add(signal.id);
+                                                    else next.delete(signal.id);
+                                                    return next;
+                                                })}
+                                                onFollow={() => void mutate(
+                                                    signal,
+                                                    () => followRadarSignal(signal.id, signal.version),
+                                                    t('feedback.followed', { subject: signal.subject.label }),
+                                                    false,
+                                                )}
+                                                onSnooze={(until) => void mutate(
+                                                    signal,
+                                                    () => snoozeRadarSignal(signal.id, signal.version, until),
+                                                    t('feedback.snoozed', { subject: signal.subject.label }),
+                                                    true,
+                                                )}
+                                                onDismiss={() => void mutate(
+                                                    signal,
+                                                    () => dismissRadarSignal(signal.id, signal.version),
+                                                    t('feedback.dismissed', { subject: signal.subject.label }),
+                                                    true,
+                                                )}
+                                                onCreateTask={() => void openTask(signal)}
+                                                onRefreshEvidence={() => void refreshRadar()}
+                                                onOpenContext={() => void openContext(signal)}
+                                            />
+                                        ))}
                                     </ol>
                                 </RadarFamilyLayer>
                             );
