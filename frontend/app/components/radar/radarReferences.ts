@@ -1,4 +1,5 @@
 import { radarPathBridges } from '@/app/components/radar/radarHorizon';
+import { radarRecordLabel } from '@/app/components/radar/radarLabels';
 import type {
     RadarEvidenceReference,
     RadarSignal,
@@ -56,7 +57,10 @@ export function radarSubjectRecordHref(subject: RadarSubject): string | null {
  */
 export function radarSignalNames(signal: RadarSignal): ReadonlyMap<string, string> {
     const names = new Map<string, string>();
-    names.set(referenceKey(signal.subject.type, signal.subject.id), signal.subject.label);
+    const subjectLabel = radarRecordLabel(signal.subject.label);
+    if (subjectLabel !== null) {
+        names.set(referenceKey(signal.subject.type, signal.subject.id), subjectLabel);
+    }
     for (const bridge of radarPathBridges(signal)) {
         names.set(referenceKey('person', bridge.bridgePersonId), bridge.bridgeName);
     }
@@ -78,11 +82,9 @@ export function radarReferenceLink(
 ): RadarNamedLink | null {
     const href = radarRecordHref(reference.type, reference.id);
     if (href === null) return null;
-    const supplied = typeof reference.label === 'string' ? reference.label.trim() : '';
-    const label = supplied.length > 0
-        ? supplied
-        : names.get(referenceKey(reference.type, reference.id)) ?? '';
-    return label.length > 0 ? { href, label } : null;
+    const supplied = radarRecordLabel(reference.label);
+    const label = supplied ?? names.get(referenceKey(reference.type, reference.id)) ?? null;
+    return label === null ? null : { href, label };
 }
 
 /** Every named link one evidence entry cites, de-duplicated, in the order the detector wrote them. */

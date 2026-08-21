@@ -37,7 +37,12 @@
     "subject": {
       "person": "Contact",
       "company": "Company",
-      "deal": "Deal"
+      "deal": "Deal",
+      "unnamed": {
+        "person": "Unnamed contact",
+        "company": "Unnamed company",
+        "deal": "Unnamed deal"
+      }
     },
     "state": {
       "active": "Active",

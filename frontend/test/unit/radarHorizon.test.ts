@@ -21,9 +21,13 @@ import {
 } from '@/app/components/radar/radarReferences';
 import {
     RADAR_FAMILY_FILTER_KEY,
+    RADAR_HORIZON_FILTER_KEY,
+    RADAR_QUERY_FILTER_KEY,
     RADAR_STATE_FILTER_KEY,
     radarFamilyHref,
+    radarOwnedUrlParams,
 } from '@/app/components/radar/radarLinks';
+import { radarRecordLabel } from '@/app/components/radar/radarLabels';
 import { resolveShippedRoute } from '@/app/lib/routeManifest';
 import type { RadarEvidence, RadarSignal } from '@/app/lib/types';
 
@@ -321,6 +325,19 @@ describe('every record Radar cites is a named link', () => {
         expect(radarReferenceLinks(references, radarSignalNames(introduction)).map((link) => link.href))
             .toEqual(['/records/contacts/10', '/records/contacts/7']);
     });
+
+    it('rejects identifier-shaped API fallbacks for subjects, references, and connectors', () => {
+        const unnamed = path([{ id: 7, name: '#7' }], {
+            subject: { type: 'person', id: 10, label: '#10' },
+        });
+        const references = [{ type: 'person', id: 55, label: '#55' }];
+
+        expect(radarRecordLabel('#42')).toBeNull();
+        expect(radarRecordLabel('  # 42  ')).toBeNull();
+        expect(radarSignalNames(unnamed).size).toBe(0);
+        expect(radarReferenceLinks(references, radarSignalNames(unnamed))).toEqual([]);
+        expect(radarPathBridges(unnamed)).toEqual([]);
+    });
 });
 
 describe('the Radar deep link other surfaces produce', () => {
@@ -335,5 +352,27 @@ describe('the Radar deep link other surfaces produce', () => {
     it('names the same query keys the board reads back out of the URL', () => {
         expect(RADAR_FAMILY_FILTER_KEY).toBe('family');
         expect(RADAR_STATE_FILTER_KEY).toBe('state');
+        expect(RADAR_QUERY_FILTER_KEY).toBe('q');
+        expect(RADAR_HORIZON_FILTER_KEY).toBe('when');
+    });
+
+    it('serializes every non-default filter and removes every default from a shared link', () => {
+        expect(radarOwnedUrlParams({
+            family: 'deal_risk',
+            state: 'snoozed',
+            query: ' Apollo ',
+            horizon: 'month',
+        })).toEqual({
+            family: 'deal_risk',
+            state: 'snoozed',
+            q: 'Apollo',
+            when: 'month',
+        });
+        expect(radarOwnedUrlParams({
+            family: 'all',
+            state: 'attention',
+            query: ' ',
+            horizon: null,
+        })).toEqual({ family: undefined, state: undefined, q: undefined, when: undefined });
     });
 });

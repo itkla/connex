@@ -4,6 +4,7 @@ import type {
     TemperatureBand,
     TemperatureTrend,
 } from '@/app/lib/types';
+import { radarRecordLabel } from '@/app/components/radar/radarLabels';
 
 /**
  * Radar's own axis: how long until each signal costs the workspace something.
@@ -181,8 +182,11 @@ export function radarPathBridges(signal: RadarSignal): RadarPathFacts[] {
     for (const evidence of signal.evidence) {
         if (evidence.type !== 'warm_path') continue;
         const bridgePersonId = numberOf(evidence.parameters.bridgePersonId);
-        const bridgeName = textOf(evidence.parameters.bridgeName);
-        if (bridgePersonId === null || !Number.isInteger(bridgePersonId) || bridgeName === null) {
+        if (bridgePersonId === null || !Number.isInteger(bridgePersonId)) {
+            continue;
+        }
+        const bridgeName = radarRecordLabel(evidence.parameters.bridgeName);
+        if (bridgeName === null) {
             continue;
         }
         bridges.push({

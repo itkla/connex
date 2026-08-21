@@ -37,7 +37,12 @@
     "subject": {
       "person": "連絡先",
       "company": "会社",
-      "deal": "案件"
+      "deal": "案件",
+      "unnamed": {
+        "person": "名前のない連絡先",
+        "company": "名前のない会社",
+        "deal": "名前のない案件"
+      }
     },
     "state": {
       "active": "対応中",

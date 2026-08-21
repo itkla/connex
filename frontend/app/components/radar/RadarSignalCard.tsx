@@ -21,6 +21,7 @@ import type { PermissionCheck } from '@/app/lib/permissionState';
 import { usePermissionCheck, usePermissionsRefresh } from '@/app/hooks/usePermissions';
 import RadarSnoozeDialog from '@/app/components/radar/RadarSnoozeDialog';
 import { RadarMark } from '@/app/components/radar/RadarVocabulary';
+import { radarRecordLabel } from '@/app/components/radar/radarLabels';
 import {
     radarDecayFacts,
     radarMarkTone,
@@ -167,6 +168,11 @@ export default function RadarSignalCard({
     const personUpdatePermission = usePermissionCheck('PERSON_UPDATE');
     const refreshPermissions = usePermissionsRefresh();
     const warmPath = signal.family === 'warm_path';
+    const subjectLabel = radarRecordLabel(signal.subject.label)
+        ?? t(`subject.unnamed.${signal.subject.type}`);
+    const displaySignal = subjectLabel === signal.subject.label
+        ? signal
+        : { ...signal, subject: { ...signal.subject, label: subjectLabel } };
     const taskActionPermission = requiredTaskPermission(
         taskPermission, personUpdatePermission, warmPath);
     const canCreateTask = taskActionPermission === 'granted';
@@ -203,7 +209,7 @@ export default function RadarSignalCard({
         () => new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }),
         [locale],
     );
-    const names = radarSignalNames(signal);
+    const names = radarSignalNames(displaySignal);
     const evidenceRenderKeys = evidenceKeys(signal.evidence);
     const subjectHref = radarSubjectRecordHref(signal.subject);
     const detailId = `radar-detail-${signal.id}`;
@@ -358,7 +364,7 @@ export default function RadarSignalCard({
 
     const actionLabel = warmPath ? t('actions.askIntro') : t('actions.followUp');
     const actionNamedLabel = signal.taskId != null
-        ? t(warmPath ? 'actions.introAskedNamed' : 'actions.followUpDoneNamed', { subject: signal.subject.label })
+        ? t(warmPath ? 'actions.introAskedNamed' : 'actions.followUpDoneNamed', { subject: subjectLabel })
         : !canCreateTask
             ? t(taskActionPermission === 'denied'
                 ? warmPath
@@ -366,16 +372,16 @@ export default function RadarSignalCard({
                     : 'actions.createTaskDeniedNamed'
                 : warmPath
                     ? 'actions.createWarmPathTaskPermissionUnavailableNamed'
-                    : 'actions.createTaskPermissionUnavailableNamed', { subject: signal.subject.label })
+                    : 'actions.createTaskPermissionUnavailableNamed', { subject: subjectLabel })
             : freshnessStatus !== 'current'
                 ? t(freshnessStatus === 'checking'
                     ? 'actions.createTaskEvidenceCheckingNamed'
-                    : 'actions.createTaskEvidenceUnavailableNamed', { subject: signal.subject.label })
+                    : 'actions.createTaskEvidenceUnavailableNamed', { subject: subjectLabel })
                 : stale
-                    ? t('actions.createTaskStaleNamed', { subject: signal.subject.label })
+                    ? t('actions.createTaskStaleNamed', { subject: subjectLabel })
                     : !hasWarmPathBridge
-                        ? t('actions.createTaskPathUnavailableNamed', { subject: signal.subject.label })
-                        : t(warmPath ? 'actions.askIntroNamed' : 'actions.followUpNamed', { subject: signal.subject.label });
+                        ? t('actions.createTaskPathUnavailableNamed', { subject: subjectLabel })
+                        : t(warmPath ? 'actions.askIntroNamed' : 'actions.followUpNamed', { subject: subjectLabel });
 
     return (
         <li className="border-b border-border/60 last:border-b-0">
@@ -397,13 +403,13 @@ export default function RadarSignalCard({
                                 <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                                     <h3 className="min-w-0 text-[0.9375rem] leading-tight font-semibold">
                                         {subjectHref === null ? (
-                                            <span className="truncate text-foreground">{signal.subject.label}</span>
+                                            <span className="truncate text-foreground">{subjectLabel}</span>
                                         ) : (
                                             <Link
                                                 href={subjectHref}
                                                 className="truncate text-foreground underline-offset-2 outline-none hover:underline focus-visible:underline"
                                             >
-                                                {signal.subject.label}
+                                                {subjectLabel}
                                             </Link>
                                         )}
                                     </h3>
@@ -459,7 +465,7 @@ export default function RadarSignalCard({
                                 onClick={() => onExpandedChange(!expanded)}
                                 aria-expanded={expanded}
                                 aria-controls={detailId}
-                                aria-label={t(expanded ? 'detail.hideNamed' : 'detail.showNamed', { subject: signal.subject.label })}
+                                aria-label={t(expanded ? 'detail.hideNamed' : 'detail.showNamed', { subject: subjectLabel })}
                             >
                                 {t('detail.why')}
                                 <ChevronDownIcon
@@ -475,7 +481,7 @@ export default function RadarSignalCard({
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
                                     <IconButton
-                                        label={t('actions.moreNamed', { subject: signal.subject.label })}
+                                        label={t('actions.moreNamed', { subject: subjectLabel })}
                                         variant="ghost"
                                         className="min-h-11 min-w-11 lg:min-h-9 lg:min-w-9"
                                         disabled={busy}
@@ -597,7 +603,7 @@ export default function RadarSignalCard({
             </Collapsible>
             {snoozeOpen ? (
                 <RadarSnoozeDialog
-                    signal={signal}
+                    signal={displaySignal}
                     open
                     busy={busy}
                     onOpenChange={onSnoozeOpenChange}

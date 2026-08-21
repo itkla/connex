@@ -37,6 +37,7 @@ type CaptureState = {
     radarCardProps: Map<number, CapturedProps>;
     radarCardRenders: number;
     renderRealRadarCards: boolean;
+    ownedUrlParams: Record<string, string | undefined> | null;
 };
 
 const captures = vi.hoisted<CaptureState>(() => ({
@@ -50,6 +51,7 @@ const captures = vi.hoisted<CaptureState>(() => ({
     radarCardProps: new Map(),
     radarCardRenders: 0,
     renderRealRadarCards: false,
+    ownedUrlParams: null,
 }));
 
 const api = vi.hoisted(() => ({
@@ -71,7 +73,10 @@ const api = vi.hoisted(() => ({
 const actions = vi.hoisted(() => ({ run: vi.fn() }));
 const navigation = vi.hoisted(() => ({
     refresh: vi.fn(),
-    searchParams: { get: vi.fn(() => null) },
+    searchParams: { get: vi.fn((key: string): string | null => {
+        void key;
+        return null;
+    }) },
 }));
 const translate = vi.hoisted(() => {
     const format = (key: string, values?: Record<string, string | number>) => (
@@ -164,7 +169,9 @@ vi.mock('@/app/hooks/useUnsavedChangesGuard', () => ({
 }));
 
 vi.mock('@/app/hooks/useOwnedUrlParams', () => ({
-    useOwnedUrlParams: () => undefined,
+    useOwnedUrlParams: (params: Record<string, string | undefined>) => {
+        captures.ownedUrlParams = params;
+    },
 }));
 
 vi.mock('@/app/hooks/usePermissions', () => ({
@@ -878,7 +885,12 @@ beforeEach(() => {
     captures.radarCardProps.clear();
     captures.radarCardRenders = 0;
     captures.renderRealRadarCards = false;
+    captures.ownedUrlParams = null;
     vi.clearAllMocks();
+    navigation.searchParams.get.mockImplementation((key: string) => {
+        void key;
+        return null;
+    });
     api.getContacts.mockResolvedValue([]);
     api.getDeals.mockResolvedValue([]);
     api.getUsers.mockResolvedValue([]);
@@ -921,13 +933,101 @@ describe('Radar action integration', () => {
         await board.unmount();
     });
 
+    it('replaces raw-id subject fallbacks before rendering copy or opening an action', async () => {
+        const currentPayload = payload([warmPathSignal({
+            subject: { type: 'person', id: 10, label: '#10' },
+        })]);
+        api.getRadar.mockResolvedValue(currentPayload);
+        actions.run.mockResolvedValue({ status: 'completed' });
+        captures.renderRealRadarCards = true;
+        const board = await renderInteractiveRadarBoard(currentPayload);
+        const action = board.elements.find((element) => (
+            element.tagName === 'BUTTON'
+            && element.parentNode !== null
+            && element.getAttribute('aria-label') === 'actions.askIntroNamed:subject.unnamed.person'
+        ));
+        if (!action) throw new Error('The unnamed Radar subject did not receive safe localized copy');
+
+        expect(board.elements.flatMap((element) => (
+            [element.getAttribute('aria-label'), element.getAttribute('title')]
+                .filter((value): value is string => value !== null)
+        )).some((value) => /#\s*\d+/.test(value))).toBe(false);
+
+        await act(async () => {
+            board.dispatch('click', action);
+            await Promise.resolve();
+        });
+        expect(actions.run).toHaveBeenCalledWith('create.task', expect.objectContaining({
+            record: { type: 'person', id: 10, label: 'subject.unnamed.person' },
+        }));
+        await board.unmount();
+    });
+
+    it('renders the horizon before family layers and signal evidence at mobile-safe widths', async () => {
+        const currentPayload = payload([signal({
+            evidence: [{
+                type: 'relationship_temperature',
+                parameters: { band: 'cool', trend: 'cooling', daysUntilCold: 3 },
+                references: [{ type: 'person', id: 10, label: 'Ada Lovelace' }],
+            }],
+        })]);
+        api.getRadar.mockResolvedValue(currentPayload);
+        captures.renderRealRadarCards = true;
+        const board = await renderInteractiveRadarBoard(currentPayload);
+        const horizonHeading = board.elements.find((element) => element.id === 'radar-horizon-heading');
+        const familyHeading = board.elements.find((element) => element.id === 'radar-layer-relationship_decay');
+        const signalRow = board.elements.find((element) => element.id === 'radar-signal-1');
+        if (!horizonHeading || !familyHeading || !signalRow) {
+            throw new Error('The rendered Radar disclosure hierarchy is incomplete');
+        }
+
+        expect(board.elements.indexOf(horizonHeading)).toBeLessThan(board.elements.indexOf(familyHeading));
+        expect(board.elements.indexOf(familyHeading)).toBeLessThan(board.elements.indexOf(signalRow));
+
+        const horizonGroup = board.elements.find((element) => (
+            element.getAttribute('role') === 'group'
+            && element.getAttribute('aria-label') === 'horizon.heading'
+        ));
+        if (!horizonGroup) throw new Error('The rendered Radar horizon group is missing');
+        expect(horizonGroup.getAttribute('class')).toContain('overflow-x-auto');
+        const columns = board.elements.filter((element) => (
+            element.tagName === 'BUTTON' && element.parentNode === horizonGroup
+        ));
+        expect(columns).toHaveLength(5);
+        expect(columns.every((column) => column.getAttribute('class')?.includes('min-w-28'))).toBe(true);
+        await board.unmount();
+    });
+
+    it('round-trips every Radar-owned URL filter from a shared link', async () => {
+        const params = new Map([
+            ['family', 'deal_risk'],
+            ['state', 'snoozed'],
+            ['q', 'Apollo'],
+            ['when', 'month'],
+        ]);
+        navigation.searchParams.get.mockImplementation((key: string) => params.get(key) ?? null);
+        const currentPayload = payload([]);
+        api.getRadar.mockResolvedValue(currentPayload);
+        const board = await renderRadarBoard(currentPayload);
+
+        expect(captures.ownedUrlParams).toEqual({
+            family: 'deal_risk',
+            state: 'snoozed',
+            q: 'Apollo',
+            when: 'month',
+        });
+        await board.unmount();
+    });
+
     it('opens the current record through the authorized context lookup, not a guessed href', async () => {
-        const currentPayload = payload([warmPathSignal()]);
+        const currentPayload = payload([warmPathSignal({
+            subject: { type: 'person', id: 10, label: '#10' },
+        })]);
         api.getRadar.mockResolvedValue(currentPayload);
         api.getRadarContext.mockResolvedValue({
             type: 'person',
             id: 10,
-            label: 'Ada Lovelace',
+            label: '#10',
             href: '/records/contacts/10',
         });
         actions.run.mockResolvedValue({ status: 'completed' });
@@ -942,7 +1042,7 @@ describe('Radar action integration', () => {
         expect(api.getRadarContext).toHaveBeenCalledWith(1);
         expect(actions.run).toHaveBeenCalledWith('record.open', {
             source: 'menu',
-            record: { type: 'person', id: 10, label: 'Ada Lovelace' },
+            record: { type: 'person', id: 10, label: 'subject.unnamed.person' },
         });
         await board.unmount();
     });
