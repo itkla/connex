@@ -35,16 +35,22 @@ Read the relevant contract before editing that subsystem:
 
 | Work | Required reading |
 |---|---|
+| Security/auth/provider/upload boundary | `../docs/backend/SECURITY_BOUNDARIES.md` |
+| AI, masking, assistant, model-provider egress | `../docs/backend/AI_SECURITY.md` |
+| Business-card upload/OCR/fallback/import | `../docs/backend/BUSINESS_CARD_SCANNING.md`, `../ocr/AGENTS.md` |
+| Automation, segments, rules, workflows | `../docs/backend/AUTOMATION.md` |
+| Duplicate review, CSV, interaction-history import | `../docs/backend/IMPORTS_AND_DUPLICATE_REVIEW.md` |
 | Tenancy, routing, lifecycle, data planes | `../docs/MULTITENANCY_PLAN.md` |
 | Transactions, concurrency, lock order | `../docs/backend/LOCKING.md` |
 | Flyway/schema/table placement | `../docs/backend/MIGRATIONS.md` |
 | Object storage/uploads/deletion queue | `../docs/backend/OBJECT_STORAGE.md` |
 | Connected provider capture | `../docs/CONNECTED_CAPTURE.md` |
 | Commercial-document signatures | `../docs/ESIGNATURE.md` |
+| Volume seeder/startup contract | `../docs/VOLUME_SEEDER.md` |
 | Deployment, startup posture, maintenance modes | `../docs/DEPLOYMENT.md` |
 | Vulnerability handling | `../docs/VULNERABILITY_MANAGEMENT.md` |
 
-For feature-specific systems such as workflows, imports/duplicate review, AI/provider egress, business-card OCR, APPI requests, SSO, or notifications, inspect the owning package, tests, and existing authoritative docs before changing contracts. Do not copy their full protocol into this guide.
+Inspect the owning package, nearest implementation, and tests in addition to the contract. Do not copy a subsystem's full protocol back into this guide.
 
 ## Security boundaries
 
@@ -53,7 +59,7 @@ For feature-specific systems such as workflows, imports/duplicate review, AI/pro
 - Provider and network egress must use the established bounded/fixed-host/address-validation adapters for that subsystem. Do not add arbitrary redirects, remote URL fetching, or network I/O inside database transactions.
 - Upload/image paths must preserve the existing bounded decode/admission and metadata-stripping boundaries. Never add unbounded multipart/image processing or log recognized/uploaded content.
 - Idempotency, one-use proofs, generation handles, leases, and ownership checks are data-integrity/security mechanisms. Do not simplify them without reading the owning contract and tests.
-- New tables holding workspace/org data must participate in the appropriate tenant/control lifecycle, export, teardown, and residual-verification registries. `docs/MULTITENANCY_PLAN.md` is authoritative.
+- New tables holding workspace/org data must participate in the appropriate tenant/control lifecycle, export, teardown, and residual-verification registries. `../docs/MULTITENANCY_PLAN.md` is authoritative.
 
 ## Transactions and locking
 
@@ -114,4 +120,4 @@ Local database credentials belong in untracked `backend/.env` derived from `.env
 - Optional OCR sidecar: `docker compose --profile ocr up -d ocr`
 - Full backend suite: CI-owned through `Backend — build & test`
 
-The `dev` profile is for local HTTP/database posture only. Production and staging exceptions, TLS requirements, audit-integrity configuration, seeder/maintenance posture, and deployment sequencing belong to `../docs/DEPLOYMENT.md`, not this always-loaded guide.
+The `dev` profile is for local HTTP/database posture only. Production and staging exceptions, TLS requirements, audit-integrity configuration, seeder/maintenance posture, and deployment sequencing belong to the linked runbooks, not this always-loaded guide.
