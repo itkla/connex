@@ -85,7 +85,7 @@ export default function TaskFilterSheet({
                 </ResponsiveDialogHeader>
 
                 <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2">
-                    {sections.filter((section) => section.options.length > 0).map((section) => (
+                    {sections.map((section) => section.options.length > 0 ? (
                         <section key={section.label} className="border-b border-border px-2 py-3 last:border-b-0">
                             <h3 className="px-2 pb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
                                 {section.label}
@@ -123,7 +123,7 @@ export default function TaskFilterSheet({
                                 })}
                             </div>
                         </section>
-                    ))}
+                    ) : null)}
                 </div>
 
                 <ResponsiveDialogFooter className="shrink-0 flex-row items-center justify-between gap-2 border-t border-border px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
