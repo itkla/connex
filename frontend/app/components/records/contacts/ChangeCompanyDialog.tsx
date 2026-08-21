@@ -3,9 +3,9 @@
 import { useEffect, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 
 import {
     Combobox,
@@ -43,6 +43,7 @@ type Props = {
 export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSuccess }: Props) {
     const router = useRouter();
     const t = useTranslations('ContactsChangeCompanyDialog');
+    const reportApiError = useApiErrorToast('ContactsChangeCompanyDialog');
     const defaultCompanyId = contacts.length === 1
         ? contacts[0].companyId ?? contacts[0].company?.id ?? null
         : null;
@@ -87,7 +88,7 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSu
 
     const handleSave = async () => {
         if (!selected) {
-            toast.error(t('toastPickCompany'));
+            toastError(t('toastPickCompany'));
             return;
         }
         setIsSaving(true);
@@ -114,7 +115,7 @@ export default function ChangeCompanyDialog({ open, onOpenChange, contacts, onSu
                 onOpenChange(false);
             }, 900);
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastFailedUpdate'));
+            reportApiError(err, 'toastFailedUpdate');
         } finally {
             setIsSaving(false);
         }

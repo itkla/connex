@@ -32,11 +32,11 @@ import {
     PaginationNext,
     PaginationEllipsis,
 } from '@/components/ui/pagination';
-import { toast } from 'sonner';
 import { useTranslations } from 'next-intl';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 import { copyToClipboard } from '@/app/lib/utils';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { cn } from '@/lib/utils';
 import { useDragScroll } from '@/app/hooks/useDragScroll';
 import type { RowDensity } from '@/app/hooks/useRecordDensity';
@@ -856,9 +856,9 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                                             e.stopPropagation();
                                                             const v = getValue(item) ?? '';
                                                             if (copyToClipboard(v, label)) {
-                                                                toast.success(t('copiedToast', { label }));
+                                                                toastSuccess(t('copiedToast', { label }));
                                                             } else {
-                                                                toast.error(t('copyFailedToast', { label: label.toLowerCase() }));
+                                                                toastError(t('copyFailedToast', { label: label.toLowerCase() }));
                                                             }
                                                         }}
                                                     >
