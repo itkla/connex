@@ -95,6 +95,6 @@
     "stageNamesEmpty": "Stage names cannot be empty",
     "singleTerminalPerType": "A pipeline can have only one Won stage and one Lost stage",
     "pipelineUpdated": "Pipeline updated",
-    "failedToSave": "Failed to save"
+    "failedToSave": "Couldn't save the pipeline"
   }
 }

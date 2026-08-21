@@ -95,6 +95,6 @@
     "stageNamesEmpty": "ステージ名は空にできません",
     "singleTerminalPerType": "パイプラインには成約ステージと失注ステージをそれぞれ1つまでしか設定できません",
     "pipelineUpdated": "パイプラインを更新しました",
-    "failedToSave": "保存できませんでした"
+    "failedToSave": "パイプラインを保存できませんでした"
   }
 }
