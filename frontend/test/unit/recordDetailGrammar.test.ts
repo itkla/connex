@@ -26,6 +26,20 @@ describe('record detail grammar', () => {
         expect(recordDetailSectionId('deal', 'relationship')).toBe('deal-detail-relationship');
     });
 
+    it('gives each record detail action region one primary create menu', () => {
+        for (const relativePath of [
+            'app/components/records/contacts/ContactActionsMenu.tsx',
+            'app/components/records/companies/CompanyActionsMenu.tsx',
+            'app/components/records/deals/DealActionsMenu.tsx',
+        ]) {
+            const source = readFileSync(path.resolve(process.cwd(), relativePath), 'utf8');
+            expect(source.match(/variant="brand"/g), relativePath).toHaveLength(1);
+            expect(source, relativePath).toContain(
+                '<Button variant="brand" size="toolbar" menu>',
+            );
+        }
+    });
+
     it('contact detail uses the wide left-rail canvas with evidence in the identity chip dialog', () => {
         const source = readFileSync(
             path.resolve(process.cwd(), 'app/(app)/records/contacts/[id]/page.tsx'),

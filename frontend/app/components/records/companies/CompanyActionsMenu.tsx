@@ -300,23 +300,17 @@ export default function CompanyActionsMenu({
                 </Button>
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="toolbar" menu>
+                        <Button variant="brand" size="toolbar" menu>
                             <PlusIcon className="size-4" />
                             {t('new')}
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
-                        <DropdownMenuItem onSelect={(e) => {
-                            e.preventDefault();
-                            showNewContactDialog();
-                        }}>
+                        <DropdownMenuItem onSelect={showNewContactDialog}>
                             <UserIcon className="size-4" />
                             {t('newContact')}
                         </DropdownMenuItem>
-                        <DropdownMenuItem onSelect={(e) => {
-                            e.preventDefault();
-                            showNewDealDialog();
-                        }}>
+                        <DropdownMenuItem onSelect={showNewDealDialog}>
                             <BriefcaseIcon className="size-4" />
                             {t('newDeal')}
                         </DropdownMenuItem>

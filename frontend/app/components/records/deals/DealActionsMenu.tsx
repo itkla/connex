@@ -155,7 +155,7 @@ export default function DealActionsMenu({
                 </Button>
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="toolbar" menu>
+                        <Button variant="brand" size="toolbar" menu>
                             <PlusIcon className="size-4" />
                             {t('new')}
                         </Button>
