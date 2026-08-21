@@ -55,6 +55,9 @@ class CompanyMapperTest extends AbstractMapperTest {
         Company abbreviation = newCompany();
         abbreviation.setName("Al");
         companyMapper.update(abbreviation);
+        Company multiWordName = newCompany();
+        multiWordName.setName("Acme Corp");
+        companyMapper.update(multiWordName);
         Company cjkName = newCompany();
         cjkName.setName("森");
         companyMapper.update(cjkName);
@@ -71,6 +74,12 @@ class CompanyMapperTest extends AbstractMapperTest {
         assertTrue(companyMapper.findMentionedRecords(
                 workspace.getId(), "Tell me about Al?", 21).stream()
                 .anyMatch(match -> match.getId() == abbreviation.getId()));
+        assertTrue(companyMapper.findMentionedRecords(
+                workspace.getId(), "Acme Corporation", 21).stream()
+                .noneMatch(match -> match.getId() == multiWordName.getId()));
+        assertTrue(companyMapper.findMentionedRecords(
+                workspace.getId(), "Tell me about Acme Corp?", 21).stream()
+                .anyMatch(match -> match.getId() == multiWordName.getId()));
         assertTrue(companyMapper.findMentionedRecords(
                 workspace.getId(), "森について教えて", 21).stream()
                 .anyMatch(match -> match.getId() == cjkName.getId()));

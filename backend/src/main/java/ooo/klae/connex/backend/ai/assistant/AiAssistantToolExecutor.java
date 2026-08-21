@@ -232,7 +232,7 @@ public class AiAssistantToolExecutor {
         int limit = integer(args, "limit", DEFAULT_LIMIT);
         List<Activity> activities = switch (resource.kind()) {
             case "person" -> {
-                requireProcessable(personService.getPersonById(resource.id()));
+                requireProcessablePerson(resource.id());
                 yield filterRestrictedLinkedPeople(
                         historyService.activitiesForPerson(resource.id(), limit),
                         Activity::getPerson,
@@ -269,7 +269,7 @@ public class AiAssistantToolExecutor {
         int limit = integer(args, "limit", DEFAULT_LIMIT);
         List<Task> tasks = switch (resource.kind()) {
             case "person" -> {
-                requireProcessable(personService.getPersonById(resource.id()));
+                requireProcessablePerson(resource.id());
                 yield filterRestrictedLinkedPeople(
                         historyService.tasksForPerson(resource.id(), limit),
                         Task::getPerson,
@@ -351,8 +351,7 @@ public class AiAssistantToolExecutor {
             LocalDateTime startUtc,
             LocalDateTime endUtc,
             MaskingContext maskingContext) {
-        Person person = personService.getPersonById(personId);
-        requireProcessable(person);
+        Person person = requireProcessablePerson(personId);
         new Identifier("person", person.getName()).seed(maskingContext);
         List<Activity> candidates = activityService.getActivitiesByPersonIdInWindow(
                 personId,
@@ -754,6 +753,13 @@ public class AiAssistantToolExecutor {
         if (!isProcessable(person)) {
             throw AiAssistantLoopException.accessRevoked("inaccessible_resource");
         }
+    }
+
+    private Person requireProcessablePerson(int personId) {
+        Person person = personMapper.getPersonById(
+                workspaceService.getCurrentWorkspaceId(), personId);
+        requireProcessable(person);
+        return person;
     }
 
     private static boolean isProcessable(Person person) {

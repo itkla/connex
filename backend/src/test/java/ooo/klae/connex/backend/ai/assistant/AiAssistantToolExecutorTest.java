@@ -82,6 +82,7 @@ class AiAssistantToolExecutorTest {
                 new AiAssistantToolCatalog(), searchService, personService, companyService,
                 dealService, activityService, taskService, historyService, scoringService, workspaceService,
                 personMapper, companyMapper, dealMapper, dateResolver);
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
     }
 
     @Test
@@ -128,6 +129,7 @@ class AiAssistantToolExecutorTest {
                 List.of(), List.of(), List.of(), List.of(), List.of(),
                 List.of(), List.of(), List.of(), List.of(), List.of(), List.of()));
         when(personService.getPersonById(17)).thenReturn(restricted);
+        when(personMapper.getPersonById(7, 17)).thenReturn(restricted);
         AiChatResourceRegistry resources = new AiChatResourceRegistry();
         resources.register("person", 17);
 
@@ -165,7 +167,7 @@ class AiAssistantToolExecutorTest {
         deal.setId(8);
         Company company = new Company();
         company.setId(5);
-        when(personService.getPersonById(17)).thenReturn(person);
+        when(personMapper.getPersonById(7, 17)).thenReturn(person);
         when(dealService.getDealById(8)).thenReturn(deal);
         when(companyService.getCompanyById(5)).thenReturn(company);
         when(historyService.activitiesForPerson(17, 3)).thenReturn(List.of());
@@ -222,6 +224,7 @@ class AiAssistantToolExecutorTest {
         verify(taskService, never()).getTasksByDealId(8);
         verify(companyService, never()).getCompanyTimeline(5, 7);
         verify(companyService, never()).getCompanyTimeline(5, 8);
+        verify(personService, never()).getPersonById(17);
     }
 
     @Test
@@ -518,7 +521,7 @@ class AiAssistantToolExecutorTest {
         Person person = new Person();
         person.setId(17);
         person.setName("Ada Lovelace");
-        when(personService.getPersonById(17)).thenReturn(person);
+        when(personMapper.getPersonById(7, 17)).thenReturn(person);
         Activity activity = new Activity();
         activity.setSubject("x".repeat(500) + " Ada Lovelace " + "tail".repeat(20));
         when(activityService.getActivitiesByPersonIdInWindow(
@@ -554,7 +557,7 @@ class AiAssistantToolExecutorTest {
     void scheduleConflictResultsBoundCountAndTextBeforePromptSerialization() {
         Person person = new Person();
         person.setId(17);
-        when(personService.getPersonById(17)).thenReturn(person);
+        when(personMapper.getPersonById(7, 17)).thenReturn(person);
         List<Activity> activities = IntStream.range(0, 25)
                 .mapToObj(index -> {
                     Activity activity = new Activity();

@@ -609,6 +609,9 @@ class PersonMapperTest extends AbstractMapperTest {
         Person abbreviation = newPerson(newCompany());
         abbreviation.setName("Al");
         personMapper.update(abbreviation);
+        Person multiWordName = newPerson(newCompany());
+        multiWordName.setName("Kenji Sato");
+        personMapper.update(multiWordName);
         Person japaneseName = newPerson(newCompany());
         japaneseName.setName("山田");
         personMapper.update(japaneseName);
@@ -635,6 +638,12 @@ class PersonMapperTest extends AbstractMapperTest {
         assertTrue(personMapper.findMentionedRecords(
                 workspace.getId(), "Tell me about Al?", 21).stream()
                 .anyMatch(match -> match.getId() == abbreviation.getId()));
+        assertTrue(personMapper.findMentionedRecords(
+                workspace.getId(), "Kenji Satomi", 21).stream()
+                .noneMatch(match -> match.getId() == multiWordName.getId()));
+        assertTrue(personMapper.findMentionedRecords(
+                workspace.getId(), "Tell me about Kenji Sato?", 21).stream()
+                .anyMatch(match -> match.getId() == multiWordName.getId()));
         assertTrue(personMapper.findMentionedRecords(
                 workspace.getId(), "山田さんについて教えて", 21).stream()
                 .anyMatch(match -> match.getId() == japaneseName.getId()));
