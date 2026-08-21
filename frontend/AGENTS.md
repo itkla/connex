@@ -30,6 +30,7 @@ Read the relevant contract before editing that area:
 | New page, redesign, cross-surface UI pattern | `../docs/frontend/PRODUCT_GRAMMAR.md` |
 | Motion or animated interaction | `../docs/frontend/MOTION.md` |
 | Frontend testing/browser verification | `../docs/FRONTEND_TESTING.md` |
+| Production build/image/release asset gate | `../docs/frontend/BUILD_ASSET_GATE.md` |
 | Deployment/staging/build pipeline | `../docs/DEPLOYMENT.md`, `../docs/STAGING_DEPLOY.md` |
 
 For subsystem-specific behavior, inspect the nearest shipped implementation and its tests before searching for a new abstraction.
@@ -121,4 +122,4 @@ This repository uses **pnpm**, not npm.
 - Verify production build assets: `node ci/verify_build_chunks.mjs .next`
 - Regenerate vocabulary model: `node scripts/generate-vocabulary.mjs`
 
-Build-pipeline changes must preserve the production build-asset gate. Its detailed behavior belongs with the frontend CI/testing documentation rather than this always-loaded guide.
+Build-pipeline changes must preserve every invocation and artifact boundary documented in `../docs/frontend/BUILD_ASSET_GATE.md`.
