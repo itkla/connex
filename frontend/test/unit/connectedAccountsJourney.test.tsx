@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import CaptureProviderCard from "@/app/components/account/connected-capture/CaptureProviderCard";
+import CaptureDisclosures from "@/app/components/account/connected-capture/CaptureDisclosures";
 import { NowProvider } from "@/app/hooks/useNow";
 import {
     CAPTURE_PANELS,
@@ -35,7 +36,15 @@ function source(file: string): string {
     return readFileSync(path.join(process.cwd(), file), "utf8");
 }
 
-function messages(locale: "en" | "ja"): Record<string, Record<string, string>> {
+type AccountMessageCatalog = {
+    AccountConnections: Record<string, string>;
+    AccountCaptureProvider: Record<string, string>;
+    AccountCaptureLifecycle: Record<string, string>;
+    AccountManageConnection: Record<string, string>;
+    AccountCaptureDisclosure: { retention: Record<string, string> };
+};
+
+function messages(locale: "en" | "ja"): AccountMessageCatalog {
     return JSON.parse(source(path.join("messages", locale, "account.json")));
 }
 
@@ -298,11 +307,7 @@ describe("what a source reports at a glance", () => {
 });
 
 describe("last sync", () => {
-    /**
-     * `ProviderConnection.lastSyncAt` survives from an earlier connection model and no backend
-     * write path sets it, so reading it would report "never" on a provider that is syncing.
-     */
-    it("reads stream success rather than the connection's dead last-sync column", () => {
+    it("reads stream success rather than duplicating connection metadata", () => {
         const card = source("app/components/account/connected-capture/CaptureProviderCard.tsx");
         const drawer = source("app/components/account/connected-capture/ManageConnectionDrawer.tsx");
 
@@ -344,6 +349,7 @@ describe("a broken connection keeps a way back on the card", () => {
                     authorizationErrorCode={null}
                     busy={false}
                     onConnect={() => undefined}
+                    onReset={() => undefined}
                     onManage={() => undefined}
                     onReviews={() => undefined}
                     onSync={() => undefined}
@@ -401,6 +407,7 @@ describe("two clicks to provider authorization", () => {
                     authorizationErrorCode={null}
                     busy={false}
                     onConnect={() => undefined}
+                    onReset={() => undefined}
                     onManage={() => undefined}
                     onReviews={() => undefined}
                     onSync={() => undefined}
@@ -507,6 +514,17 @@ describe("authorization return path", () => {
         expect(card).toContain("role=\"alert\"");
     });
 
+    it("routes a retained-identity conflict to the destructive reset instead of retrying", () => {
+        const card = source("app/components/account/connected-capture/CaptureProviderCard.tsx");
+        const panel = source("app/components/account/ConnectionsPanel.tsx");
+
+        expect(card).toContain("retained_data_reset_required");
+        expect(card).toContain("onReset");
+        expect(card).toContain("eraseRetainedData");
+        expect(panel).toContain("resetRetainedProviderData(target.provider)");
+        expect(panel).toContain('mode: "reset"');
+    });
+
     it("returns to the connections route rather than another settings destination", () => {
         expect(captureConnectionsHref(new URLSearchParams(), { provider: "google" }))
             .toBe("/account/connections?provider=google");
@@ -514,7 +532,7 @@ describe("authorization return path", () => {
 });
 
 describe("disconnect is not erasure", () => {
-    const RETAINED = ["disconnectRetained", "purgeRetained"] as const;
+    const RETAINED = ["disconnectRetained", "purgeRetained", "resetRetained"] as const;
 
     it("states what survives a disconnect in both locales", () => {
         for (const locale of ["en", "ja"] as const) {
@@ -537,19 +555,24 @@ describe("disconnect is not erasure", () => {
         expect(dialog).toContain("purgeRetained");
     });
 
-    /**
-     * The server pages every workspace and purges before it revokes, and it never consults the
-     * instance's capture switch on the way. Gating the warning on that switch let an instance that
-     * turned capture off after data was captured promise that nothing is deleted while everything
-     * was, so the confirmation cannot read that switch at all.
-     */
-    it("warns and demands acknowledgement on every disconnect, whatever the capture switch", () => {
+    it("keeps ordinary disconnect non-destructive and acknowledgement-free", () => {
         const dialog = source("app/components/account/connected-capture/CapturePurgeDialog.tsx");
 
         expect(dialog).not.toContain("captureEnabled");
+        expect(dialog).toContain("disconnectRetentionTitle");
+        expect(dialog).toContain("disconnectRetentionDescription");
+        expect(dialog).toContain("const destructive = mode !== 'disconnect'");
+        expect(dialog).toContain("destructive ? (");
+    });
+
+    it("gives the all-workspace reset its own scope and acknowledgement", () => {
+        const dialog = source("app/components/account/connected-capture/CapturePurgeDialog.tsx");
+
         expect(dialog).toContain("allWorkspacesTitle");
         expect(dialog).toContain("allWorkspacesDescription");
-        expect(dialog).toContain("disabled={busy || !acknowledged}");
+        expect(dialog).toContain("resetAcknowledge");
+        expect(dialog).toContain("confirmReset");
+        expect(dialog).toContain("disabled={busy || (destructive && !acknowledged)}");
     });
 
     it("passes no capture switch into the confirmation from the panel", () => {
@@ -559,15 +582,11 @@ describe("disconnect is not erasure", () => {
         expect(lifecycle.slice(0, lifecycle.indexOf("/>"))).not.toContain("captureEnabled");
     });
 
-    /**
-     * The note a reader weighs while deciding must carry the same facts as the confirmation they
-     * reach afterwards; stating only what survives would read as a promise that nothing is lost.
-     */
-    it("states the erasure in the drawer note, not only in the confirmation", () => {
+    it("states retention in the drawer note before the disconnect confirmation", () => {
         for (const locale of ["en", "ja"] as const) {
             const note = messages(locale).AccountManageConnection.disconnectNote;
 
-            expect(note, `${locale}`).toMatch(locale === "en" ? /every workspace/ : /すべてのワークスペース/);
+            expect(note, `${locale}`).toMatch(locale === "en" ? /stays in Connex/ : /Connex に残ります/);
             expect(note).toMatch(locale === "en" ? /stay exactly as they are/ : /そのまま残ります/);
         }
     });
@@ -586,6 +605,38 @@ describe("disconnect is not erasure", () => {
             const catalog = messages(locale);
             expect(catalog.AccountConnections.disconnect)
                 .not.toBe(catalog.AccountCaptureProvider.purge);
+        }
+    });
+});
+
+describe("capture disclosure codes", () => {
+    it("maps the retained-data contract and safely falls back for future codes", () => {
+        const markup = renderToStaticMarkup(
+            <CaptureDisclosures disclosures={{
+                scopes: [],
+                admittedFields: ["future_field"],
+                materialExclusions: [],
+                visibility: [],
+                retention: [
+                    "retained_on_disconnect",
+                    "erased_on_request",
+                    "future_retention_rule",
+                ],
+            }} />,
+        );
+
+        expect(markup).toContain("AccountCaptureDisclosure.retention.retainedOnDisconnect");
+        expect(markup).toContain("AccountCaptureDisclosure.retention.erasedOnRequest");
+        expect(markup).toContain("AccountCaptureDisclosure.retention.unknown");
+        expect(markup).toContain("AccountCaptureDisclosure.admittedField.unknown");
+    });
+
+    it("defines every retained-data disclosure in both locale catalogs", () => {
+        for (const locale of ["en", "ja"] as const) {
+            const retention = messages(locale).AccountCaptureDisclosure.retention;
+            expect(retention.retainedOnDisconnect).toBeTruthy();
+            expect(retention.erasedOnRequest).toBeTruthy();
+            expect(retention.unknown).toBeTruthy();
         }
     });
 });

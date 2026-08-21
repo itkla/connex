@@ -81,6 +81,7 @@ function terminalPhase(status: ManagedPairingStatus): ManagedConnectPhase {
  * @param onOpenChange closes the dialog; the caller unmounts it, which stops polling
  * @param onConnected notifies the caller that the connection list changed; must be referentially
  *   stable, because polling restarts whenever it changes
+ * @param onResetRequired hands a retained-identity conflict to the separate destructive reset
  */
 export default function ManagedConnectDialog({
     provider,
@@ -88,12 +89,14 @@ export default function ManagedConnectDialog({
     open,
     onOpenChange,
     onConnected,
+    onResetRequired,
 }: {
     provider: ConnectedAccountProvider;
     providerName: string;
     open: boolean;
     onOpenChange: (open: boolean) => void;
     onConnected: () => void;
+    onResetRequired: () => void;
 }) {
     const t = useTranslations('AccountManagedConnect');
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
@@ -392,7 +395,16 @@ export default function ManagedConnectDialog({
                                 {phase.kind === 'failed' ? t('close') : t('cancel')}
                             </Button>
                             {phase.kind === 'failed' ? (
-                                phase.failure === 'managed_identity_unavailable' ? null : (
+                                phase.failure === 'managed_identity_unavailable' ? null
+                                : phase.failure === 'retained_data_reset_required' ? (
+                                    <Button
+                                        type="button"
+                                        variant="destructive"
+                                        onClick={onResetRequired}
+                                    >
+                                        {t('eraseRetainedData')}
+                                    </Button>
+                                ) : (
                                     <Button type="button" onClick={() => void start()}>
                                         {t('retry')}
                                     </Button>

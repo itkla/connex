@@ -27,6 +27,8 @@ export const MANAGED_PAIRING_FAILURES = [
     'denied',
     'exchange',
     'no_offline_access',
+    'connection_conflict',
+    'retained_data_reset_required',
     'superseded',
     'expired',
     'unknown',

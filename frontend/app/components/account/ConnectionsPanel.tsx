@@ -30,6 +30,7 @@ import {
     getProviderConnections,
     pauseProviderConnection,
     preflightPersonDuplicates,
+    resetRetainedProviderData,
     resumeProviderConnection,
     syncProviderCapture,
     updateProviderCapturePolicy,
@@ -285,7 +286,13 @@ export default function ConnectionsPanel({
                     setCaptureReloadKey((current) => current + 1);
                 }
             } else if (callbackError) {
-                const known = ["state", "denied", "exchange", "no_offline_access"].includes(callbackError);
+                const known = [
+                    "state",
+                    "denied",
+                    "exchange",
+                    "no_offline_access",
+                    "retained_data_reset_required",
+                ].includes(callbackError);
                 const code = known ? callbackError : "exchange";
                 setAuthorizationError({ provider: handedOffTo, code });
                 toastError(t(`error_${code}`));
@@ -512,6 +519,20 @@ export default function ConnectionsPanel({
                 tLifecycle("purgeStarted"),
             );
         }
+        if (target.mode === "reset") {
+            return runProviderMutation(
+                target.provider,
+                () => resetRetainedProviderData(target.provider),
+                () => {
+                    setAuthorizationError(null);
+                    setConnectionsReloadKey((current) => current + 1);
+                    if (providerCaptureEnabled(capabilities, target.provider)) {
+                        setCaptureReloadKey((current) => current + 1);
+                    }
+                },
+                tLifecycle("resetStarted"),
+            );
+        }
         return runProviderMutation(
             target.provider,
             () => disconnectProviderConnection(target.provider),
@@ -621,6 +642,10 @@ export default function ConnectionsPanel({
                                 }
                                 busy={busyProvider === provider}
                                 onConnect={() => connect(provider)}
+                                onReset={() => setLifecycleTarget({
+                                    provider,
+                                    mode: "reset",
+                                })}
                                 onManage={() => replaceRouteState({
                                     provider,
                                     panel: "manage",
@@ -785,6 +810,10 @@ export default function ConnectionsPanel({
                         if (!open) setManagedTarget(null);
                     }}
                     onConnected={handleManagedConnected}
+                    onResetRequired={() => {
+                        setManagedTarget(null);
+                        setLifecycleTarget({ provider: managedTarget, mode: "reset" });
+                    }}
                 />
             ) : null}
 

@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { ArrowPathIcon, LinkIcon } from '@heroicons/react/24/outline';
+import { ArrowPathIcon, LinkIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { useLocale, useTranslations } from 'next-intl';
 
 import { useLiveNow } from '@/app/hooks/useNow';
@@ -102,6 +102,7 @@ export default function CaptureProviderCard({
     authorizationErrorCode,
     busy,
     onConnect,
+    onReset,
     onManage,
     onReviews,
     onSync,
@@ -121,6 +122,7 @@ export default function CaptureProviderCard({
     authorizationErrorCode: string | null;
     busy: boolean;
     onConnect: () => void;
+    onReset: () => void;
     onManage: () => void;
     onReviews: () => void;
     onSync: () => void;
@@ -217,17 +219,31 @@ export default function CaptureProviderCard({
                     <p className="max-w-prose text-sm text-destructive" role="alert">
                         {t(`error_${authorizationErrorCode}`)}
                     </p>
-                    <Button
-                        type="button"
-                        variant="outline"
-                        size="toolbar"
-                        className="mt-3"
-                        disabled={!connectionEnabled || busy || managedUnavailable}
-                        onClick={onConnect}
-                    >
-                        <ArrowPathIcon data-icon="inline-start" />
-                        {t('tryAgain')}
-                    </Button>
+                    {authorizationErrorCode === 'retained_data_reset_required' ? (
+                        <Button
+                            type="button"
+                            variant="destructive"
+                            size="toolbar"
+                            className="mt-3"
+                            disabled={busy}
+                            onClick={onReset}
+                        >
+                            <TrashIcon data-icon="inline-start" />
+                            {t('eraseRetainedData')}
+                        </Button>
+                    ) : (
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="toolbar"
+                            className="mt-3"
+                            disabled={!connectionEnabled || busy || managedUnavailable}
+                            onClick={onConnect}
+                        >
+                            <ArrowPathIcon data-icon="inline-start" />
+                            {t('tryAgain')}
+                        </Button>
+                    )}
                 </div>
             ) : null}
 

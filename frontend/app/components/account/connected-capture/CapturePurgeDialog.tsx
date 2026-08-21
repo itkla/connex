@@ -1,7 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { ExclamationTriangleIcon } from '@heroicons/react/24/outline';
+import {
+    ExclamationTriangleIcon,
+    InformationCircleIcon,
+} from '@heroicons/react/24/outline';
 import { useTranslations } from 'next-intl';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -18,21 +21,12 @@ import {
     ResponsiveDialogTitle,
 } from '@/components/ui/responsive-dialog';
 
-export type CaptureLifecycleMode = 'purge' | 'disconnect';
+export type CaptureLifecycleMode = 'purge' | 'disconnect' | 'reset';
 
 /**
- * Confirms active-workspace erasure, or the provider disconnect that erases before it revokes.
- *
- * Both confirmations state what survives as plainly as what does not, and both require the reader
- * to acknowledge the erasure first. Disconnect is unconditionally destructive because the server
- * makes it so: it pages every workspace and purges this provider's captured data before it deletes
- * the credential, and it does not consult the instance's capture switch on the way. Gating the
- * warning on that switch would let an instance that turned capture off after data was captured
- * promise a reader that nothing is deleted while everything is, so the warning is not gated at all.
- *
- * What survives is stated alongside: contacts, companies, deals, notes, and tasks are untouched.
- * Erasing captured data stays a separately named action reached from its own disclosure, so it can
- * never be performed by a reader who only meant to stop syncing.
+ * Separates ordinary credential-only disconnect from current-workspace erasure and the explicit
+ * all-workspace reset. Only destructive modes require acknowledgement, and the reset names its
+ * global scope separately so it cannot be mistaken for the current-workspace operation.
  */
 export default function CapturePurgeDialog({
     mode,
@@ -51,9 +45,10 @@ export default function CapturePurgeDialog({
 }) {
     const t = useTranslations('AccountCaptureLifecycle');
     const [acknowledged, setAcknowledged] = useState(false);
+    const destructive = mode !== 'disconnect';
 
     const confirm = async () => {
-        if (!acknowledged) return;
+        if (destructive && !acknowledged) return;
         if (await onConfirm()) onOpenChange(false);
     };
 
@@ -62,41 +57,71 @@ export default function CapturePurgeDialog({
             <ResponsiveDialogContent className="sm:max-w-lg" showCloseButton={!busy}>
                 <ResponsiveDialogHeader className="px-4 pt-4 sm:px-0 sm:pt-0">
                     <ResponsiveDialogTitle>
-                        {t(mode === 'purge' ? 'purgeTitle' : 'disconnectTitle', {
+                        {t(mode === 'purge'
+                            ? 'purgeTitle'
+                            : mode === 'reset'
+                                ? 'resetTitle'
+                                : 'disconnectTitle', {
                             provider: providerName,
                         })}
                     </ResponsiveDialogTitle>
                     <ResponsiveDialogDescription>
-                        {t(mode === 'purge' ? 'purgeDescription' : 'disconnectDescription', {
+                        {t(mode === 'purge'
+                            ? 'purgeDescription'
+                            : mode === 'reset'
+                                ? 'resetDescription'
+                                : 'disconnectDescription', {
                             provider: providerName,
                         })}
                     </ResponsiveDialogDescription>
                 </ResponsiveDialogHeader>
 
                 <div className="grid gap-4 px-4 py-4 sm:px-0">
-                    <Alert variant="destructive">
-                        <ExclamationTriangleIcon aria-hidden />
+                    <Alert variant={destructive ? 'destructive' : 'default'}>
+                        {destructive ? (
+                            <ExclamationTriangleIcon aria-hidden />
+                        ) : (
+                            <InformationCircleIcon aria-hidden />
+                        )}
                         <AlertTitle>
-                            {t(mode === 'purge' ? 'activeWorkspaceTitle' : 'allWorkspacesTitle')}
+                            {t(mode === 'purge'
+                                ? 'activeWorkspaceTitle'
+                                : mode === 'reset'
+                                    ? 'allWorkspacesTitle'
+                                    : 'disconnectRetentionTitle')}
                         </AlertTitle>
                         <AlertDescription>
                             {t(mode === 'purge'
                                 ? 'activeWorkspaceDescription'
-                                : 'allWorkspacesDescription')}
+                                : mode === 'reset'
+                                    ? 'allWorkspacesDescription'
+                                    : 'disconnectRetentionDescription')}
                         </AlertDescription>
                     </Alert>
                     <p className="text-sm text-muted-foreground">
-                        {t(mode === 'purge' ? 'purgeRetained' : 'disconnectRetained')}
+                        {t(mode === 'purge'
+                            ? 'purgeRetained'
+                            : mode === 'reset'
+                                ? 'resetRetained'
+                                : 'disconnectRetained')}
                     </p>
-                    <Label className="items-start leading-relaxed">
-                        <Checkbox
-                            checked={acknowledged}
-                            disabled={busy}
-                            onCheckedChange={(checked) => setAcknowledged(checked === true)}
-                            aria-label={t('acknowledge')}
-                        />
-                        <span>{t('acknowledge')}</span>
-                    </Label>
+                    {destructive ? (
+                        <Label className="items-start leading-relaxed">
+                            <Checkbox
+                                checked={acknowledged}
+                                disabled={busy}
+                                onCheckedChange={(checked) => setAcknowledged(checked === true)}
+                                aria-label={t(mode === 'reset' ? 'resetAcknowledge' : 'acknowledge', {
+                                    provider: providerName,
+                                })}
+                            />
+                            <span>
+                                {t(mode === 'reset' ? 'resetAcknowledge' : 'acknowledge', {
+                                    provider: providerName,
+                                })}
+                            </span>
+                        </Label>
+                    ) : null}
                 </div>
 
                 <ResponsiveDialogFooter className="border-t border-border px-4 py-4 sm:border-0 sm:px-0 sm:py-0">
@@ -108,12 +133,20 @@ export default function CapturePurgeDialog({
                     <Button
                         type="button"
                         variant="destructive"
-                        disabled={busy || !acknowledged}
+                        disabled={busy || (destructive && !acknowledged)}
                         onClick={confirm}
                     >
                         {busy
-                            ? t(mode === 'purge' ? 'purging' : 'disconnecting')
-                            : t(mode === 'purge' ? 'confirmPurge' : 'confirmDisconnect')}
+                            ? t(mode === 'purge'
+                                ? 'purging'
+                                : mode === 'reset'
+                                    ? 'resetting'
+                                    : 'disconnecting')
+                            : t(mode === 'purge'
+                                ? 'confirmPurge'
+                                : mode === 'reset'
+                                    ? 'confirmReset'
+                                    : 'confirmDisconnect')}
                     </Button>
                 </ResponsiveDialogFooter>
             </ResponsiveDialogContent>

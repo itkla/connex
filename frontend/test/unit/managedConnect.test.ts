@@ -80,6 +80,9 @@ describe('managedPairingFailure', () => {
             .toBe('managed_identity_unavailable');
         expect(managedPairingFailure('invalid_redirect_uri')).toBe('invalid_redirect_uri');
         expect(managedPairingFailure('no_offline_access')).toBe('no_offline_access');
+        expect(managedPairingFailure('connection_conflict')).toBe('connection_conflict');
+        expect(managedPairingFailure('retained_data_reset_required'))
+            .toBe('retained_data_reset_required');
         expect(managedPairingFailure('superseded')).toBe('superseded');
     });
 

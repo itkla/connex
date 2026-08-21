@@ -5064,7 +5064,6 @@ export type ProviderConnection = {
     providerAccountEmail?: string | null;
     grantedScopes?: string | null;
     hasCredential: boolean;
-    lastSyncAt?: string | null;
     errorCode?: string | null;
     createdAt: string;
     updatedAt: string;

@@ -68,7 +68,7 @@ const BASE_OVERVIEW: ProviderCaptureOverview = {
         admittedFields: ['occurred_at', 'participants', 'subject'],
         materialExclusions: ['attachments', 'raw_mime', 'remote_images'],
         visibility: ['workspace_activity_evidence'],
-        retention: ['purged_on_disconnect'],
+        retention: ['retained_on_disconnect', 'erased_on_request'],
     },
     purge: { active: false, status: 'idle', errorCode: null },
 };
@@ -131,6 +131,7 @@ for (const locale of ['en', 'ja'] as const) {
         let overview = BASE_OVERVIEW;
         let reviews = REVIEW_PAGE;
         let approvedInteractionId: number | null = null;
+        let resetRequested = false;
 
         await page.route('**/api/account/connections**', async (route) => {
             const request = route.request();
@@ -200,6 +201,11 @@ for (const locale of ['en', 'ja'] as const) {
                 });
                 return;
             }
+            if (request.method() === 'DELETE' && path.endsWith('/google/retained-data')) {
+                resetRequested = true;
+                await route.fulfill({ status: 202, body: '' });
+                return;
+            }
             await route.continue();
         });
 
@@ -266,5 +272,29 @@ for (const locale of ['en', 'ja'] as const) {
         await expect(page.getByText(
             message(locale, 'account', 'AccountCaptureLifecycle.purgeStarted'),
         )).toBeVisible();
+
+        await page.evaluate(() => window.sessionStorage.setItem(
+            'connex.connectedAccounts.pendingAuthorization',
+            'google',
+        ));
+        await page.goto('/account/connections?error=retained_data_reset_required');
+        await expect(page.getByText(
+            message(locale, 'account', 'AccountConnections.error_retained_data_reset_required'),
+        ).first()).toBeVisible();
+        await page.getByRole('button', {
+            name: message(locale, 'account', 'AccountCaptureProvider.eraseRetainedData'),
+        }).click();
+        const providerName = message(locale, 'account', 'AccountConnections.provider_google');
+        await page.getByLabel(
+            message(locale, 'account', 'AccountCaptureLifecycle.resetAcknowledge')
+                .replace('{provider}', providerName),
+        ).click();
+        await page.getByRole('button', {
+            name: message(locale, 'account', 'AccountCaptureLifecycle.confirmReset'),
+        }).click();
+        await expect(page.getByText(
+            message(locale, 'account', 'AccountCaptureLifecycle.resetStarted'),
+        )).toBeVisible();
+        expect(resetRequested).toBe(true);
     });
 }

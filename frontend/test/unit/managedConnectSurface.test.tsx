@@ -27,6 +27,7 @@ function renderCard(overrides: { managedUnavailable: boolean }): string {
                 authorizationErrorCode={null}
                 busy={false}
                 onConnect={() => undefined}
+                onReset={() => undefined}
                 onManage={() => undefined}
                 onReviews={() => undefined}
                 onSync={() => undefined}

@@ -108,6 +108,7 @@
     "error_denied": "プロバイダー側で連携がキャンセルされました。",
     "error_exchange": "プロバイダーが連携を拒否しました。もう一度お試しください。",
     "error_no_offline_access": "プロバイダーから継続的なアクセスが許可されませんでした。要求される権限をすべて承認して、もう一度お試しください。",
+    "error_retained_data_reset_required": "このプロバイダーアカウントは、保持中の取り込みデータに紐づくアカウントと一致しません。別のアカウントを連携する前に、以前のプロバイダーデータを消去してください。",
     "entityLabel": "連携",
     "managedUnavailableTitle": "Connex 提供の連携はまだ利用できません",
     "managedUnavailableBody": "このインスタンスは Connex が提供する {provider} アプリケーションを使う設定ですが、プロバイダーの審査が完了していないため連携は無効になっています。当面は管理者が独自（BYO）の認証情報を設定できます。",
@@ -117,6 +118,7 @@
     "connectProvider": "{provider} を連携",
     "manage": "管理",
     "tryAgain": "もう一度試す",
+    "eraseRetainedData": "以前のプロバイダーデータを消去",
     "stream": {
       "mail": "メール",
       "calendar": "カレンダー"
@@ -147,6 +149,7 @@
     "close": "閉じる",
     "done": "完了",
     "retry": "やり直す",
+    "eraseRetainedData": "以前のプロバイダーデータを消去",
     "stepCodeTitle": "1. ペアリングコード",
     "stepCodeBody": "この画面は開いたままにしてください。コードの残り時間は {time} です。",
     "stepHelperTitle": "2. このコンピューターでヘルパーを実行",
@@ -175,6 +178,8 @@
       "denied": "プロバイダー側で連携がキャンセルされました。",
       "exchange": "プロバイダーが連携を拒否しました。もう一度やり直してください。",
       "no_offline_access": "プロバイダーから継続的なアクセスが許可されませんでした。要求される権限をすべて承認して、もう一度やり直してください。",
+      "connection_conflict": "承認中に連携状態が変更されました。現在の状態を確認し、必要であればもう一度やり直してください。",
+      "retained_data_reset_required": "このプロバイダーアカウントは、保持中の取り込みデータに紐づくアカウントと一致しません。別のアカウントを連携する前に、以前のプロバイダーデータを消去してください。",
       "superseded": "別の連携試行に置き換えられました。連携する場合はもう一度やり直してください。",
       "expired": "ヘルパーが完了する前にペアリングコードの有効期限が切れました。やり直して新しいコードを取得してください。",
       "unknown": "連携を完了できませんでした。もう一度やり直してください。"
@@ -387,8 +392,8 @@
     },
     "retention": {
       "untilPurged": "ワークスペースの取り込みデータを消去するまで保存",
-      "untilPurgedOrDisconnected": "消去またはプロバイダー連携解除まで保存",
-      "purgedOnDisconnect": "プロバイダー連携を解除したときに消去",
+      "retainedOnDisconnect": "プロバイダー連携を解除しても保存",
+      "erasedOnRequest": "消去を依頼した場合にのみ削除",
       "purgedOnAccountDeletion": "連携アカウントの所有者を削除したときに消去",
       "unknown": "保存ルール: {code}"
     },
@@ -426,20 +431,29 @@
     "purgeTitle": "{provider} の取り込みデータを消去しますか？",
     "purgeDescription": "アクティブなワークスペースから、取り込まれた内容と派生した関係性の根拠を削除します。",
     "disconnectTitle": "{provider} の連携を解除しますか？",
-    "disconnectDescription": "Connex アカウントからプロバイダーへのアクセスを削除します。",
+    "disconnectDescription": "今後の同期を停止し、Connex アカウントからプロバイダーへのアクセスを削除します。",
+    "resetTitle": "{provider} から取り込んだ全データを消去し、アカウントをリセットしますか？",
+    "resetDescription": "保持中の取り込みデータに紐づくアカウントを別のプロバイダーアカウントへ変更する前に必要な操作です。",
     "activeWorkspaceTitle": "アクティブなワークスペースに影響します",
     "activeWorkspaceDescription": "取り込まれた内容・参加者・確認・同期状態・派生アクティビティが削除されます。メタデータのみの監査記録は残ります。",
-    "allWorkspacesTitle": "連携解除前に取り込みデータを消去します",
-    "allWorkspacesDescription": "認証情報を削除する前に、すべてのワークスペースからこのプロバイダーの取り込みデータを削除します。元に戻せません。",
+    "disconnectRetentionTitle": "取り込みデータは Connex に残ります",
+    "disconnectRetentionDescription": "取り込んだプロバイダーの内容と関係性の根拠は、別途消去するまで利用できます。",
+    "allWorkspacesTitle": "すべてのワークスペースに影響します",
+    "allWorkspacesDescription": "このプロバイダーから取り込んだ内容・参加者・確認・同期状態・ポリシー・派生アクティビティを、すべてのワークスペースから完全に削除します。元に戻せません。",
     "acknowledge": "削除される取り込みデータの範囲を理解しました。",
+    "resetAcknowledge": "{provider} から取り込んだデータが、すべてのワークスペースから完全に削除されることを理解しました。",
     "cancel": "キャンセル",
     "confirmPurge": "取り込みデータを消去",
     "confirmDisconnect": "アカウント連携を解除",
+    "confirmReset": "データを消去してアカウントをリセット",
     "purging": "消去を開始中",
     "disconnecting": "連携解除中",
+    "resetting": "リセットを開始中",
     "purgeStarted": "取り込みデータの消去を開始しました",
+    "resetStarted": "プロバイダーデータの消去とアカウントのリセットを開始しました",
     "disconnectRetained": "連絡先・会社・案件・メモ・タスクはそのまま残ります。",
-    "purgeRetained": "連携自体は残ります。連絡先・会社・案件・メモ・タスクもそのまま残ります。"
+    "purgeRetained": "連携自体は残ります。連絡先・会社・案件・メモ・タスクもそのまま残ります。",
+    "resetRetained": "連絡先・会社・案件・メモ・タスクはそのまま残ります。プロバイダー連携と、保持中の取り込みデータに紐づく識別情報は削除されます。"
   },
   "AccountChangeEmail": {
     "title": "メールアドレスを変更",
@@ -574,7 +588,7 @@
     "notAllowed": "不許可",
     "days": "{count}日",
     "advanced": "詳細な操作",
-    "disconnectNote": "連携を解除すると、以後の同期は停止し、Connex からのアクセスがなくなります。このプロバイダーから取り込んだメールと打ち合わせのアクティビティは、すべてのワークスペースから削除され、元に戻せません。連絡先・会社・案件・メモ・タスクはそのまま残ります。",
+    "disconnectNote": "連携を解除すると、以後の同期は停止し、Connex からのアクセスがなくなります。取り込んだメールと打ち合わせのアクティビティは、別途消去するまで Connex に残ります。連絡先・会社・案件・メモ・タスクはそのまま残ります。",
     "purgeNote": "消去すると、このワークスペースでこのプロバイダーから取り込んだメールと打ち合わせのアクティビティが削除されます。連携自体はそのままです。元に戻せません。"
   }
 }
