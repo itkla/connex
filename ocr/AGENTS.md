@@ -5,7 +5,7 @@ The root `../AGENTS.md` applies here. `ocr/` is a private, CPU-only PaddleOCR si
 ## Runtime invariants
 
 - Production and local inference run through `ocr/Dockerfile`; a host Python environment is not a supported runtime.
-- Direct Python dependencies are pinned in `requirements.txt`; the complete hashed graph lives in `requirements.lock`. Production installs only the hash-checked lock. New dependencies require justification, lock regeneration, audit, and Dependabot coverage.
+- Direct Python dependencies are pinned in `requirements.txt`; the complete hashed graph lives in `requirements.lock`. Production installs only the hash-checked lock. Regenerate it with Python 3.12, `pip==26.1.2`, and `pip-tools==7.5.3`, matching CI. New dependencies require justification, lock regeneration, audit, and Dependabot coverage.
 - The service uses the pinned CPU PaddlePaddle/PaddleOCR stack and pre-fetched pinned models. Runtime model downloads are forbidden. Missing models or unsupported CPU capability fail startup.
 - Preserve the supported resource envelope unless a recorded benchmark justifies a change: two CPUs, 2 GiB memory, one concurrent inference.
 - The container filesystem is read-only and the service has no public deployment route. Backend-to-sidecar authentication uses a unique secret bearer token of at least 32 characters.
@@ -42,13 +42,25 @@ cd ocr
 PYTHONPATH=. python3 -m unittest discover -s tests -v
 ```
 
-After dependency changes, regenerate the lock with the repository-pinned tooling and audit it:
+After dependency changes, regenerate and audit the lock with the exact CI-compatible compiler toolchain:
 
 ```bash
-pip-compile --generate-hashes --strip-extras --allow-unsafe --output-file=requirements.lock requirements.txt
-python3 -m pip install pip-audit
-python3 -m pip_audit --requirement requirements.lock
+cd ocr
+python3.12 -m venv /tmp/connex-ocr-lock-venv
+source /tmp/connex-ocr-lock-venv/bin/activate
+python -m pip install pip==26.1.2 pip-tools==7.5.3 pip-audit
+pip-compile \
+  --generate-hashes \
+  --strip-extras \
+  --allow-unsafe \
+  --output-file=requirements.lock \
+  requirements.txt
+python -m pip_audit --requirement requirements.lock
+deactivate
+rm -rf /tmp/connex-ocr-lock-venv
 ```
+
+Do not regenerate with a different Python/pip/pip-tools version and treat the result as canonical; CI verifies reproducibility with these exact pins.
 
 For runtime/model/dependency changes, build the real image:
 
