@@ -199,6 +199,7 @@ class AiAssistantPromptInjectionGoldenTest {
                 dealService,
                 activityService,
                 taskService,
+                mock(AiAssistantHistoryService.class),
                 scoringService,
                 workspaceService,
                 mock(PersonMapper.class),

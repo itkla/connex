@@ -1352,6 +1352,13 @@
     WHERE workspace_id = #{workspaceId}
       AND name IS NOT NULL
       AND name != ''
+      AND (TRIM(name) = TRIM(#{text})
+        OR (TRIM(name) REGEXP '^[A-Za-z0-9_]+([[:space:]][A-Za-z0-9_]+)*$'
+          AND REGEXP_LIKE(
+            #{text},
+            CONCAT('(^|[^A-Za-z0-9_])', TRIM(name), '([^A-Za-z0-9_]|$)'),
+            'i'))
+        OR LENGTH(TRIM(name)) &gt; CHAR_LENGTH(TRIM(name)))
       AND LOCATE(name, #{text}) &gt; 0
     ORDER BY CHAR_LENGTH(name) DESC, id
     LIMIT #{limit}

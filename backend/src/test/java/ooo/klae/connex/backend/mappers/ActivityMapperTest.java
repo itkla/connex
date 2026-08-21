@@ -228,6 +228,60 @@ class ActivityMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void assistantActivityPagesBoundVisibleRecordReadsWithoutChangingTheirOrder() {
+        User user = newUser();
+        Person person = newPerson(newCompany());
+        Person restrictedPerson = newPerson(newCompany());
+        personMapper.updateProcessingRestrictions(
+                workspace.getId(), restrictedPerson.getId(), true, false);
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        Activity olderPersonActivity = build("call", "older person", person, null, user);
+        olderPersonActivity.setTimestamp("2026-08-10 09:00:00");
+        Activity newerPersonActivity = build("call", "newer person", person, null, user);
+        newerPersonActivity.setTimestamp("2026-08-11 09:00:00");
+        Activity olderDealActivity = build("call", "older deal", null, deal, user);
+        olderDealActivity.setTimestamp("2026-08-10 10:00:00");
+        Activity newerDealActivity = build("call", "newer deal", null, deal, user);
+        newerDealActivity.setTimestamp("2026-08-11 10:00:00");
+        Activity restrictedPersonReference = build(
+                "call", "restricted person reference", person, deal, user);
+        restrictedPersonReference.setTimestamp("2026-08-12 09:00:00");
+        Activity restrictedDealPerson = build(
+                "call", "restricted deal person", restrictedPerson, deal, user);
+        restrictedDealPerson.setTimestamp("2026-08-12 10:00:00");
+        activityMapper.insert(olderPersonActivity);
+        activityMapper.insert(newerPersonActivity);
+        activityMapper.insert(olderDealActivity);
+        activityMapper.insert(newerDealActivity);
+        activityMapper.insert(restrictedPersonReference);
+        activityMapper.insert(restrictedDealPerson);
+        jdbcTemplate.update(
+                "INSERT INTO entity_reference "
+                    + "(workspace_id, source_type, source_id, ref_type, ref_id, label) "
+                    + "VALUES (?, 'activity', ?, 'person', ?, ?)",
+                workspace.getId(),
+                restrictedPersonReference.getId(),
+                restrictedPerson.getId(),
+                restrictedPerson.getName());
+
+        List<Activity> personPage = activityMapper.getAiAssistantActivitiesByPersonId(
+                workspace.getId(), person.getId(), List.of(workspace.getId()), 1);
+        List<Activity> dealPage = activityMapper.getAiAssistantActivitiesByDealId(
+                workspace.getId(), deal.getId(), List.of(workspace.getId()), 1);
+        List<Activity> companyPage = activityMapper.getAiAssistantActivitiesByCompanyId(
+                workspace.getId(), deal.getCompanyId(), List.of(workspace.getId()), 1);
+
+        assertEquals(List.of(newerPersonActivity.getId()),
+                personPage.stream().map(Activity::getId).toList());
+        assertEquals(List.of(newerDealActivity.getId()),
+                dealPage.stream().map(Activity::getId).toList());
+        assertEquals(List.of(newerDealActivity.getId()),
+                companyPage.stream().map(Activity::getId).toList());
+    }
+
+    @Test
     void getActivitiesByPersonIdInWindowBoundsTimeWorkspaceAndRows() {
         User user = newUser();
         Person person = newPerson(newCompany());

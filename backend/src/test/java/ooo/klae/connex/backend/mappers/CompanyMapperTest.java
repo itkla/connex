@@ -47,6 +47,44 @@ class CompanyMapperTest extends AbstractMapperTest {
     @Autowired private NoteMapper noteMapper;
     @Autowired private TaskMapper taskMapper;
 
+    @Test
+    void mentionLookupUsesAsciiBoundariesAndPreservesSingleCharacterCjkNames() {
+        Company company = newCompany();
+        company.setName("d");
+        companyMapper.update(company);
+        Company abbreviation = newCompany();
+        abbreviation.setName("Al");
+        companyMapper.update(abbreviation);
+        Company multiWordName = newCompany();
+        multiWordName.setName("Acme Corp");
+        companyMapper.update(multiWordName);
+        Company cjkName = newCompany();
+        cjkName.setName("森");
+        companyMapper.update(cjkName);
+
+        assertTrue(companyMapper.findMentionedRecords(
+                workspace.getId(), "deadline", 21).stream()
+                .noneMatch(match -> match.getId() == company.getId()));
+        assertTrue(companyMapper.findMentionedRecords(
+                workspace.getId(), "Tell me about d?", 21).stream()
+                .anyMatch(match -> match.getId() == company.getId()));
+        assertTrue(companyMapper.findMentionedRecords(
+                workspace.getId(), "Alice", 21).stream()
+                .noneMatch(match -> match.getId() == abbreviation.getId()));
+        assertTrue(companyMapper.findMentionedRecords(
+                workspace.getId(), "Tell me about Al?", 21).stream()
+                .anyMatch(match -> match.getId() == abbreviation.getId()));
+        assertTrue(companyMapper.findMentionedRecords(
+                workspace.getId(), "Acme Corporation", 21).stream()
+                .noneMatch(match -> match.getId() == multiWordName.getId()));
+        assertTrue(companyMapper.findMentionedRecords(
+                workspace.getId(), "Tell me about Acme Corp?", 21).stream()
+                .anyMatch(match -> match.getId() == multiWordName.getId()));
+        assertTrue(companyMapper.findMentionedRecords(
+                workspace.getId(), "森について教えて", 21).stream()
+                .anyMatch(match -> match.getId() == cjkName.getId()));
+    }
+
     /**
      * Inserts a new company and checks if the generated ID is not zero.
      */

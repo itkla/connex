@@ -905,6 +905,13 @@
     WHERE <include refid="visible"/>
       AND c.name IS NOT NULL
       AND c.name != ''
+      AND (TRIM(c.name) = TRIM(#{text})
+        OR (TRIM(c.name) REGEXP '^[A-Za-z0-9_]+([[:space:]][A-Za-z0-9_]+)*$'
+          AND REGEXP_LIKE(
+            #{text},
+            CONCAT('(^|[^A-Za-z0-9_])', TRIM(c.name), '([^A-Za-z0-9_]|$)'),
+            'i'))
+        OR LENGTH(TRIM(c.name)) &gt; CHAR_LENGTH(TRIM(c.name)))
       AND LOCATE(c.name, #{text}) &gt; 0
     ORDER BY CHAR_LENGTH(c.name) DESC, c.id
     LIMIT #{limit}

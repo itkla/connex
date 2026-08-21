@@ -125,6 +125,8 @@ class AiAssistantWriteToolServiceTest {
         AiAssistantDateResolver dateResolver = new AiAssistantDateResolver(authService, CLOCK);
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
         PersonMapper personMapper = mock(PersonMapper.class);
+        when(personMapper.getPersonById(TURN.workspaceId(), 31))
+                .thenReturn(person(31));
         when(personMapper.getByIds(TURN.workspaceId(), List.of(31)))
                 .thenReturn(List.of(person(31)));
         AiAssistantToolExecutor readExecutor = new AiAssistantToolExecutor(
@@ -135,6 +137,7 @@ class AiAssistantWriteToolServiceTest {
                 dealService,
                 activityService,
                 taskService,
+                mock(AiAssistantHistoryService.class),
                 mock(ScoringService.class),
                 workspaceService,
                 personMapper,

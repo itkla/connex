@@ -67,6 +67,7 @@ public class AiAssistantToolExecutor {
     private final DealService dealService;
     private final ActivityService activityService;
     private final TaskService taskService;
+    private final AiAssistantHistoryService historyService;
     private final ScoringService scoringService;
     private final WorkspaceService workspaceService;
     private final PersonMapper personMapper;
@@ -231,22 +232,25 @@ public class AiAssistantToolExecutor {
         int limit = integer(args, "limit", DEFAULT_LIMIT);
         List<Activity> activities = switch (resource.kind()) {
             case "person" -> {
-                requireProcessable(personService.getPersonById(resource.id()));
+                requireProcessablePerson(resource.id());
                 yield filterRestrictedLinkedPeople(
-                        activityService.getActivitiesByPersonId(resource.id()),
+                        historyService.activitiesForPerson(resource.id(), limit),
                         Activity::getPerson,
                         Activity::getReferences,
                         resources.maskingContext());
             }
-            case "company" -> filterRestrictedLinkedPeople(
-                    companyService.getCompanyTimeline(resource.id(), limit).activities(),
-                    Activity::getPerson,
-                    Activity::getReferences,
-                    resources.maskingContext());
+            case "company" -> {
+                companyService.getCompanyById(resource.id());
+                yield filterRestrictedLinkedPeople(
+                        historyService.activitiesForCompany(resource.id(), limit),
+                        Activity::getPerson,
+                        Activity::getReferences,
+                        resources.maskingContext());
+            }
             case "deal" -> {
                 dealService.getDealById(resource.id());
                 yield filterRestrictedLinkedPeople(
-                        activityService.getActivitiesByDealId(resource.id()),
+                        historyService.activitiesForDeal(resource.id(), limit),
                         Activity::getPerson,
                         Activity::getReferences,
                         resources.maskingContext());
@@ -265,22 +269,25 @@ public class AiAssistantToolExecutor {
         int limit = integer(args, "limit", DEFAULT_LIMIT);
         List<Task> tasks = switch (resource.kind()) {
             case "person" -> {
-                requireProcessable(personService.getPersonById(resource.id()));
+                requireProcessablePerson(resource.id());
                 yield filterRestrictedLinkedPeople(
-                        taskService.getTasksByPersonId(resource.id()),
+                        historyService.tasksForPerson(resource.id(), limit),
                         Task::getPerson,
                         Task::getReferences,
                         resources.maskingContext());
             }
-            case "company" -> filterRestrictedLinkedPeople(
-                    companyService.getCompanyTimeline(resource.id(), limit).tasks(),
-                    Task::getPerson,
-                    Task::getReferences,
-                    resources.maskingContext());
+            case "company" -> {
+                companyService.getCompanyById(resource.id());
+                yield filterRestrictedLinkedPeople(
+                        historyService.tasksForCompany(resource.id(), limit),
+                        Task::getPerson,
+                        Task::getReferences,
+                        resources.maskingContext());
+            }
             case "deal" -> {
                 dealService.getDealById(resource.id());
                 yield filterRestrictedLinkedPeople(
-                        taskService.getTasksByDealId(resource.id()),
+                        historyService.tasksForDeal(resource.id(), limit),
                         Task::getPerson,
                         Task::getReferences,
                         resources.maskingContext());
@@ -344,8 +351,7 @@ public class AiAssistantToolExecutor {
             LocalDateTime startUtc,
             LocalDateTime endUtc,
             MaskingContext maskingContext) {
-        Person person = personService.getPersonById(personId);
-        requireProcessable(person);
+        Person person = requireProcessablePerson(personId);
         new Identifier("person", person.getName()).seed(maskingContext);
         List<Activity> candidates = activityService.getActivitiesByPersonIdInWindow(
                 personId,
@@ -452,11 +458,9 @@ public class AiAssistantToolExecutor {
         List<Identifier> identifiers = List.of(new Identifier("company", company.getName()));
         seedIdentifiers(identifiers, resources.maskingContext());
         if (includeNotes) {
-            CompanyService.CompanyTimelineData timeline = companyService.getCompanyTimeline(
-                    company.getId(), MAX_NOTES);
             data.put("notes", noteData(
                     filterRestrictedLinkedPeople(
-                            timeline.notes(),
+                            historyService.notesForCompany(company.getId(), MAX_NOTES),
                             Note::getPerson,
                             Note::getReferences,
                             resources.maskingContext())
@@ -749,6 +753,13 @@ public class AiAssistantToolExecutor {
         if (!isProcessable(person)) {
             throw AiAssistantLoopException.accessRevoked("inaccessible_resource");
         }
+    }
+
+    private Person requireProcessablePerson(int personId) {
+        Person person = personMapper.getPersonById(
+                workspaceService.getCurrentWorkspaceId(), personId);
+        requireProcessable(person);
+        return person;
     }
 
     private static boolean isProcessable(Person person) {

@@ -843,6 +843,13 @@
       AND p.provision_ceased_at IS NULL
       AND p.name IS NOT NULL
       AND p.name != ''
+      AND (TRIM(p.name) = TRIM(#{text})
+        OR (TRIM(p.name) REGEXP '^[A-Za-z0-9_]+([[:space:]][A-Za-z0-9_]+)*$'
+          AND REGEXP_LIKE(
+            #{text},
+            CONCAT('(^|[^A-Za-z0-9_])', TRIM(p.name), '([^A-Za-z0-9_]|$)'),
+            'i'))
+        OR LENGTH(TRIM(p.name)) &gt; CHAR_LENGTH(TRIM(p.name)))
       AND LOCATE(p.name, #{text}) &gt; 0
     ORDER BY CHAR_LENGTH(p.name) DESC, p.id
     LIMIT #{limit}
