@@ -67,4 +67,10 @@ public class ProviderConnectionController {
     public void disconnect(@PathVariable String provider) {
         connectionService.disconnect(provider);
     }
+
+    @DeleteMapping("/{provider}/retained-data")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public void eraseAllCapturedDataAndReset(@PathVariable String provider) {
+        connectionService.eraseAllCapturedDataAndReset(provider);
+    }
 }

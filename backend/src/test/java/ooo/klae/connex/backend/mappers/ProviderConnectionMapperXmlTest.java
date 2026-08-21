@@ -21,6 +21,7 @@ class ProviderConnectionMapperXmlTest {
         assertTrue(source.contains("credential_generation = #{generation}"));
         assertTrue(source.contains("credential_ref = NULL"));
         assertTrue(source.contains("access_token_expires_at = NULL"));
+        assertFalse(source.contains("provider_account_id = NULL"));
         assertFalse(source.contains("last_sync_at"));
         assertFalse(source.contains("${"));
     }

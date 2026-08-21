@@ -15,6 +15,12 @@ import ooo.klae.connex.backend.mappers.ProviderCaptureMapper;
 public class ProviderCapturePurgeService {
     private final ProviderCaptureMapper captureMapper;
 
+    /** Reports whether one user and provider retain purgeable tenant-local data. */
+    @Transactional(readOnly = true)
+    public boolean hasResiduals(int workspaceId, int userId, String provider) {
+        return captureMapper.countUserProviderResiduals(workspaceId, userId, provider) != 0;
+    }
+
     /** Removes all admitted and source-owned data, policy, decisions, and cursors. */
     @Transactional
     public void purge(int workspaceId, int userId, String provider) {

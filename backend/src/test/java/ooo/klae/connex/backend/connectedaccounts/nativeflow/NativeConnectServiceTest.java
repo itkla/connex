@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -473,6 +474,66 @@ class NativeConnectServiceTest {
     }
 
     @Test
+    void pairingPersistsAbsentAndPresentConnectionExpectations() {
+        nativeConnectService.createPairing(PROVIDER);
+
+        NativeConnectSession absent = latest(firstUser);
+        assertNull(absent.getExpectedConnectionId());
+        assertNull(absent.getExpectedCredentialGeneration());
+
+        ProviderConnection connection = insertConnection(
+            "disconnected", "google:issuer:subject", 7);
+        nativeConnectService.createPairing(PROVIDER);
+
+        NativeConnectSession present = latest(firstUser);
+        assertEquals(connection.getId(), present.getExpectedConnectionId());
+        assertEquals(7L, present.getExpectedCredentialGeneration());
+    }
+
+    @Test
+    void staleExpectationBeforeExchangeFailsWithoutProviderEgress() {
+        NativePrepareResponse prepared = prepare(
+            nativeConnectService.createPairing(PROVIDER));
+        insertConnection("disconnected", "google:issuer:subject", 1);
+
+        NativeConnectException error = assertThrows(
+            NativeConnectException.class,
+            () -> complete(
+                prepared,
+                "stale-code",
+                queryParameter(prepared.authorizeUrl(), "state")));
+
+        assertEquals("connection_conflict", error.getCode());
+        verify(tokenClient, never()).exchange(anyString(), anyMap());
+        assertEquals("failed", latest(firstUser).getStatus());
+        assertEquals("connection_conflict", latest(firstUser).getErrorCode());
+    }
+
+    @Test
+    void connectionRaceAfterExchangeRevokesFreshGoogleGrant() {
+        NativePrepareResponse prepared = prepare(
+            nativeConnectService.createPairing(PROVIDER));
+        when(tokenClient.exchange(anyString(), anyMap())).thenAnswer(invocation -> {
+            insertConnection("disconnected", "google:issuer:subject", 1);
+            return tokenResponse(
+                "issuer", "subject", "race@example.test", "race-code");
+        });
+
+        NativeConnectException error = assertThrows(
+            NativeConnectException.class,
+            () -> complete(
+                prepared,
+                "race-code",
+                queryParameter(prepared.authorizeUrl(), "state")));
+
+        assertEquals("connection_conflict", error.getCode());
+        verify(tokenClient).revoke(
+            "https://oauth2.googleapis.com/revoke", "refresh-race-code");
+        assertEquals("failed", latest(firstUser).getStatus());
+        assertEquals("connection_conflict", latest(firstUser).getErrorCode());
+    }
+
+    @Test
     void pkceVerifierIsExchangedButNeverReturned() {
         AtomicReference<Map<String, String>> exchangedForm = new AtomicReference<>();
         when(tokenClient.exchange(anyString(), anyMap())).thenAnswer(invocation -> {
@@ -633,6 +694,18 @@ class NativeConnectServiceTest {
         ProviderConnection connection =
             connectionMapper.getByUserAndProvider(user.getId(), PROVIDER);
         assertNotNull(connection);
+        return connection;
+    }
+
+    private ProviderConnection insertConnection(
+            String status, String accountId, long generation) {
+        ProviderConnection connection = new ProviderConnection();
+        connection.setUserId(firstUser.getId());
+        connection.setProvider(PROVIDER);
+        connection.setStatus(status);
+        connection.setProviderAccountId(accountId);
+        connection.setCredentialGeneration(generation);
+        connectionMapper.insert(connection);
         return connection;
     }
 

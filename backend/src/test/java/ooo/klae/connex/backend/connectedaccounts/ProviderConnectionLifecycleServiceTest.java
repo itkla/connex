@@ -28,8 +28,10 @@ import tools.jackson.databind.ObjectMapper;
 import ooo.klae.connex.backend.beans.ProviderConnection;
 import ooo.klae.connex.backend.connectedaccounts.capture.ProviderCapturePurgeService;
 import ooo.klae.connex.backend.mappers.ProviderConnectionMapper;
+import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 class ProviderConnectionLifecycleServiceTest {
@@ -39,6 +41,8 @@ class ProviderConnectionLifecycleServiceTest {
         ProviderConnectionMapper connectionMapper =
             mock(ProviderConnectionMapper.class);
         WorkspaceMapper workspaceMapper = mock(WorkspaceMapper.class);
+        TenantLifecycleControlMapper lifecycleControlMapper =
+            mock(TenantLifecycleControlMapper.class);
         TenantWorkScope tenantWorkScope = mock(TenantWorkScope.class);
         ProviderCapturePurgeService purgeService =
             mock(ProviderCapturePurgeService.class);
@@ -50,6 +54,7 @@ class ProviderConnectionLifecycleServiceTest {
         ConnectedAccountProviders providers = new ConnectedAccountProviders(
             new ConnectedAccountProperties());
         ProviderTokenClient tokenClient = mock(ProviderTokenClient.class);
+        AuditService auditService = mock(AuditService.class);
         when(tenantWorkScope.unrouted(
                 org.mockito.ArgumentMatchers.<Supplier<Object>>any()))
             .thenAnswer(invocation -> invocation
@@ -59,10 +64,18 @@ class ProviderConnectionLifecycleServiceTest {
             return null;
         }).when(tenantWorkScope).inLifecycleWorkspace(
             anyInt(), any(Runnable.class));
+        when(tenantWorkScope.inLifecycleWorkspace(
+                anyInt(), org.mockito.ArgumentMatchers.<Supplier<Boolean>>any()))
+            .thenAnswer(invocation -> invocation
+                .<Supplier<Boolean>>getArgument(1).get());
         when(transactionManager.getTransaction(any()))
             .thenReturn(new SimpleTransactionStatus());
         when(workspaceMapper.findWorkspaceIdsLifecyclePage(0, 50))
             .thenReturn(List.of(3, 5));
+        when(lifecycleControlMapper.findWorkspaceOrgIdForLifecycle(3)).thenReturn(13);
+        when(lifecycleControlMapper.findWorkspaceOrgIdForLifecycle(5)).thenReturn(15);
+        when(purgeService.hasResiduals(3, 9, "google")).thenReturn(true);
+        when(purgeService.hasResiduals(5, 9, "google")).thenReturn(true);
         ProviderConnection connection = connection();
         when(connectionMapper.getById(31)).thenReturn(connection);
         when(connectionMapper.getByIdForShare(31)).thenReturn(connection);
@@ -85,6 +98,7 @@ class ProviderConnectionLifecycleServiceTest {
                 connectionMapper,
                 userMapper(),
                 workspaceMapper,
+                lifecycleControlMapper,
                 tenantWorkScope,
                 purgeService,
                 transactionManager,
@@ -93,13 +107,26 @@ class ProviderConnectionLifecycleServiceTest {
                 providers,
                 tokenClient,
                 new ObjectMapper(),
-                new ConnectedCaptureProperties());
+                new ConnectedCaptureProperties(),
+                auditService);
 
         assertTrue(service.process(connection));
 
-        InOrder order = inOrder(purgeService, tokenClient, persistence);
+        InOrder order = inOrder(auditService, purgeService, tokenClient, persistence);
+        order.verify(auditService).recordStrictIndependentScoped(
+            eq("provider.capture.purge"), eq("user"), eq(9), eq(3), eq(13),
+            eq("google"), anyString(), any());
         order.verify(purgeService).purge(3, 9, "google");
+        order.verify(auditService).recordIndependentScoped(
+            eq("provider.capture.purge.complete"), eq("user"), eq(9), eq(3), eq(13),
+            eq("google"), anyString(), any());
+        order.verify(auditService).recordStrictIndependentScoped(
+            eq("provider.capture.purge"), eq("user"), eq(9), eq(5), eq(15),
+            eq("google"), anyString(), any());
         order.verify(purgeService).purge(5, 9, "google");
+        order.verify(auditService).recordIndependentScoped(
+            eq("provider.capture.purge.complete"), eq("user"), eq(9), eq(5), eq(15),
+            eq("google"), anyString(), any());
         order.verify(tokenClient).revoke(
             "https://oauth2.googleapis.com/revoke", "refresh-token");
         order.verify(persistence).finish(connection);
@@ -112,6 +139,8 @@ class ProviderConnectionLifecycleServiceTest {
         ProviderConnectionMapper connectionMapper =
             mock(ProviderConnectionMapper.class);
         WorkspaceMapper workspaceMapper = mock(WorkspaceMapper.class);
+        TenantLifecycleControlMapper lifecycleControlMapper =
+            mock(TenantLifecycleControlMapper.class);
         TenantWorkScope tenantWorkScope = mock(TenantWorkScope.class);
         ProviderCapturePurgeService purgeService =
             mock(ProviderCapturePurgeService.class);
@@ -132,6 +161,10 @@ class ProviderConnectionLifecycleServiceTest {
             return null;
         }).when(tenantWorkScope).inLifecycleWorkspace(
             anyInt(), any(Runnable.class));
+        when(tenantWorkScope.inLifecycleWorkspace(
+                anyInt(), org.mockito.ArgumentMatchers.<Supplier<Boolean>>any()))
+            .thenAnswer(invocation -> invocation
+                .<Supplier<Boolean>>getArgument(1).get());
         when(transactionManager.getTransaction(any()))
             .thenReturn(new SimpleTransactionStatus());
         when(connectionMapper.getById(31)).thenReturn(connection);
@@ -153,6 +186,7 @@ class ProviderConnectionLifecycleServiceTest {
                 connectionMapper,
                 userMapper(),
                 workspaceMapper,
+                lifecycleControlMapper,
                 tenantWorkScope,
                 purgeService,
                 transactionManager,
@@ -162,7 +196,8 @@ class ProviderConnectionLifecycleServiceTest {
                     new ConnectedAccountProperties()),
                 mock(ProviderTokenClient.class),
                 new ObjectMapper(),
-                properties);
+                properties,
+                mock(AuditService.class));
 
         assertFalse(service.process(connection));
 
@@ -199,6 +234,7 @@ class ProviderConnectionLifecycleServiceTest {
                 connectionMapper,
                 userMapper(),
                 mock(WorkspaceMapper.class),
+                mock(TenantLifecycleControlMapper.class),
                 tenantWorkScope,
                 purgeService,
                 mock(PlatformTransactionManager.class),
@@ -208,7 +244,8 @@ class ProviderConnectionLifecycleServiceTest {
                     new ConnectedAccountProperties()),
                 tokenClient,
                 new ObjectMapper(),
-                new ConnectedCaptureProperties());
+                new ConnectedCaptureProperties(),
+                mock(AuditService.class));
 
         assertTrue(service.process(connection));
 

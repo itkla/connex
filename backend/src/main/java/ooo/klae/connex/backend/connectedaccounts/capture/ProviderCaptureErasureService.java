@@ -36,11 +36,13 @@ public class ProviderCaptureErasureService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
         sessionSecurityService.requireRecentAuthentication(userId);
+        int orgId = workspaceService.getOrgId(workspaceId);
+        recordStrictRequest(workspaceId, orgId, provider);
         new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
             workspaceService.lockAndRequireMember(workspaceId, userId);
             purgeService.purge(workspaceId, userId, provider);
         });
-        recordStrict(workspaceId, provider);
+        recordCompletion(workspaceId, orgId, provider);
         return new ProviderCaptureOverviewDto.PurgeState(false, "idle", null);
     }
 
@@ -50,14 +52,31 @@ public class ProviderCaptureErasureService {
         }
     }
 
-    private void recordStrict(int workspaceId, String provider) {
+    private void recordStrictRequest(
+            int workspaceId, int orgId, String provider) {
         tenantWorkScope.unrouted(() -> {
             auditService.recordStrictIndependentScoped(
                 "provider.capture.erase",
                 "workspace",
                 workspaceId,
                 workspaceId,
-                workspaceService.getOrgId(workspaceId),
+                orgId,
+                provider,
+                "Requested erasure of captured provider data for the current member",
+                Map.of("provider", provider));
+            return null;
+        });
+    }
+
+    private void recordCompletion(
+            int workspaceId, int orgId, String provider) {
+        tenantWorkScope.unrouted(() -> {
+            auditService.recordScoped(
+                "provider.capture.erase.complete",
+                "workspace",
+                workspaceId,
+                workspaceId,
+                orgId,
                 provider,
                 "Erased captured provider data for the current member",
                 Map.of("provider", provider));

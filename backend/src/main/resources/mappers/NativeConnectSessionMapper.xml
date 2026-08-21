@@ -13,6 +13,8 @@
     <result property="stateHash" column="state_hash"/>
     <result property="verifierRef" column="verifier_ref"/>
     <result property="redirectUri" column="redirect_uri"/>
+    <result property="expectedConnectionId" column="expected_connection_id"/>
+    <result property="expectedCredentialGeneration" column="expected_credential_generation"/>
     <result property="errorCode" column="error_code"/>
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
@@ -21,7 +23,8 @@
 
   <sql id="cols">
     id, user_id, provider, status, pairing_code_hash, handoff_ticket_hash,
-    state_hash, verifier_ref, redirect_uri, error_code, created_at, updated_at, expires_at
+    state_hash, verifier_ref, redirect_uri, expected_connection_id,
+    expected_credential_generation, error_code, created_at, updated_at, expires_at
   </sql>
 
   <select id="getLatestByUserAndProvider" resultMap="NativeConnectSessionResult">
@@ -76,9 +79,11 @@
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO provider_native_connect_session (
-      user_id, provider, status, pairing_code_hash, expires_at
+      user_id, provider, status, pairing_code_hash, expected_connection_id,
+      expected_credential_generation, expires_at
     ) VALUES (
-      #{userId}, #{provider}, #{status}, #{pairingCodeHash}, #{expiresAt}
+      #{userId}, #{provider}, #{status}, #{pairingCodeHash}, #{expectedConnectionId},
+      #{expectedCredentialGeneration}, #{expiresAt}
     )
   </insert>
 

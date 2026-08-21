@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -58,10 +59,10 @@ class ProviderConnectionServiceTest extends AbstractServiceTest {
         properties.getMicrosoft().setClientSecret(null);
     }
 
-    private static String fakeIdToken(String email) {
+    private static String fakeIdToken(String email, String accountId) {
         String payload = Base64.getUrlEncoder().withoutPadding()
             .encodeToString(("{\"aud\":\"client-id\",\"iss\":\"https://accounts.example.test\","
-                + "\"sub\":\"provider-account\",\"email\":\"" + email + "\"}")
+                + "\"sub\":\"" + accountId + "\",\"email\":\"" + email + "\"}")
                 .getBytes(StandardCharsets.UTF_8));
         return "header." + payload + ".signature";
     }
@@ -79,8 +80,13 @@ class ProviderConnectionServiceTest extends AbstractServiceTest {
     }
 
     private void stubExchange(String refreshToken, String email) {
+        stubExchange(refreshToken, email, "provider-account");
+    }
+
+    private void stubExchange(String refreshToken, String email, String accountId) {
         when(tokenClient.exchange(anyString(), any())).thenReturn(new ProviderTokenResponse(
-            "access-token", refreshToken, 3600L, "openid email scope-a", fakeIdToken(email)));
+            "access-token", refreshToken, 3600L, "openid email scope-a",
+            fakeIdToken(email, accountId)));
     }
 
     private String storedReference() {
@@ -208,6 +214,91 @@ class ProviderConnectionServiceTest extends AbstractServiceTest {
         assertEquals(tombstoneGeneration + 1, reconnected.getCredentialGeneration());
         assertEquals("connected", reconnected.getStatus());
         assertNotNull(reconnected.getCredentialRef());
+    }
+
+    @Test
+    void callbackStartedBeforeDisconnectCannotRestoreTheCredential() {
+        stubExchange("refresh-token-1", "old@example.com");
+        connectionService.completeCallback(
+            "google", "code", beginAndExtractState(), null);
+        String staleState = beginAndExtractState();
+
+        connectionService.disconnect("google");
+        ProviderConnection tombstone = providerConnectionMapper
+            .getByUserAndProvider(currentUser.getId(), "google");
+        long disconnectedGeneration = tombstone.getCredentialGeneration();
+
+        stubExchange("refresh-token-2", "old@example.com");
+        assertTrue(connectionService.completeCallback(
+            "google", "code", staleState, null).contains("error=exchange"));
+
+        ProviderConnection retained = providerConnectionMapper
+            .getByUserAndProvider(currentUser.getId(), "google");
+        assertEquals("disconnected", retained.getStatus());
+        assertEquals(disconnectedGeneration, retained.getCredentialGeneration());
+        assertNull(retained.getCredentialRef());
+    }
+
+    @Test
+    void disconnectDuringCodeExchangeRevokesTheSupersededGoogleGrant() {
+        stubExchange("refresh-token-1", "old@example.com");
+        connectionService.completeCallback(
+            "google", "code", beginAndExtractState(), null);
+        String staleState = beginAndExtractState();
+        ProviderTokenResponse replacement = new ProviderTokenResponse(
+            "access-token-2",
+            "refresh-token-2",
+            3600L,
+            "openid email scope-a",
+            fakeIdToken("old@example.com", "provider-account"));
+        when(tokenClient.exchange(anyString(), any())).thenAnswer(invocation -> {
+            connectionService.disconnect("google");
+            return replacement;
+        });
+
+        assertTrue(connectionService.completeCallback(
+            "google", "code", staleState, null).contains("error=exchange"));
+
+        verify(tokenClient).revoke(
+            "https://oauth2.googleapis.com/revoke", "refresh-token-2");
+        ProviderConnection tombstone = providerConnectionMapper
+            .getByUserAndProvider(currentUser.getId(), "google");
+        assertEquals("disconnected", tombstone.getStatus());
+        assertNull(tombstone.getCredentialRef());
+    }
+
+    @Test
+    void disconnectedTombstoneRejectsADifferentProviderAccount() {
+        stubExchange("refresh-token-1", "old@example.com", "account-old");
+        connectionService.completeCallback(
+            "google", "code", beginAndExtractState(), null);
+        connectionService.disconnect("google");
+
+        stubExchange("refresh-token-2", "new@example.com", "account-new");
+        assertTrue(connectionService.completeCallback(
+            "google", "code", beginAndExtractState(), null)
+            .contains("error=retained_data_reset_required"));
+        verify(tokenClient).revoke(
+            "https://oauth2.googleapis.com/revoke", "refresh-token-2");
+
+        ProviderConnection tombstone = providerConnectionMapper
+            .getByUserAndProvider(currentUser.getId(), "google");
+        assertEquals("disconnected", tombstone.getStatus());
+        assertEquals("account-old", tombstone.getProviderAccountId());
+        assertNull(tombstone.getCredentialRef());
+    }
+
+    @Test
+    void explicitAllWorkspaceResetDeletesTheRetainedIdentityTombstone() {
+        stubExchange("refresh-token-1", "old@example.com", "account-old");
+        connectionService.completeCallback(
+            "google", "code", beginAndExtractState(), null);
+        connectionService.disconnect("google");
+
+        connectionService.eraseAllCapturedDataAndReset("google");
+
+        assertNull(providerConnectionMapper.getByUserAndProvider(
+            currentUser.getId(), "google"));
     }
 
     @Test

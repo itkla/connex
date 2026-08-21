@@ -27,6 +27,7 @@ class ProviderConnectionMutationTest {
         connection.setId(31);
         connection.setUserId(9);
         connection.setProvider("google");
+        connection.setProviderAccountId("account-31");
         connection.setStatus("connected");
         connection.setCredentialGeneration(4);
         when(mapper.getByUserAndProviderForUpdate(9, "google"))
@@ -60,6 +61,7 @@ class ProviderConnectionMutationTest {
         revoking.setId(31);
         revoking.setUserId(9);
         revoking.setProvider("google");
+        revoking.setProviderAccountId("account-31");
         revoking.setStatus("revoking");
         revoking.setCredentialGeneration(5);
         when(userMapper.lockByIdForShare(9)).thenReturn(9);

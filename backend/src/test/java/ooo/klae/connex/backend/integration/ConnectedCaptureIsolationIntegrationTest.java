@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -60,7 +61,8 @@ import ooo.klae.connex.backend.services.SessionSecurityService;
     "connex.connected-accounts.google.client-id=capture-isolation-client",
     "connex.connected-accounts.google.client-secret=capture-isolation-secret",
     "connex.connected-capture.scheduling-enabled=true",
-    "connex.connected-capture.google.enabled=true"
+    "connex.connected-capture.google.enabled=true",
+    "connex.connected-capture.scheduler-batch-size=1000"
 })
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class ConnectedCaptureIsolationIntegrationTest {
@@ -98,6 +100,7 @@ class ConnectedCaptureIsolationIntegrationTest {
         for (int workspaceId : workspaceIds.reversed()) {
             for (int userId : userIds.reversed()) {
                 purgeService.purge(workspaceId, userId, "google");
+                purgeService.purge(workspaceId, userId, "microsoft");
             }
             jdbcTemplate.update(
                 "DELETE FROM workspace_member WHERE workspace_id = ?",
@@ -220,6 +223,62 @@ class ConnectedCaptureIsolationIntegrationTest {
                 workspace.getId(), owner.getId(), "google"));
     }
 
+    @Test
+    void allWorkspaceResetPurgesOnlyTheTargetUserAndProvider() throws Exception {
+        Workspace firstWorkspace = newWorkspace();
+        Workspace secondWorkspace = newWorkspace();
+        User owner = newMember(firstWorkspace);
+        workspaceMapper.addMember(secondWorkspace.getId(), owner.getId(), "member");
+        User otherUser = newMember(firstWorkspace);
+        capturedInteraction(firstWorkspace, owner, "google");
+        capturedInteraction(secondWorkspace, owner, "google");
+        capturedInteraction(firstWorkspace, otherUser, "google");
+        capturedInteraction(firstWorkspace, owner, "microsoft");
+        ProviderConnection connection = new ProviderConnection();
+        connection.setUserId(owner.getId());
+        connection.setProvider("google");
+        connection.setStatus("disconnected");
+        connection.setProviderAccountId("google:issuer:subject");
+        connection.setCredentialGeneration(2);
+        connectionMapper.insert(connection);
+        MockHttpSession session = login(owner.getUsername());
+        MockHttpServletRequest stepUpRequest =
+            new MockHttpServletRequest(context.getServletContext());
+        stepUpRequest.setSession(session);
+        sessionSecurityService.markStepUp(stepUpRequest, owner.getId());
+
+        mockMvc.perform(delete(
+                "/api/account/connections/google/retained-data")
+                .header("X-Workspace-Id", firstWorkspace.getId())
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isAccepted());
+
+        assertNull(connectionMapper.getByUserAndProvider(owner.getId(), "google"));
+        assertEquals(0, captureMapper.countUserProviderResiduals(
+            firstWorkspace.getId(), owner.getId(), "google"));
+        assertEquals(0, captureMapper.countUserProviderResiduals(
+            secondWorkspace.getId(), owner.getId(), "google"));
+        assertEquals(1, captureMapper.countUserProviderResiduals(
+            firstWorkspace.getId(), otherUser.getId(), "google"));
+        assertEquals(1, captureMapper.countUserProviderResiduals(
+            firstWorkspace.getId(), owner.getId(), "microsoft"));
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log "
+                + "WHERE action = 'provider.capture.purge.complete' "
+                + "AND entity_type = 'user' AND entity_id = ? AND workspace_id = ?",
+            Integer.class,
+            owner.getId(),
+            firstWorkspace.getId()));
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log "
+                + "WHERE action = 'provider.capture.purge.complete' "
+                + "AND entity_type = 'user' AND entity_id = ? AND workspace_id = ?",
+            Integer.class,
+            owner.getId(),
+            secondWorkspace.getId()));
+    }
+
     private MockHttpSession login(String username) throws Exception {
         String body = "{\"username\":\"" + username
             + "\",\"password\":\"" + PASSWORD + "\"}";
@@ -268,11 +327,16 @@ class ConnectedCaptureIsolationIntegrationTest {
 
     private ProviderCapturedInteraction capturedInteraction(
             Workspace workspace, User user) {
+        return capturedInteraction(workspace, user, "google");
+    }
+
+    private ProviderCapturedInteraction capturedInteraction(
+            Workspace workspace, User user, String provider) {
         ProviderCapturedInteraction interaction =
             new ProviderCapturedInteraction();
         interaction.setWorkspaceId(workspace.getId());
         interaction.setUserId(user.getId());
-        interaction.setProvider("google");
+        interaction.setProvider(provider);
         interaction.setStream("mail_inbox");
         interaction.setProviderSourceId("source-" + suffix());
         interaction.setProviderConversationId("thread-" + suffix());

@@ -22,6 +22,8 @@ public class NativeConnectSession {
     private byte[] stateHash;
     private String verifierRef;
     private String redirectUri;
+    private Integer expectedConnectionId;
+    private Long expectedCredentialGeneration;
     private String errorCode;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.scheduling.annotation.Scheduled;
@@ -20,8 +21,10 @@ import tools.jackson.databind.ObjectMapper;
 import ooo.klae.connex.backend.beans.ProviderConnection;
 import ooo.klae.connex.backend.connectedaccounts.capture.ProviderCapturePurgeService;
 import ooo.klae.connex.backend.mappers.ProviderConnectionMapper;
+import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
@@ -38,6 +41,7 @@ public class ProviderConnectionLifecycleService {
     private final ProviderConnectionMapper connectionMapper;
     private final UserMapper userMapper;
     private final WorkspaceMapper workspaceMapper;
+    private final TenantLifecycleControlMapper lifecycleControlMapper;
     private final TenantWorkScope tenantWorkScope;
     private final ProviderCapturePurgeService purgeService;
     private final PlatformTransactionManager transactionManager;
@@ -47,6 +51,7 @@ public class ProviderConnectionLifecycleService {
     private final ProviderTokenClient tokenClient;
     private final ObjectMapper objectMapper;
     private final ConnectedCaptureProperties captureProperties;
+    private final AuditService auditService;
 
     /** Advances ordinary revocation or one bounded legacy purge page. */
     public boolean process(ProviderConnection connection) {
@@ -86,10 +91,43 @@ public class ProviderConnectionLifecycleService {
                 () -> workspaceMapper.findWorkspaceIdsLifecyclePage(
                     current.getCaptureReconcileAfterWorkspaceId(), limit));
             for (int workspaceId : workspaceIds) {
+                boolean hasResiduals = tenantWorkScope.inLifecycleWorkspace(
+                    workspaceId,
+                    () -> purgeService.hasResiduals(
+                        workspaceId, current.getUserId(), current.getProvider()));
+                Integer orgId = null;
+                if (hasResiduals) {
+                    orgId = tenantWorkScope.unrouted(
+                        () -> lifecycleControlMapper.findWorkspaceOrgIdForLifecycle(workspaceId));
+                    if (orgId == null) {
+                        throw new IllegalStateException(
+                            "Provider purge workspace scope no longer exists");
+                    }
+                    auditService.recordStrictIndependentScoped(
+                        "provider.capture.purge",
+                        "user",
+                        current.getUserId(),
+                        workspaceId,
+                        orgId,
+                        current.getProvider(),
+                        "Requested provider data purge during provider account cleanup",
+                        Map.of("provider", current.getProvider()));
+                }
                 tenantWorkScope.inLifecycleWorkspace(workspaceId,
                     () -> new TransactionTemplate(transactionManager)
                         .executeWithoutResult(status ->
                             purgeWorkspace(workspaceId, current, owner)));
+                if (hasResiduals) {
+                    auditService.recordIndependentScoped(
+                        "provider.capture.purge.complete",
+                        "user",
+                        current.getUserId(),
+                        workspaceId,
+                        orgId,
+                        current.getProvider(),
+                        "Completed provider data purge during provider account cleanup",
+                        Map.of("provider", current.getProvider()));
+                }
             }
             int afterWorkspaceId = workspaceIds.isEmpty()
                 ? current.getCaptureReconcileAfterWorkspaceId()

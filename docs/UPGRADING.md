@@ -79,8 +79,9 @@ all-replicas-down boundary.
 ### V186 provider-disconnect retention cutover
 
 `V186__provider_disconnect_retention.sql` introduces the internal `revoking` and `disconnected`
-states used by the new credential-only disconnect lifecycle. A backend that predates this cutover
-still treats an ordinary disconnect as authorization to erase captured provider data from every
+states used by the new credential-only disconnect lifecycle and removes the obsolete
+`provider_connection.last_sync_at` column. A backend that predates this cutover still reads that
+column and treats an ordinary disconnect as authorization to erase captured provider data from every
 workspace. If an old backend serves a disconnect after V186 applies, the new backend cannot
 distinguish that legacy request from account-deletion cleanup and will finish the destructive flow.
 

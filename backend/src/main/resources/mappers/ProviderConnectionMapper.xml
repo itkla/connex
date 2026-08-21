@@ -178,7 +178,6 @@
     UPDATE provider_connection
     SET status = 'disconnected',
         provider_account_email = NULL,
-        provider_account_id = NULL,
         granted_scopes = NULL,
         credential_ref = NULL,
         access_token_expires_at = NULL,

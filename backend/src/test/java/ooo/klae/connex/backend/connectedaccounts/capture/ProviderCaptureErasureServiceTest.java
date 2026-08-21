@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -36,12 +37,31 @@ class ProviderCaptureErasureServiceTest {
         assertEquals("idle", result.status());
         InOrder order = inOrder(
             fixture.sessionSecurityService(),
+            fixture.auditService(),
             fixture.workspaceService(),
             fixture.purgeService());
         order.verify(fixture.sessionSecurityService())
             .requireRecentAuthentication(9);
+        order.verify(fixture.auditService()).recordStrictIndependentScoped(
+            "provider.capture.erase",
+            "workspace",
+            7,
+            7,
+            3,
+            "google",
+            "Requested erasure of captured provider data for the current member",
+            java.util.Map.of("provider", "google"));
         order.verify(fixture.workspaceService()).lockAndRequireMember(7, 9);
         order.verify(fixture.purgeService()).purge(7, 9, "google");
+        order.verify(fixture.auditService()).recordScoped(
+            "provider.capture.erase.complete",
+            "workspace",
+            7,
+            7,
+            3,
+            "google",
+            "Erased captured provider data for the current member",
+            java.util.Map.of("provider", "google"));
     }
 
     @Test
@@ -73,6 +93,28 @@ class ProviderCaptureErasureServiceTest {
                 org.mockito.ArgumentMatchers.anyInt(),
                 org.mockito.ArgumentMatchers.anyInt(),
                 org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void failedDurableErasureIntentPreventsDestructiveWork() {
+        Fixture fixture = fixture();
+        doThrow(new IllegalStateException("audit unavailable"))
+            .when(fixture.auditService())
+            .recordStrictIndependentScoped(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any());
+
+        assertThrows(
+            IllegalStateException.class,
+            () -> fixture.service().eraseCurrent("google"));
+
+        verify(fixture.purgeService(), never()).purge(7, 9, "google");
     }
 
     private static Fixture fixture() {
@@ -108,14 +150,16 @@ class ProviderCaptureErasureServiceTest {
             service,
             workspaceService,
             sessionSecurityService,
-            purgeService);
+            purgeService,
+            auditService);
     }
 
     private record Fixture(
         ProviderCaptureErasureService service,
         WorkspaceService workspaceService,
         SessionSecurityService sessionSecurityService,
-        ProviderCapturePurgeService purgeService
+        ProviderCapturePurgeService purgeService,
+        AuditService auditService
     ) {
     }
 }

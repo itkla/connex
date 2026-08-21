@@ -295,8 +295,10 @@ a data movement:
    `provider:issuer:subject` — derived from the provider's OpenID `iss`/`sub` claims, not from the
    OAuth client. The same mailbox reconnecting under a different client resolves to the same account
    identity, so the reconnect reattaches to the existing connection instead of creating a duplicate.
-6. A user who reconnects a **different** mailbox is a different account identity, and Connex treats
-   it as a new connection.
+6. A user who wants to reconnect a **different** mailbox must first confirm the all-workspace
+   retained-data reset. Connex erases the old mailbox's captured namespace and deletes its
+   credential-free tombstone before the different account identity can create a new connection;
+   it never combines two mailboxes in one retained namespace.
 
 The reverse direction (Custom → managed) works the same way once managed mode is available.
 

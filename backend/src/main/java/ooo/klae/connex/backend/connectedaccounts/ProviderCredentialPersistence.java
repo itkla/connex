@@ -33,11 +33,44 @@ public class ProviderCredentialPersistence {
     private final UserProviderSecretCipher secretCipher;
     private final ObjectMapper objectMapper;
 
-    /** Stores a first connection or atomically replaces a reconnect generation. */
+    /** Captures the row boundary that one new authorization must not outlive. */
+    @Transactional
+    public ProviderConnectionExpectation authorizationExpectation(
+            int userId, String provider) {
+        requireUser(userId);
+        ProviderConnection connection =
+            connectionMapper.getByUserAndProviderForShare(userId, provider);
+        if (connection != null
+                && ("revoking".equals(connection.getStatus())
+                    || "disconnecting".equals(connection.getStatus())
+                    || "purge_failed".equals(connection.getStatus()))) {
+            throw new ConflictException(
+                "Provider disconnect cleanup must finish before reconnecting");
+        }
+        return ProviderConnectionExpectation.snapshot(connection);
+    }
+
+    /** Rejects an authorization whose captured row boundary has already changed. */
+    @Transactional
+    public void requireAuthorizationExpectation(
+            int userId,
+            String provider,
+            ProviderConnectionExpectation expectation) {
+        requireUser(userId);
+        ProviderConnection connection =
+            connectionMapper.getByUserAndProviderForShare(userId, provider);
+        if (!expectation.matches(connection)) {
+            throw new ConflictException(
+                "Provider authorization was superseded by a connection change");
+        }
+    }
+
+    /** Stores a first connection or atomically replaces an expected reconnect generation. */
     @Transactional
     public boolean storeConnection(
             int userId,
             String provider,
+            ProviderConnectionExpectation expectation,
             ProviderTokenResponse tokens,
             String accountId,
             String accountEmail,
@@ -45,11 +78,12 @@ public class ProviderCredentialPersistence {
         requireUser(userId);
         ProviderConnection existing =
             connectionMapper.getByUserAndProviderForUpdate(userId, provider);
-        if (existing != null
-                && existing.getProviderAccountId() == null
-                && !"disconnected".equals(existing.getStatus())) {
+        if (!expectation.matches(existing)) {
             throw new ConflictException(
-                "Disconnect the legacy provider connection before reconnecting");
+                "Provider authorization was superseded by a connection change");
+        }
+        if (existing != null && existing.getProviderAccountId() == null) {
+            throw new ProviderRetainedDataResetRequiredException();
         }
         if (existing != null
                 && ("disconnecting".equals(existing.getStatus())
@@ -61,8 +95,7 @@ public class ProviderCredentialPersistence {
         if (existing != null
                 && existing.getProviderAccountId() != null
                 && !existing.getProviderAccountId().equals(accountId)) {
-            throw new ConflictException(
-                "Disconnect the existing provider account before connecting a different account");
+            throw new ProviderRetainedDataResetRequiredException();
         }
         String reference = secretCipher.encryptTokenBundle(
             provider, userId, bundleJson(tokens, null));

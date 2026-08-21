@@ -25,6 +25,7 @@ class ProviderConnectionLifecyclePersistenceTest {
         connection.setId(31);
         connection.setUserId(9);
         connection.setProvider("google");
+        connection.setProviderAccountId("account-31");
         connection.setStatus("revoking");
         connection.setCredentialGeneration(4);
         connection.setCredentialRef("credential-ref");
@@ -43,5 +44,6 @@ class ProviderConnectionLifecyclePersistenceTest {
         order.verify(secretCipher).deleteTokenBundleReference(
             "google", 9, "credential-ref");
         order.verify(connectionMapper).completeRevocation(31, 4);
+        assertTrue(connection.getProviderAccountId() != null);
     }
 }
