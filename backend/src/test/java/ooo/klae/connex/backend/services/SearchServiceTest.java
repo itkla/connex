@@ -92,6 +92,36 @@ class SearchServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void authorMetadataMatchesPreserveNoteRecencyOrder() {
+        String marker = "author-order-" + unique();
+        User firstAuthor = newUser();
+        firstAuthor.setDisplayName(marker + " first");
+        userMapper.update(firstAuthor);
+        User secondAuthor = newUser();
+        secondAuthor.setDisplayName(marker + " second");
+        userMapper.update(secondAuthor);
+
+        authenticateAs(firstAuthor, workspace.getId());
+        Note firstNote = new Note();
+        firstNote.setContent("first author-only body " + unique());
+        firstNote.setVisibility("workspace");
+        Note firstCreated = noteService.create(firstNote);
+
+        authenticateAs(secondAuthor, workspace.getId());
+        Note secondNote = new Note();
+        secondNote.setContent("second author-only body " + unique());
+        secondNote.setVisibility("workspace");
+        Note secondCreated = noteService.create(secondNote);
+
+        authenticateAs(currentUser, workspace.getId());
+        SearchResultsDto results = searchService.search(marker);
+
+        assertEquals(
+            List.of(secondCreated.getId(), firstCreated.getId()),
+            results.getNotes().stream().map(note -> note.getId()).toList());
+    }
+
+    @Test
     void visibleNoteMetadataMatchesSurviveRedactedContentMatches() {
         String query = currentUser.getUsername();
         Note privateTarget = new Note();

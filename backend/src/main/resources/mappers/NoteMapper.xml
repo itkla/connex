@@ -32,8 +32,6 @@
     <result property="updatedAt" column="updated_at"/>
     <association property="author" javaType="User">
       <id property="id" column="author_id"/>
-      <result property="displayName" column="author_display_name"/>
-      <result property="username" column="author_username"/>
     </association>
     <association property="person" javaType="Person">
       <id property="id" column="person_id"/>
@@ -55,8 +53,6 @@
 
   <sql id="searchNoteColumns">
     <include refid="qualifiedNoteColumns"/>,
-    u.display_name AS author_display_name,
-    u.username AS author_username,
     p.name AS person_name,
     d.name AS deal_name
   </sql>
@@ -400,9 +396,6 @@
   <select id="searchVisible" resultMap="SearchNoteResult">
     SELECT <include refid="searchNoteColumns"/>
     FROM note n
-    LEFT JOIN workspace_member wm ON wm.workspace_id = #{workspaceId}
-      AND wm.user_id = n.author_id AND wm.status IN ('active', 'pending')
-    LEFT JOIN app_user u ON u.id = wm.user_id
     LEFT JOIN person p ON p.id = n.person_id AND p.archived_at IS NULL
       AND <include refid="visiblePerson"/>
     LEFT JOIN deal d ON d.workspace_id = #{workspaceId} AND d.id = n.deal_id
@@ -410,8 +403,6 @@
       AND (n.visibility = 'workspace' OR n.author_id = #{currentUserId})
       AND (n.content LIKE #{query}
       OR n.title LIKE #{query}
-      OR u.display_name LIKE #{query}
-      OR u.username LIKE #{query}
       OR p.name LIKE #{query}
       OR d.name LIKE #{query})
     ORDER BY n.created_at DESC, n.id DESC

@@ -45,8 +45,11 @@ import org.springframework.stereotype.Service;
 
 import java.text.Normalizer;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -113,7 +116,9 @@ public class SearchService {
         Set<Permission> permissions = workspaceService.permissionsFor(workspaceId, userId);
         auditService.record("search", "search", null, query, "Search performed", null);
         List<Activity> activities = searchVisibleActivities(workspaceId, pattern, needle);
-        List<Note> notes = searchVisibleNotes(workspaceId, pattern, needle, userId);
+        List<Note> notes = mergeVisibleNotes(
+            searchVisibleNotes(workspaceId, pattern, needle, userId),
+            searchVisibleNotesByAuthor(workspaceId, pattern, userId));
         List<Task> tasks = searchVisibleTasks(workspaceId, pattern, needle);
         return new SearchResultsDto(
             companyMapper.search(workspaceId, pattern).stream().map(CompanyDto::from).toList(),
@@ -183,6 +188,41 @@ public class SearchService {
         return visible;
     }
 
+    private List<Note> searchVisibleNotesByAuthor(
+            int workspaceId, String pattern, int currentUserId) {
+        List<Note> visible = new ArrayList<>();
+        int offset = 0;
+        while (visible.size() < RESULT_LIMIT && offset < MAX_CANDIDATES) {
+            int limit = Math.min(CANDIDATE_BATCH_SIZE, MAX_CANDIDATES - offset);
+            List<Note> batch = noteMapper.getVisibleNotesPage(
+                workspaceId, currentUserId, null, List.of(), "created", "desc", limit, offset);
+            if (batch.isEmpty()) {
+                return visible;
+            }
+            List<Integer> authorIds = batch.stream()
+                .map(Note::getAuthor)
+                .filter(author -> author != null)
+                .map(author -> author.getId())
+                .distinct()
+                .toList();
+            Set<Integer> matchingAuthorIds = authorIds.isEmpty()
+                ? Set.of()
+                : Set.copyOf(userMapper.findMatchingWorkspaceMemberIdsIn(
+                    workspaceId, pattern, authorIds));
+            List<Note> matches = batch.stream()
+                .filter(note -> note.getAuthor() != null
+                    && matchingAuthorIds.contains(note.getAuthor().getId()))
+                .limit(RESULT_LIMIT - visible.size())
+                .toList();
+            visible.addAll(referenceService.hydrate(workspaceId, matches));
+            offset += batch.size();
+            if (batch.size() < limit) {
+                return visible;
+            }
+        }
+        return visible;
+    }
+
     private List<Task> searchVisibleTasks(int workspaceId, String pattern, String needle) {
         List<Task> visible = new ArrayList<>();
         int offset = 0;
@@ -208,10 +248,20 @@ public class SearchService {
         return visibleTextMatches(needle,
             note.getTitle(),
             note.getContent(),
-            note.getAuthor() == null ? null : note.getAuthor().getDisplayName(),
-            note.getAuthor() == null ? null : note.getAuthor().getUsername(),
             note.getPerson() == null ? null : note.getPerson().getName(),
             note.getDeal() == null ? null : note.getDeal().getName());
+    }
+
+    private static List<Note> mergeVisibleNotes(
+            List<Note> contentMatches, List<Note> authorMatches) {
+        Map<Integer, Note> unique = new LinkedHashMap<>();
+        contentMatches.forEach(note -> unique.put(note.getId(), note));
+        authorMatches.forEach(note -> unique.putIfAbsent(note.getId(), note));
+        return unique.values().stream()
+            .sorted(Comparator.comparing(Note::getCreatedAt).reversed()
+                .thenComparing(Comparator.comparingInt(Note::getId).reversed()))
+            .limit(RESULT_LIMIT)
+            .toList();
     }
 
     private static boolean visibleTextMatches(String needle, String... values) {
