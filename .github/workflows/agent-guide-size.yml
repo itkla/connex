@@ -9,6 +9,7 @@ on:
       - .github/scripts/check-agent-guide-size.py
       - .github/workflows/agent-guide-size.yml
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - AGENTS.md
       - '*/AGENTS.md'
