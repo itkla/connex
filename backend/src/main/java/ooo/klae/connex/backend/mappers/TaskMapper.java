@@ -48,7 +48,16 @@ public interface TaskMapper {
     Task getTaskById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Task getTaskByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
-    List<Task> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
+    List<Integer> getVisibleIdsIn(
+        @Param("workspaceId") int workspaceId,
+        @Param("ids") List<Integer> ids
+    );
+    List<Task> search(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query,
+        @Param("limit") int limit,
+        @Param("offset") int offset
+    );
     int insert(Task task);
     List<HistoryImportProvenance> findHistoryImports(
         @Param("workspaceId") int workspaceId,

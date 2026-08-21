@@ -306,6 +306,10 @@ public interface DealMapper {
     Deal getDealById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Deal getDealByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    List<Integer> getVisibleIdsIn(
+        @Param("workspaceId") int workspaceId,
+        @Param("ids") List<Integer> ids
+    );
     /** Deals are owned-only already; mirrors the person/company method so bulk write-scoping is uniform. */
     boolean existsOwned(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Deal> search(@Param("workspaceId") int workspaceId, @Param("query") String query);

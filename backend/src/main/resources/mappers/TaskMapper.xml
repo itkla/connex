@@ -164,7 +164,7 @@
     FROM task
     WHERE workspace_id = #{workspaceId} AND description LIKE #{query}
     ORDER BY due_date IS NULL, due_date, id
-    LIMIT 10
+    LIMIT #{limit} OFFSET #{offset}
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
@@ -300,6 +300,15 @@
     SELECT EXISTS(
       SELECT 1 FROM task WHERE workspace_id = #{workspaceId} AND id = #{id}
     )
+  </select>
+
+  <select id="getVisibleIdsIn" resultType="int">
+    SELECT id
+    FROM task
+    WHERE workspace_id = #{workspaceId}
+      AND id IN
+      <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    ORDER BY id
   </select>
 
   <update id="unassignMemberTasks">

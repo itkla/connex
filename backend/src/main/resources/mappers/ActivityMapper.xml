@@ -291,7 +291,7 @@
     SELECT <include refid="activityColumns"/> FROM activity
     WHERE workspace_id = #{workspaceId} AND (subject LIKE #{query} OR notes LIKE #{query})
     ORDER BY timestamp DESC, id DESC
-    LIMIT 10
+    LIMIT #{limit} OFFSET #{offset}
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
@@ -365,6 +365,15 @@
     SELECT EXISTS(
       SELECT 1 FROM activity WHERE workspace_id = #{workspaceId} AND id = #{id}
     )
+  </select>
+
+  <select id="getVisibleIdsIn" resultType="int">
+    SELECT id
+    FROM activity
+    WHERE workspace_id = #{workspaceId}
+      AND id IN
+      <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    ORDER BY id
   </select>
 
   <select id="countCreatedAnywhere" resultType="int">

@@ -22,6 +22,7 @@ import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -43,6 +44,7 @@ public class NoteService {
     private static final Logger log = LoggerFactory.getLogger(NoteService.class);
 
     private final NoteMapper noteMapper;
+    private final UserMapper userMapper;
     private final DealMapper dealMapper;
     private final PersonMapper personMapper;
     private final AuditService auditService;
@@ -56,6 +58,7 @@ public class NoteService {
     private static final Set<String> AUDIT_FIELDS = Set.of("content", "title", "visibility");
     private static final Set<String> PRIVATE_AUDIT_FIELDS = Set.of("visibility");
     private static final Set<String> VALID_VISIBILITY = Set.of("private", "workspace");
+    private static final Set<String> VALID_PAGE_SORTS = Set.of("updated", "created", "title");
     private static final String PRIVATE = "private";
     private static final String MENTION_TYPE = "note.mention";
     private static final String MENTION_CATEGORY = "note";
@@ -76,13 +79,29 @@ public class NoteService {
 
     /** Returns a bounded note page, optionally excluding every private note. */
     public List<Note> getNotesPage(int limit, int offset, boolean workspaceOnly) {
+        return getNotesPage(null, null, null, limit, offset, workspaceOnly);
+    }
+
+    /** Returns a bounded, searchable, and sortable note page. */
+    public List<Note> getNotesPage(
+            String query,
+            String sort,
+            String dir,
+            int limit,
+            int offset,
+            boolean workspaceOnly) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        List<Integer> authorIds = matchingAuthorIds(workspaceId, query);
+        String sortKey = canonicalPageSort(sort);
+        String direction = canonicalPageDirection(sortKey, dir);
         if (workspaceOnly) {
             return referenceService.hydrate(
-                workspaceId, noteMapper.getWorkspaceNotesPage(workspaceId, limit, offset));
+                workspaceId, noteMapper.getWorkspaceNotesPage(
+                    workspaceId, query, authorIds, sortKey, direction, limit, offset));
         }
         int currentUserId = workspaceService.getCurrentUserId();
-        return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesPage(workspaceId, currentUserId, limit, offset));
+        return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesPage(
+            workspaceId, currentUserId, query, authorIds, sortKey, direction, limit, offset));
     }
 
     public long countNotes() {
@@ -91,12 +110,18 @@ public class NoteService {
 
     /** Counts notes in the active workspace, optionally excluding every private note. */
     public long countNotes(boolean workspaceOnly) {
+        return countNotes(null, workspaceOnly);
+    }
+
+    /** Counts notes matching the same visibility and query contract as the paged list. */
+    public long countNotes(String query, boolean workspaceOnly) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        List<Integer> authorIds = matchingAuthorIds(workspaceId, query);
         if (workspaceOnly) {
-            return noteMapper.countWorkspaceNotes(workspaceId);
+            return noteMapper.countWorkspaceNotes(workspaceId, query, authorIds);
         }
         int currentUserId = workspaceService.getCurrentUserId();
-        return noteMapper.countVisibleNotes(workspaceId, currentUserId);
+        return noteMapper.countVisibleNotes(workspaceId, currentUserId, query, authorIds);
     }
 
     public List<Note> getNotesByPersonId(int personId) {
@@ -128,7 +153,10 @@ public class NoteService {
     public List<Note> getNotesReferencing(String refType, int refId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int currentUserId = workspaceService.getCurrentUserId();
-        return referenceService.hydrate(workspaceId, noteMapper.getNotesReferencing(workspaceId, refType, refId, currentUserId));
+        String canonicalRefType = referenceService.requireVisibleTarget(
+            workspaceId, refType, refId, currentUserId);
+        return referenceService.hydrate(workspaceId, noteMapper.getNotesReferencing(
+            workspaceId, canonicalRefType, refId, currentUserId));
     }
 
     public Note getNoteById(int id) {
@@ -273,6 +301,21 @@ public class NoteService {
                         note.getId(), recipientId, e.toString());
             }
         }
+    }
+
+    private List<Integer> matchingAuthorIds(int workspaceId, String query) {
+        return query == null ? List.of() : userMapper.findMatchingWorkspaceMemberIds(workspaceId, query);
+    }
+
+    private static String canonicalPageSort(String sort) {
+        return sort != null && VALID_PAGE_SORTS.contains(sort) ? sort : "updated";
+    }
+
+    private static String canonicalPageDirection(String sort, String dir) {
+        if ("asc".equals(dir) || "desc".equals(dir)) {
+            return dir;
+        }
+        return "title".equals(sort) ? "asc" : "desc";
     }
 
     private static String normalizeVisibility(String value, String fallback) {

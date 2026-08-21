@@ -889,13 +889,26 @@ class RecordListControllerTest {
     @Test
     void notesPageClampsSize() {
         NoteController controller = new NoteController(noteService);
-        when(noteService.getNotesPage(100, 0, false)).thenReturn(List.of());
-        when(noteService.countNotes(false)).thenReturn(0L);
+        when(noteService.getNotesPage(null, null, null, 100, 0, false)).thenReturn(List.of());
+        when(noteService.countNotes(null, false)).thenReturn(0L);
 
-        var response = controller.getNotesPage(0, 500, false);
+        var response = controller.getNotesPage(0, 500, null, null, null, false);
 
         assertEquals(0, response.total());
-        verify(noteService).getNotesPage(100, 0, false);
+        verify(noteService).getNotesPage(null, null, null, 100, 0, false);
+    }
+
+    @Test
+    void notesPageEscapesQueryAndDelegatesSort() {
+        NoteController controller = new NoteController(noteService);
+        when(noteService.getNotesPage("%100\\%\\_%", "title", "asc", 25, 25, true))
+            .thenReturn(List.of());
+        when(noteService.countNotes("%100\\%\\_%", true)).thenReturn(0L);
+
+        controller.getNotesPage(2, 25, " 100%_ ", "title", "asc", true);
+
+        verify(noteService).getNotesPage("%100\\%\\_%", "title", "asc", 25, 25, true);
+        verify(noteService).countNotes("%100\\%\\_%", true);
     }
 
     @Test

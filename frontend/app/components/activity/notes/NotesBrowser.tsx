@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
@@ -15,8 +15,15 @@ import {
 } from '@heroicons/react/24/outline';
 
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import {
+    Pagination,
+    PaginationContent,
+    PaginationItem,
+    PaginationNext,
+    PaginationPrevious,
+} from '@/components/ui/pagination';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -30,17 +37,17 @@ import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import NoteDialog from '@/app/components/activity/notes/NoteDialog';
 import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
-import { deleteNote } from '@/app/lib/api';
+import { deleteNote, getNotesPage } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatDate } from '@/app/lib/utils';
 import { deriveNoteTitle, noteSnippet } from '@/app/lib/noteText';
 import { recordDetailNavigationPath } from '@/app/lib/recordReturnPath';
-import { NOTE_URL_KEY } from '@/app/hooks/listStateUrl';
+import { NOTE_URL_KEY, parseDeepLinkId } from '@/app/hooks/listStateUrl';
 import { useRecordReturnScroll } from '@/app/hooks/useRecordReturnSelection';
-import type { Contact, Deal, Note, User } from '@/app/lib/types';
+import { useServerRecords } from '@/app/hooks/useServerRecords';
+import type { Contact, Deal, Note, NotesPageParams, User } from '@/app/lib/types';
 
 type Props = {
-    notes: Note[];
     persons: Contact[];
     deals: Deal[];
     users: User[];
@@ -50,81 +57,69 @@ type Props = {
 type GroupBy = 'record' | 'none';
 type SortBy = 'updated' | 'created' | 'title';
 type NoteGroup = { id: string; label: string | null; notes: Note[] };
-type VisibleNoteGroup = NoteGroup & { total: number };
 
 const STANDALONE = '__standalone';
-const INITIAL_VISIBLE_NOTES = 40;
 const NOTES_PAGE_SIZE = 40;
 
-export default function NotesBrowser({ notes, persons, deals, users, currentUserId }: Props) {
+function isSortBy(value: string | null | undefined): value is SortBy {
+    return value === 'updated' || value === 'created' || value === 'title';
+}
+
+function loadNotesPage(params: NotesPageParams) {
+    const recognizedSort = isSortBy(params.sort) ? params.sort : undefined;
+    const sort = recognizedSort ?? 'updated';
+    const dir = recognizedSort ? params.dir : 'desc';
+    return getNotesPage({ ...params, sort, dir });
+}
+
+export default function NotesBrowser({ persons, deals, users, currentUserId }: Props) {
     const router = useRouter();
     const t = useTranslations('ActivityNotes');
     const tf = useTranslations('Filters');
     const locale = useLocale();
 
-    const [query, setQuery] = useState('');
     const [groupBy, setGroupBy] = useState<GroupBy>('record');
-    const [sortBy, setSortBy] = useState<SortBy>('updated');
     const [deleteTarget, setDeleteTarget] = useState<Note | null>(null);
     const [dialogNote, setDialogNote] = useState<Note | null | undefined>(undefined);
     const [isDeleting, setIsDeleting] = useState(false);
-    const visibleKey = `${query.trim()}|${groupBy}|${sortBy}`;
-    const [visibleState, setVisibleState] = useState({ key: visibleKey, count: INITIAL_VISIBLE_NOTES });
-    const visibleCount = visibleState.key === visibleKey ? visibleState.count : INITIAL_VISIBLE_NOTES;
+    const {
+        items: notes,
+        total,
+        loading,
+        page,
+        setPage,
+        size,
+        query,
+        setQuery,
+        sortKey,
+        applySort,
+        reload,
+    } = useServerRecords<Note, NotesPageParams>(loadNotesPage, {}, {
+        defaultSize: NOTES_PAGE_SIZE,
+        urlSync: true,
+    });
+    const sortBy: SortBy = isSortBy(sortKey) ? sortKey : 'updated';
 
     const personById = useMemo(() => new Map(persons.map((p) => [p.id, p])), [persons]);
     const dealById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals]);
     const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
 
     useEffect(() => {
-        const noteParam = new URLSearchParams(window.location.search).get(NOTE_URL_KEY);
-        if (noteParam && /^\d+$/.test(noteParam)) {
-            router.replace(`/activity/notes/${noteParam}`);
+        const noteId = parseDeepLinkId(new URLSearchParams(window.location.search).get(NOTE_URL_KEY));
+        if (noteId !== null) {
+            router.replace(`/activity/notes/${noteId}`);
         }
     }, [router]);
 
-    const filtered = useMemo(() => {
-        const needle = query.trim().toLowerCase();
-        if (!needle) return notes;
-        return notes.filter((note) => {
-            const author = userById.get(note.author);
-            const haystack = [
-                note.title,
-                noteSnippet(note.content, 4000),
-                note.person ? personById.get(note.person)?.name : null,
-                note.deal ? dealById.get(note.deal)?.name : null,
-                author?.displayName,
-                author?.username,
-            ]
-                .filter(Boolean)
-                .join(' ')
-                .toLowerCase();
-            return haystack.includes(needle);
-        });
-    }, [notes, query, personById, dealById, userById]);
-    const restoreVisibleCount = useCallback((count: number) => {
-        setVisibleState({
-            key: visibleKey,
-            count: Math.min(Math.max(count, INITIAL_VISIBLE_NOTES), filtered.length),
-        });
-    }, [filtered.length, visibleKey]);
-    const returnSnapshot = useRecordReturnScroll('notes', true, visibleCount, restoreVisibleCount);
+    const returnSnapshot = useRecordReturnScroll('notes', !loading);
 
     const groups = useMemo<NoteGroup[]>(() => {
-        const sorted = [...filtered].sort((a, b) => {
-            if (sortBy === 'title') {
-                return deriveNoteTitle(a).localeCompare(deriveNoteTitle(b), locale);
-            }
-            const key = sortBy === 'created' ? 'createdAt' : 'updatedAt';
-            return (b[key] ?? '').localeCompare(a[key] ?? '');
-        });
-
         if (groupBy === 'none') {
-            return [{ id: '__all', label: null, notes: sorted }];
+            return [{ id: '__all', label: null, notes }];
         }
 
         const map = new Map<string, NoteGroup>();
-        for (const note of sorted) {
+        for (const note of notes) {
             let id = STANDALONE;
             let label = t('standalone');
             if (note.person) {
@@ -141,32 +136,13 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
             }
             group.notes.push(note);
         }
-        return Array.from(map.values()).sort((a, b) => {
-            if (a.id === STANDALONE) return 1;
-            if (b.id === STANDALONE) return -1;
-            if (sortBy === 'title') {
-                return (a.label ?? '').localeCompare(b.label ?? '', locale);
-            }
-            const key = sortBy === 'created' ? 'createdAt' : 'updatedAt';
-            return (b.notes[0]?.[key] ?? '').localeCompare(a.notes[0]?.[key] ?? '');
-        });
-    }, [filtered, groupBy, sortBy, locale, personById, dealById, t]);
-
-    const visibleGroups = useMemo<VisibleNoteGroup[]>(() => {
-        let remaining = visibleCount;
-        const visible: VisibleNoteGroup[] = [];
-        for (const group of groups) {
-            if (remaining === 0) break;
-            const groupNotes = group.notes.slice(0, remaining);
-            if (groupNotes.length > 0) {
-                visible.push({ ...group, notes: groupNotes, total: group.notes.length });
-                remaining -= groupNotes.length;
-            }
-        }
-        return visible;
-    }, [groups, visibleCount]);
-    const shownCount = Math.min(visibleCount, filtered.length);
-    const hasMore = shownCount < filtered.length;
+        const grouped = Array.from(map.values());
+        return [
+            ...grouped.filter((group) => group.id !== STANDALONE),
+            ...grouped.filter((group) => group.id === STANDALONE),
+        ];
+    }, [groupBy, notes, personById, dealById, t]);
+    const pageCount = Math.max(1, Math.ceil(total / size));
 
     const hasActiveFilters = query.trim() !== '' || groupBy !== 'record' || sortBy !== 'updated';
     const chips: FilterChipData[] = query.trim()
@@ -180,7 +156,7 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
             await deleteNote(deleteTarget.id);
             toastSuccess(t('toastNoteDeleted'));
             setDeleteTarget(null);
-            router.refresh();
+            reload();
         } catch (error) {
             toastError(error instanceof Error ? error.message : t('toastFailedDelete'));
         } finally {
@@ -220,7 +196,7 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
                         onClearAll={() => {
                             setQuery('');
                             setGroupBy('record');
-                            setSortBy('updated');
+                            applySort(null, 'asc');
                         }}
                         clearAllLabel={tf('clearAll')}
                         search={
@@ -248,7 +224,10 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
                             label={t('sortBy')}
                             ariaLabel={t('sortByAria')}
                             value={sortBy}
-                            onValueChange={(value) => setSortBy(value as SortBy)}
+                            onValueChange={(value) => {
+                                if (!isSortBy(value)) return;
+                                applySort(value, value === 'title' ? 'asc' : 'desc');
+                            }}
                             options={[
                                 { value: 'updated', label: t('sortUpdated') },
                                 { value: 'created', label: t('sortCreated') },
@@ -259,15 +238,21 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
                 </Rise>
 
                 <Rise delay={0.12}>
-                    {filtered.length === 0 ? (
+                    {loading && notes.length === 0 ? (
+                        <div className="space-y-3" role="status" aria-label={t('loading')}>
+                            {Array.from({ length: 5 }, (_, index) => (
+                                <Skeleton key={index} className="h-24 rounded-2xl" />
+                            ))}
+                        </div>
+                    ) : notes.length === 0 ? (
                         <div className="rounded-2xl border border-border bg-card px-6 py-20 text-center">
                             <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-dark">
                                 <PencilSquareIcon className="size-7" />
                             </div>
                             <p className="mx-auto mt-5 max-w-sm text-sm font-medium text-foreground">
-                                {notes.length === 0 ? t('empty') : t('emptyFiltered')}
+                                {query.trim() ? t('emptyFiltered') : t('empty')}
                             </p>
-                            {notes.length === 0 && (
+                            {!query.trim() && (
                                 <Button
                                     onClick={() => setDialogNote(null)}
                                     variant="brand"
@@ -280,13 +265,10 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
                         </div>
                     ) : (
                         <div className="space-y-8">
-                            {visibleGroups.map((group) => (
+                            {groups.map((group) => (
                                 <section key={group.id}>
                                     {group.label && (
-                                        <SectionHeader
-                                            title={group.label}
-                                            action={<Badge variant="outline">{group.total}</Badge>}
-                                        />
+                                        <SectionHeader title={group.label} />
                                     )}
                                     <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
                                         {group.notes.map((note) => (
@@ -322,18 +304,32 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
                             ))}
                             <div className="flex flex-col items-center gap-3">
                                 <p className="text-xs text-muted-foreground">
-                                    {t('showingCount', { shown: shownCount, total: filtered.length })}
+                                    {t('showingCount', { shown: notes.length, total })}
                                 </p>
-                                {hasMore ? (
-                                    <Button
-                                        variant="outline"
-                                        onClick={() => setVisibleState({
-                                            key: visibleKey,
-                                            count: Math.min(visibleCount + NOTES_PAGE_SIZE, filtered.length),
-                                        })}
-                                    >
-                                        {t('showMore')}
-                                    </Button>
+                                {pageCount > 1 ? (
+                                    <Pagination aria-label={t('paginationLabel')}>
+                                        <PaginationContent>
+                                            <PaginationItem>
+                                                <PaginationPrevious
+                                                    aria-label={t('previousPage')}
+                                                    disabled={page <= 1 || loading}
+                                                    onClick={() => setPage(page - 1)}
+                                                />
+                                            </PaginationItem>
+                                            <PaginationItem>
+                                                <span className="px-3 text-xs tabular-nums text-muted-foreground">
+                                                    {t('pageStatus', { page, total: pageCount })}
+                                                </span>
+                                            </PaginationItem>
+                                            <PaginationItem>
+                                                <PaginationNext
+                                                    aria-label={t('nextPage')}
+                                                    disabled={page >= pageCount || loading}
+                                                    onClick={() => setPage(page + 1)}
+                                                />
+                                            </PaginationItem>
+                                        </PaginationContent>
+                                    </Pagination>
                                 ) : null}
                             </div>
                         </div>
@@ -352,6 +348,7 @@ export default function NotesBrowser({ notes, persons, deals, users, currentUser
                     persons={persons}
                     deals={deals}
                     currentUserId={currentUserId}
+                    onSaved={reload}
                 />
             ) : null}
 

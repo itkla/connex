@@ -28,6 +28,7 @@ export default function NoteMarkdownImage({ source, alt }: { source: string; alt
                 alt={alt}
                 loading="lazy"
                 decoding="async"
+                referrerPolicy="no-referrer"
                 onError={() => setFailed(true)}
             />
             <span className="note-image-caption">{alt}</span>

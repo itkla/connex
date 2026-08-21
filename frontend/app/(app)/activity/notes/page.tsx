@@ -4,7 +4,6 @@ import {
     getContacts,
     getCurrentUserResultFromCookie,
     getDeals,
-    getNotes,
     getUsers,
 } from "@/app/lib/api";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
@@ -23,8 +22,7 @@ export default async function NotesPage() {
 
     const init = { headers: { cookie: cookie ?? '' }, cache: 'no-store' as const };
 
-    const [allNotes, persons, deals, users] = await Promise.all([
-        getNotes(init),
+    const [persons, deals, users] = await Promise.all([
         getContacts({}, init),
         getDeals(init),
         getUsers(init),
@@ -32,7 +30,6 @@ export default async function NotesPage() {
 
     return (
         <NotesBrowser
-            notes={allNotes}
             persons={persons}
             deals={deals}
             users={users}

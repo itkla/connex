@@ -516,6 +516,15 @@
         AND person.archived_at IS NULL
     )
   </select>
+
+  <select id="getVisibleIdsIn" resultType="int">
+    SELECT p.id
+    FROM person p
+    WHERE <include refid="visible"/>
+      AND p.id IN
+      <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    ORDER BY p.id
+  </select>
   <select id="existsOwned" resultType="boolean">
     SELECT EXISTS(SELECT 1 FROM person
       WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NULL)

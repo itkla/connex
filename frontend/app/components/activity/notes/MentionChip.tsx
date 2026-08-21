@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { EnvelopeIcon, UserIcon } from "@heroicons/react/24/outline";
 
 import { getUserById } from "@/app/lib/api";
@@ -12,6 +13,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
 import { PreviewSkeleton } from "./RecordPreview";
 
 function MemberPreview({ id }: { id: number }) {
+    const t = useTranslations("ActivityNotesReferencePreview");
     const [user, setUser] = useState<User | null>(null);
     const [loading, setLoading] = useState(true);
     useEffect(() => {
@@ -29,7 +31,7 @@ function MemberPreview({ id }: { id: number }) {
         };
     }, [id]);
     if (loading) return <PreviewSkeleton />;
-    if (!user) return <p className="text-sm text-muted-foreground">Member unavailable</p>;
+    if (!user) return <p className="text-sm text-muted-foreground">{t("memberUnavailable")}</p>;
     return (
         <div className="flex gap-3">
             <Avatar size="lg" className="ring-1 ring-border">

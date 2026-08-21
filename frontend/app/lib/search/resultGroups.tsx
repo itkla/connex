@@ -20,8 +20,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import CompanyAvatar from "@/app/components/records/companies/CompanyAvatar";
 import { dealDocumentsHref } from "@/app/components/records/deals/dealLinks";
 import UserAvatar from "@/app/components/records/users/UserAvatar";
+import { deriveNoteTitle, noteSnippet } from "@/app/lib/noteText";
 import { formatFileSize } from "@/app/lib/utils";
-import { noteContentToPlainText } from "@/app/lib/references";
 import type { SearchResults } from "@/app/lib/types";
 
 /** A leading-icon component compatible with the sidebar/action icon contract. */
@@ -152,17 +152,22 @@ export function buildSearchGroups(results: SearchResults | null, t: SearchTransl
         label: a.subject,
         subtitle: a.type || undefined,
     }));
-    addGroup("notes", t("groupNotes"), results.notes, (n) => ({
-        key: `note-${n.id}`,
-        href: `/activity/notes/${n.id}`,
-        icon: DocumentTextIcon,
-        label: truncate(noteContentToPlainText(n.content)),
-    }));
+    addGroup("notes", t("groupNotes"), results.notes, (note) => {
+        const snippet = noteSnippet(note.content, 70);
+        const title = deriveNoteTitle(note, snippet);
+        return {
+            key: `note-${note.id}`,
+            href: `/activity/notes/${note.id}`,
+            icon: DocumentTextIcon,
+            label: truncate(title),
+            subtitle: snippet && snippet !== title ? snippet : undefined,
+        };
+    });
     addGroup("tasks", t("groupTasks"), results.tasks, (task) => ({
         key: `task-${task.id}`,
         href: `/activity/tasks/${task.id}`,
         icon: CheckCircleIcon,
-        label: truncate(noteContentToPlainText(task.description)),
+        label: noteSnippet(task.description, 70),
     }));
     addGroup("attachments", t("groupAttachments"), results.attachments, (a) => ({
         key: `attachment-${a.id}`,

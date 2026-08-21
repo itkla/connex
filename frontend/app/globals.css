@@ -303,7 +303,7 @@
   .note-prose :where(p) {
     @apply my-2;
   }
-  .note-prose :where(ul):not([data-type="taskList"]) {
+  .note-prose :where(ul):not([data-type="taskList"], .contains-task-list) {
     @apply my-2 list-disc pl-6;
   }
   .note-prose :where(ol) {
@@ -380,6 +380,12 @@
   }
   .note-prose :where(ul[data-type="taskList"] li > div) {
     @apply min-w-0 flex-1;
+  }
+  .note-prose :where(ul.contains-task-list) {
+    @apply my-2 list-none pl-0.5;
+  }
+  .note-prose :where(li.task-list-item) {
+    @apply flex items-start gap-2;
   }
   .note-prose[data-empty]::before {
     @apply pointer-events-none absolute text-muted-foreground;

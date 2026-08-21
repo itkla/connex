@@ -147,6 +147,8 @@ type Props = {
     onDealQueryChange?: (query: string) => void;
     personOptionsLoading?: boolean;
     dealOptionsLoading?: boolean;
+    /** Runs after a successful create or update so list consumers can reload their current page. */
+    onSaved?: () => void;
 };
 
 export default function NoteDialog(props: Props) {
@@ -179,6 +181,7 @@ function ScopedNoteDialog({
     onDealQueryChange,
     personOptionsLoading = false,
     dealOptionsLoading = false,
+    onSaved,
     activeWorkspaceId,
 }: Props & { activeWorkspaceId: number | null }) {
     const t = useTranslations('ActivityNotesDialog');
@@ -269,6 +272,7 @@ function ScopedNoteDialog({
                             onDealQueryChange={onDealQueryChange}
                             personOptionsLoading={personOptionsLoading}
                             dealOptionsLoading={dealOptionsLoading}
+                            onSaved={onSaved}
                             onSubmittingChange={(value) => {
                                 submittingRef.current = value;
                             }}
@@ -313,6 +317,8 @@ type FormProps = {
     onDealQueryChange?: (query: string) => void;
     personOptionsLoading?: boolean;
     dealOptionsLoading?: boolean;
+    /** Runs after a successful create or update. */
+    onSaved?: () => void;
     onSubmittingChange: (value: boolean) => void;
     /** Reports whether the form holds unsaved edits, so a wrapper can guard against accidental discard. */
     onDirtyChange?: (dirty: boolean) => void;
@@ -466,6 +472,7 @@ export function NoteDialogForm({
     onDealQueryChange,
     personOptionsLoading = false,
     dealOptionsLoading = false,
+    onSaved,
     onSubmittingChange,
     onDirtyChange,
     onPersistDraft,
@@ -644,6 +651,7 @@ export function NoteDialogForm({
                 toastSuccess(t('toastCreated'));
             }
             setSucceeded(true);
+            onSaved?.();
             router.refresh();
             setTimeout(() => onClose(), 900);
         } catch (err) {

@@ -75,7 +75,16 @@ public interface ActivityMapper {
     Activity getActivityById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Activity getActivityByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
-    List<Activity> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
+    List<Integer> getVisibleIdsIn(
+        @Param("workspaceId") int workspaceId,
+        @Param("ids") List<Integer> ids
+    );
+    List<Activity> search(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query,
+        @Param("limit") int limit,
+        @Param("offset") int offset
+    );
     int insert(Activity activity);
     List<HistoryImportProvenance> findHistoryImports(
         @Param("workspaceId") int workspaceId,

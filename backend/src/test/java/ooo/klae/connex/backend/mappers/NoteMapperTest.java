@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.mappers;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -139,10 +140,12 @@ class NoteMapperTest extends AbstractMapperTest {
         otherPrivate.setVisibility("private");
         noteMapper.insert(otherPrivate);
 
-        List<Note> page = noteMapper.getVisibleNotesPage(pageWorkspace.getId(), current.getId(), 10, 0);
+        List<Note> page = noteMapper.getVisibleNotesPage(
+            pageWorkspace.getId(), current.getId(), null, List.of(), "updated", "desc", 10, 0);
 
         assertEquals(2, page.size());
-        assertEquals(2, noteMapper.countVisibleNotes(pageWorkspace.getId(), current.getId()));
+        assertEquals(2, noteMapper.countVisibleNotes(
+            pageWorkspace.getId(), current.getId(), null, List.of()));
         assertTrue(page.stream().anyMatch(note -> note.getId() == workspaceNote.getId()));
         assertTrue(page.stream().anyMatch(note -> note.getId() == ownPrivate.getId()));
         assertTrue(page.stream().noneMatch(note -> note.getId() == otherPrivate.getId()));
@@ -165,12 +168,69 @@ class NoteMapperTest extends AbstractMapperTest {
         Note foreign = build("foreign", user, null, null);
         noteMapper.insert(foreign);
 
-        List<Note> page = noteMapper.getWorkspaceNotesPage(pageWorkspace.getId(), 1, 0);
+        List<Note> page = noteMapper.getWorkspaceNotesPage(
+            pageWorkspace.getId(), null, List.of(), "updated", "desc", 1, 0);
 
         assertEquals(1, page.size());
-        assertEquals(2, noteMapper.countWorkspaceNotes(pageWorkspace.getId()));
+        assertEquals(2, noteMapper.countWorkspaceNotes(pageWorkspace.getId(), null, List.of()));
         assertTrue(page.stream().noneMatch(note -> note.getId() == privateNote.getId()));
         assertTrue(page.stream().noneMatch(note -> note.getId() == foreign.getId()));
+    }
+
+    @Test
+    void visibleNotesPageSearchKeepsCountSortAndOffsetsInLockstep() {
+        Workspace pageWorkspace = newWorkspace();
+        User user = newUser();
+        Note alpha = build("plain", user, null, null);
+        alpha.setWorkspaceId(pageWorkspace.getId());
+        alpha.setTitle("Needle Alpha");
+        noteMapper.insert(alpha);
+        Note zeta = build("plain", user, null, null);
+        zeta.setWorkspaceId(pageWorkspace.getId());
+        zeta.setTitle("Needle Zeta");
+        noteMapper.insert(zeta);
+        Note body = build("Needle body", user, null, null);
+        body.setWorkspaceId(pageWorkspace.getId());
+        noteMapper.insert(body);
+        Note richBody = build("- [x] Needle checklist\n\n> [!info]\n> Needle callout", user, null, null);
+        richBody.setWorkspaceId(pageWorkspace.getId());
+        noteMapper.insert(richBody);
+        Note mixedBody = build("Needle outside [Frozen](company:999995)", user, null, null);
+        mixedBody.setWorkspaceId(pageWorkspace.getId());
+        noteMapper.insert(mixedBody);
+        Note linkLabelOnly = build("Outside [Needle hidden](company:999994)", user, null, null);
+        linkLabelOnly.setWorkspaceId(pageWorkspace.getId());
+        noteMapper.insert(linkLabelOnly);
+        Note frozenLabel = build("[Needle frozen](company:999999)", user, null, null);
+        frozenLabel.setWorkspaceId(pageWorkspace.getId());
+        frozenLabel.setTitle("Unrelated");
+        noteMapper.insert(frozenLabel);
+        Note escapedFrozenLabel = build("[Needle escaped](company\\:999998)", user, null, null);
+        escapedFrozenLabel.setWorkspaceId(pageWorkspace.getId());
+        noteMapper.insert(escapedFrozenLabel);
+        Note namedEntityFrozenLabel = build("[Needle named](company&colon;999997)", user, null, null);
+        namedEntityFrozenLabel.setWorkspaceId(pageWorkspace.getId());
+        noteMapper.insert(namedEntityFrozenLabel);
+        Note numericEntityFrozenLabel = build("[Needle numeric](company&#58;999996)", user, null, null);
+        numericEntityFrozenLabel.setWorkspaceId(pageWorkspace.getId());
+        noteMapper.insert(numericEntityFrozenLabel);
+
+        List<Note> page = noteMapper.getVisibleNotesPage(
+            pageWorkspace.getId(), user.getId(), "%Needle%", List.of(), "title", "asc", 2, 1);
+
+        assertEquals(List.of(zeta.getId(), body.getId()), page.stream().map(Note::getId).toList());
+        assertEquals(5, noteMapper.countVisibleNotes(
+            pageWorkspace.getId(), user.getId(), "%Needle%", List.of()));
+        assertTrue(page.stream().noneMatch(note -> note.getId() == frozenLabel.getId()));
+        assertTrue(page.stream().noneMatch(note -> note.getId() == escapedFrozenLabel.getId()));
+        assertTrue(page.stream().noneMatch(note -> note.getId() == namedEntityFrozenLabel.getId()));
+        assertTrue(page.stream().noneMatch(note -> note.getId() == numericEntityFrozenLabel.getId()));
+        List<Integer> matchingIds = noteMapper.getVisibleNotesPage(
+            pageWorkspace.getId(), user.getId(), "%Needle%", List.of(), "title", "asc", 10, 0)
+            .stream().map(Note::getId).toList();
+        assertTrue(matchingIds.contains(richBody.getId()));
+        assertTrue(matchingIds.contains(mixedBody.getId()));
+        assertFalse(matchingIds.contains(linkLabelOnly.getId()));
     }
 
     /**

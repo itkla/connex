@@ -126,6 +126,11 @@
     "open": "開く",
     "edit": "編集",
     "actionsAria": "メモの操作",
+    "loading": "メモを読み込み中",
+    "paginationLabel": "メモのページ",
+    "previousPage": "前のメモページ",
+    "nextPage": "次のメモページ",
+    "pageStatus": "{total}ページ中{page}ページ",
     "showMore": "さらにメモを表示",
     "showingCount": "{total} 件中 {shown} 件を表示"
   },
@@ -404,6 +409,7 @@
     "taskList": "チェックリスト",
     "taskChecked": "完了したチェックリスト項目",
     "taskUnchecked": "未完了のチェックリスト項目",
+    "unavailableReference": "利用できない参照",
     "blockquote": "引用",
     "codeBlock": "コードブロック",
     "tableInsert": "表を挿入",
@@ -489,6 +495,17 @@
     "slashPickerSearchError": "検索できませんでした。",
     "slashPickerRetry": "再試行",
     "slashPickerResults": "{count}件見つかりました"
+  },
+  "ActivityNotesReferencePreview": {
+    "memberUnavailable": "利用できないメンバー",
+    "contactUnavailable": "利用できない連絡先",
+    "dealUnavailable": "利用できない案件",
+    "companyUnavailable": "利用できない会社",
+    "value": "金額",
+    "company": "会社",
+    "stage": "ステージ",
+    "status": "ステータス",
+    "expectedClose": "成約予定日"
   },
   "ActivityTaskDetail": {
     "back": "タスクに戻る",

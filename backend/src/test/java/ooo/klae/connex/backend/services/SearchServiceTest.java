@@ -10,16 +10,22 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
+import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Campaign;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealDocument;
 import ooo.klae.connex.backend.beans.DocumentTemplate;
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Product;
 import ooo.klae.connex.backend.beans.ReportDefinition;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.SearchResultsDto;
@@ -32,9 +38,13 @@ import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 
+@Transactional(isolation = Isolation.READ_COMMITTED)
 class SearchServiceTest extends AbstractServiceTest {
 
     @Autowired private SearchService searchService;
+    @Autowired private NoteService noteService;
+    @Autowired private TaskService taskService;
+    @Autowired private ActivityService activityService;
     @Autowired private ProductMapper productMapper;
     @Autowired private CampaignMapper campaignMapper;
     @Autowired private ReportMapper reportMapper;
@@ -66,6 +76,108 @@ class SearchServiceTest extends AbstractServiceTest {
         Company company = newCompany();
         SearchResultsDto results = searchService.search(company.getName());
         assertTrue(results.getCompanies().stream().anyMatch(c -> c.getId() == company.getId()));
+    }
+
+    @Test
+    void visibleNoteMetadataMatchesRemainSearchable() {
+        Note note = new Note();
+        note.setContent("metadata-only body " + unique());
+        note.setTitle("metadata-only title " + unique());
+        note.setVisibility("workspace");
+        Note created = noteService.create(note);
+
+        SearchResultsDto results = searchService.search(currentUser.getUsername());
+
+        assertTrue(results.getNotes().stream().anyMatch(result -> result.getId() == created.getId()));
+    }
+
+    @Test
+    void visibleNoteMetadataMatchesSurviveRedactedContentMatches() {
+        String query = currentUser.getUsername();
+        Note privateTarget = new Note();
+        privateTarget.setContent("private body");
+        privateTarget.setTitle(query);
+        privateTarget.setVisibility("private");
+        Note target = noteService.create(privateTarget);
+
+        Note source = new Note();
+        source.setContent("Visible source [" + query + "](note:" + target.getId() + ")");
+        source.setVisibility("workspace");
+        Note created = noteService.create(source);
+
+        User other = newUser();
+        authenticateAs(other, workspace.getId());
+
+        SearchResultsDto results = searchService.search(query);
+
+        assertTrue(results.getNotes().stream().anyMatch(result -> result.getId() == created.getId()));
+    }
+
+    /** A private target's frozen label cannot be used as a global-search oracle by another member. */
+    @Test
+    void privateNoteTargetLabelsAreNotSearchableByNonAuthor() {
+        String label = "Secret Search " + unique();
+        Note privateTarget = new Note();
+        privateTarget.setContent("private body");
+        privateTarget.setTitle(label);
+        privateTarget.setVisibility("private");
+        Note target = noteService.create(privateTarget);
+
+        Task task = new Task();
+        task.setDescription("Review [" + label + "](note:" + target.getId() + ")");
+        task.setAssignedTo(currentUser);
+        taskService.create(task);
+
+        Activity activity = new Activity();
+        activity.setType("call");
+        activity.setSubject("Source activity");
+        activity.setNotes("Discussed [" + label + "](note:" + target.getId() + ")");
+        activityService.create(activity);
+
+        Note sourceNote = new Note();
+        sourceNote.setContent("Source note [" + label + "](note:" + target.getId() + ")");
+        sourceNote.setVisibility("workspace");
+        noteService.create(sourceNote);
+
+        User other = newUser();
+        authenticateAs(other, workspace.getId());
+
+        SearchResultsDto results = searchService.search(label);
+
+        assertTrue(results.getNotes().isEmpty());
+        assertTrue(results.getTasks().isEmpty());
+        assertTrue(results.getActivities().isEmpty());
+    }
+
+    @Test
+    void redactedTaskCandidatesDoNotHideLaterVisibleMatches() {
+        String label = "Visible Search " + unique();
+        Note privateTarget = new Note();
+        privateTarget.setContent("private body");
+        privateTarget.setTitle(label);
+        privateTarget.setVisibility("private");
+        Note target = noteService.create(privateTarget);
+
+        for (int index = 0; index < 25; index++) {
+            Task hidden = new Task();
+            hidden.setDescription("Hidden [" + label + "](note:" + target.getId() + ") " + index);
+            hidden.setAssignedTo(currentUser);
+            hidden.setDueDate(String.format("2024-01-%02d", index % 28 + 1));
+            taskService.create(hidden);
+        }
+
+        Task visible = new Task();
+        visible.setDescription("Visible task " + label);
+        visible.setAssignedTo(currentUser);
+        visible.setDueDate("2025-01-01");
+        Task created = taskService.create(visible);
+
+        User other = newUser();
+        authenticateAs(other, workspace.getId());
+
+        SearchResultsDto results = searchService.search(label);
+
+        assertTrue(results.getTasks().stream().anyMatch(taskResult -> taskResult.getId() == created.getId()));
     }
 
     @Test

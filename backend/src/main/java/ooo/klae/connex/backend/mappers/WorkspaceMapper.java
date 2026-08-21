@@ -37,6 +37,10 @@ public interface WorkspaceMapper {
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId);
     boolean isMemberIncludingPending(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
+    List<Integer> getMemberIdsIncludingPending(
+        @Param("workspaceId") int workspaceId,
+        @Param("userIds") List<Integer> userIds
+    );
     int countActiveMembers(
         @Param("workspaceId") int workspaceId,
         @Param("memberIds") List<Integer> memberIds

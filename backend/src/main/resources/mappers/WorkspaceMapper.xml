@@ -120,6 +120,18 @@
     )
   </select>
 
+  <select id="getMemberIdsIncludingPending" resultType="int">
+    SELECT user_id
+    FROM workspace_member
+    WHERE workspace_id = #{workspaceId}
+      AND status IN ('active', 'pending')
+      AND user_id IN
+      <foreach collection="userIds" item="userId" open="(" separator="," close=")">
+        #{userId}
+      </foreach>
+    ORDER BY user_id
+  </select>
+
   <select id="countActiveMembers" resultType="int">
     SELECT COUNT(*)
     FROM workspace_member
