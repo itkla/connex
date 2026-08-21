@@ -18,6 +18,7 @@ import {
     askConnexToolOutcomeSummary,
     askConnexToolRequestSummary,
     askConnexTurnStorageKey,
+    completeAskConnexFileUpload,
     extractAskConnexAttachments,
     groupAskConnexMessages,
     hasPendingAskConnexFileOperation,
@@ -27,12 +28,14 @@ import {
     mergeAskConnexToolCalls,
     parseStoredAskConnexSession,
     parseStoredAskConnexTurn,
+    reconcileAskConnexFileAttachments,
     reduceAskConnexToolCards,
     reduceAskConnexTurn,
     removeReadyAskConnexFile,
     removeAskConnexAttachment,
     restoreAskConnexFileAfterFailedRemoval,
     serializeStoredAskConnexTurn,
+    type AskConnexFileAttachment,
 } from '@/app/lib/askConnex';
 import type { AiAssistantToolCall } from '@/app/lib/types';
 
@@ -157,7 +160,7 @@ describe('Ask Connex file lifecycle', () => {
         status: 'ready' as const,
         progress: 100,
         error: null,
-    };
+    } satisfies AskConnexFileAttachment;
 
     it('keeps uploads and removals pending until their requests settle', () => {
         expect(hasPendingAskConnexFileOperation([
@@ -167,6 +170,77 @@ describe('Ask Connex file lifecycle', () => {
             { ...ready, status: 'removing' },
         ])).toBe(true);
         expect(hasPendingAskConnexFileOperation([ready])).toBe(false);
+    });
+
+    it('preserves transient file chips while reconciling durable attachments', () => {
+        const uploading: AskConnexFileAttachment = {
+            ...ready,
+            clientId: 'uploading-local',
+            id: null,
+            status: 'uploading',
+            progress: 40,
+        };
+        const failed: AskConnexFileAttachment = {
+            ...ready,
+            clientId: 'failed-local',
+            id: null,
+            status: 'failed',
+            progress: 0,
+            error: 'Upload failed',
+        };
+        const removing: AskConnexFileAttachment = {
+            ...ready,
+            status: 'removing',
+        };
+        const durableOther: AskConnexFileAttachment = {
+            ...ready,
+            clientId: 'stored:42',
+            id: 42,
+            fileName: 'other.txt',
+        };
+
+        expect(reconcileAskConnexFileAttachments(
+            [uploading, failed, removing],
+            [ready, durableOther],
+        )).toEqual([uploading, failed, removing, durableOther]);
+    });
+
+    it('keeps unacknowledged local completions and drops stale durable chips', () => {
+        const localCompletion: AskConnexFileAttachment = {
+            ...ready,
+            clientId: 'upload-local',
+            id: 42,
+        };
+        const staleDurable: AskConnexFileAttachment = {
+            ...ready,
+            clientId: 'stored:43',
+            id: 43,
+        };
+
+        expect(reconcileAskConnexFileAttachments(
+            [localCompletion, staleDurable],
+            [],
+        )).toEqual([localCompletion]);
+        expect(reconcileAskConnexFileAttachments(
+            [localCompletion],
+            [{ ...localCompletion, clientId: 'stored:42' }],
+        )).toEqual([{ ...localCompletion, clientId: 'stored:42' }]);
+    });
+
+    it('deduplicates a completed upload against a concurrently hydrated copy', () => {
+        const uploading: AskConnexFileAttachment = {
+            ...ready,
+            clientId: 'upload-local',
+            id: null,
+            status: 'uploading',
+            progress: 70,
+        };
+
+        expect(completeAskConnexFileUpload(
+            [uploading, ready],
+            uploading.clientId,
+            ready,
+        )).toEqual([{ ...ready, clientId: uploading.clientId }]);
     });
 
     it('does not restore a late failed deletion into a different session epoch', () => {

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
     ASK_CONNEX_STREAM_HYDRATION_LIMIT,
+    absorbAskConnexStreamPartial,
     applyAskConnexStreamDelta,
     createAskConnexFrameCoalescer,
     createAskConnexStream,
@@ -9,9 +10,10 @@ import {
     failAskConnexStreamHydration,
     requestAskConnexTurnCancel,
     settleAskConnexStreamHydration,
+    shouldResetAskConnexStream,
     type AskConnexStreamState,
 } from '@/app/lib/askConnexStream';
-import type { AiChatDeltaFrame } from '@/app/lib/types';
+import type { AiChatDeltaFrame, AiChatRealtimeFrame } from '@/app/lib/types';
 
 function delta(seq: number, text: string, turnId = 9): AiChatDeltaFrame {
     return { turnId, seq, kind: 'delta', text };
@@ -25,6 +27,25 @@ function applyAll(state: AskConnexStreamState, frames: AiChatDeltaFrame[]): AskC
 }
 
 describe('Ask Connex stream reassembly', () => {
+    it('recognizes the durable running-state frame that invalidates an existing stream', () => {
+        const state = applyAll(createAskConnexStream(9), [delta(0, 'Abandoned')]);
+        const reset: AiChatRealtimeFrame = {
+            workspaceId: 7,
+            sessionId: 4,
+            turnId: 9,
+            seq: 0,
+            kind: 'state',
+            tool: null,
+            status: 'running',
+            reason: null,
+        };
+
+        expect(shouldResetAskConnexStream(state, reset)).toBe(true);
+        expect(shouldResetAskConnexStream(null, reset)).toBe(false);
+        expect(shouldResetAskConnexStream(state, { ...reset, turnId: 10 })).toBe(false);
+        expect(shouldResetAskConnexStream(state, { ...reset, kind: 'step' })).toBe(false);
+    });
+
     it('reassembles contiguous offset frames and drops replayed overlap', () => {
         const state = applyAll(createAskConnexStream(9), [
             delta(0, 'Hel'),
@@ -83,6 +104,22 @@ describe('Ask Connex stream reassembly', () => {
         expect(settled.state.pending).toHaveLength(1);
         expect(settled.state.hydrating).toBe(true);
         expect(settled.hydrate).toBe(true);
+    });
+
+    it('keeps one in-flight hydration authoritative when polling absorbs a short partial', () => {
+        const gapped = applyAskConnexStreamDelta(createAskConnexStream(9), delta(9, 'rld!'));
+        const absorbed = absorbAskConnexStreamPartial(gapped.state, 'Hel');
+
+        expect(absorbed.state.text).toBe('Hel');
+        expect(absorbed.state.pending).toHaveLength(1);
+        expect(absorbed.state.hydrating).toBe(true);
+        expect(absorbed.state.hydrations).toBe(1);
+        expect(absorbed.hydrate).toBe(false);
+
+        const settled = settleAskConnexStreamHydration(absorbed.state, 'Hello, wo');
+        expect(settled.state.text).toBe('Hello, world!');
+        expect(settled.state.pending).toHaveLength(0);
+        expect(settled.state.hydrating).toBe(false);
     });
 
     it('dedupes live frames against a late-join hydrated partial by character offset', () => {
