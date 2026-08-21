@@ -94,16 +94,17 @@ export default function TaskFilterSheet({
                                 {section.options.map((option) => {
                                     const selected = section.selected.has(option.value);
                                     return (
-                                        <button
+                                        <Button
                                             key={option.value}
                                             type="button"
                                             aria-pressed={selected}
                                             onClick={() => section.onToggle(option.value)}
+                                            variant={selected ? 'secondary' : 'ghost'}
+                                            size="page"
                                             className={cn(
-                                                'flex min-h-11 w-full items-center gap-2 rounded-lg px-2 text-left text-sm transition-colors motion-reduce:transition-none',
-                                                selected
-                                                    ? 'bg-brand-light/60 font-medium text-brand-dark'
-                                                    : 'text-foreground hover:bg-muted',
+                                                'w-full justify-start text-left font-normal',
+                                                selected &&
+                                                    'bg-brand-light/60 font-medium text-brand-dark hover:bg-brand-light/70',
                                             )}
                                         >
                                             <span className="min-w-0 flex-1 truncate">{option.label}</span>
@@ -117,7 +118,7 @@ export default function TaskFilterSheet({
                                                 )}
                                                 aria-hidden
                                             />
-                                        </button>
+                                        </Button>
                                     );
                                 })}
                             </div>

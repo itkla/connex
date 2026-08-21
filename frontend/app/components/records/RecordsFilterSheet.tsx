@@ -94,14 +94,16 @@ function OptionRow({
     onSelect: () => void;
 }) {
     return (
-        <button
+        <Button
             type="button"
             aria-pressed={selected}
             disabled={disabled}
             onClick={onSelect}
+            variant={selected ? 'secondary' : 'ghost'}
+            size="page"
             className={cn(
-                'flex min-h-11 w-full items-center gap-2 rounded-lg px-2 text-left text-sm transition-colors motion-reduce:transition-none',
-                selected ? 'bg-brand-light/60 font-medium text-brand-dark' : 'text-foreground hover:bg-muted',
+                'w-full justify-start text-left font-normal',
+                selected && 'bg-brand-light/60 font-medium text-brand-dark hover:bg-brand-light/70',
                 disabled && 'opacity-50',
             )}
         >
@@ -113,7 +115,7 @@ function OptionRow({
             {indicator ?? (
                 <CheckIcon className={cn('size-4 shrink-0 text-brand-dark', !selected && 'invisible')} aria-hidden />
             )}
-        </button>
+        </Button>
     );
 }
 

@@ -64,9 +64,9 @@ import { join, relative, resolve, sep } from "node:path";
  *    `SegmentedControl` and rebuilt the signal row on `Button`/`IconButton`, so both radar files left
  *    the ledger: one hand-rolled chip layer and sixteen shape overrides, icon sizes, and untooltipped
  *    icon buttons.
- * 6. 430 → 424 (lowered). WS8's filter-family convergence replaced the private `pillClass` surface,
- *    filter-bar actions, and records sort/column triggers with the context-tiered button primitives;
- *    the unused parallel records filter menu was removed.
+ * 6. 430 → 422 (lowered). WS8's filter-family convergence replaced the private `pillClass`
+ *    surface, filter-bar actions, mobile filter options, and records sort/column triggers with the
+ *    context-tiered button primitives; the unused parallel records filter menu was removed.
  *
  * **The burndown contract**, deliberately identical to `lint/motionDurations.mjs` so the two gates
  * read the same way. `loadBaseline()` returns the committed inventory of files that still carry
@@ -375,4 +375,4 @@ export function loadBaseline() {
  * The ledger's total after the widening described above. It may fall. It rises only in a commit
  * that widens what the scanner catches — never to make room for new debt.
  */
-export const BASELINE_HIGH_WATER_MARK = 424;
+export const BASELINE_HIGH_WATER_MARK = 422;
