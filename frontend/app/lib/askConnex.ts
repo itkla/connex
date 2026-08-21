@@ -34,6 +34,7 @@ export type AskConnexFileAttachment = {
     status: 'uploading' | 'ready' | 'failed' | 'removing';
     progress: number;
     error: string | null;
+    durableEchoPending?: boolean;
 };
 
 /** Returns whether an upload or removal must settle before the conversation can advance. */
@@ -43,6 +44,63 @@ export function hasPendingAskConnexFileOperation(
     return attachments.some(
         (attachment) => attachment.status === 'uploading' || attachment.status === 'removing',
     );
+}
+
+/**
+ * Reconciles a fresh durable attachment read without erasing local upload, failure, or removal
+ * feedback. Locally completed uploads survive one absent read so a refresh started before upload
+ * completion cannot erase them, then expire if a later read still has no durable echo.
+ */
+export function reconcileAskConnexFileAttachments(
+    current: readonly AskConnexFileAttachment[],
+    persisted: readonly AskConnexFileAttachment[],
+): AskConnexFileAttachment[] {
+    const persistedById = new Map<number, AskConnexFileAttachment>();
+    persisted.forEach((attachment) => {
+        if (attachment.id !== null && attachment.status === 'ready') {
+            persistedById.set(attachment.id, attachment);
+        }
+    });
+
+    const reconciled: AskConnexFileAttachment[] = [];
+    current.forEach((attachment) => {
+        if (attachment.status !== 'ready') {
+            if (attachment.id !== null) persistedById.delete(attachment.id);
+            reconciled.push(attachment);
+            return;
+        }
+        if (attachment.id === null) {
+            reconciled.push(attachment);
+            return;
+        }
+        const durable = persistedById.get(attachment.id);
+        if (durable) {
+            persistedById.delete(attachment.id);
+            reconciled.push(durable);
+            return;
+        }
+        if (attachment.durableEchoPending) {
+            reconciled.push({ ...attachment, durableEchoPending: false });
+        }
+    });
+    return [...reconciled, ...persistedById.values()];
+}
+
+/** Replaces a completed upload chip and removes any concurrently hydrated copy of the same file. */
+export function completeAskConnexFileUpload(
+    attachments: readonly AskConnexFileAttachment[],
+    clientId: string,
+    uploaded: AskConnexFileAttachment,
+): AskConnexFileAttachment[] {
+    const completed = { ...uploaded, clientId, durableEchoPending: true };
+    const deduplicated = attachments.filter(
+        (attachment) => attachment.clientId === clientId || attachment.id !== uploaded.id,
+    );
+    const index = deduplicated.findIndex((attachment) => attachment.clientId === clientId);
+    if (index < 0) return [...deduplicated, completed];
+    return deduplicated.map((attachment, attachmentIndex) => attachmentIndex === index
+        ? completed
+        : attachment);
 }
 
 /** Restores a failed removal only while its originating session epoch is still active. */

@@ -1,4 +1,4 @@
-import type { AiChatDeltaFrame } from '@/app/lib/types';
+import type { AiChatDeltaFrame, AiChatRealtimeFrame } from '@/app/lib/types';
 import type { AskConnexTurnState } from '@/app/lib/askConnex';
 
 /** Upper bound on consecutive REST re-hydrations for one streaming turn. */
@@ -58,6 +58,27 @@ function drainPending(state: AskConnexStreamState): AskConnexStreamState {
     return { ...state, text, pending: remaining };
 }
 
+function mergePartial(
+    state: AskConnexStreamState,
+    partial: string,
+): AskConnexStreamState {
+    return drainPending({
+        ...state,
+        text: partial.length > state.text.length ? partial : state.text,
+    });
+}
+
+/** Returns whether a durable reset invalidation starts a fresh stream for this turn. */
+export function shouldResetAskConnexStream(
+    state: AskConnexStreamState | null,
+    frame: AiChatRealtimeFrame,
+): boolean {
+    return state?.turnId === frame.turnId
+        && frame.kind === 'reset'
+        && frame.seq === 0
+        && frame.status === 'running';
+}
+
 /**
  * Applies one live delta frame by character offset. Fully overlapped frames are dropped, a frame
  * straddling the applied length contributes only its unapplied suffix, and a frame beyond the
@@ -102,11 +123,7 @@ export function settleAskConnexStreamHydration(
     state: AskConnexStreamState,
     partial: string,
 ): AskConnexStreamTransition {
-    const merged = drainPending({
-        ...state,
-        hydrating: false,
-        text: partial.length > state.text.length ? partial : state.text,
-    });
+    const merged = mergePartial({ ...state, hydrating: false }, partial);
     if (merged.pending.length === 0 || merged.hydrations >= ASK_CONNEX_STREAM_HYDRATION_LIMIT) {
         return { state: merged, hydrate: false };
     }
@@ -114,6 +131,18 @@ export function settleAskConnexStreamHydration(
         state: { ...merged, hydrating: true, hydrations: merged.hydrations + 1 },
         hydrate: true,
     };
+}
+
+/**
+ * Absorbs a durable partial observed outside the active hydration request. An existing hydration
+ * remains its turn's sole retry owner, while a caller without one may start the bounded repair.
+ */
+export function absorbAskConnexStreamPartial(
+    state: AskConnexStreamState,
+    partial: string,
+): AskConnexStreamTransition {
+    if (!state.hydrating) return settleAskConnexStreamHydration(state, partial);
+    return { state: mergePartial(state, partial), hydrate: false };
 }
 
 /** Reopens delta application after a failed re-hydration without consuming buffered frames. */
