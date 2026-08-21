@@ -195,7 +195,7 @@
       "expires": "確認の有効期限",
       "actionsTitle": "実行される内容と、再試行の可否",
       "unknownAction": "ワークフローのアクション",
-      "recordUnavailable": "利用できなくなったレコード",
+      "recordLabelNotIncluded": "この概要にはレコードの詳細が含まれていません",
       "expectedSkipsTitle": "スキップされる見込みのレコード",
       "samplesTitle": "対象レコードの一部",
       "blockersTitle": "開始する前に解消してください",

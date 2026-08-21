@@ -195,7 +195,7 @@
       "expires": "Review expires",
       "actionsTitle": "What will happen, and what can be retried",
       "unknownAction": "Workflow action",
-      "recordUnavailable": "Record no longer available",
+      "recordLabelNotIncluded": "Record details weren't included in this summary",
       "expectedSkipsTitle": "Records Connex expects to skip",
       "samplesTitle": "A sample of the records",
       "blockersTitle": "Fix these before starting",

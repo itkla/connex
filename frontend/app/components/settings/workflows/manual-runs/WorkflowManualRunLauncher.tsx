@@ -464,7 +464,7 @@ function InvocationSummary({
                             <li key={record.recordId} className="grid gap-2 px-3 py-2.5 text-sm sm:grid-cols-[auto_minmax(0,1fr)_auto]">
                                 <span className="truncate text-muted-foreground">
                                     {sampledLabels.get(record.recordId)
-                                        ?? t("manual.recordUnavailable")}
+                                        ?? t("manual.recordLabelNotIncluded")}
                                 </span>
                                 <span className="text-foreground">
                                     {record.reasonCode ? <ManualReason code={record.reasonCode} /> : t(`status.${record.status}`)}

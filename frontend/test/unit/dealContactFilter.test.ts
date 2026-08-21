@@ -125,7 +125,8 @@ describe("the Deals browser keeps contact identity through downstream actions", 
     });
 
     it("does not offer Kanban when a stakeholder filter cannot be represented by its pipeline board", () => {
-        expect(browser).toContain("if (serverFilters.personId?.length && displayMode === 'kanban')");
-        expect(browser).toContain("...(serverFilters.personId?.length");
+        expect(browser).toContain("contactFilterActive && displayMode === 'kanban' ? 'table' : displayMode");
+        expect(browser).toContain("...(contactFilterActive");
+        expect(browser).not.toContain("setDisplayMode('table')");
     });
 });

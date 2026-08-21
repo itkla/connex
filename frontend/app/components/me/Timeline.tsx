@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { getTranslations } from "next-intl/server";
 
 import { getMyWorkspacesFromCookie } from "@/app/lib/api";
+import { isProviderOwnedActivity } from "@/app/lib/connectedCapture";
 import { type Activity, type Contact, type ContactLifecycleHistoryEntry, type Deal, type Note, type PersonCampaignTouch, type RecordComment, type Task, type UserReference } from "@/app/lib/types";
 import { buildTimeline, entryAuthorId, entryId } from "./timelineEntries";
 import TimelineDeepLinkFallback from "./TimelineDeepLinkFallback";
@@ -41,17 +42,22 @@ export default async function Timeline({
     ]);
     const entries = buildTimeline({ tasks, activities, notes, lifecycleHistory, comments, campaignTouches });
     const visible = limit ? entries.slice(0, limit) : entries;
-    const available = {
+    const visibleIds = {
         task: visible.flatMap((entry) => entry.kind === "task" ? [entry.task.id] : []),
         activity: visible.flatMap((entry) => entry.kind === "activity" ? [entry.activity.id] : []),
         note: visible.flatMap((entry) => entry.kind === "note" ? [entry.note.id] : []),
+    };
+    const knownIds = {
+        task: tasks.map((task) => task.id),
+        activity: activities.flatMap((activity) => isProviderOwnedActivity(activity) ? [] : [activity.id]),
+        note: notes.map((note) => note.id),
     };
 
     const userById = new Map(users.map((u) => [u.id, u]));
 
     return (
         <>
-            <TimelineDeepLinkFallback available={available} />
+            <TimelineDeepLinkFallback visible={visibleIds} known={knownIds} />
             {visible.length === 0 ? (
                 <p className="px-6 py-12 text-center text-sm text-muted-foreground">
                     {t("emptyState")}

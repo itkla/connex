@@ -20,8 +20,9 @@ describe("manual workflow preparation labels", () => {
         expect(launcher).toContain("[...preparation.samples, ...preparation.skippedSamples]");
     });
 
-    it("uses a non-identifying unavailable state when no sampled label remains", () => {
-        expect(launcher).toContain('t("manual.recordUnavailable")');
+    it("uses a neutral non-identifying state when no sampled label was included", () => {
+        expect(launcher).toContain('t("manual.recordLabelNotIncluded")');
+        expect(launcher).not.toContain('t("manual.recordUnavailable")');
         expect(launcher).not.toContain('t("manual.recordFallbackWithId"');
     });
 });

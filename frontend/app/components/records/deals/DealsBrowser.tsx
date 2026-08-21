@@ -625,11 +625,11 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         };
     }, [activeFilterState, dealFacets.companies, dealFacets.people, pipelines, allStages, ownerScope]);
     const serverFilterKey = useMemo(() => JSON.stringify(serverFilters), [serverFilters]);
-    useEffect(() => {
-        if (serverFilters.personId?.length && displayMode === 'kanban') {
-            setDisplayMode('table');
-        }
-    }, [displayMode, serverFilters.personId, setDisplayMode]);
+    const contactFilterActive = Boolean(serverFilters.personId?.length);
+    const selectableDisplayMode = contactFilterActive && displayMode === 'kanban' ? 'table' : displayMode;
+    const renderedDisplayMode = contactFilterActive && effectiveDisplayMode === 'kanban'
+        ? 'table'
+        : effectiveDisplayMode;
     const deferredQuery = useDeferredValue(query.trim());
     const metricFilters = useMemo<DealFilterParams>(() => ({
         ...serverFilters,
@@ -1203,7 +1203,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const peek = useRecordPeekController(
         'deal',
         visibleDeals,
-        effectiveDisplayMode !== 'grid',
+        renderedDisplayMode !== 'grid',
         returnSelection,
     );
 
@@ -1592,7 +1592,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                     allowGroups
                                     onChange={changeDefinition}
                                 />
-                                {effectiveDisplayMode !== 'table' && (
+                                {renderedDisplayMode !== 'table' && (
                                     <RecordsSortMenu
                                         columns={columns}
                                         sortKey={sortKey}
@@ -1603,18 +1603,18 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                 <SegmentedControl
                                     ariaLabel={t('displayMode')}
                                     className="hidden md:inline-flex"
-                                    value={displayMode}
+                                    value={selectableDisplayMode}
                                     onChange={setDisplayMode}
                                     options={[
                                         { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridView') },
                                         { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableView') },
-                                        ...(serverFilters.personId?.length
+                                        ...(contactFilterActive
                                             ? []
                                             : [{ value: 'kanban' as const, icon: <ViewColumnsIcon className="size-4" />, ariaLabel: t('kanbanView') }]),
                                     ]}
                                 />
-                                {effectiveDisplayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
-                                {effectiveDisplayMode === 'table' && (
+                                {renderedDisplayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
+                                {renderedDisplayMode === 'table' && (
                                     <ColumnVisibilityMenu
                                         toggles={toggles}
                                         onColumnVisibleChange={setColumnVisible}
@@ -1685,7 +1685,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 )}
 
                 <Rise delay={0.3}>
-                    {effectiveDisplayMode === 'kanban' ? (
+                    {renderedDisplayMode === 'kanban' ? (
                         <DealsKanban
                             deals={visibleDeals}
                             pipelines={pipelines}
@@ -1737,7 +1737,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                 />
                             )}
                             renderAvatar={(item) => {
-                                const avatarSize = effectiveDisplayMode === 'list' ? 'small' : 'large';
+                                const avatarSize = renderedDisplayMode === 'list' ? 'small' : 'large';
                                 const company = item.company != null ? companyById.get(item.company) : undefined;
                                 if (company) return <CompanyAvatar company={company} type={avatarSize} />;
                                 const contact = contactByDealId.get(item.id);
@@ -1752,7 +1752,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             onRowClick={(item) => peek.openPeek(item.id)}
                             activeId={peek.activeId}
                             recordRef={recordRef}
-                            displayMode={effectiveDisplayMode}
+                            displayMode={renderedDisplayMode}
                             density={density}
                             selectedIds={selectedIds}
                             onSelectedIdsChange={handleSelectedIdsChange}
