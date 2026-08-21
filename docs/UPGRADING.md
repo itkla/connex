@@ -76,6 +76,21 @@ runbook below already quiesces all writers, and the staging deploy replaces its 
 process before reopening the frontend; custom multi-replica deployments must enforce the same
 all-replicas-down boundary.
 
+### V186 provider-disconnect retention cutover
+
+`V186__provider_disconnect_retention.sql` introduces the internal `revoking` and `disconnected`
+states used by the new credential-only disconnect lifecycle. A backend that predates this cutover
+still treats an ordinary disconnect as authorization to erase captured provider data from every
+workspace. If an old backend serves a disconnect after V186 applies, the new backend cannot
+distinguish that legacy request from account-deletion cleanup and will finish the destructive flow.
+
+Treat the release containing V186 as a coordinated restart: close ingress, stop every old backend
+replica, then start the new backend so Flyway can apply V186 with no old binary still serving. Do
+not run old and new backend versions concurrently across this migration. The standard Compose
+runbook below already quiesces all writers, and the staging deploy stops its single backend process
+before the replacement applies migrations; custom multi-replica deployments must enforce the same
+all-replicas-down boundary.
+
 ## On-prem upgrade runbook
 
 1. **Preflight legacy media before any recreate** — if the installed version predates private object

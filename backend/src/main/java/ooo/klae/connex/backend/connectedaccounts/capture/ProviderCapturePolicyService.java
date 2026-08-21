@@ -615,7 +615,7 @@ public class ProviderCapturePolicyService {
         if (connection == null) {
             restrictions.add("not_connected");
         } else if (!"connected".equals(connection.getStatus())) {
-            restrictions.add("connection_" + connection.getStatus());
+            restrictions.add(connectionRestriction(connection.getStatus()));
         }
         if (!workspacePolicy.isBodyCaptureAllowed() && userPolicy.isIncludeBodies()) {
             restrictions.add("body_capture_disabled");
@@ -634,6 +634,17 @@ public class ProviderCapturePolicyService {
             restrictions.add("missing_scope_mail");
         }
         return restrictions;
+    }
+
+    static String connectionRestriction(String status) {
+        return switch (status) {
+            case "paused" -> "connection_paused";
+            case "error" -> "connection_error";
+            case "revoking", "disconnecting" -> "connection_disconnecting";
+            case "purge_failed" -> "connection_purge_failed";
+            case "revoked", "disconnected" -> "not_connected";
+            default -> "not_connected";
+        };
     }
 
     private List<String> normalizeDomains(List<String> values) {

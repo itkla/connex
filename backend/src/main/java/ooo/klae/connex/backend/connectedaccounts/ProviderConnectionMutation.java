@@ -34,7 +34,7 @@ public class ProviderConnectionMutation {
         }
         if (!from.equals(connection.getStatus())) {
             throw new BadRequestException(
-                "Connection is " + connection.getStatus() + ", not " + from);
+                "Connection cannot transition from its current state");
         }
         connection.setStatus(to);
         connection.setCredentialGeneration(connection.getCredentialGeneration() + 1);
