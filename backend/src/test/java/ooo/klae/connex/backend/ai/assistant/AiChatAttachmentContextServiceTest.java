@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -29,6 +30,9 @@ import ooo.klae.connex.backend.ai.AiCompletionOutcome;
 import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService;
 import ooo.klae.connex.backend.ai.AiInvocationService;
+import ooo.klae.connex.backend.ai.masking.EntityKind;
+import ooo.klae.connex.backend.ai.masking.MaskingContext;
+import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -88,6 +92,68 @@ class AiChatAttachmentContextServiceTest {
         verify(managedObjectService, never()).openAttachment(TURN.workspaceId(), image);
         verify(invocationService, never()).complete(
                 any(AiInvocation.class), any(), anyLong(), any());
+    }
+
+    @Test
+    void textAttachmentContactDataIsRedactedBeforeThePromptBoundary() {
+        Attachment attachment = attachment(31, "notes.txt", "text/plain");
+        when(persistenceService.loadAttachments(TURN)).thenReturn(List.of(attachment));
+        when(managedObjectService.openAttachment(TURN.workspaceId(), attachment))
+                .thenReturn(content(new byte[] {1}));
+        when(attachmentPolicy.readText(any(), eq(1L)))
+                .thenReturn("x".repeat(31_989)
+                        + " victim@example.com "
+                        + "tail".repeat(20));
+
+        AiChatAttachmentContext context = service.prepare(TURN, NOW.plusSeconds(70));
+
+        String retained = (String) context.data().getFirst().get("content");
+        assertEquals(32_000, retained.length());
+        assertTrue(retained.endsWith("[redacted]"));
+        assertFalse(retained.contains("victim"));
+        assertFalse(retained.contains("@example"));
+        assertEquals(true, context.data().getFirst().get("truncated"));
+    }
+
+    @Test
+    void textAttachmentIdentifierIsRedactedBeforeThePromptBoundary() {
+        Attachment attachment = attachment(31, "notes.txt", "text/plain");
+        when(persistenceService.loadAttachments(TURN)).thenReturn(List.of(attachment));
+        when(managedObjectService.openAttachment(TURN.workspaceId(), attachment))
+                .thenReturn(content(new byte[] {1}));
+        when(attachmentPolicy.readText(any(), eq(1L)))
+                .thenReturn("x".repeat(31_988)
+                        + " Ada Lovelace "
+                        + "tail".repeat(20));
+        MaskingContext maskingContext = new MaskingContext();
+        MaskingEngine.maskField(EntityKind.PERSON, "Ada Lovelace", maskingContext);
+
+        AiChatAttachmentContext context = service.prepare(
+                TURN, NOW.plusSeconds(70), maskingContext);
+
+        String retained = (String) context.data().getFirst().get("content");
+        assertEquals(32_000, retained.length());
+        assertTrue(retained.contains("[redacted]"));
+        assertFalse(retained.contains("Ada"));
+        assertFalse(retained.contains("Lovelace"));
+        assertEquals(true, context.data().getFirst().get("truncated"));
+    }
+
+    @Test
+    void textAttachmentSpecialCareTextIsScreenedBeforeThePromptBoundary() {
+        Attachment attachment = attachment(31, "notes.txt", "text/plain");
+        when(persistenceService.loadAttachments(TURN)).thenReturn(List.of(attachment));
+        when(managedObjectService.openAttachment(TURN.workspaceId(), attachment))
+                .thenReturn(content(new byte[] {1}));
+        when(attachmentPolicy.readText(any(), eq(1L)))
+                .thenReturn("x".repeat(31_985)
+                        + " The contact discussed a diagnosis.");
+
+        AiChatAttachmentContext context = service.prepare(TURN, NOW.plusSeconds(70));
+
+        assertEquals(
+                "[omitted by policy]",
+                context.data().getFirst().get("content"));
     }
 
     @Test

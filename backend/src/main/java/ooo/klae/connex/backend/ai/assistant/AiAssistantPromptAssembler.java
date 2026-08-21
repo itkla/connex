@@ -214,14 +214,13 @@ public class AiAssistantPromptAssembler {
                     "page_context", pageContext.data(), context, budget.pageContextBytes()));
         }
         String repairContent = repair == null ? null : repairRequest(repair, context);
-        if (repairContent != null && !budget.fits(repairContent, budget.toolResultBytes())) {
+        if (repairContent != null && !budget.fits(
+                repairContent, budget.repairEnvelopeBytes())) {
             throw new AiAssistantLoopException(
                     "prompt_budget_exceeded", "prompt_budget_exceeded");
         }
-        int remainingToolBytes = budget.toolResultBytes()
-                - (repairContent == null ? 0 : budget.utf8Bytes(repairContent));
         for (String toolResult : boundedToolResults(
-                toolTurns, context, budget, remainingToolBytes).contents()) {
+                toolTurns, context, budget, budget.toolResultBytes()).contents()) {
             prompt.userTurn(toolResult);
         }
         if (repairContent != null) {
@@ -273,14 +272,13 @@ public class AiAssistantPromptAssembler {
                 : repair.schemaRule().startsWith("native_")
                         ? nativeToolRepairRequest(repair.schemaRule())
                         : nativeFinalRepairRequest(repair, context);
-        if (repairContent != null && !budget.fits(repairContent, budget.toolResultBytes())) {
+        if (repairContent != null && !budget.fits(
+                repairContent, budget.repairEnvelopeBytes())) {
             throw new AiAssistantLoopException(
                     "prompt_budget_exceeded", "prompt_budget_exceeded");
         }
-        int remainingToolBytes = budget.toolResultBytes()
-                - (repairContent == null ? 0 : budget.utf8Bytes(repairContent));
         BoundedToolResults bounded = boundedNativeToolResults(
-                toolTurns, nativeCalls, context, budget, remainingToolBytes);
+                toolTurns, nativeCalls, context, budget, budget.toolResultBytes());
         List<AiToolCall> orderedCalls = orderedNativeCalls(toolTurns, nativeCalls);
         List<AiToolExchange> exchanges = new ArrayList<>(toolTurns.size());
         for (int index = 0; index < toolTurns.size(); index++) {
@@ -1404,18 +1402,7 @@ public class AiAssistantPromptAssembler {
 
     private void seedIdentifiers(List<Identifier> identifiers, MaskingContext context) {
         for (Identifier identifier : identifiers) {
-            if (identifier.value() == null || identifier.value().isBlank()) {
-                continue;
-            }
-            EntityKind kind = switch (identifier.kind()) {
-                case "person" -> EntityKind.PERSON;
-                case "company" -> EntityKind.COMPANY;
-                case "deal" -> EntityKind.DEAL;
-                default -> null;
-            };
-            if (kind != null) {
-                MaskingEngine.maskField(kind, identifier.value(), context);
-            }
+            identifier.seed(context);
         }
     }
 

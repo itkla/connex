@@ -146,6 +146,17 @@ class AiChatTurnPersistenceServiceTest {
     }
 
     @Test
+    void durableTerminalProjectionUsesTheStoredWinnerAndUtf16Offset() {
+        storedTurn.setStatus("resolved");
+        storedTurn.setStreamed(true);
+        storedTurn.setPartialContentUtf16Offset(31);
+
+        AiChatDurableTerminal terminal = service.terminalState(TURN);
+
+        assertEquals(new AiChatDurableTerminal("resolved", null, 31), terminal);
+    }
+
+    @Test
     void appendPartialBatchPersistsAndPublishesTheSameUtf16Batch() {
         AiChatQueuedTurn streamed = new AiChatQueuedTurn(
                 7, 11, 13, 17, 19, 1, 23L, false, List.of(), List.of(),
@@ -368,13 +379,76 @@ class AiChatTurnPersistenceServiceTest {
 
     @Test
     void restrictionEpochChangePreventsGeneratedTitlePersistence() {
+        AiChatSession session = new AiChatSession();
+        session.setId(TURN.sessionId());
+        session.setCreatedByUserId(TURN.userId());
+        session.setTitleUserSet(false);
+        when(chatMapper.getSessionByIdForUpdate(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
         when(restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
                 TURN.workspaceId(), TURN.restrictionEpoch())).thenReturn(false);
 
         assertFalse(service.applyGeneratedTitle(TURN, "Stale model title"));
 
+        InOrder order = inOrder(chatMapper, restrictionEpoch);
+        order.verify(chatMapper).getSessionByIdForUpdate(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId());
+        order.verify(restrictionEpoch).retainReadFenceUntilTransactionCompletionIfCurrent(
+                TURN.workspaceId(), TURN.restrictionEpoch());
         verify(chatMapper, never()).updateGeneratedTitle(
                 TURN.workspaceId(), TURN.sessionId(), "Stale model title");
+    }
+
+    @Test
+    void assistantPersistenceAcquiresDatabaseRowsBeforeTheRestrictionFence() {
+        when(restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
+                TURN.workspaceId(), TURN.restrictionEpoch())).thenReturn(false);
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            assertThrows(
+                    AiAssistantLoopException.class,
+                    () -> service.upsertHistorySummary(
+                            TURN, null, 0, "Summary",
+                            "{\"kind\":\"history_summary\"}", 3, 2));
+            InOrder summaryOrder = inOrder(chatMapper, restrictionEpoch);
+            summaryOrder.verify(chatMapper).getSessionByIdForUpdate(
+                    TURN.workspaceId(), TURN.userId(), TURN.sessionId());
+            summaryOrder.verify(chatMapper).getTurnByIdForUpdate(
+                    TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
+            summaryOrder.verify(restrictionEpoch)
+                    .retainReadFenceUntilTransactionCompletionIfCurrent(
+                            TURN.workspaceId(), TURN.restrictionEpoch());
+
+            clearInvocations(chatMapper, restrictionEpoch);
+            assertThrows(
+                    AiAssistantLoopException.class,
+                    () -> service.finishTool(TURN, 29, "executed", "{}"));
+            InOrder toolOrder = inOrder(chatMapper, restrictionEpoch);
+            toolOrder.verify(chatMapper).getSessionByIdForUpdate(
+                    TURN.workspaceId(), TURN.userId(), TURN.sessionId());
+            toolOrder.verify(chatMapper).getTurnByIdForUpdate(
+                    TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
+            toolOrder.verify(restrictionEpoch)
+                    .retainReadFenceUntilTransactionCompletionIfCurrent(
+                            TURN.workspaceId(), TURN.restrictionEpoch());
+
+            clearInvocations(chatMapper, restrictionEpoch);
+            assertThrows(
+                    AiAssistantLoopException.class,
+                    () -> service.resolve(TURN, "Answer", null, 5, 3));
+            InOrder resolveOrder = inOrder(chatMapper, restrictionEpoch);
+            resolveOrder.verify(chatMapper).getSessionByIdForUpdate(
+                    TURN.workspaceId(), TURN.userId(), TURN.sessionId());
+            resolveOrder.verify(chatMapper).getTurnByIdForUpdate(
+                    TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
+            resolveOrder.verify(restrictionEpoch)
+                    .retainReadFenceUntilTransactionCompletionIfCurrent(
+                            TURN.workspaceId(), TURN.restrictionEpoch());
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
     }
 
     @Test

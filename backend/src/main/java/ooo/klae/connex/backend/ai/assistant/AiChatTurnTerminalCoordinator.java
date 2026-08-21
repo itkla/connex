@@ -64,12 +64,9 @@ public class AiChatTurnTerminalCoordinator {
             AiGenerationTaskResult.Outcome outcome,
             String reason) {
         if (outcome == AiGenerationTaskResult.Outcome.RESOLVED) {
-            int terminalOffset = tenantWorkScope.inWorkspace(
-                    turn.workspaceId(), () -> persistenceService.terminalOffset(turn));
-            publish(turn, new AiChatStepFrameDto(
-                    turn.workspaceId(), turn.sessionId(), turn.turnId(),
-                    terminalOffset, "terminal", null, "resolved", null));
-            return true;
+            AiChatDurableTerminal terminal = durableTerminal(turn);
+            publish(turn, terminalFrame(turn, terminal));
+            return "resolved".equals(terminal.status());
         }
         String status = outcome == AiGenerationTaskResult.Outcome.TIMED_OUT
                 ? "timed_out"
@@ -78,14 +75,21 @@ public class AiChatTurnTerminalCoordinator {
         boolean changed = tenantWorkScope.inWorkspace(
                 turn.workspaceId(),
                 () -> persistenceService.markTerminal(turn, status, stableReason));
-        if (changed) {
-            int terminalOffset = tenantWorkScope.inWorkspace(
-                    turn.workspaceId(), () -> persistenceService.terminalOffset(turn));
-            publish(turn, new AiChatStepFrameDto(
-                    turn.workspaceId(), turn.sessionId(), turn.turnId(),
-                    terminalOffset, "terminal", null, status, stableReason));
-        }
+        AiChatDurableTerminal terminal = durableTerminal(turn);
+        publish(turn, terminalFrame(turn, terminal));
         return changed;
+    }
+
+    private AiChatDurableTerminal durableTerminal(AiChatQueuedTurn turn) {
+        return tenantWorkScope.inWorkspace(
+                turn.workspaceId(), () -> persistenceService.terminalState(turn));
+    }
+
+    private static AiChatStepFrameDto terminalFrame(
+            AiChatQueuedTurn turn, AiChatDurableTerminal terminal) {
+        return new AiChatStepFrameDto(
+                turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                terminal.offset(), "terminal", null, terminal.status(), terminal.reason());
     }
 
     private static String stableReason(

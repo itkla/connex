@@ -6,12 +6,25 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import ooo.klae.connex.backend.ai.AiPrivacyMode;
+import ooo.klae.connex.backend.ai.masking.MaskingContext;
+
 /** Per-turn stable positional handles for tenant-local CRM records. */
 public final class AiChatResourceRegistry {
     private static final Set<String> KINDS = Set.of("person", "company", "deal");
 
     private final Map<String, ResourceRef> resources = new LinkedHashMap<>();
     private final Map<ResourceRef, String> handles = new LinkedHashMap<>();
+    private final MaskingContext maskingContext;
+
+    /** Creates a registry without a shared masked request context. */
+    public AiChatResourceRegistry() {
+        this(new MaskingContext(AiPrivacyMode.UNMASKED));
+    }
+
+    AiChatResourceRegistry(MaskingContext maskingContext) {
+        this.maskingContext = java.util.Objects.requireNonNull(maskingContext, "maskingContext");
+    }
 
     /** One server-only record identity behind a provider-visible handle. */
     public record ResourceRef(String kind, int id) {
@@ -68,5 +81,9 @@ public final class AiChatResourceRegistry {
     /** @return immutable handle-to-resource snapshot for durable citation metadata */
     public Map<String, ResourceRef> snapshot() {
         return Collections.unmodifiableMap(new LinkedHashMap<>(resources));
+    }
+
+    MaskingContext maskingContext() {
+        return maskingContext;
     }
 }

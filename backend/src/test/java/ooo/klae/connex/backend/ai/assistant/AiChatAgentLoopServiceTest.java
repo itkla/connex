@@ -46,6 +46,7 @@ import ooo.klae.connex.backend.ai.AiStructuredRepairAttempt;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolResult.Identifier;
 import ooo.klae.connex.backend.ai.masking.Demasker;
+import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.provider.AiImageInputUnsupportedException;
 import ooo.klae.connex.backend.ai.provider.AiInvocationProtocol;
 import ooo.klae.connex.backend.ai.provider.AiNativeToolRequest;
@@ -146,7 +147,7 @@ class AiChatAgentLoopServiceTest {
                         64, 64_000, 16_000, 16_000, 16_000, 112_000),
                 0,
                 0));
-        when(attachmentContextService.prepare(eq(TURN), any(Instant.class))).thenReturn(
+        when(attachmentContextService.prepare(eq(TURN), any(Instant.class), any())).thenReturn(
                 AiChatAttachmentContext.empty());
         when(toolExecutor.pageContext(any(), any())).thenReturn(
                 new AiAssistantToolResult(Map.of(), List.of()));
@@ -488,7 +489,7 @@ class AiChatAgentLoopServiceTest {
 
     @Test
     void confirmTierToolPersistsApprovalCardWithoutAutoExecution() throws Exception {
-        when(attachmentContextService.prepare(eq(TURN), any(Instant.class))).thenReturn(
+        when(attachmentContextService.prepare(eq(TURN), any(Instant.class), any())).thenReturn(
                 new AiChatAttachmentContext(
                         List.of(Map.of(
                                 "fileName", "instructions.txt",
@@ -547,7 +548,7 @@ class AiChatAgentLoopServiceTest {
 
     @Test
     void maliciousAttachmentCannotCauseAnAutoWriteWithoutApproval() throws Exception {
-        when(attachmentContextService.prepare(eq(TURN), any(Instant.class))).thenReturn(
+        when(attachmentContextService.prepare(eq(TURN), any(Instant.class), any())).thenReturn(
                 new AiChatAttachmentContext(
                         List.of(Map.of(
                                 "fileName", "instructions.txt",
@@ -583,7 +584,7 @@ class AiChatAgentLoopServiceTest {
 
     @Test
     void imageCapabilityFailureReturnsExplicitUnsupportedTerminal() {
-        when(attachmentContextService.prepare(eq(TURN), any(Instant.class))).thenThrow(
+        when(attachmentContextService.prepare(eq(TURN), any(Instant.class), any())).thenThrow(
                 new AiImageInputUnsupportedException());
 
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
@@ -889,7 +890,7 @@ class AiChatAgentLoopServiceTest {
     }
 
     @Test
-    void repairedNativeFinalPersistsTheRepairAwareToolBudgetAudit() throws Exception {
+    void repairedNativeFinalKeepsRepairBytesOutOfTheToolReplayBudget() throws Exception {
         useNativeMemory(new AiAssistantPromptBudget(
                 64, 4_096, 256, 256, 2_048, 6_808));
         AiAssistantToolResult largeResult = new AiAssistantToolResult(
@@ -937,16 +938,14 @@ class AiChatAgentLoopServiceTest {
                 eq(directAdmission), any(Runnable.class));
         assertFalse(requests.getAllValues().get(1).exchanges().getFirst()
                 .maskedResult().contains("[truncated:"));
-        assertTrue(requests.getAllValues().getLast().exchanges().getFirst()
-                .maskedResult().contains("[truncated: showing"));
+        assertFalse(requests.getAllValues().getLast().exchanges().getFirst()
+                .maskedResult().contains("[truncated:"));
         ArgumentCaptor<String> metadata = ArgumentCaptor.forClass(String.class);
         verify(persistenceService).resolve(
                 eq(TURN), eq("The repaired answer is complete."),
                 metadata.capture(), anyInt(), anyInt());
-        JsonNode audit = objectMapper.readTree(metadata.getValue())
-                .path("toolResultBudget");
-        assertEquals(1, audit.path("truncatedToolResults").asInt());
-        assertEquals(0, audit.path("evictedToolExchanges").asInt());
+        assertTrue(objectMapper.readTree(metadata.getValue())
+                .path("toolResultBudget").isMissingNode());
     }
 
     @Test
@@ -1315,7 +1314,7 @@ class AiChatAgentLoopServiceTest {
                                 64, 64_000, 16_000, 16_000, 16_000, 112_000),
                         0,
                         0));
-        when(attachmentContextService.prepare(eq(streamedTurn), any(Instant.class)))
+        when(attachmentContextService.prepare(eq(streamedTurn), any(Instant.class), any()))
                 .thenReturn(AiChatAttachmentContext.empty());
         when(persistenceService.appendPartialBatch(
                 eq(streamedTurn), eq(0), any()))
@@ -1526,6 +1525,34 @@ class AiChatAgentLoopServiceTest {
         assertEquals(0, objectMapper.readTree(metadata.getValue()).get("citations").size());
         assertEquals(0, objectMapper.readTree(metadata.getValue()).get("suggestions").size());
         assertEquals(0, objectMapper.readTree(metadata.getValue()).get("resources").size());
+    }
+
+    @Test
+    void pageIdentifiersSeedTheSharedAttachmentContextBeforePreparation() throws Exception {
+        when(toolExecutor.pageContext(any(), any())).thenReturn(
+                new AiAssistantToolResult(
+                        Map.of(),
+                        List.of(new Identifier("person", "Ada Lovelace"))));
+        when(attachmentContextService.prepare(eq(TURN), any(Instant.class), any()))
+                .thenAnswer(invocation -> {
+                    MaskingContext context = invocation.getArgument(2);
+                    assertTrue(context.identifierDictionary().contains("Ada Lovelace"));
+                    return AiChatAttachmentContext.empty();
+                });
+        AiAssistantStep finalStep = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer("Pipeline is healthy.", List.of()));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(finalStep));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        verify(attachmentContextService).prepare(eq(TURN), any(Instant.class), any());
     }
 
     @Test
@@ -1745,6 +1772,8 @@ class AiChatAgentLoopServiceTest {
                 });
         when(persistenceService.markTerminal(
                 TURN, "failed", "budget_exhausted")).thenReturn(true);
+        when(persistenceService.terminalState(TURN)).thenReturn(
+                new AiChatDurableTerminal("failed", "budget_exhausted", 1));
         AiChatTurnTerminalCoordinator terminalCoordinator =
                 new AiChatTurnTerminalCoordinator(
                         tenantWorkScope, persistenceService, realtimeDispatcher);
@@ -1835,6 +1864,9 @@ class AiChatAgentLoopServiceTest {
                 });
         when(persistenceService.markTerminal(
                 TURN, "failed", "tool_result_budget_exhausted")).thenReturn(true);
+        when(persistenceService.terminalState(TURN)).thenReturn(
+                new AiChatDurableTerminal(
+                        "failed", "tool_result_budget_exhausted", 1));
         AiChatTurnTerminalCoordinator terminalCoordinator =
                 new AiChatTurnTerminalCoordinator(
                         tenantWorkScope, persistenceService, realtimeDispatcher);

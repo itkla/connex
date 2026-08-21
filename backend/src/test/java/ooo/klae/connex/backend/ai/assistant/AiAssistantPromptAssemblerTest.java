@@ -925,29 +925,91 @@ class AiAssistantPromptAssemblerTest {
     }
 
     @Test
-    void repairAndPriorToolResultsShareOneGracefullyDegradedToolAllocation() {
+    void repairKeepsTheCompleteIndependentlyBudgetedPriorToolReplay() {
         AiChatMessage request = new AiChatMessage();
         request.setAuthorKind("user");
         request.setContent("Repair the response");
-        AiAssistantToolResult oversizedToolResult = new AiAssistantToolResult(
-                Map.of("result", "TOOL_RESULT_MUST_BE_DROPPED".repeat(40)), List.of());
+        AiAssistantToolResult toolResult = new AiAssistantToolResult(
+                Map.of("result", "TOOL_RESULT_MUST_SURVIVE".repeat(12)), List.of());
         AiStructuredRepair repair = AiStructuredRepair.from(
                 "exclusive_step", "{\"tool\":null,\"final\":null}");
         AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
-                64, 1_000, 1_000, 1_000, 500, 1_000);
+                64, 1_000, 1_000, 1_000, 500, 2_000, 1_000);
 
-        MaskedPrompt prompt = assembler.assemble(
+        MaskedPrompt withoutRepair = assembler.assemble(
                 List.of(request),
                 new AiAssistantToolResult(Map.of(), List.of()),
-                List.of(new ToolTurn(1, "search_records", oversizedToolResult)),
+                List.of(new ToolTurn(1, "search_records", toolResult)),
+                new MaskingContext(),
+                new AiChatResourceRegistry(),
+                budget,
+                null);
+        MaskedPrompt withRepair = assembler.assemble(
+                List.of(request),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(new ToolTurn(1, "search_records", toolResult)),
                 new MaskingContext(),
                 new AiChatResourceRegistry(),
                 budget,
                 repair);
 
-        assertTrue(prompt.getMessages().stream()
-                .anyMatch(message -> message.getContent().contains("[truncated:")));
-        assertTrue(prompt.getMessages().getLast().getContent().contains("MODEL_OUTPUT_BEGIN"));
+        assertEquals(
+                withoutRepair.getMessages().getLast().getContent(),
+                withRepair.getMessages().get(withRepair.getMessages().size() - 2).getContent());
+        assertTrue(withRepair.getMessages().getLast().getContent().contains("MODEL_OUTPUT_BEGIN"));
+    }
+
+    @Test
+    void nativeRepairKeepsTheCompleteIndependentlyBudgetedExchangeReplay() {
+        ToolTurn turn = new ToolTurn(
+                1,
+                "search_records",
+                new AiAssistantToolResult(
+                        Map.of("result", "TOOL_RESULT_MUST_SURVIVE".repeat(12)), List.of()));
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                64, 1_000, 1_000, 1_000, 500, 2_000, 1_000);
+        Map<Integer, AiToolCall> calls = Map.of(
+                1, new AiToolCall("call_1", "search_records", "{}"));
+
+        AiAssistantPromptAssembler.NativeReplay withoutRepair = assembler.nativeReplay(
+                List.of(turn), calls, new MaskingContext(), budget, null);
+        AiAssistantPromptAssembler.NativeReplay withRepair = assembler.nativeReplay(
+                List.of(turn),
+                calls,
+                new MaskingContext(),
+                budget,
+                AiStructuredRepair.from("final_response", "{\"content\":null}"));
+
+        assertEquals(withoutRepair.exchanges(), withRepair.exchanges());
+        assertEquals(withoutRepair.audit(), withRepair.audit());
+        assertTrue(withRepair.repairMessage().contains("MODEL_OUTPUT_BEGIN"));
+    }
+
+    @Test
+    void oversizedRepairFailsAgainstItsIndependentEnvelope() {
+        AiChatMessage request = new AiChatMessage();
+        request.setAuthorKind("user");
+        request.setContent("Repair the response");
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                64, 1_000, 1_000, 1_000, 500, 64, 1_000);
+
+        AiAssistantLoopException exception = assertThrows(
+                AiAssistantLoopException.class,
+                () -> assembler.assemble(
+                        List.of(request),
+                        new AiAssistantToolResult(Map.of(), List.of()),
+                        List.of(new ToolTurn(
+                                1,
+                                "search_records",
+                                new AiAssistantToolResult(
+                                        Map.of("result", "TOOL_RESULT_MUST_SURVIVE"),
+                                        List.of()))),
+                        new MaskingContext(),
+                        new AiChatResourceRegistry(),
+                        budget,
+                        AiStructuredRepair.from("exclusive_step", "x".repeat(200))));
+
+        assertEquals("prompt_budget_exceeded", exception.terminalReason());
     }
 
     private JsonNode toolPayload(String content) throws Exception {

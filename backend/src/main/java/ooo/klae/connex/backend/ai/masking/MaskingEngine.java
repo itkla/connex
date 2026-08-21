@@ -77,6 +77,44 @@ public final class MaskingEngine {
     }
 
     /**
+     * Screens complete uncontrolled text against a populated masking dictionary before a caller
+     * applies any character boundary. Known identifiers are irreversibly redacted here because a
+     * later truncation could otherwise split a tokenizable value into an unrecognizable fragment.
+     * @param text complete free-text value
+     * @param ctx request-local masking context populated from structured fields
+     * @return normalized text with policy exclusions and sensitive values removed
+     */
+    public static String screenFreeTextBeforeTruncation(String text, MaskingContext ctx) {
+        Objects.requireNonNull(ctx, "ctx");
+        String screened = screenCompleteFreeText(text);
+        if (OMITTED_BY_POLICY.equals(screened)) {
+            return screened;
+        }
+        if (ctx.privacyMode() == ooo.klae.connex.backend.ai.AiPrivacyMode.UNMASKED) {
+            return redactContactData(screened);
+        }
+        String redacted = screened;
+        for (MaskingContext.IdentifierEntry entry : ctx.identifierEntriesByLongestRawValue()) {
+            redacted = identifierPattern(entry.rawValue()).matcher(redacted)
+                    .replaceAll(Matcher.quoteReplacement(REDACTED));
+        }
+        return redactContactData(redacted);
+    }
+
+    private static String screenCompleteFreeText(String text) {
+        if (text == null || text.isBlank()) {
+            return "";
+        }
+        String normalizedText = Normalizer.normalize(text, Normalizer.Form.NFKC);
+        String sanitizedText = stripInjectedTokenDelimiters(normalizeSeparators(normalizedText));
+        String specialCareScreeningText = WHITESPACE.matcher(sanitizedText).replaceAll(" ");
+        if (SpecialCareTextScreen.screen(specialCareScreeningText).excluded()) {
+            return OMITTED_BY_POLICY;
+        }
+        return sanitizedText;
+    }
+
+    /**
      * Checks whether a tenant identifier would collide with immutable server-controlled prompt
      * text under the same normalized substring matching used by the outbound leak scan.
      * @param trustedStaticText server-controlled prompt text

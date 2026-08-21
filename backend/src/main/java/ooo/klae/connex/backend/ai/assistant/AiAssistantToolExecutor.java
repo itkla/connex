@@ -15,8 +15,11 @@ import java.util.function.Function;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolResult.Identifier;
 import ooo.klae.connex.backend.ai.assistant.AiChatResourceRegistry.ResourceRef;
+import ooo.klae.connex.backend.ai.masking.MaskingEngine;
+import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
@@ -232,18 +235,21 @@ public class AiAssistantToolExecutor {
                 yield filterRestrictedLinkedPeople(
                         activityService.getActivitiesByPersonId(resource.id()),
                         Activity::getPerson,
-                        Activity::getReferences);
+                        Activity::getReferences,
+                        resources.maskingContext());
             }
             case "company" -> filterRestrictedLinkedPeople(
                     companyService.getCompanyTimeline(resource.id(), limit).activities(),
                     Activity::getPerson,
-                    Activity::getReferences);
+                    Activity::getReferences,
+                    resources.maskingContext());
             case "deal" -> {
                 dealService.getDealById(resource.id());
                 yield filterRestrictedLinkedPeople(
                         activityService.getActivitiesByDealId(resource.id()),
                         Activity::getPerson,
-                        Activity::getReferences);
+                        Activity::getReferences,
+                        resources.maskingContext());
             }
             default -> throw AiAssistantLoopException.malformed("wrong_handle_kind");
         };
@@ -263,18 +269,21 @@ public class AiAssistantToolExecutor {
                 yield filterRestrictedLinkedPeople(
                         taskService.getTasksByPersonId(resource.id()),
                         Task::getPerson,
-                        Task::getReferences);
+                        Task::getReferences,
+                        resources.maskingContext());
             }
             case "company" -> filterRestrictedLinkedPeople(
                     companyService.getCompanyTimeline(resource.id(), limit).tasks(),
                     Task::getPerson,
-                    Task::getReferences);
+                    Task::getReferences,
+                    resources.maskingContext());
             case "deal" -> {
                 dealService.getDealById(resource.id());
                 yield filterRestrictedLinkedPeople(
                         taskService.getTasksByDealId(resource.id()),
                         Task::getPerson,
-                        Task::getReferences);
+                        Task::getReferences,
+                        resources.maskingContext());
             }
             default -> throw AiAssistantLoopException.malformed("wrong_handle_kind");
         };
@@ -316,13 +325,28 @@ public class AiAssistantToolExecutor {
         if (!end.utc().isAfter(start.utc())) {
             throw AiAssistantLoopException.malformed("invalid_schedule_window");
         }
-        return findScheduleConflicts(resource.id(), start.utc(), end.utc());
+        return findScheduleConflicts(
+                resource.id(), start.utc(), end.utc(), resources.maskingContext());
     }
 
     /** Finds point-in-time activities for a processable person inside one UTC meeting window. */
     public AiAssistantToolResult findScheduleConflicts(
             int personId, LocalDateTime startUtc, LocalDateTime endUtc) {
-        requireProcessable(personService.getPersonById(personId));
+        return findScheduleConflicts(
+                personId,
+                startUtc,
+                endUtc,
+                new MaskingContext(AiPrivacyMode.UNMASKED));
+    }
+
+    private AiAssistantToolResult findScheduleConflicts(
+            int personId,
+            LocalDateTime startUtc,
+            LocalDateTime endUtc,
+            MaskingContext maskingContext) {
+        Person person = personService.getPersonById(personId);
+        requireProcessable(person);
+        new Identifier("person", person.getName()).seed(maskingContext);
         List<Activity> candidates = activityService.getActivitiesByPersonIdInWindow(
                 personId,
                 startUtc,
@@ -331,13 +355,14 @@ public class AiAssistantToolExecutor {
         List<Activity> matchingActivities = filterRestrictedLinkedPeople(
                     candidates,
                     Activity::getPerson,
-                    Activity::getReferences)
+                    Activity::getReferences,
+                    maskingContext)
                 .stream()
                 .limit(MAX_SCHEDULE_CONFLICTS + 1L)
                 .toList();
         List<Map<String, Object>> conflicts = matchingActivities.stream()
                 .limit(MAX_SCHEDULE_CONFLICTS)
-                .map(AiAssistantToolExecutor::scheduleConflictData)
+                .map(activity -> scheduleConflictData(activity, maskingContext))
                 .toList();
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("start", MYSQL_TIMESTAMP.format(startUtc));
@@ -394,6 +419,7 @@ public class AiAssistantToolExecutor {
                     "name", person.getCompany().getName()));
             identifiers.add(new Identifier("company", person.getCompany().getName()));
         }
+        seedIdentifiers(identifiers, resources.maskingContext());
         if (includeNotes) {
             List<Note> notes = person.getNotes() == null
                     ? List.of()
@@ -402,8 +428,10 @@ public class AiAssistantToolExecutor {
                     filterRestrictedLinkedPeople(
                             notes,
                             Note::getPerson,
-                            Note::getReferences).toArray(Note[]::new),
-                    includePrivateNotes));
+                            Note::getReferences,
+                            resources.maskingContext()).toArray(Note[]::new),
+                    includePrivateNotes,
+                    resources.maskingContext()));
         }
         return new RecordResult(data, identifiers);
     }
@@ -421,16 +449,22 @@ public class AiAssistantToolExecutor {
         String handle = resources.register("company", company.getId());
         Map<String, Object> data = baseRecord(handle, "company", company.getName());
         putIfPresent(data, "industry", company.getIndustry());
+        List<Identifier> identifiers = List.of(new Identifier("company", company.getName()));
+        seedIdentifiers(identifiers, resources.maskingContext());
         if (includeNotes) {
             CompanyService.CompanyTimelineData timeline = companyService.getCompanyTimeline(
                     company.getId(), MAX_NOTES);
             data.put("notes", noteData(
                     filterRestrictedLinkedPeople(
-                            timeline.notes(), Note::getPerson, Note::getReferences)
+                            timeline.notes(),
+                            Note::getPerson,
+                            Note::getReferences,
+                            resources.maskingContext())
                             .toArray(Note[]::new),
-                    includePrivateNotes));
+                    includePrivateNotes,
+                    resources.maskingContext()));
         }
-        return new RecordResult(data, List.of(new Identifier("company", company.getName())));
+        return new RecordResult(data, identifiers);
     }
 
     private RecordResult dealRecord(
@@ -473,14 +507,17 @@ public class AiAssistantToolExecutor {
                 data.remove("company");
             }
         }
+        seedIdentifiers(identifiers, resources.maskingContext());
         if (includeNotes) {
             data.put("notes", noteData(
                     filterRestrictedLinkedPeople(
                             dealService.getNotesByDealId(deal.getId()),
                             Note::getPerson,
-                            Note::getReferences)
+                            Note::getReferences,
+                            resources.maskingContext())
                             .toArray(Note[]::new),
-                    includePrivateNotes));
+                    includePrivateNotes,
+                    resources.maskingContext()));
         }
         return new RecordResult(data, identifiers);
     }
@@ -521,12 +558,20 @@ public class AiAssistantToolExecutor {
         return data;
     }
 
-    private static Map<String, Object> scheduleConflictData(Activity activity) {
+    private static Map<String, Object> scheduleConflictData(
+            Activity activity, MaskingContext maskingContext) {
         Map<String, Object> data = new LinkedHashMap<>();
-        putBounded(data, "type", activity.getType(), MAX_SCHEDULE_CONFLICT_FIELD_CHARS);
-        putBounded(data, "subject", activity.getSubject(), MAX_SCHEDULE_CONFLICT_FIELD_CHARS);
-        putBounded(data, "notes", activity.getNotes(), MAX_SCHEDULE_CONFLICT_FIELD_CHARS);
-        putBounded(data, "timestamp", activity.getTimestamp(), MAX_SCHEDULE_CONFLICT_FIELD_CHARS);
+        putBounded(
+                data, "type", activity.getType(), MAX_SCHEDULE_CONFLICT_FIELD_CHARS, maskingContext);
+        putBounded(
+                data, "subject", activity.getSubject(),
+                MAX_SCHEDULE_CONFLICT_FIELD_CHARS, maskingContext);
+        putBounded(
+                data, "notes", activity.getNotes(),
+                MAX_SCHEDULE_CONFLICT_FIELD_CHARS, maskingContext);
+        putBounded(
+                data, "timestamp", activity.getTimestamp(),
+                MAX_SCHEDULE_CONFLICT_FIELD_CHARS, maskingContext);
         return data;
     }
 
@@ -540,7 +585,7 @@ public class AiAssistantToolExecutor {
     }
 
     private static List<Map<String, Object>> noteData(
-            Note[] notes, boolean includePrivateNotes) {
+            Note[] notes, boolean includePrivateNotes, MaskingContext maskingContext) {
         if (notes == null) {
             return List.of();
         }
@@ -555,9 +600,10 @@ public class AiAssistantToolExecutor {
                         return;
                     }
                     Map<String, Object> data = new LinkedHashMap<>();
-                    putBounded(data, "title", note.getTitle(), budget);
-                    putBounded(data, "createdAt", note.getCreatedAt(), budget);
-                    boolean complete = putBounded(data, "content", note.getContent(), budget);
+                    putBounded(data, "title", note.getTitle(), budget, maskingContext);
+                    putBounded(data, "createdAt", note.getCreatedAt(), budget, maskingContext);
+                    boolean complete = putBounded(
+                            data, "content", note.getContent(), budget, maskingContext);
                     if (!complete) {
                         data.put("contentTruncated", true);
                     }
@@ -569,7 +615,8 @@ public class AiAssistantToolExecutor {
     private <T> List<T> filterRestrictedLinkedPeople(
             List<T> records,
             Function<T, Person> personReference,
-            Function<T, List<EntityReference>> structuredReferences) {
+            Function<T, List<EntityReference>> structuredReferences,
+            MaskingContext maskingContext) {
         Set<Integer> personIds = new LinkedHashSet<>();
         for (T record : records) {
             if (record == null) {
@@ -593,9 +640,13 @@ public class AiAssistantToolExecutor {
             return List.copyOf(records);
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Set<Integer> processableIds = personMapper.getByIds(
+        List<Person> processablePeople = personMapper.getByIds(
                         workspaceId, List.copyOf(personIds)).stream()
                 .filter(AiAssistantToolExecutor::isProcessable)
+                .toList();
+        processablePeople.forEach(person ->
+                new Identifier("person", person.getName()).seed(maskingContext));
+        Set<Integer> processableIds = processablePeople.stream()
                 .map(Person::getId)
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());
         return records.stream()
@@ -616,27 +667,37 @@ public class AiAssistantToolExecutor {
     }
 
     private static boolean putBounded(
-            Map<String, Object> data, String key, String value, TextBudget budget) {
+            Map<String, Object> data,
+            String key,
+            String value,
+            TextBudget budget,
+            MaskingContext maskingContext) {
         if (value == null || value.isBlank()) {
             return true;
         }
+        String screened = MaskingEngine.screenFreeTextBeforeTruncation(value, maskingContext);
         int retained = Math.min(
-                value.length(), Math.min(MAX_NOTE_FIELD_CHARS, budget.remaining()));
+                screened.length(), Math.min(MAX_NOTE_FIELD_CHARS, budget.remaining()));
         if (retained > 0) {
-            data.put(key, value.substring(0, retained));
+            data.put(key, screened.substring(0, retained));
             budget.consume(retained);
         }
-        return retained == value.length();
+        return retained == screened.length();
     }
 
     private static void putBounded(
-            Map<String, Object> data, String key, String value, int maxCharacters) {
+            Map<String, Object> data,
+            String key,
+            String value,
+            int maxCharacters,
+            MaskingContext maskingContext) {
         if (value == null || value.isBlank()) {
             return;
         }
-        int retained = Math.min(value.length(), maxCharacters);
-        data.put(key, value.substring(0, retained));
-        if (retained < value.length()) {
+        String screened = MaskingEngine.screenFreeTextBeforeTruncation(value, maskingContext);
+        int retained = Math.min(screened.length(), maxCharacters);
+        data.put(key, screened.substring(0, retained));
+        if (retained < screened.length()) {
             data.put(key + "Truncated", true);
         }
     }
@@ -707,6 +768,11 @@ public class AiAssistantToolExecutor {
     private static AiAssistantToolResult result(
             Map<String, Object> data, List<Identifier> identifiers) {
         return new AiAssistantToolResult(data, identifiers);
+    }
+
+    private static void seedIdentifiers(
+            List<Identifier> identifiers, MaskingContext maskingContext) {
+        identifiers.forEach(identifier -> identifier.seed(maskingContext));
     }
 
     private record RecordResult(Map<String, Object> data, List<Identifier> identifiers) {

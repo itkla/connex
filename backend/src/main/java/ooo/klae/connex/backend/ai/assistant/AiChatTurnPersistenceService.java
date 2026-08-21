@@ -239,12 +239,12 @@ public class AiChatTurnPersistenceService {
             int outputTokens) {
         requireActiveTransaction();
         requireCurrentActor(turn);
+        lockAuthorizedTurn(turn, RUNNING);
         if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
                 turn.workspaceId(), turn.restrictionEpoch())) {
             throw new AiAssistantLoopException(
                     "restrictions_changed", "restrictions_changed");
         }
-        lockAuthorizedTurn(turn, RUNNING);
         AiChatMessage currentSummary = chatMapper.getHistorySummary(
                 turn.workspaceId(), turn.sessionId());
         if (existingSummaryId == null) {
@@ -557,12 +557,12 @@ public class AiChatTurnPersistenceService {
             String status,
             String resultJson) {
         requireCurrentActor(turn);
+        lockAuthorizedTurn(turn, RUNNING);
         if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
                 turn.workspaceId(), turn.restrictionEpoch())) {
             throw new AiAssistantLoopException(
                     "restrictions_changed", "restrictions_changed");
         }
-        lockAuthorizedTurn(turn, RUNNING);
         return chatMapper.updateToolCall(
                 turn.workspaceId(), turn.userMessageId(), toolCallId, status,
                 resultJson, turn.userId()) == 1;
@@ -601,12 +601,12 @@ public class AiChatTurnPersistenceService {
             int outputTokens) {
         requireActiveTransaction();
         requireCurrentActor(turn);
+        lockAuthorizedTurn(turn, RUNNING);
         if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
                 turn.workspaceId(), turn.restrictionEpoch())) {
             throw new AiAssistantLoopException(
                     "restrictions_changed", "restrictions_changed");
         }
-        lockAuthorizedTurn(turn, RUNNING);
         if (turn.streamed() && chatMapper.replaceTurnPartialContent(
                 turn.workspaceId(), turn.sessionId(), turn.turnId(),
                 content, content.length()) != 1) {
@@ -639,15 +639,15 @@ public class AiChatTurnPersistenceService {
             return false;
         }
         requireCurrentActor(turn);
-        if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
-                turn.workspaceId(), turn.restrictionEpoch())) {
-            return false;
-        }
         AiChatSession session = chatMapper.getSessionByIdForUpdate(
                 turn.workspaceId(), turn.userId(), turn.sessionId());
         if (session == null
                 || !Objects.equals(session.getCreatedByUserId(), turn.userId())
                 || session.isTitleUserSet()) {
+            return false;
+        }
+        if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
+                turn.workspaceId(), turn.restrictionEpoch())) {
             return false;
         }
         return chatMapper.updateGeneratedTitle(
@@ -669,11 +669,17 @@ public class AiChatTurnPersistenceService {
                 status, reason, null, null) == 1;
     }
 
-    /** Returns the durable UTF-16 terminal offset, or zero for buffered turns. */
+    /** Returns the durable terminal projection after a generation callback settles. */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
-    public int terminalOffset(AiChatQueuedTurn turn) {
+    public AiChatDurableTerminal terminalState(AiChatQueuedTurn turn) {
         AiChatTurn stored = lockGenerationOwnedTurn(turn);
-        return stored.isStreamed() ? stored.getPartialContentUtf16Offset() : 0;
+        if (QUEUED.equals(stored.getStatus()) || RUNNING.equals(stored.getStatus())) {
+            throw new IllegalStateException("Assistant turn is not terminal");
+        }
+        return new AiChatDurableTerminal(
+                stored.getStatus(),
+                stored.getTerminalReason(),
+                stored.isStreamed() ? stored.getPartialContentUtf16Offset() : 0);
     }
 
     private static void requireActiveTransaction() {

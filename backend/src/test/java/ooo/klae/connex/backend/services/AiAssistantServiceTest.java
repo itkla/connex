@@ -455,6 +455,23 @@ class AiAssistantServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void nonInviteesCannotDistinguishActiveFromArchivedSharedSessions() {
+        AiChatSession active = sharedSession(currentUser, "Active invitation boundary");
+        AiChatSession archived = sharedSession(currentUser, "Archived invitation boundary");
+        service.archive(archived.getId());
+        User nonInvitee = aiUser("admin");
+        authenticateAs(nonInvitee, workspace.getId());
+
+        ForbiddenException activeFailure = assertThrows(
+                ForbiddenException.class, () -> service.join(active.getId()));
+        ForbiddenException archivedFailure = assertThrows(
+                ForbiddenException.class, () -> service.join(archived.getId()));
+
+        assertEquals(INACCESSIBLE, activeFailure.getMessage());
+        assertEquals(INACCESSIBLE, archivedFailure.getMessage());
+    }
+
+    @Test
     void invitedWorkspaceMemberMustJoinBeforeTranscriptAccessAndKeepsProvenance() {
         AiChatSessionDto created = service.create(createRequest("Shared provenance"));
         service.setShared(created.getId(), true);
