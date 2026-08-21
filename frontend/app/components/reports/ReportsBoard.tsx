@@ -26,7 +26,6 @@ import {
 
 import Rise from '@/app/components/motion/Rise';
 import { PageHeader } from '@/app/components/PageHeader';
-import { PageShell } from '@/app/components/PageShell';
 import AskConnexComposer from '@/app/components/reports/AskConnexComposer';
 import {
     cloneReportConfig,
@@ -257,44 +256,43 @@ export default function ReportsBoard({
 
     return (
         <>
-            <PageShell>
-                <Rise>
-                    <PageHeader
-                        title={t('landing.title')}
-                        description={t('landing.subtitle')}
-                        actions={(
-                            <>
-                                {canReadGoals ? (
-                                    <Button asChild variant="outline">
-                                        <Link href="/overview/reports/goals">
-                                            <FlagIcon />
-                                            {t('landing.manageGoals')}
-                                        </Link>
-                                    </Button>
-                                ) : null}
-                                {!composerAvailable && canCreateReports ? (
-                                    <Button asChild variant="brand">
-                                        <Link href="/overview/reports/new">
-                                            <PencilSquareIcon />
-                                            {t('landing.newReport')}
-                                        </Link>
-                                    </Button>
-                                ) : null}
-                            </>
-                        )}
-                    />
+            <Rise>
+                <PageHeader
+                    title={t('landing.title')}
+                    description={t('landing.subtitle')}
+                    actions={(
+                        <>
+                            {canReadGoals ? (
+                                <Button asChild variant="outline">
+                                    <Link href="/overview/reports/goals">
+                                        <FlagIcon />
+                                        {t('landing.manageGoals')}
+                                    </Link>
+                                </Button>
+                            ) : null}
+                            {!composerAvailable && canCreateReports ? (
+                                <Button asChild variant="brand">
+                                    <Link href="/overview/reports/new">
+                                        <PencilSquareIcon />
+                                        {t('landing.newReport')}
+                                    </Link>
+                                </Button>
+                            ) : null}
+                        </>
+                    )}
+                />
+            </Rise>
+
+            {composerAvailable && canCreateReports ? (
+                <Rise delay={0.06}>
+                    <AskConnexComposer />
                 </Rise>
+            ) : null}
 
-                {composerAvailable && canCreateReports ? (
-                    <Rise delay={0.06}>
-                        <AskConnexComposer />
-                    </Rise>
-                ) : null}
-
-                {hasReports ? (
-                    <>
-                        <Rise delay={composerAvailable ? 0.12 : 0.06}>
-                            <section aria-labelledby="your-reports-title">
+            {hasReports ? (
+                <>
+                    <Rise delay={composerAvailable ? 0.12 : 0.06}>
+                        <section aria-labelledby="your-reports-title">
                                 <div className="mb-4">
                                     <h2 id="your-reports-title" className="text-xl font-bold tracking-tight text-foreground">
                                         {t('landing.yourReportsTitle')}
@@ -369,18 +367,17 @@ export default function ReportsBoard({
                                         })}
                                     </ul>
                                 </div>
-                            </section>
-                        </Rise>
-                        <Rise delay={composerAvailable ? 0.18 : 0.12}>
-                            {progressiveStartSection}
-                        </Rise>
-                    </>
-                ) : (
-                    <Rise delay={composerAvailable ? 0.12 : 0.06}>
+                        </section>
+                    </Rise>
+                    <Rise delay={composerAvailable ? 0.18 : 0.12}>
                         {progressiveStartSection}
                     </Rise>
-                )}
-            </PageShell>
+                </>
+            ) : (
+                <Rise delay={composerAvailable ? 0.12 : 0.06}>
+                    {progressiveStartSection}
+                </Rise>
+            )}
 
             <DeleteRecordDialog
                 open={deleting !== null}

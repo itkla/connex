@@ -2281,7 +2281,8 @@ export function exportCompaniesCsv(params: Types.CompaniesPageParams = {}, init:
 export function exportDealsCsv(params: Types.DealFilterParams = {}, init: RequestInit = {}) {
     const query = buildQuery({
         q: params.q, currency: params.currency, pipelineId: params.pipelineId, stageId: params.stageId,
-        companyId: params.companyId, noCompany: params.noCompany, status: params.status, risk: params.risk,
+        companyId: params.companyId, personId: params.personId, noCompany: params.noCompany,
+        status: params.status, risk: params.risk,
         scope: params.scope, memberIds: params.memberIds,
     });
     return downloadCsv(`/api/exports/deals${query}`, "deals.csv", init);
@@ -2989,7 +2990,8 @@ export function getDealsSegmentPage(params: Types.DealSegmentPageParams, init: R
 export function getDealIds(params: Types.DealsPageParams = {}, init: RequestInit = {}) {
     const query = buildQuery({
         q: params.q, currency: params.currency, pipelineId: params.pipelineId, stageId: params.stageId,
-        companyId: params.companyId, noCompany: params.noCompany, status: params.status, risk: params.risk,
+        companyId: params.companyId, personId: params.personId, noCompany: params.noCompany,
+        status: params.status, risk: params.risk,
         scope: params.scope, memberIds: params.memberIds,
     });
     return getJson<number[]>(`/api/deals/ids${query}`, init);
@@ -3046,7 +3048,8 @@ export function getDealMetricsResultFromCookie(
 }
 
 /**
- * Stable filter-facet vocabulary (status, stage, pipeline, company, currency, owners) with
+ * Stable filter-facet vocabulary (status, stage, pipeline, company, stakeholder contact, currency,
+ * owners) with
  * counts, computed server-side over the whole workspace so options never vanish when the
  * visible page lacks them (e.g. the "Closed" status option). The owners facet in particular
  * always reflects all-team counts — including the `__empty__` unassigned bucket — regardless

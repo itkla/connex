@@ -19,7 +19,7 @@ import ContactActionsMenu from "@/app/components/records/contacts/ContactActions
 import ContactAvatar from "@/app/components/records/contacts/ContactAvatar";
 import ContactConnections from "@/app/components/records/contacts/ContactConnections";
 import ContactStatCard from "@/app/components/records/contacts/ContactStatCard";
-import { companyDealsHref } from "@/app/components/records/deals/dealLinks";
+import { contactDealsHref } from "@/app/components/records/deals/dealLinks";
 import WarmthEvidenceChip from "@/app/components/records/WarmthEvidenceChip";
 import { RecordActivityComposer, RecordTaskComposer } from "@/app/components/records/RecordComposers";
 import TagEditor from "@/app/components/records/contacts/TagEditor";
@@ -375,7 +375,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                     label={t("deals")}
                                     value={deals.length}
                                     subtitle={deals.length > 0 ? t("dealsCount", { count: deals.length }) : undefined}
-                                    viewHref={companyDealsHref(contact.companyId ?? contact.company?.id)}
+                                    viewHref={contactDealsHref(contact.id)}
                                 />
                             </div>
                         </RecordDetailSection>

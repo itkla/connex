@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 
 import ReportsBoard from '@/app/components/reports/ReportsBoard';
+import { PageShell } from '@/app/components/PageShell';
 import PermissionsUnavailablePage from '@/app/components/PermissionsUnavailablePage';
 import WorkspaceUnavailablePage from '@/app/components/WorkspaceUnavailablePage';
 import {
@@ -36,12 +37,14 @@ export default async function ReportsPage() {
     const effectivePermissions = permissionsResult.data;
 
     return (
-        <ReportsBoard
-            templates={templates}
-            initialReports={reports}
-            effectivePermissions={effectivePermissions}
-            currentUserId={user.id}
-            composerAvailable={composerAvailabilityResult.ok && composerAvailabilityResult.data.available}
-        />
+        <PageShell>
+            <ReportsBoard
+                templates={templates}
+                initialReports={reports}
+                effectivePermissions={effectivePermissions}
+                currentUserId={user.id}
+                composerAvailable={composerAvailabilityResult.ok && composerAvailabilityResult.data.available}
+            />
+        </PageShell>
     );
 }

@@ -114,6 +114,7 @@ public class ExportController {
             @RequestParam(required = false) List<Integer> pipelineId,
             @RequestParam(required = false) List<Integer> stageId,
             @RequestParam(required = false) List<Integer> companyId,
+            @RequestParam(required = false) List<Integer> personId,
             @RequestParam(defaultValue = "false") boolean noCompany,
             @RequestParam(required = false) List<String> status,
             @RequestParam(required = false) List<String> risk,
@@ -126,6 +127,7 @@ public class ExportController {
             DealFilterNormalizer.normalizeIds(pipelineId, "pipelineId"),
             DealFilterNormalizer.normalizeIds(stageId, "stageId"),
             DealFilterNormalizer.normalizeIds(companyId, "companyId"),
+            DealFilterNormalizer.normalizeIds(personId, "personId"),
             noCompany,
             DealFilterNormalizer.normalizeStatuses(status),
             DealFilterNormalizer.normalizeValues(risk, DealFilterNormalizer.DEAL_RISKS, "risk"),
@@ -146,6 +148,7 @@ public class ExportController {
             DealFilterNormalizer.normalizeIds(request.getPipelineId(), "pipelineId"),
             DealFilterNormalizer.normalizeIds(request.getStageId(), "stageId"),
             DealFilterNormalizer.normalizeIds(request.getCompanyId(), "companyId"),
+            DealFilterNormalizer.normalizeIds(request.getPersonId(), "personId"),
             request.isNoCompany(),
             DealFilterNormalizer.normalizeStatuses(request.getStatus()),
             DealFilterNormalizer.normalizeValues(

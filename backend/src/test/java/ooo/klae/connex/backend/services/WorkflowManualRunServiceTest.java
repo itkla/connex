@@ -17,6 +17,7 @@ import static org.mockito.Mockito.when;
 import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,22 +29,29 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.SavedView;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowInvocation;
 import ooo.klae.connex.backend.beans.WorkflowInvocationRecord;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
+import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
+import ooo.klae.connex.backend.dto.WorkflowDiagnosticCode;
+import ooo.klae.connex.backend.dto.WorkflowDiagnosticDto;
 import ooo.klae.connex.backend.dto.WorkflowInvocationResultDto;
 import ooo.klae.connex.backend.dto.WorkflowManualConfirmRequest;
 import ooo.klae.connex.backend.dto.WorkflowManualPreparationDto;
 import ooo.klae.connex.backend.dto.WorkflowManualPrepareRequest;
 import ooo.klae.connex.backend.dto.WorkflowManualScope;
+import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowOperationsMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
+import ooo.klae.connex.backend.services.WorkflowActionRetryPolicy.RetrySafety;
 
 @ExtendWith(MockitoExtension.class)
 class WorkflowManualRunServiceTest {
@@ -171,7 +179,7 @@ class WorkflowManualRunServiceTest {
             "{\"segments\":{\"match\":\"all\",\"conditions\":[]},"
                 + "\"filters\":{\"status\":[\"open\"]}}");
         when(dealService.getMatchingDealIds(
-            null, null, null, null, null, false, List.of("open"), null, null))
+            null, null, null, null, null, null, false, List.of("open"), null, null))
             .thenReturn(List.of(91, 92));
 
         WorkflowManualPreparationDto result = service.prepare(
@@ -182,7 +190,94 @@ class WorkflowManualRunServiceTest {
         assertEquals(0, result.exactCount());
         assertEquals(List.of("scope_empty"), result.blockers());
         verify(dealService).getMatchingDealIds(
-            null, null, null, null, null, false, List.of("open"), null, null);
+            null, null, null, null, null, null, false, List.of("open"), null, null);
+    }
+
+    @Test
+    void savedViewContactFacetNarrowsTheManualDealScope() throws Exception {
+        stubSavedView("{\"filters\":{\"contact\":[\"13\",\"13\"]}}");
+        when(dealService.getMatchingDealIds(
+            null, null, null, null, null, List.of(13, 13), false, null, null, null))
+            .thenReturn(List.of());
+
+        WorkflowManualPreparationDto result = service.prepare(
+            11,
+            new WorkflowManualPrepareRequest(
+                "saved_view", new WorkflowManualScope.SavedView(5)));
+
+        assertEquals(0, result.exactCount());
+        verify(dealService).getMatchingDealIds(
+            null, null, null, null, null, List.of(13, 13), false, null, null, null);
+    }
+
+    @Test
+    void preparationLabelsTheActorAndAccessibleSkippedRecordsWithoutLeakingMissingIds() {
+        when(workspaceService.getCurrentUserId()).thenReturn(41);
+        Workflow workflow = new Workflow();
+        workflow.setId(11);
+        workflow.setWorkspaceId(7);
+        workflow.setName("Deal workflow");
+        workflow.setEnabled(true);
+        workflow.setRuntimeOwner("canonical");
+        workflow.setActiveVersionId(19L);
+        when(workflowMapper.getById(7, 11)).thenReturn(workflow);
+        WorkflowVersion version = new WorkflowVersion();
+        version.setId(19L);
+        version.setWorkflowId(11);
+        version.setWorkspaceId(7);
+        version.setVersionNumber(1);
+        version.setRecordType("deal");
+        version.setExecutionMode("user");
+        version.setRunAsUserId(17);
+        version.setDefinitionHash(new byte[32]);
+        version.setDefinitionJson("{}");
+        when(workflowVersionMapper.getById(7, 11, 19L)).thenReturn(version);
+        User actor = new User();
+        actor.setId(17);
+        actor.setDisplayName("Workflow Owner");
+        when(workspaceService.getMembers(7)).thenReturn(List.of(actor));
+        when(workspaceService.getRole(7, 17)).thenReturn("member");
+        RuleAction action = new RuleAction();
+        action.setType("create_task");
+        WorkflowDefinition definition = new WorkflowDefinition(
+            1, "action", List.of(new WorkflowNode.Action("action", action)), List.of());
+        when(canonicalizer.parseDefinition("{}")).thenReturn(definition);
+        when(retryPolicy.safety(action)).thenReturn(RetrySafety.TRANSACTIONAL);
+        WorkflowDiagnosticDto blocker = new WorkflowDiagnosticDto(
+            WorkflowDiagnosticCode.ACTION_PERMISSION_MISSING,
+            "action",
+            null,
+            null,
+            Map.of("permission", "TASK_CREATE"));
+        when(actionGuard.blocker(7, 17, "deal", 91, "action", action)).thenReturn(blocker);
+        doAnswer(call -> {
+            if (call.getArgument(2, Integer.class) == 92) {
+                throw new WorkflowExecutionException(
+                    "record_unavailable", "Record unavailable", true);
+            }
+            return null;
+        }).when(recordGuard).requireAccessible(anyInt(), anyString(), anyInt());
+        Deal deal = new Deal();
+        deal.setId(91);
+        deal.setName("Strategic Renewal");
+        when(dealService.getDealById(91)).thenReturn(deal);
+        when(objectMapper.writeValueAsString(any())).thenReturn("{}");
+        doAnswer(call -> {
+            call.<WorkflowInvocation>getArgument(0).setId(31L);
+            return null;
+        }).when(operationsMapper).insertInvocation(any());
+
+        WorkflowManualPreparationDto result = service.prepare(
+            11,
+            new WorkflowManualPrepareRequest(
+                "record_list", new WorkflowManualScope.PageSelection(List.of(91, 92))));
+
+        assertEquals("Workflow Owner", result.actorLabel());
+        assertEquals(
+            List.of(new WorkflowManualPreparationDto.Sample(91, "Strategic Renewal")),
+            result.skippedSamples());
+        assertEquals(1, result.expectedSkips().missingReference());
+        assertEquals(1, result.expectedSkips().unsupportedContext());
     }
 
     @Test
@@ -243,11 +338,13 @@ class WorkflowManualRunServiceTest {
         view.setRecordType("deal");
         view.setConfig(JsonMapper.builder().build().readTree(configJson));
         when(savedViewService.getById(5)).thenReturn(view);
-        when(objectMapper.treeToValue(
-            view.getConfig().get("segments"), SegmentDefinition.class))
-            .thenReturn(new SegmentDefinition());
-        when(segmentService.evaluate(eq("deal"), any(SegmentDefinition.class)))
-            .thenReturn(List.of());
+        if (view.getConfig().get("segments") != null) {
+            when(objectMapper.treeToValue(
+                view.getConfig().get("segments"), SegmentDefinition.class))
+                .thenReturn(new SegmentDefinition());
+            when(segmentService.evaluate(eq("deal"), any(SegmentDefinition.class)))
+                .thenReturn(List.of());
+        }
         WorkflowDefinition definition = new WorkflowDefinition(
             1, "trigger", List.of(), List.of());
         when(canonicalizer.parseDefinition("{}")).thenReturn(definition);

@@ -17,6 +17,9 @@ export const DEAL_DOCUMENTS_ANCHOR = 'deal-documents';
  */
 export const DEAL_COMPANY_FILTER_KEY = 'company';
 
+/** URL query key the deals browser reads as its stakeholder-contact facet. */
+export const DEAL_CONTACT_FILTER_KEY = 'contact';
+
 /** URL query key the deals browser reads as its pipeline facet, resolved the same way. */
 export const DEAL_PIPELINE_FILTER_KEY = 'pipeline';
 
@@ -45,6 +48,11 @@ export type DealRiskFilterLevel = (typeof DEAL_RISK_LEVELS)[number];
 export function companyDealsHref(companyId: number | null | undefined): string | undefined {
     if (companyId == null) return undefined;
     return `${DEALS_BROWSER_PATH}?${DEAL_COMPANY_FILTER_KEY}=${companyId}`;
+}
+
+/** Href for the deals browser pre-filtered to one contact's stakeholder deals. */
+export function contactDealsHref(contactId: number): string {
+    return `${DEALS_BROWSER_PATH}?${DEAL_CONTACT_FILTER_KEY}=${contactId}`;
 }
 
 /** Href for the deals browser pre-filtered to one pipeline's deals. */

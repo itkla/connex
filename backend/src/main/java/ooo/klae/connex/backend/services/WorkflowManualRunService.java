@@ -30,6 +30,7 @@ import ooo.klae.connex.backend.beans.PersonFirstResponseState;
 import ooo.klae.connex.backend.beans.PersonLeadSource;
 import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.beans.SavedView;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowInvocation;
 import ooo.klae.connex.backend.beans.WorkflowInvocationRecord;
@@ -61,6 +62,7 @@ public class WorkflowManualRunService {
 
     private static final int MAX_RECORDS = 1000;
     private static final int MAX_SAMPLES = 25;
+    private static final int MAX_SKIPPED_SAMPLES = 50;
     private static final int MAX_LABEL_LENGTH = 128;
     private static final Set<String> TERMINAL_INVOCATION_STATUSES = Set.of(
         "succeeded", "failed", "partial", "cancelled", "expired");
@@ -106,10 +108,12 @@ public class WorkflowManualRunService {
         WorkflowDefinition definition = canonicalizer.parseDefinition(version.getDefinitionJson());
         definitionValidator.validate(version.getRecordType(), version.getExecutionMode(), definition);
         int actorUserId = actorUserId(version);
+        String actorLabel = actorLabel(workspaceId, version, actorUserId);
         List<WorkflowManualPreparationDto.Action> actions = actions(definition);
         List<String> blockers = operationalBlockers(workflow, version, actorUserId, resolved.ids());
         List<WorkflowInvocationRecord> records = new ArrayList<>();
         List<WorkflowManualPreparationDto.Sample> samples = new ArrayList<>();
+        List<WorkflowManualPreparationDto.Sample> skippedSamples = new ArrayList<>();
         int missingReferences = 0;
         int configurationSkips = 0;
         int ordinal = 0;
@@ -136,6 +140,10 @@ public class WorkflowManualRunService {
                     missingReferences++;
                 } else {
                     configurationSkips++;
+                    if (skippedSamples.size() < MAX_SKIPPED_SAMPLES) {
+                        skippedSamples.add(new WorkflowManualPreparationDto.Sample(
+                            recordId, recordLabel(version.getRecordType(), recordId)));
+                    }
                 }
             }
             records.add(record);
@@ -175,6 +183,7 @@ public class WorkflowManualRunService {
             HexFormat.of().formatHex(version.getDefinitionHash()),
             version.getExecutionMode(),
             actorUserId,
+            actorLabel,
             resolved.scopeKind(),
             resolved.resolvedKind(),
             sourceSurface,
@@ -186,6 +195,7 @@ public class WorkflowManualRunService {
             (int) records.stream().filter(record -> "ready".equals(record.getPreviewStatus())).count(),
             expectedSkips,
             List.copyOf(samples),
+            List.copyOf(skippedSamples),
             actions,
             blockers.isEmpty() && records.stream().anyMatch(
                 record -> "ready".equals(record.getPreviewStatus())),
@@ -361,7 +371,7 @@ public class WorkflowManualRunService {
                 "search_snapshot",
                 resolveFilterForRecordType(recordType, new WorkflowManualFilter(
                     query, null, null, null, false, null, null, null,
-                    null, null, null, null, null, null, false, null, false, null, false),
+                    null, null, null, null, null, null, null, false, null, false, null, false),
                     requesterId),
                 scope);
         }
@@ -411,8 +421,14 @@ public class WorkflowManualRunService {
             int requesterId) {
         WorkflowManualFilter resolved = filter == null
             ? new WorkflowManualFilter(
-                null, null, null, null, false, null, null, null,
-                null, null, null, null, null, null, false, null, false, null, false)
+                null, null, null, null,
+                false, null,
+                null, null, null, null,
+                null, null,
+                null, null,
+                null, false,
+                null, false,
+                null, false)
             : filter;
         MemberScope memberScope = memberScopeResolver.resolve(
             resolved.memberScope(), resolved.memberIds(), requesterId);
@@ -445,6 +461,7 @@ public class WorkflowManualRunService {
                 resolved.pipelineIds(),
                 resolved.stageIds(),
                 resolved.companyIds(),
+                resolved.personIds(),
                 Boolean.TRUE.equals(resolved.noCompany()),
                 resolved.statuses(),
                 resolved.risks(),
@@ -578,6 +595,31 @@ public class WorkflowManualRunService {
         return actor;
     }
 
+    private String actorLabel(int workspaceId, WorkflowVersion version, int actorUserId) {
+        if ("system".equals(version.getExecutionMode())) {
+            return null;
+        }
+        List<User> members = workspaceService.getMembers(workspaceId);
+        if (members == null) {
+            return null;
+        }
+        return members.stream()
+            .filter(member -> member.getId() == actorUserId)
+            .map(WorkflowManualRunService::memberLabel)
+            .filter(label -> label != null && !label.isBlank())
+            .findFirst()
+            .orElse(null);
+    }
+
+    private static String memberLabel(User member) {
+        String displayName = member.getDisplayName();
+        if (displayName != null && !displayName.isBlank()) {
+            return displayName.trim();
+        }
+        String username = member.getUsername();
+        return username == null || username.isBlank() ? null : username.trim();
+    }
+
     private WorkflowInvocation invocation(
             int workspaceId,
             Workflow workflow,
@@ -663,7 +705,7 @@ public class WorkflowManualRunService {
         if (config == null || config.isNull()) {
             return new WorkflowManualFilter(
                 null, null, null, null, false, null, null, null,
-                null, null, null, null, null, null, false, null, false, null, false);
+                null, null, null, null, null, null, null, false, null, false, null, false);
         }
         JsonNode filters = config.get("filters");
         List<String> lifecycle = textValues(filters, "lifecycle");
@@ -679,6 +721,7 @@ public class WorkflowManualRunService {
             integerValues(filters, "pipelineId"),
             integerValues(filters, "stageId"),
             integerValues(filters, "companyId"),
+            integerValues(filters, "contact"),
             textValues(filters, "status"),
             textValues(filters, "risk"),
             firstValue(filters, "scope"),
@@ -734,6 +777,7 @@ public class WorkflowManualRunService {
             || nonempty(filter.pipelineIds())
             || nonempty(filter.stageIds())
             || nonempty(filter.companyIds())
+            || nonempty(filter.personIds())
             || nonempty(filter.statuses())
             || nonempty(filter.risks())
             || nonempty(filter.lifecycleStages())

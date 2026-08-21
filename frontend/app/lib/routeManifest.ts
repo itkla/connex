@@ -1,3 +1,11 @@
+import {
+    ACTIVITY_URL_KEY,
+    COMMENT_URL_KEY,
+    NOTE_URL_KEY,
+    PIPELINE_EDIT_URL_KEY,
+    TASK_URL_KEY,
+} from '@/app/hooks/listStateUrl';
+
 /**
  * The complete inventory of shipped authenticated App Router routes, as `/segment/[param]` patterns
  * matching the directory layout under `app/(app)`.
@@ -99,6 +107,17 @@ export const SHIPPED_APP_ROUTES = [
 /** One shipped route pattern from {@link SHIPPED_APP_ROUTES}. */
 export type ShippedAppRoute = (typeof SHIPPED_APP_ROUTES)[number];
 
+/** Query parameters owned by each shipped route's deep-link consumers. */
+export const SHIPPED_ROUTE_QUERY_PARAMS = {
+    '/activity/all': [ACTIVITY_URL_KEY],
+    '/activity/notes': [NOTE_URL_KEY],
+    '/activity/tasks': [TASK_URL_KEY],
+    '/records/companies/[id]': [ACTIVITY_URL_KEY, COMMENT_URL_KEY, NOTE_URL_KEY, TASK_URL_KEY],
+    '/records/contacts/[id]': [ACTIVITY_URL_KEY, COMMENT_URL_KEY, NOTE_URL_KEY, TASK_URL_KEY],
+    '/records/deals/[id]': [ACTIVITY_URL_KEY, COMMENT_URL_KEY, NOTE_URL_KEY, TASK_URL_KEY],
+    '/records/pipelines': [PIPELINE_EDIT_URL_KEY],
+} as const satisfies Partial<Record<ShippedAppRoute, readonly string[]>>;
+
 function isDynamicSegment(segment: string): boolean {
     return segment.startsWith('[') && segment.endsWith(']');
 }
@@ -146,4 +165,12 @@ export function resolveShippedRoute(href: string): ShippedAppRoute | null {
 /** Whether an app-relative href is served by a shipped route. */
 export function matchesShippedRoute(href: string): boolean {
     return resolveShippedRoute(href) !== null;
+}
+
+/** Whether a query parameter is consumed by the exact shipped route serving an href. */
+export function routeAllowsQueryParam(href: string, key: string): boolean {
+    const route = resolveShippedRoute(href);
+    if (route === null) return false;
+    const allowed = SHIPPED_ROUTE_QUERY_PARAMS[route as keyof typeof SHIPPED_ROUTE_QUERY_PARAMS];
+    return allowed?.some((candidate) => candidate === key) ?? false;
 }
