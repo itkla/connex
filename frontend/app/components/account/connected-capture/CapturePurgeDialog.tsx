@@ -7,6 +7,7 @@ import {
 } from '@heroicons/react/24/outline';
 import { useTranslations } from 'next-intl';
 
+import { canChangeCaptureLifecycleDialogOpen } from '@/app/lib/captureLifecycleDialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -22,14 +23,6 @@ import {
 } from '@/components/ui/responsive-dialog';
 
 export type CaptureLifecycleMode = 'purge' | 'disconnect' | 'reset';
-
-/** Reports whether a requested lifecycle-dialog transition is safe while a mutation is running. */
-export function canChangeCaptureLifecycleDialogOpen(
-    busy: boolean,
-    nextOpen: boolean,
-): boolean {
-    return nextOpen || !busy;
-}
 
 /**
  * Separates ordinary credential-only disconnect from current-workspace erasure and the explicit

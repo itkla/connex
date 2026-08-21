@@ -5,10 +5,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import CaptureProviderCard from "@/app/components/account/connected-capture/CaptureProviderCard";
 import CaptureDisclosures from "@/app/components/account/connected-capture/CaptureDisclosures";
-import {
-    canChangeCaptureLifecycleDialogOpen,
-} from "@/app/components/account/connected-capture/CapturePurgeDialog";
 import { NowProvider } from "@/app/hooks/useNow";
+import { canChangeCaptureLifecycleDialogOpen } from "@/app/lib/captureLifecycleDialog";
 import {
     CAPTURE_PANELS,
     providerCardAction,
