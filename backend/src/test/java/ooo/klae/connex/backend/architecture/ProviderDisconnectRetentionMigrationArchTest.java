@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.architecture;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -11,13 +12,13 @@ import org.junit.jupiter.api.Test;
 class ProviderDisconnectRetentionMigrationArchTest {
 
     @Test
-    void migrationAddsInternalStatesAndDropsDeadSyncColumn() throws Exception {
+    void migrationAddsInternalStatesWithoutContractingTheLegacySchema() throws Exception {
         String migration = resource(
             "db/migration/control/V186__provider_disconnect_retention.sql");
 
         assertTrue(migration.contains("'revoking'"));
         assertTrue(migration.contains("'disconnected'"));
-        assertTrue(migration.contains("DROP COLUMN last_sync_at"));
+        assertFalse(migration.contains("DROP COLUMN last_sync_at"));
         assertTrue(migration.contains("credential_ref IS NULL"));
         assertTrue(migration.contains("access_token_expires_at IS NULL"));
     }

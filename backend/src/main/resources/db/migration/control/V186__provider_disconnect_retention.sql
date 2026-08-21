@@ -1,6 +1,5 @@
 ALTER TABLE provider_connection
     DROP CONSTRAINT chk_provider_connection_status,
-    DROP COLUMN last_sync_at,
     ADD CONSTRAINT chk_provider_connection_status CHECK (
         status IN (
             'connected', 'paused', 'error', 'revoked', 'revoking', 'disconnected',
