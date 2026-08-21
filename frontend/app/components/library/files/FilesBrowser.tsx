@@ -66,7 +66,7 @@ import {
     FilterBar,
     MultiSelectFilter,
     RadioFilter,
-    pillClass,
+    FilterTrigger,
     type FilterChipData,
 } from '@/app/components/filters';
 import { SegmentedControl } from '@/components/ui/segmented-control';
@@ -554,17 +554,16 @@ export default function FilesBrowser() {
                             />
                         )}
                         {facets && facets.orphaned > 0 && (
-                            <button
+                            <FilterTrigger
                                 type="button"
                                 onClick={() => setOrphaned((o) => !o)}
-                                aria-pressed={orphaned}
+                                active={orphaned}
                                 title={t('unlinkedHint')}
-                                className={pillClass(orphaned)}
                             >
                                 <LinkSlashIcon className="size-3.5" />
                                 {t('unlinked')}
                                 <span className="tabular-nums">{facets.orphaned}</span>
-                            </button>
+                            </FilterTrigger>
                         )}
                     </FilterBar>
                     </Rise>

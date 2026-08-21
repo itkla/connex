@@ -34,7 +34,6 @@
     "app/components/diagnostics/MailDeliverabilitySection.tsx": 1,
     "app/components/docs/DocsTopBar.tsx": 2,
     "app/components/filters/FilterBar.tsx": 2,
-    "app/components/filters/MemberScopeFilter.tsx": 1,
     "app/components/import/ImportDialog.tsx": 2,
     "app/components/introductions/IntroRationaleLine.tsx": 1,
     "app/components/introductions/IntroductionsBoard.tsx": 1,

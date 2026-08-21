@@ -34,7 +34,7 @@ import type {
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { commentPlainText } from '@/app/components/records/comments/commentText';
 import CommentComposer from '@/app/components/records/comments/CommentComposer';
-import CommentDeleteDialog from '@/app/components/records/comments/CommentDeleteDialog';
+import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import CommentThread, {
     type CommentAuthorIdentity,
 } from '@/app/components/records/comments/CommentThread';
@@ -592,12 +592,20 @@ export default function CommentsSection({
                 )}
             </div>
 
-            <CommentDeleteDialog
-                open={pendingDelete != null}
-                deleting={deleting}
-                onCancel={() => setPendingDelete(null)}
-                onConfirm={confirmDelete}
-            />
+            {pendingDelete && (
+                <DeleteRecordDialog<RecordComment>
+                    open
+                    onOpenChange={(open) => {
+                        if (!open && !deleting) setPendingDelete(null);
+                    }}
+                    selectedIds={new Set([pendingDelete.id])}
+                    selectedItems={[pendingDelete]}
+                    entityLabel={t('entityLabel')}
+                    details={<p className="text-sm text-muted-foreground">{t('deleteConsequence')}</p>}
+                    isDeleting={deleting}
+                    confirmDelete={confirmDelete}
+                />
+            )}
         </div>
     );
 }

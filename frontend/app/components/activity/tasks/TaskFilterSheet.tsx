@@ -17,7 +17,6 @@ import {
     ResponsiveDialogTitle,
     ResponsiveDialogTrigger,
 } from '@/components/ui/responsive-dialog';
-import { pillClass } from '@/app/components/filters';
 import { cn } from '@/lib/utils';
 
 export interface TaskFilterSheetSection {
@@ -52,10 +51,17 @@ export default function TaskFilterSheet({
     return (
         <ResponsiveDialog>
             <ResponsiveDialogTrigger asChild>
-                <button
+                <Button
                     type="button"
+                    variant="outline"
+                    size="toolbar"
                     aria-label={t('filterAria')}
-                    className={cn(pillClass(activeCount > 0), 'shrink-0 md:hidden')}
+                    aria-pressed={activeCount > 0}
+                    className={cn(
+                        'shrink-0 text-xs md:hidden',
+                        activeCount > 0 &&
+                            'border-brand-dark/20 bg-brand-light/70 text-foreground hover:bg-brand-light/80',
+                    )}
                 >
                     <AdjustmentsHorizontalIcon className="size-4 shrink-0" aria-hidden />
                     <span className="truncate">{t('filter')}</span>
@@ -64,7 +70,7 @@ export default function TaskFilterSheet({
                             {activeCount}
                         </span>
                     )}
-                </button>
+                </Button>
             </ResponsiveDialogTrigger>
             <ResponsiveDialogContent
                 scrollable={false}

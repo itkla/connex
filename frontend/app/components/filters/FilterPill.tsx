@@ -1,7 +1,7 @@
 "use client";
 
-import { ChevronDownIcon } from "@heroicons/react/20/solid";
 import { XMarkIcon } from "@heroicons/react/24/outline";
+import { Button, type ButtonProps } from "@/components/ui/button";
 import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -18,12 +18,25 @@ import { cn } from "@/lib/utils";
 export type MultiSelectOption = { value: string; total?: number; label?: string };
 export type RadioOption = { value: string; label: string; count?: number };
 
-export function pillClass(active: boolean): string {
-    return cn(
-        "group inline-flex h-9 min-w-0 max-w-full items-center gap-1.5 rounded-full px-3 text-xs font-medium ring-1 outline-none focus-visible:ring-2 focus-visible:ring-brand/40",
-        active
-            ? "bg-brand-light/70 text-foreground ring-brand-dark/20"
-            : "bg-muted text-foreground ring-border hover:bg-accent hover:text-accent-foreground",
+export type FilterTriggerProps = Omit<ButtonProps, "size" | "variant"> & {
+    active: boolean;
+};
+
+/** Shared semantic trigger for toolbar filters and filter toggles. */
+export function FilterTrigger({ active, className, ...props }: FilterTriggerProps) {
+    return (
+        <Button
+            type="button"
+            variant="outline"
+            size="toolbar"
+            aria-pressed={active}
+            className={cn(
+                "min-w-0 max-w-full text-xs",
+                active && "border-brand-dark/20 bg-brand-light/70 text-foreground hover:bg-brand-light/80",
+                className,
+            )}
+            {...props}
+        />
     );
 }
 
@@ -60,15 +73,14 @@ export function MultiSelectFilter({
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <button type="button" aria-label={ariaLabel} aria-pressed={active} className={pillClass(active)}>
+                <FilterTrigger active={active} aria-label={ariaLabel} menu>
                     <span>{label}</span>
                     {active && (
                         <span className="grid size-4 place-items-center rounded-full bg-brand text-[10px] font-semibold leading-none text-brand-foreground tabular-nums">
                             {selected.size}
                         </span>
                     )}
-                    <ChevronDownIcon className="size-3.5 text-muted-foreground group-data-[state=open]:rotate-180" />
-                </button>
+                </FilterTrigger>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-60 data-open:animate-none data-closed:animate-none">
                 <DropdownMenuLabel>{label}</DropdownMenuLabel>
@@ -131,10 +143,9 @@ export function RadioFilter({
     return (
         <DropdownMenu onOpenChange={onOpenChange}>
             <DropdownMenuTrigger asChild>
-                <button type="button" aria-label={ariaLabel} aria-pressed={active} className={pillClass(active)}>
+                <FilterTrigger active={active} aria-label={ariaLabel} menu>
                     <span className="max-w-40 truncate">{active ? selectedLabel : label}</span>
-                    <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground group-data-[state=open]:rotate-180" />
-                </button>
+                </FilterTrigger>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-56 data-open:animate-none data-closed:animate-none">
                 <DropdownMenuLabel>{label}</DropdownMenuLabel>

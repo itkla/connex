@@ -28,7 +28,6 @@ import {
     MEMBER_SCOPE_ME,
     MEMBER_SCOPE_UNASSIGNED,
     interpretMemberScope,
-    pillClass,
     toggleMemberScopeMember,
     toggleMemberScopeSentinel,
 } from '@/app/components/filters';
@@ -155,10 +154,17 @@ export default function RecordsFilterSheet<T>({
     return (
         <ResponsiveDialog>
             <ResponsiveDialogTrigger asChild>
-                <button
+                <Button
                     type="button"
+                    variant="outline"
+                    size="toolbar"
                     aria-label={t('filterSortAria')}
-                    className={cn(pillClass(triggerActive), 'shrink-0 md:hidden')}
+                    aria-pressed={triggerActive}
+                    className={cn(
+                        'shrink-0 text-xs md:hidden',
+                        triggerActive &&
+                            'border-brand-dark/20 bg-brand-light/70 text-foreground hover:bg-brand-light/80',
+                    )}
                 >
                     <AdjustmentsHorizontalIcon className="size-4 shrink-0" aria-hidden />
                     <span className="truncate">{t('filterSort')}</span>
@@ -167,7 +173,7 @@ export default function RecordsFilterSheet<T>({
                             {activeCount}
                         </span>
                     )}
-                </button>
+                </Button>
             </ResponsiveDialogTrigger>
             <ResponsiveDialogContent
                 scrollable={false}

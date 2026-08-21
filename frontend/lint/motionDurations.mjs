@@ -34,6 +34,9 @@ import { join, relative, resolve, sep } from "node:path";
  * 4. 227 → 226 (lowered). WS11's Radar redesign replaced the signal card's hand-timed disclosure
  *    chevron with the `--motion-*` tokens, so the last radar file left the ledger.
  *
+ * 5. 226 → 225 (lowered). WS8's filter-family convergence removed the member-scope control's
+ *    private disclosure chevron; the shared button menu indicator now owns its tokenized motion.
+ *
  * Widening the scanner is the only sanctioned reason to raise the mark. New debt is not — and when
  * a widening commit also pays debt down, the mark follows the lower total, as in (2).
  *
@@ -218,4 +221,4 @@ export function loadBaseline() {
  * It may fall. It rises only in a commit that widens what the scanner catches — never to make room
  * for new debt.
  */
-export const BASELINE_HIGH_WATER_MARK = 226;
+export const BASELINE_HIGH_WATER_MARK = 225;

@@ -304,11 +304,6 @@
     "clearFilters": "Clear filters",
     "sortBy": "Sort"
   },
-  "RecordsFilterMenu": {
-    "filterAria": "Filter",
-    "filterBy": "Filter by",
-    "clearAll": "Clear all"
-  },
   "RecordsDeleteDialog": {
     "titleSingle": "Delete {entityLabel}?",
     "titleMultiple": "Delete {count} {entityLabel}s?",

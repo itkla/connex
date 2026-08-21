@@ -4,6 +4,7 @@
     "clearSearchAria": "Clear search",
     "clear": "Clear",
     "clearAll": "Clear all",
+    "removeFilter": "Remove {label} filter",
     "chipSearch": "Search: {query}",
     "noMatchesTitle": "No matches",
     "noMatchesBody": "Try adjusting your search or filters.",
