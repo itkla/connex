@@ -102,7 +102,7 @@ For a material backend change:
 
 1. Start MySQL and run the backend with the `dev` profile when runtime verification is needed.
 2. If a `*Controller` changed, exercise each materially changed endpoint with real HTTP requests. Verify status/body plus authentication, RBAC, and tenant behavior; include unauthorized/other-tenant cases when relevant.
-3. Add/update automated tests. Run every changed/added test class plus directly implicated architecture, tenancy, routing, migration, or security guard tests using Gradle `--tests` selectors.
+3. Add/update automated tests. Load `CONNEX_DB_*` from the untracked `backend/.env`, then run every changed/added test class plus directly implicated architecture, tenancy, routing, migration, or security guard tests using Gradle `--tests` selectors. Confirm database-backed integration tests executed rather than being assumption-skipped because credentials were absent.
 4. Do **not** run bare `./gradlew test` or `./gradlew build` on the shared development host merely for extra confidence. Use the full suite locally only to reproduce an actual full-suite CI failure that cannot be isolated, when acceptance criteria explicitly require it, or when the user explicitly directs it.
 5. Inspect the exact diff for tenant leakage, RBAC gaps, null/edge cases, N+1 behavior, transaction boundaries, migration safety, and failure recovery.
 6. Material changes get independent adversarial review. High-risk security/tenant work gets security review; concurrency/locking/migration work gets a separate correctness-focused review when the risk warrants it.
@@ -111,7 +111,13 @@ Do not investigate a slow shared development host unless the active task is abou
 
 ## Commands
 
-Local database credentials belong in untracked `backend/.env` derived from `.env.example`.
+Local database credentials belong in untracked `backend/.env` derived from `.env.example`. From `backend/`, load it into the shell before runtime or database-backed tests:
+
+```bash
+set -a
+source .env
+set +a
+```
 
 - Dev server: `SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun`
 - Targeted test: `./gradlew test --tests '<fully.qualified.TestClass>'`
