@@ -167,7 +167,7 @@ class FigureReconciliationArchTest {
                 verifyNoLineItemSource(definition, evidence, sql, violations);
                 verifyArchivePosture(definition, evidence, sql, violations);
                 verifyRestrictionPosture(definition, evidence, statement, sql, violations);
-                verifySharingPosture(definition, evidence, sql, violations);
+                verifySharingPosture(definition, evidence, statement, sql, violations);
                 verifyPeriodBasis(
                     definition, evidence, statement, sql, measureSql, violations);
                 verifyOwnerBasis(definition, evidence, sql, violations);
@@ -270,11 +270,7 @@ class FigureReconciliationArchTest {
         RestrictionPosture posture = definition.restrictionPosture();
         switch (posture) {
             case CONTACT_FILTER_EXCLUDES_UNAVAILABLE_PERSONS -> {
-                String contactFilterSql = statement.conditionals().stream()
-                    .filter(conditional -> conditional.condition().contains("personIds != null"))
-                    .map(ConditionalSql::sql)
-                    .findFirst()
-                    .orElse("");
+                String contactFilterSql = contactFilterSql(statement);
                 requireContains(definition, evidence, posture,
                     "JOIN person filtered_person", contactFilterSql, violations);
                 requireContains(definition, evidence, posture,
@@ -300,6 +296,7 @@ class FigureReconciliationArchTest {
     private void verifySharingPosture(
             FigureDefinition definition,
             StatementEvidence evidence,
+            Statement statement,
             String sql,
             List<String> violations) {
         SharingPosture posture = definition.sharingPosture();
@@ -307,8 +304,17 @@ class FigureReconciliationArchTest {
             case COMPANY_PERSON_AND_PIPELINE_SHARE_TRAVERSAL -> {
                 requirePattern(definition, evidence, posture, COMPANY_SHARE_READ,
                     "a FROM/JOIN company_share table reference", sql, violations);
+                String contactFilterSql = contactFilterSql(statement);
                 requirePattern(definition, evidence, posture, PERSON_SHARE_READ,
-                    "a FROM/JOIN person_share table reference", sql, violations);
+                    "a FROM/JOIN person_share table reference inside the personIds conditional",
+                    contactFilterSql, violations);
+                int statementPersonShareCount = matchingOccurrences(PERSON_SHARE_READ, sql);
+                int contactFilterPersonShareCount = matchingOccurrences(
+                    PERSON_SHARE_READ, contactFilterSql);
+                if (statementPersonShareCount != contactFilterPersonShareCount) {
+                    violations.add(failure(definition, evidence, posture,
+                        "every person_share reference inside the personIds conditional", sql));
+                }
                 requirePattern(definition, evidence, posture, PIPELINE_SHARE_READ,
                     "a FROM/JOIN pipeline_share table reference", sql, violations);
             }
@@ -319,6 +325,14 @@ class FigureReconciliationArchTest {
                 }
             }
         }
+    }
+
+    private String contactFilterSql(Statement statement) {
+        return statement.conditionals().stream()
+            .filter(conditional -> conditional.condition().contains("personIds != null"))
+            .map(ConditionalSql::sql)
+            .findFirst()
+            .orElse("");
     }
 
     private void verifyPeriodBasis(
@@ -551,6 +565,15 @@ class FigureReconciliationArchTest {
             violations.add(failure(definition, evidence, posture,
                 "exactly " + expectedCount + " occurrence(s) of `" + token + "`", sql));
         }
+    }
+
+    private int matchingOccurrences(Pattern pattern, String sql) {
+        int count = 0;
+        Matcher matcher = pattern.matcher(sql);
+        while (matcher.find()) {
+            count++;
+        }
+        return count;
     }
 
     private String failure(
