@@ -24,6 +24,9 @@ export const ACTIVITY_URL_KEY = 'activity';
 /** URL query key that deep-links one record comment, read by the record comments section. */
 export const COMMENT_URL_KEY = 'comment';
 
+/** URL query key that opens one pipeline in the pipelines browser's edit sheet. */
+export const PIPELINE_EDIT_URL_KEY = 'edit';
+
 /**
  * The canonical record deep-link query keys, keyed by the record kind each one addresses. Every
  * producer — a backend notification `actionUrl`, a calendar event href, an in-app link — emits these
@@ -36,6 +39,7 @@ export const DEEP_LINK_URL_KEYS = {
     note: NOTE_URL_KEY,
     activity: ACTIVITY_URL_KEY,
     comment: COMMENT_URL_KEY,
+    pipelineEdit: PIPELINE_EDIT_URL_KEY,
 } as const;
 
 /** Normalizes a URL-supplied list query so empty and whitespace-only values share one canonical form. */

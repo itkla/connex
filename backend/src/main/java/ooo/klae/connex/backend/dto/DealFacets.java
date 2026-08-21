@@ -10,6 +10,7 @@ public record DealFacets(
     List<FacetCount> stages,
     List<FacetCount> pipelines,
     List<FacetCount> companies,
+    List<FacetCount> people,
     List<FacetCount> owners,
     List<FacetCount> currencies,
     List<FacetCount> risk

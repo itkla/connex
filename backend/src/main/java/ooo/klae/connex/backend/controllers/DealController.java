@@ -141,6 +141,7 @@ public class DealController {
         @RequestParam(required = false) List<Integer> pipelineId,
         @RequestParam(required = false) List<Integer> stageId,
         @RequestParam(required = false) List<Integer> companyId,
+        @RequestParam(required = false) List<Integer> personId,
         @RequestParam(defaultValue = "false") boolean noCompany,
         @RequestParam(required = false) List<String> status,
         @RequestParam(required = false) List<String> risk,
@@ -156,6 +157,7 @@ public class DealController {
             normalizeIds(pipelineId, "pipelineId"),
             normalizeIds(stageId, "stageId"),
             normalizeIds(companyId, "companyId"),
+            normalizeIds(personId, "personId"),
             noCompany, normalizeStatuses(status), normalizeValues(risk, DealFilterNormalizer.DEAL_RISKS, "risk"),
             memberScope, bounds.size(), bounds.offset());
         return new PageResponse<>(result.items().stream().map(DealDto::from).toList(), result.total());
@@ -170,7 +172,7 @@ public class DealController {
         PageResponse<Deal> result = dealService.querySegmentDealsPage(
             request.getDefinition(), filters.query(), request.getSort(), filters.direction(),
             filters.currency(), filters.pipelineIds(), filters.stageIds(), filters.companyIds(),
-            request.isNoCompany(), filters.statuses(), filters.risks(), filters.memberScope(),
+            filters.personIds(), request.isNoCompany(), filters.statuses(), filters.risks(), filters.memberScope(),
             bounds.size(), bounds.offset());
         return new PageResponse<>(result.items().stream().map(DealDto::from).toList(), result.total());
     }
@@ -184,6 +186,7 @@ public class DealController {
         @RequestParam(required = false) List<Integer> pipelineId,
         @RequestParam(required = false) List<Integer> stageId,
         @RequestParam(required = false) List<Integer> companyId,
+        @RequestParam(required = false) List<Integer> personId,
         @RequestParam(defaultValue = "false") boolean noCompany,
         @RequestParam(required = false) List<String> status,
         @RequestParam(required = false) List<String> risk,
@@ -197,6 +200,7 @@ public class DealController {
             normalizeIds(pipelineId, "pipelineId"),
             normalizeIds(stageId, "stageId"),
             normalizeIds(companyId, "companyId"),
+            normalizeIds(personId, "personId"),
             noCompany, normalizeStatuses(status), normalizeValues(risk, DealFilterNormalizer.DEAL_RISKS, "risk"),
             resolveMemberScope(scope, memberIds));
     }
@@ -208,7 +212,7 @@ public class DealController {
         SegmentDealFilters filters = segmentFilters(request);
         return dealService.querySegmentDealMetrics(
             request.getDefinition(), filters.query(), filters.currency(), filters.pipelineIds(),
-            filters.stageIds(), filters.companyIds(), request.isNoCompany(), filters.statuses(),
+            filters.stageIds(), filters.companyIds(), filters.personIds(), request.isNoCompany(), filters.statuses(),
             filters.risks(), filters.memberScope());
     }
 
@@ -220,6 +224,7 @@ public class DealController {
             @RequestParam(required = false) List<Integer> pipelineId,
             @RequestParam(required = false) List<Integer> stageId,
             @RequestParam(required = false) List<Integer> companyId,
+            @RequestParam(required = false) List<Integer> personId,
             @RequestParam(defaultValue = "false") boolean noCompany,
             @RequestParam(required = false) List<String> status,
             @RequestParam(required = false) List<String> risk,
@@ -228,7 +233,8 @@ public class DealController {
         String query = q == null || q.isBlank() ? null : LikePattern.containing(q);
         return dealService.getMatchingDealIds(
             query, blankToNull(currency), normalizeIds(pipelineId, "pipelineId"),
-            normalizeIds(stageId, "stageId"), normalizeIds(companyId, "companyId"), noCompany,
+            normalizeIds(stageId, "stageId"), normalizeIds(companyId, "companyId"),
+            normalizeIds(personId, "personId"), noCompany,
             normalizeStatuses(status), normalizeValues(risk, DealFilterNormalizer.DEAL_RISKS, "risk"),
             resolveMemberScope(scope, memberIds));
     }
@@ -240,7 +246,7 @@ public class DealController {
         SegmentDealFilters filters = segmentFilters(request);
         return dealService.getMatchingSegmentDealIds(
             request.getDefinition(), filters.query(), filters.currency(), filters.pipelineIds(),
-            filters.stageIds(), filters.companyIds(), request.isNoCompany(), filters.statuses(),
+            filters.stageIds(), filters.companyIds(), filters.personIds(), request.isNoCompany(), filters.statuses(),
             filters.risks(), filters.memberScope());
     }
 
@@ -465,6 +471,7 @@ public class DealController {
             normalizeIds(request.getPipelineId(), "pipelineId"),
             normalizeIds(request.getStageId(), "stageId"),
             normalizeIds(request.getCompanyId(), "companyId"),
+            normalizeIds(request.getPersonId(), "personId"),
             normalizeStatuses(request.getStatus()),
             normalizeValues(request.getRisk(), DealFilterNormalizer.DEAL_RISKS, "risk"),
             resolveMemberScope(request.getScope(), request.getMemberIds()));
@@ -481,6 +488,7 @@ public class DealController {
         List<Integer> pipelineIds,
         List<Integer> stageIds,
         List<Integer> companyIds,
+        List<Integer> personIds,
         List<String> statuses,
         List<String> risks,
         MemberScope memberScope

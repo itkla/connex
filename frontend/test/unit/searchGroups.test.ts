@@ -58,6 +58,23 @@ describe("global search reaches every first-class sidebar object", () => {
         ]);
     });
 
+    it("opens the exact pipeline search result in the browser-managed edit sheet", () => {
+        const group = onlyGroup({
+            pipelines: [{
+                id: 7,
+                name: "Enterprise",
+                createdAt: "2026-08-20T10:00:00",
+                updatedAt: "2026-08-20T10:00:00",
+            }],
+        });
+
+        expect(group.rows[0]).toMatchObject({
+            key: "pipeline-7",
+            href: "/records/pipelines?edit=7",
+            label: "Enterprise",
+        });
+    });
+
     it("lands a campaign on its own detail page", () => {
         const group = onlyGroup({
             campaigns: [{ id: 8, name: "Spring outreach", type: "email", status: "active" }],

@@ -318,42 +318,43 @@ public class DealService {
      */
     public PageResponse<Deal> queryDealsPage(String query, String sort, String dir, String currency,
             List<Integer> pipelineIds, List<Integer> stageIds, List<Integer> companyIds,
-            boolean noCompany, List<String> statuses, List<String> risks,
+            List<Integer> personIds, boolean noCompany, List<String> statuses, List<String> risks,
             MemberScope memberScope, int limit, int offset) {
         return queryDealsPage(null, query, sort, dir, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, risks, memberScope, limit, offset);
+            personIds, noCompany, statuses, risks, memberScope, limit, offset);
     }
 
     /** Returns one filtered page intersected with the active workspace's segment evaluation. */
     public PageResponse<Deal> querySegmentDealsPage(SegmentDefinition definition, String query,
             String sort, String dir, String currency, List<Integer> pipelineIds,
-            List<Integer> stageIds, List<Integer> companyIds, boolean noCompany,
+            List<Integer> stageIds, List<Integer> companyIds, List<Integer> personIds, boolean noCompany,
             List<String> statuses, List<String> risks, MemberScope memberScope, int limit, int offset) {
         List<Integer> segmentIds = segmentService.evaluate("deal", definition);
         if (segmentIds.isEmpty()) {
             return new PageResponse<>(List.of(), 0);
         }
         return queryDealsPage(idsJson(segmentIds), query, sort, dir, currency, pipelineIds, stageIds,
-            companyIds, noCompany, statuses, risks, memberScope, limit, offset);
+            companyIds, personIds, noCompany, statuses, risks, memberScope, limit, offset);
     }
 
     private PageResponse<Deal> queryDealsPage(String segmentIdsJson, String query, String sort,
             String dir, String currency, List<Integer> pipelineIds, List<Integer> stageIds,
-            List<Integer> companyIds, boolean noCompany, List<String> statuses, List<String> risks,
+            List<Integer> companyIds, List<Integer> personIds, boolean noCompany,
+            List<String> statuses, List<String> risks,
             MemberScope memberScope, int limit, int offset) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Integer> riskIds = resolveRiskCandidates(
             workspaceId, segmentIdsJson, query, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, risks, memberScope);
+            personIds, noCompany, statuses, risks, memberScope);
         if (risks != null && !risks.isEmpty() && riskIds != null && riskIds.isEmpty()) {
             return new PageResponse<>(List.of(), 0);
         }
         List<Deal> items = dealMapper.getDealsPageFiltered(
             workspaceId, segmentIdsJson, query, sort, dir, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, riskIds, memberScope, limit, offset);
+            personIds, noCompany, statuses, riskIds, memberScope, limit, offset);
         long total = dealMapper.countDealsFiltered(
             workspaceId, segmentIdsJson, query, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, riskIds, memberScope);
+            personIds, noCompany, statuses, riskIds, memberScope);
         return new PageResponse<>(items, total);
     }
 
@@ -362,76 +363,78 @@ public class DealService {
      * (including risk resolution and member scope) as the list page but without pagination.
      */
     public List<Deal> queryDealsForExport(String query, String currency, List<Integer> pipelineIds,
-            List<Integer> stageIds, List<Integer> companyIds, boolean noCompany,
+            List<Integer> stageIds, List<Integer> companyIds, List<Integer> personIds, boolean noCompany,
             List<String> statuses, List<String> risks, MemberScope memberScope) {
         return queryDealsForExport(null, query, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, risks, memberScope);
+            personIds, noCompany, statuses, risks, memberScope);
     }
 
     /** Returns the current filtered deal export intersected with a Smart Segment definition. */
     public List<Deal> querySegmentDealsForExport(SegmentDefinition definition, String query,
             String currency, List<Integer> pipelineIds, List<Integer> stageIds,
-            List<Integer> companyIds, boolean noCompany, List<String> statuses,
+            List<Integer> companyIds, List<Integer> personIds, boolean noCompany, List<String> statuses,
             List<String> risks, MemberScope memberScope) {
         List<Integer> segmentIds = segmentService.evaluate("deal", definition);
         if (segmentIds.isEmpty()) {
             return List.of();
         }
         return queryDealsForExport(idsJson(segmentIds), query, currency, pipelineIds, stageIds,
-            companyIds, noCompany, statuses, risks, memberScope);
+            companyIds, personIds, noCompany, statuses, risks, memberScope);
     }
 
     private List<Deal> queryDealsForExport(String segmentIdsJson, String query, String currency,
             List<Integer> pipelineIds, List<Integer> stageIds, List<Integer> companyIds,
-            boolean noCompany, List<String> statuses, List<String> risks, MemberScope memberScope) {
+            List<Integer> personIds, boolean noCompany, List<String> statuses,
+            List<String> risks, MemberScope memberScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Integer> riskIds = resolveRiskCandidates(
             workspaceId, segmentIdsJson, query, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, risks, memberScope);
+            personIds, noCompany, statuses, risks, memberScope);
         if (risks != null && !risks.isEmpty() && riskIds != null && riskIds.isEmpty()) {
             return List.of();
         }
         return dealMapper.getDealsFiltered(
             workspaceId, segmentIdsJson, query, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, riskIds, memberScope);
+            personIds, noCompany, statuses, riskIds, memberScope);
     }
 
     /**
      * Returns currency metrics for the same complete server-representable filter used by the page.
      */
     public DealMetricsDto queryDealMetrics(String query, String currency, List<Integer> pipelineIds,
-            List<Integer> stageIds, List<Integer> companyIds, boolean noCompany,
+            List<Integer> stageIds, List<Integer> companyIds, List<Integer> personIds, boolean noCompany,
             List<String> statuses, List<String> risks, MemberScope memberScope) {
         return queryDealMetrics(null, query, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, risks, memberScope);
+            personIds, noCompany, statuses, risks, memberScope);
     }
 
     /** Returns current-list currency metrics intersected with a Smart Segment definition. */
     public DealMetricsDto querySegmentDealMetrics(SegmentDefinition definition, String query,
             String currency, List<Integer> pipelineIds, List<Integer> stageIds,
-            List<Integer> companyIds, boolean noCompany, List<String> statuses,
+            List<Integer> companyIds, List<Integer> personIds, boolean noCompany, List<String> statuses,
             List<String> risks, MemberScope memberScope) {
         List<Integer> segmentIds = segmentService.evaluate("deal", definition);
         if (segmentIds.isEmpty()) {
             return new DealMetricsDto(List.of(), 0);
         }
         return queryDealMetrics(idsJson(segmentIds), query, currency, pipelineIds, stageIds,
-            companyIds, noCompany, statuses, risks, memberScope);
+            companyIds, personIds, noCompany, statuses, risks, memberScope);
     }
 
     private DealMetricsDto queryDealMetrics(String segmentIdsJson, String query, String currency,
             List<Integer> pipelineIds, List<Integer> stageIds, List<Integer> companyIds,
-            boolean noCompany, List<String> statuses, List<String> risks, MemberScope memberScope) {
+            List<Integer> personIds, boolean noCompany, List<String> statuses,
+            List<String> risks, MemberScope memberScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Integer> riskIds = resolveRiskCandidates(
             workspaceId, segmentIdsJson, query, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, risks, memberScope);
+            personIds, noCompany, statuses, risks, memberScope);
         if (risks != null && !risks.isEmpty() && riskIds != null && riskIds.isEmpty()) {
             return new DealMetricsDto(List.of(), 0);
         }
         List<DealCurrencyMetricsDto> byCurrency = dealMapper.dealMetricsFiltered(
             workspaceId, segmentIdsJson, query, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, riskIds, memberScope);
+            personIds, noCompany, statuses, riskIds, memberScope);
         long totalCount = byCurrency.stream()
             .mapToLong(metrics -> metrics.openCount() + metrics.closedCount())
             .sum();
@@ -441,37 +444,39 @@ public class DealService {
     /** Returns at most 1,000 ids matching the native deal filters. */
     public List<Integer> getMatchingDealIds(String query, String currency,
             List<Integer> pipelineIds, List<Integer> stageIds, List<Integer> companyIds,
-            boolean noCompany, List<String> statuses, List<String> risks, MemberScope memberScope) {
+            List<Integer> personIds, boolean noCompany, List<String> statuses,
+            List<String> risks, MemberScope memberScope) {
         return getMatchingDealIds(null, query, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, risks, memberScope);
+            personIds, noCompany, statuses, risks, memberScope);
     }
 
     /** Returns at most 1,000 ids matching both the segment and native deal filters. */
     public List<Integer> getMatchingSegmentDealIds(SegmentDefinition definition, String query,
             String currency, List<Integer> pipelineIds, List<Integer> stageIds,
-            List<Integer> companyIds, boolean noCompany, List<String> statuses,
+            List<Integer> companyIds, List<Integer> personIds, boolean noCompany, List<String> statuses,
             List<String> risks, MemberScope memberScope) {
         List<Integer> segmentIds = segmentService.evaluate("deal", definition);
         if (segmentIds.isEmpty()) {
             return List.of();
         }
         return getMatchingDealIds(idsJson(segmentIds), query, currency, pipelineIds, stageIds,
-            companyIds, noCompany, statuses, risks, memberScope);
+            companyIds, personIds, noCompany, statuses, risks, memberScope);
     }
 
     private List<Integer> getMatchingDealIds(String segmentIdsJson, String query, String currency,
             List<Integer> pipelineIds, List<Integer> stageIds, List<Integer> companyIds,
-            boolean noCompany, List<String> statuses, List<String> risks, MemberScope memberScope) {
+            List<Integer> personIds, boolean noCompany, List<String> statuses,
+            List<String> risks, MemberScope memberScope) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Integer> riskIds = resolveRiskCandidates(
             workspaceId, segmentIdsJson, query, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, risks, memberScope);
+            personIds, noCompany, statuses, risks, memberScope);
         if (risks != null && !risks.isEmpty() && riskIds != null && riskIds.isEmpty()) {
             return List.of();
         }
         List<Integer> matches = dealMapper.getFilteredDealIds(
             workspaceId, segmentIdsJson, query, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, riskIds, memberScope, MAX_MATCHING_IDS + 1);
+            personIds, noCompany, statuses, riskIds, memberScope, MAX_MATCHING_IDS + 1);
         if (matches.size() > MAX_MATCHING_IDS) {
             throw new BadRequestException("Too many matching deals; narrow the filters before selecting all");
         }
@@ -481,14 +486,14 @@ public class DealService {
     private List<Integer> resolveRiskCandidates(int workspaceId, String segmentIdsJson,
             String query, String currency,
             List<Integer> pipelineIds, List<Integer> stageIds, List<Integer> companyIds,
-            boolean noCompany, List<String> statuses, List<String> risks,
+            List<Integer> personIds, boolean noCompany, List<String> statuses, List<String> risks,
             MemberScope memberScope) {
         if (risks == null || risks.isEmpty() || risks.containsAll(ALL_RISK_LEVELS)) {
             return null;
         }
         List<Integer> baseIds = dealMapper.getFilteredDealIds(
             workspaceId, segmentIdsJson, query, currency, pipelineIds, stageIds, companyIds,
-            noCompany, statuses, null, memberScope, MAX_RISK_CANDIDATES + 1);
+            personIds, noCompany, statuses, null, memberScope, MAX_RISK_CANDIDATES + 1);
         if (baseIds.size() > MAX_RISK_CANDIDATES) {
             throw new BadRequestException(
                 "Risk filter matches too many deals; narrow the other filters before loading records");
@@ -532,6 +537,7 @@ public class DealService {
             dealMapper.countsByStage(workspaceId),
             dealMapper.countsByPipeline(workspaceId),
             dealMapper.countsByCompany(workspaceId),
+            dealMapper.countsByPerson(workspaceId),
             dealMapper.countsByOwner(workspaceId),
             dealMapper.countsByCurrency(workspaceId),
             List.of()

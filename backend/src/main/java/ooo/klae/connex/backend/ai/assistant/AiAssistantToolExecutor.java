@@ -305,7 +305,7 @@ public class AiAssistantToolExecutor {
                 optionalText(args, "scope"), null, workspaceService.getCurrentUserId());
         Object value = switch (metric) {
             case "deal_metrics" -> dealService.queryDealMetrics(
-                    null, currency, null, null, null, false, null, null, memberScope);
+                    null, currency, null, null, null, null, false, null, null, memberScope);
             case "deal_kpis" -> dealService.getDealKpis(currency, days, memberScope);
             case "activity_volume" -> activityService.getActivityVolume(days, memberScope);
             case "task_summary" -> taskService.getTaskSummary(memberScope);

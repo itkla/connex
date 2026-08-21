@@ -94,7 +94,19 @@
         "taskDeleted": "Task deleted",
         "activityDeleted": "Activity deleted",
         "noteDeleted": "Note deleted",
-        "deleteFailed": "Failed to delete"
+        "deleteFailed": "Failed to delete",
+        "linkedItemOutsideWindow": "This linked item is older than the history shown here.",
+        "linkedItemUnavailable": "This linked item isn't available in this history.",
+        "openLinked": {
+            "task": "Open the task",
+            "activity": "Open the activity",
+            "note": "Open the note"
+        },
+        "viewLinked": {
+            "task": "View tasks",
+            "activity": "View activities",
+            "note": "View notes"
+        }
     },
     "MeLayout": {
         "title": "Me",

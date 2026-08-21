@@ -17,6 +17,7 @@ public record WorkflowManualPreparationDto(
     String definitionHash,
     String executionMode,
     Integer actorUserId,
+    String actorLabel,
     String scopeKind,
     String resolvedScopeKind,
     String sourceSurface,
@@ -28,6 +29,7 @@ public record WorkflowManualPreparationDto(
     int readyCount,
     ExpectedSkips expectedSkips,
     List<Sample> samples,
+    List<Sample> skippedSamples,
     List<Action> actions,
     boolean confirmable,
     List<String> blockers

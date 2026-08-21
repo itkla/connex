@@ -227,6 +227,7 @@
         "valueInvalid": "小数点以下2桁までの0以上の金額を入力してください",
         "columnActualValue": "実績金額",
         "columnCompany": "会社",
+        "filterContact": "連絡先",
         "columnPipeline": "パイプライン",
         "columnStage": "ステージ",
         "columnExpectedClose": "決着予定日",

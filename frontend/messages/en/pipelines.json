@@ -33,7 +33,9 @@
     "pipelineCreated": "Pipeline created",
     "pipelineCreatedWithFailedStages": "Pipeline created, but {failed} of {total} stages failed",
     "failedToCreate": "Failed to create pipeline",
-    "failedToLoadMetrics": "Failed to load pipeline metrics"
+    "failedToLoadMetrics": "Failed to load pipeline metrics",
+    "failedToOpen": "Couldn't open that pipeline. Try again.",
+    "pipelineUnavailable": "That pipeline is no longer available."
   },
   "PipelinesCard": {
     "actionsAriaLabel": "Pipeline actions",

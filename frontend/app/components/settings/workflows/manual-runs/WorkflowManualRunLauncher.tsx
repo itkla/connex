@@ -342,7 +342,9 @@ function PreparationSummary({ preparation }: { preparation: WorkflowManualPrepar
                 <div>
                     <dt className="text-muted-foreground">{t("manual.actor")}</dt>
                     <dd className="font-medium text-foreground">
-                        {preparation.actorUserId == null ? t("manual.systemActor") : `#${preparation.actorUserId}`}
+                        {preparation.executionMode === "system"
+                            ? t("manual.systemActor")
+                            : preparation.actorLabel ?? t("manual.actorUnavailable")}
                     </dd>
                 </div>
                 <div>
@@ -414,12 +416,12 @@ function InvocationSummary({
 }) {
     const t = useTranslations("WorkflowOperations");
     const sampledLabels = useMemo(
-        () => new Map(preparation.samples.map((sample) => [sample.recordId, sample.label])),
-        [preparation.samples],
+        () => new Map(
+            [...preparation.samples, ...preparation.skippedSamples]
+                .map((sample) => [sample.recordId, sample.label]),
+        ),
+        [preparation.samples, preparation.skippedSamples],
     );
-    const recordTypeLabel = t.has(`data.${preparation.recordType}`)
-        ? t(`data.${preparation.recordType}`)
-        : t("manual.recordFallback");
     const totals = [
         ["queued", result.queuedCount],
         ["running", result.runningCount],
@@ -462,7 +464,7 @@ function InvocationSummary({
                             <li key={record.recordId} className="grid gap-2 px-3 py-2.5 text-sm sm:grid-cols-[auto_minmax(0,1fr)_auto]">
                                 <span className="truncate text-muted-foreground">
                                     {sampledLabels.get(record.recordId)
-                                        ?? t("manual.recordFallbackWithId", { type: recordTypeLabel, id: record.recordId })}
+                                        ?? t("manual.recordLabelNotIncluded")}
                                 </span>
                                 <span className="text-foreground">
                                     {record.reasonCode ? <ManualReason code={record.reasonCode} /> : t(`status.${record.status}`)}

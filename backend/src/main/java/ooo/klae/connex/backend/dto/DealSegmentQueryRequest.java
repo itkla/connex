@@ -44,6 +44,9 @@ public class DealSegmentQueryRequest {
     @Size(max = 100)
     private List<@Positive Integer> companyId;
 
+    @Size(max = 100)
+    private List<@Positive Integer> personId;
+
     private boolean noCompany;
 
     @Size(max = 100)

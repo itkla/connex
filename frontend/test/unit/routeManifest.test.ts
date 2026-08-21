@@ -5,18 +5,23 @@ import { describe, expect, it } from "vitest";
 import {
     matchesShippedRoute,
     resolveShippedRoute,
+    routeAllowsQueryParam,
     SHIPPED_APP_ROUTES,
+    SHIPPED_ROUTE_QUERY_PARAMS,
 } from "@/app/lib/routeManifest";
 import {
     ACTIVITY_URL_KEY,
     COMMENT_URL_KEY,
     DEEP_LINK_URL_KEYS,
     NOTE_URL_KEY,
+    PIPELINE_EDIT_URL_KEY,
     TASK_URL_KEY,
 } from "@/app/hooks/listStateUrl";
 import {
     companyDealsHref,
+    contactDealsHref,
     DEAL_COMPANY_FILTER_KEY,
+    DEAL_CONTACT_FILTER_KEY,
     DEAL_PIPELINE_FILTER_KEY,
     DEAL_RISK_FILTER_KEY,
     DEAL_RISK_LEVELS,
@@ -45,7 +50,7 @@ const SHARED_MANIFEST_PATH = path.join(
 );
 
 type SharedManifest = {
-    params: Record<string, string>;
+    params: Record<string, string[]>;
     routes: string[];
 };
 
@@ -53,8 +58,8 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isStringRecord(value: unknown): value is Record<string, string> {
-    return isJsonObject(value) && Object.values(value).every((entry) => typeof entry === "string");
+function isStringArrayRecord(value: unknown): value is Record<string, string[]> {
+    return isJsonObject(value) && Object.values(value).every(isStringArray);
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -65,7 +70,7 @@ function readSharedManifest(): SharedManifest {
     const parsed: unknown = JSON.parse(readFileSync(SHARED_MANIFEST_PATH, "utf8"));
     if (!isJsonObject(parsed)) throw new Error("shared route manifest is not an object");
     const { params, routes } = parsed;
-    if (!isStringRecord(params)) throw new Error("shared route manifest params must map strings to strings");
+    if (!isStringArrayRecord(params)) throw new Error("shared route manifest params must map routes to string arrays");
     if (!isStringArray(routes)) throw new Error("shared route manifest routes must be an array of strings");
     return { params, routes };
 }
@@ -151,7 +156,15 @@ describe("shipped route manifest", () => {
 
     it("stays in sync with the manifest the backend validates action URLs against", () => {
         expect(sharedManifest.routes).toEqual([...SHIPPED_APP_ROUTES]);
-        expect(sharedManifest.params).toEqual({ ...DEEP_LINK_URL_KEYS });
+        expect(sharedManifest.params).toEqual({ ...SHIPPED_ROUTE_QUERY_PARAMS });
+    });
+
+    it("assigns every canonical deep-link parameter to at least one consuming route", () => {
+        const registered = Object.values(SHIPPED_ROUTE_QUERY_PARAMS).flat();
+
+        expect([...new Set(registered)].sort()).toEqual(
+            [...new Set(Object.values(DEEP_LINK_URL_KEYS))].sort(),
+        );
     });
 
     it("prefers a literal segment over a dynamic sibling", () => {
@@ -169,6 +182,16 @@ describe("shipped route manifest", () => {
     it("ignores the query string and fragment when resolving a route", () => {
         expect(resolveShippedRoute(`/activity/tasks?${TASK_URL_KEY}=9`)).toBe("/activity/tasks");
         expect(resolveShippedRoute("/records/deals#top")).toBe("/records/deals");
+    });
+
+    it("allows query parameters only on the route that consumes them", () => {
+        expect(routeAllowsQueryParam(`/activity/tasks?${TASK_URL_KEY}=9`, TASK_URL_KEY)).toBe(true);
+        expect(routeAllowsQueryParam(`/activity/tasks?${NOTE_URL_KEY}=9`, NOTE_URL_KEY)).toBe(false);
+        expect(routeAllowsQueryParam(`/records/pipelines?${PIPELINE_EDIT_URL_KEY}=9`, PIPELINE_EDIT_URL_KEY)).toBe(true);
+        expect(routeAllowsQueryParam(`/records/deals/9?${PIPELINE_EDIT_URL_KEY}=7`, PIPELINE_EDIT_URL_KEY)).toBe(false);
+        expect(routeAllowsQueryParam(`/records/pipelines?${TASK_URL_KEY}=9`, TASK_URL_KEY)).toBe(false);
+        expect(routeAllowsQueryParam("/records/pipelines?unknown=9", "unknown")).toBe(false);
+        expect(routeAllowsQueryParam("/not-shipped?task=9", TASK_URL_KEY)).toBe(false);
     });
 });
 
@@ -202,6 +225,13 @@ describe("deep-link producers emit the consumers' canonical params", () => {
     it("renders no deals link for a contact with no company rather than linking the whole browser", () => {
         expect(companyDealsHref(null)).toBeUndefined();
         expect(companyDealsHref(undefined)).toBeUndefined();
+    });
+
+    it("links a contact's deal count to the deals where that contact is a stakeholder", () => {
+        const href = contactDealsHref(9);
+
+        expect(resolveShippedRoute(href)).toBe("/records/deals");
+        expect(queryOf(href).get(DEAL_CONTACT_FILTER_KEY)).toBe("9");
     });
 
     it("links a pipeline's deal count to the deals browser filtered by pipeline", () => {
@@ -284,13 +314,13 @@ describe("deep-link producers emit the consumers' canonical params", () => {
             `/records/contacts/42?${TASK_URL_KEY}=9`,
             `/records/companies/42?${ACTIVITY_URL_KEY}=9`,
             `/records/deals/42?${COMMENT_URL_KEY}=9`,
-            `/activity/notes/42?${NOTE_URL_KEY}=9`,
+            `/activity/notes?${NOTE_URL_KEY}=9`,
         ];
 
         for (const href of links) {
             expect(matchesShippedRoute(href)).toBe(true);
             for (const key of queryOf(href).keys()) {
-                expect(Object.values(DEEP_LINK_URL_KEYS)).toContain(key);
+                expect(routeAllowsQueryParam(href, key)).toBe(true);
             }
         }
     });

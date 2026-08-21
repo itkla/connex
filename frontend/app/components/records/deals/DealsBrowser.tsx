@@ -113,6 +113,7 @@ import {
     type DealMetrics,
     type DealFacets,
     type DealFilterParams,
+    type FacetCount,
     type DealRevenueSeries,
     type DealStageDistribution,
     type DealsPageParams,
@@ -128,7 +129,7 @@ import {
     type WorkspaceMember,
 } from '@/app/lib/types';
 import { actualValueForOutcome, isDealClosed } from './dealOutcome';
-import { DEAL_COMPANY_FILTER_KEY, DEAL_PIPELINE_FILTER_KEY } from './dealLinks';
+import { DEAL_COMPANY_FILTER_KEY, DEAL_CONTACT_FILTER_KEY, DEAL_PIPELINE_FILTER_KEY } from './dealLinks';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import ContactAvatar from '../contacts/ContactAvatar';
 import SummaryTile from '@/app/components/SummaryTile';
@@ -232,6 +233,7 @@ const EMPTY_DEAL_DRAFT: CreateDealPayload = {
 const DEAL_FILTER_KEYS = [
     'status',
     DEAL_COMPANY_FILTER_KEY,
+    DEAL_CONTACT_FILTER_KEY,
     DEAL_PIPELINE_FILTER_KEY,
     'stage',
     'risk',
@@ -314,13 +316,13 @@ function resolveNamedFacetIds<T extends { id: number; name: string }>(values: st
     return values.some((value) => value !== FILTER_EMPTY) ? [0] : undefined;
 }
 
-function resolveCompanyFacetIds(values: string[] | undefined, facets: DealFacets['companies']): number[] | undefined {
+function resolveEntityFacetIds(values: string[] | undefined, facets: FacetCount[] | undefined): number[] | undefined {
     if (!values?.length) return undefined;
     const ids = values.flatMap((value) => {
         if (value === FILTER_EMPTY) return [];
         const id = Number(value);
         if (Number.isInteger(id) && id > 0) return [id];
-        return facets.flatMap((facet) => {
+        return (facets ?? []).flatMap((facet) => {
             if (facet.label !== value) return [];
             const facetId = Number(facet.key);
             return Number.isInteger(facetId) && facetId > 0 ? [facetId] : [];
@@ -613,15 +615,21 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         return {
             status: status?.length ? status : undefined,
             risk: risk?.length ? risk : undefined,
-            companyId: resolveCompanyFacetIds(activeFilterState.company, dealFacets.companies),
+            companyId: resolveEntityFacetIds(activeFilterState.company, dealFacets.companies),
+            personId: resolveEntityFacetIds(activeFilterState.contact, dealFacets.people),
             noCompany: activeFilterState.company?.includes(FILTER_EMPTY) || undefined,
             pipelineId: resolveNamedFacetIds(activeFilterState.pipeline, pipelines),
             stageId: resolveNamedFacetIds(activeFilterState.stage, allStages),
             scope: ownerScope.mode === 'all' ? undefined : ownerScope.mode,
             memberIds: ownerScope.mode === 'members' ? ownerScope.memberIds : undefined,
         };
-    }, [activeFilterState, dealFacets.companies, pipelines, allStages, ownerScope]);
+    }, [activeFilterState, dealFacets.companies, dealFacets.people, pipelines, allStages, ownerScope]);
     const serverFilterKey = useMemo(() => JSON.stringify(serverFilters), [serverFilters]);
+    const contactFilterActive = Boolean(serverFilters.personId?.length);
+    const selectableDisplayMode = contactFilterActive && displayMode === 'kanban' ? 'table' : displayMode;
+    const renderedDisplayMode = contactFilterActive && effectiveDisplayMode === 'kanban'
+        ? 'table'
+        : effectiveDisplayMode;
     const deferredQuery = useDeferredValue(query.trim());
     const metricFilters = useMemo<DealFilterParams>(() => ({
         ...serverFilters,
@@ -1195,7 +1203,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const peek = useRecordPeekController(
         'deal',
         visibleDeals,
-        effectiveDisplayMode !== 'grid',
+        renderedDisplayMode !== 'grid',
         returnSelection,
     );
 
@@ -1228,6 +1236,12 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             return label ? [{ key: facet.key, label }] : [];
         });
         if (companyOptions.length > 0) result.push({ key: DEAL_COMPANY_FILTER_KEY, label: t('columnCompany'), options: companyOptions });
+
+        const contactOptions = (dealFacets.people ?? []).flatMap((facet) => {
+            const label = facet.label;
+            return label ? [{ key: facet.key, label }] : [];
+        });
+        if (contactOptions.length > 0) result.push({ key: DEAL_CONTACT_FILTER_KEY, label: t('filterContact'), options: contactOptions });
 
         const pipelineOptions = dealFacets.pipelines.flatMap((facet) => {
             const pipeline = pipelineById.get(Number(facet.key));
@@ -1396,6 +1410,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                     pipelineIds: currentDealFilters.pipelineId,
                     stageIds: currentDealFilters.stageId,
                     companyIds: currentDealFilters.companyId,
+                    personIds: currentDealFilters.personId,
                     statuses: currentDealFilters.status,
                     risks: currentDealFilters.risk,
                     noCompany: currentDealFilters.noCompany,
@@ -1577,7 +1592,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                     allowGroups
                                     onChange={changeDefinition}
                                 />
-                                {effectiveDisplayMode !== 'table' && (
+                                {renderedDisplayMode !== 'table' && (
                                     <RecordsSortMenu
                                         columns={columns}
                                         sortKey={sortKey}
@@ -1588,16 +1603,18 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                 <SegmentedControl
                                     ariaLabel={t('displayMode')}
                                     className="hidden md:inline-flex"
-                                    value={displayMode}
+                                    value={selectableDisplayMode}
                                     onChange={setDisplayMode}
                                     options={[
                                         { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridView') },
                                         { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableView') },
-                                        { value: 'kanban', icon: <ViewColumnsIcon className="size-4" />, ariaLabel: t('kanbanView') },
+                                        ...(contactFilterActive
+                                            ? []
+                                            : [{ value: 'kanban' as const, icon: <ViewColumnsIcon className="size-4" />, ariaLabel: t('kanbanView') }]),
                                     ]}
                                 />
-                                {effectiveDisplayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
-                                {effectiveDisplayMode === 'table' && (
+                                {renderedDisplayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
+                                {renderedDisplayMode === 'table' && (
                                     <ColumnVisibilityMenu
                                         toggles={toggles}
                                         onColumnVisibleChange={setColumnVisible}
@@ -1668,7 +1685,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 )}
 
                 <Rise delay={0.3}>
-                    {effectiveDisplayMode === 'kanban' ? (
+                    {renderedDisplayMode === 'kanban' ? (
                         <DealsKanban
                             deals={visibleDeals}
                             pipelines={pipelines}
@@ -1720,7 +1737,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                 />
                             )}
                             renderAvatar={(item) => {
-                                const avatarSize = effectiveDisplayMode === 'list' ? 'small' : 'large';
+                                const avatarSize = renderedDisplayMode === 'list' ? 'small' : 'large';
                                 const company = item.company != null ? companyById.get(item.company) : undefined;
                                 if (company) return <CompanyAvatar company={company} type={avatarSize} />;
                                 const contact = contactByDealId.get(item.id);
@@ -1735,7 +1752,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             onRowClick={(item) => peek.openPeek(item.id)}
                             activeId={peek.activeId}
                             recordRef={recordRef}
-                            displayMode={effectiveDisplayMode}
+                            displayMode={renderedDisplayMode}
                             density={density}
                             selectedIds={selectedIds}
                             onSelectedIdsChange={handleSelectedIdsChange}

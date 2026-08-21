@@ -235,7 +235,7 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
         assertEquals(2L, after.get("__empty__"));
         assertEquals(2L, after.values().stream().mapToLong(Long::longValue).sum());
         List<Integer> unassignedIds = dealMapper.getFilteredDealIds(workspace.getId(), null, null,
-            null, null, null, null, true, null, null, allTeamScope(), 100);
+            null, null, null, null, null, true, null, null, allTeamScope(), 100);
         assertTrue(unassignedIds.contains(onAccount.getId()));
         assertTrue(unassignedIds.contains(unassigned.getId()));
     }

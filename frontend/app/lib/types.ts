@@ -3480,6 +3480,7 @@ export type DealFilterParams = MemberScopeParams & {
     stageId?: number[];
     pipelineId?: number[];
     companyId?: number[];
+    personId?: number[];
     noCompany?: boolean;
     currency?: string;
 };
@@ -3511,6 +3512,7 @@ export type DealFacets = {
     stages: FacetCount[];
     pipelines: FacetCount[];
     companies: FacetCount[];
+    people?: FacetCount[];
     currencies: FacetCount[];
     risk: FacetCount[];
     owners: FacetCount[];
@@ -4468,6 +4470,7 @@ export type WorkflowManualFilter = {
     pipelineIds?: number[];
     stageIds?: number[];
     companyIds?: number[];
+    personIds?: number[];
     statuses?: string[];
     risks?: string[];
     memberScope?: string;
@@ -4509,6 +4512,7 @@ export type WorkflowManualPreparation = {
     definitionHash: string;
     executionMode: WorkflowExecutionMode;
     actorUserId: number | null;
+    actorLabel: string | null;
     scopeKind: WorkflowManualScope["kind"];
     resolvedScopeKind: WorkflowManualResolvedScope["kind"];
     sourceSurface: WorkflowManualSourceSurface;
@@ -4520,6 +4524,7 @@ export type WorkflowManualPreparation = {
     readyCount: number;
     expectedSkips: WorkflowManualExpectedSkips;
     samples: Array<{ recordId: number; label: string }>;
+    skippedSamples: Array<{ recordId: number; label: string }>;
     actions: Array<{ nodeId: string; actionType: string; retrySafety: WorkflowRetrySafety }>;
     confirmable: boolean;
     blockers: string[];

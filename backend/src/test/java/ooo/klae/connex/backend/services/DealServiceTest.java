@@ -171,6 +171,8 @@ class DealServiceTest extends AbstractServiceTest {
             newDeal(pipeline, stage, company), "Local Won High", 120.0, 90.0, "JPY", true);
         Deal localWonLower = updateDeal(
             newDeal(pipeline, stage, company), "Local Won Low", 110.0, 80.0, "JPY", true);
+        Person contact = personNamed("Local Contact");
+        dealService.addPerson(localWon.getId(), contact.getId(), "champion");
 
         Workspace otherWorkspace = newWorkspace();
         Pipeline otherPipeline = newPipelineIn(otherWorkspace);
@@ -205,11 +207,20 @@ class DealServiceTest extends AbstractServiceTest {
         var multiFilteredPage = dealService.queryDealsPage(
             "%Local Won%", "value", "desc", "JPY",
             List.of(pipeline.getId()), List.of(stage.getId()), List.of(company.getId()),
-            false, List.of("won", "lost"), null, allTeamScope, 25, 0);
+            List.of(contact.getId()), false, List.of("won", "lost"), null,
+            allTeamScope, 25, 0);
         DealMetricsDto multiFilteredMetrics = dealService.queryDealMetrics(
             "%Local Won%", "JPY",
             List.of(pipeline.getId()), List.of(stage.getId()), List.of(company.getId()),
-            false, List.of("won", "lost"), null, allTeamScope);
+            List.of(contact.getId()), false, List.of("won", "lost"), null, allTeamScope);
+        List<Integer> matchingIds = dealService.getMatchingDealIds(
+            "%Local Won%", "JPY",
+            List.of(pipeline.getId()), List.of(stage.getId()), List.of(company.getId()),
+            List.of(contact.getId()), false, List.of("won", "lost"), null, allTeamScope);
+        List<Deal> export = dealService.queryDealsForExport(
+            "%Local Won%", "JPY",
+            List.of(pipeline.getId()), List.of(stage.getId()), List.of(company.getId()),
+            List.of(contact.getId()), false, List.of("won", "lost"), null, allTeamScope);
 
         assertEquals(3, metrics.totalCount());
         assertEquals(1, metrics.byCurrency().size());
@@ -226,6 +237,7 @@ class DealServiceTest extends AbstractServiceTest {
         assertEquals(Map.of(Integer.toString(stage.getId()), 3L), facetCounts(facets.stages()));
         assertEquals(Map.of(Integer.toString(pipeline.getId()), 3L), facetCounts(facets.pipelines()));
         assertEquals(Map.of(Integer.toString(company.getId()), 3L), facetCounts(facets.companies()));
+        assertEquals(Map.of(Integer.toString(contact.getId()), 1L), facetCounts(facets.people()));
         assertEquals(Map.of(Integer.toString(currentUser.getId()), 3L), facetCounts(facets.owners()));
         assertEquals(Map.of("JPY", 3L), facetCounts(facets.currencies()));
         assertEquals(3, count);
@@ -237,10 +249,12 @@ class DealServiceTest extends AbstractServiceTest {
             filteredPage.stream().map(Deal::getId).toList());
         assertEquals(2, filteredMetrics.totalCount());
         assertEquals(170.0, filteredMetrics.byCurrency().get(0).closedRevenue(), 0.0001);
-        assertEquals(2, multiFilteredPage.total());
-        assertEquals(List.of(localWon.getId(), localWonLower.getId()),
+        assertEquals(1, multiFilteredPage.total());
+        assertEquals(List.of(localWon.getId()),
             multiFilteredPage.items().stream().map(Deal::getId).toList());
-        assertEquals(2, multiFilteredMetrics.totalCount());
+        assertEquals(1, multiFilteredMetrics.totalCount());
+        assertEquals(List.of(localWon.getId()), matchingIds);
+        assertEquals(List.of(localWon.getId()), export.stream().map(Deal::getId).toList());
         assertEquals(3, dealService.getDealBoard(pipeline.getId()).size());
     }
 
@@ -257,6 +271,8 @@ class DealServiceTest extends AbstractServiceTest {
         updateDeal(newDeal(pipeline, stage, company), segmentName, 100.0, 0.0, "JPY", null);
         Deal won = updateDeal(
             newDeal(pipeline, stage, company), segmentName, 200.0, 180.0, "JPY", true);
+        Person contact = personNamed("Segment Contact");
+        dealService.addPerson(won.getId(), contact.getId(), "champion");
         SegmentDefinition definition = segmentDefinition(
             segmentField("name", "equals", segmentName));
         SegmentDefinition empty = segmentDefinition(
@@ -264,16 +280,16 @@ class DealServiceTest extends AbstractServiceTest {
         MemberScope scope = MemberScope.allTeam();
 
         PageResponse<Deal> page = dealService.querySegmentDealsPage(
-            definition, null, null, null, null, null, null, null,
+            definition, null, null, null, null, null, null, null, List.of(contact.getId()),
             false, List.of("won"), null, scope, 25, 0);
         DealMetricsDto metrics = dealService.querySegmentDealMetrics(
-            definition, null, null, null, null, null,
+            definition, null, null, null, null, null, List.of(contact.getId()),
             false, List.of("won"), null, scope);
         List<Integer> ids = dealService.getMatchingSegmentDealIds(
-            definition, null, null, null, null, null,
+            definition, null, null, null, null, null, List.of(contact.getId()),
             false, List.of("won"), null, scope);
         List<Deal> export = dealService.querySegmentDealsForExport(
-            definition, null, null, null, null, null,
+            definition, null, null, null, null, null, List.of(contact.getId()),
             false, List.of("won"), null, scope);
 
         assertEquals(List.of(won.getId()), page.items().stream().map(Deal::getId).toList());
@@ -282,16 +298,16 @@ class DealServiceTest extends AbstractServiceTest {
         assertEquals(List.of(won.getId()), ids);
         assertEquals(List.of(won.getId()), export.stream().map(Deal::getId).toList());
         assertEquals(0, dealService.querySegmentDealsPage(
-            empty, null, null, null, null, null, null, null,
+            empty, null, null, null, null, null, null, null, List.of(contact.getId()),
             false, null, null, scope, 25, 0).total());
         assertEquals(0, dealService.querySegmentDealMetrics(
-            empty, null, null, null, null, null,
+            empty, null, null, null, null, null, List.of(contact.getId()),
             false, null, null, scope).totalCount());
         assertTrue(dealService.getMatchingSegmentDealIds(
-            empty, null, null, null, null, null,
+            empty, null, null, null, null, null, List.of(contact.getId()),
             false, null, null, scope).isEmpty());
         assertTrue(dealService.querySegmentDealsForExport(
-            empty, null, null, null, null, null,
+            empty, null, null, null, null, null, List.of(contact.getId()),
             false, null, null, scope).isEmpty());
     }
 
@@ -312,10 +328,10 @@ class DealServiceTest extends AbstractServiceTest {
 
         BadRequestException nativeException = assertThrows(BadRequestException.class,
             () -> dealService.getMatchingDealIds(
-                null, null, null, null, null, false, null, null, MemberScope.allTeam()));
+                null, null, null, null, null, null, false, null, null, MemberScope.allTeam()));
         BadRequestException segmentException = assertThrows(BadRequestException.class,
             () -> dealService.getMatchingSegmentDealIds(
-                definition, null, null, null, null, null,
+                definition, null, null, null, null, null, null,
                 false, null, null, MemberScope.allTeam()));
 
         assertEquals("Too many matching deals; narrow the filters before selecting all",

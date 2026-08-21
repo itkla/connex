@@ -12,8 +12,10 @@ import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.stream.Stream;
 
@@ -126,6 +128,22 @@ class NotificationActionUrlIntegrityTest {
             "RequestPathRedactor's route vocabulary is missing shipped app routes: " + unknown);
     }
 
+    @Test
+    void canonicalParametersAreScopedToTheirConsumingRoute() throws Exception {
+        RouteManifest manifest = loadManifest(repositoryRoot());
+        List<String> violations = new ArrayList<>();
+
+        validateShape(
+            "test:1",
+            "\"/activity/tasks?note=9\"",
+            "/activity/tasks?note=9",
+            manifest,
+            violations);
+
+        assertTrue(!violations.isEmpty(),
+            "A query key owned by another route must fail the action URL gate");
+    }
+
     private static RouteManifest loadManifest(Path repositoryRoot) throws IOException {
         Path manifestPath = repositoryRoot.resolve(
             "backend/src/test/resources/frontend-route-manifest.json");
@@ -136,10 +154,18 @@ class NotificationActionUrlIntegrityTest {
         assertTrue(paramsNode.isObject(), "Route manifest params must be an object.");
         assertTrue(routesNode.isArray(), "Route manifest routes must be an array.");
 
-        Set<String> parameters = new TreeSet<>();
-        for (JsonNode value : paramsNode.values()) {
-            assertTrue(value.isTextual(), "Route manifest parameter values must be strings.");
-            parameters.add(value.asString());
+        Map<String, Set<String>> parameters = new TreeMap<>();
+        for (String route : paramsNode.propertyNames()) {
+            JsonNode values = paramsNode.path(route);
+            assertTrue(values.isArray(),
+                "Route manifest parameter values must be arrays of strings.");
+            Set<String> routeParameters = new TreeSet<>();
+            for (JsonNode value : values) {
+                assertTrue(value.isTextual(),
+                    "Route manifest parameter values must be strings.");
+                routeParameters.add(value.asString());
+            }
+            parameters.put(route, Set.copyOf(routeParameters));
         }
         List<String> routes = new ArrayList<>();
         for (JsonNode route : routesNode) {
@@ -147,7 +173,9 @@ class NotificationActionUrlIntegrityTest {
             routes.add(route.asString());
         }
         routes.sort(String::compareTo);
-        return new RouteManifest(Set.copyOf(parameters), List.copyOf(routes));
+        assertTrue(parameters.keySet().stream().allMatch(routes::contains),
+            "Route manifest parameters must belong to shipped routes.");
+        return new RouteManifest(Map.copyOf(parameters), List.copyOf(routes));
     }
 
     private static List<Path> javaSourceFiles(Path sourceRoot) throws IOException {
@@ -237,13 +265,36 @@ class NotificationActionUrlIntegrityTest {
         int queryIndex = withoutFragment.indexOf('?');
         String path = queryIndex < 0 ? withoutFragment : withoutFragment.substring(0, queryIndex);
         String query = queryIndex < 0 ? null : withoutFragment.substring(queryIndex + 1);
-        if (manifest.routes().stream().noneMatch(route -> routeMatches(path, route))) {
+        String route = resolvedRoute(path, manifest.routes());
+        if (route == null) {
             violations.add(location + " resolves `" + expression + "` to unshipped path shape `"
                 + displayShape(path) + "`");
         }
-        if (query != null) {
-            validateQuery(location, expression, query, manifest.parameters(), violations);
+        if (query != null && route != null) {
+            validateQuery(
+                location,
+                expression,
+                query,
+                manifest.parameters().getOrDefault(route, Set.of()),
+                violations);
         }
+    }
+
+    private static String resolvedRoute(String path, List<String> routes) {
+        return routes.stream()
+            .filter(route -> routeMatches(path, route))
+            .min(Comparator.comparingInt(NotificationActionUrlIntegrityTest::dynamicSegmentCount))
+            .orElse(null);
+    }
+
+    private static int dynamicSegmentCount(String route) {
+        int count = 0;
+        for (String segment : route.split("/", -1)) {
+            if (isDynamicRouteSegment(segment)) {
+                count++;
+            }
+        }
+        return count;
     }
 
     private static boolean routeMatches(String shape, String route) {
@@ -552,5 +603,5 @@ class NotificationActionUrlIntegrityTest {
 
     private record ParsedSource(CompilationUnitTree unit, SourcePositions positions) {}
 
-    private record RouteManifest(Set<String> parameters, List<String> routes) {}
+    private record RouteManifest(Map<String, Set<String>> parameters, List<String> routes) {}
 }

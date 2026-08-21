@@ -147,19 +147,22 @@ public class ExportService {
      * CSV of deals matching the given list filters and member scope (all deals when unfiltered).
      */
     public String exportDeals(String query, String currency, List<Integer> pipelineIds, List<Integer> stageIds,
-            List<Integer> companyIds, boolean noCompany, List<String> statuses, List<String> risks,
+            List<Integer> companyIds, List<Integer> personIds, boolean noCompany,
+            List<String> statuses, List<String> risks,
             MemberScope memberScope) {
         List<Deal> deals = dealService.queryDealsForExport(
-            query, currency, pipelineIds, stageIds, companyIds, noCompany, statuses, risks, memberScope);
+            query, currency, pipelineIds, stageIds, companyIds, personIds,
+            noCompany, statuses, risks, memberScope);
         return renderDeals(deals);
     }
 
     /** CSV of deals matching both a Smart Segment and the complete native list filter. */
     public String exportSegmentDeals(SegmentDefinition definition, String query, String currency,
             List<Integer> pipelineIds, List<Integer> stageIds, List<Integer> companyIds,
-            boolean noCompany, List<String> statuses, List<String> risks, MemberScope memberScope) {
+            List<Integer> personIds, boolean noCompany, List<String> statuses,
+            List<String> risks, MemberScope memberScope) {
         List<Deal> deals = dealService.querySegmentDealsForExport(
-            definition, query, currency, pipelineIds, stageIds, companyIds,
+            definition, query, currency, pipelineIds, stageIds, companyIds, personIds,
             noCompany, statuses, risks, memberScope);
         return renderDeals(deals);
     }

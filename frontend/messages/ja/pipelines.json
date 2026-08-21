@@ -33,7 +33,9 @@
     "pipelineCreated": "パイプラインを作成しました",
     "pipelineCreatedWithFailedStages": "パイプラインを作成しましたが、{total} 個中 {failed} 個のステージが失敗しました",
     "failedToCreate": "パイプラインを作成できませんでした",
-    "failedToLoadMetrics": "パイプラインの指標を読み込めませんでした"
+    "failedToLoadMetrics": "パイプラインの指標を読み込めませんでした",
+    "failedToOpen": "そのパイプラインを開けませんでした。もう一度お試しください。",
+    "pipelineUnavailable": "そのパイプラインは利用できなくなりました。"
   },
   "PipelinesCard": {
     "actionsAriaLabel": "パイプライン操作",

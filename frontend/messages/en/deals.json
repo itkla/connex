@@ -227,6 +227,7 @@
         "valueInvalid": "Enter a non-negative amount with up to two decimals",
         "columnActualValue": "Actual value",
         "columnCompany": "Company",
+        "filterContact": "Contact",
         "columnPipeline": "Pipeline",
         "columnStage": "Stage",
         "columnExpectedClose": "Expected close",
