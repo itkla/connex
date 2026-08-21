@@ -6,6 +6,7 @@ import { toastError, toastSuccess } from '@/app/lib/toast';
 import { useTranslations } from 'next-intl';
 
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import QuickEditDealSheet, { type DealDraft } from '@/app/components/records/deals/QuickEditDealSheet';
 import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
 import { actualValueForOutcome } from '@/app/components/records/deals/dealOutcome';
@@ -61,6 +62,7 @@ export default function EditDealSheet({
 }) {
     const router = useRouter();
     const t = useTranslations('DealsEditSheet');
+    const reportApiError = useApiErrorToast('DealsEditSheet');
     const [draft, setDraft] = useState<DealDraft>(() => toDraft(deal));
     const [isSaving, setIsSaving] = useState(false);
     const [pipelineOptions, setPipelineOptions] = useState(pipelines);
@@ -148,7 +150,7 @@ export default function EditDealSheet({
             onOpenChange(false);
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('failedToSave'));
+            reportApiError(err, 'failedToSave');
         } finally {
             setIsSaving(false);
         }

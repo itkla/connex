@@ -9,8 +9,7 @@ import RecordsActions from '@/app/components/import/RecordsActions';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { IconButton } from '@/components/ui/icon-button';
-import { toast } from 'sonner';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastError, toastInfo, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon, PlusIcon } from '@heroicons/react/24/solid';
 import {
@@ -50,6 +49,7 @@ import { useActionSelection } from '@/app/hooks/useActions';
 import { useSavedViewScope } from '@/app/hooks/useSavedViewScope';
 import { useInlineEdit } from '@/app/hooks/useInlineEdit';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { MAX_URL_PAGE_SIZE, parseListInt, writeListStateToUrl } from '@/app/hooks/listStateUrl';
 import { FILTER_EMPTY, type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, facetChips, countActiveFilters } from '@/app/components/records/types';
 import DealCard from '@/app/components/records/deals/DealCard';
@@ -363,6 +363,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const tf = useTranslations('Filters');
     const ts = useTranslations('MemberScope');
     const tSeg = useTranslations('SmartSegments');
+    const reportApiError = useApiErrorToast('DealsBrowser');
     const { levelLabel } = useRiskText();
     const locale = useLocale();
     const reduce = useReducedMotion() ?? false;
@@ -691,12 +692,12 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             } else if (hasSegments) {
                 reportSegmentFailure();
             } else {
-                toastError(error instanceof Error ? error.message : t('toastSelectAllFailed'));
+                reportApiError(error, 'toastSelectAllFailed');
             }
         } finally {
             if (requestId === selectAllRequestRef.current) setSelectingAll(false);
         }
-    }, [currentDealFilters, evaluable, filterSignature, hasSegments, reportSegmentFailure, serverFilters.risk, setSelectedIds, t]);
+    }, [currentDealFilters, evaluable, filterSignature, hasSegments, reportApiError, reportSegmentFailure, serverFilters.risk, setSelectedIds, t]);
     const exportDeals = useCallback(
         (signal: AbortSignal, workspaceId: number) => {
             const init = { signal, headers: { 'X-Workspace-Id': String(workspaceId) } };
@@ -884,7 +885,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             if (isFieldError(err)) {
                 throw err;
             }
-            toastError(err instanceof Error ? err.message : t('failedToCreateDeal'));
+            reportApiError(err, 'failedToCreateDeal');
         } finally {
             setIsCreating(false);
         }
@@ -908,7 +909,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         });
 
         if (changed.length === 0) {
-            toast.info(t('noChangesToSave'));
+            toastInfo(t('noChangesToSave'));
             setEditSheetOpen(false);
             return;
         }
@@ -918,7 +919,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             return !draft.name.trim() || !draft.pipeline || !draft.stage || !draft.currency.trim();
         });
         if (invalid) {
-            toast.error(t('validationRequired', { name: invalid.name }));
+            toastError(t('validationRequired', { name: invalid.name }));
             return;
         }
 
@@ -935,7 +936,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             setEditSheetOpen(false);
             refreshRecords();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('failedToSave'));
+            reportApiError(err, 'failedToSave');
         } finally {
             setIsSaving(false);
         }
@@ -974,7 +975,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 refreshRecords();
             }
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('failedToDelete'));
+            reportApiError(err, 'failedToDelete');
         } finally {
             setIsDeleting(false);
         }
@@ -1051,9 +1052,9 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             toastSuccess(won === null ? t('dealReopened') : t('dealClosed'));
             refreshRecords();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('failedToUpdateStatus'));
+            reportApiError(err, 'failedToUpdateStatus');
         }
-    }, [refreshRecords, t]);
+    }, [refreshRecords, reportApiError, t]);
 
     const summary = useMemo(() => {
         const m = dealMetrics.byCurrency.find((c) => c.currency === activeCurrency);

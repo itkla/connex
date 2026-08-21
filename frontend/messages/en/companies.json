@@ -58,7 +58,7 @@
     "toastNameRequired": "Name is required for \"{name}\"",
     "toastCompanyUpdated": "Company updated",
     "toastCompaniesUpdated": "{count} companies updated",
-    "toastSaveFailed": "Failed to save",
+    "toastSaveFailed": "Couldn't save the company changes",
     "addTag": "Add tag",
     "removeTag": "Remove tag",
     "toastTagAdded": "Tagged {count} companies",
@@ -88,12 +88,12 @@
     "toastCompaniesArchived": "{count} companies archived",
     "toastCompaniesArchivedPartial": "Archived {succeeded} of {total} companies",
     "toastCompaniesArchiveFailed": "Couldn't archive {failed} companies",
-    "toastArchiveFailed": "Failed to archive",
+    "toastArchiveFailed": "Couldn't archive the selected companies",
     "toastCompanyRestored": "Company restored",
     "toastCompaniesRestored": "{count} companies restored",
     "toastCompaniesRestoredPartial": "Restored {succeeded} of {total} companies",
     "toastCompaniesRestoreFailed": "Couldn't restore {failed} companies",
-    "toastRestoreFailed": "Failed to restore",
+    "toastRestoreFailed": "Couldn't restore the selected companies",
     "entityLabelPlural": "companies"
   },
   "CompaniesActionsMenu": {
@@ -154,7 +154,7 @@
     "toastNameRequired": "Name is required",
     "toastCompanyUpdated": "Company updated",
     "toastPartiallySaved": "Some company changes were saved, but another change failed. Review the current values and try again.",
-    "toastSaveFailed": "Failed to save"
+    "toastSaveFailed": "Couldn't save the company"
   },
   "CompaniesNewDialog": {
     "title": "New company",

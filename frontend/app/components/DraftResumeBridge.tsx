@@ -2,9 +2,8 @@
 
 import { useEffect } from 'react';
 import { useTranslations } from 'next-intl';
-import { toast } from 'sonner';
 
-import { toastInfo } from '@/app/lib/toast';
+import { toastDismiss, toastInfo } from '@/app/lib/toast';
 import {
     clearDraft,
     DRAFT_VERSIONS,
@@ -244,11 +243,11 @@ export default function DraftResumeBridge() {
             if (key === null) {
                 for (const draft of drafts) {
                     changedKeys.add(draft.stored.key);
-                    toast.dismiss(draft.stored.key);
+                    toastDismiss(draft.stored.key);
                 }
             } else {
                 changedKeys.add(key);
-                toast.dismiss(key);
+                toastDismiss(key);
             }
         });
 
@@ -294,7 +293,7 @@ export default function DraftResumeBridge() {
                         }
                         const current = readCurrentActivityDraft(stored, userId, activeWorkspaceId);
                         if (!current) {
-                            toast.dismiss(stored.key);
+                            toastDismiss(stored.key);
                             return;
                         }
                         const currentData = current.data;
@@ -311,7 +310,7 @@ export default function DraftResumeBridge() {
                             },
                             restoredDraftGeneration: keyGeneration,
                         });
-                        toast.dismiss(stored.key);
+                        toastDismiss(stored.key);
                     },
                 },
                 cancel: {
@@ -324,7 +323,7 @@ export default function DraftResumeBridge() {
                         }
                         const current = readCurrentActivityDraft(stored, userId, activeWorkspaceId);
                         if (current && sameActivityDraft(current, stored)) clearDraft(stored.key);
-                        toast.dismiss(stored.key);
+                        toastDismiss(stored.key);
                     },
                 },
             });
@@ -363,7 +362,7 @@ export default function DraftResumeBridge() {
                         }
                         const current = readCurrentNoteDraft(stored, userId, activeWorkspaceId);
                         if (!current) {
-                            toast.dismiss(stored.key);
+                            toastDismiss(stored.key);
                             return;
                         }
                         openOverlay({
@@ -371,7 +370,7 @@ export default function DraftResumeBridge() {
                             draft: current.data,
                             restoredDraftGeneration: keyGeneration,
                         });
-                        toast.dismiss(stored.key);
+                        toastDismiss(stored.key);
                     },
                 },
                 cancel: {
@@ -384,7 +383,7 @@ export default function DraftResumeBridge() {
                         }
                         const current = readCurrentNoteDraft(stored, userId, activeWorkspaceId);
                         if (current && sameNoteDraft(current, stored)) clearDraft(stored.key);
-                        toast.dismiss(stored.key);
+                        toastDismiss(stored.key);
                     },
                 },
             });
@@ -423,7 +422,7 @@ export default function DraftResumeBridge() {
                         }
                         const current = readCurrentTaskDraft(stored, userId, activeWorkspaceId);
                         if (!current) {
-                            toast.dismiss(stored.key);
+                            toastDismiss(stored.key);
                             return;
                         }
                         openOverlay({
@@ -431,7 +430,7 @@ export default function DraftResumeBridge() {
                             draft: current.data,
                             restoredDraftGeneration: keyGeneration,
                         });
-                        toast.dismiss(stored.key);
+                        toastDismiss(stored.key);
                     },
                 },
                 cancel: {
@@ -444,7 +443,7 @@ export default function DraftResumeBridge() {
                         }
                         const current = readCurrentTaskDraft(stored, userId, activeWorkspaceId);
                         if (current && sameTaskDraft(current, stored)) clearDraft(stored.key);
-                        toast.dismiss(stored.key);
+                        toastDismiss(stored.key);
                     },
                 },
             });
@@ -481,7 +480,7 @@ export default function DraftResumeBridge() {
             unsubscribe();
             window.clearTimeout(timer);
             for (const refreshTimer of refreshTimers) window.clearTimeout(refreshTimer);
-            for (const draft of drafts) toast.dismiss(draft.stored.key);
+            for (const draft of drafts) toastDismiss(draft.stored.key);
         };
     }, [openOverlay, t, userId, activeWorkspaceId, switching]);
 

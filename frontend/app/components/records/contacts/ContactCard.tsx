@@ -13,7 +13,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { copyToClipboard, readableTextColor } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
-import { toast } from 'sonner';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
@@ -28,6 +27,7 @@ import {
     recordDetailNavigationPath,
     type RecordReturnSelectionSnapshot,
 } from '@/app/lib/recordReturnPath';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 
 function initialsOf(name: string): string {
     const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -91,6 +91,7 @@ export default function ContactCard({
 }: ContactCardProps) {
     const router = useRouter();
     const t = useTranslations('ContactsCard');
+    const reportApiError = useApiErrorToast('ContactsCard');
     const [editSheetOpen, setEditSheetOpen] = useState(false);
     const [draft, setDraft] = useState<ContactDraft>({ name: '', email: '', phone: '', title: '' });
     const [imageFile, setImageFile] = useState<File | null>(null);
@@ -119,7 +120,7 @@ export default function ContactCard({
     async function saveInternalEdits() {
         const trimmedName = draft.name.trim();
         if (!trimmedName) {
-            toast.error(t('toastNameRequired'));
+            toastError(t('toastNameRequired'));
             return;
         }
         setIsSaving(true);
@@ -140,7 +141,8 @@ export default function ContactCard({
             setImageFile(null);
             router.refresh();
         } catch (err) {
-            toastError(detailsSaved && imageFile ? t('toastPartiallySaved') : err instanceof Error ? err.message : t('toastFailedSave'));
+            if (detailsSaved && imageFile) toastError(t('toastPartiallySaved'));
+            else reportApiError(err, 'toastFailedSave');
             if (detailsSaved) router.refresh();
         } finally {
             setIsSaving(false);
@@ -217,7 +219,9 @@ export default function ContactCard({
                                 )}
                                 {phone && (
                                     <DropdownMenuItem onSelect={() =>
-                                        copyToClipboard(phone, 'Phone') ? toast.success(t('toastPhoneCopied')) : toast.error(t('toastFailedCopyPhone'))
+                                        copyToClipboard(phone, 'Phone')
+                                            ? toastSuccess(t('toastPhoneCopied'))
+                                            : toastError(t('toastFailedCopyPhone'))
                                     }>
                                         <PhoneIcon className="size-4 text-muted-foreground" />
                                         {t('copyPhone')}
