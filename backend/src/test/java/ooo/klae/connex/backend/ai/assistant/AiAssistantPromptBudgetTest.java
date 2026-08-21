@@ -29,6 +29,7 @@ class AiAssistantPromptBudgetTest {
         assertTrue(budget.attachmentContextBytes() >= 256);
         assertTrue(budget.pageContextBytes() >= 256);
         assertTrue(budget.toolResultBytes() >= 2_048);
+        assertEquals(8_192, budget.repairEnvelopeBytes());
         assertEquals(
                 budget.compactionSourceBytes(),
                 budget.historyBytes() + budget.attachmentContextBytes()
@@ -37,8 +38,13 @@ class AiAssistantPromptBudgetTest {
                 32_768, budget.maxOutputTokens()));
         assertEquals(24_576, AiProviderCapabilities.conservativeInputByteCeiling(
                 32_768, budget.maxOutputTokens()));
-        assertTrue(budget.compactionSourceBytes() * 12 + 8_192
+        assertTrue(budget.compactionSourceBytes() * 12
+                + budget.repairEnvelopeBytes() + 8_192
                 <= AiProviderCapabilities.estimatedInputByteCeiling(
+                        32_768, budget.maxOutputTokens()));
+        assertTrue(budget.compactionSourceBytes()
+                + budget.repairEnvelopeBytes() + 8_192
+                <= AiProviderCapabilities.conservativeInputByteCeiling(
                         32_768, budget.maxOutputTokens()));
     }
 
@@ -64,7 +70,7 @@ class AiAssistantPromptBudgetTest {
                         32_768,
                         8_192),
                 8_192,
-                30_000);
+                15_000);
 
         assertTrue(budget.maxOutputTokens() < 8_192);
         assertFalse(budget.outputTokensClamped());
@@ -72,6 +78,34 @@ class AiAssistantPromptBudgetTest {
         assertTrue(budget.toolResultBytes() >= 2_048);
         assertTrue(budget.pageContextBytes() >= 256);
         assertTrue(budget.attachmentContextBytes() >= 256);
+        assertTrue(budget.compactionSourceBytes()
+                + budget.repairEnvelopeBytes() + 15_000
+                <= AiProviderCapabilities.conservativeInputByteCeiling(
+                        32_768, budget.maxOutputTokens()));
+    }
+
+    @Test
+    void fixedAndRepairEnvelopesThatCannotLeaveInputFloorsAreRejected() {
+        assertThrows(
+                ooo.klae.connex.backend.ai.provider.AiProviderException.class,
+                () -> AiAssistantPromptBudget.from(
+                        new AiProviderCapabilities(
+                                AiStructuredOutputEnforcement.PROMPT_ONLY,
+                                AiReasoningMode.TAGGED,
+                                32_768,
+                                8_192),
+                        8_192,
+                        30_000));
+        assertThrows(
+                ooo.klae.connex.backend.ai.provider.AiProviderException.class,
+                () -> AiAssistantPromptBudget.from(
+                        new AiProviderCapabilities(
+                                AiStructuredOutputEnforcement.PROMPT_ONLY,
+                                AiReasoningMode.TAGGED,
+                                32_768,
+                                8_192),
+                        8_192,
+                        Integer.MAX_VALUE));
     }
 
     @Test

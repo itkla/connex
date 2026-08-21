@@ -109,14 +109,12 @@ public class AiChatAgentLoopService {
             publish(turn, new AiChatStepFrameDto(
                     turn.workspaceId(), turn.sessionId(), turn.turnId(),
                     0, "state", null, "running", null));
-            AiChatResourceRegistry resources = new AiChatResourceRegistry();
             MaskingContext maskingContext = new MaskingContext(turn.privacyMode());
+            AiChatResourceRegistry resources = new AiChatResourceRegistry(maskingContext);
             AiChatStreamingProgress streamingProgress = turn.streamed()
                     ? new AiChatStreamingProgress(turn, persistenceService)
                     : null;
             AiChatMemory memory = memoryService.prepare(turn, maskingContext, deadline);
-            AiChatAttachmentContext attachmentContext =
-                    attachmentContextService.prepare(turn, deadline);
             List<AiChatMessage> history = memory.history();
             AiChatMessage initiatingMessage = history.stream()
                     .filter(message -> message.getId() == turn.userMessageId())
@@ -128,6 +126,9 @@ public class AiChatAgentLoopService {
             promptContext.addAll(promptAssembler.replayPageContext(history));
             AiAssistantToolResult pageContext = toolExecutor.pageContext(
                     promptContext, resources);
+            pageContext.identifiers().forEach(identifier -> identifier.seed(maskingContext));
+            AiChatAttachmentContext attachmentContext =
+                    attachmentContextService.prepare(turn, deadline, maskingContext);
             List<ToolTurn> toolTurns = new ArrayList<>();
             Map<Integer, AiToolCall> nativeCalls = new HashMap<>();
             boolean nativeTools = memory.nativeTools();

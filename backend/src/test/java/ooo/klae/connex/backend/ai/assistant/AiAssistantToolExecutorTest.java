@@ -1,7 +1,9 @@
 package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
@@ -12,6 +14,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
@@ -19,11 +22,12 @@ import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.EntityReference;
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
@@ -304,6 +308,181 @@ class AiAssistantToolExecutorTest {
     }
 
     @Test
+    void noteContactDataIsRedactedBeforeTheFieldBoundaryIsApplied() throws Exception {
+        Person person = new Person();
+        person.setId(17);
+        person.setName("Ada Lovelace");
+        Note note = new Note();
+        note.setVisibility("workspace");
+        note.setContent(
+                "x".repeat(3_989) + " victim@example.com " + "tail".repeat(20));
+        person.setNotes(new Note[] {note});
+        when(personService.getPersonById(17)).thenReturn(person);
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register("person", 17);
+
+        Object noteData = executor.execute(
+                "get_record",
+                objectMapper.readTree("{\"handle\":\"r1\"}"),
+                resources,
+                true).data().get("notes");
+
+        Map<?, ?> retained = (Map<?, ?>) ((List<?>) noteData).getFirst();
+        String content = (String) retained.get("content");
+        assertEquals(4_000, content.length());
+        assertTrue(content.endsWith("[redacted]"));
+        assertFalse(content.contains("victim"));
+        assertFalse(content.contains("@example"));
+        assertEquals(true, retained.get("contentTruncated"));
+    }
+
+    @Test
+    void noteIdentifierIsRedactedBeforeTheFieldBoundaryIsApplied() throws Exception {
+        Person person = new Person();
+        person.setId(17);
+        person.setName("Ada Lovelace");
+        Note note = new Note();
+        note.setVisibility("workspace");
+        note.setContent("x".repeat(3_988) + " Ada Lovelace " + "tail".repeat(20));
+        person.setNotes(new Note[] {note});
+        when(personService.getPersonById(17)).thenReturn(person);
+        AiChatResourceRegistry resources = new AiChatResourceRegistry(new MaskingContext());
+        resources.register("person", 17);
+
+        Object noteData = executor.execute(
+                "get_record",
+                objectMapper.readTree("{\"handle\":\"r1\"}"),
+                resources,
+                true).data().get("notes");
+
+        Map<?, ?> retained = (Map<?, ?>) ((List<?>) noteData).getFirst();
+        String content = (String) retained.get("content");
+        assertEquals(4_000, content.length());
+        assertTrue(content.contains("[redacted]"));
+        assertFalse(content.contains("Ada"));
+        assertFalse(content.contains("Lovelace"));
+        assertEquals(true, retained.get("contentTruncated"));
+    }
+
+    @Test
+    void noteSpecialCareTextIsScreenedBeforeTheFieldBoundaryIsApplied() throws Exception {
+        Person person = new Person();
+        person.setId(17);
+        person.setName("Ada Lovelace");
+        Note note = new Note();
+        note.setVisibility("workspace");
+        note.setContent("x".repeat(3_985) + " The contact discussed a diagnosis.");
+        person.setNotes(new Note[] {note});
+        when(personService.getPersonById(17)).thenReturn(person);
+        AiChatResourceRegistry resources = new AiChatResourceRegistry(new MaskingContext());
+        resources.register("person", 17);
+
+        Object noteData = executor.execute(
+                "get_record",
+                objectMapper.readTree("{\"handle\":\"r1\"}"),
+                resources,
+                true).data().get("notes");
+
+        Map<?, ?> retained = (Map<?, ?>) ((List<?>) noteData).getFirst();
+        assertEquals("[omitted by policy]", retained.get("content"));
+    }
+
+    @Test
+    void noteStructuredTimestampSurvivesPreTruncationScreening() throws Exception {
+        Person person = new Person();
+        person.setId(17);
+        person.setName("Ada Lovelace");
+        Note note = new Note();
+        note.setVisibility("workspace");
+        note.setCreatedAt("2026-08-21 12:34:56");
+        note.setContent("Follow up next week");
+        person.setNotes(new Note[] {note});
+        when(personService.getPersonById(17)).thenReturn(person);
+        AiChatResourceRegistry resources = new AiChatResourceRegistry(new MaskingContext());
+        resources.register("person", 17);
+
+        Object noteData = executor.execute(
+                "get_record",
+                objectMapper.readTree("{\"handle\":\"r1\"}"),
+                resources,
+                true).data().get("notes");
+
+        Map<?, ?> retained = (Map<?, ?>) ((List<?>) noteData).getFirst();
+        assertEquals("2026-08-21 12:34:56", retained.get("createdAt"));
+    }
+
+    @Test
+    void linkedPersonIdentifierIsRedactedBeforeTheNoteBoundaryIsApplied() throws Exception {
+        Person linkedPerson = new Person();
+        linkedPerson.setId(18);
+        linkedPerson.setName("Grace Hopper");
+        Person person = new Person();
+        person.setId(17);
+        person.setName("Ada Lovelace");
+        Note note = new Note();
+        note.setVisibility("workspace");
+        note.setPerson(linkedPerson);
+        note.setContent("x".repeat(3_988) + " Grace Hopper " + "tail".repeat(20));
+        person.setNotes(new Note[] {note});
+        when(personService.getPersonById(17)).thenReturn(person);
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        when(personMapper.getByIds(7, List.of(18))).thenReturn(List.of(linkedPerson));
+        AiChatResourceRegistry resources = new AiChatResourceRegistry(new MaskingContext());
+        resources.register("person", 17);
+
+        Object noteData = executor.execute(
+                "get_record",
+                objectMapper.readTree("{\"handle\":\"r1\"}"),
+                resources,
+                true).data().get("notes");
+
+        Map<?, ?> retained = (Map<?, ?>) ((List<?>) noteData).getFirst();
+        String content = (String) retained.get("content");
+        assertEquals(4_000, content.length());
+        assertTrue(content.contains("[redacted]"));
+        assertFalse(content.contains("Grace"));
+        assertFalse(content.contains("Hopper"));
+        assertEquals(true, retained.get("contentTruncated"));
+    }
+
+    @Test
+    void scheduleIdentifierIsRedactedBeforeTheFieldBoundaryIsApplied() throws Exception {
+        Person person = new Person();
+        person.setId(17);
+        person.setName("Ada Lovelace");
+        when(personService.getPersonById(17)).thenReturn(person);
+        Activity activity = new Activity();
+        activity.setSubject("x".repeat(500) + " Ada Lovelace " + "tail".repeat(20));
+        when(activityService.getActivitiesByPersonIdInWindow(
+                eq(17), any(), any(), eq(101))).thenReturn(List.of(activity));
+        LocalDateTime start = LocalDateTime.parse("2026-08-11T09:00:00");
+        LocalDateTime end = LocalDateTime.parse("2026-08-11T11:00:00");
+        when(dateResolver.resolveDateTime("start")).thenReturn(
+                new AiAssistantDateResolver.ResolvedDateTime(
+                        start, start, ZoneOffset.UTC, "2026-08-11 09:00:00"));
+        when(dateResolver.resolveDateTime("end")).thenReturn(
+                new AiAssistantDateResolver.ResolvedDateTime(
+                        end, end, ZoneOffset.UTC, "2026-08-11 11:00:00"));
+        AiChatResourceRegistry resources = new AiChatResourceRegistry(new MaskingContext());
+        resources.register("person", 17);
+
+        AiAssistantToolResult result = executor.execute(
+                "find_schedule_conflicts",
+                objectMapper.readTree(
+                        "{\"handle\":\"r1\",\"start\":\"start\",\"end\":\"end\"}"),
+                resources,
+                true);
+
+        Map<?, ?> conflict = (Map<?, ?>) ((List<?>) result.data().get("conflicts")).getFirst();
+        String subject = (String) conflict.get("subject");
+        assertEquals(512, subject.length());
+        assertTrue(subject.contains("[redacted]"));
+        assertFalse(subject.contains("Ada"));
+        assertFalse(subject.contains("Lovelace"));
+        assertEquals(true, conflict.get("subjectTruncated"));
+    }
+
+    @Test
     void scheduleConflictResultsBoundCountAndTextBeforePromptSerialization() {
         Person person = new Person();
         person.setId(17);
@@ -331,6 +510,7 @@ class AiAssistantToolExecutorTest {
         Map<?, ?> conflict = (Map<?, ?>) conflicts.getFirst();
         assertEquals(512, ((String) conflict.get("subject")).length());
         assertEquals(512, ((String) conflict.get("notes")).length());
+        assertEquals("2026-08-11 10:00:00", conflict.get("timestamp"));
         assertEquals(true, conflict.get("subjectTruncated"));
         assertEquals(true, conflict.get("notesTruncated"));
         verify(activityService).getActivitiesByPersonIdInWindow(

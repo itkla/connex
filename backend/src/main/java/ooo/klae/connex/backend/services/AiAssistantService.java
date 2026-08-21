@@ -357,10 +357,12 @@ public class AiAssistantService {
         workspaceService.lockAndRequirePermissions(
                 workspaceId, Map.of(userId, Set.of(Permission.AI_USE)));
         AiChatSession session = requireLocked(workspaceId, userId, id);
-        requireSharedActive(session);
         AiChatParticipant invitation = chatMapper.getParticipant(workspaceId, id, userId);
-        if (invitation == null || !"invited".equals(invitation.getStatus())
-                || chatMapper.joinParticipant(workspaceId, id, userId) != 1) {
+        if (invitation == null || !"invited".equals(invitation.getStatus())) {
+            throw inaccessible();
+        }
+        requireSharedActive(session);
+        if (chatMapper.joinParticipant(workspaceId, id, userId) != 1) {
             throw inaccessible();
         }
         realtimeDispatcher.sessionAfterCommit(

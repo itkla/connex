@@ -298,6 +298,80 @@ class AiChatMemoryServiceTest {
     }
 
     @Test
+    void maximumLengthInitiatingMessageUsesAnEphemeralProviderOmission() {
+        AiInvocationService invocationService = mock(AiInvocationService.class);
+        AiAssistantIdentifierResolver identifierResolver = mock(AiAssistantIdentifierResolver.class);
+        AiChatTurnPersistenceService persistenceService = mock(AiChatTurnPersistenceService.class);
+        AiProperties properties = new AiProperties();
+        properties.setAssistantMaxOutputTokens(8_192);
+        var objectMapper = JsonMapper.builder().build();
+        var catalog = new AiAssistantToolCatalog();
+        var assembler = new AiAssistantPromptAssembler(objectMapper, catalog);
+        var stepSchema = new AiAssistantStepSchema(objectMapper, catalog);
+        Instant now = Instant.parse("2026-08-12T00:00:00Z");
+        AiChatMemoryService service = new AiChatMemoryService(
+                invocationService,
+                mock(AiInvocationAdmissionService.class),
+                properties,
+                identifierResolver,
+                assembler,
+                mock(AiAssistantToolExecutor.class),
+                new AiAssistantSummaryGuard(),
+                new AiAssistantSummarySchema(objectMapper),
+                stepSchema,
+                persistenceService,
+                mock(AiWorkspaceGovernanceService.class),
+                objectMapper,
+                Clock.fixed(now, ZoneOffset.UTC));
+        AiChatQueuedTurn turn = new AiChatQueuedTurn(
+                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of());
+        String originalContent = "界".repeat(16_000);
+        AiChatMessage initiating = message(104, 4, "user", originalContent);
+        when(invocationService.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
+                .thenReturn(new AiProviderCapabilities(
+                        AiStructuredOutputEnforcement.JSON_SCHEMA,
+                        AiReasoningMode.TAGGED,
+                        32_768,
+                        8_192));
+        when(invocationService.serializedPromptBytes(
+                any(MaskedPrompt.class), same(stepSchema.responseSchema()),
+                eq(AiReasoningMode.TAGGED)))
+                .thenReturn(8_192);
+        when(persistenceService.loadHistory(turn, 100)).thenReturn(List.of(initiating));
+        when(persistenceService.loadHistorySummary(turn)).thenReturn(null);
+
+        AiChatMemory memory = service.prepare(
+                turn, new MaskingContext(), now.plusSeconds(70));
+
+        assertEquals(1, memory.history().size());
+        assertEquals(initiating.getId(), memory.history().getFirst().getId());
+        assertEquals(
+                "Current request omitted because it exceeded the model input budget. "
+                        + "Ask the user to retry with a shorter request.",
+                memory.history().getFirst().getContent());
+        assertTrue(memory.budget().fits(
+                memory.history().getFirst().getContent(), memory.budget().historyBytes()));
+        assertEquals(originalContent, initiating.getContent());
+        MaskedPrompt providerPrompt = assembler.assemble(
+                memory.history(),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(),
+                new MaskingContext(),
+                new AiChatResourceRegistry(),
+                memory.budget(),
+                null);
+        assertFalse(promptText(providerPrompt).contains("界"));
+        assertTrue(promptText(providerPrompt).contains("Current request omitted"));
+        verify(invocationService, never()).completeStructuredRepairable(
+                any(AiInvocation.class),
+                eq(AiAssistantSummary.class),
+                any(),
+                any(),
+                any(),
+                any(Runnable.class));
+    }
+
+    @Test
     void compactionChecksTheTurnDeadlineImmediatelyBeforeSummaryPersistence() {
         AiInvocationService invocationService = mock(AiInvocationService.class);
         AiInvocationAdmissionService admissionService = mock(AiInvocationAdmissionService.class);
