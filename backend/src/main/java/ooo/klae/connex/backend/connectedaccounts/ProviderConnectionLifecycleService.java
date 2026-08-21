@@ -91,6 +91,16 @@ public class ProviderConnectionLifecycleService {
                 () -> workspaceMapper.findWorkspaceIdsLifecyclePage(
                     current.getCaptureReconcileAfterWorkspaceId(), limit));
             for (int workspaceId : workspaceIds) {
+                int renewed = tenantWorkScope.unrouted(
+                    () -> connectionMapper.renewCaptureReconcile(
+                        current.getId(),
+                        current.getCredentialGeneration(),
+                        owner,
+                        mysql(Instant.now().plus(captureProperties.getLeaseDuration()))));
+                if (renewed != 1) {
+                    throw new IllegalStateException(
+                        "Provider disconnect purge lease was superseded");
+                }
                 boolean hasResiduals = tenantWorkScope.inLifecycleWorkspace(
                     workspaceId,
                     () -> purgeService.hasResiduals(
@@ -149,6 +159,7 @@ public class ProviderConnectionLifecycleService {
             tenantWorkScope.unrouted(() -> connectionMapper.markPurgeFailed(
                 current.getId(),
                 current.getCredentialGeneration(),
+                owner,
                 "purge_failed"));
             tenantWorkScope.unrouted(
                 () -> connectionMapper.releaseCaptureReconcile(

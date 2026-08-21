@@ -20,7 +20,7 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 class ProviderCredentialPersistenceTest {
 
     @Test
-    void migratedConnectionMustDisconnectBeforeAccountIdentityCanChange() {
+    void migratedConnectionRequiresRetainedDataResetBeforeReauthorization() {
         UserMapper userMapper = mock(UserMapper.class);
         ProviderConnectionMapper connectionMapper =
             mock(ProviderConnectionMapper.class);

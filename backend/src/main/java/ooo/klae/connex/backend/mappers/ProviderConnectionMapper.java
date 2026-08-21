@@ -33,7 +33,7 @@ public interface ProviderConnectionMapper {
     boolean isDisconnectGeneration(
         @Param("id") int id, @Param("generation") long generation);
     int markPurgeFailed(@Param("id") int id, @Param("generation") long generation,
-        @Param("errorCode") String errorCode);
+        @Param("owner") String owner, @Param("errorCode") String errorCode);
     int claimRefreshLease(@Param("id") int id, @Param("generation") long generation,
         @Param("owner") String owner, @Param("now") String now, @Param("until") String until);
     int completeRefresh(@Param("id") int id, @Param("generation") long generation,
@@ -51,6 +51,11 @@ public interface ProviderConnectionMapper {
         @Param("generation") long generation,
         @Param("owner") String owner,
         @Param("now") String now,
+        @Param("until") String until);
+    int renewCaptureReconcile(
+        @Param("id") int id,
+        @Param("generation") long generation,
+        @Param("owner") String owner,
         @Param("until") String until);
     int advanceCaptureReconcile(
         @Param("id") int id,

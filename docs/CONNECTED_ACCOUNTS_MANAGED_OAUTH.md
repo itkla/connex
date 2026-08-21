@@ -102,8 +102,9 @@ Base path `/api/account/connections/native`.
 
 Failures answer with `{ "error": "<machine_code>" }`. The account screen renders each code as a
 specific sentence: `managed_identity_unavailable`, `invalid_redirect_uri`, `state`, `denied`,
-`exchange`, `no_offline_access`, `superseded`; anything else falls back to one honest "couldn't be
-completed" message rather than inventing a diagnosis.
+`exchange`, `no_offline_access`, `connection_conflict`, `retained_data_reset_required`,
+`superseded`; anything else falls back to one honest "couldn't be completed" message rather than
+inventing a diagnosis.
 
 ### Redirect URI validation
 

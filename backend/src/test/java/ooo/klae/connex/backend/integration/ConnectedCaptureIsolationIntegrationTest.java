@@ -122,10 +122,15 @@ class ConnectedCaptureIsolationIntegrationTest {
         Workspace ownerWorkspace = newWorkspace();
         Workspace otherWorkspace = newWorkspace();
         User owner = newMember(ownerWorkspace);
+        workspaceMapper.addMember(otherWorkspace.getId(), owner.getId(), "member");
+        User otherMember = newMember(ownerWorkspace);
         User outsider = newMember(otherWorkspace);
         ProviderCapturedInteraction interaction =
             capturedInteraction(ownerWorkspace, owner);
         capturedParticipant(ownerWorkspace, interaction);
+        capturedInteraction(otherWorkspace, owner, "google");
+        capturedInteraction(ownerWorkspace, otherMember, "google");
+        capturedInteraction(ownerWorkspace, owner, "microsoft");
 
         mockMvc.perform(get("/api/account/connections/google/reviews"))
             .andExpect(status().isUnauthorized());
@@ -173,6 +178,18 @@ class ConnectedCaptureIsolationIntegrationTest {
             0,
             captureMapper.countUserProviderResiduals(
                 ownerWorkspace.getId(), owner.getId(), "google"));
+        assertEquals(
+            1,
+            captureMapper.countUserProviderResiduals(
+                otherWorkspace.getId(), owner.getId(), "google"));
+        assertEquals(
+            1,
+            captureMapper.countUserProviderResiduals(
+                ownerWorkspace.getId(), otherMember.getId(), "google"));
+        assertEquals(
+            1,
+            captureMapper.countUserProviderResiduals(
+                ownerWorkspace.getId(), owner.getId(), "microsoft"));
     }
 
     @Test

@@ -239,7 +239,9 @@
     SET status = 'purge_failed',
         error_code = #{errorCode},
         disconnect_attempt_at = UTC_TIMESTAMP(6)
-    WHERE id = #{id} AND credential_generation = #{generation}
+    WHERE id = #{id}
+      AND credential_generation = #{generation}
+      AND capture_reconcile_lease_owner = #{owner}
   </update>
 
   <update id="claimRefreshLease">
@@ -301,6 +303,15 @@
         capture_reconcile_lease_until IS NULL
         OR capture_reconcile_lease_until &lt; #{now}
       )
+  </update>
+
+  <update id="renewCaptureReconcile">
+    UPDATE provider_connection
+    SET capture_reconcile_lease_until = #{until}
+    WHERE id = #{id}
+      AND credential_generation = #{generation}
+      AND capture_reconcile_required = TRUE
+      AND capture_reconcile_lease_owner = #{owner}
   </update>
 
   <update id="advanceCaptureReconcile">

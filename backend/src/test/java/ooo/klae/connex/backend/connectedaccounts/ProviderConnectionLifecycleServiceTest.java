@@ -86,6 +86,9 @@ class ProviderConnectionLifecycleServiceTest {
                     invocation.getArgument(2));
                 return 1;
             });
+        when(connectionMapper.renewCaptureReconcile(
+                anyInt(), anyLong(), anyString(), anyString()))
+            .thenReturn(1);
         when(connectionMapper.advanceCaptureReconcile(
                 anyInt(), anyLong(), anyString(), anyInt(), anyBoolean()))
             .thenReturn(1);
@@ -132,6 +135,8 @@ class ProviderConnectionLifecycleServiceTest {
         order.verify(persistence).finish(connection);
         verify(connectionMapper).claimCaptureReconcile(
             eq(31), eq(4L), anyString(), anyString(), anyString());
+        verify(connectionMapper, org.mockito.Mockito.times(2)).renewCaptureReconcile(
+            eq(31), eq(4L), anyString(), anyString());
     }
 
     @Test
@@ -176,6 +181,9 @@ class ProviderConnectionLifecycleServiceTest {
                     invocation.getArgument(2));
                 return 1;
             });
+        when(connectionMapper.renewCaptureReconcile(
+                anyInt(), anyLong(), anyString(), anyString()))
+            .thenReturn(1);
         when(connectionMapper.advanceCaptureReconcile(
                 anyInt(), anyLong(), anyString(), anyInt(), anyBoolean()))
             .thenReturn(1);
@@ -203,6 +211,56 @@ class ProviderConnectionLifecycleServiceTest {
 
         verify(connectionMapper).advanceCaptureReconcile(
             eq(31), eq(4L), anyString(), eq(5), eq(false));
+        verify(persistence, never()).finish(any());
+    }
+
+    @Test
+    void supersededLeaseStopsBeforeTheNextWorkspacePurge() {
+        ProviderConnectionMapper connectionMapper =
+            mock(ProviderConnectionMapper.class);
+        WorkspaceMapper workspaceMapper = mock(WorkspaceMapper.class);
+        TenantWorkScope tenantWorkScope = mock(TenantWorkScope.class);
+        ProviderCapturePurgeService purgeService =
+            mock(ProviderCapturePurgeService.class);
+        ProviderConnectionLifecyclePersistence persistence =
+            mock(ProviderConnectionLifecyclePersistence.class);
+        ProviderConnection connection = connection();
+        when(tenantWorkScope.unrouted(
+                org.mockito.ArgumentMatchers.<Supplier<Object>>any()))
+            .thenAnswer(invocation -> invocation
+                .<Supplier<Object>>getArgument(0).get());
+        when(connectionMapper.getById(31)).thenReturn(connection);
+        when(connectionMapper.claimCaptureReconcile(
+                anyInt(), anyLong(), anyString(), anyString(), anyString()))
+            .thenReturn(1);
+        when(connectionMapper.renewCaptureReconcile(
+                anyInt(), anyLong(), anyString(), anyString()))
+            .thenReturn(0);
+        when(workspaceMapper.findWorkspaceIdsLifecyclePage(0, 50))
+            .thenReturn(List.of(3));
+        ProviderConnectionLifecycleService service =
+            new ProviderConnectionLifecycleService(
+                connectionMapper,
+                userMapper(),
+                workspaceMapper,
+                mock(TenantLifecycleControlMapper.class),
+                tenantWorkScope,
+                purgeService,
+                mock(PlatformTransactionManager.class),
+                persistence,
+                mock(UserProviderSecretCipher.class),
+                new ConnectedAccountProviders(
+                    new ConnectedAccountProperties()),
+                mock(ProviderTokenClient.class),
+                new ObjectMapper(),
+                new ConnectedCaptureProperties(),
+                mock(AuditService.class));
+
+        assertFalse(service.process(connection));
+
+        verify(purgeService, never()).purge(anyInt(), anyInt(), anyString());
+        verify(connectionMapper, never()).advanceCaptureReconcile(
+            anyInt(), anyLong(), anyString(), anyInt(), anyBoolean());
         verify(persistence, never()).finish(any());
     }
 
