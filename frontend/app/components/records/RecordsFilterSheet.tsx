@@ -102,7 +102,7 @@ function OptionRow({
             variant={selected ? 'secondary' : 'ghost'}
             size="page"
             className={cn(
-                'w-full justify-start text-left font-normal',
+                'h-auto min-h-11 w-full justify-start text-left font-normal',
                 selected && 'bg-brand-light/60 font-medium text-brand-dark hover:bg-brand-light/70',
                 disabled && 'opacity-50',
             )}

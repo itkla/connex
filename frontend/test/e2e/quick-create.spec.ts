@@ -23,7 +23,7 @@ test.describe("quick create", () => {
         await expect(page.getByRole("cell", { name }).first()).toBeVisible();
     });
 
-    test("a Quick Create task carries the current member and record into the canonical composer", async ({ page }, testInfo) => {
+    test("Quick Create tasks and activities carry the current member and record into canonical composers", async ({ page }, testInfo) => {
         const contact = runFixture(testInfo.project.name).contacts.activity;
         await page.goto(`/records/contacts/${contact.id}`);
         await expect(page.getByRole("heading", { name: contact.name }).first()).toBeVisible();
@@ -36,6 +36,17 @@ test.describe("quick create", () => {
 
         await expect(page.getByRole("heading", { name: "New task" }).first()).toBeVisible();
         await expect(page.getByLabel("Assignee")).toHaveValue("E2E Harness");
+        await expect(page.getByLabel("Contact")).toHaveValue(contact.name);
+        await expect(page.getByLabel("Deal")).toHaveValue("");
+        await page.getByRole("button", { name: "Cancel", exact: true }).click();
+
+        await page
+            .getByRole("complementary", { name: "Primary sidebar" })
+            .getByRole("button", { name: "New", exact: true })
+            .click();
+        await page.getByRole("option", { name: "Log activity" }).click();
+
+        await expect(page.getByRole("heading", { name: "Log activity" }).first()).toBeVisible();
         await expect(page.getByLabel("Contact")).toHaveValue(contact.name);
         await expect(page.getByLabel("Deal")).toHaveValue("");
         await page.getByRole("button", { name: "Cancel", exact: true }).click();

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { act, createElement } from "react";
+import ts from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useUnsavedChangesGuard } from "@/app/hooks/useUnsavedChangesGuard";
@@ -56,6 +57,39 @@ function readInventory(): DraftGuardInventory {
 
 function readSource(file: string): string {
     return readFileSync(path.join(process.cwd(), file), "utf8");
+}
+
+function guardDirtyExpression(entry: DraftGuardSurface): ts.Expression | null {
+    const source = readSource(entry.file);
+    const sourceFile = ts.createSourceFile(
+        entry.file,
+        source,
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.TSX,
+    );
+    let dirtyExpression: ts.Expression | null = null;
+
+    function visit(node: ts.Node) {
+        if (
+            ts.isCallExpression(node)
+            && ts.isIdentifier(node.expression)
+            && node.expression.text === GUARD_HOOK
+            && node.arguments.length === 1
+            && ts.isObjectLiteralExpression(node.arguments[0])
+        ) {
+            const dirty = node.arguments[0].properties.find((property) =>
+                (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property))
+                && property.name.getText(sourceFile) === "isDirty"
+            );
+            if (dirty && ts.isPropertyAssignment(dirty)) dirtyExpression = dirty.initializer;
+            if (dirty && ts.isShorthandPropertyAssignment(dirty)) dirtyExpression = dirty.name;
+        }
+        ts.forEachChild(node, visit);
+    }
+
+    visit(sourceFile);
+    return dirtyExpression;
 }
 
 /** The `@/`-aliased specifier a file is imported by, extension dropped as the imports write it. */
@@ -210,6 +244,21 @@ describe("draft-guard inventory", () => {
         expect(missing).toEqual([]);
     });
 
+    it("passes live draft state to every owning guard", () => {
+        const invalid = inventory.surfaces
+            .filter((entry) => entry.guard === OWN_GUARD)
+            .flatMap((entry) => {
+                const expression = guardDirtyExpression(entry);
+                if (expression === null) return [`${entry.file} has no structured isDirty input`];
+                if (expression.kind === ts.SyntaxKind.FalseKeyword) {
+                    return [`${entry.file} permanently disables its draft guard`];
+                }
+                return [];
+            });
+
+        expect(invalid).toEqual([]);
+    });
+
     it("resolves every delegating surface to a file that renders the guarded shell it names", () => {
         const broken = inventory.surfaces
             .filter((entry) => entry.guard !== OWN_GUARD)
@@ -244,7 +293,10 @@ describe("draft-guard inventory", () => {
 });
 
 describe.each(inventory.surfaces)("$surface draft guard", (entry) => {
-    it("survives outside dismissal until discard is confirmed", async () => {
+    it("resolves to a live shared guard that survives outside dismissal until confirmation", async () => {
+        const owner = resolveOwner(entry);
+        if (owner === null) throw new Error(`${entry.surface} has no guard owner`);
+        expect(guardDirtyExpression(owner), `${entry.surface} has no live dirty-state input`).not.toBeNull();
         const container = installMinimalDocument();
         const { createRoot } = await import("react-dom/client");
         const root = createRoot(container, { onCaughtError: vi.fn() });

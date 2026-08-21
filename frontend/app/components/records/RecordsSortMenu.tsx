@@ -35,11 +35,11 @@ export default function RecordsSortMenu<T>({
             <DropdownMenuTrigger asChild>
                 <Button
                     type="button"
-                    variant="outline"
-                    size="toolbar"
+                    variant="ghost"
+                    size="page"
                     menu
                     aria-label={t('sortBy')}
-                    className="text-xs text-muted-foreground aria-expanded:text-foreground"
+                    className="bg-muted px-3 text-xs text-muted-foreground ring-1 ring-border shadow-none hover:text-foreground aria-expanded:text-foreground"
                 >
                     <ChevronUpDownIcon className="size-3.5" />
                     <span>{active ? `${t('sortBy')}: ${active.label}` : t('sortBy')}</span>

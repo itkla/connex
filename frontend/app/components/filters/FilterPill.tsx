@@ -27,12 +27,12 @@ export function FilterTrigger({ active, className, ...props }: FilterTriggerProp
     return (
         <Button
             type="button"
-            variant="outline"
-            size="toolbar"
+            variant="ghost"
+            size="page"
             aria-pressed={active}
             className={cn(
-                "min-w-0 max-w-full text-xs",
-                active && "border-brand-dark/20 bg-brand-light/70 text-foreground hover:bg-brand-light/80",
+                "min-w-0 max-w-full bg-muted px-3 text-xs text-foreground ring-1 ring-border shadow-none hover:bg-accent hover:text-accent-foreground",
+                active && "bg-brand-light/70 ring-brand-dark/20 hover:bg-brand-light/70",
                 className,
             )}
             {...props}

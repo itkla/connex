@@ -39,11 +39,11 @@ export default function ColumnVisibilityMenu({
             <DropdownMenuTrigger asChild>
                 <Button
                     type="button"
-                    variant="outline"
-                    size="toolbar"
+                    variant="ghost"
+                    size="page"
                     menu
                     aria-label={t('ariaLabel')}
-                    className="text-xs text-muted-foreground aria-expanded:text-foreground"
+                    className="bg-muted px-3 text-xs text-muted-foreground ring-1 ring-border shadow-none hover:text-foreground aria-expanded:text-foreground"
                 >
                     <ViewColumnsIcon className="size-3.5" />
                     <span>{t('label')}</span>
