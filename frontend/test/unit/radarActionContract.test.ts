@@ -548,11 +548,16 @@ function installInteractiveDocument() {
             lastChild: { get: () => childNodes.at(-1) ?? null },
             textContent: {
                 get: () => '',
-                set: () => {
+                set: (value: string) => {
                     childNodes.forEach((child) => {
                         child.parentNode = null;
                     });
                     childNodes.length = 0;
+                    if (value.length > 0) {
+                        const child = documentTarget.createTextNode(value);
+                        child.parentNode = element;
+                        childNodes.push(child);
+                    }
                 },
             },
         });
@@ -963,6 +968,38 @@ describe('Radar action integration', () => {
         await board.unmount();
     });
 
+    it('does not render a raw-id connector fallback in expanded evidence', async () => {
+        const currentPayload = payload([warmPathSignal({
+            evidence: [{
+                type: 'warm_path',
+                parameters: { bridgePersonId: 20, bridgeName: '#20' },
+                references: [
+                    { type: 'person', id: 10 },
+                    { type: 'person', id: 20, label: '#20' },
+                ],
+            }],
+        })]);
+        api.getRadar.mockResolvedValue(currentPayload);
+        captures.renderRealRadarCards = true;
+        const board = await renderInteractiveRadarBoard(currentPayload);
+        const disclosure = board.elements.find((element) => (
+            element.tagName === 'BUTTON'
+            && element.getAttribute('aria-label') === 'detail.showNamed:Ada Lovelace'
+        ));
+        if (!disclosure) throw new Error('The Radar evidence disclosure did not render');
+
+        await act(async () => {
+            board.dispatch('click', disclosure);
+            await Promise.resolve();
+        });
+        const renderedText = board.elements.flatMap((element) => element.childNodes)
+            .filter((node): node is InteractiveText => node.nodeType === 3)
+            .map((node) => node.nodeValue);
+        expect(renderedText).toContain('Ada Lovelace');
+        expect(renderedText.some((value) => /#\s*\d+/.test(value))).toBe(false);
+        await board.unmount();
+    });
+
     it('renders the horizon before family layers and signal evidence at mobile-safe widths', async () => {
         const currentPayload = payload([signal({
             evidence: [{
@@ -995,6 +1032,43 @@ describe('Radar action integration', () => {
         ));
         expect(columns).toHaveLength(5);
         expect(columns.every((column) => column.getAttribute('class')?.includes('min-w-28'))).toBe(true);
+        await board.unmount();
+    });
+
+    it('renders the capped horizon and overflow summary at the detector volume extreme', async () => {
+        const currentPayload = payload(Array.from({ length: 45 }, (unused, index) => signal({
+            id: index + 1,
+            subject: { type: 'person', id: index + 1, label: `Contact ${index + 1}` },
+            evidence: [{
+                type: 'relationship_temperature',
+                parameters: { band: 'cold' },
+                references: [{ type: 'person', id: index + 1, label: `Contact ${index + 1}` }],
+            }],
+        })));
+        api.getRadar.mockResolvedValue(currentPayload);
+        const board = await renderInteractiveRadarBoard(currentPayload);
+        const horizonGroup = board.elements.find((element) => (
+            element.getAttribute('role') === 'group'
+            && element.getAttribute('aria-label') === 'horizon.heading'
+        ));
+        if (!horizonGroup) throw new Error('The rendered Radar horizon group is missing');
+        const overdueColumn = board.elements.find((element) => (
+            element.tagName === 'BUTTON'
+            && element.parentNode === horizonGroup
+            && element.getAttribute('aria-label') === 'horizon.bandNamed'
+        ));
+        if (!overdueColumn) throw new Error('The overdue horizon column did not render');
+        const marks = board.elements.filter((element) => (
+            element.parentNode?.parentNode === overdueColumn
+            && element.getAttribute('aria-hidden') === 'true'
+        ));
+        const overflow = board.elements.find((element) => (
+            element.parentNode?.parentNode === overdueColumn
+            && element.getAttribute('class')?.includes('self-center')
+        ));
+
+        expect(marks).toHaveLength(30);
+        expect(overflow).toBeDefined();
         await board.unmount();
     });
 

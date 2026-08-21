@@ -83,7 +83,10 @@ function evidenceParameters(
     evidence: RadarEvidence,
     parameterKeys: Record<string, string>,
 ): [string, unknown][] {
-    return Object.entries(evidence.parameters).filter(([key]) => key in parameterKeys);
+    return Object.entries(evidence.parameters).filter(([key, value]) => (
+        key in parameterKeys
+        && (key !== 'bridgeName' || radarRecordLabel(value) !== null)
+    ));
 }
 
 /**
@@ -278,6 +281,7 @@ export default function RadarSignalCard({
         if (typeof value === 'string') {
             const enumValues = enumValuesByKey[key];
             if (enumValues) return enumValues[value] ?? t('value.unavailable');
+            if (key === 'bridgeName') return radarRecordLabel(value) ?? t('value.unavailable');
             if (key === 'lastTouchAt' || key === 'goesColdAt') {
                 const timestamp = parseMysqlDateTime(value);
                 if (Number.isFinite(timestamp)) return dateFormat.format(timestamp);
