@@ -10,10 +10,24 @@
       "headline": "{count, plural, =0 {対応が必要なシグナルはありません} other {対応が必要なシグナル：#件}}",
       "headlineFiltered": "{count, plural, =0 {この表示に該当するシグナルはありません} other {この表示のシグナル：#件}}"
     },
-    "band": {
-      "now": "今日対応",
-      "soon": "冷めかけている",
-      "later": "標準監視"
+    "horizon": {
+      "heading": "対応が必要になる時期",
+      "hint": "すべてのシグナルを、残り時間の順に並べています。",
+      "hintFiltered": "この表示のシグナルを、残り時間の順に並べています。",
+      "more": "+{count}",
+      "bandNamed": "{band}：{count, plural, =0 {シグナルなし} other {#件}}",
+      "band": {
+        "overdue": "期限超過",
+        "week": "今週中",
+        "month": "今月中",
+        "later": "それ以降",
+        "undated": "期日なし"
+      }
+    },
+    "layer": {
+      "empty": "この種別に該当するものはありません。",
+      "emptyUnavailable": "この種別を更新できず、保存されている内容もないため、表示できるものがありません。",
+      "unavailable": "この種別を更新できませんでした。以下は最後に取得できた内容です。"
     },
     "family": {
       "relationship_decay": "冷え込みつつある関係",
@@ -23,13 +37,12 @@
     "subject": {
       "person": "連絡先",
       "company": "会社",
-      "deal": "案件"
-    },
-    "priority": {
-      "high": "優先度：高",
-      "medium": "優先度：中",
-      "cooling": "冷え込み中",
-      "opportunity": "紹介の候補"
+      "deal": "案件",
+      "unnamed": {
+        "person": "名前のない連絡先",
+        "company": "名前のない会社",
+        "deal": "名前のない案件"
+      }
     },
     "state": {
       "active": "対応中",
@@ -37,9 +50,44 @@
       "snoozed": "スヌーズ中",
       "dismissed": "非表示"
     },
+    "decay": {
+      "trendRising": "上向き",
+      "trendSteady": "横ばい",
+      "trendCooling": "冷え込み中"
+    },
+    "reasonShort": {
+      "close_overdue": "クローズ日を超過",
+      "closing_soon_quiet": "クローズ間近で動きなし",
+      "stalled": "最近の動きなし",
+      "stakeholder_cold": "関係者が冷えている",
+      "no_stakeholders": "関係者が未登録",
+      "unknown": "その他の理由"
+    },
+    "path": {
+      "connectorsHeading": "紹介を頼める方",
+      "opens": "紹介{count}件"
+    },
+    "reading": {
+      "warmth": "{band}、{trend}。",
+      "warmthBand": "現在の温度感は{band}です。",
+      "warmthTrend": "温度感は{trend}。",
+      "trendRising": "上向いています",
+      "trendSteady": "横ばいです",
+      "trendCooling": "さらに冷え込んでいます",
+      "goesColdIn": "{days, plural, =0 {本日中にコールドになります。} other {あと#日でコールドになります。}}",
+      "wentCold": "すでにコールドです。",
+      "sinceContact": "{days, plural, =0 {本日連絡済みです。} other {最後の連絡から#日経過しています。}}",
+      "closeOverdue": "予定クローズ日を{days}日超過しています。",
+      "closingSoonQuiet": "{days, plural, =0 {本日クローズ予定ですが、最近の動きがありません。} other {あと#日でクローズ予定ですが、最近の動きがありません。}}",
+      "stalled": "{days}日間、動きがありません。",
+      "stakeholderCold": "この案件の関係者が{band}の状態です。",
+      "noStakeholders": "この案件に関係者が紐付けられていません。",
+      "moreReasons": "ほかに{count}件の理由があります。",
+      "path": "<bridge>{name}</bridge>さんから紹介を受けられます。",
+      "pathShared": "<bridge>{name}</bridge>さんほか{count}名から紹介を受けられます。"
+    },
     "detail": {
-      "show": "根拠を表示",
-      "hide": "根拠を非表示",
+      "why": "根拠",
       "showNamed": "{subject} の根拠を表示",
       "hideNamed": "{subject} の根拠を非表示"
     },
@@ -47,34 +95,15 @@
       "label": "レーダーの絞り込み",
       "searchLabel": "関係性シグナルを検索",
       "searchPlaceholder": "連絡先、会社、案件、根拠を検索",
-      "familyLabel": "シグナル種別で絞り込む",
+      "familyLabel": "表示する種別",
       "stateLabel": "対応状態で絞り込む",
-      "allFamilies": "すべての種別",
+      "allFamilies": "すべて",
       "allStates": "すべての状態",
       "attention": "要対応"
     },
-    "rank": {
-      "heading": "第{position}位",
-      "rule": "並び順：{rule}",
-      "factor": "{key}：{value}（{direction}）",
-      "rulePriority": "優先度、根拠の強さ、対象の安定順",
-      "keyPriority": "優先度",
-      "keyDaysUntilCold": "コールドまでの日数",
-      "keyDaysSinceTouch": "最終接触からの日数",
-      "keyRiskScore": "リスクスコア",
-      "keyPathScore": "パスの強さ",
-      "keySubject": "対象の安定順",
-      "directionAscending": "昇順",
-      "directionDescending": "降順",
-      "unknownRule": "決定論的な種別横断ランキング規則",
-      "unknownFactor": "追加の決定論的要素",
-      "unknownDirection": "安定順"
-    },
     "evidence": {
-      "heading": "根拠",
       "separator": "、",
-      "parameter": "{key}：{value}",
-      "references": "参照元：{references}",
+      "sources": "根拠となるレコード：",
       "typeRelationshipTemperature": "温度感",
       "typeCloseOverdue": "予定クローズ日を超過",
       "typeClosingSoonQuiet": "クローズ間近だが最近の動きが少ない",
@@ -90,27 +119,19 @@
       "parameterGoesColdAt": "コールド予測日",
       "parameterDaysUntilCold": "コールドまでの日数",
       "parameterTouchCount": "接触回数",
-      "parameterModelVersion": "モデルバージョン",
       "parameterSeverity": "深刻度",
-      "parameterBridgePersonId": "橋渡し役",
-      "parameterBridgeName": "橋渡し役の名前",
+      "parameterBridgeName": "紹介を頼める方",
       "parameterReachType": "候補の種類",
       "parameterEvidenceType": "紹介ルートの根拠",
       "parameterEvidenceCompany": "共通の会社",
       "parameterOverlapStartYear": "在籍重複の開始年",
       "parameterOverlapEndYear": "在籍重複の終了年",
-      "parameterPathScore": "パスの強さ",
+      "parameterPathScore": "ルートの強さ",
       "parameterDaysOverdue": "超過日数",
       "parameterDaysUntilClose": "クローズまでの日数",
-      "parameterPersonId": "関係者",
       "parameterRole": "関係者の役割",
       "unknownType": "追加の関係性根拠",
-      "unknownParameter": "追加の参照値",
-      "referencePerson": "連絡先",
-      "referenceCompany": "会社",
-      "referenceDeal": "案件",
-      "referencePersonEdge": "関係性エッジ",
-      "unknownReference": "参照元レコード"
+      "unknownParameter": "追加の参照値"
     },
     "value": {
       "hot": "ホット",
@@ -123,7 +144,6 @@
       "high": "高",
       "medium": "中",
       "low": "低",
-      "opportunity": "紹介の候補",
       "connection": "確認済みのつながり",
       "colleagues": "現在の同僚",
       "former_colleagues": "以前の同僚",
@@ -139,35 +159,35 @@
       "unavailable": "時刻を確認できません"
     },
     "actions": {
-      "label": "{subject} の操作",
       "follow": "フォロー",
       "followed": "フォロー中",
       "snooze": "スヌーズ",
       "dismiss": "非表示",
-      "createTask": "タスクを作成",
-      "taskCreated": "タスク作成済み",
-      "openContext": "関連レコードを開く",
-      "followNamed": "{subject} のシグナルをフォロー",
-      "snoozeNamed": "{subject} のシグナルをスヌーズ",
-      "dismissNamed": "{subject} のシグナルを非表示",
-      "createTaskNamed": "{subject} のタスクを作成",
-      "taskCreatedNamed": "{subject} のタスクは作成済みです",
+      "openContext": "現在のレコードを開く",
+      "moreNamed": "{subject} のその他の操作",
+      "followUp": "フォローアップを設定",
+      "followUpNamed": "{subject} へのフォローアップを設定",
+      "followUpDone": "フォローアップ設定済み",
+      "followUpDoneNamed": "{subject} へのフォローアップはすでに設定済みです",
+      "askIntro": "紹介を依頼",
+      "askIntroNamed": "{subject} への紹介を依頼",
+      "introAsked": "紹介を依頼済み",
+      "introAskedNamed": "{subject} への紹介はすでに依頼済みです",
       "createTaskDeniedNamed": "{subject} のタスクを作成する権限がありません",
       "createTaskPermissionUnavailableNamed": "{subject} のタスク作成権限を確認できませんでした",
       "createWarmPathTaskDeniedNamed": "{subject} の紹介ルートからタスクを作成する権限がありません",
       "createWarmPathTaskPermissionUnavailableNamed": "{subject} の紹介ルートのタスクに必要な権限を確認できませんでした",
-      "createTaskEvidenceCheckingNamed": "{subject} の関係性エビデンスを更新しています",
-      "createTaskEvidenceUnavailableNamed": "{subject} の関係性エビデンスを更新できませんでした",
+      "createTaskEvidenceCheckingNamed": "{subject} の関係性の根拠を更新しています",
+      "createTaskEvidenceUnavailableNamed": "{subject} の関係性の根拠を更新できませんでした",
       "createTaskStaleNamed": "{subject} のシグナルが古いため、タスクを作成できません",
       "createTaskPathUnavailableNamed": "{subject} の紹介ルートに橋渡し役が見つからないため、タスクを作成できません",
-      "openContextNamed": "{subject} の参照元レコードを開く",
       "taskPermissionDenied": "タスクを作成する権限がありません。",
       "taskPermissionUnavailable": "タスク権限を確認できませんでした。再試行してからタスクを作成してください。",
       "warmPathTaskPermissionDenied": "紹介ルートを受け入れるには、タスク作成と連絡先更新の権限が必要です。",
       "warmPathTaskPermissionUnavailable": "紹介ルートに必要な権限を確認できませんでした。もう一度お試しください。",
       "retryPermissionCheck": "再確認",
-      "taskEvidenceChecking": "タスクを作成する前に関係性エビデンスを更新しています。",
-      "taskEvidenceUnavailable": "関係性エビデンスを更新できませんでした。再試行してからタスクを作成してください。",
+      "taskEvidenceChecking": "タスクを作成する前に関係性の根拠を更新しています。",
+      "taskEvidenceUnavailable": "関係性の根拠を更新できませんでした。再試行してからタスクを作成してください。",
       "retryEvidenceRefresh": "再読み込み",
       "taskStale": "タスクを作成する前に、この古いシグナルを更新してください。",
       "taskPathUnavailable": "この紹介ルートの橋渡し役を確認できません。更新してからタスクを作成してください。",
@@ -194,15 +214,15 @@
     },
     "empty": {
       "title": "現在、対応が必要なシグナルはありません",
-      "body": "決定論的な検出条件に該当する関係性シグナルはありません。"
+      "body": "記録されている活動の中で、いま対応が必要なものはありません。レーダーは、静かになりつつある関係、遅れはじめた案件、新しい紹介ルートを見守っています。やり取りを記録していただければ、注意すべきことがあればお知らせします。"
     },
     "noResults": {
       "title": "条件に一致するシグナルがありません",
-      "body": "種別、状態、検索語を変更して対象を広げてください。"
+      "body": "表示する種別、状態、検索語を変更して対象を広げてください。"
     },
     "partial": {
-      "title": "一部のシグナル種別を読み込めません",
-      "body": "取得済みの結果は表示しています。現在のデータを取得できなかった種別：{families}。"
+      "title": "一部のシグナルを更新できませんでした",
+      "body": "{families} は最後に取得できた内容を表示しています。その後の変化はまだ反映されていません。"
     },
     "unavailable": {
       "title": "レーダーを利用できません",

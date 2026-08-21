@@ -6,10 +6,26 @@ import { useTranslations } from 'next-intl';
 import { AdjustmentsHorizontalIcon, MagnifyingGlassIcon, SignalIcon } from '@heroicons/react/24/outline';
 
 import RadarSignalCard from '@/app/components/radar/RadarSignalCard';
-import { FAMILY_DOTS } from '@/app/components/radar/radarFamilyAccent';
+import RadarHorizon from '@/app/components/radar/RadarHorizon';
+import RadarFamilyLayer from '@/app/components/radar/RadarFamilyLayer';
+import { radarRecordLabel } from '@/app/components/radar/radarLabels';
+import {
+    RADAR_FAMILY_FILTER_KEY,
+    RADAR_HORIZON_FILTER_KEY,
+    RADAR_QUERY_FILTER_KEY,
+    RADAR_STATE_FILTER_KEY,
+    RADAR_SUBJECT_FILTER_KEY,
+    parseRadarSubjectFilter,
+    radarOwnedUrlParams,
+} from '@/app/components/radar/radarLinks';
+import {
+    isRadarHorizonBand,
+    radarHorizonPlacement,
+    radarPathBridges,
+    type RadarHorizonBand,
+} from '@/app/components/radar/radarHorizon';
 import {
     RADAR_FIELD_SURFACE,
-    RADAR_FORCED_COLORS_AFFORDANCE,
     RADAR_PRESSABLE_SURFACE,
 } from '@/app/components/radar/radarControlSurface';
 import SectionUnavailable from '@/app/components/SectionUnavailable';
@@ -24,15 +40,13 @@ import {
     snoozeRadarSignal,
 } from '@/app/lib/api';
 import {
-    RADAR_FAMILIES,
+    RADAR_SIGNAL_FAMILIES,
     classifyRadarSurface,
     createRadarTaskSignalStore,
     filterRadarSignals,
-    groupRadarSignalsByBand,
     isRadarFamilyFilter,
     isRadarStateFilter,
     radarEvidenceRefreshDelay,
-    radarFamilyCounts,
     releaseActiveRadarTask,
     replaceRadarSignal,
     unavailableRadarFamilies,
@@ -42,10 +56,11 @@ import {
     type RadarStateFilter,
 } from '@/app/lib/radar';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import type { RadarPayload, RadarSignal } from '@/app/lib/types';
+import type { RadarFamily, RadarPayload, RadarSignal } from '@/app/lib/types';
 import type { TaskDraft } from '@/app/lib/actions/types';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
+import { SegmentedControl } from '@/components/ui/segmented-control';
 import {
     Select,
     SelectContent,
@@ -61,19 +76,10 @@ function nextFocusId(signals: readonly RadarSignal[], id: number): number | null
 }
 
 function warmPathBridge(signal: RadarSignal): { id: number; label: string } | undefined {
-    for (const evidence of signal.evidence) {
-        if (evidence.type !== 'warm_path') continue;
-        const bridgePersonId = evidence.parameters.bridgePersonId;
-        if (typeof bridgePersonId !== 'number' || !Number.isInteger(bridgePersonId)) continue;
-        const bridgeName = evidence.parameters.bridgeName;
-        return {
-            id: bridgePersonId,
-            label: typeof bridgeName === 'string' && bridgeName.trim().length > 0
-                ? bridgeName.trim()
-                : `#${bridgePersonId}`,
-        };
-    }
-    return undefined;
+    const bridge = radarPathBridges(signal)[0];
+    return bridge === undefined
+        ? undefined
+        : { id: bridge.bridgePersonId, label: bridge.bridgeName };
 }
 
 function nextRadarRefreshDelay(payload: RadarPayload, requestDurationMs: number): number | null {
@@ -90,23 +96,39 @@ function nextRadarRefreshDelay(payload: RadarPayload, requestDurationMs: number)
 
 type RadarRefreshSession = { active: boolean };
 
-/** Stateful Radar work list with shareable filters and failure-aware per-signal actions. */
+/**
+ * Radar: the whole flagged portfolio placed on one horizon, then opened family by family.
+ *
+ * The page reads outside in — where attention is bleeding, what each group of signals looks like as
+ * a whole, then the individual signals and their evidence — so the first thing a user sees is a
+ * question only Radar can answer rather than the first row of a list. Every level below the horizon
+ * is a refinement of the same set, and the filters that survive in the URL keep a view shareable.
+ */
 export default function RadarBoard({ initialPayload }: { initialPayload: RadarPayload }) {
     const t = useTranslations('Radar');
     const searchParams = useSearchParams();
-    const initialFamily = searchParams.get('family');
-    const initialState = searchParams.get('state');
+    const initialFamily = searchParams.get(RADAR_FAMILY_FILTER_KEY);
+    const initialState = searchParams.get(RADAR_STATE_FILTER_KEY);
+    const initialWhen = searchParams.get(RADAR_HORIZON_FILTER_KEY);
+    const initialSubject = searchParams.get(RADAR_SUBJECT_FILTER_KEY);
     const [family, setFamily] = useState<RadarFamilyFilter>(
         isRadarFamilyFilter(initialFamily) ? initialFamily : 'all',
     );
     const [state, setState] = useState<RadarStateFilter>(
         isRadarStateFilter(initialState) ? initialState : 'attention',
     );
-    const [query, setQuery] = useState(() => searchParams.get('q') ?? '');
+    const [query, setQuery] = useState(() => (
+        radarRecordLabel(searchParams.get(RADAR_QUERY_FILTER_KEY)) ?? ''
+    ));
+    const [subjectFilter, setSubjectFilter] = useState(() => parseRadarSubjectFilter(initialSubject));
+    const [horizonBand, setHorizonBand] = useState<RadarHorizonBand | null>(
+        isRadarHorizonBand(initialWhen) ? initialWhen : null,
+    );
     const [payload, setPayload] = useState(initialPayload);
     const [busyId, setBusyId] = useState<number | null>(null);
     const [snoozeId, setSnoozeId] = useState<number | null>(null);
     const [expandedIds, setExpandedIds] = useState<ReadonlySet<number>>(() => new Set());
+    const [closedFamilies, setClosedFamilies] = useState<ReadonlySet<RadarFamily>>(() => new Set());
     const [announcement, setAnnouncement] = useState('');
     const [freshnessStatus, setFreshnessStatus] = useState<RadarFreshnessStatus>('checking');
     const { run } = useActions();
@@ -201,29 +223,55 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
         );
     }, [freshnessStatus, payload.items]);
 
-    useOwnedUrlParams({
-        family: family === 'all' ? undefined : family,
-        state: state === 'attention' ? undefined : state,
-        q: query.trim() || undefined,
-    });
+    useOwnedUrlParams(radarOwnedUrlParams({
+        family,
+        state,
+        query,
+        horizon: horizonBand,
+        subject: subjectFilter,
+    }));
 
+    const displaySignals = useMemo(() => payload.items.map((signal) => {
+        const label = radarRecordLabel(signal.subject.label)
+            ?? t(`subject.unnamed.${signal.subject.type}`);
+        return label === signal.subject.label
+            ? signal
+            : { ...signal, subject: { ...signal.subject, label } };
+    }), [payload.items, t]);
+    const matchedSignals = useMemo(() => {
+        const filteredSignals = filterRadarSignals(displaySignals, { family: 'all', state, query });
+        return subjectFilter === null
+            ? filteredSignals
+            : filteredSignals.filter((signal) => (
+                signal.subject.type === subjectFilter.type
+                && signal.subject.id === subjectFilter.id
+            ));
+    }, [displaySignals, query, state, subjectFilter]);
     const visibleSignals = useMemo(
-        () => filterRadarSignals(payload.items, { family, state, query }),
-        [family, payload.items, query, state],
+        () => matchedSignals.filter((signal) => (
+            (family === 'all' || signal.family === family)
+            && (horizonBand === null || radarHorizonPlacement(signal).band === horizonBand)
+        )),
+        [family, horizonBand, matchedSignals],
+    );
+    const horizonSignals = useMemo(
+        () => matchedSignals.filter((signal) => family === 'all' || signal.family === family),
+        [family, matchedSignals],
     );
     const surface = classifyRadarSurface(payload, visibleSignals);
     const unavailableFamilies = unavailableRadarFamilies(payload.families);
-    const familyCounts = useMemo(
-        () => radarFamilyCounts(payload.items, { state, query }),
-        [payload.items, query, state],
-    );
-    const bands = useMemo(() => groupRadarSignalsByBand(visibleSignals), [visibleSignals]);
+    const unavailableLookup = new Set<RadarFamily>(unavailableFamilies);
+    const shownFamilies = family === 'all' ? RADAR_SIGNAL_FAMILIES : [family];
+    const filtered = family !== 'all'
+        || state !== 'attention'
+        || query.trim().length > 0
+        || subjectFilter !== null;
 
     const restoreListFocus = (id: number) => {
         const target = nextFocusId(visibleSignals, id);
         requestAnimationFrame(() => {
             const element = target == null
-                ? document.getElementById('radar-family-filter')
+                ? document.getElementById('radar-filter-search')
                 : document.getElementById(`radar-signal-${target}`);
             element?.focus();
         });
@@ -273,7 +321,11 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
             const context = await getRadarContext(signal.id);
             const result = await run('record.open', {
                 source: 'menu',
-                record: { type: context.type, id: context.id, label: context.label },
+                record: {
+                    type: context.type,
+                    id: context.id,
+                    label: radarRecordLabel(context.label) ?? signal.subject.label,
+                },
             });
             if (result.status !== 'completed') throw new Error('Radar context action did not complete');
         } catch {
@@ -346,79 +398,20 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
     };
 
     return (
-        <div className="space-y-8">
+        <div className="space-y-6">
             <p className="sr-only" aria-live="polite" aria-atomic="true">{announcement}</p>
 
-            <section aria-label={t('filters.label')} className="space-y-4">
-                <p className="text-sm text-muted-foreground">
-                    {t(state === 'attention' ? 'summary.headline' : 'summary.headlineFiltered', {
-                        count: visibleSignals.length,
-                    })}
-                </p>
-
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                    <div className="-mx-1 flex flex-nowrap items-center gap-1.5 overflow-x-auto px-1 pb-1 lg:flex-wrap lg:overflow-visible lg:pb-0" role="group" aria-label={t('filters.familyLabel')}>
-                        {RADAR_FAMILIES.map((value) => (
-                            <button
-                                key={value}
-                                type="button"
-                                id={value === 'all' ? 'radar-family-filter' : undefined}
-                                data-action-focus-fallback={value === 'all' ? '' : undefined}
-                                onClick={() => setFamily(value)}
-                                aria-pressed={family === value}
-                                className={cn(
-                                    'inline-flex min-h-9 shrink-0 items-center gap-2 rounded-full px-3 text-sm whitespace-nowrap transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50',
-                                    RADAR_FORCED_COLORS_AFFORDANCE,
-                                    family === value
-                                        ? 'bg-foreground text-background'
-                                        : `${RADAR_PRESSABLE_SURFACE} text-muted-foreground hover:text-foreground`,
-                                )}
-                            >
-                                {value === 'all' ? null : (
-                                    <span className={cn('size-1.5 rounded-full', FAMILY_DOTS[value])} aria-hidden />
-                                )}
-                                {value === 'all' ? t('filters.allFamilies') : t(`family.${value}`)}
-                                <span className={cn('tabular-nums', family === value ? 'text-background/70' : 'text-muted-foreground/70')}>
-                                    {familyCounts[value]}
-                                </span>
-                            </button>
-                        ))}
-                    </div>
-
-                    <div className="flex gap-2">
-                        <div className="relative min-w-0 flex-1 lg:w-64 lg:flex-none">
-                            <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-                            <Input
-                                value={query}
-                                onChange={(event) => setQuery(event.target.value)}
-                                placeholder={t('filters.searchPlaceholder')}
-                                aria-label={t('filters.searchLabel')}
-                                className={cn('rounded-full pl-9', RADAR_FIELD_SURFACE)}
-                            />
-                        </div>
-                        <Select value={state} onValueChange={(value) => {
-                            if (isRadarStateFilter(value)) setState(value);
-                        }}>
-                            <SelectTrigger className={cn('min-h-11 shrink-0 rounded-full lg:min-h-9', RADAR_PRESSABLE_SURFACE)} aria-label={t('filters.stateLabel')}>
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent align="end">
-                                <SelectItem value="attention">{t('filters.attention')}</SelectItem>
-                                <SelectItem value="active">{t('state.active')}</SelectItem>
-                                <SelectItem value="followed">{t('state.followed')}</SelectItem>
-                                <SelectItem value="snoozed">{t('state.snoozed')}</SelectItem>
-                                <SelectItem value="dismissed">{t('state.dismissed')}</SelectItem>
-                                <SelectItem value="all">{t('filters.allStates')}</SelectItem>
-                            </SelectContent>
-                        </Select>
-                    </div>
-                </div>
-            </section>
-
-            {unavailableFamilies.length > 0 ? (
+            {surface === 'unavailable' ? (
                 <SectionUnavailable
-                    title={surface === 'unavailable' ? t('unavailable.title') : t('partial.title')}
-                    body={t(surface === 'unavailable' ? 'unavailable.body' : 'partial.body', {
+                    title={t('unavailable.title')}
+                    body={t('unavailable.body', {
+                        families: unavailableFamilies.map((value) => t(`family.${value}`)).join(t('evidence.separator')),
+                    })}
+                />
+            ) : unavailableFamilies.length > 0 ? (
+                <SectionUnavailable
+                    title={t('partial.title')}
+                    body={t('partial.body', {
                         families: unavailableFamilies.map((value) => t(`family.${value}`)).join(t('evidence.separator')),
                     })}
                 />
@@ -433,67 +426,142 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
                 />
             ) : null}
 
-            {surface === 'no_results' || (surface === 'partial' && payload.items.length > 0 && visibleSignals.length === 0) ? (
-                <EmptyState
-                    icon={AdjustmentsHorizontalIcon}
-                    title={t('noResults.title')}
-                    body={t('noResults.body')}
-                    tone="muted"
-                />
-            ) : null}
+            {surface !== 'empty' && surface !== 'unavailable' ? (
+                <>
+                    <RadarHorizon
+                        signals={horizonSignals}
+                        band={horizonBand}
+                        onBandChange={setHorizonBand}
+                        filtered={filtered}
+                    />
 
-            {bands.map((group) => (
-                <section key={group.band} aria-labelledby={`radar-band-${group.band}`} className="space-y-2">
-                    <div className="flex items-baseline gap-3">
-                        <h2 id={`radar-band-${group.band}`} className="text-sm font-semibold text-foreground">
-                            {t(`band.${group.band}`)}
-                        </h2>
-                        <span className="text-xs tabular-nums text-muted-foreground">{group.signals.length}</span>
-                        <span className="h-px min-w-0 flex-1 bg-border" aria-hidden />
+                    <section aria-label={t('filters.label')} className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <SegmentedControl
+                            ariaLabel={t('filters.familyLabel')}
+                            value={family}
+                            onChange={setFamily}
+                            options={[
+                                { value: 'all', label: t('filters.allFamilies') },
+                                ...RADAR_SIGNAL_FAMILIES.map((value) => ({
+                                    value,
+                                    label: t(`family.${value}`),
+                                })),
+                            ]}
+                        />
+
+                        <div className="flex gap-2">
+                            <div className="relative min-w-0 flex-1 lg:w-64 lg:flex-none">
+                                <MagnifyingGlassIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                                <Input
+                                    id="radar-filter-search"
+                                    data-action-focus-fallback=""
+                                    value={query}
+                                    onChange={(event) => {
+                                        setQuery(event.target.value);
+                                        setSubjectFilter(null);
+                                    }}
+                                    placeholder={t('filters.searchPlaceholder')}
+                                    aria-label={t('filters.searchLabel')}
+                                    className={cn('rounded-full pl-9', RADAR_FIELD_SURFACE)}
+                                />
+                            </div>
+                            <Select value={state} onValueChange={(value) => {
+                                if (isRadarStateFilter(value)) setState(value);
+                            }}>
+                                <SelectTrigger className={cn('min-h-11 shrink-0 rounded-full lg:min-h-9', RADAR_PRESSABLE_SURFACE)} aria-label={t('filters.stateLabel')}>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent align="end">
+                                    <SelectItem value="attention">{t('filters.attention')}</SelectItem>
+                                    <SelectItem value="active">{t('state.active')}</SelectItem>
+                                    <SelectItem value="followed">{t('state.followed')}</SelectItem>
+                                    <SelectItem value="snoozed">{t('state.snoozed')}</SelectItem>
+                                    <SelectItem value="dismissed">{t('state.dismissed')}</SelectItem>
+                                    <SelectItem value="all">{t('filters.allStates')}</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </section>
+
+                    {surface === 'no_results' ? (
+                        <EmptyState
+                            icon={AdjustmentsHorizontalIcon}
+                            title={t('noResults.title')}
+                            body={t('noResults.body')}
+                            tone="muted"
+                        />
+                    ) : (
+                        <p className="text-sm text-muted-foreground">
+                            {t(filtered || horizonBand !== null ? 'summary.headlineFiltered' : 'summary.headline', {
+                                count: visibleSignals.length,
+                            })}
+                        </p>
+                    )}
+
+                    <div className="space-y-4">
+                        {(surface === 'no_results' ? [] : shownFamilies).map((value) => {
+                            const familySignals = visibleSignals.filter((signal) => signal.family === value);
+                            return (
+                                <RadarFamilyLayer
+                                    key={value}
+                                    family={value}
+                                    signals={familySignals}
+                                    unavailable={unavailableLookup.has(value)}
+                                    open={!closedFamilies.has(value)}
+                                    onOpenChange={(open) => setClosedFamilies((current) => {
+                                        const next = new Set(current);
+                                        if (open) next.delete(value);
+                                        else next.add(value);
+                                        return next;
+                                    })}
+                                >
+                                    <ol aria-label={t(`family.${value}`)}>
+                                        {familySignals.map((signal) => (
+                                            <RadarSignalCard
+                                                key={`${signal.id}:${payload.asOf}`}
+                                                signal={signal}
+                                                pageAsOf={payload.asOf}
+                                                freshnessStatus={freshnessStatus}
+                                                busy={busyId !== null}
+                                                snoozeOpen={snoozeId === signal.id}
+                                                onSnoozeOpenChange={(open) => setSnoozeId(open ? signal.id : null)}
+                                                expanded={expandedIds.has(signal.id)}
+                                                onExpandedChange={(open) => setExpandedIds((current) => {
+                                                    const next = new Set(current);
+                                                    if (open) next.add(signal.id);
+                                                    else next.delete(signal.id);
+                                                    return next;
+                                                })}
+                                                onFollow={() => void mutate(
+                                                    signal,
+                                                    () => followRadarSignal(signal.id, signal.version),
+                                                    t('feedback.followed', { subject: signal.subject.label }),
+                                                    false,
+                                                )}
+                                                onSnooze={(until) => void mutate(
+                                                    signal,
+                                                    () => snoozeRadarSignal(signal.id, signal.version, until),
+                                                    t('feedback.snoozed', { subject: signal.subject.label }),
+                                                    true,
+                                                )}
+                                                onDismiss={() => void mutate(
+                                                    signal,
+                                                    () => dismissRadarSignal(signal.id, signal.version),
+                                                    t('feedback.dismissed', { subject: signal.subject.label }),
+                                                    true,
+                                                )}
+                                                onCreateTask={() => void openTask(signal)}
+                                                onRefreshEvidence={() => void refreshRadar()}
+                                                onOpenContext={() => void openContext(signal)}
+                                            />
+                                        ))}
+                                    </ol>
+                                </RadarFamilyLayer>
+                            );
+                        })}
                     </div>
-                    <ol className="rounded-2xl border border-border bg-card" aria-label={t(`band.${group.band}`)}>
-                        {group.signals.map((signal) => (
-                            <RadarSignalCard
-                                key={`${signal.id}:${payload.asOf}`}
-                                signal={signal}
-                                pageAsOf={payload.asOf}
-                                freshnessStatus={freshnessStatus}
-                                busy={busyId !== null}
-                                snoozeOpen={snoozeId === signal.id}
-                                onSnoozeOpenChange={(open) => setSnoozeId(open ? signal.id : null)}
-                                expanded={expandedIds.has(signal.id)}
-                                onExpandedChange={(open) => setExpandedIds((current) => {
-                                    const next = new Set(current);
-                                    if (open) next.add(signal.id);
-                                    else next.delete(signal.id);
-                                    return next;
-                                })}
-                                onFollow={() => void mutate(
-                                    signal,
-                                    () => followRadarSignal(signal.id, signal.version),
-                                    t('feedback.followed', { subject: signal.subject.label }),
-                                    false,
-                                )}
-                                onSnooze={(until) => void mutate(
-                                    signal,
-                                    () => snoozeRadarSignal(signal.id, signal.version, until),
-                                    t('feedback.snoozed', { subject: signal.subject.label }),
-                                    true,
-                                )}
-                                onDismiss={() => void mutate(
-                                    signal,
-                                    () => dismissRadarSignal(signal.id, signal.version),
-                                    t('feedback.dismissed', { subject: signal.subject.label }),
-                                    true,
-                                )}
-                                onCreateTask={() => void openTask(signal)}
-                                onRefreshEvidence={() => void refreshRadar()}
-                                onOpenContext={() => void openContext(signal)}
-                            />
-                        ))}
-                    </ol>
-                </section>
-            ))}
+                </>
+            ) : null}
         </div>
     );
 }

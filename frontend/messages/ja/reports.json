@@ -24,7 +24,7 @@
     },
     "landing": {
       "title": "レポート",
-      "subtitle": "確定的なCRM数値を、グラフ、推奨事項、データ付録、追跡可能な出典を備えたレビュー用の文章に変換します。",
+      "subtitle": "ワークスペースの数値を、グラフ・推奨事項・データ付録・追跡可能な出典を備えたレビュー用の文章に変換します。",
       "newReport": "新規レポート",
       "blankBuilder": "空のビルダー",
       "otherWays": "別の方法で作成",
@@ -92,9 +92,9 @@
       "unavailable": {
         "not_configured": "AI が無効または未設定の間は、テンプレートまたは空のビルダーを使用してください。",
         "input_restricted": "設定されたプロバイダーへ送信できない内容が含まれています。機微な情報を削除して再試行してください。",
-        "rate_limited": "AI 生成の上限に達しました。後でもう一度試すか、確定的なビルダーを使用してください。",
+        "rate_limited": "AI 生成の上限に達しました。しばらくしてからもう一度お試しいただくか、ご自身でレポートを作成してください。",
         "invalid_definition": "この依頼を有効なレポート定義に変換できませんでした。言い換えるか、ビルダーを使用してください。",
-        "provider_error": "プロバイダーが定義を生成できませんでした。再試行するか、確定的な開始方法を使用してください。"
+        "provider_error": "プロバイダーが定義を生成できませんでした。もう一度お試しいただくか、ご自身でレポートを作成してください。"
       }
     },
     "templates": {
@@ -224,7 +224,7 @@
       "executiveSummary": "エグゼクティブサマリー",
       "findings": "所見と推奨事項",
       "narrativeUnavailable": "文章を利用できません",
-      "narrativeUnavailableBody": "確定的な数値と出典付録は完全な状態で確認できます。",
+      "narrativeUnavailableBody": "数値と出典付録はそろっており、そのままご確認いただけます。",
       "narrativeGenerating": "エグゼクティブサマリーを作成中",
       "narrativeGeneratingBody": "以下の数値はすでに利用できます。出典に基づく文章を作成しており、まもなくここに表示されます。",
       "narrativeErrorTitle": "文章を生成できませんでした",
@@ -236,7 +236,7 @@
       "figures": "根拠と数値",
       "appendix": "データ付録",
       "citations": "出典",
-      "generatedBy": "Connexがワークスペースの確定的な数値から生成",
+      "generatedBy": "Connex がワークスペースの数値をもとに生成",
       "widgetScope": "{source}・{group}別",
       "currentPeriod": "当期",
       "currentStateAsOf": "現在状態の数値の基準時点",
@@ -470,7 +470,7 @@
       "entityLabel": "目標",
       "deleteDetails": "{scope} の売上目標です。",
       "emptyTitle": "売上目標はまだありません",
-      "emptyBody": "月次または四半期レポートに確定的な達成率を追加する目標を作成してください。",
+      "emptyBody": "月次・四半期レポートに達成率を表示するには、目標を作成してください。",
       "loadErrorTitle": "目標を読み込めませんでした",
       "loadErrorBody": "ワークスペースの目標を現在利用できません。目標を作成または変更する前に再試行してください。",
       "ownersLoadError": "ワークスペースメンバーを読み込めなかったため、目標管理を一時的に利用できません。",

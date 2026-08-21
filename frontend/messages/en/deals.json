@@ -5,7 +5,7 @@
         "levelLow": "Low risk",
         "panelTitle": "Risk signals",
         "unavailable": "Risk evidence is temporarily unavailable.",
-        "clear": "No active deterministic risk signals.",
+        "clear": "No risk signals on this deal right now.",
         "assessedAt": "Assessed {date}",
         "factorCloseOverdue": "Expected close date passed {days, plural, one {# day} other {# days}} ago",
         "factorClosingSoonQuiet": "Closing in {days, plural, one {# day} other {# days}} with no recent activity",

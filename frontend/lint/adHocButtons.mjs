@@ -58,6 +58,12 @@ import { join, relative, resolve, sep } from "node:path";
  *    around the button system: the overflow menu that carried the card's five secondary jobs moved
  *    into the manage drawer, and the actions that stayed took context tiers instead of the `sm`
  *    sizes the card had been naming, clearing all seven of its findings.
+ * 4. 448 → 447 (lowered). #1340's People & access destination removed the last remaining shape
+ *    override from one of the members-panel actions.
+ * 5. 447 → 430 (lowered). WS11's Radar redesign put the board's filter row on
+ *    `SegmentedControl` and rebuilt the signal row on `Button`/`IconButton`, so both radar files left
+ *    the ledger: one hand-rolled chip layer and sixteen shape overrides, icon sizes, and untooltipped
+ *    icon buttons.
  *
  * **The burndown contract**, deliberately identical to `lint/motionDurations.mjs` so the two gates
  * read the same way. `loadBaseline()` returns the committed inventory of files that still carry
@@ -366,4 +372,4 @@ export function loadBaseline() {
  * The ledger's total after the widening described above. It may fall. It rises only in a commit
  * that widens what the scanner catches — never to make room for new debt.
  */
-export const BASELINE_HIGH_WATER_MARK = 448;
+export const BASELINE_HIGH_WATER_MARK = 430;

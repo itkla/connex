@@ -93,8 +93,6 @@
     "app/components/overview/analytics/RecentMovesList.tsx": 1,
     "app/components/overview/analytics/StageFunnel.tsx": 1,
     "app/components/overview/analytics/TeamLeaderboard.tsx": 1,
-    "app/components/radar/RadarBoard.tsx": 1,
-    "app/components/radar/RadarSignalCard.tsx": 16,
     "app/components/records/ColumnVisibilityMenu.tsx": 1,
     "app/components/records/CustomFieldColumns.tsx": 1,
     "app/components/records/DuplicatePreflightWarning.tsx": 3,

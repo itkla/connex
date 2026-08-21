@@ -31,6 +31,9 @@ import { join, relative, resolve, sep } from "node:path";
  *    primitives: the records split button, the dashboard and deal-document menu triggers, and the
  *    analytics range control, whose thumb now rides `SegmentedControl`'s shared spring.
  *
+ * 4. 227 → 226 (lowered). WS11's Radar redesign replaced the signal card's hand-timed disclosure
+ *    chevron with the `--motion-*` tokens, so the last radar file left the ledger.
+ *
  * Widening the scanner is the only sanctioned reason to raise the mark. New debt is not — and when
  * a widening commit also pays debt down, the mark follows the lower total, as in (2).
  *
@@ -215,4 +218,4 @@ export function loadBaseline() {
  * It may fall. It rises only in a commit that widens what the scanner catches — never to make room
  * for new debt.
  */
-export const BASELINE_HIGH_WATER_MARK = 227;
+export const BASELINE_HIGH_WATER_MARK = 226;

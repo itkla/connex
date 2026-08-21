@@ -1,10 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 
 import RadarSignalCard from '@/app/components/radar/RadarSignalCard';
+import { radarPathBridges } from '@/app/components/radar/radarHorizon';
+import { radarRecordLabel } from '@/app/components/radar/radarLabels';
 import { radarSubjectHref } from '@/app/components/radar/radarLinks';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import { useActions } from '@/app/hooks/useActions';
@@ -34,19 +36,10 @@ export type RecordSignalsSubject = {
 
 /** The bridge contact named by a warm-path signal, when it carries one. */
 function warmPathBridge(signal: RadarSignal): { id: number; label: string } | undefined {
-    for (const evidence of signal.evidence) {
-        if (evidence.type !== 'warm_path') continue;
-        const bridgePersonId = evidence.parameters.bridgePersonId;
-        if (typeof bridgePersonId !== 'number' || !Number.isInteger(bridgePersonId)) continue;
-        const bridgeName = evidence.parameters.bridgeName;
-        return {
-            id: bridgePersonId,
-            label: typeof bridgeName === 'string' && bridgeName.trim().length > 0
-                ? bridgeName.trim()
-                : `#${bridgePersonId}`,
-        };
-    }
-    return undefined;
+    const bridge = radarPathBridges(signal)[0];
+    return bridge === undefined
+        ? undefined
+        : { id: bridge.bridgePersonId, label: bridge.bridgeName };
 }
 
 /**
@@ -83,6 +76,14 @@ export default function RecordSignalsPanel({
     const sessionRef = useRef({ active: true });
     const draftsRef = useRef(new Map<number, TaskDraft>());
     const activeTaskRef = useRef<ActiveRadarTask | null>(null);
+
+    const withDisplayLabel = (signal: RadarSignal): RadarSignal => {
+        const label = radarRecordLabel(signal.subject.label)
+            ?? tRadar(`subject.unnamed.${signal.subject.type}`);
+        return label === signal.subject.label
+            ? signal
+            : { ...signal, subject: { ...signal.subject, label } };
+    };
 
     const load = useCallback((session: { active: boolean }) => {
         getRadarForSubject(subject.type, subject.id).then(
@@ -195,7 +196,9 @@ export default function RecordSignalsPanel({
         }
     };
 
-    const href = useMemo(() => radarSubjectHref(subject.label), [subject.label]);
+    const subjectLabel = radarRecordLabel(subject.label)
+        ?? tRadar(`subject.unnamed.${subject.type}`);
+    const href = radarSubjectHref({ ...subject, label: subjectLabel });
     const unavailable = freshnessStatus === 'unavailable';
     const loading = freshnessStatus === 'checking' && asOf === '';
 
@@ -225,41 +228,44 @@ export default function RecordSignalsPanel({
                     <p className="px-6 py-6 text-sm text-muted-foreground">{t('empty')}</p>
                 ) : (
                     <ol aria-label={t('title')}>
-                        {signals.map((signal) => (
-                            <RadarSignalCard
-                                key={`${signal.id}:${asOf}`}
-                                signal={signal}
-                                pageAsOf={asOf}
-                                freshnessStatus={freshnessStatus}
-                                busy={busyId !== null}
-                                snoozeOpen={snoozeId === signal.id}
-                                onSnoozeOpenChange={(open) => setSnoozeId(open ? signal.id : null)}
-                                expanded={expandedIds.has(signal.id)}
-                                onExpandedChange={(open) => setExpandedIds((current) => {
-                                    const next = new Set(current);
-                                    if (open) next.add(signal.id);
-                                    else next.delete(signal.id);
-                                    return next;
-                                })}
-                                onFollow={() => void mutate(
-                                    signal,
-                                    () => followRadarSignal(signal.id, signal.version),
-                                    tRadar('feedback.followed', { subject: signal.subject.label }),
-                                )}
-                                onSnooze={(until) => void mutate(
-                                    signal,
-                                    () => snoozeRadarSignal(signal.id, signal.version, until),
-                                    tRadar('feedback.snoozed', { subject: signal.subject.label }),
-                                )}
-                                onDismiss={() => void mutate(
-                                    signal,
-                                    () => dismissRadarSignal(signal.id, signal.version),
-                                    tRadar('feedback.dismissed', { subject: signal.subject.label }),
-                                )}
-                                onCreateTask={() => void openTask(signal)}
-                                onRefreshEvidence={refresh}
-                            />
-                        ))}
+                        {signals.map((rawSignal) => {
+                            const signal = withDisplayLabel(rawSignal);
+                            return (
+                                <RadarSignalCard
+                                    key={`${signal.id}:${asOf}`}
+                                    signal={signal}
+                                    pageAsOf={asOf}
+                                    freshnessStatus={freshnessStatus}
+                                    busy={busyId !== null}
+                                    snoozeOpen={snoozeId === signal.id}
+                                    onSnoozeOpenChange={(open) => setSnoozeId(open ? signal.id : null)}
+                                    expanded={expandedIds.has(signal.id)}
+                                    onExpandedChange={(open) => setExpandedIds((current) => {
+                                        const next = new Set(current);
+                                        if (open) next.add(signal.id);
+                                        else next.delete(signal.id);
+                                        return next;
+                                    })}
+                                    onFollow={() => void mutate(
+                                        signal,
+                                        () => followRadarSignal(signal.id, signal.version),
+                                        tRadar('feedback.followed', { subject: signal.subject.label }),
+                                    )}
+                                    onSnooze={(until) => void mutate(
+                                        signal,
+                                        () => snoozeRadarSignal(signal.id, signal.version, until),
+                                        tRadar('feedback.snoozed', { subject: signal.subject.label }),
+                                    )}
+                                    onDismiss={() => void mutate(
+                                        signal,
+                                        () => dismissRadarSignal(signal.id, signal.version),
+                                        tRadar('feedback.dismissed', { subject: signal.subject.label }),
+                                    )}
+                                    onCreateTask={() => void openTask(signal)}
+                                    onRefreshEvidence={refresh}
+                                />
+                            );
+                        })}
                     </ol>
                 )}
                 {evaluation ? (
