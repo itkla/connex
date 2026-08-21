@@ -205,11 +205,12 @@ describe('Ask Connex file lifecycle', () => {
         )).toEqual([uploading, failed, removing, durableOther]);
     });
 
-    it('keeps unacknowledged local completions and drops stale durable chips', () => {
+    it('keeps a local completion through one absent read and drops it after no durable echo', () => {
         const localCompletion: AskConnexFileAttachment = {
             ...ready,
             clientId: 'upload-local',
             id: 42,
+            durableEchoPending: true,
         };
         const staleDurable: AskConnexFileAttachment = {
             ...ready,
@@ -217,14 +218,19 @@ describe('Ask Connex file lifecycle', () => {
             id: 43,
         };
 
-        expect(reconcileAskConnexFileAttachments(
+        const afterFirstAbsentRead = reconcileAskConnexFileAttachments(
             [localCompletion, staleDurable],
             [],
-        )).toEqual([localCompletion]);
+        );
+        expect(afterFirstAbsentRead).toEqual([
+            { ...localCompletion, durableEchoPending: false },
+        ]);
+        expect(reconcileAskConnexFileAttachments(afterFirstAbsentRead, [])).toEqual([]);
+        const durableEcho = { ...ready, id: 42, clientId: 'stored:42' };
         expect(reconcileAskConnexFileAttachments(
             [localCompletion],
-            [{ ...localCompletion, clientId: 'stored:42' }],
-        )).toEqual([{ ...localCompletion, clientId: 'stored:42' }]);
+            [durableEcho],
+        )).toEqual([durableEcho]);
     });
 
     it('deduplicates a completed upload against a concurrently hydrated copy', () => {
@@ -240,7 +246,11 @@ describe('Ask Connex file lifecycle', () => {
             [uploading, ready],
             uploading.clientId,
             ready,
-        )).toEqual([{ ...ready, clientId: uploading.clientId }]);
+        )).toEqual([{
+            ...ready,
+            clientId: uploading.clientId,
+            durableEchoPending: true,
+        }]);
     });
 
     it('does not restore a late failed deletion into a different session epoch', () => {

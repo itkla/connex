@@ -34,6 +34,7 @@ export type AskConnexFileAttachment = {
     status: 'uploading' | 'ready' | 'failed' | 'removing';
     progress: number;
     error: string | null;
+    durableEchoPending?: boolean;
 };
 
 /** Returns whether an upload or removal must settle before the conversation can advance. */
@@ -47,7 +48,8 @@ export function hasPendingAskConnexFileOperation(
 
 /**
  * Reconciles a fresh durable attachment read without erasing local upload, failure, or removal
- * feedback. Locally completed uploads remain visible until the server has echoed their IDs.
+ * feedback. Locally completed uploads survive one absent read so a refresh started before upload
+ * completion cannot erase them, then expire if a later read still has no durable echo.
  */
 export function reconcileAskConnexFileAttachments(
     current: readonly AskConnexFileAttachment[],
@@ -77,7 +79,9 @@ export function reconcileAskConnexFileAttachments(
             reconciled.push(durable);
             return;
         }
-        if (!attachment.clientId.startsWith('stored:')) reconciled.push(attachment);
+        if (attachment.durableEchoPending) {
+            reconciled.push({ ...attachment, durableEchoPending: false });
+        }
     });
     return [...reconciled, ...persistedById.values()];
 }
@@ -88,7 +92,7 @@ export function completeAskConnexFileUpload(
     clientId: string,
     uploaded: AskConnexFileAttachment,
 ): AskConnexFileAttachment[] {
-    const completed = { ...uploaded, clientId };
+    const completed = { ...uploaded, clientId, durableEchoPending: true };
     const deduplicated = attachments.filter(
         (attachment) => attachment.clientId === clientId || attachment.id !== uploaded.id,
     );

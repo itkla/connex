@@ -27,14 +27,14 @@ function applyAll(state: AskConnexStreamState, frames: AiChatDeltaFrame[]): AskC
 }
 
 describe('Ask Connex stream reassembly', () => {
-    it('recognizes the durable running-state frame that invalidates an existing stream', () => {
+    it('recognizes only the durable reset frame that invalidates an existing stream', () => {
         const state = applyAll(createAskConnexStream(9), [delta(0, 'Abandoned')]);
         const reset: AiChatRealtimeFrame = {
             workspaceId: 7,
             sessionId: 4,
             turnId: 9,
             seq: 0,
-            kind: 'state',
+            kind: 'reset',
             tool: null,
             status: 'running',
             reason: null,
@@ -44,6 +44,7 @@ describe('Ask Connex stream reassembly', () => {
         expect(shouldResetAskConnexStream(null, reset)).toBe(false);
         expect(shouldResetAskConnexStream(state, { ...reset, turnId: 10 })).toBe(false);
         expect(shouldResetAskConnexStream(state, { ...reset, kind: 'step' })).toBe(false);
+        expect(shouldResetAskConnexStream(state, { ...reset, kind: 'state' })).toBe(false);
     });
 
     it('reassembles contiguous offset frames and drops replayed overlap', () => {

@@ -68,13 +68,13 @@ function mergePartial(
     });
 }
 
-/** Returns whether a durable running-state invalidation starts a fresh stream for this turn. */
+/** Returns whether a durable reset invalidation starts a fresh stream for this turn. */
 export function shouldResetAskConnexStream(
     state: AskConnexStreamState | null,
     frame: AiChatRealtimeFrame,
 ): boolean {
     return state?.turnId === frame.turnId
-        && frame.kind === 'state'
+        && frame.kind === 'reset'
         && frame.seq === 0
         && frame.status === 'running';
 }

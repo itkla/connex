@@ -2904,7 +2904,7 @@ export type AiChatRealtimeFrame = {
     sessionId: number;
     turnId: number;
     seq: number;
-    kind: 'session' | 'message' | 'state' | 'step' | 'terminal';
+    kind: 'session' | 'message' | 'state' | 'reset' | 'step' | 'terminal';
     tool: string | null;
     status: string;
     reason: string | null;
