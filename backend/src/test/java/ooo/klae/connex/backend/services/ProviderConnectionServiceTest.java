@@ -8,6 +8,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -164,6 +165,11 @@ class ProviderConnectionServiceTest extends AbstractServiceTest {
 
         connectionService.disconnect("google");
         assertTrue(connectionService.getForCurrentUser().isEmpty());
+        ProviderConnection tombstone = providerConnectionMapper
+            .getByUserAndProvider(currentUser.getId(), "google");
+        assertEquals("disconnected", tombstone.getStatus());
+        assertEquals(4, tombstone.getCredentialGeneration());
+        assertNull(tombstone.getCredentialRef());
     }
 
     @Test
@@ -181,6 +187,27 @@ class ProviderConnectionServiceTest extends AbstractServiceTest {
         String bundle = secretCipher.decryptTokenBundle("google", currentUser.getId(), storedReference());
         assertTrue(bundle.contains("refresh-token-2"));
         assertFalse(bundle.contains("refresh-token-1"));
+    }
+
+    @Test
+    void reconnectFromDisconnectedTombstoneAdvancesGenerationByOne() {
+        stubExchange("refresh-token-1", "old@example.com");
+        connectionService.completeCallback(
+            "google", "code", beginAndExtractState(), null);
+        connectionService.disconnect("google");
+        ProviderConnection tombstone = providerConnectionMapper
+            .getByUserAndProvider(currentUser.getId(), "google");
+        long tombstoneGeneration = tombstone.getCredentialGeneration();
+
+        stubExchange("refresh-token-2", "new@example.com");
+        connectionService.completeCallback(
+            "google", "code", beginAndExtractState(), null);
+
+        ProviderConnection reconnected = providerConnectionMapper
+            .getByUserAndProvider(currentUser.getId(), "google");
+        assertEquals(tombstoneGeneration + 1, reconnected.getCredentialGeneration());
+        assertEquals("connected", reconnected.getStatus());
+        assertNotNull(reconnected.getCredentialRef());
     }
 
     @Test

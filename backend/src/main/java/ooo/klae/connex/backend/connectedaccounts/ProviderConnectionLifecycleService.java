@@ -20,6 +20,7 @@ import tools.jackson.databind.ObjectMapper;
 import ooo.klae.connex.backend.beans.ProviderConnection;
 import ooo.klae.connex.backend.connectedaccounts.capture.ProviderCapturePurgeService;
 import ooo.klae.connex.backend.mappers.ProviderConnectionMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
@@ -35,6 +36,7 @@ public class ProviderConnectionLifecycleService {
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS");
 
     private final ProviderConnectionMapper connectionMapper;
+    private final UserMapper userMapper;
     private final WorkspaceMapper workspaceMapper;
     private final TenantWorkScope tenantWorkScope;
     private final ProviderCapturePurgeService purgeService;
@@ -46,16 +48,21 @@ public class ProviderConnectionLifecycleService {
     private final ObjectMapper objectMapper;
     private final ConnectedCaptureProperties captureProperties;
 
-    /** Advances one bounded purge page before revoking and deleting the local credential. */
+    /** Advances ordinary revocation or one bounded legacy purge page. */
     public boolean process(ProviderConnection connection) {
         ProviderConnection current = tenantWorkScope.unrouted(
             () -> connectionMapper.getById(connection.getId()));
         if (current == null) {
             return true;
         }
-        if (current.getCredentialGeneration() != connection.getCredentialGeneration()
-                || (!"disconnecting".equals(current.getStatus())
-                    && !"purge_failed".equals(current.getStatus()))) {
+        if (current.getCredentialGeneration() != connection.getCredentialGeneration()) {
+            return false;
+        }
+        if ("revoking".equals(current.getStatus())) {
+            return revokeAndRetainTombstone(current);
+        }
+        if (!"disconnecting".equals(current.getStatus())
+                && !"purge_failed".equals(current.getStatus())) {
             return false;
         }
         if (!current.isCaptureReconcileRequired()) {
@@ -120,6 +127,10 @@ public class ProviderConnectionLifecycleService {
 
     private void purgeWorkspace(
             int workspaceId, ProviderConnection expected, String owner) {
+        if (userMapper.lockByIdForShare(expected.getUserId()) == null) {
+            throw new IllegalStateException(
+                "Provider connection owner no longer exists");
+        }
         ProviderConnection locked =
             connectionMapper.getByIdForShare(expected.getId());
         if (locked == null
@@ -141,6 +152,21 @@ public class ProviderConnectionLifecycleService {
             return null;
         });
         return tenantWorkScope.unrouted(() -> persistence.finish(connection));
+    }
+
+    private boolean revokeAndRetainTombstone(ProviderConnection connection) {
+        int claimed = tenantWorkScope.unrouted(
+            () -> connectionMapper.claimRevocationAttempt(
+                connection.getId(), connection.getCredentialGeneration()));
+        if (claimed != 1) {
+            return false;
+        }
+        tenantWorkScope.unrouted(() -> {
+            revokeBestEffort(connection);
+            return null;
+        });
+        return tenantWorkScope.unrouted(
+            () -> persistence.finishRevocation(connection));
     }
 
     /** Retries durable cleanup independently of capture-ingestion feature flags. */

@@ -30,7 +30,6 @@ import ooo.klae.connex.backend.services.DuplicateDecisionLockService;
 import ooo.klae.connex.backend.services.IdentityKind;
 import ooo.klae.connex.backend.services.MatchingService;
 import ooo.klae.connex.backend.services.PersonService;
-import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
@@ -49,8 +48,6 @@ public class ProviderCaptureReviewService {
     private final WorkspaceService workspaceService;
     private final ProviderCapturePolicyService policyService;
     private final ProviderCapturePagePersistence pagePersistence;
-    private final ProviderCapturePurgeService purgeService;
-    private final SessionSecurityService sessionSecurityService;
     private final AuditService auditService;
     private final PlatformTransactionManager transactionManager;
     private final TenantWorkScope tenantWorkScope;
@@ -235,22 +232,6 @@ public class ProviderCaptureReviewService {
         interaction.setVersion(version + 1);
         pagePersistence.projectHistorical(
             workspaceId, userId, interaction, participants);
-    }
-
-    /** Purges the current workspace's captured provider data without disconnecting OAuth. */
-    public ProviderCaptureOverviewDto.PurgeState purgeCurrent(String provider) {
-        policyService.getCurrentOverview(provider);
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        int userId = workspaceService.getCurrentUserId();
-        sessionSecurityService.requireRecentAuthentication(userId);
-        purgeService.purge(workspaceId, userId, provider);
-        recordStrict(
-            "provider.capture.purge",
-            workspaceId,
-            provider,
-            "Purged captured provider data",
-            Map.of("provider", provider));
-        return new ProviderCaptureOverviewDto.PurgeState(false, "idle", null);
     }
 
     private Resolution resolution(

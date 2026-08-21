@@ -92,7 +92,7 @@ Numbered and testable. Cite them by number in reviews.
 | Personal saved list state | **saved view** (an ad-hoc **filter** becomes one when saved; pinning is a state of a saved view) | **保存ビュー**（ピン留めは保存ビューの状態）／**フィルター** | — |
 | Rule-based live membership | **smart segment** | **スマートセグメント** | — |
 | Recoverable hide | **Archive** | **アーカイブ** | delete (when the record is recoverable) |
-| Permanent removal | **Delete** — always with "This can't be undone." | records: **削除**「この操作は取り消せません。」; erasing captured data (e.g. imported provider data on disconnect): **消去** — both sanctioned, each bound to its context | purge, teardown, tear down; パージ |
+| Permanent removal | **Delete** — always with "This can't be undone." | records: **削除**「この操作は取り消せません。」; explicitly erasing captured provider data: **消去** — both sanctioned, each bound to its context | purge, teardown, tear down; パージ |
 | Detach from a relationship | **Remove** (never destroys the record) | **解除** | — |
 | APPI use-limitation state | **Privacy hold** — badges: "On hold — privacy request" / "Sharing stopped — privacy request"; plain gloss "This person asked to limit how their data is used."; statutory terms only as a secondary admin hint and on compliance surfaces | **プライバシー保護のため利用停止中**（法令用語の「利用停止」「第三者提供停止」は補足・コンプライアンス画面のみ） | processing suspended, provision ceased, processing restrictions, restricted (unglossed) as headline copy |
 | Marketing exclusion states | **Opted out**, **Do not contact**, **Privacy hold** | **配信停止（オプトアウト）**, **連絡不可** | consent and suppression, consent access; 抑制 |

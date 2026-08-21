@@ -205,8 +205,9 @@ are not available here," not "we will proxy it for you."
   streams and body/metadata modes are permitted, backfill windows, exclusions, and the visibility of
   what is captured (see [CONNECTED_CAPTURE.md](CONNECTED_CAPTURE.md)). They never receive another
   user's tokens and never gain access to another user's mailbox through Connex.
-- Removing a user, or a user disconnecting, revokes and deletes that user's credential and purges
-  their captured content on the documented purge path.
+- A user disconnecting best-effort revokes and deletes that user's credential while retaining
+  captured content. Explicit current-workspace erasure and membership/account removal follow the
+  separate retention and erasure paths documented in [CONNECTED_CAPTURE.md](CONNECTED_CAPTURE.md).
 
 ## Google Workspace administrator steps
 

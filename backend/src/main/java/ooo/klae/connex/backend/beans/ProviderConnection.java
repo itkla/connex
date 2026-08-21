@@ -32,7 +32,6 @@ public class ProviderConnection {
     private String captureReconcileLeaseUntil;
     private String captureReconcileNextAttemptAt;
     private int captureReconcileFailures;
-    private String lastSyncAt;
     private String errorCode;
     private String createdAt;
     private String updatedAt;

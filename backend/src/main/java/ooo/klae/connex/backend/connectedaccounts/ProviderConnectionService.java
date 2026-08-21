@@ -72,6 +72,7 @@ public class ProviderConnectionService {
         int userId = workspaceService.getCurrentUserId();
         return tenantWorkScope.unrouted(
             () -> connectionMapper.getByUserId(userId).stream()
+                .filter(connection -> !"disconnected".equals(connection.getStatus()))
                 .map(ProviderConnectionDto::from)
                 .toList());
     }
@@ -170,22 +171,25 @@ public class ProviderConnectionService {
     }
 
     /**
-     * Starts a durable disconnect that stops claims, purges every tenant catalog, attempts
-     * provider revocation, and only then destroys the generation-bound local credential.
-     * Step-up is required because this removes both retained content and durable access.
+     * Stops capture claims, attempts provider revocation, destroys the generation-bound local
+     * credential, and retains captured data plus a credential-free generation tombstone.
      */
     public void disconnect(String provider) {
         int userId = workspaceService.getCurrentUserId();
         sessionSecurityService.requireRecentAuthentication(userId);
         requireSupported(provider);
         ProviderConnection connection = tenantWorkScope.unrouted(
-            () -> connectionMutation.beginDisconnect(userId, provider));
-        if (!lifecycleService.process(connection)) {
+            () -> connectionMutation.beginRevocation(userId, provider));
+        if (!"disconnected".equals(connection.getStatus())) {
+            captureConnectionStateService.reconcile(userId, provider);
+        }
+        if (!"disconnected".equals(connection.getStatus())
+                && !lifecycleService.process(connection)) {
             throw new ConflictException(
-                "Provider disconnect cleanup is pending; retry after the current purge finishes");
+                "Provider disconnect is pending; retry after credential cleanup finishes");
         }
         auditService.record("user.connection.disconnect", "user", userId, provider,
-            "Started disconnect and purge for the " + provider + " account", null);
+            "Disconnected the " + provider + " account and retained captured data", null);
     }
 
     private ProviderConnectionDto transition(String provider, String from, String to,

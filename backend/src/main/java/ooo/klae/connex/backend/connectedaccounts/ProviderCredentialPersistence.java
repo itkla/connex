@@ -45,13 +45,16 @@ public class ProviderCredentialPersistence {
         requireUser(userId);
         ProviderConnection existing =
             connectionMapper.getByUserAndProviderForUpdate(userId, provider);
-        if (existing != null && existing.getProviderAccountId() == null) {
+        if (existing != null
+                && existing.getProviderAccountId() == null
+                && !"disconnected".equals(existing.getStatus())) {
             throw new ConflictException(
                 "Disconnect the legacy provider connection before reconnecting");
         }
         if (existing != null
                 && ("disconnecting".equals(existing.getStatus())
-                    || "purge_failed".equals(existing.getStatus()))) {
+                    || "purge_failed".equals(existing.getStatus())
+                    || "revoking".equals(existing.getStatus()))) {
             throw new ConflictException(
                 "Provider disconnect cleanup must finish before reconnecting");
         }

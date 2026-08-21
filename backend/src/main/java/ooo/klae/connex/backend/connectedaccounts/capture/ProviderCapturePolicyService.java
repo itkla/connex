@@ -422,7 +422,7 @@ public class ProviderCapturePolicyService {
             fields,
             exclusions,
             List.of("workspace_activity_evidence"),
-            List.of("purged_on_disconnect", "purged_on_account_deletion"));
+            List.of("retained_on_disconnect", "erased_on_request", "purged_on_account_deletion"));
     }
 
     private ProviderCaptureOverviewDto.PurgeState purge(
@@ -430,11 +430,13 @@ public class ProviderCapturePolicyService {
         if (connection == null) {
             return new ProviderCaptureOverviewDto.PurgeState(false, "idle", null);
         }
-        boolean active = "disconnecting".equals(connection.getStatus())
+        boolean revoking = "revoking".equals(connection.getStatus());
+        boolean active = revoking
+            || "disconnecting".equals(connection.getStatus())
             || "purge_failed".equals(connection.getStatus());
         return new ProviderCaptureOverviewDto.PurgeState(
             active,
-            active ? connection.getStatus() : "idle",
+            active ? (revoking ? "disconnecting" : connection.getStatus()) : "idle",
             connection.getErrorCode());
     }
 

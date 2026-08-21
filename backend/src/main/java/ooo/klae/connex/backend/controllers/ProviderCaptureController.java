@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.connectedaccounts.capture.ProviderCapturePolicyService;
+import ooo.klae.connex.backend.connectedaccounts.capture.ProviderCaptureErasureService;
 import ooo.klae.connex.backend.connectedaccounts.capture.ProviderCaptureReviewService;
 import ooo.klae.connex.backend.dto.ProviderCaptureApprovalRequest;
 import ooo.klae.connex.backend.dto.ProviderCaptureOverviewDto;
@@ -37,6 +38,7 @@ import ooo.klae.connex.backend.dto.ProviderCaptureWorkspacePolicyRequest;
 public class ProviderCaptureController {
     private final ProviderCapturePolicyService policyService;
     private final ProviderCaptureReviewService reviewService;
+    private final ProviderCaptureErasureService erasureService;
 
     @GetMapping("/capture")
     public ProviderCaptureOverviewResponse overview() {
@@ -89,6 +91,6 @@ public class ProviderCaptureController {
     @DeleteMapping("/{provider}/captured-data")
     public ProviderCaptureOverviewDto.PurgeState purge(
             @PathVariable String provider) {
-        return reviewService.purgeCurrent(provider);
+        return erasureService.eraseCurrent(provider);
     }
 }

@@ -25,6 +25,9 @@ public interface ProviderConnectionMapper {
     List<ProviderConnection> findCaptureReconcileDue(@Param("limit") int limit);
     int insert(ProviderConnection connection);
     int update(ProviderConnection connection);
+    int beginRevocation(@Param("userId") int userId, @Param("provider") String provider);
+    int claimRevocationAttempt(@Param("id") int id, @Param("generation") long generation);
+    int completeRevocation(@Param("id") int id, @Param("generation") long generation);
     int beginDisconnect(@Param("userId") int userId, @Param("provider") String provider);
     int claimDisconnectAttempt(@Param("id") int id, @Param("generation") long generation);
     boolean isDisconnectGeneration(

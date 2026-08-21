@@ -28,6 +28,7 @@ import tools.jackson.databind.ObjectMapper;
 import ooo.klae.connex.backend.beans.ProviderConnection;
 import ooo.klae.connex.backend.connectedaccounts.capture.ProviderCapturePurgeService;
 import ooo.klae.connex.backend.mappers.ProviderConnectionMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
@@ -82,6 +83,7 @@ class ProviderConnectionLifecycleServiceTest {
         ProviderConnectionLifecycleService service =
             new ProviderConnectionLifecycleService(
                 connectionMapper,
+                userMapper(),
                 workspaceMapper,
                 tenantWorkScope,
                 purgeService,
@@ -149,6 +151,7 @@ class ProviderConnectionLifecycleServiceTest {
         ProviderConnectionLifecycleService service =
             new ProviderConnectionLifecycleService(
                 connectionMapper,
+                userMapper(),
                 workspaceMapper,
                 tenantWorkScope,
                 purgeService,
@@ -168,6 +171,54 @@ class ProviderConnectionLifecycleServiceTest {
         verify(persistence, never()).finish(any());
     }
 
+    @Test
+    void ordinaryRevocationSkipsTenantPurgeAndRetainsTombstone() {
+        ProviderConnectionMapper connectionMapper =
+            mock(ProviderConnectionMapper.class);
+        TenantWorkScope tenantWorkScope = mock(TenantWorkScope.class);
+        ProviderCapturePurgeService purgeService =
+            mock(ProviderCapturePurgeService.class);
+        ProviderConnectionLifecyclePersistence persistence =
+            mock(ProviderConnectionLifecyclePersistence.class);
+        UserProviderSecretCipher cipher = mock(UserProviderSecretCipher.class);
+        ProviderTokenClient tokenClient = mock(ProviderTokenClient.class);
+        ProviderConnection connection = connection();
+        connection.setStatus("revoking");
+        connection.setCaptureReconcileRequired(false);
+        when(tenantWorkScope.unrouted(
+                org.mockito.ArgumentMatchers.<Supplier<Object>>any()))
+            .thenAnswer(invocation -> invocation
+                .<Supplier<Object>>getArgument(0).get());
+        when(connectionMapper.getById(31)).thenReturn(connection);
+        when(connectionMapper.claimRevocationAttempt(31, 4)).thenReturn(1);
+        when(cipher.decryptTokenBundle("google", 9, "credential-ref"))
+            .thenReturn("{\"refreshToken\":\"refresh-token\"}");
+        when(persistence.finishRevocation(connection)).thenReturn(true);
+        ProviderConnectionLifecycleService service =
+            new ProviderConnectionLifecycleService(
+                connectionMapper,
+                userMapper(),
+                mock(WorkspaceMapper.class),
+                tenantWorkScope,
+                purgeService,
+                mock(PlatformTransactionManager.class),
+                persistence,
+                cipher,
+                new ConnectedAccountProviders(
+                    new ConnectedAccountProperties()),
+                tokenClient,
+                new ObjectMapper(),
+                new ConnectedCaptureProperties());
+
+        assertTrue(service.process(connection));
+
+        InOrder order = inOrder(tokenClient, persistence);
+        order.verify(tokenClient).revoke(
+            "https://oauth2.googleapis.com/revoke", "refresh-token");
+        order.verify(persistence).finishRevocation(connection);
+        verify(purgeService, never()).purge(anyInt(), anyInt(), anyString());
+    }
+
     private static ProviderConnection connection() {
         ProviderConnection connection = new ProviderConnection();
         connection.setId(31);
@@ -178,5 +229,11 @@ class ProviderConnectionLifecycleServiceTest {
         connection.setCredentialGeneration(4);
         connection.setCaptureReconcileRequired(true);
         return connection;
+    }
+
+    private static UserMapper userMapper() {
+        UserMapper userMapper = mock(UserMapper.class);
+        when(userMapper.lockByIdForShare(9)).thenReturn(9);
+        return userMapper;
     }
 }
