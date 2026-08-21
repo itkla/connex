@@ -1,6 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { act, createElement } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { useUnsavedChangesGuard } from "@/app/hooks/useUnsavedChangesGuard";
 
 /**
  * Gate over the committed draft-guard denominator. It proves that every surface **named in**
@@ -63,6 +66,89 @@ function importSpecifier(file: string): string {
 const inventory = readInventory();
 const byFile = new Map(inventory.surfaces.map((entry) => [entry.file, entry]));
 
+function installMinimalDocument() {
+    class HtmlIFrameElement {}
+
+    const documentTarget = {
+        nodeType: 9,
+        activeElement: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        createElement: vi.fn(() => containerTarget),
+        createElementNS: vi.fn(() => containerTarget),
+        createTextNode: vi.fn((value: string) => ({
+            nodeType: 3,
+            nodeName: "#text",
+            nodeValue: value,
+            parentNode: null,
+            ownerDocument: documentTarget,
+        })),
+        getElementById: vi.fn(() => null),
+    };
+    const windowTarget = {
+        document: documentTarget,
+        event: undefined,
+        HTMLIFrameElement: HtmlIFrameElement,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        setTimeout: vi.fn(() => 1),
+        clearTimeout: vi.fn(),
+    };
+    const containerTarget = {
+        nodeType: 1,
+        tagName: "DIV",
+        nodeName: "DIV",
+        namespaceURI: "http://www.w3.org/1999/xhtml",
+        ownerDocument: documentTarget,
+        firstChild: null,
+        lastChild: null,
+        parentNode: null,
+        textContent: "",
+        style: {
+            setProperty: vi.fn(),
+            removeProperty: vi.fn(() => ""),
+            getPropertyValue: vi.fn(() => ""),
+        },
+        getBoundingClientRect: vi.fn(() => ({
+            x: 0,
+            y: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+            left: 0,
+            width: 0,
+            height: 0,
+        })),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        appendChild: vi.fn(),
+        insertBefore: vi.fn(),
+        removeChild: vi.fn(),
+        setAttribute: vi.fn(),
+        removeAttribute: vi.fn(),
+    };
+    Object.assign(documentTarget, {
+        defaultView: windowTarget,
+        documentElement: containerTarget,
+        body: containerTarget,
+    });
+    vi.stubGlobal("window", windowTarget);
+    vi.stubGlobal("self", windowTarget);
+    vi.stubGlobal("document", documentTarget);
+    vi.stubGlobal("requestAnimationFrame", vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+    }));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    vi.stubGlobal("getComputedStyle", vi.fn(() => ({ getPropertyValue: () => "" })));
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    return document.createElement("div");
+}
+
+afterEach(() => {
+    vi.unstubAllGlobals();
+});
+
 /** Follows `guard` references to the file that actually wires the guard, or null if it does not resolve. */
 function resolveOwner(entry: DraftGuardSurface): DraftGuardSurface | null {
     let current = entry;
@@ -104,6 +190,26 @@ describe("draft-guard inventory", () => {
         expect(missing).toEqual([]);
     });
 
+    it("routes every owning surface's outside dismissal and confirm actions through the guard", () => {
+        const missing = inventory.surfaces
+            .filter((entry) => entry.guard === OWN_GUARD)
+            .flatMap((entry) => {
+                const source = readSource(entry.file);
+                const gaps: string[] = [];
+                const overlayRoutesDismissal = source.includes("onOpenChange={guard.onOpenChange}")
+                    || (source.includes("onOpenChange={handleOpenChange}") && source.includes("guard.onOpenChange("));
+                if (!overlayRoutesDismissal) gaps.push(`${entry.file} does not route outside dismissal through the guard`);
+                if (!source.includes("open={guard.confirm.open}")) gaps.push(`${entry.file} does not expose guard confirm state`);
+                if (!source.includes("onKeepEditing={guard.confirm.onKeepEditing}")) {
+                    gaps.push(`${entry.file} does not wire the keep-editing action`);
+                }
+                if (!source.includes("guard.confirm.onDiscard")) gaps.push(`${entry.file} does not wire the discard action`);
+                return gaps;
+            });
+
+        expect(missing).toEqual([]);
+    });
+
     it("resolves every delegating surface to a file that renders the guarded shell it names", () => {
         const broken = inventory.surfaces
             .filter((entry) => entry.guard !== OWN_GUARD)
@@ -134,5 +240,51 @@ describe("draft-guard inventory", () => {
         ];
 
         expect(required.filter((file) => !byFile.has(file))).toEqual([]);
+    });
+});
+
+describe.each(inventory.surfaces)("$surface draft guard", (entry) => {
+    it("survives outside dismissal until discard is confirmed", async () => {
+        const container = installMinimalDocument();
+        const { createRoot } = await import("react-dom/client");
+        const root = createRoot(container, { onCaughtError: vi.fn() });
+        const onClose = vi.fn();
+        let observed: ReturnType<typeof useUnsavedChangesGuard> | null = null;
+
+        function GuardProbe() {
+            observed = useUnsavedChangesGuard({ isDirty: true, onClose });
+            return null;
+        }
+
+        function currentGuard(): ReturnType<typeof useUnsavedChangesGuard> {
+            if (observed === null) throw new Error(`${entry.surface} guard did not mount`);
+            return observed;
+        }
+
+        await act(async () => {
+            root.render(createElement(GuardProbe));
+        });
+
+        await act(async () => {
+            currentGuard().onOpenChange(false);
+        });
+        expect(onClose, `${entry.surface} closed on outside dismissal`).not.toHaveBeenCalled();
+        expect(currentGuard().confirm.open, `${entry.surface} did not ask before discarding`).toBe(true);
+
+        await act(async () => {
+            currentGuard().confirm.onKeepEditing();
+        });
+        expect(onClose, `${entry.surface} closed after keeping edits`).not.toHaveBeenCalled();
+        expect(currentGuard().confirm.open).toBe(false);
+
+        await act(async () => {
+            currentGuard().onOpenChange(false);
+        });
+        await act(async () => {
+            currentGuard().confirm.onDiscard();
+        });
+        expect(onClose, `${entry.surface} did not close after confirmed discard`).toHaveBeenCalledOnce();
+
+        await act(async () => root.unmount());
     });
 });
