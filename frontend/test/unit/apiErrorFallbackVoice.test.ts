@@ -1,7 +1,18 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import ts from "typescript";
+import { beforeAll, describe, expect, it } from "vitest";
+
+const scopedComponents = [
+    "app/components/records/companies/CompaniesBrowser.tsx",
+    "app/components/records/companies/EditCompanySheet.tsx",
+    "app/components/records/contacts/ChangeCompanyDialog.tsx",
+    "app/components/records/contacts/ContactCard.tsx",
+    "app/components/records/deals/DealsBrowser.tsx",
+    "app/components/records/deals/EditDealSheet.tsx",
+    "app/components/records/pipelines/EditPipelineSheet.tsx",
+] as const;
 
 const fallbackTitles = [
     {
@@ -94,6 +105,60 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function literalFallbackKeys(expression: ts.Expression, file: string): string[] {
+    if (ts.isStringLiteralLike(expression)) return [expression.text];
+    if (ts.isParenthesizedExpression(expression)) return literalFallbackKeys(expression.expression, file);
+    if (ts.isConditionalExpression(expression)) {
+        return [
+            ...literalFallbackKeys(expression.whenTrue, file),
+            ...literalFallbackKeys(expression.whenFalse, file),
+        ];
+    }
+    throw new Error(`${file} passes a non-literal fallback to useApiErrorToast`);
+}
+
+function fallbackKeysFor(file: string): string[] {
+    const source = readFileSync(join(process.cwd(), file), "utf8");
+    const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const reporters = new Map<string, string>();
+    const collectReporters = (node: ts.Node) => {
+        if (
+            ts.isVariableDeclaration(node)
+            && ts.isIdentifier(node.name)
+            && node.initializer
+            && ts.isCallExpression(node.initializer)
+            && ts.isIdentifier(node.initializer.expression)
+            && node.initializer.expression.text === "useApiErrorToast"
+        ) {
+            const namespace = node.initializer.arguments[0];
+            if (!namespace || !ts.isStringLiteralLike(namespace)) {
+                throw new Error(`${file} passes a non-literal namespace to useApiErrorToast`);
+            }
+            reporters.set(node.name.text, namespace.text);
+        }
+        ts.forEachChild(node, collectReporters);
+    };
+    collectReporters(sourceFile);
+    if (reporters.size !== 1) throw new Error(`${file} must bind useApiErrorToast exactly once`);
+
+    const fallbacks: string[] = [];
+    const collectFallbacks = (node: ts.Node) => {
+        if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+            const namespace = reporters.get(node.expression.text);
+            if (namespace !== undefined) {
+                const fallback = node.arguments[1];
+                if (!fallback) throw new Error(`${file} calls ${node.expression.text} without a fallback`);
+                for (const key of literalFallbackKeys(fallback, file)) {
+                    fallbacks.push(`${namespace}.${key}`);
+                }
+            }
+        }
+        ts.forEachChild(node, collectFallbacks);
+    };
+    collectFallbacks(sourceFile);
+    return fallbacks;
+}
+
 function messageFor(locale: "en" | "ja", catalog: string, key: string): string {
     const parsed: unknown = JSON.parse(
         readFileSync(join(process.cwd(), "messages", locale, `${catalog}.json`), "utf8"),
@@ -110,6 +175,15 @@ function messageFor(locale: "en" | "ja", catalog: string, key: string): string {
 }
 
 describe("API error fallback titles", () => {
+    beforeAll(() => {
+        const approved = fallbackTitles.map(({ key }) => key).sort();
+        const derived = scopedComponents.flatMap(fallbackKeysFor).sort();
+
+        expect(fallbackTitles).toHaveLength(14);
+        expect(approved).toEqual([...new Set(approved)]);
+        expect(derived).toEqual(approved);
+    });
+
     it.each(fallbackTitles)("keeps $key in the approved EN and JA voice", ({ catalog, key, en, ja }) => {
         const english = messageFor("en", catalog, key);
 
