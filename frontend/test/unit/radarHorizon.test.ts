@@ -24,8 +24,11 @@ import {
     RADAR_HORIZON_FILTER_KEY,
     RADAR_QUERY_FILTER_KEY,
     RADAR_STATE_FILTER_KEY,
+    RADAR_SUBJECT_FILTER_KEY,
+    parseRadarSubjectFilter,
     radarFamilyHref,
     radarOwnedUrlParams,
+    radarSubjectHref,
 } from '@/app/components/radar/radarLinks';
 import { radarRecordLabel } from '@/app/components/radar/radarLabels';
 import { resolveShippedRoute } from '@/app/lib/routeManifest';
@@ -354,6 +357,7 @@ describe('the Radar deep link other surfaces produce', () => {
         expect(RADAR_STATE_FILTER_KEY).toBe('state');
         expect(RADAR_QUERY_FILTER_KEY).toBe('q');
         expect(RADAR_HORIZON_FILTER_KEY).toBe('when');
+        expect(RADAR_SUBJECT_FILTER_KEY).toBe('subject');
     });
 
     it('serializes every non-default filter and removes every default from a shared link', () => {
@@ -362,17 +366,39 @@ describe('the Radar deep link other surfaces produce', () => {
             state: 'snoozed',
             query: ' Apollo ',
             horizon: 'month',
+            subject: { type: 'deal', id: 20 },
         })).toEqual({
             family: 'deal_risk',
             state: 'snoozed',
             q: 'Apollo',
             when: 'month',
+            subject: 'deal:20',
         });
         expect(radarOwnedUrlParams({
             family: 'all',
             state: 'attention',
             query: ' ',
             horizon: null,
-        })).toEqual({ family: undefined, state: undefined, q: undefined, when: undefined });
+            subject: null,
+        })).toEqual({
+            family: undefined,
+            state: undefined,
+            q: undefined,
+            when: undefined,
+            subject: undefined,
+        });
+    });
+
+    it('round-trips a record link by exact identity while keeping its visible query named', () => {
+        const href = radarSubjectHref({ type: 'person', id: 42, label: 'Unnamed contact' });
+        const query = new URLSearchParams(href.slice(href.indexOf('?') + 1));
+
+        expect(query.get(RADAR_QUERY_FILTER_KEY)).toBe('Unnamed contact');
+        expect(query.get(RADAR_STATE_FILTER_KEY)).toBe('all');
+        expect(parseRadarSubjectFilter(query.get(RADAR_SUBJECT_FILTER_KEY)))
+            .toEqual({ type: 'person', id: 42 });
+        expect(parseRadarSubjectFilter('person:0')).toBeNull();
+        expect(parseRadarSubjectFilter('edge:42')).toBeNull();
+        expect(parseRadarSubjectFilter('person:42:extra')).toBeNull();
     });
 });

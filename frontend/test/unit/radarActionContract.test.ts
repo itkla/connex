@@ -954,6 +954,7 @@ describe('Radar action integration', () => {
         ));
         if (!action) throw new Error('The unnamed Radar subject did not receive safe localized copy');
         expect(captures.ownedUrlParams?.q).toBeUndefined();
+        expect(captures.ownedUrlParams?.subject).toBeUndefined();
 
         expect(board.elements.flatMap((element) => (
             [element.getAttribute('aria-label'), element.getAttribute('title')]
@@ -1080,9 +1081,32 @@ describe('Radar action integration', () => {
             ['state', 'snoozed'],
             ['q', 'Apollo'],
             ['when', 'month'],
+            ['subject', 'deal:20'],
         ]);
         navigation.searchParams.get.mockImplementation((key: string) => params.get(key) ?? null);
-        const currentPayload = payload([]);
+        const currentPayload = payload([
+            signal({
+                family: 'deal_risk',
+                subject: { type: 'deal', id: 20, label: 'Apollo' },
+                state: 'snoozed',
+                evidence: [{
+                    type: 'closing_soon_quiet',
+                    parameters: { daysUntilClose: 20 },
+                    references: [{ type: 'deal', id: 20, label: 'Apollo' }],
+                }],
+            }),
+            signal({
+                id: 2,
+                family: 'deal_risk',
+                subject: { type: 'deal', id: 21, label: 'Apollo' },
+                state: 'snoozed',
+                evidence: [{
+                    type: 'closing_soon_quiet',
+                    parameters: { daysUntilClose: 20 },
+                    references: [{ type: 'deal', id: 21, label: 'Apollo' }],
+                }],
+            }),
+        ]);
         api.getRadar.mockResolvedValue(currentPayload);
         const board = await renderRadarBoard(currentPayload);
 
@@ -1091,7 +1115,9 @@ describe('Radar action integration', () => {
             state: 'snoozed',
             q: 'Apollo',
             when: 'month',
+            subject: 'deal:20',
         });
+        expect([...captures.radarCardProps.keys()]).toEqual([1]);
         await board.unmount();
     });
 

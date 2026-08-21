@@ -198,7 +198,7 @@ export default function RecordSignalsPanel({
 
     const subjectLabel = radarRecordLabel(subject.label)
         ?? tRadar(`subject.unnamed.${subject.type}`);
-    const href = radarSubjectHref(subjectLabel);
+    const href = radarSubjectHref({ ...subject, label: subjectLabel });
     const unavailable = freshnessStatus === 'unavailable';
     const loading = freshnessStatus === 'checking' && asOf === '';
 

@@ -14,6 +14,8 @@ import {
     RADAR_HORIZON_FILTER_KEY,
     RADAR_QUERY_FILTER_KEY,
     RADAR_STATE_FILTER_KEY,
+    RADAR_SUBJECT_FILTER_KEY,
+    parseRadarSubjectFilter,
     radarOwnedUrlParams,
 } from '@/app/components/radar/radarLinks';
 import {
@@ -108,6 +110,7 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
     const initialFamily = searchParams.get(RADAR_FAMILY_FILTER_KEY);
     const initialState = searchParams.get(RADAR_STATE_FILTER_KEY);
     const initialWhen = searchParams.get(RADAR_HORIZON_FILTER_KEY);
+    const initialSubject = searchParams.get(RADAR_SUBJECT_FILTER_KEY);
     const [family, setFamily] = useState<RadarFamilyFilter>(
         isRadarFamilyFilter(initialFamily) ? initialFamily : 'all',
     );
@@ -117,6 +120,7 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
     const [query, setQuery] = useState(() => (
         radarRecordLabel(searchParams.get(RADAR_QUERY_FILTER_KEY)) ?? ''
     ));
+    const [subjectFilter, setSubjectFilter] = useState(() => parseRadarSubjectFilter(initialSubject));
     const [horizonBand, setHorizonBand] = useState<RadarHorizonBand | null>(
         isRadarHorizonBand(initialWhen) ? initialWhen : null,
     );
@@ -219,7 +223,13 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
         );
     }, [freshnessStatus, payload.items]);
 
-    useOwnedUrlParams(radarOwnedUrlParams({ family, state, query, horizon: horizonBand }));
+    useOwnedUrlParams(radarOwnedUrlParams({
+        family,
+        state,
+        query,
+        horizon: horizonBand,
+        subject: subjectFilter,
+    }));
 
     const displaySignals = useMemo(() => payload.items.map((signal) => {
         const label = radarRecordLabel(signal.subject.label)
@@ -228,10 +238,15 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
             ? signal
             : { ...signal, subject: { ...signal.subject, label } };
     }), [payload.items, t]);
-    const matchedSignals = useMemo(
-        () => filterRadarSignals(displaySignals, { family: 'all', state, query }),
-        [displaySignals, query, state],
-    );
+    const matchedSignals = useMemo(() => {
+        const filteredSignals = filterRadarSignals(displaySignals, { family: 'all', state, query });
+        return subjectFilter === null
+            ? filteredSignals
+            : filteredSignals.filter((signal) => (
+                signal.subject.type === subjectFilter.type
+                && signal.subject.id === subjectFilter.id
+            ));
+    }, [displaySignals, query, state, subjectFilter]);
     const visibleSignals = useMemo(
         () => matchedSignals.filter((signal) => (
             (family === 'all' || signal.family === family)
@@ -247,7 +262,10 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
     const unavailableFamilies = unavailableRadarFamilies(payload.families);
     const unavailableLookup = new Set<RadarFamily>(unavailableFamilies);
     const shownFamilies = family === 'all' ? RADAR_SIGNAL_FAMILIES : [family];
-    const filtered = family !== 'all' || state !== 'attention' || query.trim().length > 0;
+    const filtered = family !== 'all'
+        || state !== 'attention'
+        || query.trim().length > 0
+        || subjectFilter !== null;
 
     const restoreListFocus = (id: number) => {
         const target = nextFocusId(visibleSignals, id);
@@ -438,7 +456,10 @@ export default function RadarBoard({ initialPayload }: { initialPayload: RadarPa
                                     id="radar-filter-search"
                                     data-action-focus-fallback=""
                                     value={query}
-                                    onChange={(event) => setQuery(event.target.value)}
+                                    onChange={(event) => {
+                                        setQuery(event.target.value);
+                                        setSubjectFilter(null);
+                                    }}
                                     placeholder={t('filters.searchPlaceholder')}
                                     aria-label={t('filters.searchLabel')}
                                     className={cn('rounded-full pl-9', RADAR_FIELD_SURFACE)}
