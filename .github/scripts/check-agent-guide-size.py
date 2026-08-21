@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -10,17 +11,39 @@ PACKAGE_LIMIT = 20 * 1024
 INHERITED_LIMIT = 30 * 1024
 
 ROOT_GUIDE = Path("AGENTS.md")
-PACKAGE_GUIDES = (
-    Path("frontend/AGENTS.md"),
-    Path("backend/AGENTS.md"),
-    Path("ocr/AGENTS.md"),
-)
+
+
+def tracked_agent_guides() -> tuple[Path, ...]:
+    result = subprocess.run(
+        ["git", "ls-files", "-z", "--", "AGENTS.md", ":(glob)**/AGENTS.md"],
+        check=True,
+        capture_output=True,
+    )
+    guides = {
+        Path(raw_path)
+        for raw_path in result.stdout.decode("utf-8").split("\0")
+        if raw_path
+    }
+    if ROOT_GUIDE not in guides:
+        raise FileNotFoundError(f"required root agent guide is missing: {ROOT_GUIDE}")
+    return tuple(sorted(guides))
 
 
 def byte_size(path: Path) -> int:
     if not path.is_file():
-        raise FileNotFoundError(f"required agent guide is missing: {path}")
+        raise FileNotFoundError(f"tracked agent guide is missing from the checkout: {path}")
     return len(path.read_bytes())
+
+
+def inherited_chain(guide: Path, guides: frozenset[Path]) -> tuple[Path, ...]:
+    ancestors: list[Path] = []
+    parent = guide.parent
+    while parent != Path("."):
+        candidate = parent / "AGENTS.md"
+        if candidate != guide and candidate in guides:
+            ancestors.append(candidate)
+        parent = parent.parent
+    return (ROOT_GUIDE, *reversed(ancestors), guide)
 
 
 def format_size(value: int) -> str:
@@ -31,28 +54,32 @@ def main() -> int:
     failures: list[str] = []
 
     try:
-        root_size = byte_size(ROOT_GUIDE)
-    except FileNotFoundError as error:
+        guide_paths = tracked_agent_guides()
+        sizes = {guide: byte_size(guide) for guide in guide_paths}
+    except (FileNotFoundError, subprocess.CalledProcessError, UnicodeDecodeError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
 
+    root_size = sizes[ROOT_GUIDE]
     print(f"{ROOT_GUIDE}: {format_size(root_size)} / {format_size(ROOT_LIMIT)}")
     if root_size > ROOT_LIMIT:
         failures.append(
             f"{ROOT_GUIDE} exceeds the root guide budget by {root_size - ROOT_LIMIT} bytes"
         )
 
-    for package_guide in PACKAGE_GUIDES:
-        try:
-            package_size = byte_size(package_guide)
-        except FileNotFoundError as error:
-            failures.append(str(error))
-            continue
+    guide_set = frozenset(guide_paths)
+    package_guides = tuple(guide for guide in guide_paths if guide != ROOT_GUIDE)
+    if not package_guides:
+        failures.append("no tracked package agent guides were discovered")
 
-        inherited_size = root_size + package_size
+    for package_guide in package_guides:
+        package_size = sizes[package_guide]
+        chain = inherited_chain(package_guide, guide_set)
+        inherited_size = sum(sizes[path] for path in chain)
+        chain_label = " + ".join(str(path) for path in chain)
         print(
             f"{package_guide}: {format_size(package_size)} / "
-            f"{format_size(PACKAGE_LIMIT)}; inherited: "
+            f"{format_size(PACKAGE_LIMIT)}; inherited ({chain_label}): "
             f"{format_size(inherited_size)} / {format_size(INHERITED_LIMIT)}"
         )
 
@@ -63,7 +90,7 @@ def main() -> int:
             )
         if inherited_size > INHERITED_LIMIT:
             failures.append(
-                f"{ROOT_GUIDE} + {package_guide} exceed the inherited context budget by "
+                f"{chain_label} exceed the inherited context budget by "
                 f"{inherited_size - INHERITED_LIMIT} bytes"
             )
 
@@ -77,7 +104,7 @@ def main() -> int:
         )
         return 1
 
-    print("Agent guide context budgets pass.")
+    print(f"Agent guide context budgets pass for {len(guide_paths)} tracked guide(s).")
     return 0
 
 
