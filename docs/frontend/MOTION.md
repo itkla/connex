@@ -14,11 +14,11 @@ The first interaction may delight; the fiftieth must not irritate. Repeated oper
 
 Use the existing named tokens rather than literal durations:
 
-| Purpose | CSS token | JS seconds | JS milliseconds |
-|---|---|---|---|
-| feedback / anchored popup | `--motion-micro` | `durationMicro` | `durationMicroMs` |
-| focus-taking surface / section reveal | `--motion-standard` | `durationStandard` | `durationStandardMs` |
-| rare expressive arrival/completion | `--motion-expressive` | `durationExpressive` | `durationExpressiveMs` |
+| Purpose | CSS token | Value | JS seconds | JS milliseconds |
+|---|---|---:|---|---|
+| feedback / anchored popup | `--motion-micro` | 150 ms | `durationMicro` | `durationMicroMs` |
+| focus-taking surface / section reveal | `--motion-standard` | 250 ms | `durationStandard` | `durationStandardMs` |
+| rare expressive arrival/completion | `--motion-expressive` | 400 ms | `durationExpressive` | `durationExpressiveMs` |
 
 `motion/react` consumes seconds; Web Animations/style timing consumes milliseconds. Use the matching mirror.
 
@@ -88,7 +88,7 @@ When the scanner misses an idiom, improve the scanner rather than documenting th
 
 ## Review checklist
 
-For a motion change:
+Every material motion change receives one focused animation review against this contract. The active environment may provide a named animation-review skill; the requirement is the independent charter, not a permanently hard-coded tool name.
 
 - Timing uses a named shared token/preset.
 - Character matches the interaction: hand-driven vs calm state transition.
