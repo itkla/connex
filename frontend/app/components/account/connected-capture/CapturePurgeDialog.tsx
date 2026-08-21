@@ -23,6 +23,14 @@ import {
 
 export type CaptureLifecycleMode = 'purge' | 'disconnect' | 'reset';
 
+/** Reports whether a requested lifecycle-dialog transition is safe while a mutation is running. */
+export function canChangeCaptureLifecycleDialogOpen(
+    busy: boolean,
+    nextOpen: boolean,
+): boolean {
+    return nextOpen || !busy;
+}
+
 /**
  * Separates ordinary credential-only disconnect from current-workspace erasure and the explicit
  * all-workspace reset. Only destructive modes require acknowledgement, and the reset names its
@@ -53,7 +61,14 @@ export default function CapturePurgeDialog({
     };
 
     return (
-        <ResponsiveDialog open={open} onOpenChange={onOpenChange}>
+        <ResponsiveDialog
+            open={open}
+            onOpenChange={(nextOpen) => {
+                if (!canChangeCaptureLifecycleDialogOpen(busy, nextOpen)) return;
+                if (!nextOpen) setAcknowledged(false);
+                onOpenChange(nextOpen);
+            }}
+        >
             <ResponsiveDialogContent className="sm:max-w-lg" showCloseButton={!busy}>
                 <ResponsiveDialogHeader className="px-4 pt-4 sm:px-0 sm:pt-0">
                     <ResponsiveDialogTitle>

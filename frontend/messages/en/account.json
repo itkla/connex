@@ -118,7 +118,11 @@
     "connectProvider": "Connect {provider}",
     "manage": "Manage",
     "tryAgain": "Try again",
+    "retryReset": "Retry account reset",
     "eraseRetainedData": "Erase old provider data",
+    "retainedDataNote": "Captured relationship evidence remains in this workspace until you erase it.",
+    "resetProviderAccount": "Reset provider account",
+    "accountResetNote": "Connex keeps the previous provider account association so reconnecting the same account can reuse retained evidence. Reset it only before connecting a different account.",
     "stream": {
       "mail": "Mail",
       "calendar": "Calendar"

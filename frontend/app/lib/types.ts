@@ -5160,6 +5160,8 @@ export type ProviderCaptureOverview = {
     reviewCount: number;
     pendingApprovalCount: number;
     activationReady: boolean;
+    retainedData: boolean;
+    accountResetAvailable: boolean;
     disclosures: CaptureDisclosures;
     purge: CapturePurgeState;
 };

@@ -225,6 +225,13 @@ class ConnectedCaptureIsolationIntegrationTest {
             1,
             captureMapper.countUserProviderResiduals(
                 workspace.getId(), owner.getId(), "google"));
+        mockMvc.perform(get("/api/account/connections/capture")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.providers[0].provider").value("google"))
+            .andExpect(jsonPath("$.providers[0].retainedData").value(true))
+            .andExpect(jsonPath("$.providers[0].accountResetAvailable").value(true));
 
         mockMvc.perform(delete(
                 "/api/account/connections/google/captured-data")
@@ -238,6 +245,22 @@ class ConnectedCaptureIsolationIntegrationTest {
             0,
             captureMapper.countUserProviderResiduals(
                 workspace.getId(), owner.getId(), "google"));
+        mockMvc.perform(get("/api/account/connections/capture")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.providers[0].retainedData").value(false))
+            .andExpect(jsonPath("$.providers[0].accountResetAvailable").value(true));
+
+        tombstone.setStatus("purge_failed");
+        tombstone.setErrorCode("purge_failed");
+        connectionMapper.update(tombstone);
+        mockMvc.perform(get("/api/account/connections/capture")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.providers[0].purge.active").value(false))
+            .andExpect(jsonPath("$.providers[0].purge.status").value("purge_failed"));
     }
 
     @Test
@@ -294,6 +317,12 @@ class ConnectedCaptureIsolationIntegrationTest {
             Integer.class,
             owner.getId(),
             secondWorkspace.getId()));
+        mockMvc.perform(get("/api/account/connections/capture")
+                .header("X-Workspace-Id", firstWorkspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.providers[0].retainedData").value(false))
+            .andExpect(jsonPath("$.providers[0].accountResetAvailable").value(false));
     }
 
     private MockHttpSession login(String username) throws Exception {

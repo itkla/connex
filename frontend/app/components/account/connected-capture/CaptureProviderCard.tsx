@@ -102,6 +102,7 @@ export default function CaptureProviderCard({
     authorizationErrorCode,
     busy,
     onConnect,
+    onPurge,
     onReset,
     onManage,
     onReviews,
@@ -122,6 +123,7 @@ export default function CaptureProviderCard({
     authorizationErrorCode: string | null;
     busy: boolean;
     onConnect: () => void;
+    onPurge: () => void;
     onReset: () => void;
     onManage: () => void;
     onReviews: () => void;
@@ -137,6 +139,7 @@ export default function CaptureProviderCard({
     const action = providerCardAction(state, connection, captureEnabled, capture);
     const showSecondaryAction = action === 'reconnect' || action === 'sync';
     const stalledWithoutRepair = state === 'attention' && action !== 'reconnect';
+    const resetFailed = connection?.status === 'purge_failed';
 
     return (
         <article className="rounded-2xl border border-border bg-card px-4 py-4 sm:px-5">
@@ -200,26 +203,72 @@ export default function CaptureProviderCard({
                                     {action === 'reconnect' ? t('reconnect') : tCapture('syncNow')}
                                 </Button>
                             ) : null}
+                            {resetFailed ? (
+                                <Button
+                                    type="button"
+                                    variant="destructive"
+                                    size="toolbar"
+                                    disabled={busy}
+                                    onClick={onReset}
+                                >
+                                    <ArrowPathIcon data-icon="inline-start" />
+                                    {t('retryReset')}
+                                </Button>
+                            ) : null}
                         </>
                     ) : (
-                        <Button
-                            size="toolbar"
-                            onClick={onConnect}
-                            disabled={!connectionEnabled || busy || managedUnavailable}
-                        >
-                            <LinkIcon data-icon="inline-start" />
-                            {t('connectProvider', { provider: providerName })}
-                        </Button>
+                        <>
+                            <Button
+                                size="toolbar"
+                                onClick={onConnect}
+                                disabled={!connectionEnabled || busy || managedUnavailable}
+                            >
+                                <LinkIcon data-icon="inline-start" />
+                                {t('connectProvider', { provider: providerName })}
+                            </Button>
+                            {capture?.retainedData ? (
+                                <Button
+                                    type="button"
+                                    variant="destructive"
+                                    size="toolbar"
+                                    disabled={busy}
+                                    onClick={onPurge}
+                                >
+                                    <TrashIcon data-icon="inline-start" />
+                                    {tCapture('purge')}
+                                </Button>
+                            ) : null}
+                            {capture?.accountResetAvailable ? (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="toolbar"
+                                    disabled={busy}
+                                    onClick={onReset}
+                                >
+                                    <TrashIcon data-icon="inline-start" />
+                                    {t('resetProviderAccount')}
+                                </Button>
+                            ) : null}
+                        </>
                     )}
                 </div>
             </div>
+
+            {!connection && (capture?.retainedData || capture?.accountResetAvailable) ? (
+                <div className="mt-4 space-y-2 border-t border-border pt-4 text-sm text-muted-foreground">
+                    {capture.retainedData ? <p>{t('retainedDataNote')}</p> : null}
+                    {capture.accountResetAvailable ? <p>{t('accountResetNote')}</p> : null}
+                </div>
+            ) : null}
 
             {authorizationErrorCode ? (
                 <div className="mt-4 border-t border-border pt-4">
                     <p className="max-w-prose text-sm text-destructive" role="alert">
                         {t(`error_${authorizationErrorCode}`)}
                     </p>
-                    {authorizationErrorCode === 'retained_data_reset_required' ? (
+                    {authorizationErrorCode === 'retained_data_reset_required'
+                            && !capture?.accountResetAvailable ? (
                         <Button
                             type="button"
                             variant="destructive"

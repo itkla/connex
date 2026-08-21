@@ -5,6 +5,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import CaptureProviderCard from "@/app/components/account/connected-capture/CaptureProviderCard";
 import CaptureDisclosures from "@/app/components/account/connected-capture/CaptureDisclosures";
+import {
+    canChangeCaptureLifecycleDialogOpen,
+} from "@/app/components/account/connected-capture/CapturePurgeDialog";
 import { NowProvider } from "@/app/hooks/useNow";
 import {
     CAPTURE_PANELS,
@@ -119,6 +122,8 @@ function overview(streams: CaptureStreamState[]): ProviderCaptureOverview {
         reviewCount: 0,
         pendingApprovalCount: 0,
         activationReady: true,
+        retainedData: true,
+        accountResetAvailable: false,
         disclosures: {
             scopes: [],
             admittedFields: [],
@@ -349,6 +354,7 @@ describe("a broken connection keeps a way back on the card", () => {
                     authorizationErrorCode={null}
                     busy={false}
                     onConnect={() => undefined}
+                    onPurge={() => undefined}
                     onReset={() => undefined}
                     onManage={() => undefined}
                     onReviews={() => undefined}
@@ -407,6 +413,7 @@ describe("two clicks to provider authorization", () => {
                     authorizationErrorCode={null}
                     busy={false}
                     onConnect={() => undefined}
+                    onPurge={() => undefined}
                     onReset={() => undefined}
                     onManage={() => undefined}
                     onReviews={() => undefined}
@@ -454,6 +461,94 @@ describe("two clicks to provider authorization", () => {
 
         expect(dialog).toContain("{ kind: 'intro' }");
         expect(dialog).toContain("beginManagedPairing(provider)");
+    });
+});
+
+describe("retained evidence after disconnect", () => {
+    it("keeps both scopes of erasure actionable on a disconnected card", () => {
+        const retained = overview([]);
+        retained.accountResetAvailable = true;
+        const markup = renderToStaticMarkup(
+            <NowProvider value={Date.parse("2026-08-19T12:00:00Z")}>
+                <CaptureProviderCard
+                    provider="google"
+                    providerIcon={null}
+                    state="disconnected"
+                    managedUnavailable={false}
+                    connection={null}
+                    connectionEnabled
+                    captureEnabled={false}
+                    capture={retained}
+                    captureLoading={false}
+                    captureLoadError={false}
+                    pendingReviews={0}
+                    authorizationErrorCode={null}
+                    busy={false}
+                    onConnect={() => undefined}
+                    onPurge={() => undefined}
+                    onReset={() => undefined}
+                    onManage={() => undefined}
+                    onReviews={() => undefined}
+                    onSync={() => undefined}
+                    onRetryCapture={() => undefined}
+                />
+            </NowProvider>,
+        );
+
+        expect(markup).toContain("AccountCaptureProvider.purge");
+        expect(markup).toContain("AccountConnections.retainedDataNote");
+        expect(markup).toContain("AccountConnections.resetProviderAccount");
+        expect(markup).toContain("AccountConnections.accountResetNote");
+    });
+
+    it("offers an explicit reset retry after a purge failure", () => {
+        const failed = overview([]);
+        failed.purge = { active: false, status: "purge_failed", errorCode: "purge_failed" };
+        const markup = renderToStaticMarkup(
+            <NowProvider value={Date.parse("2026-08-19T12:00:00Z")}>
+                <CaptureProviderCard
+                    provider="google"
+                    providerIcon={null}
+                    state="disconnecting"
+                    managedUnavailable={false}
+                    connection={connection({ status: "purge_failed" })}
+                    connectionEnabled
+                    captureEnabled={false}
+                    capture={failed}
+                    captureLoading={false}
+                    captureLoadError={false}
+                    pendingReviews={0}
+                    authorizationErrorCode={null}
+                    busy={false}
+                    onConnect={() => undefined}
+                    onPurge={() => undefined}
+                    onReset={() => undefined}
+                    onManage={() => undefined}
+                    onReviews={() => undefined}
+                    onSync={() => undefined}
+                    onRetryCapture={() => undefined}
+                />
+            </NowProvider>,
+        );
+
+        expect(markup).toContain("AccountConnections.retryReset");
+    });
+
+    it("discovers retained providers even when capture is disabled", () => {
+        const panel = source("app/components/account/ConnectionsPanel.tsx");
+
+        expect(panel).toContain("overviewOf(provider)?.retainedData === true");
+        expect(panel).toContain("overviewOf(provider)?.accountResetAvailable === true");
+        expect(panel).toContain("setCaptureReloadKey((current) => current + 1)");
+        expect(panel).toContain("setConnectionsReloadKey((current) => current + 1)");
+        expect(panel).not.toContain("if (!anyCaptureEnabled) return;");
+        expect(panel).not.toContain("error instanceof Error ? error.message");
+    });
+
+    it("keeps a destructive lifecycle dialog open while its request is running", () => {
+        expect(canChangeCaptureLifecycleDialogOpen(true, false)).toBe(false);
+        expect(canChangeCaptureLifecycleDialogOpen(true, true)).toBe(true);
+        expect(canChangeCaptureLifecycleDialogOpen(false, false)).toBe(true);
     });
 });
 

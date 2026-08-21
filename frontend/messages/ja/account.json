@@ -118,7 +118,11 @@
     "connectProvider": "{provider} を連携",
     "manage": "管理",
     "tryAgain": "もう一度試す",
+    "retryReset": "アカウントのリセットを再試行",
     "eraseRetainedData": "以前のプロバイダーデータを消去",
+    "retainedDataNote": "取り込まれた関係性の根拠は、消去するまでこのワークスペースに残ります。",
+    "resetProviderAccount": "プロバイダーアカウントをリセット",
+    "accountResetNote": "以前のプロバイダーアカウントとの関連付けは、同じアカウントを再連携したときに保持中の根拠を再利用できるよう残ります。別のアカウントを連携する前にのみリセットしてください。",
     "stream": {
       "mail": "メール",
       "calendar": "カレンダー"
