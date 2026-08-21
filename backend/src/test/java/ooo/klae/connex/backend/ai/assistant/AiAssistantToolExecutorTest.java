@@ -388,6 +388,30 @@ class AiAssistantToolExecutorTest {
     }
 
     @Test
+    void noteStructuredTimestampSurvivesPreTruncationScreening() throws Exception {
+        Person person = new Person();
+        person.setId(17);
+        person.setName("Ada Lovelace");
+        Note note = new Note();
+        note.setVisibility("workspace");
+        note.setCreatedAt("2026-08-21 12:34:56");
+        note.setContent("Follow up next week");
+        person.setNotes(new Note[] {note});
+        when(personService.getPersonById(17)).thenReturn(person);
+        AiChatResourceRegistry resources = new AiChatResourceRegistry(new MaskingContext());
+        resources.register("person", 17);
+
+        Object noteData = executor.execute(
+                "get_record",
+                objectMapper.readTree("{\"handle\":\"r1\"}"),
+                resources,
+                true).data().get("notes");
+
+        Map<?, ?> retained = (Map<?, ?>) ((List<?>) noteData).getFirst();
+        assertEquals("2026-08-21 12:34:56", retained.get("createdAt"));
+    }
+
+    @Test
     void linkedPersonIdentifierIsRedactedBeforeTheNoteBoundaryIsApplied() throws Exception {
         Person linkedPerson = new Person();
         linkedPerson.setId(18);
@@ -486,6 +510,7 @@ class AiAssistantToolExecutorTest {
         Map<?, ?> conflict = (Map<?, ?>) conflicts.getFirst();
         assertEquals(512, ((String) conflict.get("subject")).length());
         assertEquals(512, ((String) conflict.get("notes")).length());
+        assertEquals("2026-08-11 10:00:00", conflict.get("timestamp"));
         assertEquals(true, conflict.get("subjectTruncated"));
         assertEquals(true, conflict.get("notesTruncated"));
         verify(activityService).getActivitiesByPersonIdInWindow(

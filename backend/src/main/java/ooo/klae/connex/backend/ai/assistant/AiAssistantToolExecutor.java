@@ -569,7 +569,7 @@ public class AiAssistantToolExecutor {
         putBounded(
                 data, "notes", activity.getNotes(),
                 MAX_SCHEDULE_CONFLICT_FIELD_CHARS, maskingContext);
-        putBounded(
+        putBoundedTemporal(
                 data, "timestamp", activity.getTimestamp(),
                 MAX_SCHEDULE_CONFLICT_FIELD_CHARS, maskingContext);
         return data;
@@ -601,7 +601,8 @@ public class AiAssistantToolExecutor {
                     }
                     Map<String, Object> data = new LinkedHashMap<>();
                     putBounded(data, "title", note.getTitle(), budget, maskingContext);
-                    putBounded(data, "createdAt", note.getCreatedAt(), budget, maskingContext);
+                    putBoundedTemporal(
+                            data, "createdAt", note.getCreatedAt(), budget, maskingContext);
                     boolean complete = putBounded(
                             data, "content", note.getContent(), budget, maskingContext);
                     if (!complete) {
@@ -676,6 +677,27 @@ public class AiAssistantToolExecutor {
             return true;
         }
         String screened = MaskingEngine.screenFreeTextBeforeTruncation(value, maskingContext);
+        return putBoundedScreened(data, key, screened, budget);
+    }
+
+    private static boolean putBoundedTemporal(
+            Map<String, Object> data,
+            String key,
+            String value,
+            TextBudget budget,
+            MaskingContext maskingContext) {
+        if (value == null || value.isBlank()) {
+            return true;
+        }
+        String screened = MaskingEngine.maskTemporal(value, maskingContext);
+        return putBoundedScreened(data, key, screened, budget);
+    }
+
+    private static boolean putBoundedScreened(
+            Map<String, Object> data,
+            String key,
+            String screened,
+            TextBudget budget) {
         int retained = Math.min(
                 screened.length(), Math.min(MAX_NOTE_FIELD_CHARS, budget.remaining()));
         if (retained > 0) {
@@ -695,6 +717,27 @@ public class AiAssistantToolExecutor {
             return;
         }
         String screened = MaskingEngine.screenFreeTextBeforeTruncation(value, maskingContext);
+        putBoundedScreened(data, key, screened, maxCharacters);
+    }
+
+    private static void putBoundedTemporal(
+            Map<String, Object> data,
+            String key,
+            String value,
+            int maxCharacters,
+            MaskingContext maskingContext) {
+        if (value == null || value.isBlank()) {
+            return;
+        }
+        String screened = MaskingEngine.maskTemporal(value, maskingContext);
+        putBoundedScreened(data, key, screened, maxCharacters);
+    }
+
+    private static void putBoundedScreened(
+            Map<String, Object> data,
+            String key,
+            String screened,
+            int maxCharacters) {
         int retained = Math.min(screened.length(), maxCharacters);
         data.put(key, screened.substring(0, retained));
         if (retained < screened.length()) {
