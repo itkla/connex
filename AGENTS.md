@@ -8,7 +8,7 @@ Keep agent guides concise. Put subsystem contracts, rationale, runbooks, and inc
 
 Connex is a multi-tenant relationship-intelligence CRM:
 
-- `frontend/` — Next.js 16, React 19, strict TypeScript, Tailwind v4.
+- `frontend/` — Next.js 16, React 19, strict TypeScript, Tailwind v4; Node `^22.13.0 || >=24.0.0`.
 - `backend/` — Spring Boot 4, Java 26, MyBatis, Flyway/MySQL, Spring Security.
 - `ocr/` — private CPU-only business-card OCR sidecar.
 
