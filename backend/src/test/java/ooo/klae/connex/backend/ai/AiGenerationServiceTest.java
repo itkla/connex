@@ -323,7 +323,7 @@ class AiGenerationServiceTest {
     }
 
     @Test
-    void hardTimeoutDoesNotInterruptAResolvingDurableClaim() throws Exception {
+    void hardTimeoutBoundsAResolvingDurableClaim() throws Exception {
         service.shutdown();
         service = new AiGenerationService(
                 properties(Duration.ofMillis(100)),
@@ -336,6 +336,7 @@ class AiGenerationServiceTest {
         CountDownLatch listenerStarted = new CountDownLatch(1);
         CountDownLatch releaseListener = new CountDownLatch(1);
         AtomicInteger interruptions = new AtomicInteger();
+        AtomicInteger callbacks = new AtomicInteger();
         AiGenerationStatusDto accepted = service.startAtRestrictionEpoch(
                 AiFeature.ASSISTANT_CHAT,
                 "resolving-across-timeout",
@@ -344,6 +345,7 @@ class AiGenerationServiceTest {
                 () -> AiGenerationTaskResult.resolved("ready"),
                 restrictionEpoch.get(),
                 (outcome, reason) -> {
+                    int callback = callbacks.incrementAndGet();
                     listenerStarted.countDown();
                     try {
                         releaseListener.await();
@@ -351,18 +353,18 @@ class AiGenerationServiceTest {
                         interruptions.incrementAndGet();
                         Thread.currentThread().interrupt();
                     }
-                    return true;
+                    return callback == 1;
                 });
 
         assertTrue(listenerStarted.await(2, TimeUnit.SECONDS));
         assertFalse(releaseListener.await(250, TimeUnit.MILLISECONDS));
-        assertEquals("running", service.status(accepted.handle()).status());
-        assertEquals(0, interruptions.get());
+        assertEquals("timed_out", service.status(accepted.handle()).status());
+        assertEquals(1, interruptions.get());
         releaseListener.countDown();
 
-        AiGenerationStatusDto resolved = awaitStatus(accepted.handle(), "resolved");
-        assertEquals("ready", resolved.result().asString());
-        assertEquals(0, interruptions.get());
+        awaitUnavailable(accepted.handle());
+        assertEquals(2, callbacks.get());
+        assertEquals(1, interruptions.get());
     }
 
     @Test
@@ -399,12 +401,12 @@ class AiGenerationServiceTest {
 
         assertTrue(listenerStarted.await(2, TimeUnit.SECONDS));
         assertFalse(releaseListener.await(250, TimeUnit.MILLISECONDS));
-        assertEquals("running", service.status(accepted.handle()).status());
-        assertEquals(0, interruptions.get());
+        assertEquals("timed_out", service.status(accepted.handle()).status());
+        assertEquals(1, interruptions.get());
         releaseListener.countDown();
 
         awaitUnavailable(accepted.handle());
-        assertEquals(0, interruptions.get());
+        assertEquals(1, interruptions.get());
     }
 
     @Test
@@ -450,15 +452,15 @@ class AiGenerationServiceTest {
 
         assertTrue(listenerStarted.await(2, TimeUnit.SECONDS));
         assertFalse(releaseListener.await(250, TimeUnit.MILLISECONDS));
-        assertEquals("running", service.status(accepted.handle()).status());
-        assertEquals(0, interruptions.get());
+        assertEquals("timed_out", service.status(accepted.handle()).status());
+        assertEquals(1, interruptions.get());
         releaseListener.countDown();
 
         AiGenerationStatusDto timedOut = awaitStatus(accepted.handle(), "timed_out");
         assertTrue(timeoutRetried.await(2, TimeUnit.SECONDS));
         assertEquals("generation_timeout", timedOut.reason());
         assertEquals(2, callbacks.get());
-        assertEquals(0, interruptions.get());
+        assertEquals(1, interruptions.get());
     }
 
     @Test

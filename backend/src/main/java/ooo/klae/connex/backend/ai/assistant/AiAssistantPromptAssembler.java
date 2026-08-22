@@ -966,20 +966,17 @@ public class AiAssistantPromptAssembler {
             String content = message.getContent();
             if ("assistant".equals(message.getAuthorKind())) {
                 if (message.getStructuredJson() == null) {
-                    throw new AiAssistantLoopException(
-                            "summary_compaction_failed", "summary_compaction_failed");
+                    continue;
                 }
                 ReplayAnswer replay = reauthorizeAnswer(message, resources);
                 if (replay == null) {
-                    throw new AiAssistantLoopException(
-                            "summary_compaction_failed", "summary_compaction_failed");
+                    continue;
                 }
                 content = replay.content();
             } else if ("user".equals(message.getAuthorKind())) {
                 content = reauthorizeUser(message, resources, context);
                 if (content == null) {
-                    throw new AiAssistantLoopException(
-                            "summary_compaction_failed", "summary_compaction_failed");
+                    continue;
                 }
             }
             transcript.add(Map.of(

@@ -303,8 +303,8 @@ class AiInvocationServiceTest {
 
         assertEquals("AI provider configuration changed before egress", exception.getMessage());
         verify(providerTransport).run();
-        verify(budgetLease).close();
-        verify(budgetLease, never()).settle(anyInt(), anyInt());
+        verify(budgetLease).settle(12, 4);
+        verify(budgetLease, never()).close();
     }
 
     @Test
@@ -327,8 +327,8 @@ class AiInvocationServiceTest {
 
         verify(providerAttemptGuard, times(2)).run();
         verify(providerTransport).run();
-        verify(budgetLease).close();
-        verify(budgetLease, never()).settle(anyInt(), anyInt());
+        verify(budgetLease).settle(12, 4);
+        verify(budgetLease, never()).close();
     }
 
     @Test
