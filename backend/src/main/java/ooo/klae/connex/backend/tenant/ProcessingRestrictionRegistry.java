@@ -89,6 +89,8 @@ public final class ProcessingRestrictionRegistry {
                 + "and provision-ceased people; the pass's own timestamps carry no personal data.");
         enroll(entries, "ProviderCaptureMapper", RestrictionStrategy.DETECT_RESTRICTED,
             "Provider participant matching detects both restriction states before projection.");
+        enroll(entries, "AiAssistantIdentifierMapper", RestrictionStrategy.EXCLUDE_RESTRICTED,
+            "Ask Connex identifier resolution excludes both suspended and provision-ceased people.");
         return Map.copyOf(entries);
     }
 
