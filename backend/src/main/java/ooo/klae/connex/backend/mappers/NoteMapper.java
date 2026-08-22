@@ -60,6 +60,12 @@ public interface NoteMapper {
     List<Note> getVisibleCompanyNotes(@Param("workspaceId") int workspaceId,
             @Param("companyId") int companyId, @Param("currentUserId") int currentUserId,
             @Param("limit") int limit);
+    List<Note> getAiAssistantVisibleNotesByCompanyId(
+            @Param("workspaceId") int workspaceId,
+            @Param("companyId") int companyId,
+            @Param("currentUserId") int currentUserId,
+            @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
+            @Param("limit") int limit);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Note> getWorkspaceNotesByCompanyIds(@Param("workspaceId") int workspaceId,
             @Param("companyIds") List<Integer> companyIds);

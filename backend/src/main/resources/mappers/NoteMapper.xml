@@ -151,6 +151,32 @@
     </choose>
   </sql>
 
+  <sql id="assistantProcessablePerson">
+    p.archived_at IS NULL
+    AND p.suspended_at IS NULL
+    AND p.provision_ceased_at IS NULL
+    AND (p.workspace_id = #{workspaceId}
+      OR (p.workspace_id IN
+        <foreach item="organizationWorkspaceId" collection="organizationWorkspaceIds"
+                 open="(" separator="," close=")">#{organizationWorkspaceId}</foreach>
+        AND EXISTS (SELECT 1 FROM person_share ps
+          WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId})))
+  </sql>
+
+  <sql id="assistantLinkedPeopleProcessable">
+    (n.person_id IS NULL OR EXISTS (SELECT 1 FROM person p
+      WHERE p.id = n.person_id
+        AND <include refid="assistantProcessablePerson"/>))
+    AND NOT EXISTS (SELECT 1 FROM entity_reference linked_reference
+      WHERE linked_reference.workspace_id = #{workspaceId}
+        AND linked_reference.source_type = 'note'
+        AND linked_reference.source_id = n.id
+        AND linked_reference.ref_type = 'person'
+        AND NOT EXISTS (SELECT 1 FROM person p
+          WHERE p.id = linked_reference.ref_id
+            AND <include refid="assistantProcessablePerson"/>))
+  </sql>
+
   <select id="getAllNotes" resultMap="NoteResult">
     SELECT <include refid="noteColumns"/> FROM note
     WHERE workspace_id = #{workspaceId} ORDER BY created_at DESC, id DESC
@@ -269,6 +295,20 @@
       AND (EXISTS (SELECT 1 FROM person p
           WHERE p.workspace_id = #{workspaceId} AND p.id = n.person_id
             AND p.company_id = #{companyId} AND p.archived_at IS NULL)
+        OR EXISTS (SELECT 1 FROM deal d
+          WHERE d.workspace_id = #{workspaceId} AND d.id = n.deal_id AND d.company_id = #{companyId}))
+    ORDER BY n.updated_at DESC, n.id DESC
+    LIMIT #{limit}
+  </select>
+
+  <select id="getAiAssistantVisibleNotesByCompanyId" resultMap="NoteResult">
+    SELECT <include refid="qualifiedNoteColumns"/> FROM note n
+    WHERE n.workspace_id = #{workspaceId}
+      AND (n.visibility = 'workspace' OR n.author_id = #{currentUserId})
+      AND <include refid="assistantLinkedPeopleProcessable"/>
+      AND (EXISTS (SELECT 1 FROM person p
+          WHERE p.id = n.person_id AND p.company_id = #{companyId}
+            AND <include refid="assistantProcessablePerson"/>)
         OR EXISTS (SELECT 1 FROM deal d
           WHERE d.workspace_id = #{workspaceId} AND d.id = n.deal_id AND d.company_id = #{companyId}))
     ORDER BY n.updated_at DESC, n.id DESC

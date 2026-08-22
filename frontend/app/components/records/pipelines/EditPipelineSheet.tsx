@@ -2,10 +2,11 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { toastError, toastInfo, toastSuccess } from '@/app/lib/toast';
+import { toastInfo, toastSuccess } from '@/app/lib/toast';
 import { useTranslations } from 'next-intl';
 
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { createStage, deleteStage, getStagesByPipelineId, updatePipeline, updateStage } from '@/app/lib/api';
 import { Pipeline, Stage, UpdatePipelinePayload } from '@/app/lib/types';
 import QuickEditPipelineSheet, { type PipelineDraft, type StageKind } from '@/app/components/records/pipelines/QuickEditPipelineSheet';
@@ -44,6 +45,7 @@ export default function EditPipelineSheet({
 }) {
     const router = useRouter();
     const t = useTranslations('PipelinesEditSheet');
+    const reportApiError = useApiErrorToast('PipelinesEditSheet');
     const [draft, setDraft] = useState<PipelineDraft>(() => toDraft(pipeline, stages));
     const [isSaving, setIsSaving] = useState(false);
     const { fieldErrors, setFieldErrors, reset: resetFieldErrors, clearError } = useFieldErrors();
@@ -147,7 +149,7 @@ export default function EditPipelineSheet({
             setDraft(toDraft(pipeline, fresh));
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('failedToSave'));
+            reportApiError(err, 'failedToSave');
         } finally {
             setIsSaving(false);
         }

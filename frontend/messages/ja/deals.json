@@ -250,14 +250,14 @@
         "validationRequired": "「{name}」には名前、パイプライン、ステージ、通貨が必要です",
         "dealUpdated": "案件を更新しました",
         "dealsUpdated": "{count} 件の案件を更新しました",
-        "failedToSave": "保存できませんでした",
+        "failedToSave": "案件の変更を保存できませんでした",
         "dealDeleted": "案件を削除しました",
         "dealsDeleted": "{count} 件の案件を削除しました",
-        "failedToDelete": "削除できませんでした",
+        "failedToDelete": "選択した案件を削除できませんでした",
         "cannotChangeStatus": "ステータスを変更できません: パイプラインまたはステージが未設定です",
         "dealClosed": "案件を決着しました",
         "dealReopened": "案件を再オープンしました",
-        "failedToUpdateStatus": "ステータスを更新できませんでした",
+        "failedToUpdateStatus": "案件のステータスを更新できませんでした",
         "changeStage": "ステージを変更",
         "assignOwner": "担当者を割り当て",
         "addTag": "タグを追加",
@@ -293,7 +293,7 @@
         "stagesLoadFailed": "ステージを読み込めませんでした",
         "retry": "再試行",
         "dealUpdated": "案件を更新しました",
-        "failedToSave": "保存できませんでした"
+        "failedToSave": "案件を保存できませんでした"
     },
     "DealsNewDialog": {
         "companySearchFailed": "会社を検索できませんでした。もう一度お試しください。",

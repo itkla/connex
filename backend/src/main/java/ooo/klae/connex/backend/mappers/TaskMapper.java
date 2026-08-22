@@ -33,6 +33,11 @@ public interface TaskMapper {
         @Param("assignedToId") int assignedToId
     );
     List<Task> getTasksByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
+    List<Task> getAiAssistantTasksByPersonId(
+        @Param("workspaceId") int workspaceId,
+        @Param("personId") int personId,
+        @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
+        @Param("limit") int limit);
     List<Task> getTasksByPersonIds(@Param("workspaceId") int workspaceId,
             @Param("personIds") List<Integer> personIds);
     List<Task> getTasksByPersonCompanyIds(
@@ -41,8 +46,18 @@ public interface TaskMapper {
         @Param("companyIds") List<Integer> companyIds
     );
     List<Task> getTasksByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
+    List<Task> getAiAssistantTasksByDealId(
+        @Param("workspaceId") int workspaceId,
+        @Param("dealId") int dealId,
+        @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
+        @Param("limit") int limit);
     List<Task> getCompanyTasks(@Param("workspaceId") int workspaceId,
             @Param("companyId") int companyId, @Param("limit") int limit);
+    List<Task> getAiAssistantTasksByCompanyId(
+        @Param("workspaceId") int workspaceId,
+        @Param("companyId") int companyId,
+        @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
+        @Param("limit") int limit);
     List<Task> getTasksByDealCompanyIds(@Param("workspaceId") int workspaceId,
             @Param("companyIds") List<Integer> companyIds);
     Task getTaskById(@Param("workspaceId") int workspaceId, @Param("id") int id);

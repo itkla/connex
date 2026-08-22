@@ -4,10 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useRouter } from 'next/navigation';
-import { toast } from 'sonner';
 import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 
 import Rise from '@/app/components/motion/Rise';
+import { toastError, toastSuccess } from '@/app/lib/toast';
 import { completeTask, rescheduleDeal, rescheduleTask } from '@/app/lib/api';
 import { useNow } from '@/app/hooks/useNow';
 import { isTypingTarget, parseCalendarDate } from '@/app/lib/utils';
@@ -215,19 +215,19 @@ export default function CalendarShell({
             const originalKey = event.dayKey;
             const ok = await applyReschedule(event, newDayKey);
             if (ok) {
-                toast.success(t('rescheduled'), {
+                toastSuccess(t('rescheduled'), {
                     id: `reschedule-${event.id}`,
                     action: {
                         label: t('undo'),
                         onClick: () => {
                             void applyReschedule(event, originalKey).then((undone) => {
-                                if (!undone) toast.error(t('rescheduleFailed'));
+                                if (!undone) toastError(t('rescheduleFailed'));
                             });
                         },
                     },
                 });
             } else {
-                toast.error(t('rescheduleFailed'));
+                toastError(t('rescheduleFailed'));
             }
         },
         [applyReschedule, t],
@@ -238,11 +238,11 @@ export default function CalendarShell({
             if (event.kind !== 'task') return;
             try {
                 await completeTask(event.entityId);
-                toast.success(t('taskCompleted'));
+                toastSuccess(t('taskCompleted'));
                 setOpenEventId(null);
                 router.refresh();
             } catch {
-                toast.error(t('completeFailed'));
+                toastError(t('completeFailed'));
             }
         },
         [router, t],

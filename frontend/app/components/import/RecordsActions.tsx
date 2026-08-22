@@ -3,13 +3,12 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { toast } from 'sonner';
 import { ArrowDownTrayIcon, ArrowUpTrayIcon } from '@heroicons/react/24/outline';
 import { PlusIcon } from '@heroicons/react/24/solid';
 
 import { SplitButton } from '@/components/ui/split-button';
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastDismiss, toastError, toastLoading, toastSuccess } from '@/app/lib/toast';
 import type { ExportEntity, ImportEntity } from '@/app/lib/types';
 import { useActions, useRegisterActions } from '@/app/hooks/useActions';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
@@ -111,13 +110,13 @@ export default function RecordsActions(props: RecordsActionsProps) {
         ) return;
         const controller = new AbortController();
         activeControllerRef.current = controller;
-        const toastId = toast.loading(t('exporting'));
+        const toastId = toastLoading(t('exporting'));
         try {
             await liveExportRef.current(controller.signal, originWorkspaceId);
             if (!controller.signal.aborted) toastSuccess(t('exported'), { id: toastId });
         } catch (error) {
             if (controller.signal.aborted || isAbortError(error)) {
-                toast.dismiss(toastId);
+                toastDismiss(toastId);
                 return;
             }
             toastError(t('errorExport'), { id: toastId });

@@ -11,7 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { type BusinessCardImportDraft, CreateContactPayload } from "@/app/lib/types";
 import { createContact, importBusinessCard, isFieldError, uploadContactPicture } from "@/app/lib/api";
-import { toast } from "sonner";
+import { toastError, toastSuccess } from "@/app/lib/toast";
 import { useTranslations } from "next-intl";
 
 function emptyContactPayload(companyId: number): CreateContactPayload {
@@ -157,7 +157,7 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                                 finalized = true;
                                 setNewContactPayload(emptyContactPayload(company.id));
                                 setImageFile(null);
-                                toast.success(t(reusedContact ? 'toastCardAttached' : 'toastContactCreated'));
+                                toastSuccess(t(reusedContact ? 'toastCardAttached' : 'toastContactCreated'));
                                 setCreationSucceeded(true);
                                 invalidatePendingClose();
                                 const closeGeneration = closeGenerationRef.current;
@@ -174,7 +174,7 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                         if (isFieldError(error) || businessCard) {
                             throw error;
                         }
-                        toast.error(t('toastCreateContactFailed'));
+                        toastError(t('toastCreateContactFailed'));
                     } finally {
                         if (isCurrent()) setIsCreating(false);
                     }

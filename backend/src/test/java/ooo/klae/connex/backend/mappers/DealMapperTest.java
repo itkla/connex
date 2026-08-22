@@ -46,6 +46,43 @@ class DealMapperTest extends AbstractMapperTest {
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private NoteMapper noteMapper;
 
+    @Test
+    void mentionLookupUsesAsciiBoundariesAndPreservesSingleCharacterCjkNames() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        dealMapper.updateName(workspace.getId(), deal.getId(), "d", "d");
+        Deal abbreviation = newDeal(pipeline, stage, newCompany());
+        dealMapper.updateName(workspace.getId(), abbreviation.getId(), "Al", "Al");
+        Deal multiWordName = newDeal(pipeline, stage, newCompany());
+        dealMapper.updateName(
+                workspace.getId(), multiWordName.getId(), "Renewal Plan", "Renewal Plan");
+        Deal cjkName = newDeal(pipeline, stage, newCompany());
+        dealMapper.updateName(workspace.getId(), cjkName.getId(), "李", "李");
+
+        assertTrue(dealMapper.findMentionedRecords(
+                workspace.getId(), "deadline", 21).stream()
+                .noneMatch(match -> match.getId() == deal.getId()));
+        assertTrue(dealMapper.findMentionedRecords(
+                workspace.getId(), "Tell me about d?", 21).stream()
+                .anyMatch(match -> match.getId() == deal.getId()));
+        assertTrue(dealMapper.findMentionedRecords(
+                workspace.getId(), "Alice", 21).stream()
+                .noneMatch(match -> match.getId() == abbreviation.getId()));
+        assertTrue(dealMapper.findMentionedRecords(
+                workspace.getId(), "Tell me about Al?", 21).stream()
+                .anyMatch(match -> match.getId() == abbreviation.getId()));
+        assertTrue(dealMapper.findMentionedRecords(
+                workspace.getId(), "Renewal Planning", 21).stream()
+                .noneMatch(match -> match.getId() == multiWordName.getId()));
+        assertTrue(dealMapper.findMentionedRecords(
+                workspace.getId(), "Tell me about Renewal Plan?", 21).stream()
+                .anyMatch(match -> match.getId() == multiWordName.getId()));
+        assertTrue(dealMapper.findMentionedRecords(
+                workspace.getId(), "李について教えて", 21).stream()
+                .anyMatch(match -> match.getId() == cjkName.getId()));
+    }
+
     /**
      * Inserts a new deal and checks if the generated ID is not zero.
      */

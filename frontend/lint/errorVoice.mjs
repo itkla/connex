@@ -26,21 +26,7 @@ export const SONNER_ALLOWED = [
 ];
 
 /** Files that still import `sonner` directly instead of the branded helpers in `app/lib/toast.ts`. */
-export const SONNER_IMPORT_EXCLUSIONS = [
-    "app/components/DraftResumeBridge.tsx",
-    "app/components/calendar/CalendarShell.tsx",
-    "app/components/import/RecordsActions.tsx",
-    "app/components/records/RecordsRenderView.tsx",
-    "app/components/records/companies/CompaniesBrowser.tsx",
-    "app/components/records/companies/ContactsGrid.tsx",
-    "app/components/records/companies/EditCompanySheet.tsx",
-    "app/components/records/contacts/ChangeCompanyDialog.tsx",
-    "app/components/records/contacts/ContactCard.tsx",
-    "app/components/records/deals/DealsBrowser.tsx",
-    "app/components/records/deals/EditDealSheet.tsx",
-    "app/components/records/pipelines/EditPipelineSheet.tsx",
-    "app/hooks/useNotifications.tsx",
-];
+export const SONNER_IMPORT_EXCLUSIONS = [];
 
 /** Files that still carry an error's own text into a toast instead of mapping it to product copy. */
 export const RAW_ERROR_TOAST_EXCLUSIONS = [
@@ -65,7 +51,6 @@ export const RAW_ERROR_TOAST_EXCLUSIONS = [
     "app/components/marketing/campaigns/CampaignDelivery.tsx",
     "app/components/marketing/campaigns/CampaignDetail.tsx",
     "app/components/marketing/campaigns/CampaignExportPanel.tsx",
-    "app/components/marketing/campaigns/CampaignsBrowser.tsx",
     "app/components/marketing/campaigns/UnsubscribeConfirm.tsx",
     "app/components/me/TimelineRow.tsx",
     "app/components/organization/DataRequestDialog.tsx",
@@ -82,12 +67,8 @@ export const RAW_ERROR_TOAST_EXCLUSIONS = [
     "app/components/records/EngineEvaluationPanel.tsx",
     "app/components/records/approval-policies/ApprovalPoliciesBrowser.tsx",
     "app/components/records/approval-policies/ApprovalPolicyDialog.tsx",
-    "app/components/records/companies/CompaniesBrowser.tsx",
     "app/components/records/companies/CompanyActionsMenu.tsx",
-    "app/components/records/companies/EditCompanySheet.tsx",
-    "app/components/records/contacts/ChangeCompanyDialog.tsx",
     "app/components/records/contacts/ContactActionsMenu.tsx",
-    "app/components/records/contacts/ContactCard.tsx",
     "app/components/records/contacts/ContactConnections.tsx",
     "app/components/records/contacts/ContactProvenanceDialog.tsx",
     "app/components/records/contacts/ContactQualificationDialog.tsx",
@@ -99,10 +80,7 @@ export const RAW_ERROR_TOAST_EXCLUSIONS = [
     "app/components/records/deals/DealLineItems.tsx",
     "app/components/records/deals/DealTaskList.tsx",
     "app/components/records/deals/DealTeamDialog.tsx",
-    "app/components/records/deals/DealsBrowser.tsx",
     "app/components/records/deals/DealsKanban.tsx",
-    "app/components/records/deals/EditDealSheet.tsx",
-    "app/components/records/pipelines/EditPipelineSheet.tsx",
     "app/components/records/pipelines/PipelinesBrowser.tsx",
     "app/components/records/users/NewUserDialog.tsx",
     "app/components/reports/AskConnexComposer.tsx",
@@ -127,8 +105,8 @@ export const RAW_ERROR_TOAST_EXCLUSIONS = [
  * and regressions cannot hide in slack between an old high-water mark and today's list.
  */
 export const EXCLUSION_BASELINE = {
-    sonnerImports: 13,
-    rawErrorToasts: 75,
+    sonnerImports: 0,
+    rawErrorToasts: 67,
 };
 
 const SONNER_IMPORT_MESSAGE =
@@ -164,15 +142,18 @@ const RAW_TEXT_IN_TOAST_SELECTOR =
 const RAW_TEXT_LIFTED_TO_VARIABLE_SELECTOR =
     "VariableDeclarator ConditionalExpression[test.operator='instanceof'][consequent.property.name='message']";
 
+const SOURCE_FILES = ["**/*.{ts,tsx,js,jsx,mjs}"];
+
 /**
- * Builds the flat-config entries for both gates, each scoped away from its committed exclusions.
- * @returns eslint flat config objects, in the order they must be applied
+ * Builds the unfiltered rule pair used to derive the live violation inventory from source. Keeping
+ * this probe beside the shipping lint rules prevents the ledger test from drifting to a weaker
+ * source-text approximation.
+ * @returns {import("eslint").Linter.Config[]} eslint flat config objects without allowlist or burndown ignores
  */
-export function errorVoiceConfig() {
+export function errorVoiceProbeConfig() {
     return [
         {
-            files: ["**/*.{ts,tsx,js,jsx,mjs}"],
-            ignores: [...SONNER_ALLOWED, ...SONNER_IMPORT_EXCLUSIONS],
+            files: SOURCE_FILES,
             rules: {
                 "no-restricted-imports": [
                     "error",
@@ -181,8 +162,7 @@ export function errorVoiceConfig() {
             },
         },
         {
-            files: ["**/*.{ts,tsx,js,jsx,mjs}"],
-            ignores: [...RAW_ERROR_TOAST_EXCLUSIONS],
+            files: SOURCE_FILES,
             rules: {
                 "no-restricted-syntax": [
                     "error",
@@ -190,6 +170,24 @@ export function errorVoiceConfig() {
                     { selector: RAW_TEXT_LIFTED_TO_VARIABLE_SELECTOR, message: RAW_ERROR_TOAST_MESSAGE },
                 ],
             },
+        },
+    ];
+}
+
+/**
+ * Builds the flat-config entries for both gates, each scoped away from its committed exclusions.
+ * @returns {import("eslint").Linter.Config[]} eslint flat config objects, in the order they must be applied
+ */
+export function errorVoiceConfig() {
+    const [sonnerProbe, rawErrorProbe] = errorVoiceProbeConfig();
+    return [
+        {
+            ...sonnerProbe,
+            ignores: [...SONNER_ALLOWED, ...SONNER_IMPORT_EXCLUSIONS],
+        },
+        {
+            ...rawErrorProbe,
+            ignores: [...RAW_ERROR_TOAST_EXCLUSIONS],
         },
     ];
 }

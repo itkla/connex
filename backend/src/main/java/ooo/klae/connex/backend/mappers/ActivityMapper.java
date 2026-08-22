@@ -58,6 +58,11 @@ public interface ActivityMapper {
     );
     long upcomingCount(@Param("workspaceId") int workspaceId, @Param("days") int days);
     List<Activity> getActivitiesByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
+    List<Activity> getAiAssistantActivitiesByPersonId(
+        @Param("workspaceId") int workspaceId,
+        @Param("personId") int personId,
+        @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
+        @Param("limit") int limit);
     List<Activity> getActivitiesByPersonIdInWindow(
         @Param("workspaceId") int workspaceId,
         @Param("personId") int personId,
@@ -67,9 +72,19 @@ public interface ActivityMapper {
     List<Activity> getActivitiesByPersonIds(@Param("workspaceId") int workspaceId,
             @Param("personIds") List<Integer> personIds);
     List<Activity> getActivitiesByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
+    List<Activity> getAiAssistantActivitiesByDealId(
+        @Param("workspaceId") int workspaceId,
+        @Param("dealId") int dealId,
+        @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
+        @Param("limit") int limit);
     List<Activity> getActivitiesByCreatedById(@Param("workspaceId") int workspaceId, @Param("createdById") int createdById);
     List<Activity> getCompanyActivities(@Param("workspaceId") int workspaceId,
             @Param("companyId") int companyId, @Param("limit") int limit);
+    List<Activity> getAiAssistantActivitiesByCompanyId(
+        @Param("workspaceId") int workspaceId,
+        @Param("companyId") int companyId,
+        @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
+        @Param("limit") int limit);
     List<Activity> getActivitiesByDealCompanyIds(@Param("workspaceId") int workspaceId,
             @Param("companyIds") List<Integer> companyIds);
     Activity getActivityById(@Param("workspaceId") int workspaceId, @Param("id") int id);

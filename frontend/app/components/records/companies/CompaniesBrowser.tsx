@@ -7,8 +7,7 @@ import { useReducedMotion } from 'motion/react';
 import { Button } from '@/components/ui/button';
 import RecordsActions from '@/app/components/import/RecordsActions';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { toast } from 'sonner';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastError, toastInfo, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
 import { ArchiveBoxIcon, ArchiveBoxArrowDownIcon, BuildingOffice2Icon } from '@heroicons/react/24/outline';
@@ -44,6 +43,7 @@ import { useRecordReturnSelection } from '@/app/hooks/useRecordReturnSelection';
 import { useActionSelection, useActions } from '@/app/hooks/useActions';
 import { usePermission } from '@/app/hooks/usePermissions';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import FirstRunDoors from '@/app/components/FirstRunDoors';
 import { firstRunDoors } from '@/app/lib/firstRunJourney';
 import { useSavedViewScope } from '@/app/hooks/useSavedViewScope';
@@ -179,6 +179,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
     const ts = useTranslations('MemberScope');
     const tSeg = useTranslations('SmartSegments');
     const ttemp = useTranslations('Temperature');
+    const reportApiError = useApiErrorToast('CompaniesBrowser');
     const reduce = useReducedMotion() ?? false;
     const {
         displayMode,
@@ -380,12 +381,12 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                 failedSegmentKeyRef.current = segmentsKey;
                 setSegmentErrorKey(segmentsKey);
             } else {
-                toastError(err instanceof Error ? err.message : t('toastSelectAllFailed'));
+                reportApiError(err, 'toastSelectAllFailed');
             }
         } finally {
             if (requestId === selectAllRequestRef.current) setSelectingAll(false);
         }
-    }, [filterParams, query, hasSegments, evaluable, segmentsKey, filterSignature, setSelectedIds, showArchived, t, tSeg]);
+    }, [filterParams, query, hasSegments, evaluable, segmentsKey, filterSignature, reportApiError, setSelectedIds, showArchived, tSeg]);
 
     const exportCompanies = useCallback(async (signal: AbortSignal, workspaceId: number) => {
         const init = { signal, headers: { 'X-Workspace-Id': String(workspaceId) } };
@@ -579,14 +580,14 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
         });
 
         if (changed.length === 0) {
-            toast.info(t('toastNoChanges'));
+            toastInfo(t('toastNoChanges'));
             setEditSheetOpen(false);
             return;
         }
 
         const invalid = changed.find((c) => !drafts[c.id].name.trim());
         if (invalid) {
-            toast.error(t('toastNameRequired', { name: invalid.name }));
+            toastError(t('toastNameRequired', { name: invalid.name }));
             return;
         }
 
@@ -611,7 +612,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
             setEditSheetOpen(false);
             refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastSaveFailed'));
+            reportApiError(err, 'toastSaveFailed');
         } finally {
             setIsSaving(false);
         }
@@ -650,7 +651,7 @@ export default function CompaniesBrowser({ savedViews, defaultView, savedViewsUn
                 refresh();
             }
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t(showArchived ? 'toastRestoreFailed' : 'toastArchiveFailed'));
+            reportApiError(err, showArchived ? 'toastRestoreFailed' : 'toastArchiveFailed');
         } finally {
             setIsDeleting(false);
         }

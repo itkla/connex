@@ -200,7 +200,7 @@
         "toastPickCompany": "Pick a company",
         "toastAssociatedSingle": "{contactName} associated with {companyName}",
         "toastAssociatedMultiple": "{count} contacts associated with {companyName}",
-        "toastFailedUpdate": "Failed to update company"
+        "toastFailedUpdate": "Couldn't change the company"
     },
     "ContactsEditSheet": {
         "toastNoChanges": "No changes to save",

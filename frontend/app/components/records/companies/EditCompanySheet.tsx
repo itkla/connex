@@ -3,9 +3,9 @@
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { toast } from 'sonner';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastError, toastInfo, toastSuccess } from '@/app/lib/toast';
 
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import QuickEditCompanySheet, { type CompanyDraft } from '@/app/components/records/companies/QuickEditCompanySheet';
 import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
 import { getCompanyById, updateCompany, uploadCompanyLogo } from '@/app/lib/api';
@@ -42,6 +42,7 @@ export default function EditCompanySheet({
 }) {
     const router = useRouter();
     const t = useTranslations('CompaniesEditSheet');
+    const reportApiError = useApiErrorToast('CompaniesEditSheet');
     const [draft, setDraft] = useState<CompanyDraft>(() => toDraft(company));
     const [logoFile, setLogoFile] = useState<File | null>(null);
     const [isSaving, setIsSaving] = useState(false);
@@ -63,14 +64,14 @@ export default function EditCompanySheet({
         const customChanged = cfRef.current?.hasChanges() ?? false;
 
         if (!textChanged && !logoChanged && !customChanged) {
-            toast.info(t('toastNoChanges'));
+            toastInfo(t('toastNoChanges'));
             handleOpenChange(false);
             return;
         }
 
         if (!draft.name.trim()) {
             // TODO: replace this message with the validation error message from the backend
-            toast.error(t('toastNameRequired'));
+            toastError(t('toastNameRequired'));
             return;
         }
 
@@ -109,7 +110,7 @@ export default function EditCompanySheet({
                 toastError(t('toastPartiallySaved'));
                 router.refresh();
             } else {
-                toastError(err instanceof Error ? err.message : t('toastSaveFailed'));
+                reportApiError(err, 'toastSaveFailed');
             }
         } finally {
             setIsSaving(false);

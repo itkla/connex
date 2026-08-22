@@ -1982,6 +1982,7 @@ class AiChatAgentLoopServiceTest {
                 mock(ooo.klae.connex.backend.services.DealService.class),
                 mock(ooo.klae.connex.backend.services.ActivityService.class),
                 mock(ooo.klae.connex.backend.services.TaskService.class),
+                mock(AiAssistantHistoryService.class),
                 mock(ooo.klae.connex.backend.services.ScoringService.class),
                 workspaceService,
                 mock(PersonMapper.class),
