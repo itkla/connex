@@ -33,7 +33,6 @@ export const RAW_ERROR_TOAST_EXCLUSIONS = [
     "app/auth/logout/page.tsx",
     "app/auth/reset-password/ResetPasswordForm.tsx",
     "app/components/account/ChangeEmailDialog.tsx",
-    "app/components/account/ConnectionsPanel.tsx",
     "app/components/account/MembershipPanel.tsx",
     "app/components/actions/create/CompanyCreateContainer.tsx",
     "app/components/actions/create/ContactCreateContainer.tsx",
@@ -106,7 +105,7 @@ export const RAW_ERROR_TOAST_EXCLUSIONS = [
  */
 export const EXCLUSION_BASELINE = {
     sonnerImports: 0,
-    rawErrorToasts: 67,
+    rawErrorToasts: 66,
 };
 
 const SONNER_IMPORT_MESSAGE =

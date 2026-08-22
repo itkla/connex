@@ -54,7 +54,7 @@ import {
 } from "@/app/lib/managedConnect";
 import { checkPermission, type PermissionsStatus } from "@/app/lib/permissionState";
 import type { CapabilityAvailability } from "@/app/lib/capabilityAvailability";
-import { toastError, toastSuccess } from "@/app/lib/toast";
+import { toastSuccess } from "@/app/lib/toast";
 import type {
     CaptureOverview,
     CaptureReviewDecision,
@@ -294,7 +294,7 @@ export default function ConnectionsPanel({
                 ].includes(callbackError);
                 const code = known ? callbackError : "exchange";
                 setAuthorizationError({ provider: handedOffTo, code });
-                toastError(t(`error_${code}`));
+                showApiError(new Error("Provider authorization failed"));
             }
             const resumed = connected === "google" || connected === "microsoft"
                 ? connected
@@ -310,7 +310,7 @@ export default function ConnectionsPanel({
             );
         }, 50);
         return () => window.clearTimeout(timeout);
-    }, [capabilities, currentSearchParams, router, searchParams, t]);
+    }, [capabilities, currentSearchParams, router, searchParams, showApiError, t]);
 
     /**
      * Discards a handoff record that no authorization return ever claimed.
