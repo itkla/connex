@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
@@ -42,7 +42,6 @@ import { toastError, toastSuccess } from '@/app/lib/toast';
 import { formatDate } from '@/app/lib/utils';
 import { deriveNoteTitle, noteSnippet } from '@/app/lib/noteText';
 import { recordDetailNavigationPath } from '@/app/lib/recordReturnPath';
-import { NOTE_URL_KEY, parseDeepLinkId } from '@/app/hooks/listStateUrl';
 import { useRecordReturnScroll } from '@/app/hooks/useRecordReturnSelection';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
 import type { Contact, Deal, Note, NotesPageParams, User } from '@/app/lib/types';
@@ -103,13 +102,6 @@ export default function NotesBrowser({ persons, deals, users, currentUserId }: P
     const personById = useMemo(() => new Map(persons.map((p) => [p.id, p])), [persons]);
     const dealById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals]);
     const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
-
-    useEffect(() => {
-        const noteId = parseDeepLinkId(new URLSearchParams(window.location.search).get(NOTE_URL_KEY));
-        if (noteId !== null) {
-            router.replace(`/activity/notes/${noteId}`);
-        }
-    }, [router]);
 
     const returnSnapshot = useRecordReturnScroll('notes', !loading);
 

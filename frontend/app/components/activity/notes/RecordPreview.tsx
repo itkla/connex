@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BriefcaseIcon, BuildingOffice2Icon, EnvelopeIcon, GlobeAltIcon, UserIcon } from "@heroicons/react/24/outline";
 import { useLocale, useTranslations } from "next-intl";
 
@@ -40,18 +40,6 @@ export function PreviewSkeleton() {
             </div>
         </div>
     );
-}
-
-function formatCurrency(value: number, currency: string, locale: string): string {
-    try {
-        return new Intl.NumberFormat(locale, {
-            style: "currency",
-            currency: currency || "USD",
-            maximumFractionDigits: 0,
-        }).format(value);
-    } catch {
-        return `${value}`;
-    }
 }
 
 function ContactPreview({ id }: { id: number }) {
@@ -94,6 +82,17 @@ function DealPreview({ id }: { id: number }) {
     const locale = useLocale();
     const t = useTranslations("ActivityNotesReferencePreview");
     const { data, loading } = useRecord(getDealSummary, id);
+    const currencyFormatter = useMemo(() => {
+        try {
+            return new Intl.NumberFormat(locale, {
+                style: "currency",
+                currency: data?.currency || "USD",
+                maximumFractionDigits: 0,
+            });
+        } catch {
+            return null;
+        }
+    }, [data?.currency, locale]);
     if (loading) return <PreviewSkeleton />;
     if (!data) return <p className="text-sm text-muted-foreground">{t("dealUnavailable")}</p>;
     const stage = [data.pipelineName, data.stageName].filter(Boolean).join(" · ");
@@ -109,7 +108,7 @@ function DealPreview({ id }: { id: number }) {
                 <div className="flex justify-between gap-2">
                     <dt>{t("value")}</dt>
                     <dd className="font-medium tabular-nums text-foreground">
-                        {formatCurrency(data.value, data.currency, locale)}
+                        {currencyFormatter?.format(data.value) ?? `${data.value}`}
                     </dd>
                 </div>
                 {data.companyName ? (
