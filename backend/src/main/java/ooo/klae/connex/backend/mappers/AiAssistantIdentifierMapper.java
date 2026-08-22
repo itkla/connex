@@ -13,6 +13,7 @@ public interface AiAssistantIdentifierMapper {
     /** Returns one globally bounded set of visible record names present in supplied text. */
     List<AiAssistantIdentifierMention> findMentionedRecords(
             @Param("workspaceId") int workspaceId,
+            @Param("orgWorkspaceIdsJson") String orgWorkspaceIdsJson,
             @Param("text") String text,
             @Param("limit") int limit);
 }

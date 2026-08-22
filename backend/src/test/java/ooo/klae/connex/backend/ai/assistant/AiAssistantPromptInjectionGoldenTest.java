@@ -53,6 +53,8 @@ import ooo.klae.connex.backend.services.AiProviderConfigService;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess;
+import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations.WorkspaceScope;
 import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.ScoringService;
 import ooo.klae.connex.backend.services.SearchService;
@@ -68,17 +70,21 @@ class AiAssistantPromptInjectionGoldenTest {
         ObjectMapper objectMapper = JsonMapper.builder().build();
         AiAssistantIdentifierMapper identifierMapper = mock(AiAssistantIdentifierMapper.class);
         WorkspaceService workspaceService = mock(WorkspaceService.class);
+        OrganizationWorkspaceScopeControlAccess workspaceScopeControlAccess =
+                mock(OrganizationWorkspaceScopeControlAccess.class);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        when(workspaceScopeControlAccess.getForWorkspace(7))
+                .thenReturn(new WorkspaceScope(2, List.of(7), "[7]"));
         AiAssistantIdentifierMention mentioned = new AiAssistantIdentifierMention();
         mentioned.setKind("person");
         mentioned.setId(31);
         mentioned.setValue("Kenji Sato");
         when(identifierMapper.findMentionedRecords(
-                7, "What is happening with Kenji Sato?", 21))
+                7, "[7]", "What is happening with Kenji Sato?", 21))
                 .thenReturn(List.of(mentioned));
         MaskingContext context = new MaskingContext();
         AiAssistantIdentifierResolver resolver = new AiAssistantIdentifierResolver(
-                identifierMapper, workspaceService);
+                identifierMapper, workspaceService, workspaceScopeControlAccess);
         resolver.seed(
                 resolver.resolve("What is happening with Kenji Sato?"), context);
         AiChatMessage userRequest = new AiChatMessage();

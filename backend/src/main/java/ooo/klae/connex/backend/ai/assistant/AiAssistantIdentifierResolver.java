@@ -12,6 +12,7 @@ import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.beans.AiAssistantIdentifierMention;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
 import ooo.klae.connex.backend.mappers.AiAssistantIdentifierMapper;
+import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 /** Resolves one bounded, locally authorized identifier set for an Ask Connex user turn. */
@@ -23,13 +24,17 @@ public class AiAssistantIdentifierResolver {
 
     private final AiAssistantIdentifierMapper identifierMapper;
     private final WorkspaceService workspaceService;
+    private final OrganizationWorkspaceScopeControlAccess workspaceScopeControlAccess;
 
     /** Resolves exactly one globally bounded visible-record search for the supplied turn text. */
     public Resolution resolve(String message) {
         Objects.requireNonNull(message, "message");
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String orgWorkspaceIdsJson = workspaceScopeControlAccess
+                .getForWorkspace(workspaceId)
+                .workspaceIdsJson();
         List<AiAssistantIdentifierMention> mentions = identifierMapper.findMentionedRecords(
-                workspaceId, message, OVERFLOW_LIMIT);
+                workspaceId, orgWorkspaceIdsJson, message, OVERFLOW_LIMIT);
         if (mentions.size() > MAX_IDENTIFIERS) {
             throw AiAssistantLoopException.malformed("identifier_limit_exceeded");
         }

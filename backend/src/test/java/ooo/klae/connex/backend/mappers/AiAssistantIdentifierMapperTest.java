@@ -13,10 +13,12 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 
 class AiAssistantIdentifierMapperTest extends AbstractMapperTest {
     @Autowired private AiAssistantIdentifierMapper identifierMapper;
+    @Autowired private ShareMapper shareMapper;
 
     @Test
     void lookupCombinesVisibleKindsWithAsciiBoundariesAndOneGlobalLimit() {
@@ -34,6 +36,7 @@ class AiAssistantIdentifierMapperTest extends AbstractMapperTest {
 
         var matches = identifierMapper.findMentionedRecords(
                 workspace.getId(),
+                "[" + workspace.getId() + "]",
                 "Ask Kenji Sato about Acme Corp and Renewal Plan",
                 21);
 
@@ -43,10 +46,12 @@ class AiAssistantIdentifierMapperTest extends AbstractMapperTest {
                 .toList());
         assertTrue(identifierMapper.findMentionedRecords(
                 workspace.getId(),
+                "[" + workspace.getId() + "]",
                 "Kenji Satomi at Acme Corporation discussed Renewal Planning",
                 21).isEmpty());
         assertEquals(2, identifierMapper.findMentionedRecords(
                 workspace.getId(),
+                "[" + workspace.getId() + "]",
                 "Ask Kenji Sato about Acme Corp and Renewal Plan",
                 2).size());
     }
@@ -75,6 +80,43 @@ class AiAssistantIdentifierMapperTest extends AbstractMapperTest {
         String text = hiddenPerson.getName() + " at " + hiddenCompany.getName();
 
         assertTrue(identifierMapper.findMentionedRecords(
-                workspace.getId(), text, 21).isEmpty());
+                workspace.getId(),
+                "[" + workspace.getId() + "," + sibling.getId() + "]",
+                text,
+                21).isEmpty());
+    }
+
+    @Test
+    void lookupRequiresSharedRecordsToBelongToTheControlDerivedOrganizationScope() {
+        User actor = newUser();
+        Integer orgId = workspaceMapper.getOrgId(workspace.getId());
+        if (orgId == null) {
+            throw new IllegalStateException("Test workspace organization is unavailable");
+        }
+        Workspace sibling = new Workspace();
+        sibling.setName("Sibling " + unique());
+        sibling.setSlug("sibling-" + unique());
+        sibling.setOrgId(orgId);
+        workspaceMapper.insert(sibling);
+        Company sharedCompany = new Company();
+        sharedCompany.setWorkspaceId(sibling.getId());
+        sharedCompany.setName("Shared Company " + unique());
+        companyMapper.insert(sharedCompany);
+        Person sharedPerson = new Person();
+        sharedPerson.setWorkspaceId(sibling.getId());
+        sharedPerson.setName("Shared Person " + unique());
+        sharedPerson.setCompany(sharedCompany);
+        personMapper.insert(sharedPerson);
+        assertTrue(shareMapper.shareCompany(
+                sharedCompany.getId(), sibling.getId(), workspace.getId(), actor.getId(), false) > 0);
+        assertTrue(shareMapper.sharePerson(
+                sharedPerson.getId(), sibling.getId(), workspace.getId(), actor.getId(), false) > 0);
+        String text = sharedPerson.getName() + " at " + sharedCompany.getName();
+        String completeScope = "[" + workspace.getId() + "," + sibling.getId() + "]";
+
+        assertEquals(2, identifierMapper.findMentionedRecords(
+                workspace.getId(), completeScope, text, 21).size());
+        assertTrue(identifierMapper.findMentionedRecords(
+                workspace.getId(), "[" + workspace.getId() + "]", text, 21).isEmpty());
     }
 }
