@@ -154,6 +154,7 @@ type AskConnexDrawerLabels = {
     emptyBody: string;
     emptyTitle: string;
     formerMember: string;
+    contentWithheld: string;
     historySummarized: string;
     invitation: string;
     invitations: string;
@@ -438,22 +439,28 @@ function TranscriptMessage({
                         {author}
                     </MessageHeader>
                 ) : null}
-                {!user ? <MessageReasoning reasoning={message.reasoning} label={labels.thinking} /> : null}
+                {!user && message.contentWithheld !== true
+                    ? <MessageReasoning reasoning={message.reasoning} label={labels.thinking} />
+                    : null}
                 <motion.div
                     initial={animateEntrance ? (reduceMotion ? { opacity: 0 } : { opacity: 0, transform: 'translateY(0.375rem)' }) : false}
                     animate={{ opacity: 1, transform: 'translateY(0rem)' }}
                     transition={reduceMotion ? instant : { duration: 0.2, ease: easeOut }}
                     className={cn(
                         'whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed',
-                        user
+                        message.contentWithheld === true
+                            ? 'bg-muted text-muted-foreground italic'
+                            : user
                             ? 'bg-primary text-primary-foreground'
                             : 'bg-muted text-foreground',
                     )}
                 >
-                    {message.content}
+                    {message.contentWithheld === true ? labels.contentWithheld : message.content}
                 </motion.div>
-                {!user ? <MessageCitations citations={message.citations} labels={labels} /> : null}
-                {!user ? (
+                {!user && message.contentWithheld !== true
+                    ? <MessageCitations citations={message.citations} labels={labels} />
+                    : null}
+                {!user && message.contentWithheld !== true ? (
                     <ToolCallCards
                         cards={toolCalls}
                         labels={labels.toolCard}
@@ -462,7 +469,7 @@ function TranscriptMessage({
                         onAction={onToolAction}
                     />
                 ) : null}
-                {!user ? (
+                {!user && message.contentWithheld !== true ? (
                     <MessageSuggestions
                         suggestions={suggestions}
                         label={labels.suggestedFollowUps}

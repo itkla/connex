@@ -22,7 +22,7 @@ const SECTION_IDS = [
     "contact",
 ] as const;
 
-const UPDATED = "2026-08-10";
+const UPDATED = "2026-08-21";
 
 export async function generateMetadata(): Promise<Metadata> {
     const t = await getTranslations("Legal");

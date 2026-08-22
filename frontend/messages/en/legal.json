@@ -42,7 +42,7 @@
         },
         "security": {
           "h": "Security control measures",
-          "b": "We take organizational, human, physical, and technical security control measures appropriate to the risk. These include role-based access control, tenant isolation, an append-only audit log, encrypted transport, and hardened authentication (including passkeys / WebAuthn).\n\nA fuller summary is set out on our Data Disclosure page."
+          "b": "We take organizational, human, physical, and technical security control measures appropriate to the risk. These include role-based access control, tenant isolation, an append-only audit log, encrypted transport, and hardened authentication (including passkeys / WebAuthn).\n\nFor AI features, structured identifiers are tokenized. Free text is screened for special-care data, pattern-redacted for email addresses, URLs, phone numbers, and long identifiers, and tokenized for identifiers matched to CRM records. Names and other identifiers in free text that do not match a CRM record may be sent to the configured AI provider as written.\n\nA fuller summary is set out on our Data Disclosure page."
         },
         "retention": {
           "h": "Retention and deletion",
@@ -96,7 +96,7 @@
         },
         "security": {
           "h": "6. Security control measures taken",
-          "b": "We have taken the following categories of security control measures:\n\n- Organizational: defined responsibilities, access management, and an append-only audit log of access to and changes of personal data.\n- Human: staff supervision and confidentiality obligations.\n- Physical: reliance on cloud infrastructure with physical-security controls.\n- Technical: role-based access control, tenant isolation, encrypted transport, hardened authentication (passkeys / WebAuthn), and security headers.\n- External environment: SaaS personal data is stored on cloud infrastructure located in Japan; where handling involves parties outside Japan, we take account of that country's data-protection environment."
+          "b": "We have taken the following categories of security control measures:\n\n- Organizational: defined responsibilities, access management, and an append-only audit log of access to and changes of personal data.\n- Human: staff supervision and confidentiality obligations.\n- Physical: reliance on cloud infrastructure with physical-security controls.\n- Technical: role-based access control, tenant isolation, encrypted transport, hardened authentication (passkeys / WebAuthn), and security headers.\n- External environment: SaaS personal data is stored on cloud infrastructure located in Japan; where handling involves parties outside Japan, we take account of that country's data-protection environment.\n\nFor AI features, structured identifiers are tokenized. Free text is screened for special-care data, pattern-redacted for email addresses, URLs, phone numbers, and long identifiers, and tokenized for identifiers matched to CRM records. Names and other identifiers in free text that do not match a CRM record may be sent to the configured AI provider as written."
         },
         "complaints": {
           "h": "7. Where to lodge complaints",

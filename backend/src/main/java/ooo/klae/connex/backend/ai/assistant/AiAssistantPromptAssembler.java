@@ -34,6 +34,7 @@ import tools.jackson.databind.node.ObjectNode;
 @Component
 @RequiredArgsConstructor
 public class AiAssistantPromptAssembler {
+    private static final int MAX_USER_IDENTIFIERS = 20;
     private static final int MAX_SUMMARY_IDENTIFIERS = 200;
     private static final int MAX_SUMMARY_IDENTIFIER_CHARS = 1_000;
     private static final String CRM_DATA_BEGIN = "CRM_DATA_BEGIN";
@@ -965,20 +966,17 @@ public class AiAssistantPromptAssembler {
             String content = message.getContent();
             if ("assistant".equals(message.getAuthorKind())) {
                 if (message.getStructuredJson() == null) {
-                    throw new AiAssistantLoopException(
-                            "summary_compaction_failed", "summary_compaction_failed");
+                    continue;
                 }
                 ReplayAnswer replay = reauthorizeAnswer(message, resources);
                 if (replay == null) {
-                    throw new AiAssistantLoopException(
-                            "summary_compaction_failed", "summary_compaction_failed");
+                    continue;
                 }
                 content = replay.content();
             } else if ("user".equals(message.getAuthorKind())) {
-                content = reauthorizeUser(message, resources);
+                content = reauthorizeUser(message, resources, context);
                 if (content == null) {
-                    throw new AiAssistantLoopException(
-                            "summary_compaction_failed", "summary_compaction_failed");
+                    continue;
                 }
             }
             transcript.add(Map.of(
@@ -1135,7 +1133,11 @@ public class AiAssistantPromptAssembler {
                     "citations", replay.citations())));
             return;
         }
-        String masked = MaskingEngine.maskFreeText(message.getContent(), context);
+        String content = reauthorizeUser(message, resources, context);
+        if (content == null) {
+            return;
+        }
+        String masked = MaskingEngine.maskFreeText(content, context);
         String serialized = serialize(Map.of("content", masked));
         prompt.userTurn(USER_REQUEST_BEGIN + "\n" + serialized + "\n" + USER_REQUEST_END);
     }
@@ -1219,7 +1221,9 @@ public class AiAssistantPromptAssembler {
     }
 
     private String reauthorizeUser(
-            AiChatMessage message, AiChatResourceRegistry resources) {
+            AiChatMessage message,
+            AiChatResourceRegistry resources,
+            MaskingContext context) {
         if (message.getStructuredJson() == null) {
             return message.getContent();
         }
@@ -1240,6 +1244,20 @@ public class AiAssistantPromptAssembler {
             if (resources.handleFor(stored.kind(), stored.id()).isEmpty()) {
                 return null;
             }
+        }
+        JsonNode storedIdentifiers = metadata.get("identifiers");
+        if (storedIdentifiers == null || !storedIdentifiers.isArray()) {
+            return storedResources.isEmpty() ? message.getContent() : null;
+        }
+        if (storedIdentifiers.size() > MAX_USER_IDENTIFIERS) {
+            return null;
+        }
+        for (JsonNode identifier : storedIdentifiers) {
+            StoredSummaryIdentifier stored = storedSummaryIdentifier(identifier);
+            if (stored.kind() == EntityKind.EMAIL || stored.kind() == EntityKind.PHONE) {
+                return null;
+            }
+            MaskingEngine.maskField(stored.kind(), stored.value(), context);
         }
         return message.getContent();
     }

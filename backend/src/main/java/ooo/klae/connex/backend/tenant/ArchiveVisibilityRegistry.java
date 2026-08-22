@@ -256,6 +256,9 @@ public final class ArchiveVisibilityRegistry {
                 + "never projects identifying person or company fields; participant evidence stays "
                 + "reachable for lawful disclosure while restricted records remain ineligible for "
                 + "new provider-owned activity projections.");
+        declare(entries, "AiAssistantIdentifierMapper", ArchiveStrategy.EXCLUDE_ARCHIVED,
+            "Ask Connex identifier resolution projects contact and company names into prompt metadata, "
+                + "so every matching record read excludes archived rows before projection.");
         return Map.copyOf(entries);
     }
 

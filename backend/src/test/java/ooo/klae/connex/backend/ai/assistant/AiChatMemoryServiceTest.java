@@ -10,7 +10,6 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.same;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -34,10 +33,8 @@ import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.AiStructuredRepairAttempt;
-import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
-import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.provider.AiNativeToolRequest;
 import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
@@ -55,7 +52,6 @@ class AiChatMemoryServiceTest {
         AiInvocationAdmissionService admissionService = mock(AiInvocationAdmissionService.class);
         AiInvocationAdmissionService.DirectAdmission admission =
                 mock(AiInvocationAdmissionService.DirectAdmission.class);
-        AiAssistantIdentifierResolver identifierResolver = mock(AiAssistantIdentifierResolver.class);
         AiChatTurnPersistenceService persistenceService = mock(AiChatTurnPersistenceService.class);
         AiProperties properties = new AiProperties();
         properties.setAssistantMaxOutputTokens(1_024);
@@ -71,9 +67,8 @@ class AiChatMemoryServiceTest {
                 invocationService,
                 admissionService,
                 properties,
-                identifierResolver,
                 assembler,
-                mock(AiAssistantToolExecutor.class),
+                emptyToolExecutor(),
                 summaryGuard,
                 summarySchema,
                 stepSchema,
@@ -87,6 +82,10 @@ class AiChatMemoryServiceTest {
                 101, 1, "user",
                 "EARLY_FACT_BEGIN " + "quarterly planning preference ".repeat(200)
                         + "EARLY_FACT_END");
+        early.setStructuredJson(
+                "{\"kind\":\"user_message\",\"resources\":[],"
+                        + "\"identifiers\":[{\"kind\":\"person\","
+                        + "\"value\":\"quarterly planning\"}]}");
         AiChatMessage recent = message(
                 103, 3, "assistant",
                 "RECENT_ANSWER_BEGIN " + "grounded relationship update ".repeat(1_100)
@@ -124,13 +123,6 @@ class AiChatMemoryServiceTest {
                 any(MaskedPrompt.class), same(stepSchema.responseSchema()),
                 eq(AiReasoningMode.TAGGED)))
                 .thenReturn(8_192);
-        doAnswer(invocation -> {
-            MaskingEngine.maskField(
-                    EntityKind.PERSON,
-                    "quarterly planning",
-                    invocation.getArgument(1));
-            return null;
-        }).when(identifierResolver).seed(anyString(), any(MaskingContext.class));
         when(persistenceService.loadHistory(turn, 100))
                 .thenReturn(List.of(early, middle, recent, initiating));
         when(persistenceService.loadHistorySummary(turn)).thenReturn(null);
@@ -221,7 +213,6 @@ class AiChatMemoryServiceTest {
     @Test
     void nativeProviderCapabilitySelectsTheNativeFixedEnvelope() {
         AiInvocationService invocationService = mock(AiInvocationService.class);
-        AiAssistantIdentifierResolver identifierResolver = mock(AiAssistantIdentifierResolver.class);
         AiChatTurnPersistenceService persistenceService = mock(AiChatTurnPersistenceService.class);
         AiProperties properties = new AiProperties();
         properties.setAssistantMaxOutputTokens(8_192);
@@ -234,9 +225,8 @@ class AiChatMemoryServiceTest {
                 invocationService,
                 mock(AiInvocationAdmissionService.class),
                 properties,
-                identifierResolver,
                 assembler,
-                mock(AiAssistantToolExecutor.class),
+                emptyToolExecutor(),
                 new AiAssistantSummaryGuard(),
                 new AiAssistantSummarySchema(objectMapper),
                 stepSchema,
@@ -300,7 +290,6 @@ class AiChatMemoryServiceTest {
     @Test
     void maximumLengthInitiatingMessageUsesAnEphemeralProviderOmission() {
         AiInvocationService invocationService = mock(AiInvocationService.class);
-        AiAssistantIdentifierResolver identifierResolver = mock(AiAssistantIdentifierResolver.class);
         AiChatTurnPersistenceService persistenceService = mock(AiChatTurnPersistenceService.class);
         AiProperties properties = new AiProperties();
         properties.setAssistantMaxOutputTokens(8_192);
@@ -313,9 +302,8 @@ class AiChatMemoryServiceTest {
                 invocationService,
                 mock(AiInvocationAdmissionService.class),
                 properties,
-                identifierResolver,
                 assembler,
-                mock(AiAssistantToolExecutor.class),
+                emptyToolExecutor(),
                 new AiAssistantSummaryGuard(),
                 new AiAssistantSummarySchema(objectMapper),
                 stepSchema,
@@ -377,9 +365,8 @@ class AiChatMemoryServiceTest {
         AiInvocationAdmissionService admissionService = mock(AiInvocationAdmissionService.class);
         AiInvocationAdmissionService.DirectAdmission admission =
                 mock(AiInvocationAdmissionService.DirectAdmission.class);
-        AiAssistantIdentifierResolver identifierResolver = mock(AiAssistantIdentifierResolver.class);
         AiChatTurnPersistenceService persistenceService = mock(AiChatTurnPersistenceService.class);
-        AiAssistantToolExecutor toolExecutor = mock(AiAssistantToolExecutor.class);
+        AiAssistantToolExecutor toolExecutor = emptyToolExecutor();
         AiWorkspaceGovernanceService governanceService = mock(AiWorkspaceGovernanceService.class);
         AiProperties properties = new AiProperties();
         properties.setAssistantMaxOutputTokens(1_024);
@@ -398,7 +385,6 @@ class AiChatMemoryServiceTest {
                 invocationService,
                 admissionService,
                 properties,
-                identifierResolver,
                 assembler,
                 toolExecutor,
                 summaryGuard,
@@ -461,9 +447,8 @@ class AiChatMemoryServiceTest {
         AiInvocationAdmissionService admissionService = mock(AiInvocationAdmissionService.class);
         AiInvocationAdmissionService.DirectAdmission admission =
                 mock(AiInvocationAdmissionService.DirectAdmission.class);
-        AiAssistantIdentifierResolver identifierResolver = mock(AiAssistantIdentifierResolver.class);
         AiChatTurnPersistenceService persistenceService = mock(AiChatTurnPersistenceService.class);
-        AiAssistantToolExecutor toolExecutor = mock(AiAssistantToolExecutor.class);
+        AiAssistantToolExecutor toolExecutor = emptyToolExecutor();
         AiProperties properties = new AiProperties();
         properties.setAssistantMaxOutputTokens(1_024);
         var objectMapper = JsonMapper.builder().build();
@@ -478,7 +463,6 @@ class AiChatMemoryServiceTest {
                 invocationService,
                 admissionService,
                 properties,
-                identifierResolver,
                 assembler,
                 toolExecutor,
                 summaryGuard,
@@ -578,6 +562,13 @@ class AiChatMemoryServiceTest {
             message.setStructuredJson("{\"kind\":\"user_message\",\"resources\":[]}");
         }
         return message;
+    }
+
+    private static AiAssistantToolExecutor emptyToolExecutor() {
+        AiAssistantToolExecutor executor = mock(AiAssistantToolExecutor.class);
+        when(executor.pageContext(any(), any()))
+                .thenReturn(new AiAssistantToolResult(Map.of(), List.of()));
+        return executor;
     }
 
     private static String promptText(MaskedPrompt prompt) {

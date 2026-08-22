@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.clearInvocations;
@@ -711,6 +712,40 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         assertEquals("r1", detail.messages().items().getFirst().getCitations().getFirst().handle());
         assertEquals(visible.getId(),
                 detail.messages().items().getFirst().getCitations().getFirst().id());
+    }
+
+    @Test
+    void restrictedResourceWithholdsPersistedAssistantContentAtReadTime() {
+        AiChatSessionDto created = service.create(createRequest("Restriction projection"));
+        Person person = newPerson(newCompany());
+        int turnId = turn(created.getId(), currentUser);
+        String persistedContent = person.getName() + " has a relationship update.";
+        assistantMessage(
+                created.getId(),
+                1,
+                persistedContent,
+                "{\"turnId\":" + turnId
+                        + ",\"citations\":[{\"handle\":\"r1\",\"kind\":\"person\",\"id\":"
+                        + person.getId()
+                        + "}],\"resources\":[{\"handle\":\"r1\",\"kind\":\"person\",\"id\":"
+                        + person.getId()
+                        + "}],\"suggestions\":[\"Review recent activity\"],"
+                        + "\"reasoning\":\"Compared authorized relationship signals.\"}");
+        personMapper.updateProcessingRestrictions(
+                workspace.getId(), person.getId(), true, false);
+
+        AiChatMessageDto answer = service.get(created.getId(), 1, 50)
+                .messages().items().getFirst();
+
+        assertTrue(answer.isContentWithheld());
+        assertEquals("", answer.getContent());
+        assertNull(answer.getReasoning());
+        assertEquals(List.of(), answer.getCitations());
+        assertEquals(List.of(), answer.getSuggestions());
+        assertEquals(
+                persistedContent,
+                chatMapper.listMessages(workspace.getId(), created.getId(), 50, 0)
+                        .getFirst().getContent());
     }
 
     @Test

@@ -43,7 +43,8 @@ import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
 import ooo.klae.connex.backend.beans.AiChatMessage;
-import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.AiAssistantIdentifierMention;
+import ooo.klae.connex.backend.mappers.AiAssistantIdentifierMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
@@ -52,6 +53,8 @@ import ooo.klae.connex.backend.services.AiProviderConfigService;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess;
+import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations.WorkspaceScope;
 import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.ScoringService;
 import ooo.klae.connex.backend.services.SearchService;
@@ -65,24 +68,25 @@ class AiAssistantPromptInjectionGoldenTest {
     @Test
     void locallyResolvedNameWithoutPageContextOrToolResultNeverLeavesTheMaskedPrompt() throws Exception {
         ObjectMapper objectMapper = JsonMapper.builder().build();
-        PersonMapper personMapper = mock(PersonMapper.class);
-        CompanyMapper companyMapper = mock(CompanyMapper.class);
-        DealMapper dealMapper = mock(DealMapper.class);
+        AiAssistantIdentifierMapper identifierMapper = mock(AiAssistantIdentifierMapper.class);
         WorkspaceService workspaceService = mock(WorkspaceService.class);
+        OrganizationWorkspaceScopeControlAccess workspaceScopeControlAccess =
+                mock(OrganizationWorkspaceScopeControlAccess.class);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
-        Person mentioned = new Person();
+        when(workspaceScopeControlAccess.getForWorkspace(7))
+                .thenReturn(new WorkspaceScope(2, List.of(7), "[7]"));
+        AiAssistantIdentifierMention mentioned = new AiAssistantIdentifierMention();
+        mentioned.setKind("person");
         mentioned.setId(31);
-        mentioned.setName("Kenji Sato");
-        when(personMapper.findMentionedRecords(7, "What is happening with Kenji Sato?", 21))
+        mentioned.setValue("Kenji Sato");
+        when(identifierMapper.findMentionedRecords(
+                7, "[7]", "What is happening with Kenji Sato?", 21))
                 .thenReturn(List.of(mentioned));
-        when(companyMapper.findMentionedRecords(7, "What is happening with Kenji Sato?", 21))
-                .thenReturn(List.of());
-        when(dealMapper.findMentionedRecords(7, "What is happening with Kenji Sato?", 21))
-                .thenReturn(List.of());
         MaskingContext context = new MaskingContext();
-        new AiAssistantIdentifierResolver(
-                personMapper, companyMapper, dealMapper, workspaceService)
-                .seed("What is happening with Kenji Sato?", context);
+        AiAssistantIdentifierResolver resolver = new AiAssistantIdentifierResolver(
+                identifierMapper, workspaceService, workspaceScopeControlAccess);
+        resolver.seed(
+                resolver.resolve("What is happening with Kenji Sato?"), context);
         AiChatMessage userRequest = new AiChatMessage();
         userRequest.setAuthorKind("user");
         userRequest.setContent("What is happening with Kenji Sato?");

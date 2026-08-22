@@ -740,6 +740,54 @@ class AiAssistantPromptAssemblerTest {
     }
 
     @Test
+    void durableUserIdentifiersAreRemaskedWithTheFreshEgressContext() throws Exception {
+        AiChatMessage priorRequest = new AiChatMessage();
+        priorRequest.setAuthorKind("user");
+        priorRequest.setContent("What changed for Kenji Sato?");
+        priorRequest.setStructuredJson("""
+                {"kind":"user_message",
+                "resources":[{"handle":"r1","kind":"person","id":31}],
+                "identifiers":[{"kind":"person","value":"Kenji Sato"}]}
+                """);
+        MaskingContext context = new MaskingContext();
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register("person", 31);
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(priorRequest),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(),
+                context,
+                resources);
+        String serialized = objectMapper.writeValueAsString(prompt.getMessages());
+
+        OutboundLeakScan.assertNoLeak(serialized, context, objectMapper);
+        assertFalse(serialized.contains("Kenji Sato"));
+        assertTrue(serialized.contains("{{P1}}"));
+    }
+
+    @Test
+    void inaccessibleUserIdentifierResourcesOmitTheHistoricalTurnFromReplay() {
+        AiChatMessage priorRequest = new AiChatMessage();
+        priorRequest.setAuthorKind("user");
+        priorRequest.setContent("What changed for Kenji Sato?");
+        priorRequest.setStructuredJson("""
+                {"kind":"user_message",
+                "resources":[{"handle":"r1","kind":"person","id":31}],
+                "identifiers":[{"kind":"person","value":"Kenji Sato"}]}
+                """);
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(priorRequest),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(),
+                new MaskingContext(),
+                new AiChatResourceRegistry());
+
+        assertTrue(prompt.getMessages().isEmpty());
+    }
+
+    @Test
     void durableSummarySpecialCareTextIsOmittedBeforeEgress() throws Exception {
         AiChatMessage summary = new AiChatMessage();
         summary.setAuthorKind("system");
@@ -782,7 +830,7 @@ class AiAssistantPromptAssemblerTest {
     }
 
     @Test
-    void compactionRejectsAssistantSourceWhoseResourcesAreNoLongerAuthorized() {
+    void compactionOmitsAssistantSourceWhoseResourcesAreNoLongerAuthorized() {
         AiChatMessage priorAnswer = new AiChatMessage();
         priorAnswer.setAuthorKind("assistant");
         priorAnswer.setContent("Restricted Person is the key contact from r1.");
@@ -792,32 +840,32 @@ class AiAssistantPromptAssemblerTest {
                 List.of(),
                 Map.of("r1", new AiChatResourceRegistry.ResourceRef("person", 71))));
 
-        assertThrows(
-                AiAssistantLoopException.class,
-                () -> assembler.assembleSummary(
-                        null,
-                        List.of(priorAnswer),
-                        new MaskingContext(),
-                        new AiChatResourceRegistry()));
+        MaskedPrompt prompt = assembler.assembleSummary(
+                null,
+                List.of(priorAnswer),
+                new MaskingContext(),
+                new AiChatResourceRegistry());
+
+        assertFalse(prompt.getMessages().getFirst().getContent().contains("Restricted Person"));
     }
 
     @Test
-    void compactionRejectsAssistantSourceWithoutDurableResourceProvenance() {
+    void compactionOmitsAssistantSourceWithoutDurableResourceProvenance() {
         AiChatMessage priorAnswer = new AiChatMessage();
         priorAnswer.setAuthorKind("assistant");
         priorAnswer.setContent("A legacy answer with unknown provenance.");
 
-        assertThrows(
-                AiAssistantLoopException.class,
-                () -> assembler.assembleSummary(
-                        null,
-                        List.of(priorAnswer),
-                        new MaskingContext(),
-                        new AiChatResourceRegistry()));
+        MaskedPrompt prompt = assembler.assembleSummary(
+                null,
+                List.of(priorAnswer),
+                new MaskingContext(),
+                new AiChatResourceRegistry());
+
+        assertFalse(prompt.getMessages().getFirst().getContent().contains("unknown provenance"));
     }
 
     @Test
-    void compactionRejectsUserSourceWhosePageContextIsNoLongerAuthorized() {
+    void compactionOmitsUserSourceWhosePageContextIsNoLongerAuthorized() {
         AiChatMessage priorRequest = new AiChatMessage();
         priorRequest.setAuthorKind("user");
         priorRequest.setContent("What changed on the current record?");
@@ -826,13 +874,34 @@ class AiAssistantPromptAssemblerTest {
                 {"handle":"r1","kind":"person","id":71}]}
                 """);
 
-        assertThrows(
-                AiAssistantLoopException.class,
-                () -> assembler.assembleSummary(
-                        null,
-                        List.of(priorRequest),
-                        new MaskingContext(),
-                        new AiChatResourceRegistry()));
+        MaskedPrompt prompt = assembler.assembleSummary(
+                null,
+                List.of(priorRequest),
+                new MaskingContext(),
+                new AiChatResourceRegistry());
+
+        assertFalse(prompt.getMessages().getFirst().getContent().contains("current record"));
+    }
+
+    @Test
+    void compactionOmitsLegacyResourceBackedUserSourceWithoutIdentifierProvenance() {
+        AiChatMessage priorRequest = new AiChatMessage();
+        priorRequest.setAuthorKind("user");
+        priorRequest.setContent("What changed for the legacy contact?");
+        priorRequest.setStructuredJson("""
+                {"kind":"user_message","resources":[
+                {"handle":"r1","kind":"person","id":71}]}
+                """);
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register("person", 71);
+
+        MaskedPrompt prompt = assembler.assembleSummary(
+                null,
+                List.of(priorRequest),
+                new MaskingContext(),
+                resources);
+
+        assertFalse(prompt.getMessages().getFirst().getContent().contains("legacy contact"));
     }
 
     @Test

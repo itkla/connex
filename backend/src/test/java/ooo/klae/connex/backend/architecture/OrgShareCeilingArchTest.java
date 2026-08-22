@@ -41,6 +41,7 @@ class OrgShareCeilingArchTest {
      * Keyed by mapper resource to the share table it references.
      */
     private static final java.util.Map<String, Pattern> SHARE_READERS = java.util.Map.of(
+        "mappers/AiAssistantIdentifierMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
         "mappers/CompanyMapper.xml", Pattern.compile("FROM company_share"),
         "mappers/DealMapper.xml", Pattern.compile("FROM (?:company|person|pipeline)_share"),
         "mappers/IdentityMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
@@ -55,7 +56,8 @@ class OrgShareCeilingArchTest {
         for (var entry : SHARE_READERS.entrySet()) {
             String xml = loadMapperText(entry.getKey());
             int shareReads = count(entry.getValue(), xml);
-            Pattern ceiling = entry.getKey().equals("mappers/PersonEdgeMapper.xml")
+            Pattern ceiling = entry.getKey().equals("mappers/AiAssistantIdentifierMapper.xml")
+                    || entry.getKey().equals("mappers/PersonEdgeMapper.xml")
                     || entry.getKey().equals("mappers/IdentityMapper.xml")
                 ? CONTROL_DERIVED_READ_CEILING
                 : READ_CEILING;

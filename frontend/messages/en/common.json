@@ -342,6 +342,7 @@
     "emptyTitle": "What can I help with?",
     "emptyBody": "Ask about this record or your workspace.",
     "formerMember": "Former member",
+    "contentWithheld": "This answer is hidden because one or more source records are no longer available for AI use.",
     "historySummarized": "Earlier messages were summarized",
     "invitation": "Invitation",
     "invitations": "Invitations",

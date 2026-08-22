@@ -1322,8 +1322,8 @@
                         "columns": 1,
                         "items": [
                             {
-                                "title": "Names and contact details are replaced first",
-                                "description": "People, companies, email addresses and phone numbers are swapped for placeholders before anything is sent, and swapped back in the answer. In free text, Connex additionally removes email addresses, web addresses and long runs of digits such as phone numbers. It does not detect postal addresses in free text, so a street address typed into a note is sent as written."
+                                "title": "Known identifiers are replaced first",
+                                "description": "Structured identifiers are tokenized. Free text is screened for special-care data, pattern-redacted for email addresses, URLs, phone numbers, and long identifiers, and tokenized for identifiers matched to CRM records. Names, postal addresses, and other identifiers in free text that do not match a CRM record may be sent as written."
                             },
                             {
                                 "title": "Sensitive free text is withheld, not masked",

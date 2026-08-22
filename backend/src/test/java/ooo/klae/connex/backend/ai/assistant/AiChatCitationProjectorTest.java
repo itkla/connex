@@ -4,13 +4,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatTurn;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -20,13 +23,68 @@ import tools.jackson.databind.json.JsonMapper;
 class AiChatCitationProjectorTest {
 
     private final AiChatMapper chatMapper = mock(AiChatMapper.class);
+    private final PersonMapper personMapper = mock(PersonMapper.class);
+    private final CompanyMapper companyMapper = mock(CompanyMapper.class);
+    private final DealMapper dealMapper = mock(DealMapper.class);
 
     private final AiChatCitationProjector projector = new AiChatCitationProjector(
             JsonMapper.builder().build(),
-            mock(PersonMapper.class),
-            mock(CompanyMapper.class),
-            mock(DealMapper.class),
+            personMapper,
+            companyMapper,
+            dealMapper,
             chatMapper);
+
+    @Test
+    void projectWithholdsAnAnswerWhenAnyDurableResourceIsRestricted() {
+        AiChatMessage message = new AiChatMessage();
+        message.setId(23);
+        message.setAuthorKind("assistant");
+        message.setStructuredJson("""
+                {"citations":[
+                {"handle":"r1","kind":"person","id":11},
+                {"handle":"r2","kind":"person","id":12}],
+                "resources":[
+                {"handle":"r1","kind":"person","id":11},
+                {"handle":"r2","kind":"person","id":12}]}
+                """);
+        Person visible = person(11);
+        Person restricted = person(12);
+        restricted.setSuspendedAt(LocalDateTime.now());
+        when(personMapper.getByIds(3, List.of(11, 12)))
+                .thenReturn(List.of(visible, restricted));
+
+        AiChatCitationProjector.Projection projection = projector.project(3, List.of(message));
+
+        assertEquals(Set.of(23), projection.withheldMessageIds());
+        assertEquals(List.of(11), projection.citationsByMessage().get(23).stream()
+                .map(citation -> citation.id())
+                .toList());
+    }
+
+    @Test
+    void projectKeepsAResourceFreeAnswerVisible() {
+        AiChatMessage message = new AiChatMessage();
+        message.setId(23);
+        message.setAuthorKind("assistant");
+        message.setStructuredJson("{\"citations\":[],\"resources\":[]}");
+
+        AiChatCitationProjector.Projection projection = projector.project(3, List.of(message));
+
+        assertEquals(Set.of(), projection.withheldMessageIds());
+        assertEquals(List.of(), projection.citationsByMessage().get(23));
+    }
+
+    @Test
+    void projectFailsClosedForMalformedDurableResourceMetadata() {
+        AiChatMessage message = new AiChatMessage();
+        message.setId(23);
+        message.setAuthorKind("assistant");
+        message.setStructuredJson("{\"resources\":[{\"kind\":\"person\",\"id\":0}]}");
+
+        assertEquals(
+                Set.of(23),
+                projector.project(3, List.of(message)).withheldMessageIds());
+    }
 
     @Test
     void suggestionsRemainBoundedDistinctAndFreeOfHandlesAndControlInstructions() {
@@ -133,5 +191,11 @@ class AiChatCitationProjectorTest {
         turn.setId(id);
         turn.setRequestedByUserId(requesterId);
         return turn;
+    }
+
+    private Person person(int id) {
+        Person person = new Person();
+        person.setId(id);
+        return person;
     }
 }
