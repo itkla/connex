@@ -47,7 +47,6 @@ public class AiChatMemoryService {
     private final AiInvocationService invocationService;
     private final AiInvocationAdmissionService invocationAdmissionService;
     private final AiProperties aiProperties;
-    private final AiAssistantIdentifierResolver identifierResolver;
     private final AiAssistantPromptAssembler promptAssembler;
     private final AiAssistantToolExecutor toolExecutor;
     private final AiAssistantSummaryGuard summaryGuard;
@@ -101,7 +100,6 @@ public class AiChatMemoryService {
             initiatingMessage = providerMessage(
                     initiatingMessage, OVERSIZED_INITIATING_MESSAGE_OMISSION);
         }
-        identifierResolver.seed(initiatingMessage.getContent(), context);
         AiChatMessage summary = persistenceService.loadHistorySummary(turn);
         if (summary != null
                 && saturatedAdd(
@@ -135,15 +133,15 @@ public class AiChatMemoryService {
                 if (source.isEmpty()) {
                     source = List.of(oversizedCompactionMessage(candidates.getFirst()));
                 }
-                identifierResolver.seed(identifierSource(summary, source), context);
                 List<AiChatMessage> provenance = new ArrayList<>(source.size() + 1);
                 if (summary != null) {
                     provenance.add(summary);
                 }
                 provenance.addAll(source);
                 AiChatResourceRegistry summaryResources = new AiChatResourceRegistry();
-                toolExecutor.pageContext(
+                AiAssistantToolResult summaryContext = toolExecutor.pageContext(
                         promptAssembler.replayPageContext(provenance), summaryResources);
+                summaryContext.identifiers().forEach(identifier -> identifier.seed(context));
                 AiInvocation invocation = new AiInvocation(
                         AiFeature.ASSISTANT_CHAT,
                         context,
@@ -226,7 +224,6 @@ public class AiChatMemoryService {
         }
         List<AiChatMessage> bounded = boundedHistory(
                 summary, dialogue, initiatingMessage, budget.historyBytes());
-        identifierResolver.seed(identifierSource(null, bounded), context);
         return new AiChatMemory(
                 bounded,
                 budget,
@@ -389,18 +386,6 @@ public class AiChatMemoryService {
                 .filter(AiChatMemoryService::isDialogue)
                 .filter(message -> message.getSeq() > sequence)
                 .toList();
-    }
-
-    private static String identifierSource(
-            AiChatMessage summary, List<AiChatMessage> messages) {
-        StringBuilder source = new StringBuilder();
-        if (summary != null) {
-            source.append(summary.getContent()).append('\n');
-        }
-        for (AiChatMessage message : messages) {
-            source.append(message.getContent()).append('\n');
-        }
-        return source.toString();
     }
 
     private static AiChatMessage oversizedCompactionMessage(AiChatMessage source) {

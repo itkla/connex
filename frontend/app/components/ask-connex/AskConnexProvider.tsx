@@ -1388,6 +1388,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         emptyBody: t('emptyBody'),
         emptyTitle: t('emptyTitle'),
         formerMember: t('formerMember'),
+        contentWithheld: t('contentWithheld'),
         historySummarized: t('historySummarized'),
         invitation: t('invitation'),
         invitations: t('invitations'),

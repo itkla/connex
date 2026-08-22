@@ -829,6 +829,7 @@ public class AiInvocationService {
             } else {
                 providerResult = adapter.complete(providerRequest);
             }
+            attemptTracker.checkpoint();
             AiCompletionResult result = withConservativeUsage(
                     providerResult, effectiveInvocation, serializedPrompt);
             attemptTracker.settleBudget(result.inputTokens(), result.outputTokens());

@@ -342,6 +342,7 @@
     "emptyTitle": "何をお手伝いしましょうか？",
     "emptyBody": "このレコードやワークスペースについて質問できます。",
     "formerMember": "以前のメンバー",
+    "contentWithheld": "参照元のレコードの一部がAIで利用できなくなったため、この回答は非表示になっています。",
     "historySummarized": "以前のメッセージは要約されています",
     "invitation": "招待",
     "invitations": "招待",

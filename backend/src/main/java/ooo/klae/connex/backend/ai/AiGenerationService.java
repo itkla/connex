@@ -398,15 +398,25 @@ public class AiGenerationService {
         TerminalClaim claim = claimTerminal(
                 state, AiGenerationTaskResult.Outcome.RESOLVED, null);
         ScheduledFuture<?> timeout;
+        String retryTimeoutReason = null;
         synchronized (stateLock) {
             if (generations.get(state.handle) != state || !state.isActive()) {
                 return;
             }
             state.terminalClaimInProgress = false;
+            String pendingTimeoutReason = state.pendingTimeoutReason;
+            state.pendingTimeoutReason = null;
             if (claim == TerminalClaim.FAILED) {
-                return;
-            }
-            if (claim == TerminalClaim.SUPERSEDED) {
+                if (pendingTimeoutReason == null) {
+                    return;
+                }
+                state.terminalClaimInProgress = true;
+                state.status = Status.TIMED_OUT;
+                state.reason = pendingTimeoutReason;
+                releaseResultCapacityLocked(state);
+                timeout = finishLocked(state);
+                retryTimeoutReason = pendingTimeoutReason;
+            } else if (claim == TerminalClaim.SUPERSEDED) {
                 timeout = retireSupersededLocked(state);
             } else {
                 retainedResultBytes -= state.retainedResultBytes - result.bytes();
@@ -418,6 +428,9 @@ public class AiGenerationService {
             }
         }
         cancelTimer(timeout);
+        if (retryTimeoutReason != null) {
+            submitTimeoutNotification(state, retryTimeoutReason);
+        }
     }
 
     private void fail(GenerationState state, String reason) {
@@ -430,15 +443,25 @@ public class AiGenerationService {
         TerminalClaim claim = claimTerminal(
                 state, AiGenerationTaskResult.Outcome.FAILED, stableReason);
         ScheduledFuture<?> timeout;
+        String retryTimeoutReason = null;
         synchronized (stateLock) {
             if (generations.get(state.handle) != state || !state.isActive()) {
                 return;
             }
             state.terminalClaimInProgress = false;
+            String pendingTimeoutReason = state.pendingTimeoutReason;
+            state.pendingTimeoutReason = null;
             if (claim == TerminalClaim.FAILED) {
-                return;
-            }
-            if (claim == TerminalClaim.SUPERSEDED) {
+                if (pendingTimeoutReason == null) {
+                    return;
+                }
+                state.terminalClaimInProgress = true;
+                state.status = Status.TIMED_OUT;
+                state.reason = pendingTimeoutReason;
+                releaseResultCapacityLocked(state);
+                timeout = finishLocked(state);
+                retryTimeoutReason = pendingTimeoutReason;
+            } else if (claim == TerminalClaim.SUPERSEDED) {
                 timeout = retireSupersededLocked(state);
             } else {
                 state.status = Status.FAILED;
@@ -448,6 +471,9 @@ public class AiGenerationService {
             }
         }
         cancelTimer(timeout);
+        if (retryTimeoutReason != null) {
+            submitTimeoutNotification(state, retryTimeoutReason);
+        }
     }
 
     private void timeOut(GenerationState state) {
@@ -457,33 +483,27 @@ public class AiGenerationService {
     private void timeOut(GenerationState state, String reason) {
         Future<?> future;
         ScheduledFuture<?> timeout;
-        boolean notifyTerminal;
         String stableReason = stableReason(reason, "generation_timeout");
         synchronized (stateLock) {
             if (generations.get(state.handle) != state || !state.isActive()) {
                 return;
             }
-            notifyTerminal = !state.terminalClaimInProgress;
-            if (notifyTerminal) {
-                state.terminalClaimInProgress = true;
+            if (state.terminalClaimInProgress) {
+                state.pendingTimeoutReason = stableReason;
+                return;
             }
-            if (!notifyTerminal) {
-                timeout = retireSupersededLocked(state);
-            } else {
-                state.status = Status.TIMED_OUT;
-                state.reason = stableReason;
-                releaseResultCapacityLocked(state);
-                timeout = finishLocked(state);
-            }
+            state.terminalClaimInProgress = true;
+            state.status = Status.TIMED_OUT;
+            state.reason = stableReason;
+            releaseResultCapacityLocked(state);
+            timeout = finishLocked(state);
             future = state.future;
         }
         cancelTimer(timeout);
         if (future != null) {
             future.cancel(true);
         }
-        if (notifyTerminal) {
-            submitTimeoutNotification(state, stableReason);
-        }
+        submitTimeoutNotification(state, stableReason);
     }
 
     private boolean beginTerminalClaimLocked(GenerationState state) {
@@ -801,6 +821,7 @@ public class AiGenerationService {
         private String reason;
         private boolean sensitive;
         private boolean terminalClaimInProgress;
+        private String pendingTimeoutReason;
         private int retainedResultBytes;
         private Future<?> future;
         private ScheduledFuture<?> timeout;

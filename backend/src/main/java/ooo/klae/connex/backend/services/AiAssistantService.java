@@ -190,7 +190,7 @@ public class AiAssistantService {
             AiChatSession session) {
         List<AiChatMessage> storedMessages = chatMapper.listMessages(
             workspaceId, id, messageSize, offset);
-        var citations = citationProjector.project(workspaceId, storedMessages);
+        var projection = citationProjector.project(workspaceId, storedMessages);
         Map<Integer, String> authorNames = authorNames(storedMessages);
         var suggestions = citationProjector.suggestions(
                 workspaceId, id, userId, storedMessages);
@@ -199,12 +199,13 @@ public class AiAssistantService {
         List<AiChatMessageDto> messages = storedMessages.stream()
             .map(message -> AiChatMessageDto.from(
                     message,
-                    citations.getOrDefault(message.getId(), List.of()),
+                    projection.citationsByMessage().getOrDefault(message.getId(), List.of()),
                     suggestions.getOrDefault(message.getId(), List.of()),
                     message.getAuthorUserId() == null
                             ? null
                             : authorNames.get(message.getAuthorUserId()),
-                    reasoning.get(message.getId())))
+                    reasoning.get(message.getId()),
+                    projection.withheldMessageIds().contains(message.getId())))
             .toList();
         return new AiChatSessionDetailDto(
             AiChatSessionDto.from(session),

@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.AiAssistantIdentifierMapper">
+
+  <resultMap id="IdentifierMention" type="AiAssistantIdentifierMention">
+    <id property="kind" column="kind"/>
+    <id property="id" column="id"/>
+    <result property="value" column="value"/>
+  </resultMap>
+
+  <select id="findMentionedRecords" resultMap="IdentifierMention">
+    SELECT matched.kind, matched.id, matched.value
+    FROM (
+      SELECT 'person' AS kind, p.id, p.name AS value
+      FROM person p
+      WHERE (p.workspace_id = #{workspaceId}
+        OR EXISTS (SELECT 1 FROM person_share ps
+          JOIN workspace vws ON vws.id = ps.workspace_id
+          JOIN workspace ows ON ows.id = p.workspace_id AND ows.org_id = vws.org_id
+          WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+        AND p.archived_at IS NULL
+        AND p.suspended_at IS NULL
+        AND p.provision_ceased_at IS NULL
+        AND p.name IS NOT NULL
+        AND p.name != ''
+        AND (TRIM(p.name) = TRIM(#{text})
+          OR (TRIM(p.name) REGEXP '^[A-Za-z0-9_]+([[:space:]][A-Za-z0-9_]+)*$'
+            AND REGEXP_LIKE(
+              #{text},
+              CONCAT('(^|[^A-Za-z0-9_])', TRIM(p.name), '([^A-Za-z0-9_]|$)'),
+              'i'))
+          OR LENGTH(TRIM(p.name)) &gt; CHAR_LENGTH(TRIM(p.name)))
+        AND LOCATE(p.name, #{text}) &gt; 0
+      UNION ALL
+      SELECT 'company' AS kind, c.id, c.name AS value
+      FROM company c
+      WHERE (c.workspace_id = #{workspaceId}
+        OR EXISTS (SELECT 1 FROM company_share cs
+          JOIN workspace vws ON vws.id = cs.workspace_id
+          JOIN workspace ows ON ows.id = c.workspace_id AND ows.org_id = vws.org_id
+          WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
+        AND c.archived_at IS NULL
+        AND c.name IS NOT NULL
+        AND c.name != ''
+        AND (TRIM(c.name) = TRIM(#{text})
+          OR (TRIM(c.name) REGEXP '^[A-Za-z0-9_]+([[:space:]][A-Za-z0-9_]+)*$'
+            AND REGEXP_LIKE(
+              #{text},
+              CONCAT('(^|[^A-Za-z0-9_])', TRIM(c.name), '([^A-Za-z0-9_]|$)'),
+              'i'))
+          OR LENGTH(TRIM(c.name)) &gt; CHAR_LENGTH(TRIM(c.name)))
+        AND LOCATE(c.name, #{text}) &gt; 0
+      UNION ALL
+      SELECT 'deal' AS kind, d.id, d.name AS value
+      FROM deal d
+      WHERE d.workspace_id = #{workspaceId}
+        AND d.name IS NOT NULL
+        AND d.name != ''
+        AND (TRIM(d.name) = TRIM(#{text})
+          OR (TRIM(d.name) REGEXP '^[A-Za-z0-9_]+([[:space:]][A-Za-z0-9_]+)*$'
+            AND REGEXP_LIKE(
+              #{text},
+              CONCAT('(^|[^A-Za-z0-9_])', TRIM(d.name), '([^A-Za-z0-9_]|$)'),
+              'i'))
+          OR LENGTH(TRIM(d.name)) &gt; CHAR_LENGTH(TRIM(d.name)))
+        AND LOCATE(d.name, #{text}) &gt; 0
+    ) matched
+    ORDER BY CHAR_LENGTH(matched.value) DESC, matched.kind, matched.id
+    LIMIT #{limit}
+  </select>
+
+</mapper>

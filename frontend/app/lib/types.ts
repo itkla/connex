@@ -2875,6 +2875,7 @@ export type AiChatMessage = {
     authorDisplayName: string | null;
     content: string;
     reasoning?: string | null;
+    contentWithheld?: boolean;
     historySummarized?: boolean;
     createdAt: string;
     citations?: AiChatCitation[] | null;

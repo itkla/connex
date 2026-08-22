@@ -740,6 +740,54 @@ class AiAssistantPromptAssemblerTest {
     }
 
     @Test
+    void durableUserIdentifiersAreRemaskedWithTheFreshEgressContext() throws Exception {
+        AiChatMessage priorRequest = new AiChatMessage();
+        priorRequest.setAuthorKind("user");
+        priorRequest.setContent("What changed for Kenji Sato?");
+        priorRequest.setStructuredJson("""
+                {"kind":"user_message",
+                "resources":[{"handle":"r1","kind":"person","id":31}],
+                "identifiers":[{"kind":"person","value":"Kenji Sato"}]}
+                """);
+        MaskingContext context = new MaskingContext();
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register("person", 31);
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(priorRequest),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(),
+                context,
+                resources);
+        String serialized = objectMapper.writeValueAsString(prompt.getMessages());
+
+        OutboundLeakScan.assertNoLeak(serialized, context, objectMapper);
+        assertFalse(serialized.contains("Kenji Sato"));
+        assertTrue(serialized.contains("{{P1}}"));
+    }
+
+    @Test
+    void inaccessibleUserIdentifierResourcesOmitTheHistoricalTurnFromReplay() {
+        AiChatMessage priorRequest = new AiChatMessage();
+        priorRequest.setAuthorKind("user");
+        priorRequest.setContent("What changed for Kenji Sato?");
+        priorRequest.setStructuredJson("""
+                {"kind":"user_message",
+                "resources":[{"handle":"r1","kind":"person","id":31}],
+                "identifiers":[{"kind":"person","value":"Kenji Sato"}]}
+                """);
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(priorRequest),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(),
+                new MaskingContext(),
+                new AiChatResourceRegistry());
+
+        assertTrue(prompt.getMessages().isEmpty());
+    }
+
+    @Test
     void durableSummarySpecialCareTextIsOmittedBeforeEgress() throws Exception {
         AiChatMessage summary = new AiChatMessage();
         summary.setAuthorKind("system");

@@ -291,6 +291,47 @@ class AiInvocationServiceTest {
     }
 
     @Test
+    void completeRejectsAProviderConfigurationChangedDuringTheRequest() {
+        ResolvedAiProvider changed = unmaskedResolved();
+        when(aiProviderConfigService.resolveForOrg(ORG_ID, ACTOR_ID))
+                .thenReturn(resolved, resolved, changed);
+        providerReturns(new AiCompletionResult("unused", 12, 4, "end_turn"));
+
+        AiProviderException exception = assertThrows(
+                AiProviderException.class,
+                () -> service.complete(invocation("Summarize relationship state")));
+
+        assertEquals("AI provider configuration changed before egress", exception.getMessage());
+        verify(providerTransport).run();
+        verify(budgetLease).close();
+        verify(budgetLease, never()).settle(anyInt(), anyInt());
+    }
+
+    @Test
+    void completeRejectsPermissionLossDuringTheRequest() {
+        doNothing().doThrow(new ForbiddenException("AI access changed"))
+                .when(providerAttemptGuard).run();
+        providerReturns(new AiCompletionResult(
+                "{\"rationale\":\"unused\",\"evidence\":[]}",
+                12,
+                4,
+                "end_turn"));
+
+        assertThrows(
+                ForbiddenException.class,
+                () -> service.complete(
+                        invocation("Summarize relationship state"),
+                        directAdmission,
+                        restrictionEpoch.current(WORKSPACE_ID),
+                        providerAttemptGuard));
+
+        verify(providerAttemptGuard, times(2)).run();
+        verify(providerTransport).run();
+        verify(budgetLease).close();
+        verify(budgetLease, never()).settle(anyInt(), anyInt());
+    }
+
+    @Test
     void completeNativeToolsValidatesMaskedArgumentsAndRecordsProtocol() throws Exception {
         when(aiProvider.toolCallingCapability(resolved.target()))
                 .thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
@@ -1016,7 +1057,7 @@ class AiInvocationServiceTest {
 
         service.complete(invocation);
 
-        verify(aiFeatureGate, times(2)).requireAiUsable(AiFeature.BUSINESS_CARD_EXTRACTION);
+        verify(aiFeatureGate, times(3)).requireAiUsable(AiFeature.BUSINESS_CARD_EXTRACTION);
         ArgumentCaptor<AiCompletionRequest> requestCaptor = ArgumentCaptor.forClass(AiCompletionRequest.class);
         verify(aiProvider).complete(requestCaptor.capture());
         assertEquals(1, requestCaptor.getValue().images().size());

@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -37,5 +38,29 @@ class AiChatTranscriptProjectionTest {
         session.setHistorySummarized(true);
 
         assertTrue(AiChatSessionDto.from(session).isHistorySummarized());
+    }
+
+    @Test
+    void withheldAssistantProjectionDropsEveryGeneratedContentSurface() {
+        AiChatMessage message = new AiChatMessage();
+        message.setId(17);
+        message.setSessionId(9);
+        message.setSeq(41);
+        message.setAuthorKind("assistant");
+        message.setContent("Restricted generated answer");
+
+        AiChatMessageDto projected = AiChatMessageDto.from(
+                message,
+                List.of(),
+                List.of("Review recent activity"),
+                null,
+                "Compared restricted signals",
+                true);
+
+        assertTrue(projected.isContentWithheld());
+        assertEquals("", projected.getContent());
+        assertNull(projected.getReasoning());
+        assertEquals(List.of(), projected.getCitations());
+        assertEquals(List.of(), projected.getSuggestions());
     }
 }

@@ -127,9 +127,12 @@ public class AiChatTurnPersistenceService {
         if (!request.pageContext().isEmpty()) {
             toolExecutor.pageContext(request.pageContext(), messageResources);
         }
-        identifierResolver.mentionedResources(request.content()).forEach(resource ->
+        AiAssistantIdentifierResolver.Resolution identifierResolution =
+                identifierResolver.resolve(request.content());
+        identifierResolution.resources().forEach(resource ->
                 messageResources.register(resource.kind(), resource.id()));
-        message.setStructuredJson(userMessageMetadata(messageResources.snapshot()));
+        message.setStructuredJson(userMessageMetadata(
+                messageResources.snapshot(), identifierResolution.identifiers()));
         chatMapper.insertMessage(message);
 
         AiChatTurn turn = new AiChatTurn();
@@ -421,7 +424,8 @@ public class AiChatTurnPersistenceService {
     }
 
     private String userMessageMetadata(
-            java.util.Map<String, AiChatResourceRegistry.ResourceRef> resources) {
+            java.util.Map<String, AiChatResourceRegistry.ResourceRef> resources,
+            List<AiAssistantIdentifierResolver.Identifier> identifiers) {
         try {
             List<java.util.Map<String, Object>> storedResources = resources.entrySet().stream()
                     .map(entry -> java.util.Map.<String, Object>of(
@@ -429,9 +433,15 @@ public class AiChatTurnPersistenceService {
                             "kind", entry.getValue().kind(),
                             "id", entry.getValue().id()))
                     .toList();
+            List<java.util.Map<String, String>> storedIdentifiers = identifiers.stream()
+                    .map(identifier -> java.util.Map.of(
+                            "kind", identifier.kind().name().toLowerCase(java.util.Locale.ROOT),
+                            "value", identifier.value()))
+                    .toList();
             return objectMapper.writeValueAsString(java.util.Map.of(
                     "kind", "user_message",
-                    "resources", storedResources));
+                    "resources", storedResources,
+                    "identifiers", storedIdentifiers));
         } catch (JacksonException exception) {
             throw new IllegalStateException(
                     "Assistant user message metadata could not be serialized", exception);

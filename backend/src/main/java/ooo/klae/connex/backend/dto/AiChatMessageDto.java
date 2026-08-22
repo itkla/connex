@@ -18,6 +18,7 @@ public class AiChatMessageDto {
     private String authorDisplayName;
     private String content;
     private String reasoning;
+    private boolean contentWithheld;
     private boolean historySummarized;
     private String createdAt;
     private List<AiChatCitationDto> citations = List.of();
@@ -67,6 +68,17 @@ public class AiChatMessageDto {
             List<String> suggestions,
             String authorDisplayName,
             String reasoning) {
+        return from(message, citations, suggestions, authorDisplayName, reasoning, false);
+    }
+
+    /** Maps a persisted message while withholding content whose live resources are inaccessible. */
+    public static AiChatMessageDto from(
+            AiChatMessage message,
+            List<AiChatCitationDto> citations,
+            List<String> suggestions,
+            String authorDisplayName,
+            String reasoning,
+            boolean contentWithheld) {
         AiChatMessageDto dto = new AiChatMessageDto();
         dto.setId(message.getId());
         dto.setSessionId(message.getSessionId());
@@ -75,12 +87,13 @@ public class AiChatMessageDto {
         dto.setAuthorUserId(message.getAuthorUserId());
         dto.setAuthorDisplayName(authorDisplayName);
         boolean historySummarized = "system".equals(message.getAuthorKind());
-        dto.setContent(historySummarized ? "" : message.getContent());
-        dto.setReasoning(reasoning);
+        dto.setContent(historySummarized || contentWithheld ? "" : message.getContent());
+        dto.setReasoning(contentWithheld ? null : reasoning);
+        dto.setContentWithheld(contentWithheld);
         dto.setHistorySummarized(historySummarized);
         dto.setCreatedAt(message.getCreatedAt());
-        dto.setCitations(List.copyOf(citations));
-        dto.setSuggestions(List.copyOf(suggestions));
+        dto.setCitations(contentWithheld ? List.of() : List.copyOf(citations));
+        dto.setSuggestions(contentWithheld ? List.of() : List.copyOf(suggestions));
         return dto;
     }
 }

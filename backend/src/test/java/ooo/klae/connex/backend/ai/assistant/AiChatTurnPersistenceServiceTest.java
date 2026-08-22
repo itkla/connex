@@ -106,7 +106,8 @@ class AiChatTurnPersistenceServiceTest {
         User actor = new User();
         actor.setId(TURN.userId());
         when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(actor));
-        when(identifierResolver.mentionedResources(any())).thenReturn(List.of());
+        when(identifierResolver.resolve(any()))
+                .thenReturn(AiAssistantIdentifierResolver.Resolution.empty());
         when(restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
                 TURN.workspaceId(), TURN.restrictionEpoch())).thenReturn(true);
     }
@@ -294,8 +295,12 @@ class AiChatTurnPersistenceServiceTest {
         when(chatMapper.listActiveTurnsBySessionForUpdate(
                 TURN.workspaceId(), TURN.sessionId())).thenReturn(List.of());
         when(chatMapper.nextMessageSequence(TURN.workspaceId(), TURN.sessionId())).thenReturn(1);
-        when(identifierResolver.mentionedResources("Question"))
-                .thenReturn(List.of(new AiChatPageContextDto("person", 31)));
+        when(identifierResolver.resolve("Question"))
+                .thenReturn(new AiAssistantIdentifierResolver.Resolution(
+                        List.of(new AiChatPageContextDto("person", 31)),
+                        List.of(new AiAssistantIdentifierResolver.Identifier(
+                                ooo.klae.connex.backend.ai.masking.EntityKind.PERSON,
+                                "Ada Lovelace"))));
         org.mockito.Mockito.doAnswer(invocation -> {
             AiChatResourceRegistry registry = invocation.getArgument(1);
             registry.register("deal", 47);
@@ -310,10 +315,12 @@ class AiChatTurnPersistenceServiceTest {
                 TURN.restrictionEpoch());
 
         assertFalse(queued.includePrivateNotes());
+        verify(identifierResolver).resolve("Question");
         verify(chatMapper).insertMessage(argThat(message ->
                 message.getStructuredJson() != null
                         && message.getStructuredJson().contains("\"kind\":\"person\"")
                         && message.getStructuredJson().contains("\"id\":31")
+                        && message.getStructuredJson().contains("\"value\":\"Ada Lovelace\"")
                         && message.getStructuredJson().contains("\"kind\":\"deal\"")
                         && message.getStructuredJson().contains("\"id\":47")));
     }
