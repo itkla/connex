@@ -152,9 +152,9 @@ export default function GlobalSearch() {
 
     useEffect(() => {
         if (!shouldSearch) return;
-        if (cached !== null && isFresh(cached, Date.now())) return;
         const controller = new AbortController();
         const timer = setTimeout(() => {
+            if (cached !== null && isFresh(cached, Date.now())) return;
             setFailedQuery((current) => (current === trimmed ? null : current));
             searchApi(trimmed, { signal: controller.signal })
                 .then((data) => setScopedCache((current) => ({
