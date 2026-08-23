@@ -760,14 +760,26 @@ export function askConnexScopePreview(
  * asked for.
  */
 export type AskConnexDeclaredScope = {
-    matchedRecordCount: number | null;
-    /** Whether the cohort exceeded the cap and the request will read only part of it. */
-    truncated: boolean;
-    recordCap: number;
-    /** Stable identity of exactly these filters. */
+    /** Stable identity of exactly these filters, asked in exactly this question, from this page. */
     identity: string;
     /** Whether the server asked for this breadth to be reviewed before it runs. */
     confirmationRecommended: boolean;
+    /**
+     * What the server established these filters cover, or null when it has established nothing.
+     *
+     * Null is the honest answer whenever the measurement does not describe the request that would
+     * actually run: a preview still in flight, one the allowance turned away, one that failed, and
+     * one taken for a different question all leave the breadth unknown. Unknown is never treated as
+     * narrow — a request nobody could measure is announced rather than run.
+     */
+    matched: {
+        count: number | null;
+        /** Whether the cohort exceeded the cap and the request will read only part of it. */
+        truncated: boolean;
+        recordCap: number;
+    } | null;
+    /** Whether the missing measurement is still being read, rather than having failed outright. */
+    measuring: boolean;
 };
 
 /**
@@ -797,15 +809,21 @@ export const EMPTY_ASK_CONNEX_REQUEST_SCOPE: AskConnexRequestScope = {
 /**
  * Combines what a request carries with what it declares into one reviewable breadth.
  *
- * Confirmation is armed by either half: enough carried records to be broad on their own, or filters
- * the server itself asked to have reviewed. Filters that narrow a request rather than widening it
- * are shown as chips but do not by themselves hold the request back.
+ * Confirmation is armed by any of three things: enough carried records to be broad on their own,
+ * filters the server itself asked to have reviewed, or filters whose breadth nothing established
+ * before the request went out. That last one is the whole point of announcing breadth at all — a
+ * scope that will be attached to the turn but was never measured is exactly the case where nobody
+ * can say the request is narrow, so it is treated as broad rather than waved through.
+ *
+ * Filters that narrow a request rather than widening it are shown as chips but do not by themselves
+ * hold the request back.
  */
 export function askConnexRequestScope(
     records: AskConnexScopePreview | null,
     declared: AskConnexDeclaredScope | null,
 ): AskConnexRequestScope {
-    const armed = records !== null || declared?.confirmationRecommended === true;
+    const armed = records !== null
+        || (declared !== null && (declared.confirmationRecommended || declared.matched === null));
     return {
         records,
         declared,
@@ -825,14 +843,6 @@ export function askConnexRequestScope(
  */
 export function askConnexScopePreviewKey(preview: AskConnexScopePreview | null): string | null {
     return preview === null ? null : preview.identity;
-}
-
-/** Whether a request still needs the user's agreement before it runs. */
-export function askConnexScopeNeedsConfirmation(
-    scopeKey: string | null,
-    confirmedKey: string | null,
-): boolean {
-    return scopeKey !== null && scopeKey !== confirmedKey;
 }
 
 /** Parses a persisted positive integer id without accepting partial or unsafe numbers. */

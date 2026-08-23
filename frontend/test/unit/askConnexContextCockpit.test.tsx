@@ -10,7 +10,6 @@ import {
 } from "@/app/components/ask-connex/AskConnexContextCockpit";
 import {
     askConnexRequestScope,
-    askConnexScopeNeedsConfirmation,
     askConnexScopePreview,
     askConnexScopePreviewKey,
     isAskConnexPinned,
@@ -46,7 +45,9 @@ const labels: AskConnexContextLabels = {
     scopeConfirm: "Ask with this context",
     scopeEdit: "Change the context",
     scopeSummary: (preview) => `I'll read ${preview.total} records and ${preview.files} files.`,
-    scopeDeclaredSummary: (declared) => `${declared.matchedRecordCount ?? 0} records match these filters.`,
+    scopeDeclaredSummary: (declared) => declared.matched === null
+        ? "The breadth of these filters was never checked."
+        : `${declared.matched.count ?? 0} records match these filters.`,
     scopeTitle: "What this will cover",
     scopeFilters: "Add filters",
     scopeFiltersSet: (count) => `Filters · ${count}`,
@@ -457,13 +458,11 @@ describe("interpreted scope", () => {
             [file("upload-b")],
         ));
 
-        expect(askConnexScopeNeedsConfirmation(first, null)).toBe(true);
-        expect(askConnexScopeNeedsConfirmation(first, first)).toBe(false);
-        expect(askConnexScopeNeedsConfirmation(wider, first)).toBe(true);
-        expect(askConnexScopeNeedsConfirmation(reordered, first)).toBe(false);
-        expect(askConnexScopeNeedsConfirmation(swapped, first)).toBe(true);
-        expect(askConnexScopeNeedsConfirmation(otherFile, withFile)).toBe(true);
-        expect(askConnexScopeNeedsConfirmation(null, null)).toBe(false);
+        expect(first).not.toBeNull();
+        expect(wider).not.toBe(first);
+        expect(reordered).toBe(first);
+        expect(swapped).not.toBe(first);
+        expect(otherFile).not.toBe(withFile);
     });
 
     it("states what it will read and offers both agreeing and correcting", () => {

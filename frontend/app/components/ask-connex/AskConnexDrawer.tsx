@@ -85,7 +85,6 @@ import {
     askConnexCitationHref,
     askConnexCitations,
     askConnexPromptFocusPending,
-    askConnexScopeNeedsConfirmation,
     askConnexTranscript,
     groupAskConnexMessages,
     hasPendingAskConnexFileOperation,
@@ -247,8 +246,14 @@ export type AskConnexScopeSurface = {
     preview: AskConnexScopePreviewState;
     /** A refused scope, already stated in plain language, or null when nothing was refused. */
     refusal: string | null;
+    /** Whether the filters as set cannot be sent, so the request waits rather than losing them. */
+    blocked: boolean;
+    /** The problem holding the request back, already stated in plain language, or null. */
+    problem: string | null;
     onDraftChange: (draft: AskConnexScopeDraft) => void;
     onEditorOpenChange: (open: boolean) => void;
+    /** Takes the question the breadth check should be about, at the moment one is being decided. */
+    onSettle: () => void;
 };
 
 type AskConnexDrawerLabels = AskConnexContextLabels & AskConnexTurnLabels & {
@@ -1477,13 +1482,23 @@ function ConversationSurface({
         && !contextOverflow
         && !contentTooLong
         && !fileOperationPending
+        && !scope.blocked
         && !busy
         && unavailable === null;
     const contextGroupRef = useRef<HTMLDivElement>(null);
-    const [confirmedScopeKey, setConfirmedScopeKey] = useState<string | null>(null);
-    const [pendingScope, setPendingScope] = useState<{ key: string; content?: string } | null>(null);
+    const [pendingScope, setPendingScope] = useState<{ content?: string } | null>(null);
     const scopeKey = requestScope.identity;
-    const asking = pendingScope !== null && pendingScope.key === scopeKey;
+    /**
+     * A held request keeps its notice until the member acts on it, not until its breadth changes.
+     *
+     * The breadth is still being measured while the notice is up, and the answer may well be that it
+     * needed no review — dropping the notice the moment that lands would take the member's own Send
+     * with it. What does close it is there being nothing left to announce: a request that no longer
+     * carries records or declares filters has no breadth to state, so the notice goes and Send is
+     * the member's to press again.
+     */
+    const asking = pendingScope !== null
+        && (requestScope.records !== null || requestScope.declared !== null);
 
     /**
      * Lands the member in the composer after a contextual entry point wrote a job into it.
@@ -1514,10 +1529,20 @@ function ConversationSurface({
         composerRef.current?.focus();
     };
 
+    /**
+     * Asks for one question to be sent, announcing its breadth first whenever it has one.
+     *
+     * Every broad request is announced, including the second one against filters that were already
+     * agreed to once: agreement is given to a question, not to a set of filters left in the form, and
+     * a notice that only ever appears once would let every later question inherit a review nobody
+     * performed on it. Settling the breadth check comes first, so what the notice states is measured
+     * against the question actually about to go out rather than an earlier one.
+     */
     const requestSend = (content?: string) => {
         if (!canSend) return;
-        if (scopeKey !== null && askConnexScopeNeedsConfirmation(scopeKey, confirmedScopeKey)) {
-            setPendingScope({ key: scopeKey, content });
+        scope.onSettle();
+        if (scopeKey !== null) {
+            setPendingScope({ content });
             return;
         }
         setPendingScope(null);
@@ -1566,12 +1591,13 @@ function ConversationSurface({
     };
 
     /**
-     * Re-arms the scope confirmation and hands the member back the inputs that decide breadth, so
-     * the next send announces the new breadth rather than inheriting agreement given to the old one.
+     * Puts the held request down and hands the member back the inputs that decide breadth.
+     *
+     * Nothing is sent and nothing is agreed to: the next send announces whatever breadth the request
+     * has by then, so narrowing it here is a change of mind rather than a step on the way out.
      */
     const narrowScope = () => {
         setPendingScope(null);
-        setConfirmedScopeKey(null);
         focusBreadthInputs();
     };
 
@@ -1836,9 +1862,7 @@ function ConversationSurface({
                             scope={requestScope}
                             labels={labels}
                             onConfirm={() => {
-                                if (scopeKey === null) return;
                                 const content = pendingScope?.content;
-                                setConfirmedScopeKey(scopeKey);
                                 setPendingScope(null);
                                 onSend(content);
                             }}
@@ -1924,6 +1948,8 @@ function ConversationSurface({
                             <div className="min-w-0 text-xs text-muted-foreground">
                                 {contentTooLong ? (
                                     <p role="alert" className="text-destructive">{labels.tooLong}</p>
+                                ) : scope.blocked && scope.problem !== null ? (
+                                    <p role="alert" className="truncate text-destructive">{scope.problem}</p>
                                 ) : (
                                     <p className="hidden sm:block">{labels.composerHint}</p>
                                 )}

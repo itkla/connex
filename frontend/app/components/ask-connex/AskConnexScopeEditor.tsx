@@ -16,6 +16,7 @@ import {
     askConnexScopeDisclosures,
     askConnexScopeOptionsFor,
     askConnexScopeProblem,
+    askConnexScopeSavedViewLabels,
     askConnexScopeStageLabels,
     clearedAskConnexScopeDraft,
     withAskConnexScopeRecordKinds,
@@ -32,6 +33,7 @@ import type {
     AiChatScopeDealStatus,
     AiChatScopeOwnerMode,
     AiChatScopeWarmthBand,
+    SavedViewRecordType,
 } from '@/app/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -189,26 +191,82 @@ export function AskConnexScopeSummary({
 }
 
 /**
+ * Where the workspace's own names have got to: still being read, read, or not read at all.
+ *
+ * Held apart from the names themselves because "none yet" and "none at all" are different answers to
+ * the same question, and a request that failed must never settle into the second one — a form that
+ * says a workspace has no members when nobody could ask is stating something untrue about it.
+ */
+export type AskConnexScopeOptionsStatus = 'loading' | 'ready' | 'failed';
+
+/**
+ * What became of the read behind the choices, stated once for the whole form.
+ *
+ * One line rather than one per field, because the members, stages, and saved views are read together
+ * and a member who cannot see any of them has one thing to know and one thing to do about it. Says
+ * nothing at all once the names are there, so the ordinary case carries no chrome.
+ */
+function OptionsStatus({ status, onRetry }: {
+    status: AskConnexScopeOptionsStatus;
+    onRetry: () => void;
+}) {
+    const t = useTranslations('AskConnex');
+
+    if (status === 'ready') return null;
+    if (status === 'loading') {
+        return (
+            <p role="status" className="text-xs leading-relaxed text-muted-foreground">
+                {t('scope.options.loading')}
+            </p>
+        );
+    }
+    return (
+        <div className="flex flex-wrap items-center gap-2">
+            <p role="alert" className="text-xs leading-relaxed text-destructive">
+                {t('scope.options.failed')}
+            </p>
+            <Button type="button" size="inline" variant="outline" onClick={onRetry}>
+                {t('scope.options.retry')}
+            </Button>
+        </div>
+    );
+}
+
+/**
  * The filter form itself.
  *
  * Ordered by how often a member reaches for each filter, and conditional fields appear rather than
  * being shown disabled: stages and deal status are refused outright against a cohort with no deals
  * in it, so they are offered only where they can be honoured.
+ *
+ * A field whose choices are workspace names is offered once those names are there. While they are
+ * still being read, or after the read failed, the form says so and offers the read again instead of
+ * presenting an absence it never established.
  */
 export function AskConnexScopeFields({
     draft,
     options,
+    optionsStatus,
     onChange,
+    onRetryOptions,
 }: {
     draft: AskConnexScopeDraft;
     options: AskConnexScopeOptions;
+    optionsStatus: AskConnexScopeOptionsStatus;
     onChange: (draft: AskConnexScopeDraft) => void;
+    onRetryOptions: () => void;
 }) {
     const t = useTranslations('AskConnex');
     const tWarmth = useTranslations('Temperature');
     const problem = askConnexScopeProblem(draft);
     const allowsDeals = askConnexScopeAllowsDeals(draft);
     const stageLabels = askConnexScopeStageLabels(options.stages, options.pipelines);
+    const savedViewLabels = askConnexScopeSavedViewLabels(
+        options.savedViews,
+        (recordType: SavedViewRecordType) => t(`scope.recordKinds.${recordType}`),
+    );
+    const selectedMemberIds = new Set(draft.ownerMemberIds);
+    const selectedStageIds = new Set(draft.stageIds);
     const membersAtCap = draft.ownerMemberIds.length >= ASK_CONNEX_SCOPE_MAX_MEMBERS;
     const stagesAtCap = draft.stageIds.length >= ASK_CONNEX_SCOPE_MAX_STAGES;
     const periodModes: { value: AskConnexScopePeriodMode; label: string }[] = [
@@ -295,7 +353,7 @@ export function AskConnexScopeFields({
                 {draft.ownerMode === 'members' ? (
                     <div className="max-h-40 space-y-1 overflow-y-auto">
                         {options.members.map((member) => {
-                            const selected = draft.ownerMemberIds.includes(member.id);
+                            const selected = selectedMemberIds.has(member.id);
                             const atCap = membersAtCap;
                             return (
                                 <Button
@@ -319,6 +377,11 @@ export function AskConnexScopeFields({
                                 </Button>
                             );
                         })}
+                        {optionsStatus === 'ready' && options.members.length === 0 ? (
+                            <p role="status" className="text-xs text-muted-foreground">
+                                {t('scope.owners.none')}
+                            </p>
+                        ) : null}
                         {problem === 'membersMissing' ? (
                             <p role="alert" className="text-xs text-destructive">{t('scope.problem.membersMissing')}</p>
                         ) : null}
@@ -385,7 +448,7 @@ export function AskConnexScopeFields({
                 <Field label={t('scope.stages.label')}>
                     <div className="flex flex-wrap gap-1.5">
                         {options.stages.map((stage) => {
-                            const selected = draft.stageIds.includes(stage.id);
+                            const selected = selectedStageIds.has(stage.id);
                             return (
                                 <ChoiceButton
                                     key={stage.id}
@@ -414,7 +477,7 @@ export function AskConnexScopeFields({
                         {options.savedViews.map((view) => (
                             <ChoiceButton
                                 key={`${view.recordType}:${view.id}`}
-                                label={view.name}
+                                label={savedViewLabels.get(view.id) ?? view.name}
                                 selected={draft.savedViewId === view.id}
                                 onSelect={() => onChange({
                                     ...draft,
@@ -425,6 +488,8 @@ export function AskConnexScopeFields({
                     </div>
                 </Field>
             ) : null}
+
+            <OptionsStatus status={optionsStatus} onRetry={onRetryOptions} />
         </div>
     );
 }
@@ -457,11 +522,20 @@ export default function AskConnexScopeEditor({
 }) {
     const t = useTranslations('AskConnex');
     const { activeWorkspaceId, switching } = useWorkspace();
+    const [attempt, setAttempt] = useState(0);
     const [loaded, setLoaded] = useState<{
         workspaceId: number;
+        attempt: number;
+        failed: boolean;
         options: AskConnexScopeOptions;
     } | null>(null);
     const options = askConnexScopeOptionsFor(loaded, activeWorkspaceId);
+    const settled = loaded !== null
+        && loaded.workspaceId === activeWorkspaceId
+        && loaded.attempt === attempt;
+    const optionsStatus: AskConnexScopeOptionsStatus = settled
+        ? (loaded.failed ? 'failed' : 'ready')
+        : 'loading';
 
     /**
      * Reads the names this workspace offers as choices.
@@ -471,34 +545,48 @@ export default function AskConnexScopeEditor({
      * produced it, so the previous workspace's members, stages, and saved views must leave the form
      * the moment another one becomes active rather than staying on offer as filters that would be
      * refused — or, worse, silently applied to records they never described.
+     *
+     * A read that did not come back whole is recorded as having failed rather than as a workspace
+     * with nothing in it, and the attempt is part of the key, so asking again really does ask again.
+     * Only a settled read closes the door on another one: while one is in flight the guard here has
+     * nothing to match, which is what keeps this from cancelling its own request.
      */
     useEffect(() => {
         if (!open || switching || activeWorkspaceId === null) return;
-        if (loaded?.workspaceId === activeWorkspaceId) return;
+        if (loaded?.workspaceId === activeWorkspaceId && loaded.attempt === attempt) return;
         const controller = new AbortController();
         const load = async () => {
-            const [members, pipelines, stages, personViews, companyViews, dealViews] = await Promise.all([
-                getActiveWorkspaceMembers({ signal: controller.signal }).catch(() => []),
-                getPipelines({ signal: controller.signal }).catch(() => []),
-                getAllStages({ signal: controller.signal }).catch(() => []),
-                getSavedViews('person', { signal: controller.signal }).catch(() => []),
-                getSavedViews('company', { signal: controller.signal }).catch(() => []),
-                getSavedViews('deal', { signal: controller.signal }).catch(() => []),
+            const reads = await Promise.allSettled([
+                getActiveWorkspaceMembers({ signal: controller.signal }),
+                getPipelines({ signal: controller.signal }),
+                getAllStages({ signal: controller.signal }),
+                getSavedViews('person', { signal: controller.signal }),
+                getSavedViews('company', { signal: controller.signal }),
+                getSavedViews('deal', { signal: controller.signal }),
             ]);
             if (controller.signal.aborted) return;
+            const [members, pipelines, stages, personViews, companyViews, dealViews] = reads;
             setLoaded({
                 workspaceId: activeWorkspaceId,
+                attempt,
+                failed: reads.some((read) => read.status === 'rejected'),
                 options: {
-                    members: members.filter((member) => member.status === 'active'),
-                    pipelines,
-                    stages,
-                    savedViews: [...personViews, ...companyViews, ...dealViews],
+                    members: members.status === 'fulfilled'
+                        ? members.value.filter((member) => member.status === 'active')
+                        : [],
+                    pipelines: pipelines.status === 'fulfilled' ? pipelines.value : [],
+                    stages: stages.status === 'fulfilled' ? stages.value : [],
+                    savedViews: [
+                        ...(personViews.status === 'fulfilled' ? personViews.value : []),
+                        ...(companyViews.status === 'fulfilled' ? companyViews.value : []),
+                        ...(dealViews.status === 'fulfilled' ? dealViews.value : []),
+                    ],
                 },
             });
         };
         void load();
         return () => controller.abort();
-    }, [activeWorkspaceId, loaded, open, switching]);
+    }, [activeWorkspaceId, attempt, loaded, open, switching]);
 
     return (
         <ResponsiveDialog open={open} onOpenChange={onOpenChange}>
@@ -514,7 +602,9 @@ export default function AskConnexScopeEditor({
                     <AskConnexScopeFields
                         draft={draft}
                         options={options}
+                        optionsStatus={optionsStatus}
                         onChange={onDraftChange}
+                        onRetryOptions={() => setAttempt((current) => current + 1)}
                     />
                     <div className="rounded-lg border border-border bg-muted/40 p-3">
                         <p className="mb-1 text-xs font-medium text-foreground">{t('scope.preview.title')}</p>

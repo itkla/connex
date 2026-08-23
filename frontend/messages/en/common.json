@@ -789,6 +789,7 @@
         "allTeam": "Everyone",
         "me": "Me",
         "members": "Chosen members",
+        "none": "No members to choose from here.",
         "cap": "You can name up to {count} members. Clear one to choose another."
       },
       "warmth": {
@@ -816,6 +817,7 @@
       "chips": {
         "period": "Period",
         "owners": "Owner",
+        "ownersMe": "My records",
         "warmth": "Warmth",
         "recordKinds": "Record types",
         "dealStatuses": "Deal status",
@@ -827,12 +829,18 @@
         "periodLength": "Choose a window of 1 to 365 days.",
         "membersMissing": "Choose at least one member, or go back to everyone."
       },
+      "options": {
+        "loading": "Loading the names this workspace offers…",
+        "failed": "Couldn't load members, stages, and saved views.",
+        "retry": "Try again"
+      },
       "preview": {
         "title": "What this covers",
         "idle": "Choose a filter to see what it covers.",
         "loading": "Checking what this covers…",
         "matched": "{count, plural, one {# record matches} other {# records match}} these filters.",
         "matchedUnknown": "These filters are ready to use.",
+        "matchedUnchecked": "How much these filters cover couldn't be checked. Send only if this is the breadth you meant.",
         "truncated": "Ask Connex will read the first {count} of them.",
         "capability": "It will use {name}.",
         "throttled": "That was a lot of changes at once — the count will catch up in a moment.",

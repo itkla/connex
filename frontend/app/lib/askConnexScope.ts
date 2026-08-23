@@ -1,4 +1,5 @@
 import type {
+    AiChatPageContext,
     AiChatPageContextKind,
     AiChatQueryScope,
     AiChatQueryScopeRequest,
@@ -7,6 +8,7 @@ import type {
     AiChatScopeWarmthBand,
     Pipeline,
     SavedView,
+    SavedViewRecordType,
     Stage,
     WorkspaceMember,
 } from '@/app/lib/types';
@@ -177,6 +179,39 @@ export function askConnexScopeStageLabels(
     return labels;
 }
 
+/**
+ * How each saved view is named in the editor.
+ *
+ * Contacts, companies, and deals each keep their own saved views, and the useful names among them —
+ * "My records", "Recently added" — are exactly the ones every record type reuses. Two buttons
+ * reading the same word that scope the assistant to different cohorts is a choice nobody can make
+ * correctly, so a name that occurs under more than one record type carries that record type; a name
+ * that is already unique is left alone.
+ *
+ * @param savedViews every saved view the workspace offers, across record types
+ * @param recordTypeLabel the member's own word for one record type
+ * @returns each saved view's id mapped to the label the editor shows for it
+ */
+export function askConnexScopeSavedViewLabels(
+    savedViews: readonly SavedView[],
+    recordTypeLabel: (recordType: SavedViewRecordType) => string,
+): Map<number, string> {
+    const nameCounts = new Map<string, number>();
+    for (const view of savedViews) {
+        nameCounts.set(view.name, (nameCounts.get(view.name) ?? 0) + 1);
+    }
+    const labels = new Map<number, string>();
+    for (const view of savedViews) {
+        labels.set(
+            view.id,
+            (nameCounts.get(view.name) ?? 0) > 1
+                ? `${recordTypeLabel(view.recordType)} · ${view.name}`
+                : view.name,
+        );
+    }
+    return labels;
+}
+
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 function declaredPeriod(draft: AskConnexScopeDraft): boolean {
@@ -268,8 +303,24 @@ export function askConnexScopeProblem(draft: AskConnexScopeDraft): AskConnexScop
 }
 
 /**
+ * Whether the draft states filters the form already knows it cannot send.
+ *
+ * Kept apart from "no filters at all", because at the moment of sending the two are opposites. A
+ * question with no filters covers whatever it and its page imply; a question whose filters are
+ * half-written — chosen members that name nobody, a range that runs backwards — covers *more* than
+ * the member asked for if those filters are dropped on the way out. A blocked draft therefore holds
+ * the request until the problem stated in the form is fixed, rather than quietly widening it.
+ */
+export function askConnexScopeBlocked(draft: AskConnexScopeDraft): boolean {
+    return askConnexScopeDeclared(draft) && askConnexScopeProblem(draft) !== null;
+}
+
+/**
  * Converts the editor's state into the request the server validates, or null when nothing was
  * declared or the draft still carries a problem the member can fix.
+ *
+ * Null is not on its own permission to send: {@link askConnexScopeBlocked} separates the two reasons
+ * it is returned, and a blocked draft must stop the request instead of sending it unscoped.
  *
  * Only stated filters are sent. An unstated filter is absent rather than sent as an empty list, so
  * "no owner filter" and "an owner filter that happens to name nobody" stay distinguishable all the
@@ -357,9 +408,12 @@ export function askConnexScopeDisclosures(
 ): AskConnexScopeDisclosure[] {
     if (scope === null) return [];
     const disclosures: AskConnexScopeDisclosure[] = [];
+    const stated = new Set<AskConnexScopeDisclosure>();
     for (const entry of scope.unavailable) {
         const disclosure: AskConnexScopeDisclosure = askConnexScopeReason(entry) ?? 'other';
-        if (!disclosures.includes(disclosure)) disclosures.push(disclosure);
+        if (stated.has(disclosure)) continue;
+        stated.add(disclosure);
+        disclosures.push(disclosure);
     }
     return disclosures;
 }
@@ -382,11 +436,34 @@ export function askConnexScopeRefusal(message: string | null | undefined): AskCo
 export type AskConnexScopeChip = {
     /** Stable identity for the chip, unique within one interpreted scope. */
     key: string;
-    /** Which filter it is, so its owner can title it in the member's language. */
-    kind: 'period' | 'owners' | 'warmth' | 'recordKinds' | 'dealStatuses' | 'stages' | 'savedView';
+    /**
+     * Which filter it is, so its owner can title it in the member's language.
+     *
+     * `ownersMe` is the owner filter interpreted as the member themselves. It is its own kind rather
+     * than an owner chip with a name in it, because the server resolves references only for members
+     * that were named one by one: the request is restricted to the person reading it and nothing in
+     * the interpretation says so, so the chip has to say it instead of rendering an empty list.
+     */
+    kind:
+        | 'period'
+        | 'owners'
+        | 'ownersMe'
+        | 'warmth'
+        | 'recordKinds'
+        | 'dealStatuses'
+        | 'stages'
+        | 'savedView';
     /** The values it names, already resolved to labels the server authorized. */
     values: string[];
 };
+
+function authorizedLabels(references: readonly { label: string }[]): string[] {
+    const labels: string[] = [];
+    for (const reference of references) {
+        if (reference.label.length > 0) labels.push(reference.label);
+    }
+    return labels;
+}
 
 /**
  * Turns an interpreted scope into the chips the cockpit shows.
@@ -407,12 +484,10 @@ export function askConnexScopeChips(scope: AiChatQueryScope | null): AskConnexSc
                 : [],
         });
     }
-    if (scope.ownerMode !== 'all_team') {
-        chips.push({
-            key: 'owners',
-            kind: 'owners',
-            values: scope.owners.map((owner) => owner.label).filter((label) => label.length > 0),
-        });
+    if (scope.ownerMode === 'me') {
+        chips.push({ key: 'owners', kind: 'ownersMe', values: [] });
+    } else if (scope.ownerMode !== 'all_team') {
+        chips.push({ key: 'owners', kind: 'owners', values: authorizedLabels(scope.owners) });
     }
     if (scope.warmthBands.length > 0) {
         chips.push({ key: 'warmth', kind: 'warmth', values: [...scope.warmthBands] });
@@ -424,16 +499,22 @@ export function askConnexScopeChips(scope: AiChatQueryScope | null): AskConnexSc
         chips.push({ key: 'dealStatuses', kind: 'dealStatuses', values: [...scope.dealStatuses] });
     }
     if (scope.stages.length > 0) {
-        chips.push({
-            key: 'stages',
-            kind: 'stages',
-            values: scope.stages.map((stage) => stage.label).filter((label) => label.length > 0),
-        });
+        chips.push({ key: 'stages', kind: 'stages', values: authorizedLabels(scope.stages) });
     }
     if (scope.savedView !== null) {
         chips.push({ key: 'savedView', kind: 'savedView', values: [scope.savedView.label] });
     }
     return chips;
+}
+
+const periodFormats = new Map<string, Intl.DateTimeFormat>();
+
+function periodFormat(locale: string): Intl.DateTimeFormat {
+    const existing = periodFormats.get(locale);
+    if (existing !== undefined) return existing;
+    const format = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeZone: 'UTC' });
+    periodFormats.set(locale, format);
+    return format;
 }
 
 function calendarDate(value: string): Date | null {
@@ -459,8 +540,7 @@ export function askConnexScopePeriodLabel(values: readonly string[], locale: str
     const start = calendarDate(values[0]);
     const end = calendarDate(values[1]);
     if (start === null || end === null || start > end) return '';
-    return new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeZone: 'UTC' })
-        .formatRange(start, end);
+    return periodFormat(locale).formatRange(start, end);
 }
 
 /**
@@ -470,6 +550,29 @@ export function askConnexScopePeriodLabel(values: readonly string[], locale: str
  * than every keystroke and checkbox on the way to one.
  */
 export const ASK_CONNEX_SCOPE_PREVIEW_DEBOUNCE_MS = 400;
+
+/**
+ * A stable identity for everything except the filters that decides what a preview is about.
+ *
+ * A preview is not only a count. The server reads the question and the records the page is offering
+ * to work out which capability would answer, and a different capability counts a different cohort
+ * and reaches a different judgement about whether the breadth is worth reviewing. Those inputs
+ * therefore belong to a preview's identity exactly as the filters do: an answer about one question
+ * is not an answer about the next one.
+ *
+ * @param content the question as it would be sent
+ * @param pageContext the records the request would carry
+ * @returns an identity that changes whenever the routed request would
+ */
+export function askConnexScopeRoutingKey(
+    content: string,
+    pageContext: readonly AiChatPageContext[],
+): string {
+    const records: string[] = [];
+    for (const entry of pageContext) records.push(`${entry.kind}:${entry.id}`);
+    records.sort();
+    return `${records.join(',')} ${content}`;
+}
 
 /** What the interpreted-scope preview is currently doing, as the editor renders it. */
 export type AskConnexScopePreviewState =

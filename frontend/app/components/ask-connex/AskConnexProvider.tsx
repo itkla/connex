@@ -112,11 +112,14 @@ import {
     ASK_CONNEX_SCOPE_PREVIEW_DEBOUNCE_MS,
     EMPTY_ASK_CONNEX_SCOPE_DRAFT,
     askConnexScopeAccepted,
+    askConnexScopeBlocked,
     askConnexScopeChips,
     askConnexScopeFilterCount,
     askConnexScopePeriodLabel,
+    askConnexScopeProblem,
     askConnexScopeRefusal,
     askConnexScopeRequest,
+    askConnexScopeRoutingKey,
     type AskConnexScopeChip,
     type AskConnexScopeDraft,
     type AskConnexScopePreviewState,
@@ -461,6 +464,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const [promptRequest, setPromptRequest] = useState(0);
     const [scopeDraft, setScopeDraft] = useState<AskConnexScopeDraft>(EMPTY_ASK_CONNEX_SCOPE_DRAFT);
     const [scopeEditorOpen, setScopeEditorOpen] = useState(false);
+    const [scopeRoutingContent, setScopeRoutingContent] = useState('');
     const [scopeInterpretation, setScopeInterpretation] = useState<{
         key: string;
         state: AskConnexScopePreviewState;
@@ -551,32 +555,72 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         [contextFiles, contextResult.pageContext],
     );
     const scopeRequest = useMemo(() => askConnexScopeRequest(scopeDraft), [scopeDraft]);
+    const scopeBlocked = askConnexScopeBlocked(scopeDraft);
+    const scopeProblem = askConnexScopeProblem(scopeDraft);
     const scopeRequestKey = useMemo(
         () => scopeRequest === null ? null : JSON.stringify(scopeRequest),
         [scopeRequest],
     );
+    /**
+     * The routed inputs as they stand now, and as the preview last asked about them.
+     *
+     * They are kept apart on purpose. The question is read into the preview's identity, because the
+     * capability the server routes to decides both the cohort it counts and whether it asks for the
+     * breadth to be reviewed — but reading it *live* would fire a rate-limited cohort evaluation at
+     * every keystroke. So the question the preview asked about is a snapshot, taken when the filter
+     * form opens and again the moment a send is requested, while the live one decides whether the
+     * answer still describes the request that would actually go out. Page context is live in both:
+     * navigating is already a settled act, not a keystroke.
+     */
+    const scopeRoutingKey = useMemo(
+        () => askConnexScopeRoutingKey(
+            askConnexMessageContent(composer),
+            contextResult.pageContext,
+        ),
+        [composer, contextResult.pageContext],
+    );
+    const scopeSettledRoutingKey = useMemo(
+        () => askConnexScopeRoutingKey(scopeRoutingContent, contextResult.pageContext),
+        [contextResult.pageContext, scopeRoutingContent],
+    );
+    const scopePreviewKey = useMemo(
+        () => scopeRequestKey === null
+            ? null
+            : `${scopeRequestKey} ${scopeSettledRoutingKey}`,
+        [scopeRequestKey, scopeSettledRoutingKey],
+    );
     const scopePreviewState = useMemo<AskConnexScopePreviewState>(
         () => {
-            if (scopeRequestKey === null) return { status: 'idle' };
-            return scopeInterpretation?.key === scopeRequestKey
+            if (scopePreviewKey === null) return { status: 'idle' };
+            return scopeInterpretation?.key === scopePreviewKey
                 ? scopeInterpretation.state
                 : { status: 'loading' };
         },
-        [scopeInterpretation, scopeRequestKey],
+        [scopeInterpretation, scopePreviewKey],
     );
     const interpretedScope = scopePreviewState.status === 'ready' ? scopePreviewState.scope : null;
+    const scopePreviewCurrent = scopeRoutingKey === scopeSettledRoutingKey;
     const declaredScope = useMemo<AskConnexDeclaredScope | null>(
         () => {
-            if (scopeRequestKey === null || scopePreviewState.status !== 'ready') return null;
+            if (scopeRequestKey === null) return null;
+            const measured = scopePreviewCurrent && scopePreviewState.status === 'ready'
+                ? scopePreviewState
+                : null;
             return {
-                matchedRecordCount: scopePreviewState.scope.matchedRecordCount,
-                truncated: scopePreviewState.scope.matchedRecordCountTruncated,
-                recordCap: scopePreviewState.scope.recordCap,
-                identity: scopeRequestKey,
-                confirmationRecommended: scopePreviewState.confirmationRecommended,
+                identity: `${scopeRequestKey} ${scopeRoutingKey}`,
+                confirmationRecommended: measured?.confirmationRecommended ?? false,
+                matched: measured === null
+                    ? null
+                    : {
+                        count: measured.scope.matchedRecordCount,
+                        truncated: measured.scope.matchedRecordCountTruncated,
+                        recordCap: measured.scope.recordCap,
+                    },
+                measuring: measured === null
+                    && (!scopePreviewCurrent || scopePreviewState.status === 'loading'),
             };
         },
-        [scopePreviewState, scopeRequestKey],
+        [scopePreviewCurrent, scopePreviewState, scopeRequestKey, scopeRoutingKey],
     );
     const requestScope = useMemo(
         () => askConnexRequestScope(scopePreview, declaredScope),
@@ -620,17 +664,32 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }, [scopeRequest]);
 
     /**
-     * Asks the server what the declared filters actually cover.
+     * Takes the question the preview should be about.
      *
-     * Deliberately driven by the filters alone. The question itself is sent so the server can
-     * recognize which capability would run, but it is read from a ref rather than being a
-     * dependency: a preview evaluates a whole cohort and is rate limited, so it follows a settled
-     * selection instead of every keystroke on the way to one. A refusal, a spent allowance, and an
-     * unavailable feature are each kept apart, because the remedy for each is different and only one
-     * of them is something the member can fix in the form.
+     * Called where a member has stopped typing and started deciding — opening the filter form, and
+     * pressing Send — so the rate-limited cohort evaluation follows a settled question instead of
+     * every keystroke on the way to one, while still describing the request that is about to go out.
+     */
+    const settleScopeRouting = useCallback(() => {
+        setScopeRoutingContent(composerRef.current);
+    }, []);
+
+    useEffect(() => {
+        if (!scopeEditorOpen) return;
+        settleScopeRouting();
+    }, [scopeEditorOpen, settleScopeRouting]);
+
+    /**
+     * Asks the server what the declared filters actually cover, for this question, from this page.
+     *
+     * All three decide the answer: the server routes the question and the carried records to a
+     * capability, and a different capability counts a different cohort and reaches its own judgement
+     * about whether the breadth is worth reviewing. A refusal, a spent allowance, and an unavailable
+     * feature are each kept apart, because the remedy for each is different and only one of them is
+     * something the member can fix in the form.
      */
     useEffect(() => {
-        if (scopeRequestKey === null) return;
+        if (scopePreviewKey === null) return;
         if (permission !== 'granted' || activeWorkspaceId === null || switching) return;
         const controller = new AbortController();
         const timer = window.setTimeout(() => {
@@ -638,7 +697,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             if (declared === null) return;
             previewAiChatScope(
                 {
-                    content: composerRef.current,
+                    content: scopeRoutingContent,
                     pageContext: pageContextRef.current,
                     scope: declared,
                 },
@@ -646,7 +705,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             ).then((preview) => {
                 if (controller.signal.aborted) return;
                 setScopeInterpretation({
-                    key: scopeRequestKey,
+                    key: scopePreviewKey,
                     state: {
                         status: 'ready',
                         scope: preview.scope,
@@ -664,14 +723,14 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                         : status === 403
                             ? { status: 'unavailable' }
                             : { status: 'failed' };
-                setScopeInterpretation({ key: scopeRequestKey, state });
+                setScopeInterpretation({ key: scopePreviewKey, state });
             });
         }, ASK_CONNEX_SCOPE_PREVIEW_DEBOUNCE_MS);
         return () => {
             window.clearTimeout(timer);
             controller.abort();
         };
-    }, [activeWorkspaceId, permission, scopeRequestKey, switching]);
+    }, [activeWorkspaceId, permission, scopePreviewKey, scopeRoutingContent, switching]);
 
     useEffect(() => {
         workspaceSessionIdRef.current = workspaceSessionId;
@@ -1261,6 +1320,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             dispatchToolCalls({ type: 'reset' });
             setScopeDraft(EMPTY_ASK_CONNEX_SCOPE_DRAFT);
             setScopeInterpretation(null);
+            setScopeRoutingContent('');
             setScopeEditorOpen(false);
             setLoadState('loading');
             setLoadError(null);
@@ -1858,6 +1918,14 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         }
     }, [actionableToolCallIds, router, t, toolCalls]);
 
+    /**
+     * Sends one question, with everything it declares it covers.
+     *
+     * A draft carrying a problem the form can already see stops the request here rather than
+     * shedding its filters on the way out: the request body a blocked draft produces is no body at
+     * all, so sending it would ask a question covering everything the member was in the middle of
+     * narrowing away from — a wider question than the one they wrote, not a narrower one.
+     */
     const send = useCallback(async (contentOverride?: string) => {
         const requestContent = contentOverride ?? composer;
         const content = askConnexMessageContent(requestContent);
@@ -1882,6 +1950,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             || requestContextOverflow
             || content.length === 0
             || content.length > 16_000
+            || scopeBlocked
         ) return;
 
         submittingRef.current = true;
@@ -1922,10 +1991,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             });
             if (activeSignal.aborted) return;
             const acceptedScope = accepted.scope;
-            if (acceptedScope != null && scopeRequestKey !== null) {
-                setScopeInterpretation((current) => current === null || current.key !== scopeRequestKey
+            if (acceptedScope != null && scopePreviewKey !== null) {
+                setScopeInterpretation((current) => current === null || current.key !== scopePreviewKey
                     ? current
-                    : { key: scopeRequestKey, state: askConnexScopeAccepted(current.state, acceptedScope) });
+                    : { key: scopePreviewKey, state: askConnexScopeAccepted(current.state, acceptedScope) });
             }
             const stored = {
                 sessionId: accepted.sessionId,
@@ -1967,9 +2036,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
              * unable to send the corrected question.
              */
             const refusal = scopeRefusalReason(error);
-            if (refusal !== null && scopeRequestKey !== null) {
+            if (refusal !== null && scopePreviewKey !== null) {
                 setScopeInterpretation({
-                    key: scopeRequestKey,
+                    key: scopePreviewKey,
                     state: { status: 'refused', reason: refusal },
                 });
                 return;
@@ -1990,7 +2059,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             submittingRef.current = false;
             setSubmitting(false);
         }
-    }, [activeSession, composer, corrections, featureUnavailable, fileContextCount, fileOperationPending, followTurn, permission, refreshTranscript, resetStream, router, scopeRequest, scopeRequestKey, sessionKey, showApiError, sourceRecord, sourceSelection, submissionBlocked, t, turn.phase, turnKey, userDisplayName, userId, workspaceMode]);
+    }, [activeSession, composer, corrections, featureUnavailable, fileContextCount, fileOperationPending, followTurn, permission, refreshTranscript, resetStream, router, scopeBlocked, scopePreviewKey, scopeRequest, sessionKey, showApiError, sourceRecord, sourceSelection, submissionBlocked, t, turn.phase, turnKey, userDisplayName, userId, workspaceMode]);
 
     const retryPrompt = useMemo(() => askConnexRetryPrompt(messages), [messages]);
     const retryTurn = useCallback(() => {
@@ -2145,12 +2214,20 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
      *
      * A cohort the retrieval will only partly read says so in the same breath, because a count the
      * request cannot honour in full is exactly the promise this sentence exists to avoid making.
+     * Where there is no count at all the sentence says that instead of implying the filters are
+     * settled: a measurement still arriving and one nothing could take are different situations, and
+     * only the second is a reason to think twice before sending.
      */
     const scopeDeclaredSummary = useCallback((declared: AskConnexDeclaredScope) => {
-        if (declared.matchedRecordCount === null) return t('scope.preview.matchedUnknown');
-        const matched = t('scope.preview.matched', { count: declared.matchedRecordCount });
-        return declared.truncated
-            ? `${matched} ${t('scope.preview.truncated', { count: declared.recordCap })}`
+        if (declared.matched === null) {
+            return declared.measuring
+                ? t('scope.preview.loading')
+                : t('scope.preview.matchedUnchecked');
+        }
+        if (declared.matched.count === null) return t('scope.preview.matchedUnknown');
+        const matched = t('scope.preview.matched', { count: declared.matched.count });
+        return declared.matched.truncated
+            ? `${matched} ${t('scope.preview.truncated', { count: declared.matched.recordCap })}`
             : matched;
     }, [t]);
     const citationKind = useCallback(
@@ -2428,10 +2505,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     ? t('scope.reasons.unknown')
                     : t(`scope.reasons.${scopePreviewState.reason}`)
                 : null,
+            blocked: scopeBlocked,
+            problem: scopeProblem === null ? null : t(`scope.problem.${scopeProblem}`),
             onDraftChange: setScopeDraft,
             onEditorOpenChange: setScopeEditorOpen,
+            onSettle: settleScopeRouting,
         }),
-        [scopeChips, scopeDraft, scopeEditorOpen, scopePreviewState, skills, t],
+        [scopeBlocked, scopeChips, scopeDraft, scopeEditorOpen, scopePreviewState, scopeProblem, settleScopeRouting, skills, t],
     );
 
     return (

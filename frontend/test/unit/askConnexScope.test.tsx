@@ -8,7 +8,10 @@ import {
     AskConnexScopeFields,
     AskConnexScopeSummary,
 } from "@/app/components/ask-connex/AskConnexScopeEditor";
-import { askConnexRequestScope } from "@/app/lib/askConnex";
+import {
+    askConnexRequestScope,
+    type AskConnexDeclaredScope,
+} from "@/app/lib/askConnex";
 import {
     ASK_CONNEX_SCOPE_MAX_STAGES,
     ASK_CONNEX_SCOPE_REASONS,
@@ -16,6 +19,7 @@ import {
     NO_ASK_CONNEX_SCOPE_OPTIONS,
     askConnexScopeAccepted,
     askConnexScopeAllowsDeals,
+    askConnexScopeBlocked,
     askConnexScopeChips,
     askConnexScopeDeclared,
     askConnexScopeDisclosures,
@@ -26,6 +30,8 @@ import {
     askConnexScopeReason,
     askConnexScopeRefusal,
     askConnexScopeRequest,
+    askConnexScopeRoutingKey,
+    askConnexScopeSavedViewLabels,
     askConnexScopeStageLabels,
     clearedAskConnexScopeDraft,
     withAskConnexScopeRecordKinds,
@@ -33,7 +39,13 @@ import {
     type AskConnexScopeOptions,
     type AskConnexScopePreviewState,
 } from "@/app/lib/askConnexScope";
-import type { AiAssistantSkill, AiChatQueryScope, Stage } from "@/app/lib/types";
+import type {
+    AiAssistantSkill,
+    AiChatQueryScope,
+    SavedView,
+    SavedViewRecordType,
+    Stage,
+} from "@/app/lib/types";
 
 const MESSAGES = JSON.parse(
     readFileSync(join(process.cwd(), "messages", "en", "common.json"), "utf8"),
@@ -60,6 +72,23 @@ function options(overrides: Partial<AskConnexScopeOptions> = {}): AskConnexScope
 
 function stage(overrides: Partial<Stage> & { id: number; name: string }): Stage {
     return { pipeline: 1, position: 0, success: false, failure: false, ...overrides };
+}
+
+function savedView(overrides: Partial<SavedView> & { id: number; name: string; recordType: SavedViewRecordType }): SavedView {
+    return {
+        workspaceId: 1,
+        visibility: "private",
+        ownerUserId: 1,
+        ownedByCurrentUser: true,
+        config: {},
+        position: 0,
+        pinned: false,
+        pinPosition: null,
+        default: false,
+        createdAt: "",
+        updatedAt: "",
+        ...overrides,
+    };
 }
 
 function interpreted(overrides: Partial<AiChatQueryScope> = {}): AiChatQueryScope {
@@ -213,6 +242,28 @@ describe("problems the form can settle itself", () => {
         expect(askConnexScopeProblem(draft({ ownerMode: "members" }))).toBe("membersMissing");
         expect(askConnexScopeProblem(draft({ ownerMode: "members", ownerMemberIds: [2] }))).toBeNull();
     });
+
+    it("keeps a half-written filter from becoming a question about everything", () => {
+        const nobody = draft({ ownerMode: "members" });
+        const backwards = draft({
+            periodMode: "range",
+            periodStart: "2026-05-01",
+            periodEnd: "2026-04-01",
+        });
+
+        for (const stuck of [nobody, backwards]) {
+            expect(askConnexScopeDeclared(stuck)).toBe(true);
+            expect(askConnexScopeRequest(stuck)).toBeNull();
+            expect(askConnexScopeBlocked(stuck)).toBe(true);
+        }
+    });
+
+    it("does not confuse a form with nothing in it for a form with a mistake in it", () => {
+        expect(askConnexScopeRequest(EMPTY_ASK_CONNEX_SCOPE_DRAFT)).toBeNull();
+        expect(askConnexScopeBlocked(EMPTY_ASK_CONNEX_SCOPE_DRAFT)).toBe(false);
+        expect(askConnexScopeBlocked(draft({ ownerMode: "members", ownerMemberIds: [2] }))).toBe(false);
+        expect(askConnexScopeBlocked(draft({ periodMode: "days", periodDays: 30 }))).toBe(false);
+    });
 });
 
 describe("filters that depend on other filters", () => {
@@ -248,14 +299,18 @@ describe("filters that depend on other filters", () => {
             <AskConnexScopeFields
                 draft={EMPTY_ASK_CONNEX_SCOPE_DRAFT}
                 options={options()}
+                optionsStatus="ready"
                 onChange={() => {}}
+                onRetryOptions={() => {}}
             />,
         );
         const withoutDeals = render(
             <AskConnexScopeFields
                 draft={draft({ recordKinds: ["person"] })}
                 options={options()}
+                optionsStatus="ready"
                 onChange={() => {}}
+                onRetryOptions={() => {}}
             />,
         );
 
@@ -268,7 +323,9 @@ describe("filters that depend on other filters", () => {
             <AskConnexScopeFields
                 draft={EMPTY_ASK_CONNEX_SCOPE_DRAFT}
                 options={options({ stages: [stage({ id: 4, name: "Proposal", position: 2 })] })}
+                optionsStatus="ready"
                 onChange={() => {}}
+                onRetryOptions={() => {}}
             />,
         );
 
@@ -277,7 +334,9 @@ describe("filters that depend on other filters", () => {
             <AskConnexScopeFields
                 draft={EMPTY_ASK_CONNEX_SCOPE_DRAFT}
                 options={options()}
+                optionsStatus="ready"
                 onChange={() => {}}
+                onRetryOptions={() => {}}
             />,
         )).not.toContain("Stages");
     });
@@ -287,7 +346,9 @@ describe("filters that depend on other filters", () => {
             <AskConnexScopeFields
                 draft={draft({ periodMode: "range", periodStart: "2026-05-01", periodEnd: "2026-04-01" })}
                 options={options()}
+                optionsStatus="ready"
                 onChange={() => {}}
+                onRetryOptions={() => {}}
             />,
         );
 
@@ -498,6 +559,20 @@ describe("the chips a declared scope leaves in the cockpit", () => {
         expect(chips[2]?.values).toEqual(["My cooling accounts"]);
     });
 
+    it("says whose records a scope restricted to the member covers", () => {
+        const chips = askConnexScopeChips(interpreted({ ownerMode: "me", owners: [] }));
+
+        expect(chips).toEqual([{ key: "owners", kind: "ownersMe", values: [] }]);
+        expect(
+            (((MESSAGES.AskConnex as Record<string, unknown>).scope as Record<string, unknown>)
+                .chips as Record<string, unknown>).ownersMe,
+        ).toBe("My records");
+        expect(
+            (((JA_MESSAGES.AskConnex as Record<string, unknown>).scope as Record<string, unknown>)
+                .chips as Record<string, unknown>).ownersMe,
+        ).toBeTypeOf("string");
+    });
+
     it("carries the fixed vocabularies for their own copy to resolve", () => {
         const chips = askConnexScopeChips(interpreted({
             warmthBands: ["cool"],
@@ -514,51 +589,76 @@ describe("the chips a declared scope leaves in the cockpit", () => {
 });
 
 describe("agreeing to what a request will cover", () => {
+    function measured(overrides: Partial<AskConnexDeclaredScope> = {}): AskConnexDeclaredScope {
+        return {
+            identity: "filters-a",
+            confirmationRecommended: false,
+            matched: { count: 3, truncated: false, recordCap: 200 },
+            measuring: false,
+            ...overrides,
+        };
+    }
+
     it("asks for nothing when neither the records nor the filters are broad", () => {
         expect(askConnexRequestScope(null, null).identity).toBeNull();
     });
 
     it("holds the request when the server asks for the breadth to be reviewed", () => {
-        const scope = askConnexRequestScope(null, {
-            matchedRecordCount: 47,
-            truncated: false,
-            recordCap: 200,
-            identity: "filters-a",
+        const scope = askConnexRequestScope(null, measured({
             confirmationRecommended: true,
-        });
+            matched: { count: 47, truncated: false, recordCap: 200 },
+        }));
 
         expect(scope.identity).not.toBeNull();
     });
 
     it("lets narrowing filters through without a confirmation of their own", () => {
-        const scope = askConnexRequestScope(null, {
-            matchedRecordCount: 3,
-            truncated: false,
-            recordCap: 200,
-            identity: "filters-a",
-            confirmationRecommended: false,
-        });
+        expect(askConnexRequestScope(null, measured()).identity).toBeNull();
+    });
 
-        expect(scope.identity).toBeNull();
+    it("holds a scope nothing has measured, however narrow it may turn out to be", () => {
+        for (const unmeasured of [
+            measured({ matched: null, measuring: true }),
+            measured({ matched: null, measuring: false }),
+        ]) {
+            expect(askConnexRequestScope(null, unmeasured).identity).not.toBeNull();
+        }
     });
 
     it("re-arms the confirmation when the filters change under an agreed breadth", () => {
-        const first = askConnexRequestScope(null, {
-            matchedRecordCount: 47,
-            truncated: false,
-            recordCap: 200,
-            identity: "filters-a",
+        const first = askConnexRequestScope(null, measured({
             confirmationRecommended: true,
-        });
-        const second = askConnexRequestScope(null, {
-            matchedRecordCount: 47,
-            truncated: false,
-            recordCap: 200,
+            matched: { count: 47, truncated: false, recordCap: 200 },
+        }));
+        const second = askConnexRequestScope(null, measured({
             identity: "filters-b",
             confirmationRecommended: true,
-        });
+            matched: { count: 47, truncated: false, recordCap: 200 },
+        }));
 
         expect(second.identity).not.toBe(first.identity);
+    });
+
+    it("re-arms it when the same filters are asked a different question, from a different page", () => {
+        const asked = askConnexScopeRoutingKey("which accounts are cooling?", [
+            { kind: "company", id: 4 },
+        ]);
+
+        expect(askConnexScopeRoutingKey("which accounts are cooling?", [
+            { kind: "company", id: 4 },
+        ])).toBe(asked);
+        expect(askConnexScopeRoutingKey("which accounts are cooling?", [
+            { kind: "company", id: 4 },
+            { kind: "company", id: 9 },
+        ])).not.toBe(asked);
+        expect(askConnexScopeRoutingKey("who should I introduce?", [
+            { kind: "company", id: 4 },
+        ])).not.toBe(asked);
+    });
+
+    it("reads the same page context in either order as the same request", () => {
+        expect(askConnexScopeRoutingKey("q", [{ kind: "deal", id: 2 }, { kind: "deal", id: 1 }]))
+            .toBe(askConnexScopeRoutingKey("q", [{ kind: "deal", id: 1 }, { kind: "deal", id: 2 }]));
     });
 });
 
@@ -593,11 +693,14 @@ describe("what the server echoes back once a scoped question is accepted", () =>
         expect(merged.confirmationRecommended).toBe(true);
         expect(merged.skillKey).toBe("activity_digest_v1");
         expect(askConnexRequestScope(null, {
-            matchedRecordCount: merged.scope.matchedRecordCount,
-            truncated: merged.scope.matchedRecordCountTruncated,
-            recordCap: merged.scope.recordCap,
             identity: "filters-a",
             confirmationRecommended: merged.confirmationRecommended,
+            matched: {
+                count: merged.scope.matchedRecordCount,
+                truncated: merged.scope.matchedRecordCountTruncated,
+                recordCap: merged.scope.recordCap,
+            },
+            measuring: false,
         }).identity).not.toBeNull();
     });
 
@@ -665,7 +768,9 @@ describe("the names a workspace lends the form", () => {
             <AskConnexScopeFields
                 draft={EMPTY_ASK_CONNEX_SCOPE_DRAFT}
                 options={askConnexScopeOptionsFor({ workspaceId: 7, options: workspaceOptions }, 9)}
+                optionsStatus="ready"
                 onChange={() => {}}
+                onRetryOptions={() => {}}
             />,
         );
 
@@ -713,7 +818,9 @@ describe("naming a stage the member can tell apart", () => {
             <AskConnexScopeFields
                 draft={draft({ stageIds: stages.slice(0, ASK_CONNEX_SCOPE_MAX_STAGES).map((each) => each.id) })}
                 options={options({ stages })}
+                optionsStatus="ready"
                 onChange={() => {}}
+                onRetryOptions={() => {}}
             />,
         );
 
@@ -726,12 +833,124 @@ describe("naming a stage the member can tell apart", () => {
             <AskConnexScopeFields
                 draft={EMPTY_ASK_CONNEX_SCOPE_DRAFT}
                 options={options({ stages: [stage({ id: 4, name: "Proposal" })] })}
+                optionsStatus="ready"
                 onChange={() => {}}
+                onRetryOptions={() => {}}
             />,
         );
 
         expect(markup).not.toContain("You can name up to");
         expect(markup).not.toContain('disabled=""');
+    });
+});
+
+describe("naming a saved view the member can tell apart", () => {
+    it("carries the record type only where the same name occurs under more than one", () => {
+        const labels = askConnexScopeSavedViewLabels(
+            [
+                savedView({ id: 1, name: "My records", recordType: "person" }),
+                savedView({ id: 2, name: "My records", recordType: "deal" }),
+                savedView({ id: 3, name: "Cooling accounts", recordType: "company" }),
+            ],
+            (recordType) => ({ person: "Contacts", company: "Companies", deal: "Deals" })[recordType],
+        );
+
+        expect(labels.get(1)).toBe("Contacts · My records");
+        expect(labels.get(2)).toBe("Deals · My records");
+        expect(labels.get(3)).toBe("Cooling accounts");
+    });
+
+    it("offers two views of the same name as two buttons the member can tell apart", () => {
+        const markup = render(
+            <AskConnexScopeFields
+                draft={EMPTY_ASK_CONNEX_SCOPE_DRAFT}
+                options={options({
+                    savedViews: [
+                        savedView({ id: 1, name: "My records", recordType: "person" }),
+                        savedView({ id: 2, name: "My records", recordType: "deal" }),
+                    ],
+                })}
+                optionsStatus="ready"
+                onChange={() => {}}
+                onRetryOptions={() => {}}
+            />,
+        );
+
+        expect(markup).toContain("Contacts · My records");
+        expect(markup).toContain("Deals · My records");
+    });
+});
+
+describe("what the form says about names it could not read", () => {
+    it("says the names are still coming rather than showing a workspace with none", () => {
+        const markup = render(
+            <AskConnexScopeFields
+                draft={EMPTY_ASK_CONNEX_SCOPE_DRAFT}
+                options={NO_ASK_CONNEX_SCOPE_OPTIONS}
+                optionsStatus="loading"
+                onChange={() => {}}
+                onRetryOptions={() => {}}
+            />,
+        );
+
+        expect(markup).toContain("Loading the names this workspace offers");
+        expect(markup).toContain('role="status"');
+        expect(markup).not.toContain("Couldn&#x27;t load members, stages, and saved views.");
+    });
+
+    it("says a read failed, and offers it again, instead of settling into an empty workspace", () => {
+        const markup = render(
+            <AskConnexScopeFields
+                draft={EMPTY_ASK_CONNEX_SCOPE_DRAFT}
+                options={NO_ASK_CONNEX_SCOPE_OPTIONS}
+                optionsStatus="failed"
+                onChange={() => {}}
+                onRetryOptions={() => {}}
+            />,
+        );
+
+        expect(markup).toContain("Couldn&#x27;t load members, stages, and saved views.");
+        expect(markup).toContain("Try again");
+        expect(markup).toContain('role="alert"');
+    });
+
+    it("says nothing at all once the names are there", () => {
+        const markup = render(
+            <AskConnexScopeFields
+                draft={EMPTY_ASK_CONNEX_SCOPE_DRAFT}
+                options={NO_ASK_CONNEX_SCOPE_OPTIONS}
+                optionsStatus="ready"
+                onChange={() => {}}
+                onRetryOptions={() => {}}
+            />,
+        );
+
+        expect(markup).not.toContain("Loading the names this workspace offers");
+        expect(markup).not.toContain("Couldn&#x27;t load members, stages, and saved views.");
+        expect(markup).not.toContain("Try again");
+    });
+
+    it("states an empty member list as empty, once it is known to be", () => {
+        const membersMode = draft({ ownerMode: "members" });
+
+        expect(render(
+            <AskConnexScopeFields
+                draft={membersMode}
+                options={NO_ASK_CONNEX_SCOPE_OPTIONS}
+                optionsStatus="ready"
+                onChange={() => {}}
+                onRetryOptions={() => {}}
+            />,
+        )).toContain("No members to choose from here.");
+        expect(render(
+            <AskConnexScopeFields
+                draft={membersMode}
+                options={NO_ASK_CONNEX_SCOPE_OPTIONS}
+                optionsStatus="loading"
+                onChange={() => {}}
+                onRetryOptions={() => {}}
+            />,
+        )).not.toContain("No members to choose from here.");
     });
 });
 
@@ -741,7 +960,9 @@ describe("what a screen reader hears in the filter form", () => {
             <AskConnexScopeFields
                 draft={EMPTY_ASK_CONNEX_SCOPE_DRAFT}
                 options={options()}
+                optionsStatus="ready"
                 onChange={() => {}}
+                onRetryOptions={() => {}}
             />,
         );
 
