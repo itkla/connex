@@ -40,13 +40,13 @@ test.describe("activity composer", () => {
         await page.getByRole("main").getByRole("button", { name: "New", exact: true }).click();
         await page.getByRole("menuitem", { name: "Add task" }).click();
         await expect(page.getByRole("heading", { name: "New task" }).first()).toBeVisible();
-        await expect(page.getByLabel("Deal")).toHaveValue(deal.name);
+        await expect(page.getByRole("combobox", { name: "Deal" })).toHaveValue(deal.name);
         await page.getByRole("button", { name: "Cancel", exact: true }).click();
 
         await page.getByRole("main").getByRole("button", { name: "New", exact: true }).click();
         await page.getByRole("menuitem", { name: "Add activity" }).click();
         await expect(page.getByRole("heading", { name: "Log activity" }).first()).toBeVisible();
-        await expect(page.getByLabel("Deal")).toHaveValue(deal.name);
+        await expect(page.getByRole("combobox", { name: "Deal" })).toHaveValue(deal.name);
         await page.getByRole("button", { name: "Cancel", exact: true }).click();
     });
 });
