@@ -10,20 +10,22 @@ import MembersPanel from "@/app/components/settings/MembersPanel";
 import RolesPanel from "@/app/components/settings/RolesPanel";
 import SettingsAvailabilityNotice from "@/app/components/settings/SettingsAvailabilityNotice";
 import { SettingsSection } from "@/app/components/settings/SettingsSection";
+import {
+    SectionRefusal,
+    SettingsSectionRegion,
+} from "@/app/components/settings/SettingsSectionRegion";
 import { usePermissionCheck } from "@/app/hooks/usePermissions";
 import { useSectionArrival } from "@/app/hooks/useSectionArrival";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { PEOPLE_SECTIONS, type PeopleSection } from "@/app/lib/peopleSections";
 import type { PermissionCheck } from "@/app/lib/permissionState";
 import type { User } from "@/app/lib/types";
-import { cn } from "@/lib/utils";
 
 /**
- * One addressable region of the page: the anchor a deep link resolves against, and the arrival mark
- * a reader who followed one needs in order to see which section answered them.
+ * One addressable region of the page, typed to the sections this one has.
  *
- * The mark is a background wash rather than an outline. An outline on a settings section reads as a
- * validation state; a wash that recedes reads as "here", which is all it has to say.
+ * The region itself — the anchor, the arrival mark, and the keyboard landing — is shared with the
+ * other consolidated destinations, so every one of them arrives the same way.
  */
 function PeopleSectionRegion({
     section,
@@ -37,43 +39,26 @@ function PeopleSectionRegion({
     children: React.ReactNode;
 }) {
     return (
-        <div
-            id={section}
-            ref={register(section)}
-            tabIndex={-1}
-            data-arrived={arrived === section ? "" : undefined}
-            className={cn(
-                "-mx-3 scroll-mt-24 rounded-2xl px-3 py-3 outline-none transition-colors duration-(--motion-expressive) ease-calm motion-reduce:transition-none",
-                arrived === section ? "bg-muted/50" : "bg-transparent",
-            )}
-        >
+        <SettingsSectionRegion section={section} arrived={arrived} register={register}>
             {children}
-        </div>
+        </SettingsSectionRegion>
     );
 }
 
 /**
- * The refusal posture for a section whose read the backend gates.
+ * The refusal posture for a section whose read the backend gates, in this page's voice.
  *
- * #1340's rule is that a managed destination never vanishes and never teleports: a member who
- * cannot read roles still sees that roles exist here and is told who can change that, rather than
- * finding a page with a hole in it. A failed permission lookup is kept apart from a refusal,
- * because "we could not check" and "you may not" are different things to be told.
- *
- * The unresolved case says what actually failed. The shared notice's own retry copy is about
- * checking whether a *feature* is available, which is the state its first consumers were in; here
- * the lookup that failed is the viewer's permissions, and a member reading "we couldn't check
- * feature availability" under Roles would be told about the wrong thing entirely.
+ * The postures themselves are shared; what belongs to this page is the copy for the unresolved
+ * case, which must name the lookup that failed. A member reading "we couldn't check feature
+ * availability" under Roles would be told about the wrong thing entirely.
  */
 function RefusedSection({ check }: { check: Exclude<PermissionCheck, "granted"> }) {
     const t = useTranslations("SettingsPeople");
-    if (check === "denied") return <SettingsAvailabilityNotice variant="inline" state="ask-admin" />;
     return (
-        <SettingsAvailabilityNotice
-            variant="inline"
-            state="retry"
-            title={t("accessCheckFailedTitle")}
-            body={t("accessCheckFailedBody")}
+        <SectionRefusal
+            check={check}
+            retryTitle={t("accessCheckFailedTitle")}
+            retryBody={t("accessCheckFailedBody")}
         />
     );
 }

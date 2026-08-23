@@ -62,7 +62,22 @@ function toForm(config: MailConfig): FormState {
     };
 }
 
-export default function EmailPanel() {
+/**
+ * Where the panel is rendering, so one component serves both of its homes while #1340 migrates the
+ * workspace destinations.
+ *
+ * - `page` is `/settings/email` exactly as it ships: the panel names itself, because nothing above
+ *   it does.
+ * - `section` is the email section of Communications, whose heading already carries this panel's
+ *   own title and subtitle. The panel drops its header rather than repeating it — and the section
+ *   keeps that name even when the panel is replaced by a managed or refused posture, which is why
+ *   the heading moved up rather than staying here.
+ */
+export type EmailPresentation = "page" | "section";
+
+export default function EmailPanel({
+    presentation = "page",
+}: { presentation?: EmailPresentation } = {}) {
     const t = useTranslations("WorkspaceEmail");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { activeWorkspaceId } = useWorkspace();
@@ -182,7 +197,9 @@ export default function EmailPanel() {
 
     return (
         <Rise className="space-y-4">
-            <SettingsSection title={t("title")} description={t("subtitle")} />
+            {presentation === "page" ? (
+                <SettingsSection title={t("title")} description={t("subtitle")} />
+            ) : null}
 
             {error ? (
                 <div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card px-4 py-8 text-center">

@@ -8,6 +8,7 @@
     "newButton": "New policy",
     "templatesLink": "Document templates",
     "sectionPolicies": "Policies",
+    "sectionDescription": "Which generated documents need internal approval before they can be finalized, and who signs them off.",
     "searchPlaceholder": "Search policies",
     "emptyTitle": "No approval policies yet",
     "emptyBody": "Policies route generated quotes, proposals, order forms, and contracts for internal approval — by document type, total value, or discount depth — before they can be finalized.",

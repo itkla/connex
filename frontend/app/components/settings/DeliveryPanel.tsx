@@ -85,8 +85,23 @@ function normalizeProvider(value: string): DeliveryEmailProvider {
  * email panel: an enable toggle gates the provider fields, and the HTTP ESP path exposes a
  * write-only credential plus a one-time webhook token/secret reveal.
  */
-export default function DeliveryPanel() {
+/**
+ * Where the panel is rendering, so one component serves both of its homes while #1340 migrates the
+ * workspace destinations.
+ *
+ * - `page` is `/settings/delivery` exactly as it ships: three peer sections under a page that has
+ *   no other heading.
+ * - `section` is the delivery section of Communications, which is already named for this panel, so
+ *   the panel drops its own top heading and its two remaining ones step down to `h3` — the page
+ *   stays one outline instead of repeating `h2` inside `h2`.
+ */
+export type DeliveryPresentation = "page" | "section";
+
+export default function DeliveryPanel({
+    presentation = "page",
+}: { presentation?: DeliveryPresentation } = {}) {
     const t = useTranslations("WorkspaceDelivery");
+    const headingLevel = presentation === "section" ? 3 : 2;
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { activeWorkspaceId } = useWorkspace();
 
@@ -240,7 +255,9 @@ export default function DeliveryPanel() {
 
     return (
         <Rise className="space-y-4">
-            <SettingsSection title={t("title")} description={t("subtitle")} />
+            {presentation === "page" ? (
+                <SettingsSection title={t("title")} description={t("subtitle")} />
+            ) : null}
 
             {forbidden ? (
                 <div className="flex flex-col items-center gap-2 rounded-2xl border border-border bg-card px-4 py-8 text-center">
@@ -447,9 +464,9 @@ export default function DeliveryPanel() {
                 </div>
             )}
 
-            <SmsSection />
+            <SmsSection headingLevel={headingLevel} />
 
-            <ConnectorsSection />
+            <ConnectorsSection headingLevel={headingLevel} />
         </Rise>
     );
 }
@@ -482,7 +499,7 @@ function toSmsForm(config: DeliveryProviderConfig): SmsFormState {
  * an enable toggle gates the gateway fields and a write-only credential is stored encrypted and never
  * shown. The only SMS provider is the HTTP gateway, so the provider select has a single option.
  */
-function SmsSection() {
+function SmsSection({ headingLevel }: { headingLevel: 2 | 3 }) {
     const t = useTranslations("WorkspaceDelivery");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { activeWorkspaceId } = useWorkspace();
@@ -594,7 +611,11 @@ function SmsSection() {
 
     return (
         <div className="space-y-4">
-            <SettingsSection title={t("smsTitle")} description={t("smsSubtitle")} />
+            <SettingsSection
+                headingLevel={headingLevel}
+                title={t("smsTitle")}
+                description={t("smsSubtitle")}
+            />
 
             {forbidden ? (
                 <div className="flex flex-col items-center gap-2 rounded-2xl border border-border bg-card px-4 py-8 text-center">
@@ -743,7 +764,7 @@ function toConnectorForm(config: ConnectorConfig): ConnectorFormState {
  * Workspace audience-export connector configuration. Mirrors the delivery provider block: an enable
  * toggle gates the connector fields and a write-only credential is stored encrypted and never shown.
  */
-function ConnectorsSection() {
+function ConnectorsSection({ headingLevel }: { headingLevel: 2 | 3 }) {
     const t = useTranslations("WorkspaceDelivery");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { activeWorkspaceId } = useWorkspace();
@@ -853,7 +874,11 @@ function ConnectorsSection() {
 
     return (
         <div className="space-y-4">
-            <SettingsSection title={t("connectorsTitle")} description={t("connectorsSubtitle")} />
+            <SettingsSection
+                headingLevel={headingLevel}
+                title={t("connectorsTitle")}
+                description={t("connectorsSubtitle")}
+            />
 
             {forbidden ? (
                 <div className="flex flex-col items-center gap-2 rounded-2xl border border-border bg-card px-4 py-8 text-center">

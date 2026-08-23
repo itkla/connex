@@ -32,6 +32,7 @@ import { getAuditLogs } from "@/app/lib/api";
 import Rise from "@/app/components/motion/Rise";
 import { PageHeader } from "@/app/components/PageHeader";
 import { PageShell } from "@/app/components/PageShell";
+import { SettingsSection } from "@/app/components/settings/SettingsSection";
 import {
     SearchField,
     FilterBar,
@@ -174,12 +175,39 @@ function isSuccessful(e: AuditLogEntry): boolean {
     return auditOutcome(e) === "success";
 }
 
+/**
+ * Which of the browser's two homes is rendering it while #1340 migrates the workspace destinations.
+ *
+ * - `page` is `/admin/logs` exactly as it ships: its own route, its own shell, its own page header.
+ * - `section` is the audit section of Audit & diagnostics. The settings layout owns the shell, and
+ *   the page is one outline of section headings, so the browser trades its page header for a
+ *   section heading of the same name and keeps the stat cluster beside it.
+ */
+export type AuditLogPresentation = "page" | "section";
+
+/**
+ * The shell the browser stands in: its own on its own route, and none inside a settings page whose
+ * layout already supplies one.
+ */
+function AuditShell({
+    presentation,
+    children,
+}: {
+    presentation: AuditLogPresentation;
+    children: React.ReactNode;
+}) {
+    if (presentation === "section") return <div className="flex flex-col gap-6">{children}</div>;
+    return <PageShell>{children}</PageShell>;
+}
+
 export default function AuditLogBrowser({
     initialEntries,
     pageSize,
+    presentation = "page",
 }: {
     initialEntries: AuditLogEntry[];
     pageSize: number;
+    presentation?: AuditLogPresentation;
 }) {
     const t = useTranslations("AdminAuditLog");
     const locale = useLocale();
@@ -510,24 +538,32 @@ export default function AuditLogBrowser({
         return chips;
     })();
 
+    const statCluster = entries.length > 0 ? (
+        <StatCluster
+            stats={stats}
+            lastMs={stats.lastMs === -Infinity ? null : stats.lastMs}
+            now={now}
+            locale={locale}
+            t={t}
+        />
+    ) : undefined;
+
     return (
-        <PageShell>
+        <AuditShell presentation={presentation}>
                 <Rise delay={0}>
-                    <PageHeader
-                        title={t("heading")}
-                        description={t("subtitle")}
-                        actions={
-                            entries.length > 0 ? (
-                                <StatCluster
-                                    stats={stats}
-                                    lastMs={stats.lastMs === -Infinity ? null : stats.lastMs}
-                                    now={now}
-                                    locale={locale}
-                                    t={t}
-                                />
-                            ) : undefined
-                        }
-                    />
+                    {presentation === "section" ? (
+                        <SettingsSection
+                            title={t("heading")}
+                            description={t("subtitle")}
+                            action={statCluster}
+                        />
+                    ) : (
+                        <PageHeader
+                            title={t("heading")}
+                            description={t("subtitle")}
+                            actions={statCluster}
+                        />
+                    )}
                 </Rise>
 
                 {entries.length > 0 && (
@@ -693,7 +729,7 @@ export default function AuditLogBrowser({
                     )}
                     </Rise>
                 )}
-        </PageShell>
+        </AuditShell>
     );
 }
 
