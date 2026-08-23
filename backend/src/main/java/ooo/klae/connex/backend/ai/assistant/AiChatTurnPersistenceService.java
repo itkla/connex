@@ -16,6 +16,7 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
+import ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
@@ -349,7 +350,7 @@ public class AiChatTurnPersistenceService {
         return proposeTool(turn, stepNumber, toolName, argumentsJson, null);
     }
 
-    /** Persists a demasked read-tool proposal with optional provider reasoning state. */
+    /** Persists a demasked read-tool proposal with optional opaque provider replay state. */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
     public int proposeTool(
             AiChatQueuedTurn turn,
@@ -380,7 +381,7 @@ public class AiChatTurnPersistenceService {
         return proposeWriteTool(turn, stepNumber, write, null);
     }
 
-    /** Persists or replays a validated write proposal with optional provider reasoning state. */
+    /** Persists or replays a validated write proposal with optional opaque provider replay state. */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
     public AiAssistantToolProposal proposeWriteTool(
             AiChatQueuedTurn turn,
@@ -452,7 +453,8 @@ public class AiChatTurnPersistenceService {
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
     public void requireRunning(AiChatQueuedTurn turn) {
         requireCurrentActor(turn);
-        AiChatTurn stored = lockGenerationOwnedTurn(turn);
+        AiChatTurn stored = lockAuthorizedTurn(turn, RUNNING);
+        retainRestrictionFence(turn);
         if (CANCELLED.equals(stored.getStatus())) {
             throw new AiAssistantLoopException(CANCELLED, CANCELLED);
         }
@@ -470,7 +472,8 @@ public class AiChatTurnPersistenceService {
         if (expectedOffset < 0 || expectedOffset + content.length() > 16_000) {
             throw new AiAssistantLoopException("malformed_output", "malformed_output");
         }
-        AiChatTurn stored = lockGenerationOwnedTurn(turn);
+        AiChatTurn stored = lockAuthorizedTurn(turn, RUNNING);
+        retainRestrictionFence(turn);
         if (CANCELLED.equals(stored.getStatus())) {
             throw new AiAssistantLoopException(CANCELLED, CANCELLED);
         }
@@ -484,8 +487,8 @@ public class AiChatTurnPersistenceService {
                 expectedOffset, content, nextOffset) != 1) {
             throw new ConflictException("Assistant stream state changed");
         }
-        realtimeDispatcher.sessionAfterCommit(
-                turn.workspaceId(), turn.sessionId(), AiChatStepFrameDto.delta(
+        realtimeDispatcher.userAfterCommit(
+                turn.userId(), AiChatStepFrameDto.delta(
                         turn.workspaceId(), turn.sessionId(), turn.turnId(),
                         expectedOffset, content));
         return nextOffset;
@@ -497,7 +500,7 @@ public class AiChatTurnPersistenceService {
         if (!turn.streamed() || expectedOffset < 0 || expectedOffset > 16_000) {
             throw new IllegalArgumentException("A valid streamed assistant offset is required");
         }
-        AiChatTurn stored = lockGenerationOwnedTurn(turn);
+        AiChatTurn stored = lockAuthorizedTurn(turn, RUNNING);
         if (CANCELLED.equals(stored.getStatus())) {
             throw new AiAssistantLoopException(CANCELLED, CANCELLED);
         }
@@ -664,7 +667,19 @@ public class AiChatTurnPersistenceService {
                 turn.workspaceId(), turn.sessionId(), title) == 1;
     }
 
-    /** Applies a generation-owned terminal transition without requiring request-thread state. */
+    /**
+     * Applies a generation-owned terminal transition without requiring request-thread state.
+     *
+     * <p>A failed, cancelled, or timed-out streamed turn keeps its durable partial answer so the
+     * requester can still read what was established before the turn stopped. The partial is
+     * re-screened for suspected special-care content here because a stopped turn never reaches the
+     * terminal screen the resolved path applies, and it is purged when it cannot be shown.
+     *
+     * <p>A turn stopped by {@link AiAssistantTerminalReasons#AUTHORIZATION_WITHDRAWN} purges its
+     * partial unconditionally. The retained text carries no resource metadata, so a later read can
+     * only gate it on session access; retaining it would leave facts readable that the requester
+     * lost the right to read, or that a processing restriction withdrew mid-turn.
+     */
     @Transactional(
         isolation = Isolation.READ_COMMITTED,
         propagation = Propagation.REQUIRES_NEW,
@@ -673,7 +688,16 @@ public class AiChatTurnPersistenceService {
             AiChatQueuedTurn turn,
             String status,
             String reason) {
-        lockGenerationOwnedTurn(turn);
+        AiChatTurn stored = lockGenerationOwnedTurn(turn);
+        if (RUNNING.equals(stored.getStatus())
+                && stored.isStreamed() && stored.getPartialContentUtf16Offset() > 0
+                && (AiAssistantTerminalReasons.withdrawsAuthorization(reason)
+                        || SpecialCareTextScreen.screen(stored.getPartialContent()).excluded())
+                && chatMapper.resetTurnPartialContent(
+                        turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                        stored.getPartialContentUtf16Offset()) != 1) {
+            throw new IllegalStateException("Assistant terminal stream reset lost its durable state");
+        }
         return chatMapper.updateTurnTerminal(
                 turn.workspaceId(), turn.sessionId(), turn.turnId(),
                 status, reason, null, null) == 1;
@@ -697,6 +721,14 @@ public class AiChatTurnPersistenceService {
                 || !TransactionSynchronizationManager.isSynchronizationActive()) {
             throw new IllegalStateException(
                 "Assistant answer persistence requires an active transaction");
+        }
+    }
+
+    private void retainRestrictionFence(AiChatQueuedTurn turn) {
+        if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
+                turn.workspaceId(), turn.restrictionEpoch())) {
+            throw new AiAssistantLoopException(
+                    "restrictions_changed", "restrictions_changed");
         }
     }
 

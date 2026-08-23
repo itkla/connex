@@ -32,8 +32,8 @@ public class AiChatTurnTerminalCoordinator {
             "step_cap_exceeded",
             "workspace_disabled",
             "generation_capacity",
-            "restrictions_changed",
-            "access_revoked",
+            AiAssistantTerminalReasons.RESTRICTIONS_CHANGED,
+            AiAssistantTerminalReasons.ACCESS_REVOKED,
             INTERNAL_ERROR);
     private static final Set<String> TIMED_OUT_REASONS = Set.of(
             "generation_timeout",
@@ -56,7 +56,8 @@ public class AiChatTurnTerminalCoordinator {
 
     /** Marks a committed turn failed when its prepared restriction epoch is no longer current. */
     public void restrictionsChanged(AiChatQueuedTurn turn) {
-        complete(turn, AiGenerationTaskResult.Outcome.FAILED, "restrictions_changed");
+        complete(turn, AiGenerationTaskResult.Outcome.FAILED,
+                AiAssistantTerminalReasons.RESTRICTIONS_CHANGED);
     }
 
     private boolean complete(

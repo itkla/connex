@@ -38,6 +38,7 @@ public class AiAssistantTurnService {
     private final AiChatAgentLoopService agentLoopService;
     private final AiChatTurnTerminalCoordinator terminalCoordinator;
     private final AiInvocationService invocationService;
+    private final AiChatProgressService progressService;
 
     @Autowired
     public AiAssistantTurnService(
@@ -48,7 +49,8 @@ public class AiAssistantTurnService {
             AiGenerationService generationService,
             AiChatAgentLoopService agentLoopService,
             AiChatTurnTerminalCoordinator terminalCoordinator,
-            AiInvocationService invocationService) {
+            AiInvocationService invocationService,
+            AiChatProgressService progressService) {
         this.workspaceService = workspaceService;
         this.featureGate = featureGate;
         this.restrictionEpoch = restrictionEpoch;
@@ -57,6 +59,7 @@ public class AiAssistantTurnService {
         this.agentLoopService = agentLoopService;
         this.terminalCoordinator = terminalCoordinator;
         this.invocationService = invocationService;
+        this.progressService = progressService;
     }
 
     /** Creates the legacy buffered coordinator for isolated tests. */
@@ -69,7 +72,7 @@ public class AiAssistantTurnService {
             AiChatAgentLoopService agentLoopService,
             AiChatTurnTerminalCoordinator terminalCoordinator) {
         this(workspaceService, featureGate, restrictionEpoch, persistenceService,
-                generationService, agentLoopService, terminalCoordinator, null);
+                generationService, agentLoopService, terminalCoordinator, null, null);
     }
 
     /** Starts one whole assistant turn after committing its durable queued state. */
@@ -134,7 +137,11 @@ public class AiAssistantTurnService {
     /** Returns one authorized durable turn after applying lazy expiry. */
     @RequirePermission(Permission.AI_USE)
     public AiChatTurnDto get(int sessionId, int turnId) {
-        return AiChatTurnDto.from(persistenceService.readTurn(sessionId, turnId));
+        var turn = persistenceService.readTurn(sessionId, turnId);
+        return AiChatTurnDto.from(
+                turn,
+                progressService == null ? java.util.List.of() : progressService.project(turn),
+                workspaceService.getCurrentUserId());
     }
 
     /** Cancels one active turn without requiring AI readiness to remain enabled. */

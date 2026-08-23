@@ -179,6 +179,7 @@ const REDIRECT_ROUTES = new Set([
 
 const OWNED_ROUTE_PATTERNS = [
     /^\/activity\/notes\/new$/,
+    /^\/ask-connex(?:\/[1-9]\d*)?$/,
     /^\/library\/documents\/(?:new|[1-9]\d*)$/,
     /^\/records\/deals\/[1-9]\d*\/documents\/[1-9]\d*\/print$/,
     /^\/workflows\/(?:new|[1-9]\d*)$/,

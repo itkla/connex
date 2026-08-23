@@ -1,24 +1,34 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import {
+    Fragment,
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+    useSyncExternalStore,
+    type ReactNode,
+} from 'react';
 import {
     ArchiveBoxIcon,
+    ArrowLeftIcon,
+    ArrowPathIcon,
     ArrowRightStartOnRectangleIcon,
     ArrowDownIcon,
     ArrowUpIcon,
     CheckIcon,
-    ChevronRightIcon,
     ClockIcon,
     EllipsisHorizontalIcon,
     ExclamationCircleIcon,
+    ExclamationTriangleIcon,
     LinkIcon,
-    MapPinIcon,
-    DocumentTextIcon,
+    MagnifyingGlassIcon,
     PaperClipIcon,
-    PhotoIcon,
     PencilSquareIcon,
     PlusIcon,
     SparklesIcon,
+    ArrowsPointingOutIcon,
     StopCircleIcon,
     StopIcon,
     UserGroupIcon,
@@ -36,6 +46,15 @@ import { EmptyState } from '@/app/components/EmptyState';
 import ErrorState from '@/app/components/ErrorState';
 import SectionBoundary from '@/app/components/SectionBoundary';
 import MentionEditor from '@/app/components/activity/notes/MentionEditor';
+import AskConnexAnswerDocument, {
+    AskConnexCheckedTrail,
+    type AskConnexAnswerDocumentLabels,
+} from '@/app/components/ask-connex/AskConnexAnswerDocument';
+import {
+    AskConnexContextStrip,
+    AskConnexScopeNotice,
+    type AskConnexContextLabels,
+} from '@/app/components/ask-connex/AskConnexContextCockpit';
 import AskConnexTab from '@/app/components/ask-connex/AskConnexTab';
 import AskConnexToolCard, {
     type AskConnexToolCardLabels,
@@ -43,6 +62,8 @@ import AskConnexToolCard, {
 import type {
     AskConnexAttachment,
     AskConnexFileAttachment,
+    AskConnexScopePreview,
+    AskConnexSelectionContext,
     AskConnexToolAction,
     AskConnexToolCardState,
     AskConnexTurnState,
@@ -51,6 +72,8 @@ import {
     anchorAskConnexToolCards,
     askConnexCitationHref,
     askConnexCitations,
+    askConnexScopeNeedsConfirmation,
+    askConnexScopePreviewKey,
     askConnexTranscript,
     groupAskConnexMessages,
     hasPendingAskConnexFileOperation,
@@ -58,18 +81,18 @@ import {
 } from '@/app/lib/askConnex';
 import type { AskConnexStreamStore } from '@/app/lib/askConnexStream';
 import { easeOut, instant, springSmooth } from '@/app/lib/motion';
-import { formatFileSize } from '@/app/lib/utils';
 import type {
     AiChatCitation,
     AiChatMessage,
     AiChatParticipant,
     AiChatPresence,
+    AiChatProgressItem,
     AiChatSession,
     WorkspaceMember,
 } from '@/app/lib/types';
 import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { IconButton } from '@/components/ui/icon-button';
 import {
     Dialog,
     DialogContent,
@@ -80,7 +103,6 @@ import {
 } from '@/components/ui/dialog';
 import {
     Drawer,
-    DrawerClose,
     DrawerContent,
     DrawerDescription,
     DrawerTitle,
@@ -132,25 +154,44 @@ type UnavailableState = {
     body: string;
 } | null;
 
-type AskConnexDrawerLabels = {
+/**
+ * The vocabulary the live and settled answer surfaces need: the streamed tail, its partial-answer
+ * disclosure, the status line, and the milestone trail beneath it.
+ */
+export type AskConnexTurnLabels = {
+    answerDocument: AskConnexAnswerDocumentLabels;
     assistantAuthor: string;
+    budgetExhausted: string;
+    toolResultBudgetExhausted: string;
+    partialAnswer: string;
+    retry: string;
+    stop: string;
+    stopping: string;
+    turnAccepted: string;
+    turnCancelled: string;
+    turnFailed: string;
+    turnImageUnsupported: string;
+    turnResolved: string;
+    turnStreaming: string;
+    turnTimedOut: string;
+    turnWorking: string;
+};
+
+type AskConnexDrawerLabels = AskConnexContextLabels & AskConnexTurnLabels & {
     addContext: string;
     addRecordContext: string;
     archive: string;
     attachFile: string;
-    budgetExhausted: string;
-    toolResultBudgetExhausted: string;
     citations: string;
     disclosureCreation: string;
     disclosureList: string;
     imageDisclosure: string;
     citationKind: (kind: AiChatCitation['kind']) => string;
     close: string;
+    closeWorkspace: string;
     composerAria: string;
     composerHint: string;
     composerPlaceholder: string;
-    context: string;
-    contextLimit: string;
     emptyBody: string;
     emptyTitle: string;
     formerMember: string;
@@ -170,12 +211,12 @@ type AskConnexDrawerLabels = {
     messages: string;
     newChat: string;
     noRecentSessions: string;
+    noMatchingSessions: string;
     moreOptions: string;
     participants: string;
     presence: string;
     recentSessions: string;
-    removeContext: (label: string) => string;
-    removeFile: (label: string) => string;
+    searchSessions: string;
     removeParticipant: (name: string) => string;
     rename: string;
     renameCancel: string;
@@ -184,31 +225,18 @@ type AskConnexDrawerLabels = {
     renameSave: string;
     renameSaving: string;
     renameTitle: string;
-    retry: string;
     send: string;
     shareCancel: string;
     shareConfirm: string;
     shareDescription: string;
     shared: string;
     shareTitle: string;
-    stop: string;
-    stopping: string;
     suggestedFollowUps: string;
-    thinking: string;
     title: string;
     tooLong: string;
     typing: (names: string) => string;
     unshare: string;
-    turnAccepted: string;
-    turnCancelled: string;
-    turnFailed: string;
-    turnImageUnsupported: string;
-    turnResolved: string;
-    turnStreaming: string;
-    turnTimedOut: string;
-    turnWorking: string;
-    uploadProgress: (progress: number) => string;
-    uploadRemoving: string;
+    openWorkspace: string;
     toolCard: AskConnexToolCardLabels;
 };
 
@@ -217,6 +245,9 @@ type AskConnexDrawerProps = {
     instantOpen: boolean;
     isMobile: boolean;
     showTab: boolean;
+    workspace: boolean;
+    desktopRoot: HTMLElement | null;
+    workspaceRoot: HTMLElement | null;
     sessions: AiChatSession[];
     invitations: AiChatSession[];
     activeSession: AiChatSession | null;
@@ -230,6 +261,12 @@ type AskConnexDrawerProps = {
     loadError: Error | null;
     composer: string;
     implicitContext: AskConnexAttachment | null;
+    selectionContext: AskConnexSelectionContext | null;
+    unsupportedPageContext: { type: AskConnexSelectionContext['type']; label: string } | null;
+    pinnedContext: readonly AskConnexAttachment[];
+    pageContextPinned: boolean;
+    contextCorrected: boolean;
+    scopePreview: AskConnexScopePreview | null;
     attachments: AskConnexAttachment[];
     fileAttachments: AskConnexFileAttachment[];
     canAttachFiles: boolean;
@@ -243,12 +280,15 @@ type AskConnexDrawerProps = {
     cancelling: boolean;
     toolCalls: AskConnexToolCardState[];
     actionableToolCallIds: ReadonlySet<number>;
+    canRetryTurn: boolean;
     unavailable: UnavailableState;
     starterPrompts: string[];
     labels: AskConnexDrawerLabels;
     onOpenChange: (open: boolean) => void;
     onOpenChangeComplete: (open: boolean) => void;
     onKeyboardClose: () => void;
+    onOpenWorkspace: () => void;
+    onCloseWorkspace: () => void;
     onSelectSession: (session: AiChatSession) => void;
     onNewChat: () => void;
     onRename: (title: string) => Promise<boolean>;
@@ -261,16 +301,30 @@ type AskConnexDrawerProps = {
     onRetry: () => void;
     onComposerChange: (value: string) => void;
     onRemoveAttachment: (attachment: AskConnexAttachment) => void;
+    onTogglePagePin: () => void;
+    onUnpinContext: (attachment: AskConnexAttachment) => void;
+    onRemovePageContext: () => void;
+    onRemoveSelectionContext: () => void;
+    onResetContext: () => void;
     onAttachFiles: (files: File[]) => void;
     onRemoveFileAttachment: (attachment: AskConnexFileAttachment) => void;
     onSend: (content?: string) => void;
     onCancelTurn: () => void;
+    onRetryTurn: () => void;
     onToolAction: (toolCallId: number, action: AskConnexToolAction) => void;
 };
 
 type ConversationSurfaceProps = Omit<
     AskConnexDrawerProps,
-    'instantOpen' | 'isMobile' | 'showTab' | 'onOpenChange' | 'onOpenChangeComplete' | 'onKeyboardClose' | 'onRename'
+    'instantOpen'
+    | 'isMobile'
+    | 'showTab'
+    | 'desktopRoot'
+    | 'workspaceRoot'
+    | 'onOpenChange'
+    | 'onOpenChangeComplete'
+    | 'onKeyboardClose'
+    | 'onRename'
 > & {
     closeButton: ReactNode;
     onBeginRename: () => void;
@@ -338,7 +392,7 @@ function MessageSuggestions({
                     <Button
                         type="button"
                         variant="outline"
-                        size="xs"
+                        size="inline"
                         className="h-auto max-w-72 justify-start whitespace-normal py-1.5 text-left leading-4"
                         onClick={() => onSend(suggestion)}
                     >
@@ -347,23 +401,6 @@ function MessageSuggestions({
                 </li>
             ))}
         </ul>
-    );
-}
-
-function MessageReasoning({ reasoning, label }: { reasoning: string | null | undefined; label: string }) {
-    const content = reasoning?.trim();
-    if (!content) return null;
-
-    return (
-        <details className="group text-xs text-muted-foreground">
-            <summary className="flex min-h-8 cursor-pointer list-none items-center gap-1.5 rounded-md px-1 font-medium outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-                <ChevronRightIcon className="size-3.5 shrink-0 group-open:rotate-90" />
-                <span>{label}</span>
-            </summary>
-            <div className="ml-2 whitespace-pre-wrap break-words border-l border-border py-1 pl-4 leading-relaxed">
-                {content}
-            </div>
-        </details>
     );
 }
 
@@ -433,31 +470,44 @@ function TranscriptMessage({
             {lastInGroup
                 ? <SenderAvatar user={user} label={author} />
                 : <MessageAvatar aria-hidden className="bg-transparent" />}
-            <MessageContent className="w-auto max-w-[85%] gap-1.5">
+            <MessageContent className={cn(
+                'w-auto gap-1.5',
+                !user && message.answerDocument ? 'max-w-full' : 'max-w-[85%]',
+            )}>
                 {firstInGroup ? (
                     <MessageHeader className={user ? 'justify-end' : undefined}>
                         {author}
                     </MessageHeader>
                 ) : null}
-                {!user && message.contentWithheld !== true
-                    ? <MessageReasoning reasoning={message.reasoning} label={labels.thinking} />
-                    : null}
                 <motion.div
                     initial={animateEntrance ? (reduceMotion ? { opacity: 0 } : { opacity: 0, transform: 'translateY(0.375rem)' }) : false}
                     animate={{ opacity: 1, transform: 'translateY(0rem)' }}
                     transition={reduceMotion ? instant : { duration: 0.2, ease: easeOut }}
                     className={cn(
-                        'whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed',
+                        message.answerDocument
+                            ? 'w-full'
+                            : 'whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed',
                         message.contentWithheld === true
                             ? 'bg-muted text-muted-foreground italic'
                             : user
                             ? 'bg-primary text-primary-foreground'
-                            : 'bg-muted text-foreground',
+                            : message.answerDocument
+                                ? null
+                                : 'bg-muted text-foreground',
                     )}
                 >
-                    {message.contentWithheld === true ? labels.contentWithheld : message.content}
+                    {message.contentWithheld === true
+                        ? labels.contentWithheld
+                        : !user && message.answerDocument
+                            ? (
+                                <AskConnexAnswerDocument
+                                    document={message.answerDocument}
+                                    labels={labels.answerDocument}
+                                />
+                            )
+                            : message.content}
                 </motion.div>
-                {!user && message.contentWithheld !== true
+                {!user && message.contentWithheld !== true && !message.answerDocument
                     ? <MessageCitations citations={message.citations} labels={labels} />
                     : null}
                 {!user && message.contentWithheld !== true ? (
@@ -544,18 +594,78 @@ function PresenceStrip({ presence, labels }: { presence: AiChatPresence; labels:
     );
 }
 
-function TurnActivity({
+/**
+ * A settled answer that produced no transcript message: what happened, what it covered before it
+ * stopped, and the one action worth offering next.
+ *
+ * The milestone trail is repeated here because it otherwise exists only while the answer is still
+ * running — a reader who arrives after it stopped would have no way to learn what was covered. The
+ * announcement is deliberately kept to the one-line outcome: the trail and the retry control sit
+ * outside it so settling does not read a whole list aloud.
+ */
+function SettledTurnActivity({
+    icon,
+    message,
+    destructive,
+    progress,
+    labels,
+    canRetry,
+    onRetry,
+}: {
+    icon: ReactNode;
+    message: string;
+    destructive?: boolean;
+    progress: AiChatProgressItem[];
+    labels: AskConnexTurnLabels;
+    canRetry: boolean;
+    onRetry: () => void;
+}) {
+    return (
+        <div className="space-y-2 px-4 py-2 text-xs text-muted-foreground">
+            <div
+                role="status"
+                className={cn('flex items-center gap-2', destructive && 'text-destructive')}
+            >
+                {icon}
+                <span>{message}</span>
+            </div>
+            <AskConnexCheckedTrail progress={progress} labels={labels.answerDocument} />
+            {canRetry ? (
+                <Button type="button" variant="outline" size="inline" onClick={onRetry}>
+                    <ArrowPathIcon />
+                    {labels.retry}
+                </Button>
+            ) : null}
+        </div>
+    );
+}
+
+/**
+ * The live and settled state of the answer in progress.
+ *
+ * While the answer runs, the whole region is the announced status so each new milestone is spoken
+ * as it lands rather than only the overall phase; the streamed words themselves are never announced.
+ *
+ * The stop control appears only for the member who asked. A participant who opened a shared session
+ * mid-turn adopts that turn into the same state, and the cancellation endpoint rejects anyone but
+ * its requester, so offering the control to them would be a button that can only fail.
+ */
+export function TurnActivity({
     turn,
     streaming,
     cancelling,
+    canRetry,
     labels,
     onCancel,
+    onRetry,
 }: {
     turn: AskConnexTurnState;
     streaming: boolean;
     cancelling: boolean;
-    labels: AskConnexDrawerLabels;
+    canRetry: boolean;
+    labels: AskConnexTurnLabels;
     onCancel: () => void;
+    onRetry: () => void;
 }) {
     if (turn.phase === 'idle') return null;
     if (turn.phase === 'resolved') {
@@ -568,66 +678,96 @@ function TurnActivity({
     }
     if (turn.phase === 'failed') {
         return (
-            <div role="status" className="flex items-center gap-2 px-4 py-2 text-xs text-destructive">
-                <ExclamationCircleIcon className="size-3.5" />
-                <span>{turn.reason === 'image_input_unsupported'
+            <SettledTurnActivity
+                icon={<ExclamationCircleIcon className="size-3.5" />}
+                destructive
+                message={turn.reason === 'image_input_unsupported'
                     ? labels.turnImageUnsupported
                     : turn.reason === 'tool_result_budget_exhausted'
                         ? labels.toolResultBudgetExhausted
                         : turn.reason === 'budget_exhausted'
                             ? labels.budgetExhausted
-                            : labels.turnFailed}</span>
-            </div>
+                            : labels.turnFailed}
+                progress={turn.progress}
+                labels={labels}
+                canRetry={canRetry}
+                onRetry={onRetry}
+            />
         );
     }
     if (turn.phase === 'timed_out') {
         return (
-            <div role="status" className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground">
-                <ClockIcon className="size-3.5" />
-                <span>{labels.turnTimedOut}</span>
-            </div>
+            <SettledTurnActivity
+                icon={<ClockIcon className="size-3.5" />}
+                message={labels.turnTimedOut}
+                progress={turn.progress}
+                labels={labels}
+                canRetry={canRetry}
+                onRetry={onRetry}
+            />
         );
     }
     if (turn.phase === 'cancelled') {
         return (
-            <div role="status" className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground">
-                <StopCircleIcon className="size-3.5" />
-                <span>{labels.turnCancelled}</span>
-            </div>
+            <SettledTurnActivity
+                icon={<StopCircleIcon className="size-3.5" />}
+                message={labels.turnCancelled}
+                progress={turn.progress}
+                labels={labels}
+                canRetry={false}
+                onRetry={onRetry}
+            />
         );
     }
     return (
-        <div role="status" className="flex items-center gap-2 px-4 py-1 text-xs text-muted-foreground">
-            <SparklesIcon className="size-3.5" />
-            <span>{cancelling
-                ? labels.stopping
-                : turn.phase === 'accepted'
-                    ? labels.turnAccepted
-                    : streaming
-                        ? labels.turnStreaming
-                        : labels.turnWorking}</span>
-            <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-label={labels.stop}
-                disabled={cancelling}
-                onClick={onCancel}
-            >
-                <StopIcon className="size-3.5" />
-            </Button>
+        <div role="status" className="space-y-2 px-4 py-2 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2">
+                <SparklesIcon className="size-3.5" />
+                <span>{cancelling
+                    ? labels.stopping
+                    : turn.phase === 'accepted'
+                        ? labels.turnAccepted
+                        : streaming
+                            ? labels.turnStreaming
+                            : labels.turnWorking}</span>
+                {turn.cancellable ? (
+                    <IconButton
+                        type="button"
+                        variant="ghost"
+                        size="icon-toolbar"
+                        label={labels.stop}
+                        disabled={cancelling}
+                        onClick={onCancel}
+                    >
+                        <StopIcon className="size-3.5" />
+                    </IconButton>
+                ) : null}
+            </div>
+            <AskConnexCheckedTrail
+                progress={turn.progress}
+                labels={labels.answerDocument}
+                expanded
+            />
         </div>
     );
 }
 
-function StreamingTail({
+/**
+ * The words the assistant has written so far, and — once the answer stops without resolving — the
+ * words it had written when it stopped.
+ *
+ * A settled answer that never resolved leaves no transcript message behind, so this tail is the
+ * only place its partial text exists. It stays on screen and says plainly that it is unfinished
+ * rather than disappearing and leaving a one-line failure where an answer had been forming.
+ */
+export function StreamingTail({
     store,
     turn,
     labels,
 }: {
     store: AskConnexStreamStore;
     turn: AskConnexTurnState;
-    labels: AskConnexDrawerLabels;
+    labels: AskConnexTurnLabels;
 }) {
     const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, () => null);
     if (snapshot === null || snapshot.text.length === 0 || snapshot.turnId !== turn.turnId) {
@@ -651,6 +791,12 @@ function StreamingTail({
                                 />
                             ) : null}
                         </div>
+                        {live ? null : (
+                            <p className="flex items-start gap-1.5 px-1 text-xs text-muted-foreground">
+                                <ExclamationTriangleIcon aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+                                <span>{labels.partialAnswer}</span>
+                            </p>
+                        )}
                     </MessageContent>
                 </Message>
             </MessageGroup>
@@ -658,101 +804,6 @@ function StreamingTail({
     );
 }
 
-function ContextChips({
-    implicitContext,
-    attachments,
-    fileAttachments,
-    canRemoveFiles,
-    fileOperationPending,
-    overflow,
-    labels,
-    onRemove,
-    onRemoveFile,
-}: {
-    implicitContext: AskConnexAttachment | null;
-    attachments: AskConnexAttachment[];
-    fileAttachments: AskConnexFileAttachment[];
-    canRemoveFiles: boolean;
-    fileOperationPending: boolean;
-    overflow: boolean;
-    labels: AskConnexDrawerLabels;
-    onRemove: (attachment: AskConnexAttachment) => void;
-    onRemoveFile: (attachment: AskConnexFileAttachment) => void;
-}) {
-    if (!implicitContext && attachments.length === 0 && fileAttachments.length === 0 && !overflow) return null;
-
-    return (
-        <div role="group" className="mb-2" aria-label={labels.context}>
-            <div className="flex min-w-0 items-center gap-1.5 overflow-x-auto">
-                {implicitContext ? (
-                    <Badge variant="outline" className="max-w-44 shrink-0 text-muted-foreground">
-                        <MapPinIcon />
-                        <span className="truncate">{implicitContext.label}</span>
-                    </Badge>
-                ) : null}
-                {attachments.map((attachment) => (
-                    <Badge key={`${attachment.kind}:${attachment.id}`} variant="secondary" className="max-w-44 shrink-0 pr-1">
-                        <span className="truncate">{attachment.label}</span>
-                        <button
-                            type="button"
-                            aria-label={labels.removeContext(attachment.label)}
-                            onClick={() => onRemove(attachment)}
-                            className="rounded-full p-0.5 outline-none hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring"
-                        >
-                            <XMarkIcon className="size-3" />
-                        </button>
-                    </Badge>
-                ))}
-                {fileAttachments.map((attachment) => {
-                    const FileIcon = attachment.kind === 'image' ? PhotoIcon : DocumentTextIcon;
-                    const detail = attachment.status === 'uploading'
-                        ? labels.uploadProgress(attachment.progress)
-                        : attachment.status === 'removing'
-                            ? labels.uploadRemoving
-                        : attachment.status === 'failed'
-                            ? attachment.error
-                            : formatFileSize(attachment.size);
-                    return (
-                        <Badge
-                            key={attachment.clientId}
-                            variant={attachment.status === 'failed' ? 'destructive' : 'outline'}
-                            aria-invalid={attachment.status === 'failed' || undefined}
-                            className="h-auto max-w-56 shrink-0 py-1 pr-1"
-                        >
-                            <FileIcon />
-                            <span className="min-w-0">
-                                <span className="block truncate">{attachment.fileName}</span>
-                                <span
-                                    role={attachment.status === 'failed'
-                                        ? 'alert'
-                                        : attachment.status === 'uploading' || attachment.status === 'removing'
-                                            ? 'status'
-                                            : undefined}
-                                    className="block truncate text-[10px] font-normal opacity-70"
-                                >
-                                    {detail}
-                                </span>
-                            </span>
-                            <button
-                                type="button"
-                                aria-label={labels.removeFile(attachment.fileName)}
-                                disabled={!canRemoveFiles
-                                    || fileOperationPending
-                                    || attachment.status === 'uploading'
-                                    || attachment.status === 'removing'}
-                                onClick={() => onRemoveFile(attachment)}
-                                className="rounded-full p-0.5 outline-none hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring"
-                            >
-                                <XMarkIcon className="size-3" />
-                            </button>
-                        </Badge>
-                    );
-                })}
-            </div>
-            {overflow ? <p role="alert" className="mt-1.5 text-xs text-destructive">{labels.contextLimit}</p> : null}
-        </div>
-    );
-}
 
 function SessionMenu({
     sessions,
@@ -786,9 +837,9 @@ function SessionMenu({
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon-sm" aria-label={labels.moreOptions}>
+                <IconButton variant="ghost" size="icon-toolbar" label={labels.moreOptions}>
                     <EllipsisHorizontalIcon className="size-4" />
-                </Button>
+                </IconButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-72">
                 <DropdownMenuLabel>{labels.recentSessions}</DropdownMenuLabel>
@@ -874,6 +925,12 @@ function ConversationSurface({
     loadError,
     composer,
     implicitContext,
+    selectionContext,
+    unsupportedPageContext,
+    pinnedContext,
+    pageContextPinned,
+    contextCorrected,
+    scopePreview,
     attachments,
     fileAttachments,
     canAttachFiles,
@@ -887,6 +944,7 @@ function ConversationSurface({
     cancelling,
     toolCalls,
     actionableToolCallIds,
+    canRetryTurn,
     unavailable,
     starterPrompts,
     labels,
@@ -901,12 +959,20 @@ function ConversationSurface({
     onRetry,
     onComposerChange,
     onRemoveAttachment,
+    onTogglePagePin,
+    onUnpinContext,
+    onRemovePageContext,
+    onRemoveSelectionContext,
+    onResetContext,
     onAttachFiles,
     onRemoveFileAttachment,
     onSend,
     onCancelTurn,
+    onRetryTurn,
     onToolAction,
+    onOpenWorkspace,
     open,
+    workspace,
 }: ConversationSurfaceProps) {
     const transcript = useMemo(
         () => askConnexTranscript(messages, activeSession?.historySummarized === true),
@@ -942,13 +1008,37 @@ function ConversationSurface({
         && !fileOperationPending
         && !busy
         && unavailable === null;
+    const contextGroupRef = useRef<HTMLDivElement>(null);
+    const [confirmedScopeKey, setConfirmedScopeKey] = useState<string | null>(null);
+    const [pendingScope, setPendingScope] = useState<{ key: string; content?: string } | null>(null);
+    const scopeKey = askConnexScopePreviewKey(scopePreview);
+    const asking = pendingScope !== null && pendingScope.key === scopeKey;
+
+    const requestSend = (content?: string) => {
+        if (!canSend) return;
+        if (scopeKey !== null && askConnexScopeNeedsConfirmation(scopeKey, confirmedScopeKey)) {
+            setPendingScope({ key: scopeKey, content });
+            return;
+        }
+        setPendingScope(null);
+        onSend(content);
+    };
 
     return (
-        <div className="flex h-full min-h-0 flex-col bg-popover text-popover-foreground">
+        <div className={cn(
+            'flex h-full min-h-0 flex-col text-popover-foreground',
+            workspace ? 'bg-background' : 'bg-popover',
+        )}>
             <header className="flex shrink-0 items-center gap-1 border-b border-border px-3 py-2">
-                <p className="min-w-0 flex-1 truncate px-2 text-sm font-medium text-foreground">
-                    {activeSession?.title ?? labels.newChat}
-                </p>
+                {workspace ? (
+                    <h1 className="min-w-0 flex-1 truncate px-2 text-sm font-medium text-foreground">
+                        {activeSession?.title ?? labels.newChat}
+                    </h1>
+                ) : (
+                    <p className="min-w-0 flex-1 truncate px-2 text-sm font-medium text-foreground">
+                        {activeSession?.title ?? labels.newChat}
+                    </p>
+                )}
                 <SessionMenu
                     sessions={sessions}
                     invitations={invitations}
@@ -964,6 +1054,17 @@ function ConversationSurface({
                     onManageSharing={onManageSharing}
                     onLeave={onLeave}
                 />
+                {!workspace ? (
+                    <IconButton
+                        type="button"
+                        variant="ghost"
+                        size="icon-toolbar"
+                        label={labels.openWorkspace}
+                        onClick={onOpenWorkspace}
+                    >
+                        <ArrowsPointingOutIcon className="size-4" />
+                    </IconButton>
+                ) : null}
                 {closeButton}
             </header>
 
@@ -979,7 +1080,10 @@ function ConversationSurface({
             >
                 <MessageScroller className="min-h-0 flex-1">
                     <MessageScrollerViewport aria-label={labels.messages}>
-                        <MessageScrollerContent aria-busy={busy}>
+                        <MessageScrollerContent
+                            aria-busy={busy}
+                            className={workspace ? 'mx-auto w-full max-w-4xl' : undefined}
+                        >
                             {loadState === 'loading' ? (
                                 <MessageScrollerItem messageId="loading">
                                     <TranscriptSkeleton />
@@ -1080,7 +1184,7 @@ function ConversationSurface({
                                                                 toolCalls={toolCardAnchors.byMessageId.get(message.id) ?? []}
                                                                 actionableToolCallIds={actionableToolCallIds}
                                                                 labels={labels}
-                                                                onSend={onSend}
+                                                                onSend={requestSend}
                                                                 onToolAction={onToolAction}
                                                             />
                                                         ))}
@@ -1116,8 +1220,10 @@ function ConversationSurface({
                                         turn={turn}
                                         streaming={streaming}
                                         cancelling={cancelling}
+                                        canRetry={canRetryTurn}
                                         labels={labels}
                                         onCancel={onCancelTurn}
+                                        onRetry={onRetryTurn}
                                     />
                                 </MessageScrollerItem>
                             ) : null}
@@ -1141,20 +1247,48 @@ function ConversationSurface({
                     className="shrink-0 border-t border-border p-3"
                     onSubmit={(event) => {
                         event.preventDefault();
-                        if (canSend) onSend();
+                        requestSend();
                     }}
                 >
-                    <ContextChips
+                    <AskConnexContextStrip
+                        groupRef={contextGroupRef}
                         implicitContext={implicitContext}
+                        pinnedContext={pinnedContext}
+                        pageContextPinned={pageContextPinned}
+                        selectionContext={selectionContext}
+                        unsupportedPageContext={unsupportedPageContext}
                         attachments={attachments}
                         fileAttachments={fileAttachments}
                         canRemoveFiles={canRemoveFiles}
                         fileOperationPending={fileOperationPending}
                         overflow={contextOverflow}
+                        corrected={contextCorrected}
                         labels={labels}
                         onRemove={onRemoveAttachment}
                         onRemoveFile={onRemoveFileAttachment}
+                        onTogglePagePin={onTogglePagePin}
+                        onUnpin={onUnpinContext}
+                        onRemovePage={onRemovePageContext}
+                        onRemoveSelection={onRemoveSelectionContext}
+                        onReset={onResetContext}
                     />
+                    {asking && scopePreview !== null ? (
+                        <AskConnexScopeNotice
+                            preview={scopePreview}
+                            labels={labels}
+                            onConfirm={() => {
+                                if (scopeKey === null) return;
+                                const content = pendingScope?.content;
+                                setConfirmedScopeKey(scopeKey);
+                                setPendingScope(null);
+                                onSend(content);
+                            }}
+                            onEdit={() => {
+                                setPendingScope(null);
+                                contextGroupRef.current?.focus();
+                            }}
+                        />
+                    ) : null}
                     {fileAttachments.some((attachment) => attachment.kind === 'image') ? (
                         <p className="mb-2 text-xs leading-relaxed text-muted-foreground">
                             {labels.imageDisclosure}
@@ -1164,9 +1298,7 @@ function ConversationSurface({
                         <MentionEditor
                             value={composer}
                             onChange={onComposerChange}
-                            onSubmit={() => {
-                                if (canSend) onSend();
-                            }}
+                            onSubmit={() => requestSend()}
                             placeholder={labels.composerPlaceholder}
                             ariaLabel={labels.composerAria}
                             mentionTypes={ASK_CONNEX_MENTION_TYPES}
@@ -1192,15 +1324,15 @@ function ConversationSurface({
                             ) : null}
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                    <Button
+                                    <IconButton
                                         type="button"
                                         variant="ghost"
-                                        size="icon-sm"
-                                        aria-label={labels.addContext}
+                                        size="icon-toolbar"
+                                        label={labels.addContext}
                                         disabled={busy || loadState !== 'ready' || unavailable !== null}
                                     >
                                         <PlusIcon className="size-4" />
-                                    </Button>
+                                    </IconButton>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="start" side="top" className="w-52">
                                     <DropdownMenuItem
@@ -1223,14 +1355,148 @@ function ConversationSurface({
                                     <p>{labels.composerHint}</p>
                                 )}
                             </div>
-                            <Button className="ml-auto" type="submit" size="icon-sm" aria-label={labels.send} disabled={!canSend}>
+                            <IconButton
+                                className="ml-auto"
+                                type="submit"
+                                size="icon-toolbar"
+                                label={labels.send}
+                                disabled={!canSend}
+                            >
                                 <ArrowUpIcon className="size-4" />
-                            </Button>
+                            </IconButton>
                         </div>
                     </div>
                 </form>
             )}
         </div>
+    );
+}
+
+/**
+ * One destination in the workspace session rail. Invitations and chats are the same navigation
+ * item — both land the user in a session — so they share one row rather than one row and a
+ * look-alike, and both declare the current-page state the rail's `<nav>` implies.
+ */
+function SessionRailRow({
+    title,
+    current,
+    disabled,
+    leading,
+    trailing,
+    onSelect,
+}: {
+    title: string;
+    current: boolean;
+    disabled: boolean;
+    leading?: ReactNode;
+    trailing?: ReactNode;
+    onSelect: () => void;
+}) {
+    return (
+        <button
+            type="button"
+            disabled={disabled}
+            aria-current={current ? 'page' : undefined}
+            onClick={onSelect}
+            className={cn(
+                'flex min-h-10 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50',
+                current && 'bg-muted font-medium text-foreground',
+            )}
+        >
+            {leading}
+            <span className="min-w-0 flex-1 truncate">{title}</span>
+            {trailing}
+        </button>
+    );
+}
+
+function WorkspaceSessionRail({
+    sessions,
+    invitations,
+    activeSession,
+    working,
+    labels,
+    onSelectSession,
+    onJoinInvitation,
+    onNewChat,
+}: {
+    sessions: AiChatSession[];
+    invitations: AiChatSession[];
+    activeSession: AiChatSession | null;
+    working: boolean;
+    labels: AskConnexDrawerLabels;
+    onSelectSession: (session: AiChatSession) => void;
+    onJoinInvitation: (session: AiChatSession) => void;
+    onNewChat: () => void;
+}) {
+    const [query, setQuery] = useState('');
+    const normalized = query.trim().toLocaleLowerCase();
+    const filtered = normalized.length === 0
+        ? sessions
+        : sessions.filter((session) => session.title.toLocaleLowerCase().includes(normalized));
+    return (
+        <aside className="hidden min-h-0 w-72 shrink-0 flex-col border-r border-border bg-muted/30 md:flex">
+            <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+                <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-foreground">{labels.title}</p>
+                    <p className="truncate text-xs text-muted-foreground">{labels.recentSessions}</p>
+                </div>
+                <IconButton
+                    type="button"
+                    variant="ghost"
+                    size="icon-toolbar"
+                    label={labels.newChat}
+                    disabled={working}
+                    onClick={onNewChat}
+                >
+                    <PlusIcon className="size-4" />
+                </IconButton>
+            </div>
+            <div className="p-3">
+                <div className="relative">
+                    <MagnifyingGlassIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                        value={query}
+                        onChange={(event) => setQuery(event.target.value)}
+                        placeholder={labels.searchSessions}
+                        aria-label={labels.searchSessions}
+                        className="pl-9"
+                    />
+                </div>
+            </div>
+            <nav aria-label={labels.recentSessions} className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+                {invitations.map((invitation) => (
+                    <SessionRailRow
+                        key={`invitation:${invitation.id}`}
+                        title={invitation.title}
+                        current={false}
+                        disabled={working}
+                        leading={<UserPlusIcon className="size-4 shrink-0 text-muted-foreground" />}
+                        trailing={<span className="text-xs text-muted-foreground">{labels.join}</span>}
+                        onSelect={() => onJoinInvitation(invitation)}
+                    />
+                ))}
+                {filtered.length === 0 ? (
+                    <p className="px-3 py-8 text-center text-xs text-muted-foreground">
+                        {labels.noMatchingSessions}
+                    </p>
+                ) : filtered.map((session) => (
+                    <SessionRailRow
+                        key={session.id}
+                        title={session.title}
+                        current={activeSession?.id === session.id}
+                        disabled={working}
+                        trailing={session.visibility === 'shared'
+                            ? <UserGroupIcon className="size-4 shrink-0 text-muted-foreground" />
+                            : null}
+                        onSelect={() => onSelectSession(session)}
+                    />
+                ))}
+            </nav>
+            <p className="border-t border-border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+                {labels.disclosureList}
+            </p>
+        </aside>
     );
 }
 
@@ -1241,6 +1507,9 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         instantOpen,
         isMobile,
         showTab,
+        workspace,
+        desktopRoot,
+        workspaceRoot,
         activeSession,
         labels,
         onOpenChange,
@@ -1250,7 +1519,6 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
     } = props;
     const reduceMotion = useReducedMotion() ?? false;
     const desktopTriggerRef = useRef<HTMLButtonElement>(null);
-    const [desktopRoot, setDesktopRoot] = useState<HTMLElement | null>(null);
     const [renameOpen, setRenameOpen] = useState(false);
     const [renameValue, setRenameValue] = useState('');
     const [renaming, setRenaming] = useState(false);
@@ -1261,13 +1529,6 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
     const availableMembers = props.members.filter((member) => (
         member.id !== activeSession?.createdByUserId && !participantIds.has(member.id)
     ));
-
-    useEffect(() => {
-        const frame = requestAnimationFrame(() => {
-            setDesktopRoot(document.getElementById('ask-connex-desktop-root'));
-        });
-        return () => cancelAnimationFrame(frame);
-    }, []);
 
     useEffect(() => {
         if (isMobile || !open) return;
@@ -1341,6 +1602,12 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         loadError: props.loadError,
         composer: props.composer,
         implicitContext: props.implicitContext,
+        selectionContext: props.selectionContext,
+        unsupportedPageContext: props.unsupportedPageContext,
+        pinnedContext: props.pinnedContext,
+        pageContextPinned: props.pageContextPinned,
+        contextCorrected: props.contextCorrected,
+        scopePreview: props.scopePreview,
         attachments: props.attachments,
         fileAttachments: props.fileAttachments,
         canAttachFiles: props.canAttachFiles,
@@ -1354,9 +1621,11 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         cancelling: props.cancelling,
         toolCalls: props.toolCalls,
         actionableToolCallIds: props.actionableToolCallIds,
+        canRetryTurn: props.canRetryTurn,
         unavailable: props.unavailable,
         starterPrompts: props.starterPrompts,
         labels: props.labels,
+        workspace: props.workspace,
         closeButton: null,
         onSelectSession: props.onSelectSession,
         onNewChat: props.onNewChat,
@@ -1371,14 +1640,22 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         onRetry: props.onRetry,
         onComposerChange: props.onComposerChange,
         onRemoveAttachment: props.onRemoveAttachment,
+        onTogglePagePin: props.onTogglePagePin,
+        onUnpinContext: props.onUnpinContext,
+        onRemovePageContext: props.onRemovePageContext,
+        onRemoveSelectionContext: props.onRemoveSelectionContext,
+        onResetContext: props.onResetContext,
         onAttachFiles: props.onAttachFiles,
         onRemoveFileAttachment: props.onRemoveFileAttachment,
         onSend: props.onSend,
         onCancelTurn: props.onCancelTurn,
+        onRetryTurn: props.onRetryTurn,
         onToolAction: props.onToolAction,
+        onOpenWorkspace: props.onOpenWorkspace,
+        onCloseWorkspace: props.onCloseWorkspace,
     };
 
-    const desktopPanel = !isMobile && desktopRoot ? createPortal(
+    const desktopPanel = !workspace && !isMobile && desktopRoot ? createPortal(
         <>
             {showTab ? (
                 <AskConnexTab
@@ -1409,15 +1686,15 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
                     {...surfaceProps}
                     open={open}
                     closeButton={(
-                        <Button
+                        <IconButton
                             type="button"
                             variant="ghost"
-                            size="icon-sm"
-                            aria-label={labels.close}
+                            size="icon-toolbar"
+                            label={labels.close}
                             onClick={closeDesktopPanel}
                         >
                             <XMarkIcon className="size-4" />
-                        </Button>
+                        </IconButton>
                     )}
                 />
             </motion.aside>
@@ -1425,10 +1702,45 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         desktopRoot,
     ) : null;
 
+    const workspacePanel = workspace && workspaceRoot ? createPortal(
+        <div className="flex h-full min-h-0 bg-background text-foreground">
+            <WorkspaceSessionRail
+                sessions={props.sessions}
+                invitations={props.invitations}
+                activeSession={props.activeSession}
+                working={props.working}
+                labels={labels}
+                onSelectSession={props.onSelectSession}
+                onJoinInvitation={props.onJoinInvitation}
+                onNewChat={props.onNewChat}
+            />
+            <div className="min-w-0 flex-1">
+                <ConversationSurface
+                    {...surfaceProps}
+                    open
+                    workspace
+                    closeButton={(
+                        <IconButton
+                            type="button"
+                            variant="ghost"
+                            size="icon-toolbar"
+                            label={labels.closeWorkspace}
+                            onClick={props.onCloseWorkspace}
+                        >
+                            <ArrowLeftIcon className="size-4" />
+                        </IconButton>
+                    )}
+                />
+            </div>
+        </div>,
+        workspaceRoot,
+    ) : null;
+
     return (
         <>
             {desktopPanel}
-            {isMobile ? (
+            {workspacePanel}
+            {isMobile && !workspace ? (
                 <Drawer
                     open={open}
                     onOpenChange={onOpenChange}
@@ -1454,9 +1766,15 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
                             {...surfaceProps}
                             open
                             closeButton={(
-                                <DrawerClose render={<Button variant="ghost" size="icon-sm" aria-label={labels.close} />}>
+                                <IconButton
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon-toolbar"
+                                    label={labels.close}
+                                    onClick={() => onOpenChange(false)}
+                                >
                                     <XMarkIcon className="size-4" />
-                                </DrawerClose>
+                                </IconButton>
                             )}
                         />
                     </DrawerContent>
@@ -1533,16 +1851,16 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
                                                 {participant.status === 'invited' ? labels.invitePending : labels.shared}
                                             </span>
                                             {participant.role === 'participant' ? (
-                                                <Button
+                                                <IconButton
                                                     type="button"
                                                     variant="ghost"
-                                                    size="icon-sm"
-                                                    aria-label={labels.removeParticipant(participant.displayName)}
+                                                    size="icon-toolbar"
+                                                    label={labels.removeParticipant(participant.displayName)}
                                                     onClick={() => props.onRemoveParticipant(participant.userId)}
                                                     disabled={sharing}
                                                 >
                                                     <XMarkIcon className="size-4" />
-                                                </Button>
+                                                </IconButton>
                                             ) : null}
                                         </li>
                                     ))}

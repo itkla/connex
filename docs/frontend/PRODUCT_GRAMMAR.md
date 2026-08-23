@@ -78,6 +78,14 @@ Fine-pointer calendar interaction may use an anchored event peek followed by the
 
 Products are managed in-place through their existing dialog rather than a separate detail route. Do not fake unsupported record-browser capabilities. Export copy must state backend filtering limitations rather than promise filters that are not applied.
 
+### Ask Connex workspace
+
+`/ask-connex` and `/ask-connex/[sessionId]` are the one routed exception to `PageShell`/`PageHeader`. They are a full-bleed conversational surface, not a page of content: `ContentShell` deliberately suppresses the toolbar, breadcrumb, and mobile bar for them, and the session rail plus transcript plus composer own the full viewport height. Their `page.tsx` therefore renders only the container the persistent Ask Connex controller mounts into, and the breadcrumb registry classifies both routes as `owned`.
+
+This exists so the drawer and the routed workspace stay **one controller with two mounts**. Neither route may create its own session store, socket, or streaming; the route registers its container through the Ask Connex mount context and the controller portals into it, so a session survives moving between the drawer, `/ask-connex`, and a deep link. Both routes share one `loading.tsx` skeleton because they paint the same shell.
+
+Do not read this as licence for other full-height surfaces to skip the page shell: it is granted by the surface being a second mount of an app-shell-level controller, not by being tall.
+
 ### Timeline comments
 
 Timeline comment rows are chronology/read-only representations. `CommentsSection` owns composition/thread actions. Do not wrap `NoteContent` itself in a link because its parsed content may contain anchors; use a separate thread handoff.

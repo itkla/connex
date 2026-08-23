@@ -49,6 +49,8 @@ const ROUTE_CASES = [
     ["/activity/tasks/1", "shell"],
     ["/activity/tasks", "shell"],
     ["/admin/logs", "shell"],
+    ["/ask-connex", "owned"],
+    ["/ask-connex/1", "owned"],
     ["/dashboard", "shell"],
     ["/library/documents/1", "owned"],
     ["/library/documents/new", "owned"],
@@ -125,6 +127,7 @@ const DYNAMIC_SEGMENT_EXAMPLES: Readonly<Record<string, string>> = {
     legacyRuleId: "1",
     recipeKey: "deal-won-handoff",
     runKey: "canonical-1",
+    sessionId: "1",
     snapshotId: "2",
     workflowId: "1",
 };

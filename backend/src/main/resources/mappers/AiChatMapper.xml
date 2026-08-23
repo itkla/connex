@@ -596,6 +596,18 @@
       </foreach>
   </select>
 
+  <select id="getLatestActiveTurnBySession" resultMap="turnResult">
+    SELECT id, workspace_id, session_id, requested_by_user_id, status,
+           terminal_reason, privacy_mode, streamed, partial_content,
+           partial_content_utf16_offset, cancel_requested_at, created_at, updated_at
+    FROM ai_chat_turn
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+      AND status IN ('queued', 'running')
+    ORDER BY id DESC
+    LIMIT 1
+  </select>
+
   <update id="markTurnRunning">
     UPDATE ai_chat_turn
     SET status = 'running', terminal_reason = NULL
@@ -751,6 +763,22 @@
       AND tc.status = 'proposed'
     </if>
     ORDER BY m.seq ASC, tc.id ASC
+    LIMIT #{limit}
+  </select>
+
+  <select id="listToolCallsByTurn" resultMap="toolCallResult">
+    SELECT tc.id, tc.workspace_id, tc.message_id, m.session_id,
+           m.author_user_id AS requested_by_user_id, tc.tool_name, tc.status,
+           tc.arguments_json, tc.thought_signature, tc.result_json,
+           tc.executed_by_user_id, tc.executed_at,
+           tc.idempotency_key, tc.created_at, tc.updated_at
+    FROM ai_chat_tool_call tc
+    JOIN ai_chat_message m
+      ON m.workspace_id = tc.workspace_id AND m.id = tc.message_id
+    WHERE tc.workspace_id = #{workspaceId}
+      AND m.session_id = #{sessionId}
+      AND tc.idempotency_key LIKE CONCAT(#{idempotencyPrefix}, '%')
+    ORDER BY tc.id ASC
     LIMIT #{limit}
   </select>
 

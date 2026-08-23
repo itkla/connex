@@ -34,6 +34,8 @@ export const SHIPPED_APP_ROUTES = [
     '/activity/tasks',
     '/activity/tasks/[id]',
     '/admin/logs',
+    '/ask-connex',
+    '/ask-connex/[sessionId]',
     '/dashboard',
     '/library/documents',
     '/library/documents/[id]',

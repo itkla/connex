@@ -673,7 +673,14 @@ class AiInvocationServiceTest {
                 null);
         providerReturns(new AiCompletionResult(
                 "{\"tool\":null,\"final\":{\"text\":\"One relationship is cooling.\","
-                        + "\"citations\":[],\"suggestions\":[],\"title\":null}}",
+                        + "\"citations\":[],\"suggestions\":[],\"title\":null,"
+                        + "\"blocks\":[{\"kind\":\"answer\",\"title\":null,"
+                        + "\"body\":\"One relationship is cooling.\",\"items\":[],"
+                        + "\"rows\":[],\"citations\":[]}],"
+                        + "\"coverage\":{\"status\":\"complete\",\"asOf\":null,"
+                        + "\"periodStart\":null,\"periodEnd\":null,"
+                        + "\"sources\":[\"records\"],\"exclusions\":[],"
+                        + "\"truncated\":false}}}",
                 20,
                 8,
                 "stop",

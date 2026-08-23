@@ -10,13 +10,14 @@ import {
     failAskConnexStreamHydration,
     requestAskConnexTurnCancel,
     settleAskConnexStreamHydration,
+    shouldDropAskConnexStream,
     shouldResetAskConnexStream,
     type AskConnexStreamState,
 } from '@/app/lib/askConnexStream';
 import type { AiChatDeltaFrame, AiChatRealtimeFrame } from '@/app/lib/types';
 
 function delta(seq: number, text: string, turnId = 9): AiChatDeltaFrame {
-    return { turnId, seq, kind: 'delta', text };
+    return { workspaceId: 7, sessionId: 4, turnId, seq, kind: 'delta', text };
 }
 
 function applyAll(state: AskConnexStreamState, frames: AiChatDeltaFrame[]): AskConnexStreamState {
@@ -25,6 +26,21 @@ function applyAll(state: AskConnexStreamState, frames: AiChatDeltaFrame[]): AskC
         state,
     );
 }
+
+describe('settled answer retention', () => {
+    it('drops the streamed tail only for the answer that finished', () => {
+        expect(shouldDropAskConnexStream('resolved')).toBe(true);
+        for (const status of ['failed', 'cancelled', 'timed_out']) {
+            expect(shouldDropAskConnexStream(status)).toBe(false);
+        }
+    });
+
+    it('keeps the tail while the answer is still being produced', () => {
+        for (const status of ['accepted', 'queued', 'running']) {
+            expect(shouldDropAskConnexStream(status)).toBe(false);
+        }
+    });
+});
 
 describe('Ask Connex stream reassembly', () => {
     it('recognizes only the durable reset frame that invalidates an existing stream', () => {

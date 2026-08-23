@@ -70,11 +70,96 @@ class AiAssistantStepGuardTest {
                 finalStep("Ready", "[]", "[\"" + "x".repeat(161) + "\"]", "null"))));
     }
 
+    @Test
+    void typedBlocksAndCoverageAreBoundedAndEvidenceConsistent() throws Exception {
+        assertEquals("final_fields", guard.rejectionReason(objectMapper.readTree(
+                "{\"tool\":null,\"final\":{\"text\":\"Legacy\",\"citations\":[],"
+                        + "\"suggestions\":[],\"title\":null}}")));
+        assertEquals("final_blocks", guard.rejectionReason(objectMapper.readTree(
+                finalStep("Ready", "[\"r1\"]", "[]", "null")
+                        .replace("\"citations\":[\"r1\"]}],",
+                                "\"citations\":[\"r2\"]}],"))));
+        assertEquals("final_coverage", guard.rejectionReason(objectMapper.readTree(
+                finalStep("Ready", "[]", "[]", "null")
+                        .replace("\"exclusions\":[]",
+                                "\"exclusions\":[\"bounded_results\"]"))));
+    }
+
+    @Test
+    void structuredRowsAreBoundedKindRestrictedAndEvidenceConsistent() throws Exception {
+        assertTrue(guard.permits(objectMapper.readTree(
+                finalStep("Ready", "[\"r1\"]", "[]", "null")
+                        .replace("\"kind\":\"answer\"", "\"kind\":\"metric\"")
+                        .replace("\"rows\":[]", "\"rows\":[" + row("Open pipeline") + "]"))));
+        assertEquals("final_blocks", guard.rejectionReason(objectMapper.readTree(
+                finalStep("Ready", "[\"r1\"]", "[]", "null")
+                        .replace("\"rows\":[]", "\"rows\":[" + row("Open pipeline") + "]"))));
+        assertEquals("final_rows", guard.rejectionReason(objectMapper.readTree(
+                finalStep("Ready", "[\"r1\"]", "[]", "null")
+                        .replace("\"kind\":\"answer\"", "\"kind\":\"timeline\"")
+                        .replace("\"rows\":[]", "\"rows\":[" + row("") + "]"))));
+        assertEquals("final_rows", guard.rejectionReason(objectMapper.readTree(
+                finalStep("Ready", "[\"r1\"]", "[]", "null")
+                        .replace("\"kind\":\"answer\"", "\"kind\":\"timeline\"")
+                        .replace("\"rows\":[]", "\"rows\":[" + row("x".repeat(121)) + "]"))));
+        assertEquals("final_rows", guard.rejectionReason(objectMapper.readTree(
+                finalStep("Ready", "[\"r1\"]", "[]", "null")
+                        .replace("\"kind\":\"answer\"", "\"kind\":\"diff\"")
+                        .replace("\"rows\":[]",
+                                "\"rows\":[" + row("Stage").replace("\"r1\"", "\"r2\"") + "]"))));
+        assertEquals("final_rows", guard.rejectionReason(objectMapper.readTree(
+                finalStep("Ready", "[\"r1\"]", "[]", "null")
+                        .replace("\"kind\":\"answer\"", "\"kind\":\"extraction\"")
+                        .replace("\"rows\":[]",
+                                "\"rows\":[" + row("Owner").replace(",\"at\":null", "") + "]"))));
+    }
+
+    @Test
+    void aRowOnlyBlockSatisfiesTheBlockContentRequirement() throws Exception {
+        assertTrue(guard.permits(objectMapper.readTree(
+                finalStep("Ready", "[\"r1\"]", "[]", "null")
+                        .replace("\"kind\":\"answer\"", "\"kind\":\"comparison\"")
+                        .replace("\"body\":\"Ready\"", "\"body\":null")
+                        .replace("\"rows\":[]", "\"rows\":[" + row("Atlas") + "]"))));
+    }
+
+    @Test
+    void coverageTimestampsMustBeIsoInstantsAndMayNotSmuggleAnUncitedHandle() throws Exception {
+        assertTrue(guard.permits(objectMapper.readTree(
+                finalStep("Ready", "[]", "[]", "null")
+                        .replace("\"asOf\":null", "\"asOf\":\"2026-08-21\""))));
+        assertTrue(guard.permits(objectMapper.readTree(
+                finalStep("Ready", "[]", "[]", "null")
+                        .replace("\"asOf\":null", "\"asOf\":\"2026-08-21T09:00:00Z\"")
+                        .replace("\"periodStart\":null",
+                                "\"periodStart\":\"2026-08-01T00:00:00\""))));
+        assertEquals("final_coverage", guard.rejectionReason(objectMapper.readTree(
+                finalStep("Ready", "[]", "[]", "null")
+                        .replace("\"asOf\":null",
+                                "\"asOf\":\"as of the latest medical review on file\""))));
+        assertEquals("final_coverage", guard.rejectionReason(objectMapper.readTree(
+                finalStep("Ready", "[]", "[]", "null")
+                        .replace("\"periodEnd\":null", "\"periodEnd\":\"last quarter\""))));
+        assertEquals("final_coverage", guard.rejectionReason(objectMapper.readTree(
+                finalStep("Ready", "[]", "[]", "null")
+                        .replace("\"periodStart\":null", "\"periodStart\":\"r1\""))));
+    }
+
+    private static String row(String label) {
+        return "{\"label\":\"" + label + "\",\"value\":\"12\",\"detail\":null,"
+                + "\"at\":null,\"citations\":[\"r1\"]}";
+    }
+
     private static String finalStep(
             String text, String citations, String suggestions, String title) {
         return "{\"tool\":null,\"final\":{\"text\":\"" + text
                 + "\",\"citations\":" + citations
                 + ",\"suggestions\":" + suggestions
-                + ",\"title\":" + title + "}}";
+                + ",\"title\":" + title
+                + ",\"blocks\":[{\"kind\":\"answer\",\"title\":null,\"body\":\""
+                + text + "\",\"items\":[],\"rows\":[],\"citations\":" + citations + "}]"
+                + ",\"coverage\":{\"status\":\"complete\",\"asOf\":null,"
+                + "\"periodStart\":null,\"periodEnd\":null,\"sources\":[],"
+                + "\"exclusions\":[],\"truncated\":false}}}";
     }
 }

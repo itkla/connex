@@ -1,5 +1,9 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -11,15 +15,22 @@ import java.util.Set;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
-import ooo.klae.connex.backend.ai.masking.AiGeneratedContentScreen;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatTurn;
+import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.dto.AiChatAnswerBlockDto;
+import ooo.klae.connex.backend.dto.AiChatAnswerDocumentDto;
+import ooo.klae.connex.backend.dto.AiChatAnswerRowDto;
 import ooo.klae.connex.backend.dto.AiChatCitationDto;
+import ooo.klae.connex.backend.dto.AiChatCoverageDto;
+import ooo.klae.connex.backend.dto.AiChatProgressItemDto;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.PipelineMapper;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -28,10 +39,14 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 @RequiredArgsConstructor
 public class AiChatCitationProjector {
+    private static final int MAX_CITATION_DETAIL_CHARS = 120;
+    private static final int MAX_STORED_INSTANT_CHARS = 64;
+
     private final ObjectMapper objectMapper;
     private final PersonMapper personMapper;
     private final CompanyMapper companyMapper;
     private final DealMapper dealMapper;
+    private final PipelineMapper pipelineMapper;
     private final AiChatMapper chatMapper;
 
     /** Returns authorized citations and messages withheld by current record visibility. */
@@ -50,19 +65,20 @@ public class AiChatCitationProjector {
             resourcesByMessage.put(message.getId(), resources);
             requested.addAll(resources.records());
         }
-        Set<RecordKey> visible = visibleRecords(workspaceId, requested);
+        Map<RecordKey, VisibleRecord> visible = visibleRecords(workspaceId, requested);
         Map<Integer, List<AiChatCitationDto>> projected = new LinkedHashMap<>();
         storedByMessage.forEach((messageId, citations) -> projected.put(
                 messageId,
                 citations.stream()
-                        .filter(citation -> visible.contains(
+                        .filter(citation -> visible.containsKey(
                                 new RecordKey(citation.kind(), citation.id())))
-                        .map(citation -> new AiChatCitationDto(
-                                citation.handle(), citation.kind(), citation.id()))
+                        .map(citation -> citation(
+                                citation,
+                                visible.get(new RecordKey(citation.kind(), citation.id()))))
                         .toList()));
         Set<Integer> withheldMessageIds = new LinkedHashSet<>();
         resourcesByMessage.forEach((messageId, resources) -> {
-            if (!resources.valid() || !visible.containsAll(resources.records())) {
+            if (!resources.valid() || !visible.keySet().containsAll(resources.records())) {
                 withheldMessageIds.add(messageId);
             }
         });
@@ -104,37 +120,46 @@ public class AiChatCitationProjector {
         return Map.copyOf(projected);
     }
 
-    /** Returns validated demasked reasoning only to each turn's original asker. */
-    public Map<Integer, String> reasoning(
+    /** Returns assistant messages whose originating turn belongs to the current viewer. */
+    public Set<Integer> requestedMessageIds(
             int workspaceId,
             int sessionId,
             int userId,
             List<AiChatMessage> messages) {
-        Map<Integer, StoredReasoning> storedByMessage = new LinkedHashMap<>();
+        Map<Integer, Integer> turnByMessage = new LinkedHashMap<>();
         Set<Integer> turnIds = new LinkedHashSet<>();
         for (AiChatMessage message : messages) {
-            StoredReasoning stored = storedReasoning(message);
-            if (stored == null) {
-                continue;
+            Integer turnId = storedTurnId(message);
+            if (turnId != null) {
+                turnByMessage.put(message.getId(), turnId);
+                turnIds.add(turnId);
             }
-            storedByMessage.put(message.getId(), stored);
-            turnIds.add(stored.turnId());
         }
         if (turnIds.isEmpty()) {
-            return Map.of();
+            return Set.of();
         }
         Map<Integer, Integer> requesterByTurn = requesterByTurn(
                 workspaceId, sessionId, turnIds);
-        Map<Integer, String> projected = new LinkedHashMap<>();
-        storedByMessage.forEach((messageId, stored) -> {
-            if (Objects.equals(requesterByTurn.get(stored.turnId()), userId)) {
-                projected.put(messageId, stored.value());
+        Set<Integer> requestedMessageIds = new LinkedHashSet<>();
+        turnByMessage.forEach((messageId, turnId) -> {
+            if (Objects.equals(requesterByTurn.get(turnId), userId)) {
+                requestedMessageIds.add(messageId);
             }
         });
-        return Map.copyOf(projected);
+        return Set.copyOf(requestedMessageIds);
     }
 
-    private StoredReasoning storedReasoning(AiChatMessage message) {
+    /** Returns one validated native answer document with only viewer-authorized evidence. */
+    public AiChatAnswerDocumentDto answerDocument(
+            AiChatMessage message, List<AiChatCitationDto> citations) {
+        return answerDocument(message, citations, true);
+    }
+
+    /** Returns one answer document with requester-only execution counts removed when shared. */
+    public AiChatAnswerDocumentDto answerDocument(
+            AiChatMessage message,
+            List<AiChatCitationDto> citations,
+            boolean requester) {
         if (!"assistant".equals(message.getAuthorKind())
                 || message.getStructuredJson() == null) {
             return null;
@@ -142,20 +167,257 @@ public class AiChatCitationProjector {
         try {
             JsonNode metadata = objectMapper.readTree(message.getStructuredJson());
             JsonNode turnId = metadata.get("turnId");
-            JsonNode reasoning = metadata.get("reasoning");
             if (turnId == null || !turnId.isIntegralNumber()
                     || !turnId.canConvertToInt() || turnId.asInt() <= 0
-                    || reasoning == null || !reasoning.isString()
-                    || reasoning.asString().isBlank()
-                    || reasoning.asString().length() > 16_000
-                    || AiGeneratedContentScreen.containsPlaceholder(reasoning.asString())
-                    || AiGeneratedContentScreen.rejectionReason(reasoning.asString()) != null) {
+                    || metadata.get("blocks") == null || !metadata.get("blocks").isArray()) {
                 return null;
             }
-            return new StoredReasoning(turnId.asInt(), reasoning.asString());
+            Map<String, AiChatCitationDto> evidenceByHandle = new LinkedHashMap<>();
+            for (AiChatCitationDto citation : citations) {
+                if (citation != null && evidenceByHandle.putIfAbsent(
+                        citation.handle(), citation) != null) {
+                    return null;
+                }
+            }
+            List<AiChatAnswerBlockDto> blocks = answerBlocks(
+                    metadata.get("blocks"), evidenceByHandle);
+            AiChatCoverageDto coverage = coverage(metadata.get("coverage"));
+            List<AiChatProgressItemDto> progress = progress(metadata.get("progress"));
+            if (blocks.isEmpty() || coverage == null || progress == null) {
+                return null;
+            }
+            return new AiChatAnswerDocumentDto(
+                    turnId.asInt(), blocks, coverage,
+                    requester ? progress : sharedProgress(progress));
         } catch (JacksonException exception) {
             return null;
         }
+    }
+
+    private static List<AiChatAnswerBlockDto> answerBlocks(
+            JsonNode values, Map<String, AiChatCitationDto> evidenceByHandle) {
+        if (values == null || !values.isArray()
+                || values.isEmpty() || values.size() > AiAssistantStepGuard.MAX_BLOCKS) {
+            return List.of();
+        }
+        List<AiChatAnswerBlockDto> blocks = new ArrayList<>();
+        for (JsonNode value : values) {
+            if (!exactFields(
+                    value, Set.of("kind", "title", "body", "items", "rows", "citations"))) {
+                return List.of();
+            }
+            JsonNode kind = value.get("kind");
+            JsonNode title = value.get("title");
+            JsonNode body = value.get("body");
+            JsonNode items = value.get("items");
+            JsonNode rows = value.get("rows");
+            JsonNode evidence = value.get("citations");
+            if (kind == null || !kind.isString()
+                    || !AiAssistantStepGuard.BLOCK_KINDS.contains(kind.asString())
+                    || !nullableText(title, 200)
+                    || !nullableText(body, AiAssistantStepGuard.MAX_BLOCK_CHARS)
+                    || items == null || !items.isArray()
+                    || items.size() > AiAssistantStepGuard.MAX_BLOCK_ITEMS
+                    || rows == null || !rows.isArray()
+                    || rows.size() > AiAssistantStepGuard.MAX_BLOCK_ITEMS
+                    || evidence == null || !evidence.isArray()
+                    || evidence.size() > AiAssistantStepGuard.MAX_BLOCK_CITATIONS
+                    || (!rows.isEmpty()
+                            && !AiAssistantStepGuard.ROW_BLOCK_KINDS.contains(kind.asString()))
+                    || (body.isNull() && items.isEmpty() && rows.isEmpty())) {
+                return List.of();
+            }
+            List<String> projectedItems = new ArrayList<>();
+            for (JsonNode item : items) {
+                if (!text(item, AiAssistantStepGuard.MAX_BLOCK_ITEM_CHARS)) {
+                    return List.of();
+                }
+                projectedItems.add(item.asString());
+            }
+            List<AiChatAnswerRowDto> projectedRows = answerRows(rows, evidenceByHandle);
+            if (projectedRows == null) {
+                return List.of();
+            }
+            List<AiChatCitationDto> projectedEvidence = evidence(evidence, evidenceByHandle);
+            if (projectedEvidence == null) {
+                return List.of();
+            }
+            blocks.add(new AiChatAnswerBlockDto(
+                    kind.asString(), nullableValue(title), nullableValue(body),
+                    projectedItems, projectedRows, projectedEvidence));
+        }
+        return List.copyOf(blocks);
+    }
+
+    private static List<AiChatAnswerRowDto> answerRows(
+            JsonNode values, Map<String, AiChatCitationDto> evidenceByHandle) {
+        List<AiChatAnswerRowDto> rows = new ArrayList<>();
+        for (JsonNode value : values) {
+            if (!exactFields(value, Set.of("label", "value", "detail", "at", "citations"))) {
+                return null;
+            }
+            JsonNode label = value.get("label");
+            JsonNode rowValue = value.get("value");
+            JsonNode detail = value.get("detail");
+            JsonNode at = value.get("at");
+            if (!text(label, AiAssistantStepGuard.MAX_ROW_LABEL_CHARS)
+                    || !nullableText(rowValue, AiAssistantStepGuard.MAX_ROW_VALUE_CHARS)
+                    || !nullableText(detail, AiAssistantStepGuard.MAX_ROW_VALUE_CHARS)
+                    || !nullableText(at, AiAssistantStepGuard.MAX_ROW_AT_CHARS)) {
+                return null;
+            }
+            JsonNode evidence = value.get("citations");
+            if (evidence == null || !evidence.isArray()
+                    || evidence.size() > AiAssistantStepGuard.MAX_BLOCK_CITATIONS) {
+                return null;
+            }
+            List<AiChatCitationDto> projectedEvidence = evidence(evidence, evidenceByHandle);
+            if (projectedEvidence == null) {
+                return null;
+            }
+            rows.add(new AiChatAnswerRowDto(
+                    label.asString(), nullableValue(rowValue), nullableValue(detail),
+                    nullableValue(at), projectedEvidence));
+        }
+        return List.copyOf(rows);
+    }
+
+    private static List<AiChatCitationDto> evidence(
+            JsonNode handles, Map<String, AiChatCitationDto> evidenceByHandle) {
+        Set<String> uniqueHandles = new LinkedHashSet<>();
+        List<AiChatCitationDto> projected = new ArrayList<>();
+        for (JsonNode handle : handles) {
+            if (!handle.isString() || !uniqueHandles.add(handle.asString())) {
+                return null;
+            }
+            AiChatCitationDto citation = evidenceByHandle.get(handle.asString());
+            if (citation == null) {
+                return null;
+            }
+            projected.add(citation);
+        }
+        return List.copyOf(projected);
+    }
+
+    private static AiChatCoverageDto coverage(JsonNode value) {
+        if (!exactFields(value, Set.of(
+                "status", "asOf", "periodStart", "periodEnd",
+                "sources", "exclusions", "truncated"))) {
+            return null;
+        }
+        JsonNode status = value.get("status");
+        JsonNode sources = value.get("sources");
+        JsonNode exclusions = value.get("exclusions");
+        JsonNode truncated = value.get("truncated");
+        if (status == null || !status.isString()
+                || !AiAssistantStepGuard.COVERAGE_STATUSES.contains(status.asString())
+                || !nullableCoverageInstant(value.get("asOf"))
+                || !nullableCoverageInstant(value.get("periodStart"))
+                || !nullableCoverageInstant(value.get("periodEnd"))
+                || !enumValues(sources, AiAssistantStepGuard.COVERAGE_SOURCES)
+                || !enumValues(exclusions, AiAssistantStepGuard.COVERAGE_EXCLUSIONS)
+                || truncated == null || !truncated.isBoolean()
+                || ("complete".equals(status.asString())
+                        && (truncated.asBoolean() || !exclusions.isEmpty()))) {
+            return null;
+        }
+        return new AiChatCoverageDto(
+                status.asString(), nullableValue(value.get("asOf")),
+                nullableValue(value.get("periodStart")), nullableValue(value.get("periodEnd")),
+                stringValues(sources), stringValues(exclusions), truncated.asBoolean());
+    }
+
+    private static List<AiChatProgressItemDto> progress(JsonNode values) {
+        if (values == null || !values.isArray()
+                || values.size() > AiAssistantStepGuard.MAX_BLOCKS) {
+            return null;
+        }
+        Set<String> sources = new LinkedHashSet<>();
+        List<AiChatProgressItemDto> progress = new ArrayList<>();
+        Set<String> allowedSources = AiChatProgressService.PROGRESS_SOURCES;
+        Set<String> allowedStatuses = AiChatProgressService.PROGRESS_STATUSES;
+        for (JsonNode value : values) {
+            if (!exactFields(value, Set.of("seq", "source", "status", "count", "truncated"))) {
+                return null;
+            }
+            JsonNode seq = value.get("seq");
+            JsonNode source = value.get("source");
+            JsonNode status = value.get("status");
+            JsonNode count = value.get("count");
+            JsonNode truncated = value.get("truncated");
+            if (seq == null || !seq.isIntegralNumber()
+                    || !seq.canConvertToInt() || seq.asInt() < 0
+                    || source == null || !source.isString()
+                    || !allowedSources.contains(source.asString())
+                    || !sources.add(source.asString())
+                    || status == null || !status.isString()
+                    || !allowedStatuses.contains(status.asString())
+                    || count == null || (!count.isNull()
+                            && (!count.isIntegralNumber() || !count.canConvertToInt()
+                                    || count.asInt() < 0 || count.asInt() > 1_000))
+                    || truncated == null || !truncated.isBoolean()) {
+                return null;
+            }
+            progress.add(new AiChatProgressItemDto(
+                    seq.asInt(), source.asString(), status.asString(),
+                    count.isNull() ? null : count.asInt(), truncated.asBoolean()));
+        }
+        return List.copyOf(progress);
+    }
+
+    private static boolean exactFields(JsonNode value, Set<String> expected) {
+        return value != null && value.isObject()
+                && value.propertyNames().size() == expected.size()
+                && value.propertyNames().containsAll(expected);
+    }
+
+    private static boolean nullableText(JsonNode value, int maxLength) {
+        return value != null && (value.isNull() || text(value, maxLength));
+    }
+
+    /**
+     * Revalidates a stored coverage timestamp on read. A legacy row written before the timestamp
+     * was constrained can still hold model prose, so the projection fails closed on it here rather
+     * than trusting that the step guard rejected it at generation time.
+     */
+    private static boolean nullableCoverageInstant(JsonNode value) {
+        if (value == null) {
+            return false;
+        }
+        return value.isNull()
+                || (text(value, AiAssistantStepGuard.MAX_COVERAGE_INSTANT_CHARS)
+                        && AiAssistantStepGuard.isCoverageInstant(value.asString()));
+    }
+
+    private static boolean text(JsonNode value, int maxLength) {
+        return value != null && value.isString()
+                && !value.asString().isBlank() && value.asString().length() <= maxLength;
+    }
+
+    private static String nullableValue(JsonNode value) {
+        return value == null || value.isNull() ? null : value.asString();
+    }
+
+    private static boolean enumValues(JsonNode values, Set<String> allowed) {
+        if (values == null || !values.isArray() || values.size() > allowed.size()) {
+            return false;
+        }
+        Set<String> unique = new LinkedHashSet<>();
+        for (JsonNode value : values) {
+            if (!value.isString() || !allowed.contains(value.asString())
+                    || !unique.add(value.asString())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static List<String> stringValues(JsonNode values) {
+        List<String> projected = new ArrayList<>();
+        for (JsonNode value : values) {
+            projected.add(value.asString());
+        }
+        return List.copyOf(projected);
     }
 
     private StoredSuggestions storedSuggestions(AiChatMessage message) {
@@ -183,6 +445,30 @@ public class AiChatCitationProjector {
         } catch (JacksonException exception) {
             return null;
         }
+    }
+
+    private Integer storedTurnId(AiChatMessage message) {
+        if (!"assistant".equals(message.getAuthorKind())
+                || message.getStructuredJson() == null) {
+            return null;
+        }
+        try {
+            JsonNode turnId = objectMapper.readTree(message.getStructuredJson()).get("turnId");
+            return turnId != null && turnId.isIntegralNumber()
+                    && turnId.canConvertToInt() && turnId.asInt() > 0
+                    ? turnId.asInt()
+                    : null;
+        } catch (JacksonException exception) {
+            return null;
+        }
+    }
+
+    private static List<AiChatProgressItemDto> sharedProgress(
+            List<AiChatProgressItemDto> progress) {
+        return progress.stream()
+                .map(item -> new AiChatProgressItemDto(
+                        item.seq(), item.source(), item.status(), null, false))
+                .toList();
     }
 
     private Map<Integer, Integer> requesterByTurn(
@@ -216,7 +502,8 @@ public class AiChatCitationProjector {
                         && kind != null && kind.isString() && isRecordKind(kind.asString())
                         && id != null && id.canConvertToInt() && id.asInt() > 0) {
                     stored.add(new StoredCitation(
-                            handle.asString(), kind.asString(), id.asInt()));
+                            handle.asString(), kind.asString(), id.asInt(),
+                            storedObservation(citation.get("observed"))));
                 }
             }
             return List.copyOf(stored);
@@ -258,28 +545,181 @@ public class AiChatCitationProjector {
         }
     }
 
-    private Set<RecordKey> visibleRecords(int workspaceId, Set<RecordKey> requested) {
+    private Map<RecordKey, VisibleRecord> visibleRecords(int workspaceId, Set<RecordKey> requested) {
         List<Integer> personIds = ids(requested, "person");
         List<Integer> companyIds = ids(requested, "company");
         List<Integer> dealIds = ids(requested, "deal");
-        Set<RecordKey> visible = new LinkedHashSet<>();
+        Map<RecordKey, VisibleRecord> visible = new LinkedHashMap<>();
         if (!personIds.isEmpty()) {
             personMapper.getByIds(workspaceId, personIds).stream()
                     .filter(AiChatCitationProjector::isProcessable)
-                    .map(person -> new RecordKey("person", person.getId()))
-                    .forEach(visible::add);
+                    .forEach(person -> visible.put(
+                            new RecordKey("person", person.getId()),
+                            new VisibleRecord(
+                                    safeLabel(person.getName()),
+                                    instant(person.getUpdatedAt()),
+                                    detail(person.getCompany() == null
+                                            ? null
+                                            : person.getCompany().getName()))));
         }
         if (!companyIds.isEmpty()) {
-            companyMapper.getByIds(workspaceId, companyIds).stream()
-                    .map(company -> new RecordKey("company", company.getId()))
-                    .forEach(visible::add);
+            companyMapper.getByIds(workspaceId, companyIds)
+                    .forEach(company -> visible.put(
+                            new RecordKey("company", company.getId()),
+                            new VisibleRecord(
+                                    safeLabel(company.getName()),
+                                    instant(company.getUpdatedAt()),
+                                    detail(company.getIndustry()))));
         }
         if (!dealIds.isEmpty()) {
-            dealMapper.getByIds(workspaceId, dealIds).stream()
-                    .map(deal -> new RecordKey("deal", deal.getId()))
-                    .forEach(visible::add);
+            List<Deal> deals = dealMapper.getByIds(workspaceId, dealIds);
+            Map<Integer, String> stageNames = deals.isEmpty()
+                    ? Map.of()
+                    : stageNames(workspaceId);
+            deals.forEach(deal -> visible.put(
+                    new RecordKey("deal", deal.getId()),
+                    new VisibleRecord(
+                            safeLabel(deal.getName()),
+                            instant(deal.getUpdatedAt()),
+                            detail(deal.getStageId() == null
+                                    ? null
+                                    : stageNames.get(deal.getStageId())))));
         }
-        return Set.copyOf(visible);
+        return Map.copyOf(visible);
+    }
+
+    private Map<Integer, String> stageNames(int workspaceId) {
+        Map<Integer, String> names = new LinkedHashMap<>();
+        for (Stage stage : pipelineMapper.getAllStages(workspaceId)) {
+            if (stage.getName() != null) {
+                names.put(stage.getId(), stage.getName());
+            }
+        }
+        return Map.copyOf(names);
+    }
+
+    /**
+     * Projects one stored citation through the viewer's live record visibility.
+     *
+     * <p>The label always comes from the live record, because identity is what the viewer is being
+     * shown and must never lag. Freshness and the subtitle come from the snapshot the answering turn
+     * recorded, so replaying an old transcript describes the evidence the answer was written
+     * against. A message stored before snapshots existed has none, and falls back to the live
+     * record while reporting that the values were not observed.
+     */
+    private static AiChatCitationDto citation(StoredCitation citation, VisibleRecord record) {
+        AiChatRecordObservation observed = citation.observed();
+        return new AiChatCitationDto(
+                citation.handle(), citation.kind(), citation.id(), record.label(),
+                observed == null ? record.asOf() : observed.asOf(),
+                observed == null ? record.detail() : observed.detail(),
+                observed != null);
+    }
+
+    /**
+     * Reads one stored evidence snapshot, revalidating it on read rather than trusting the row.
+     *
+     * @param value stored {@code observed} object, or null for a message written before snapshots
+     * @return the snapshot, or null when the row carries none or carries an unreadable one
+     */
+    private static AiChatRecordObservation storedObservation(JsonNode value) {
+        if (value == null || !value.isObject()) {
+            return null;
+        }
+        JsonNode asOf = value.get("asOf");
+        JsonNode detail = value.get("detail");
+        if (asOf == null || detail == null
+                || !(asOf.isNull() || text(asOf, MAX_STORED_INSTANT_CHARS))
+                || !(detail.isNull() || text(detail, MAX_CITATION_DETAIL_CHARS))) {
+            return null;
+        }
+        String instant = asOf.isNull() ? null : storedInstant(asOf.asString());
+        if (!asOf.isNull() && instant == null) {
+            return null;
+        }
+        return new AiChatRecordObservation(instant, detail(nullableValue(detail)));
+    }
+
+    /** Re-normalizes a stored ISO-8601 evidence instant, or returns null when it is unreadable. */
+    private static String storedInstant(String value) {
+        try {
+            return Instant.parse(value.strip()).toString();
+        } catch (DateTimeParseException exception) {
+            return null;
+        }
+    }
+
+    /**
+     * Records the freshness and subtitle each cited record shows right now, so the answering turn
+     * can store them beside its citation handles.
+     *
+     * @param workspaceId resolved tenant workspace
+     * @param citations handles the answer cited
+     * @param resources server-only handle-to-record identities for the turn
+     * @return snapshot per cited handle, omitting records that are not currently visible
+     */
+    public Map<String, AiChatRecordObservation> observe(
+            int workspaceId,
+            List<String> citations,
+            Map<String, AiChatResourceRegistry.ResourceRef> resources) {
+        Map<String, RecordKey> keyByHandle = new LinkedHashMap<>();
+        for (String handle : citations) {
+            AiChatResourceRegistry.ResourceRef resource = resources.get(handle);
+            if (resource != null) {
+                keyByHandle.put(handle, new RecordKey(resource.kind(), resource.id()));
+            }
+        }
+        if (keyByHandle.isEmpty()) {
+            return Map.of();
+        }
+        Map<RecordKey, VisibleRecord> visible = visibleRecords(
+                workspaceId, new LinkedHashSet<>(keyByHandle.values()));
+        Map<String, AiChatRecordObservation> observed = new LinkedHashMap<>();
+        keyByHandle.forEach((handle, key) -> {
+            VisibleRecord record = visible.get(key);
+            if (record != null) {
+                observed.put(handle, new AiChatRecordObservation(record.asOf(), record.detail()));
+            }
+        });
+        return Map.copyOf(observed);
+    }
+
+    private static String safeLabel(String label) {
+        return label == null ? "" : label;
+    }
+
+    private static String detail(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String stripped = value.strip();
+        if (stripped.length() <= MAX_CITATION_DETAIL_CHARS) {
+            return stripped;
+        }
+        int end = MAX_CITATION_DETAIL_CHARS;
+        if (Character.isHighSurrogate(stripped.charAt(end - 1))) {
+            end--;
+        }
+        return stripped.substring(0, end);
+    }
+
+    /**
+     * Normalizes a stored MySQL {@code DATETIME} into an ISO-8601 instant. Connex persists these
+     * columns in UTC without an offset, matching the frontend's {@code parseMysqlDateTime} reader,
+     * so an unparsable value yields no freshness rather than a guessed one.
+     */
+    private static String instant(String storedTimestamp) {
+        if (storedTimestamp == null || storedTimestamp.isBlank()) {
+            return null;
+        }
+        try {
+            return LocalDateTime.parse(storedTimestamp.strip().replace(' ', 'T'))
+                    .atOffset(ZoneOffset.UTC)
+                    .toInstant()
+                    .toString();
+        } catch (DateTimeParseException exception) {
+            return null;
+        }
     }
 
     private static List<Integer> ids(Set<RecordKey> requested, String kind) {
@@ -299,13 +739,11 @@ public class AiChatCitationProjector {
         return "person".equals(kind) || "company".equals(kind) || "deal".equals(kind);
     }
 
-    private record StoredCitation(String handle, String kind, int id) {
+    private record StoredCitation(
+            String handle, String kind, int id, AiChatRecordObservation observed) {
     }
 
     private record StoredSuggestions(int turnId, List<String> values) {
-    }
-
-    private record StoredReasoning(int turnId, String value) {
     }
 
     private record StoredResources(Set<RecordKey> records, boolean valid) {
@@ -319,6 +757,9 @@ public class AiChatCitationProjector {
     }
 
     private record RecordKey(String kind, int id) {
+    }
+
+    private record VisibleRecord(String label, String asOf, String detail) {
     }
 
     /** Viewer-safe transcript projection derived from one bounded record-visibility pass. */

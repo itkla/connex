@@ -171,13 +171,153 @@ public class AiAssistantStepSchema {
         ObjectNode titleText = titleAlternatives.addObject();
         titleText.put("type", "string");
         titleText.put("maxLength", 200);
+        ObjectNode blocks = properties.putObject("blocks");
+        blocks.put("type", "array");
+        blocks.put("minItems", 1);
+        blocks.put("maxItems", AiAssistantStepGuard.MAX_BLOCKS);
+        blocks.set("items", answerBlockSchema(objectMapper));
+        properties.set("coverage", coverageSchema(objectMapper));
         answer.putArray("required")
                 .add("text")
                 .add("citations")
                 .add("suggestions")
-                .add("title");
+                .add("title")
+                .add("blocks")
+                .add("coverage");
         answer.put("additionalProperties", false);
         return answer;
+    }
+
+    private static ObjectNode answerBlockSchema(ObjectMapper objectMapper) {
+        ObjectNode block = objectMapper.createObjectNode();
+        block.put("type", "object");
+        ObjectNode properties = block.putObject("properties");
+        ObjectNode kind = properties.putObject("kind");
+        kind.put("type", "string");
+        ArrayNode kinds = kind.putArray("enum");
+        AiAssistantStepGuard.BLOCK_KINDS.stream().sorted().forEach(kinds::add);
+        properties.set("title", nullableText(objectMapper, 200));
+        properties.set("body", nullableText(objectMapper, AiAssistantStepGuard.MAX_BLOCK_CHARS));
+        ObjectNode items = properties.putObject("items");
+        items.put("type", "array");
+        items.put("maxItems", AiAssistantStepGuard.MAX_BLOCK_ITEMS);
+        ObjectNode item = items.putObject("items");
+        item.put("type", "string");
+        item.put("minLength", 1);
+        item.put("maxLength", AiAssistantStepGuard.MAX_BLOCK_ITEM_CHARS);
+        ObjectNode rows = properties.putObject("rows");
+        rows.put("type", "array");
+        rows.put("maxItems", AiAssistantStepGuard.MAX_BLOCK_ITEMS);
+        rows.set("items", answerRowSchema(objectMapper));
+        ObjectNode citations = properties.putObject("citations");
+        citations.put("type", "array");
+        citations.put("maxItems", AiAssistantStepGuard.MAX_BLOCK_CITATIONS);
+        citations.putObject("items").put("type", "string");
+        block.putArray("required")
+                .add("kind")
+                .add("title")
+                .add("body")
+                .add("items")
+                .add("rows")
+                .add("citations");
+        block.put("additionalProperties", false);
+        ArrayNode contentAlternatives = block.putArray("anyOf");
+        ObjectNode bodyContent = contentAlternatives.addObject();
+        ObjectNode requiredBody = bodyContent.putObject("properties").putObject("body");
+        requiredBody.put("type", "string");
+        requiredBody.put("minLength", 1);
+        ObjectNode itemContent = contentAlternatives.addObject();
+        ObjectNode requiredItems = itemContent.putObject("properties").putObject("items");
+        requiredItems.put("type", "array");
+        requiredItems.put("minItems", 1);
+        ObjectNode rowContent = contentAlternatives.addObject();
+        ObjectNode requiredRows = rowContent.putObject("properties").putObject("rows");
+        requiredRows.put("type", "array");
+        requiredRows.put("minItems", 1);
+        return block;
+    }
+
+    private static ObjectNode answerRowSchema(ObjectMapper objectMapper) {
+        ObjectNode row = objectMapper.createObjectNode();
+        row.put("type", "object");
+        ObjectNode properties = row.putObject("properties");
+        ObjectNode label = properties.putObject("label");
+        label.put("type", "string");
+        label.put("minLength", 1);
+        label.put("maxLength", AiAssistantStepGuard.MAX_ROW_LABEL_CHARS);
+        properties.set("value", nullableText(objectMapper, AiAssistantStepGuard.MAX_ROW_VALUE_CHARS));
+        properties.set(
+                "detail", nullableText(objectMapper, AiAssistantStepGuard.MAX_ROW_VALUE_CHARS));
+        properties.set("at", nullableText(objectMapper, AiAssistantStepGuard.MAX_ROW_AT_CHARS));
+        ObjectNode citations = properties.putObject("citations");
+        citations.put("type", "array");
+        citations.put("maxItems", AiAssistantStepGuard.MAX_BLOCK_CITATIONS);
+        citations.putObject("items").put("type", "string");
+        row.putArray("required")
+                .add("label")
+                .add("value")
+                .add("detail")
+                .add("at")
+                .add("citations");
+        row.put("additionalProperties", false);
+        return row;
+    }
+
+    private static ObjectNode coverageSchema(ObjectMapper objectMapper) {
+        ObjectNode coverage = objectMapper.createObjectNode();
+        coverage.put("type", "object");
+        ObjectNode properties = coverage.putObject("properties");
+        ObjectNode status = properties.putObject("status");
+        status.put("type", "string");
+        ArrayNode statuses = status.putArray("enum");
+        AiAssistantStepGuard.COVERAGE_STATUSES.stream().sorted().forEach(statuses::add);
+        properties.set("asOf", nullableText(objectMapper, 64));
+        properties.set("periodStart", nullableText(objectMapper, 64));
+        properties.set("periodEnd", nullableText(objectMapper, 64));
+        ObjectNode sources = properties.putObject("sources");
+        sources.put("type", "array");
+        sources.put("maxItems", AiAssistantStepGuard.COVERAGE_SOURCES.size());
+        ObjectNode source = sources.putObject("items");
+        source.put("type", "string");
+        ArrayNode sourceValues = source.putArray("enum");
+        AiAssistantStepGuard.COVERAGE_SOURCES.stream().sorted().forEach(sourceValues::add);
+        ObjectNode exclusions = properties.putObject("exclusions");
+        exclusions.put("type", "array");
+        exclusions.put("maxItems", AiAssistantStepGuard.COVERAGE_EXCLUSIONS.size());
+        ObjectNode exclusion = exclusions.putObject("items");
+        exclusion.put("type", "string");
+        ArrayNode exclusionValues = exclusion.putArray("enum");
+        AiAssistantStepGuard.COVERAGE_EXCLUSIONS.stream().sorted().forEach(exclusionValues::add);
+        properties.putObject("truncated").put("type", "boolean");
+        coverage.putArray("required")
+                .add("status")
+                .add("asOf")
+                .add("periodStart")
+                .add("periodEnd")
+                .add("sources")
+                .add("exclusions")
+                .add("truncated");
+        coverage.put("additionalProperties", false);
+        ArrayNode truthfulnessAlternatives = coverage.putArray("anyOf");
+        ObjectNode complete = truthfulnessAlternatives.addObject().putObject("properties");
+        complete.putObject("status").putArray("enum").add("complete");
+        complete.putObject("exclusions").put("maxItems", 0);
+        complete.putObject("truncated").putArray("enum").add(false);
+        ObjectNode incomplete = truthfulnessAlternatives.addObject().putObject("properties");
+        incomplete.putObject("status").putArray("enum").add("partial").add("insufficient");
+        return coverage;
+    }
+
+    private static ObjectNode nullableText(
+            ObjectMapper objectMapper, int maxLength) {
+        ObjectNode value = objectMapper.createObjectNode();
+        ArrayNode alternatives = value.putArray("anyOf");
+        alternatives.addObject().put("type", "null");
+        ObjectNode text = alternatives.addObject();
+        text.put("type", "string");
+        text.put("minLength", 1);
+        text.put("maxLength", maxLength);
+        return value;
     }
 
 }

@@ -324,6 +324,20 @@ class AiChatMapperTest extends AbstractMapperTest {
                 workspace.getId(), session.getId(), true, 1).isEmpty());
         assertTrue(chatMapper.listToolCallsBySession(
                 workspace.getId() + 1, session.getId(), false, 1).isEmpty());
+        assertEquals(
+                turn.getId(),
+                chatMapper.getLatestActiveTurnBySession(
+                        workspace.getId(), session.getId()).getId());
+        assertEquals(
+                List.of(toolCall.getId(), secondToolCall.getId()),
+                chatMapper.listToolCallsByTurn(
+                                workspace.getId(), session.getId(),
+                                "turn-" + turn.getId() + "-step-", 64).stream()
+                        .map(AiChatToolCall::getId)
+                        .toList());
+        assertTrue(chatMapper.listToolCallsByTurn(
+                workspace.getId() + 1, session.getId(),
+                "turn-" + turn.getId() + "-step-", 64).isEmpty());
 
         AiChatMessage answer = new AiChatMessage();
         answer.setWorkspaceId(workspace.getId());
@@ -373,6 +387,8 @@ class AiChatMapperTest extends AbstractMapperTest {
         assertEquals("failed", storedTurn.getStatus());
         assertEquals("quota_exhausted", storedTurn.getTerminalReason());
         assertEquals(0, chatMapper.countActiveTurns(workspace.getId(), session.getId()));
+        assertNull(chatMapper.getLatestActiveTurnBySession(
+                workspace.getId(), session.getId()));
         assertNull(chatMapper.getTurnById(
                 workspace.getId() + 1, session.getId(), turn.getId()));
     }

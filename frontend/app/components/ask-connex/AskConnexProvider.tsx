@@ -11,13 +11,16 @@ import {
     useState,
     type ReactNode,
 } from 'react';
-import { useTranslations } from 'next-intl';
-import { useRouter } from 'next/navigation';
+import { useLocale, useTranslations } from 'next-intl';
+import { useParams, usePathname, useRouter } from 'next/navigation';
+import { SparklesIcon } from '@heroicons/react/24/outline';
 
 import AskConnexDrawer from '@/app/components/ask-connex/AskConnexDrawer';
-import { useActions } from '@/app/hooks/useActions';
+import { formatAnswerInstant } from '@/app/components/ask-connex/answerDocument';
+import { useActions, useRegisterActions } from '@/app/hooks/useActions';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
+import { useLiveNow } from '@/app/hooks/useNow';
 import { usePermissionCheck } from '@/app/hooks/usePermissions';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import {
@@ -58,14 +61,21 @@ import {
     AskConnexFileRemovalError,
     actionableAskConnexToolCallIds,
     activeRecordAskConnexContext,
+    activeSelectionAskConnexContext,
+    askConnexContextCorrected,
     askConnexMessageContent,
+    askConnexPinnedStorageKey,
+    askConnexRetryPrompt,
+    askConnexScopePreview,
     askConnexSessionStorageKey,
     askConnexTurnStorageKey,
     completeAskConnexFileUpload,
     hasPendingAskConnexFileOperation,
+    isAskConnexPinned,
     loadAskConnexLatestMessages,
     mergeAskConnexToolCalls,
     mergeAskConnexContext,
+    parseStoredAskConnexPins,
     parseStoredAskConnexSession,
     parseStoredAskConnexTurn,
     reconcileAskConnexFileAttachments,
@@ -73,9 +83,16 @@ import {
     reduceAskConnexTurn,
     removeReadyAskConnexFile,
     removeAskConnexAttachment,
+    serializeAskConnexPins,
     serializeStoredAskConnexTurn,
+    snapshotAskConnexSourceContext,
+    toggleAskConnexPin,
     type AskConnexAttachment,
+    type AskConnexContextCorrections,
     type AskConnexFileAttachment,
+    type AskConnexScopePreview,
+    type AskConnexSelectionContext,
+    type AskConnexSourceContext,
     type AskConnexToolAction,
     type AskConnexToolCardFailure,
     type StoredAskConnexTurn,
@@ -89,20 +106,26 @@ import {
     failAskConnexStreamHydration,
     requestAskConnexTurnCancel,
     settleAskConnexStreamHydration,
+    shouldDropAskConnexStream,
     shouldResetAskConnexStream,
     type AskConnexFrameCoalescer,
     type AskConnexStreamState,
 } from '@/app/lib/askConnexStream';
+import type { AppAction } from '@/app/lib/actions/types';
 import { AiGenerationError } from '@/app/lib/aiGeneration';
 import { createAiChatSocket } from '@/app/lib/realtime';
 import { toastError, toastSuccess } from '@/app/lib/toast';
+import { formatRelativeTime } from '@/app/lib/utils';
 import type {
     AiChatCitation,
+    AiChatAnswerBlockKind,
     AiChatAttachment,
+    AiChatCoverage,
     AiChatDeltaFrame,
     AiChatMessage,
     AiChatParticipant,
     AiChatPresence,
+    AiChatProgressItem,
     AiChatSession,
     AiChatTurn,
     AiChatTurnGenerationResult,
@@ -113,19 +136,47 @@ type OpenSource = 'standard' | 'keyboard';
 
 const ASK_CONNEX_MESSAGE_PAGE_SIZE = 50;
 const EMPTY_ASK_CONNEX_TOOL_CALL_IDS: ReadonlySet<number> = new Set();
+const EMPTY_ASK_CONNEX_PINS: readonly AskConnexAttachment[] = [];
+const noopCleanup = () => {};
 
 type AskConnexContextValue = {
     open: boolean;
     instantOpen: boolean;
     working: boolean;
+    workspace: boolean;
     openDrawer: (source?: OpenSource) => void;
     closeDrawer: () => void;
+    openWorkspace: () => void;
+};
+
+/**
+ * Registration for the two host nodes the single Ask Connex controller portals into: the app
+ * shell's desktop panel column and the routed workspace's full-bleed canvas.
+ *
+ * Both are React-owned elements that belong to a different subtree than the controller, so the
+ * controller cannot look them up — `/ask-connex` and `/ask-connex/[sessionId]` are distinct route
+ * segments, and moving between them mounts a *new* workspace host while discarding the old one.
+ * Each callback is a cleanup-returning ref: React hands it the live element and the cleanup only
+ * clears the slot when the element it captured is still the registered one, so a mount that lands
+ * before its predecessor's unmount can never leave the controller portalling into a detached node.
+ */
+type AskConnexMountValue = {
+    registerDesktopRoot: (node: HTMLElement | null) => () => void;
+    registerWorkspaceRoot: (node: HTMLElement | null) => () => void;
 };
 
 const AskConnexContext = createContext<AskConnexContextValue | null>(null);
+const AskConnexMountContext = createContext<AskConnexMountValue | null>(null);
 
 function isActiveTurnStatus(status: string): boolean {
     return status === 'accepted' || status === 'queued' || status === 'running';
+}
+
+function routeSessionId(value: string | string[] | undefined): number | null {
+    const candidate = Array.isArray(value) ? value[0] : value;
+    if (candidate === undefined || !/^[1-9]\d*$/.test(candidate)) return null;
+    const id = Number(candidate);
+    return Number.isSafeInteger(id) ? id : null;
 }
 
 function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
@@ -207,6 +258,13 @@ export function useAskConnex(): AskConnexContextValue {
     return value;
 }
 
+/** Reads the host-node registration a shell region or workspace route attaches its container to. */
+export function useAskConnexMount(): AskConnexMountValue {
+    const value = useContext(AskConnexMountContext);
+    if (value === null) throw new Error('useAskConnexMount must be used within AskConnexProvider');
+    return value;
+}
+
 /** Owns Ask Connex continuity, transcript, accepted-turn reconciliation, and responsive surfaces. */
 export default function AskConnexProvider({ children }: { children: ReactNode }) {
     const t = useTranslations('AskConnex');
@@ -218,7 +276,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         [showApiError],
     );
     const tDisclosure = useTranslations('Assistant.disclosure');
+    const locale = useLocale();
+    const now = useLiveNow();
     const router = useRouter();
+    const pathname = usePathname() ?? '';
+    const params = useParams<{ sessionId?: string | string[] }>();
+    const workspaceMode = pathname === '/ask-connex' || pathname.startsWith('/ask-connex/');
+    const workspaceSessionId = workspaceMode ? routeSessionId(params.sessionId) : null;
     const { context } = useActions();
     const { activeWorkspaceId, switching } = useWorkspace();
     const permission = usePermissionCheck('AI_USE');
@@ -231,10 +295,68 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const identity = `${userId ?? 'anon'}:${activeWorkspaceId ?? 'none'}`;
     const sessionKey = askConnexSessionStorageKey(userId, activeWorkspaceId);
     const turnKey = askConnexTurnStorageKey(userId, activeWorkspaceId);
-    const implicitContext = activeRecordAskConnexContext(context.record);
+    const pinnedKey = askConnexPinnedStorageKey(userId, activeWorkspaceId);
+    const [workspaceSourceContext, setWorkspaceSourceContext] = useState<{
+        identity: string;
+        context: AskConnexSourceContext;
+    } | null>(null);
+    const currentWorkspaceSource = workspaceSourceContext?.identity === identity
+        ? workspaceSourceContext.context
+        : null;
+    const sourceRecord = workspaceMode
+        ? currentWorkspaceSource?.record ?? null
+        : context.record;
+    const sourceSelection = workspaceMode
+        ? currentWorkspaceSource?.selection ?? null
+        : context.selection;
+    const [pinnedContext, setPinnedContext] = useState<AskConnexAttachment[]>([]);
+    const [pinnedIdentity, setPinnedIdentity] = useState<string | null>(null);
+    const [pageDismissed, setPageDismissed] = useState(false);
+    const [selectionDismissed, setSelectionDismissed] = useState(false);
+    const inferredPageContext = useMemo(
+        () => activeRecordAskConnexContext(sourceRecord),
+        [sourceRecord],
+    );
+    const implicitContext = pageDismissed ? null : inferredPageContext;
+    const inferredSelectionContext = useMemo(
+        () => activeSelectionAskConnexContext(sourceSelection),
+        [sourceSelection],
+    );
+    const selectionContext = selectionDismissed ? null : inferredSelectionContext;
+    const unsupportedPageContext = useMemo(
+        () => !pageDismissed && sourceRecord !== null && inferredPageContext === null
+            ? { type: sourceRecord.type, label: sourceRecord.label }
+            : null,
+        [inferredPageContext, pageDismissed, sourceRecord],
+    );
+    const pins = pinnedIdentity === identity ? pinnedContext : EMPTY_ASK_CONNEX_PINS;
+    const pageContextPinned = isAskConnexPinned(pins, inferredPageContext);
+    const pageContextKey = sourceRecord === null
+        ? null
+        : `${sourceRecord.type}:${String(sourceRecord.id)}`;
+    const selectionContextKey = sourceSelection === null
+        ? null
+        : `${sourceSelection.type}:${[...sourceSelection.ids].map(String).sort().join(',')}`;
+    const [offeredPageContextKey, setOfferedPageContextKey] = useState(pageContextKey);
+    const [offeredSelectionContextKey, setOfferedSelectionContextKey] = useState(selectionContextKey);
+    if (pageContextKey !== offeredPageContextKey) {
+        setOfferedPageContextKey(pageContextKey);
+        setPageDismissed(false);
+    }
+    if (selectionContextKey !== offeredSelectionContextKey) {
+        setOfferedSelectionContextKey(selectionContextKey);
+        setSelectionDismissed(false);
+    }
+    const corrections = useMemo<AskConnexContextCorrections>(
+        () => ({ pageDismissed, selectionDismissed, pinned: pins }),
+        [pageDismissed, pins, selectionDismissed],
+    );
+    const contextCorrected = askConnexContextCorrected(corrections);
 
     const [open, setOpen] = useState(false);
     const [instantOpen, setInstantOpen] = useState(false);
+    const [desktopRoot, setDesktopRoot] = useState<HTMLElement | null>(null);
+    const [workspaceRoot, setWorkspaceRoot] = useState<HTMLElement | null>(null);
     const [stateIdentity, setStateIdentity] = useState<string | null>(null);
     const [sessions, setSessions] = useState<AiChatSession[]>([]);
     const [invitations, setInvitations] = useState<AiChatSession[]>([]);
@@ -280,25 +402,60 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const streamingRef = useRef(false);
     const cancellingRef = useRef(false);
     const activeTurnRef = useRef<{ sessionId: number; turnId: number } | null>(null);
+    const durableFollowerRef = useRef<number | null>(null);
+    const workspaceReturnRef = useRef(false);
+    const workspaceSessionIdRef = useRef(workspaceSessionId);
+
+    const registerDesktopRoot = useCallback((node: HTMLElement | null) => {
+        // A ref callback that returns a cleanup is never re-invoked with null; the parameter stays
+        // nullable only because React's ref type covers both calling conventions.
+        if (node === null) return noopCleanup;
+        setDesktopRoot(node);
+        return () => setDesktopRoot((current) => (current === node ? null : current));
+    }, []);
+    const registerWorkspaceRoot = useCallback((node: HTMLElement | null) => {
+        if (node === null) return noopCleanup;
+        setWorkspaceRoot(node);
+        return () => setWorkspaceRoot((current) => (current === node ? null : current));
+    }, []);
+    const mountValue = useMemo<AskConnexMountValue>(
+        () => ({ registerDesktopRoot, registerWorkspaceRoot }),
+        [registerDesktopRoot, registerWorkspaceRoot],
+    );
 
     const contextResult = useMemo(
-        () => mergeAskConnexContext(context.record, composer),
-        [context.record, composer],
+        () => mergeAskConnexContext(sourceRecord, composer, sourceSelection, corrections),
+        [composer, corrections, sourceRecord, sourceSelection],
+    );
+    const carriedPins = useMemo(
+        () => pins.filter(
+            (pin) => !implicitContext
+                || pin.kind !== implicitContext.kind
+                || pin.id !== implicitContext.id,
+        ),
+        [implicitContext, pins],
     );
     const visibleAttachments = useMemo(
         () => contextResult.attachments.filter(
-            (attachment) => !implicitContext
-                || attachment.kind !== implicitContext.kind
-                || attachment.id !== implicitContext.id,
+            (attachment) => !(implicitContext
+                    && attachment.kind === implicitContext.kind
+                    && attachment.id === implicitContext.id)
+                && !isAskConnexPinned(carriedPins, attachment),
         ),
-        [contextResult.attachments, implicitContext],
+        [carriedPins, contextResult.attachments, implicitContext],
     );
     const contentTooLong = askConnexMessageContent(composer).length > 16_000;
     const fileOperationPending = hasPendingAskConnexFileOperation(fileAttachments);
-    const fileContextCount = fileAttachments.filter(
-        (attachment) => attachment.status !== 'failed',
-    ).length;
+    const contextFiles = useMemo(
+        () => fileAttachments.filter((attachment) => attachment.status !== 'failed'),
+        [fileAttachments],
+    );
+    const fileContextCount = contextFiles.length;
     const contextOverflow = contextResult.pageContext.length + fileContextCount > 10;
+    const scopePreview = useMemo(
+        () => askConnexScopePreview(contextResult.pageContext, contextFiles),
+        [contextFiles, contextResult.pageContext],
+    );
     const toolActionPending = toolCalls.some((toolCall) => toolCall.pendingAction !== null);
     const actionableToolCallIds = useMemo(
         () => actionableAskConnexToolCallIds(toolCalls, messages, userId),
@@ -311,6 +468,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         || toolActionPending;
     const scoped = stateIdentity === identity && !switching;
     const presenceSessionId = activeSession?.visibility === 'shared' ? activeSession.id : null;
+    /**
+     * Whether the conversation is actually on screen, in the drawer or in the routed workspace.
+     * Presence is published from here, so gating it on the drawer alone would make every member
+     * reading a shared chat at `/ask-connex` invisible to the others once the backend TTL expired.
+     */
+    const surfaceVisible = open || workspaceMode;
 
     useEffect(() => {
         activeSessionRef.current = activeSession;
@@ -321,16 +484,26 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }, [composer]);
 
     useEffect(() => {
-        activeTurnRef.current = (turn.phase === 'accepted' || turn.phase === 'running')
-            && turn.sessionId !== null
-            && turn.turnId !== null
+        workspaceSessionIdRef.current = workspaceSessionId;
+    }, [workspaceSessionId]);
+
+    const turnActive = turn.phase === 'accepted' || turn.phase === 'running';
+    const activeTurn = useMemo(
+        () => turnActive && turn.sessionId !== null && turn.turnId !== null
             ? { sessionId: turn.sessionId, turnId: turn.turnId }
-            : null;
-        if (turn.phase !== 'accepted' && turn.phase !== 'running') {
-            cancellingRef.current = false;
-            setCancelling(false);
-        }
-    }, [turn]);
+            : null,
+        [turn.sessionId, turn.turnId, turnActive],
+    );
+
+    useEffect(() => {
+        activeTurnRef.current = activeTurn;
+    }, [activeTurn]);
+
+    useEffect(() => {
+        if (turnActive) return;
+        cancellingRef.current = false;
+        setCancelling(false);
+    }, [turnActive]);
 
     const publishStream = useCallback(() => {
         const stream = streamRef.current;
@@ -403,7 +576,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
     const handleStreamDelta = useCallback((frame: AiChatDeltaFrame) => {
         const active = activeTurnRef.current;
-        if (active === null || frame.turnId !== active.turnId) return;
+        if (active === null
+                || frame.workspaceId !== activeWorkspaceId
+                || frame.sessionId !== active.sessionId
+                || frame.turnId !== active.turnId) return;
         const current = streamRef.current?.turnId === frame.turnId
             ? streamRef.current
             : createAskConnexStream(frame.turnId);
@@ -411,11 +587,17 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         streamRef.current = transition.state;
         invalidateStream();
         if (transition.hydrate) void hydrateStream(active.sessionId, frame.turnId);
-    }, [hydrateStream, invalidateStream]);
+    }, [activeWorkspaceId, hydrateStream, invalidateStream]);
 
+    /**
+     * Adopts the durable partial the server retains for this answer, including after it stopped —
+     * a stopped answer leaves no transcript message, so its retained text is the only record of
+     * what it had established. Repairing a gap is only worth doing while more text can still
+     * arrive, so a settled answer takes the partial as it stands.
+     */
     const absorbTurnPartial = useCallback((durable: AiChatTurn, streamEpoch: number) => {
         if (streamEpoch !== streamEpochRef.current) return;
-        if (!isActiveTurnStatus(durable.status)) return;
+        if (shouldDropAskConnexStream(durable.status)) return;
         const partial = durable.partialContent ?? '';
         if (partial.length === 0) return;
         const current = streamRef.current?.turnId === durable.turnId
@@ -424,7 +606,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         const settled = absorbAskConnexStreamPartial(current, partial);
         streamRef.current = settled.state;
         invalidateStream();
-        if (settled.hydrate) void hydrateStream(durable.sessionId, durable.turnId);
+        if (settled.hydrate && isActiveTurnStatus(durable.status)) {
+            void hydrateStream(durable.sessionId, durable.turnId);
+        }
     }, [hydrateStream, invalidateStream]);
 
     const openDrawer = useCallback((source: OpenSource = 'standard') => {
@@ -437,6 +621,54 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setInstantOpen(true);
         setOpen(false);
     }, []);
+    const openWorkspace = useCallback(() => {
+        workspaceReturnRef.current = true;
+        setWorkspaceSourceContext({
+            identity,
+            context: snapshotAskConnexSourceContext(context.record, context.selection),
+        });
+        setOpen(false);
+        const session = activeSessionRef.current;
+        router.push(session ? `/ask-connex/${session.id}` : '/ask-connex');
+    }, [context.record, context.selection, identity, router]);
+    const closeWorkspace = useCallback(() => {
+        if (workspaceReturnRef.current) {
+            router.back();
+            return;
+        }
+        router.push('/dashboard');
+    }, [router]);
+
+    useEffect(() => {
+        if (workspaceMode || !workspaceReturnRef.current) return;
+        workspaceReturnRef.current = false;
+        setWorkspaceSourceContext(null);
+        setInstantOpen(false);
+        setOpen(true);
+    }, [workspaceMode]);
+
+    const contextualActions = useMemo<readonly AppAction[]>(() => {
+        if (workspaceMode) return [];
+        const label = selectionContext
+            ? t('entryPoint.selection', {
+                count: selectionContext.count,
+                type: t(`recordTypes.${selectionContext.type}`),
+            })
+            : sourceRecord
+                ? t('entryPoint.record', { label: sourceRecord.label })
+                : t('entryPoint.workspace');
+        return [{
+            id: 'workspace.ask-connex',
+            group: 'workspace',
+            labelKey: 'askConnex',
+            label,
+            keywords: ['ask', 'ai', 'connex'],
+            icon: SparklesIcon,
+            order: 90,
+            execute: () => openDrawer(),
+        }];
+    }, [openDrawer, selectionContext, sourceRecord, t, workspaceMode]);
+    useRegisterActions(contextualActions);
 
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
@@ -478,7 +710,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         sessionId: number,
         signal: AbortSignal,
         animateNew: boolean,
-    ): Promise<AiChatSession | null> => {
+    ): Promise<{ session: AiChatSession; activeTurn: AiChatTurn | null } | null> => {
         const refreshVersion = ++transcriptRefreshVersionRef.current;
         const [firstDetail, attachments, historicalToolCalls, pendingToolCalls] = await Promise.all([
             getAiChatSession(
@@ -533,7 +765,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         if (signal.aborted || refreshVersion !== transcriptRefreshVersionRef.current) return null;
         setLoadState('ready');
         setLoadError(null);
-        return firstDetail.session;
+        return { session: firstDetail.session, activeTurn: firstDetail.activeTurn };
     }, [refreshCollaboration]);
 
     const clearActiveSession = useCallback(() => {
@@ -571,7 +803,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         let streamEpoch = initial?.streamEpoch ?? streamEpochRef.current;
         let current = initial?.durable ?? await getAiChatTurn(sessionId, turnId, { signal });
         while (isActiveTurnStatus(current.status)) {
-            dispatchTurn({ type: 'status', status: current.status, reason: current.terminalReason });
+            dispatchTurn({
+                type: 'status',
+                status: current.status,
+                reason: current.terminalReason,
+                progress: current.progress,
+            });
             absorbTurnPartial(current, streamEpoch);
             await delay(1_000, signal);
             streamEpoch = streamEpochRef.current;
@@ -588,7 +825,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             let durableStreamEpoch = streamEpochRef.current;
             let durable = await getAiChatTurn(stored.sessionId, stored.turnId, { signal });
             if (signal.aborted) return;
-            dispatchTurn({ type: 'status', status: durable.status, reason: durable.terminalReason });
+            dispatchTurn({
+                type: 'status',
+                status: durable.status,
+                reason: durable.terminalReason,
+                progress: durable.progress,
+            });
             absorbTurnPartial(durable, durableStreamEpoch);
 
             try {
@@ -620,11 +862,17 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             }
 
             if (signal.aborted) return;
-            dispatchTurn({ type: 'status', status: durable.status, reason: durable.terminalReason });
+            dispatchTurn({
+                type: 'status',
+                status: durable.status,
+                reason: durable.terminalReason,
+                progress: durable.progress,
+            });
+            absorbTurnPartial(durable, streamEpochRef.current);
             safeStorageRemove(turnKey);
             setSubmissionBlocked(false);
             await refreshTranscript(stored.sessionId, signal, true);
-            resetStream();
+            if (shouldDropAskConnexStream(durable.status)) resetStream();
             await refreshSessions(signal);
             if (durable.status === 'failed') {
                 deferredErrorToast(
@@ -650,6 +898,71 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         }
     }, [absorbTurnPartial, clearActiveSession, deferApiError, pollDurableTurn, refreshSessions, refreshTranscript, resetStream, t, turnKey]);
 
+    const followDurableTurn = useCallback(async (
+        initial: AiChatTurn,
+        signal: AbortSignal,
+    ): Promise<void> => {
+        if (durableFollowerRef.current === initial.turnId) return;
+        durableFollowerRef.current = initial.turnId;
+        dispatchTurn({
+            type: 'accepted',
+            sessionId: initial.sessionId,
+            turnId: initial.turnId,
+            generationHandle: null,
+            status: initial.status,
+            progress: initial.progress,
+            cancellable: initial.requestedByCurrentUser === true,
+        });
+        absorbTurnPartial(initial, streamEpochRef.current);
+        try {
+            const durable = await pollDurableTurn(
+                initial.sessionId,
+                initial.turnId,
+                signal,
+                { durable: initial, streamEpoch: streamEpochRef.current },
+            );
+            if (signal.aborted) return;
+            dispatchTurn({
+                type: 'status',
+                status: durable.status,
+                reason: durable.terminalReason,
+                progress: durable.progress,
+            });
+            absorbTurnPartial(durable, streamEpochRef.current);
+            const stored = parseStoredAskConnexTurn(safeStorageGet(turnKey));
+            if (stored?.turnId === durable.turnId) safeStorageRemove(turnKey);
+            setSubmissionBlocked(false);
+            await refreshTranscript(durable.sessionId, signal, true);
+            if (shouldDropAskConnexStream(durable.status)) resetStream();
+            await refreshSessions(signal);
+            if (durable.status === 'failed') {
+                deferredErrorToast(
+                    durable.terminalReason === 'image_input_unsupported'
+                        ? t('turnImageUnsupported')
+                        : durable.terminalReason === 'tool_result_budget_exhausted'
+                            ? t('toolResultBudgetExhausted')
+                            : durable.terminalReason === 'budget_exhausted'
+                                ? t('budgetExhausted')
+                                : t('toast.turnFailed'),
+                );
+            }
+            if (durable.status === 'timed_out') deferredErrorToast(t('toast.turnTimedOut'));
+        } catch (error) {
+            if (signal.aborted) return;
+            if (error instanceof ApiError && error.status === 403) {
+                clearActiveSession();
+                return;
+            }
+            setSubmissionBlocked(true);
+            dispatchTurn({ type: 'status', status: 'failed', reason: 'reconciliation_failed' });
+            deferApiError(error, 'toast.requestFailed');
+        } finally {
+            if (durableFollowerRef.current === initial.turnId) {
+                durableFollowerRef.current = null;
+            }
+        }
+    }, [absorbTurnPartial, clearActiveSession, deferApiError, pollDurableTurn, refreshSessions, refreshTranscript, resetStream, t, turnKey]);
+
     useEffect(() => {
         sessionEpochRef.current++;
         const controller = new AbortController();
@@ -658,6 +971,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         sessionControllerRef.current?.abort();
         sessionControllerRef.current = null;
         const storedSessionId = parseStoredAskConnexSession(safeStorageGet(sessionKey));
+        const selectedSessionId = workspaceSessionIdRef.current ?? storedSessionId;
         const storedTurn = parseStoredAskConnexTurn(safeStorageGet(turnKey));
 
         const initialize = async () => {
@@ -701,22 +1015,25 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                         setMembers(workspaceMembers.filter((member) => member.status === 'active'));
                     }
                 }
-                if (storedSessionId === null) {
+                if (selectedSessionId === null) {
                     setLoadState('ready');
                     return;
                 }
                 selectionLoadStarted = true;
-                await refreshTranscript(storedSessionId, controller.signal, false);
+                const detail = await refreshTranscript(selectedSessionId, controller.signal, false);
                 if (controller.signal.aborted) return;
-                if (storedTurn?.sessionId === storedSessionId) {
+                if (storedTurn?.sessionId === selectedSessionId) {
                     dispatchTurn({
                         type: 'accepted',
                         sessionId: storedTurn.sessionId,
                         turnId: storedTurn.turnId,
                         generationHandle: storedTurn.generationHandle,
                         status: 'accepted',
+                        cancellable: true,
                     });
                     await followTurn(storedTurn, controller.signal);
+                } else if (detail?.activeTurn) {
+                    await followDurableTurn(detail.activeTurn, controller.signal);
                 }
             } catch (error) {
                 if (controller.signal.aborted) return;
@@ -742,7 +1059,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
         void initialize();
         return () => controller.abort();
-    }, [activeWorkspaceId, clearActiveSession, deferApiError, followTurn, identity, refreshSessions, refreshTranscript, reloadVersion, resetStream, sessionKey, sharePermission, switching, t, turnKey, userId]);
+    }, [activeWorkspaceId, clearActiveSession, deferApiError, followDurableTurn, followTurn, identity, refreshSessions, refreshTranscript, reloadVersion, resetStream, sessionKey, sharePermission, switching, t, turnKey, userId]);
 
     const selectSession = useCallback(async (session: AiChatSession) => {
         if (working) return;
@@ -771,7 +1088,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         dispatchToolCalls({ type: 'reset' });
         setLoadState('loading');
         try {
-            await refreshTranscript(session.id, signal, false);
+            const detail = await refreshTranscript(session.id, signal, false);
+            if (workspaceMode) router.replace(`/ask-connex/${session.id}`);
+            if (detail?.activeTurn) void followDurableTurn(detail.activeTurn, signal);
         } catch (error) {
             if (signal.aborted) return;
             if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
@@ -782,12 +1101,62 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 deferApiError(error, 'toast.requestFailed');
             }
         }
-    }, [clearActiveSession, deferApiError, refreshTranscript, resetStream, sessionKey, t, turnKey, working]);
+    }, [clearActiveSession, deferApiError, followDurableTurn, refreshTranscript, resetStream, router, sessionKey, t, turnKey, working, workspaceMode]);
 
     const newChat = useCallback(() => {
         if (working) return;
         clearActiveSession();
-    }, [clearActiveSession, working]);
+        if (workspaceMode) router.replace('/ask-connex');
+    }, [clearActiveSession, router, working, workspaceMode]);
+
+    useEffect(() => {
+        if (!workspaceMode || stateIdentity !== identity || switching) return;
+        if (activeTurn !== null) {
+            const activeSessionId = activeSessionRef.current?.id ?? null;
+            if (activeSessionId !== null && workspaceSessionId !== activeSessionId) {
+                router.replace(`/ask-connex/${activeSessionId}`);
+            }
+            return;
+        }
+        if (workspaceSessionId === null
+                || activeSessionRef.current?.id === workspaceSessionId) return;
+        sessionEpochRef.current++;
+        sessionControllerRef.current?.abort();
+        const controller = new AbortController();
+        sessionControllerRef.current = controller;
+        const identitySignal = identityControllerRef.current?.signal;
+        const signal = identitySignal
+            ? AbortSignal.any([controller.signal, identitySignal])
+            : controller.signal;
+        safeStorageSet(sessionKey, String(workspaceSessionId));
+        safeStorageRemove(turnKey);
+        messagesRef.current = [];
+        setMessages([]);
+        setFreshMessageIds(new Set());
+        setFileAttachments([]);
+        resetStream();
+        dispatchTurn({ type: 'reset' });
+        dispatchToolCalls({ type: 'reset' });
+        setLoadState('loading');
+        const load = async () => {
+            try {
+                const detail = await refreshTranscript(workspaceSessionId, signal, false);
+                if (detail?.activeTurn) void followDurableTurn(detail.activeTurn, signal);
+            } catch (error) {
+                if (signal.aborted) return;
+                if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
+                    clearActiveSession();
+                    router.replace('/ask-connex');
+                    return;
+                }
+                setLoadError(error instanceof ApiError ? error : new Error(t('toast.requestFailed')));
+                setLoadState('error');
+                deferApiError(error, 'toast.requestFailed');
+            }
+        };
+        void load();
+        return () => controller.abort();
+    }, [activeTurn, clearActiveSession, deferApiError, followDurableTurn, identity, refreshTranscript, resetStream, router, sessionKey, stateIdentity, switching, t, turnKey, workspaceMode, workspaceSessionId]);
 
     const enqueueRealtimeRefresh = useCallback((sessionId: number, signal: AbortSignal) => {
         realtimeRefreshQueueRef.current = realtimeRefreshQueueRef.current.then(async () => {
@@ -796,7 +1165,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 await refreshSessions(signal);
                 const session = activeSessionRef.current;
                 if (session?.id === sessionId) {
-                    await refreshTranscript(session.id, signal, true);
+                    const detail = await refreshTranscript(session.id, signal, true);
+                    if (detail?.activeTurn
+                            && activeTurnRef.current?.turnId !== detail.activeTurn.turnId) {
+                        void followDurableTurn(detail.activeTurn, signal);
+                    }
                 }
             } catch (error) {
                 if (signal.aborted) return;
@@ -805,10 +1178,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 }
             }
         });
-    }, [clearActiveSession, refreshSessions, refreshTranscript]);
+    }, [clearActiveSession, followDurableTurn, refreshSessions, refreshTranscript]);
 
     useEffect(() => {
         if (userId === null || activeWorkspaceId === null || switching) return;
+        let connectedBefore = false;
         const socket = createAiChatSocket({
             onFrame: (frame) => {
                 if (frame.workspaceId !== activeWorkspaceId) return;
@@ -833,13 +1207,28 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 enqueueRealtimeRefresh(frame.sessionId, signal);
             },
             onDelta: handleStreamDelta,
+            onStatusChange: (status) => {
+                if (status !== 'connected') return;
+                if (!connectedBefore) {
+                    connectedBefore = true;
+                    return;
+                }
+                const signal = identityControllerRef.current?.signal;
+                if (!signal || signal.aborted) return;
+                const sessionId = activeSessionRef.current?.id;
+                if (sessionId !== undefined) {
+                    enqueueRealtimeRefresh(sessionId, signal);
+                    return;
+                }
+                void refreshSessions(signal).catch(() => undefined);
+            },
         });
         socket.activate();
         return () => socket.deactivate();
-    }, [activeWorkspaceId, clearActiveSession, enqueueRealtimeRefresh, handleStreamDelta, resetStream, switching, userId]);
+    }, [activeWorkspaceId, clearActiveSession, enqueueRealtimeRefresh, handleStreamDelta, refreshSessions, resetStream, switching, userId]);
 
     useEffect(() => {
-        if (!open || presenceSessionId === null || loadState !== 'ready') {
+        if (!surfaceVisible || presenceSessionId === null || loadState !== 'ready') {
             return;
         }
         const sessionId = presenceSessionId;
@@ -872,7 +1261,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             controller.abort();
             void leaveAiChatPresence(sessionId).catch(() => {});
         };
-    }, [loadState, open, presenceSessionId]);
+    }, [loadState, presenceSessionId, surfaceVisible]);
 
     const shareSession = useCallback(async (shared: boolean): Promise<boolean> => {
         if (!activeSession?.ownedByCurrentUser || sharePermission !== 'granted') return false;
@@ -992,6 +1381,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 ...current.filter((item) => item.id !== createdSession.id),
             ]);
             safeStorageSet(sessionKey, String(createdSession.id));
+            if (workspaceMode) router.replace(`/ask-connex/${createdSession.id}`);
             setLoadState('ready');
             return createdSession;
         }).finally(() => {
@@ -999,7 +1389,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         });
         sessionCreationRef.current = creation;
         return creation;
-    }, [activeSession, sessionKey, t]);
+    }, [activeSession, router, sessionKey, t, workspaceMode]);
 
     const uploadErrorMessage = useCallback((error: unknown): string => {
         if (!(error instanceof ApiError)) return t('upload.failed');
@@ -1207,7 +1597,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const send = useCallback(async (contentOverride?: string) => {
         const requestContent = contentOverride ?? composer;
         const content = askConnexMessageContent(requestContent);
-        const requestContext = mergeAskConnexContext(context.record, requestContent);
+        const requestContext = mergeAskConnexContext(
+            sourceRecord,
+            requestContent,
+            sourceSelection,
+            corrections,
+        );
         const requestContextOverflow = requestContext.pageContext.length + fileContextCount > 10;
         const activeSignal = identityControllerRef.current?.signal;
         if (
@@ -1227,6 +1622,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
         submittingRef.current = true;
         setSubmitting(true);
+        resetStream();
         let session = activeSession;
         try {
             if (session === null) {
@@ -1245,6 +1641,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                         ...current.filter((item) => item.id !== createdSession.id),
                     ]);
                     safeStorageSet(sessionKey, String(createdSession.id));
+                    if (workspaceMode) router.replace(`/ask-connex/${createdSession.id}`);
                     setLoadState('ready');
                 } catch (error) {
                     if (!activeSignal.aborted) {
@@ -1265,13 +1662,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 generationHandle: accepted.generationHandle,
             };
             safeStorageSet(turnKey, serializeStoredAskConnexTurn(stored));
-            resetStream();
             dispatchTurn({
                 type: 'accepted',
                 sessionId: accepted.sessionId,
                 turnId: accepted.turnId,
                 generationHandle: accepted.generationHandle,
                 status: accepted.status,
+                cancellable: true,
             });
             const optimistic: AiChatMessage = {
                 id: tempMessageIdRef.current,
@@ -1308,7 +1705,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             submittingRef.current = false;
             setSubmitting(false);
         }
-    }, [activeSession, composer, context.record, fileContextCount, fileOperationPending, followTurn, permission, refreshTranscript, resetStream, sessionKey, showApiError, submissionBlocked, t, turn.phase, turnKey, featureUnavailable, userDisplayName, userId]);
+    }, [activeSession, composer, corrections, featureUnavailable, fileContextCount, fileOperationPending, followTurn, permission, refreshTranscript, resetStream, router, sessionKey, showApiError, sourceRecord, sourceSelection, submissionBlocked, t, turn.phase, turnKey, userDisplayName, userId, workspaceMode]);
+
+    const retryPrompt = useMemo(() => askConnexRetryPrompt(messages), [messages]);
+    const retryTurn = useCallback(() => {
+        if (retryPrompt === null) return;
+        void send(retryPrompt);
+    }, [retryPrompt, send]);
 
     const cancelTurn = useCallback(async () => {
         const signal = identityControllerRef.current?.signal;
@@ -1334,6 +1737,36 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setComposer((current) => removeAskConnexAttachment(current, attachment));
     }, []);
 
+    useEffect(() => {
+        if (userId === null || activeWorkspaceId === null) return;
+        setPinnedContext(parseStoredAskConnexPins(safeStorageGet(pinnedKey)));
+        setPinnedIdentity(identity);
+    }, [activeWorkspaceId, identity, pinnedKey, userId]);
+
+    const commitPins = useCallback((next: AskConnexAttachment[]) => {
+        setPinnedContext(next);
+        safeStorageSet(pinnedKey, serializeAskConnexPins(next));
+    }, [pinnedKey]);
+
+    const togglePagePin = useCallback(() => {
+        if (inferredPageContext === null || pinnedIdentity !== identity) return;
+        commitPins(toggleAskConnexPin(pins, inferredPageContext));
+    }, [commitPins, identity, inferredPageContext, pinnedIdentity, pins]);
+
+    const unpinContext = useCallback((attachment: AskConnexAttachment) => {
+        if (pinnedIdentity !== identity) return;
+        commitPins(pins.filter(
+            (pin) => pin.kind !== attachment.kind || pin.id !== attachment.id,
+        ));
+    }, [commitPins, identity, pinnedIdentity, pins]);
+
+    const removePageContext = useCallback(() => setPageDismissed(true), []);
+    const removeSelectionContext = useCallback(() => setSelectionDismissed(true), []);
+    const resetContext = useCallback(() => {
+        setPageDismissed(false);
+        setSelectionDismissed(false);
+    }, []);
+
     const unavailable = useMemo(() => {
         if (permission === 'denied') {
             return { title: t('unavailable.permissionTitle'), body: t('unavailable.permissionBody') };
@@ -1353,11 +1786,78 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         return null;
     }, [permission, submissionBlocked, t, featureUnavailable]);
 
+    const canRetryTurn = retryPrompt !== null
+        && unavailable === null
+        && !working
+        && !contextOverflow;
+
+    const starterPromptKind = implicitContext?.kind
+        ?? selectionContext?.pageContext[0]?.kind
+        ?? null;
     const starterPrompts = useMemo(
-        () => starterPromptKeys(implicitContext?.kind ?? null).map((key) => t(key)),
-        [implicitContext?.kind, t],
+        () => starterPromptKeys(starterPromptKind).map((key) => t(key)),
+        [starterPromptKind, t],
+    );
+    const scopeList = useMemo(
+        () => new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' }),
+        [locale],
+    );
+    const scopeSummary = useCallback((preview: AskConnexScopePreview) => {
+        const parts = preview.records.map(
+            ({ kind, count }) => t(`scopeRecordCounts.${kind}`, { count }),
+        );
+        if (preview.files > 0) parts.push(t('scopeFiles', { count: preview.files }));
+        return t('scopeSummary', { scope: scopeList.format(parts) });
+    }, [scopeList, t]);
+    const citationKind = useCallback(
+        (kind: AiChatCitation['kind']) =>
+            kind === 'person'
+                ? t('citationKindPerson')
+                : kind === 'company'
+                    ? t('citationKindCompany')
+                    : t('citationKindDeal'),
+        [t],
     );
     const labels = useMemo(() => ({
+        answerDocument: {
+            absoluteTime: (instant: string) => formatAnswerInstant(instant, locale),
+            blockKind: (kind: AiChatAnswerBlockKind) => t(`answerDocument.blockKinds.${kind}`),
+            citationKind,
+            comparisonAgainst: t('answerDocument.comparisonAgainst'),
+            comparisonValue: t('answerDocument.comparisonValue'),
+            copyDraft: t('answerDocument.copyDraft'),
+            copyDraftDone: t('answerDocument.copyDraftDone'),
+            coverage: t('answerDocument.coverage'),
+            coverageStatus: (status: AiChatCoverage['status']) =>
+                t(`answerDocument.coverageStatuses.${status}`),
+            diffAfter: t('answerDocument.diffAfter'),
+            diffBefore: t('answerDocument.diffBefore'),
+            dismiss: t('answerDocument.dismiss'),
+            evidence: t('answerDocument.evidence'),
+            evidenceDetail: t('answerDocument.evidenceDetail'),
+            exclusions: t('answerDocument.exclusions'),
+            exclusion: (exclusion: AiChatCoverage['exclusions'][number]) =>
+                t(`answerDocument.exclusionsList.${exclusion}`),
+            freshness: t('answerDocument.freshness'),
+            freshnessCurrent: t('answerDocument.freshnessCurrent'),
+            moreDetail: t('answerDocument.moreDetail'),
+            openRecord: t('answerDocument.openRecord'),
+            period: (start: string, end: string) =>
+                t('answerDocument.period', { start, end }),
+            progressCount: (count: number) => t('answerDocument.progressCount', { count }),
+            progressSource: (source: AiChatProgressItem['source']) =>
+                t(`answerDocument.progressSources.${source}`),
+            progressStatus: (status: AiChatProgressItem['status']) =>
+                t(`answerDocument.progressStatuses.${status}`),
+            relativeTime: (instant: string) => formatRelativeTime(instant, locale, now),
+            sourceLimits: t('answerDocument.sourceLimits'),
+            sources: t('answerDocument.sources'),
+            source: (source: AiChatCoverage['sources'][number]) =>
+                t(`answerDocument.sourcesList.${source}`),
+            truncated: t('answerDocument.truncated'),
+            unsupported: t('answerDocument.unsupported'),
+            whatChecked: t('answerDocument.whatChecked'),
+        },
         assistantAuthor: t('assistantAuthor'),
         archive: t('archive'),
         budgetExhausted: t('budgetExhausted'),
@@ -1366,18 +1866,31 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         disclosureCreation: tDisclosure('sessionCreation'),
         disclosureList: tDisclosure('sessionList'),
         imageDisclosure: tDisclosure('imageProvider'),
-        citationKind: (kind: AiChatCitation['kind']) =>
-            kind === 'person'
-                ? t('citationKindPerson')
-                : kind === 'company'
-                    ? t('citationKindCompany')
-                    : t('citationKindDeal'),
+        citationKind,
         close: t('close'),
+        closeWorkspace: t('closeWorkspace'),
         composerAria: t('composerAria'),
         composerHint: t('composerHint'),
         composerPlaceholder: t('composerPlaceholder'),
         context: t('context'),
+        contextFile: t('contextFile'),
         contextLimit: t('contextLimit'),
+        contextMentioned: t('contextMentioned'),
+        contextPage: t('contextPage'),
+        contextPinned: t('contextPinned'),
+        contextReset: t('contextReset'),
+        pinContext: (label: string) => t('pinContext', { label }),
+        unpinContext: (label: string) => t('unpinContext', { label }),
+        scopeTitle: t('scopeTitle'),
+        scopeSummary,
+        scopeConfirm: t('scopeConfirm'),
+        scopeEdit: t('scopeEdit'),
+        contextSelected: (count: number, type: AskConnexSelectionContext['type']) =>
+            t('contextSelected', { count, type: t(`recordTypes.${type}`) }),
+        contextScopeUnsupported: t('contextScopeUnsupported'),
+        contextUnavailable: t('contextUnavailable'),
+        contextUnsupported: (type: AskConnexSelectionContext['type']) =>
+            t('contextUnsupported', { type: t(`recordTypes.${type}`) }),
         addContext: t('addContext'),
         addRecordContext: t('addRecordContext'),
         attachFile: t('attachFile'),
@@ -1404,10 +1917,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         messages: t('messages'),
         newChat: t('newChat'),
         noRecentSessions: t('noRecentSessions'),
+        noMatchingSessions: t('noMatchingSessions'),
         moreOptions: t('moreOptions'),
         participants: t('participants'),
         presence: t('presence'),
         recentSessions: t('recentSessions'),
+        searchSessions: t('searchSessions'),
         removeContext: (label: string) => t('removeContext', { label }),
         removeParticipant: (name: string) => t('removeParticipant', { name }),
         rename: t('rename'),
@@ -1425,7 +1940,6 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         shared: t('shared'),
         shareTitle: t('shareTitle'),
         suggestedFollowUps: t('suggestedFollowUps'),
-        thinking: t('thinking'),
         title: t('title'),
         tooLong: t('tooLong'),
         typing: (names: string) => t('typing', { names }),
@@ -1439,6 +1953,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         turnStreaming: t('turnStreaming'),
         turnTimedOut: t('turnTimedOut'),
         turnWorking: t('turnWorking'),
+        partialAnswer: t('partialAnswer'),
+        openWorkspace: t('openWorkspace'),
         toolCard: {
             actionFailed: t('toolCards.failures.actionFailed'),
             approve: t('toolCards.actions.approve'),
@@ -1497,21 +2013,34 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 requestCompleted: t('toolCards.summaries.requestCompleted'),
             },
         },
-    }), [t, tDisclosure]);
+    }), [citationKind, locale, now, scopeSummary, t, tDisclosure]);
 
     const value = useMemo<AskConnexContextValue>(
-        () => ({ open, instantOpen, working, openDrawer, closeDrawer }),
-        [closeDrawer, instantOpen, open, openDrawer, working],
+        () => ({
+            open,
+            instantOpen,
+            working,
+            workspace: workspaceMode,
+            openDrawer,
+            closeDrawer,
+            openWorkspace,
+        }),
+        [closeDrawer, instantOpen, open, openDrawer, openWorkspace, working, workspaceMode],
     );
 
     return (
         <AskConnexContext.Provider value={value}>
-            {children}
+            <AskConnexMountContext.Provider value={mountValue}>
+                {children}
+            </AskConnexMountContext.Provider>
             <AskConnexDrawer
                 open={open}
                 instantOpen={instantOpen}
                 isMobile={isMobile}
                 showTab={scoped}
+                workspace={workspaceMode}
+                desktopRoot={desktopRoot}
+                workspaceRoot={workspaceRoot}
                 sessions={scoped ? sessions : []}
                 invitations={scoped ? invitations : []}
                 activeSession={scoped ? activeSession : null}
@@ -1525,6 +2054,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 loadError={scoped ? loadError : null}
                 composer={scoped ? composer : ''}
                 implicitContext={implicitContext}
+                selectionContext={selectionContext}
+                unsupportedPageContext={unsupportedPageContext}
+                pinnedContext={scoped ? carriedPins : EMPTY_ASK_CONNEX_PINS}
+                pageContextPinned={pageContextPinned}
+                contextCorrected={contextCorrected}
+                scopePreview={scoped ? scopePreview : null}
                 attachments={scoped ? visibleAttachments : []}
                 fileAttachments={scoped ? fileAttachments : []}
                 canAttachFiles={attachmentCreatePermission === 'granted'}
@@ -1540,12 +2075,15 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 actionableToolCallIds={scoped
                     ? actionableToolCallIds
                     : EMPTY_ASK_CONNEX_TOOL_CALL_IDS}
+                canRetryTurn={scoped && canRetryTurn}
                 unavailable={unavailable}
                 starterPrompts={starterPrompts}
                 labels={labels}
                 onOpenChange={setOpen}
                 onOpenChangeComplete={() => setInstantOpen(false)}
                 onKeyboardClose={closeDrawerInstant}
+                onOpenWorkspace={openWorkspace}
+                onCloseWorkspace={closeWorkspace}
                 onSelectSession={(session) => void selectSession(session)}
                 onNewChat={newChat}
                 onRename={renameSession}
@@ -1558,10 +2096,16 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 onRetry={() => setReloadVersion((version) => version + 1)}
                 onComposerChange={setComposer}
                 onRemoveAttachment={removeAttachment}
+                onTogglePagePin={togglePagePin}
+                onUnpinContext={unpinContext}
+                onRemovePageContext={removePageContext}
+                onRemoveSelectionContext={removeSelectionContext}
+                onResetContext={resetContext}
                 onAttachFiles={(files) => void attachFiles(files)}
                 onRemoveFileAttachment={(attachment) => void removeFileAttachment(attachment)}
                 onSend={(content) => void send(content)}
                 onCancelTurn={() => void cancelTurn()}
+                onRetryTurn={retryTurn}
                 onToolAction={(toolCallId, action) => void performToolAction(toolCallId, action)}
             />
         </AskConnexContext.Provider>
