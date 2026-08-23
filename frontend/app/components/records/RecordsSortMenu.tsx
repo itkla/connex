@@ -3,6 +3,7 @@
 import { useTranslations } from 'next-intl';
 import { ChevronDownIcon, ChevronUpDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
 
+import { Button } from '@/components/ui/button';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -32,14 +33,17 @@ export default function RecordsSortMenu<T>({
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <button
+                <Button
                     type="button"
+                    variant="ghost"
+                    size="page"
+                    menu
                     aria-label={t('sortBy')}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-full bg-muted px-3 text-xs font-medium text-muted-foreground ring-1 ring-border transition hover:text-foreground aria-expanded:text-foreground"
+                    className="bg-muted px-3 text-xs text-muted-foreground ring-1 ring-border shadow-none hover:text-foreground aria-expanded:text-foreground"
                 >
                     <ChevronUpDownIcon className="size-3.5" />
                     <span>{active ? `${t('sortBy')}: ${active.label}` : t('sortBy')}</span>
-                </button>
+                </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
                 {options.map((opt) => {

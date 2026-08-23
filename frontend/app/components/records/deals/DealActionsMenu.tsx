@@ -155,35 +155,26 @@ export default function DealActionsMenu({
                 </Button>
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="toolbar" menu>
+                        <Button variant="brand" size="toolbar" menu>
                             <PlusIcon className="size-4" />
                             {t('new')}
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
                         <DropdownMenuItem
-                            onSelect={(e) => {
-                                e.preventDefault();
-                                setActivityOpen(true);
-                            }}
+                            onSelect={() => setActivityOpen(true)}
                         >
                             <ChatBubbleLeftRightIcon className="size-4" />
                             <span>{t('addActivity')}</span>
                         </DropdownMenuItem>
                         <DropdownMenuItem
-                            onSelect={(e) => {
-                                e.preventDefault();
-                                setNoteOpen(true);
-                            }}
+                            onSelect={() => setNoteOpen(true)}
                         >
                             <DocumentTextIcon className="size-4" />
                             <span>{t('addNote')}</span>
                         </DropdownMenuItem>
                         <DropdownMenuItem
-                            onSelect={(e) => {
-                                e.preventDefault();
-                                setTaskOpen(true);
-                            }}
+                            onSelect={() => setTaskOpen(true)}
                         >
                             <CheckCircleIcon className="size-4" />
                             <span>{t('addTask')}</span>

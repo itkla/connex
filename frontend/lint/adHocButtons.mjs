@@ -21,9 +21,9 @@ import { join, relative, resolve, sep } from "node:path";
  * 2. `linkAsButton` — an `<a>` or `<Link>` painting the same surface. #509 Phase 2 routes these
  *    through `buttonVariants` rather than leaving each one to redraw the button.
  * 3. `hoistedClass` — a module-scope class string, or a helper returning one, that paints a button
- *    surface and is spent on a `className`. `pillClass` is the reason this rule exists: one
- *    function draws the whole filter-pill layer, and a tag-shaped scanner scores all of its call
- *    sites clean.
+ *    surface and is spent on a `className`. The retired `pillClass` helper proved why this rule
+ *    exists: one function drew the whole filter-pill layer while a tag-shaped scanner scored all
+ *    of its call sites clean.
  * 4. `shapeOverride` — a `<Button>` or `<IconButton>` whose `className` re-decides the radius or
  *    the height (`rounded-*`, `h-8`, `size-9`). The variant is the height scale; a call site that
  *    types a number has left the scale.
@@ -64,6 +64,9 @@ import { join, relative, resolve, sep } from "node:path";
  *    `SegmentedControl` and rebuilt the signal row on `Button`/`IconButton`, so both radar files left
  *    the ledger: one hand-rolled chip layer and sixteen shape overrides, icon sizes, and untooltipped
  *    icon buttons.
+ * 6. 430 → 422 (lowered). WS8's filter-family convergence replaced the private `pillClass`
+ *    surface, filter-bar actions, mobile filter options, and records sort/column triggers with the
+ *    context-tiered button primitives; the unused parallel records filter menu was removed.
  *
  * **The burndown contract**, deliberately identical to `lint/motionDurations.mjs` so the two gates
  * read the same way. `loadBaseline()` returns the committed inventory of files that still carry
@@ -274,9 +277,9 @@ export function scanFile(file) {
 
 /**
  * Class strings hoisted out of JSX — a module-scope `const`, or a helper that returns one. They are
- * where a hand-rolled button surface hides from a tag-shaped scanner: `pillClass` paints the whole
- * filter-pill layer from one function body, and a scanner that only reads `className=` attributes
- * would score every one of its call sites as clean.
+ * where a hand-rolled button surface hides from a tag-shaped scanner. The retired `pillClass`
+ * helper painted the whole filter-pill layer from one function body, while a scanner that only
+ * read `className=` attributes scored every one of its call sites as clean.
  *
  * @returns {[string, string][]} identifier and the source text that may carry the classes
  */
@@ -372,4 +375,4 @@ export function loadBaseline() {
  * The ledger's total after the widening described above. It may fall. It rises only in a commit
  * that widens what the scanner catches — never to make room for new debt.
  */
-export const BASELINE_HIGH_WATER_MARK = 430;
+export const BASELINE_HIGH_WATER_MARK = 422;

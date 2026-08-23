@@ -1,7 +1,6 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { ChevronDownIcon } from "@heroicons/react/20/solid";
 import { XMarkIcon, UserIcon, UserMinusIcon } from "@heroicons/react/24/outline";
 import {
     DropdownMenu,
@@ -15,7 +14,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import type { WorkspaceMember } from "@/app/lib/types";
-import { pillClass } from "./FilterPill";
+import { FilterTrigger } from "./FilterPill";
 
 /** Sentinel value meaning "scoped to the current user"; resolved server-side, never a raw id. */
 export const MEMBER_SCOPE_ME = "me";
@@ -129,15 +128,14 @@ export default function MemberScopeFilter({
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <button type="button" aria-label={ariaLabel ?? t("ariaLabel")} aria-pressed={active} className={pillClass(active)}>
+                <FilterTrigger active={active} aria-label={ariaLabel ?? t("ariaLabel")} menu>
                     <span>{pillLabel}</span>
                     {mode === "members" && memberIds.length > 1 && (
                         <span className="grid size-4 place-items-center rounded-full bg-brand text-[10px] font-semibold leading-none text-brand-foreground tabular-nums">
                             {memberIds.length}
                         </span>
                     )}
-                    <ChevronDownIcon className="size-3.5 text-muted-foreground transition-transform duration-200 ease-out group-data-[state=open]:rotate-180" />
-                </button>
+                </FilterTrigger>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-64">
                 <DropdownMenuLabel>{controlLabel}</DropdownMenuLabel>

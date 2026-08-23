@@ -1,9 +1,10 @@
 export { default as SearchField } from "./SearchField";
 export { default as FilterBar, FilterChip, type FilterChipData } from "./FilterBar";
 export {
+    FilterTrigger,
     MultiSelectFilter,
     RadioFilter,
-    pillClass,
+    type FilterTriggerProps,
     type MultiSelectOption,
     type RadioOption,
 } from "./FilterPill";

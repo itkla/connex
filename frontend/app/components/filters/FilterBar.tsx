@@ -2,13 +2,27 @@
 
 import { AnimatePresence, motion } from "motion/react";
 import { XMarkIcon } from "@heroicons/react/24/outline";
+import { useTranslations } from "next-intl";
+
+import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/lib/utils";
 
 export type FilterChipData = { id: string; label: string; onRemove: () => void };
 
 const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
 
-export function FilterChip({ label, reduce, onRemove }: { label: string; reduce: boolean; onRemove: () => void }) {
+export function FilterChip({
+    label,
+    removeLabel,
+    reduce,
+    onRemove,
+}: {
+    label: string;
+    removeLabel: string;
+    reduce: boolean;
+    onRemove: () => void;
+}) {
     return (
         <motion.span
             layout={!reduce}
@@ -19,14 +33,16 @@ export function FilterChip({ label, reduce, onRemove }: { label: string; reduce:
             className="inline-flex h-6 items-center gap-1 rounded-full bg-muted px-2.5 text-xs font-medium text-foreground ring-1 ring-border"
         >
             <span className="max-w-40 truncate">{label}</span>
-            <button
+            <IconButton
+                label={removeLabel}
                 type="button"
+                variant="ghost"
+                size="icon-inline"
                 onClick={onRemove}
-                className="grid size-4 place-items-center rounded-full text-muted-foreground outline-none transition-colors motion-reduce:transition-none hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand/40"
-                aria-label="Remove filter"
+                className="text-muted-foreground hover:bg-background hover:text-foreground"
             >
                 <XMarkIcon className="size-3" />
-            </button>
+            </IconButton>
         </motion.span>
     );
 }
@@ -64,6 +80,7 @@ export default function FilterBar({
     reduce: boolean;
     className?: string;
 }) {
+    const t = useTranslations("Filters");
     const collapsible = collapsed != null;
     return (
         <div className={cn("rounded-2xl py-2.5", className)}>
@@ -74,17 +91,19 @@ export default function FilterBar({
                     </div>
                 )}
                 {hasActiveFilters && (
-                    <button
+                    <Button
                         type="button"
+                        variant="ghost"
+                        size="toolbar"
                         onClick={onClearAll}
                         className={cn(
-                            "inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium text-muted-foreground outline-none transition-colors motion-reduce:transition-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand/40",
-                            collapsible && "hidden md:inline-flex",
+                            "text-xs text-muted-foreground hover:text-foreground",
+                            collapsible && "hidden md:flex",
                         )}
                     >
                         <XMarkIcon className="size-3.5" />
                         {clearAllLabel}
-                    </button>
+                    </Button>
                 )}
                 <div
                     className={cn(
@@ -113,7 +132,13 @@ export default function FilterBar({
                         transition={{ duration: 0.2, ease: EASE_OUT }}
                     >
                         {chips.map((chip) => (
-                            <FilterChip key={chip.id} label={chip.label} reduce={reduce} onRemove={chip.onRemove} />
+                            <FilterChip
+                                key={chip.id}
+                                label={chip.label}
+                                removeLabel={t("removeFilter", { label: chip.label })}
+                                reduce={reduce}
+                                onRemove={chip.onRemove}
+                            />
                         ))}
                     </motion.div>
                 )}

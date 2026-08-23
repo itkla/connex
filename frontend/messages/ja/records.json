@@ -304,11 +304,6 @@
     "clearFilters": "フィルターを解除",
     "sortBy": "並び替え"
   },
-  "RecordsFilterMenu": {
-    "filterAria": "フィルター",
-    "filterBy": "フィルター",
-    "clearAll": "すべてクリア"
-  },
   "RecordsDeleteDialog": {
     "titleSingle": "{entityLabel} を削除しますか？",
     "titleMultiple": "{count} 件の {entityLabel} を削除しますか？",
