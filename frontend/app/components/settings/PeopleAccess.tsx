@@ -17,33 +17,9 @@ import {
 import { usePermissionCheck } from "@/app/hooks/usePermissions";
 import { useSectionArrival } from "@/app/hooks/useSectionArrival";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
-import { PEOPLE_SECTIONS, type PeopleSection } from "@/app/lib/peopleSections";
+import { PEOPLE_SECTIONS } from "@/app/lib/peopleSections";
 import type { PermissionCheck } from "@/app/lib/permissionState";
 import type { User } from "@/app/lib/types";
-
-/**
- * One addressable region of the page, typed to the sections this one has.
- *
- * The region itself — the anchor, the arrival mark, and the keyboard landing — is shared with the
- * other consolidated destinations, so every one of them arrives the same way.
- */
-function PeopleSectionRegion({
-    section,
-    arrived,
-    register,
-    children,
-}: {
-    section: PeopleSection;
-    arrived: string | null;
-    register: (section: string) => (element: HTMLElement | null) => void;
-    children: React.ReactNode;
-}) {
-    return (
-        <SettingsSectionRegion section={section} arrived={arrived} register={register}>
-            {children}
-        </SettingsSectionRegion>
-    );
-}
 
 /**
  * The refusal posture for a section whose read the backend gates, in this page's voice.
@@ -113,11 +89,11 @@ export default function PeopleAccess({
                 />
             </Rise>
 
-            <PeopleSectionRegion section="members" arrived={arrived} register={register}>
+            <SettingsSectionRegion section="members" arrived={arrived} register={register}>
                 <MembersPanel currentUserId={currentUserId} presentation="consolidated" />
-            </PeopleSectionRegion>
+            </SettingsSectionRegion>
 
-            <PeopleSectionRegion section="roles" arrived={arrived} register={register}>
+            <SettingsSectionRegion section="roles" arrived={arrived} register={register}>
                 <Rise>
                     <SettingsSection title={tRoles("title")} description={tRoles("subtitle")}>
                         {roles === "granted" ? (
@@ -127,9 +103,9 @@ export default function PeopleAccess({
                         )}
                     </SettingsSection>
                 </Rise>
-            </PeopleSectionRegion>
+            </SettingsSectionRegion>
 
-            <PeopleSectionRegion section="allowed-domains" arrived={arrived} register={register}>
+            <SettingsSectionRegion section="allowed-domains" arrived={arrived} register={register}>
                 <Rise>
                     <SettingsSection
                         title={tMembers("domainsTitle")}
@@ -142,9 +118,9 @@ export default function PeopleAccess({
                         )}
                     </SettingsSection>
                 </Rise>
-            </PeopleSectionRegion>
+            </SettingsSectionRegion>
 
-            <PeopleSectionRegion section="directory" arrived={arrived} register={register}>
+            <SettingsSectionRegion section="directory" arrived={arrived} register={register}>
                 <Rise>
                     <SettingsSection title={t("directoryTitle")} description={t("directoryDescription")}>
                         <div
@@ -166,7 +142,7 @@ export default function PeopleAccess({
                         </div>
                     </SettingsSection>
                 </Rise>
-            </PeopleSectionRegion>
+            </SettingsSectionRegion>
         </div>
     );
 }
