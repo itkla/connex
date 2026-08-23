@@ -46,11 +46,20 @@ const MEMBER_WORKSPACE = {
     orgRole: null,
 } satisfies Workspace;
 
-/** The shape the backend actually sends a member: the role key is absent, not null. */
-const ROLELESS_WORKSPACE = (() => {
-    const { orgRole: _omitted, ...rest } = MEMBER_WORKSPACE;
-    return rest as Workspace;
-})();
+/**
+ * The shape the backend actually sends a member: the role key is absent, not null.
+ *
+ * The cast is the point rather than a convenience. `Workspace` declares `orgRole` as a required
+ * `OrgRole | null`, so a payload that omits it is not assignable — and that mismatch between the
+ * declared type and the wire format is exactly what let the identity check ship.
+ */
+function withoutOrgRole(workspace: Workspace): Workspace {
+    const fields: Record<string, unknown> = { ...workspace };
+    delete fields.orgRole;
+    return fields as Workspace;
+}
+
+const ROLELESS_WORKSPACE = withoutOrgRole(MEMBER_WORKSPACE);
 
 function snapshot(workspace: Workspace): MyWorkspaces {
     return { workspaces: [workspace], activeWorkspaceId: workspace.id };
