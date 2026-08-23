@@ -5,9 +5,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -15,7 +21,11 @@ import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.ai.assistant.AiSkillCatalog.SkillSpec;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
+import ooo.klae.connex.backend.dto.AiChatPageContextDto;
+import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -26,6 +36,8 @@ class AiAssistantEvaluationRegressionTest {
     private final ObjectMapper objectMapper = JsonMapper.builder().build();
     private final AiAssistantToolCatalog toolCatalog = new AiAssistantToolCatalog();
     private final AiAssistantStepGuard stepGuard = new AiAssistantStepGuard(toolCatalog);
+    private final AiSkillCatalog skillCatalog = new AiSkillCatalog();
+    private final AiSkillRouter skillRouter = new AiSkillRouter(skillCatalog, permissiveWorkspace());
 
     @Test
     void englishAndJapaneseEvaluationSetPassesEveryAssistantRiskCategory() throws IOException {
@@ -54,7 +66,44 @@ class AiAssistantEvaluationRegressionTest {
         }
     }
 
+    /**
+     * Every enabled skill declares its own golden-set threshold, and an English set alone is never
+     * evidence for Japanese. This gate is what stops a skill from shipping ahead of the cases that
+     * would catch it selecting the wrong job.
+     */
+    @Test
+    void everyAvailableSkillMeetsItsDeclaredGoldenSetThresholdInBothLocales() throws IOException {
+        Map<String, Map<String, Integer>> casesBySkillAndLocale = new HashMap<>();
+        for (JsonNode evaluationCase : evaluationCases()) {
+            JsonNode skill = evaluationCase.get("skill");
+            if (skill == null || !skill.isString()) {
+                continue;
+            }
+            casesBySkillAndLocale
+                    .computeIfAbsent(skill.asString(), key -> new HashMap<>())
+                    .merge(requiredText(evaluationCase, "locale"), 1, Integer::sum);
+        }
+        for (SkillSpec spec : skillCatalog.skills()) {
+            if (!spec.available()) {
+                continue;
+            }
+            Map<String, Integer> counts = casesBySkillAndLocale
+                    .getOrDefault(spec.evaluation().goldenSetId(), Map.of());
+            for (String locale : LOCALES) {
+                assertTrue(
+                        counts.getOrDefault(locale, 0)
+                                >= spec.evaluation().minimumCasesPerLocale(),
+                        () -> spec.key() + " has no " + locale
+                                + " golden case meeting its declared threshold");
+            }
+        }
+    }
+
     private void evaluate(String id, Category category, JsonNode evaluationCase) {
+        if (category == Category.SKILL_ROUTING) {
+            evaluateSkillRouting(id, evaluationCase);
+            return;
+        }
         JsonNode candidate = evaluationCase.get("candidate");
         assertNotNull(candidate, () -> "Missing candidate for " + id);
         assertTrue(stepGuard.permits(candidate), () -> "Candidate failed assistant schema guard: " + id);
@@ -66,7 +115,48 @@ class AiAssistantEvaluationRegressionTest {
             case TOOL_SELECTION -> evaluateToolSelection(id, evaluationCase, candidate);
             case REFUSAL -> evaluateSafeAnswer(id, evaluationCase, candidate);
             case INJECTION_RESISTANCE -> evaluateInjectionResistance(id, evaluationCase, candidate);
+            case SKILL_ROUTING -> throw new IllegalStateException(
+                    "Skill routing is evaluated before the candidate schema guard");
         }
+    }
+
+    /**
+     * Routing is deterministic and server-owned, so a golden case is an exact expectation rather
+     * than a tolerance: the same request in the same locale must always reach the same skill.
+     *
+     * <p>A case may instead declare {@code expectedFallback}, which is just as load-bearing: an
+     * over-eager trigger that captures a question a skill's bounded plan cannot answer is a worse
+     * outcome than the generic loop handling it, and only a negative case catches that.
+     */
+    private void evaluateSkillRouting(String id, JsonNode evaluationCase) {
+        List<AiChatPageContextDto> context = new ArrayList<>();
+        for (JsonNode record : evaluationCase.path("context")) {
+            context.add(new AiChatPageContextDto(
+                    requiredText(record, "kind"), record.path("id").asInt()));
+        }
+        AiSkillRouter.Routing routing = skillRouter.route(
+                7, 11, requiredText(evaluationCase, "request"),
+                List.copyOf(context), AiChatQueryScope.none());
+        JsonNode fallback = evaluationCase.get("expectedFallback");
+        if (fallback != null && fallback.isBoolean() && fallback.booleanValue()) {
+            assertFalse(routing.routed(),
+                    () -> "Request was captured by " + routing.skill().key() + " in " + id);
+            return;
+        }
+        String expected = requiredText(evaluationCase, "expectedSkill");
+        assertTrue(routing.routed(),
+                () -> "Request was not routed to a skill in " + id + ": " + routing.reason());
+        assertEquals(expected, routing.skill().key(),
+                () -> "Imprecise skill selection in " + id);
+        assertTrue(skillCatalog.isAvailable(expected),
+                () -> "Golden case targets an unavailable skill in " + id);
+    }
+
+    private static WorkspaceService permissiveWorkspace() {
+        WorkspaceService workspaceService = mock(WorkspaceService.class);
+        when(workspaceService.permissionsFor(anyInt(), anyInt()))
+                .thenReturn(Set.of(Permission.AI_USE));
+        return workspaceService;
     }
 
     private void evaluateFactuality(
@@ -152,7 +242,8 @@ class AiAssistantEvaluationRegressionTest {
         CITATION_CORRECTNESS,
         TOOL_SELECTION,
         REFUSAL,
-        INJECTION_RESISTANCE;
+        INJECTION_RESISTANCE,
+        SKILL_ROUTING;
 
         private static Category from(String value) {
             return valueOf(value.toUpperCase(java.util.Locale.ROOT));

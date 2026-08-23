@@ -5,19 +5,17 @@ import java.util.Collections;
 import java.util.List;
 
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 /**
- * Request body for starting one bounded assistant turn.
+ * Request body for the interpreted-scope preview a broad assistant request is gated behind.
  *
- * @param content the member's literal request
- * @param pageContext records the active page anchors the turn to
- * @param scope declared query scope the server validates, authorizes, and then executes
+ * @param content the request the member is about to send, used only for skill recognition
+ * @param pageContext records the active page anchors the request to
+ * @param scope declared query scope to validate, authorize, and evaluate
  */
-public record AiChatTurnCreateRequest(
-        @NotBlank
+public record AiChatScopePreviewRequest(
         @Size(max = 16000)
         String content,
         @Size(max = 10)
@@ -25,12 +23,7 @@ public record AiChatTurnCreateRequest(
         @Valid
         AiChatQueryScopeRequest scope) {
 
-    /** Creates a turn request that declares no query scope. */
-    public AiChatTurnCreateRequest(String content, List<AiChatPageContextDto> pageContext) {
-        this(content, pageContext, null);
-    }
-
-    public AiChatTurnCreateRequest {
+    public AiChatScopePreviewRequest {
         pageContext = pageContext == null
                 ? List.of()
                 : Collections.unmodifiableList(new ArrayList<>(pageContext));

@@ -37,6 +37,9 @@ import ooo.klae.connex.backend.dto.AiChatAttachmentDto;
 import ooo.klae.connex.backend.dto.AiChatMessageDto;
 import ooo.klae.connex.backend.dto.AiChatParticipantDto;
 import ooo.klae.connex.backend.dto.AiChatPresenceDto;
+import ooo.klae.connex.backend.dto.AiChatQueryScopeDto;
+import ooo.klae.connex.backend.dto.AiChatScopePreviewDto;
+import ooo.klae.connex.backend.dto.AiChatScopePreviewRequest;
 import ooo.klae.connex.backend.dto.AiChatSessionCreateRequest;
 import ooo.klae.connex.backend.dto.AiChatSessionDetailDto;
 import ooo.klae.connex.backend.dto.AiChatSessionDto;
@@ -95,6 +98,80 @@ class AiAssistantControllerTest {
 
         verify(turnService).start(
                 org.mockito.ArgumentMatchers.eq(42), any(AiChatTurnCreateRequest.class));
+    }
+
+    /**
+     * The preview is the sentence a member confirms before a broad request runs, so its shape is
+     * part of the contract: the interpreted scope, the evaluated cohort size, the caps the retrieval
+     * will apply, and whether a skill would run all have to arrive together.
+     */
+    @Test
+    void scopePreviewReturnsTheInterpretedScopeAndTheEvaluatedBreadth() throws Exception {
+        when(turnService.previewScope(any(AiChatScopePreviewRequest.class)))
+            .thenReturn(new AiChatScopePreviewDto(
+                    new AiChatQueryScopeDto(
+                            true, "2026-05-26", "2026-08-23", 90, "all_team", List.of(),
+                            List.of("cool", "cold"), List.of("company"), List.of(),
+                            List.of(), List.of(), null, 128, false, 200, 100, 10, List.of()),
+                    "activity_digest_v1",
+                    "1.0.0",
+                    true));
+
+        mockMvc.perform(post("/api/ai/assistant/sessions/scope-preview")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"content\":\"List recent activity for cool accounts\","
+                        + "\"pageContext\":[],"
+                        + "\"scope\":{\"periodDays\":90,\"warmthBands\":[\"cool\",\"cold\"],"
+                        + "\"recordKinds\":[\"company\"]}}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.scope.declared").value(true))
+            .andExpect(jsonPath("$.scope.periodStart").value("2026-05-26"))
+            .andExpect(jsonPath("$.scope.matchedRecordCount").value(128))
+            .andExpect(jsonPath("$.scope.recordCap").value(200))
+            .andExpect(jsonPath("$.scope.activityCap").value(100))
+            .andExpect(jsonPath("$.scope.perRecordCap").value(10))
+            .andExpect(jsonPath("$.skillKey").value("activity_digest_v1"))
+            .andExpect(jsonPath("$.confirmationRecommended").value(true));
+
+        verify(turnService).previewScope(any(AiChatScopePreviewRequest.class));
+    }
+
+    @Test
+    void scopePreviewRejectsAScopeTheServerCannotExecuteAsDeclared() throws Exception {
+        when(turnService.previewScope(any(AiChatScopePreviewRequest.class)))
+            .thenThrow(new BadRequestException(
+                    "Assistant scope cannot be executed as declared: "
+                            + "warmth_unsupported_for_deals"));
+
+        mockMvc.perform(post("/api/ai/assistant/sessions/scope-preview")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"content\":\"Which deals need attention?\",\"pageContext\":[],"
+                        + "\"scope\":{\"warmthBands\":[\"cool\"],"
+                        + "\"recordKinds\":[\"deal\"]}}"))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void scopePreviewRejectsAnUnsupportedFilterValueAtTheBoundary() throws Exception {
+        mockMvc.perform(post("/api/ai/assistant/sessions/scope-preview")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"content\":\"Anything\",\"pageContext\":[],"
+                        + "\"scope\":{\"warmthBands\":[\"lukewarm\"]}}"))
+            .andExpect(status().is4xxClientError());
+
+        verify(turnService, org.mockito.Mockito.never())
+            .previewScope(any(AiChatScopePreviewRequest.class));
+    }
+
+    @Test
+    void scopePreviewSurfacesAnAuthorizationFailureRatherThanAnEmptyPreview() throws Exception {
+        when(turnService.previewScope(any(AiChatScopePreviewRequest.class)))
+            .thenThrow(new ForbiddenException("Requires the AI_USE permission in this workspace"));
+
+        mockMvc.perform(post("/api/ai/assistant/sessions/scope-preview")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"content\":\"Anything\",\"pageContext\":[],\"scope\":{}}"))
+            .andExpect(status().isForbidden());
     }
 
     @Test

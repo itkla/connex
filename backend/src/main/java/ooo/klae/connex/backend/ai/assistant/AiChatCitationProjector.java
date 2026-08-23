@@ -26,6 +26,7 @@ import ooo.klae.connex.backend.dto.AiChatAnswerRowDto;
 import ooo.klae.connex.backend.dto.AiChatCitationDto;
 import ooo.klae.connex.backend.dto.AiChatCoverageDto;
 import ooo.klae.connex.backend.dto.AiChatProgressItemDto;
+import ooo.klae.connex.backend.dto.AiChatSkillDto;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -40,6 +41,10 @@ import tools.jackson.databind.ObjectMapper;
 @RequiredArgsConstructor
 public class AiChatCitationProjector {
     private static final int MAX_CITATION_DETAIL_CHARS = 120;
+    private static final java.util.regex.Pattern SKILL_KEY =
+            java.util.regex.Pattern.compile("[a-z][a-z0-9_]{0,63}");
+    private static final java.util.regex.Pattern SKILL_VERSION =
+            java.util.regex.Pattern.compile("\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}");
     private static final int MAX_STORED_INSTANT_CHARS = 64;
 
     private final ObjectMapper objectMapper;
@@ -188,7 +193,8 @@ public class AiChatCitationProjector {
             }
             return new AiChatAnswerDocumentDto(
                     turnId.asInt(), blocks, coverage,
-                    requester ? progress : sharedProgress(progress));
+                    requester ? progress : sharedProgress(progress),
+                    skill(metadata.get("skill")));
         } catch (JacksonException exception) {
             return null;
         }
@@ -363,6 +369,25 @@ public class AiChatCitationProjector {
                     count.isNull() ? null : count.asInt(), truncated.asBoolean()));
         }
         return List.copyOf(progress);
+    }
+
+    /**
+     * Revalidates the stored skill attribution on read. A key or version that no longer matches the
+     * catalog's identifier shape is dropped rather than echoed, so a legacy or hand-edited row
+     * cannot put arbitrary text where the client renders a product label.
+     */
+    private static AiChatSkillDto skill(JsonNode value) {
+        if (!exactFields(value, Set.of("key", "version"))) {
+            return null;
+        }
+        JsonNode key = value.get("key");
+        JsonNode version = value.get("version");
+        if (key == null || !key.isString() || !SKILL_KEY.matcher(key.asString()).matches()
+                || version == null || !version.isString()
+                || !SKILL_VERSION.matcher(version.asString()).matches()) {
+            return null;
+        }
+        return new AiChatSkillDto(key.asString(), version.asString());
     }
 
     private static boolean exactFields(JsonNode value, Set<String> expected) {

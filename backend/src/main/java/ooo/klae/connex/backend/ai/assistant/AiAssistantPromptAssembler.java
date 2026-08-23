@@ -94,6 +94,30 @@ public class AiAssistantPromptAssembler {
     public record ToolTurn(int seq, String tool, AiAssistantToolResult result) {
     }
 
+    /**
+     * The selected skill's bounded per-turn contract and the evidence its server-owned plan
+     * retrieved.
+     *
+     * <p>Deliberately per-turn: the skill catalog is never serialized into the fixed prompt
+     * envelope, because on the smallest supported model that envelope is paid directly out of the
+     * answer's own output-token budget.
+     *
+     * @param directive bounded server-authored instruction for the selected skill
+     * @param evidence plan results, entering the prompt as untrusted CRM data
+     */
+    public record SkillContext(String directive, Map<String, Object> evidence) {
+        public static final SkillContext NONE = new SkillContext(null, Map.of());
+
+        public SkillContext {
+            evidence = evidence == null ? Map.of() : Map.copyOf(evidence);
+        }
+
+        /** @return whether the turn carries no server-owned skill contract */
+        public boolean isEmpty() {
+            return (directive == null || directive.isBlank()) && evidence.isEmpty();
+        }
+    }
+
     /** Metadata-only honesty counters for the current model-visible tool replay. */
     public record ToolBudgetAudit(
             int truncatedToolResults,
@@ -128,6 +152,19 @@ public class AiAssistantPromptAssembler {
         /** @return masked tool-role results in replay order */
         public List<String> toolResults() {
             return exchanges.stream().map(AiToolExchange::maskedResult).toList();
+        }
+    }
+
+    /**
+     * The declared skill a durable answer was produced by.
+     *
+     * @param key stable catalog key
+     * @param version semantic version of the declaration that ran
+     */
+    public record SkillReference(String key, String version) {
+        public SkillReference {
+            java.util.Objects.requireNonNull(key, "key");
+            java.util.Objects.requireNonNull(version, "version");
         }
     }
 
@@ -228,6 +265,22 @@ public class AiAssistantPromptAssembler {
             List<Map<String, Object>> attachmentData,
             AiAssistantPromptBudget budget,
             AiStructuredRepair repair) {
+        return assemble(
+                history, pageContext, toolTurns, context, resources,
+                attachmentData, budget, repair, SkillContext.NONE);
+    }
+
+    /** Assembles one step that also carries a selected skill's contract and plan evidence. */
+    public MaskedPrompt assemble(
+            List<AiChatMessage> history,
+            AiAssistantToolResult pageContext,
+            List<ToolTurn> toolTurns,
+            MaskingContext context,
+            AiChatResourceRegistry resources,
+            List<Map<String, Object>> attachmentData,
+            AiAssistantPromptBudget budget,
+            AiStructuredRepair repair,
+            SkillContext skill) {
         seedIdentifiers(pageContext.identifiers(), context);
         for (ToolTurn turn : toolTurns) {
             seedIdentifiers(turn.result().identifiers(), context);
@@ -244,6 +297,7 @@ public class AiAssistantPromptAssembler {
             prompt.userTurn(boundedCrmData(
                     "page_context", pageContext.data(), context, budget.pageContextBytes()));
         }
+        appendSkillContext(prompt, skill, context, budget);
         String repairContent = repair == null ? null : repairRequest(repair, context);
         if (repairContent != null && !budget.fits(
                 repairContent, budget.repairEnvelopeBytes())) {
@@ -269,6 +323,21 @@ public class AiAssistantPromptAssembler {
             AiChatResourceRegistry resources,
             List<Map<String, Object>> attachmentData,
             AiAssistantPromptBudget budget) {
+        return assembleNative(
+                history, pageContext, toolTurns, context, resources,
+                attachmentData, budget, SkillContext.NONE);
+    }
+
+    /** Assembles native-tool input that also carries a skill contract and its plan evidence. */
+    public MaskedPrompt assembleNative(
+            List<AiChatMessage> history,
+            AiAssistantToolResult pageContext,
+            List<ToolTurn> toolTurns,
+            MaskingContext context,
+            AiChatResourceRegistry resources,
+            List<Map<String, Object>> attachmentData,
+            AiAssistantPromptBudget budget,
+            SkillContext skill) {
         seedIdentifiers(pageContext.identifiers(), context);
         for (ToolTurn turn : toolTurns) {
             seedIdentifiers(turn.result().identifiers(), context);
@@ -285,7 +354,33 @@ public class AiAssistantPromptAssembler {
             prompt.userTurn(boundedCrmData(
                     "page_context", pageContext.data(), context, budget.pageContextBytes()));
         }
+        appendSkillContext(prompt, skill, context, budget);
         return prompt.build();
+    }
+
+    /**
+     * Appends the selected skill's contract and plan evidence.
+     *
+     * <p>The directive is server-authored and travels outside the CRM_DATA delimiters, exactly as a
+     * schema-repair instruction does; the evidence travels inside them, because it is retrieved
+     * tenant content and must remain untrusted data.
+     */
+    private void appendSkillContext(
+            PromptAssembly.Builder prompt,
+            SkillContext skill,
+            MaskingContext context,
+            AiAssistantPromptBudget budget) {
+        if (skill == null || skill.isEmpty()) {
+            return;
+        }
+        if (skill.directive() != null && !skill.directive().isBlank()
+                && budget.fits(skill.directive(), AiSkillCatalog.maxDirectiveBytes())) {
+            prompt.userTurn(skill.directive());
+        }
+        if (!skill.evidence().isEmpty()) {
+            prompt.userTurn(boundedCrmData(
+                    "skill_evidence", skill.evidence(), context, budget.toolResultBytes()));
+        }
     }
 
     /** Builds bounded native call/result pairs under the shared tool replay allocation. */
@@ -913,6 +1008,41 @@ public class AiAssistantPromptAssembler {
             AiAssistantStep.Coverage coverage,
             List<AiChatProgressItemDto> progress,
             ToolBudgetAudit toolBudgetAudit) {
+        return finalMetadata(
+                turnId, citations, suggestions, resources, observations, blocks,
+                coverage, progress, toolBudgetAudit, null);
+    }
+
+    /**
+     * Serializes final viewer metadata that also records which declared skill produced the answer.
+     *
+     * <p>The skill key and version are durable evaluation and audit metadata. They are stable
+     * machine identifiers the client maps to product language, never orchestration internals: the
+     * plan, its tool arguments, and its budgets stay on the server.
+     *
+     * @param turnId durable turn identifier
+     * @param citations handles the answer cited
+     * @param suggestions validated follow-up suggestions
+     * @param resources per-turn handle-to-record snapshot
+     * @param observations record freshness observed while the turn ran
+     * @param blocks screened answer-document blocks
+     * @param coverage reconciled coverage disclosure
+     * @param progress viewer-safe milestone trail
+     * @param toolBudgetAudit exact model-visible replay degradation counters
+     * @param skill declared skill that produced the answer, or null for the generic loop
+     * @return serialized durable metadata
+     */
+    public String finalMetadata(
+            int turnId,
+            List<String> citations,
+            List<String> suggestions,
+            Map<String, AiChatResourceRegistry.ResourceRef> resources,
+            Map<String, AiChatRecordObservation> observations,
+            List<AiAssistantStep.AnswerBlock> blocks,
+            AiAssistantStep.Coverage coverage,
+            List<AiChatProgressItemDto> progress,
+            ToolBudgetAudit toolBudgetAudit,
+            SkillReference skill) {
         java.util.Objects.requireNonNull(toolBudgetAudit, "toolBudgetAudit");
         List<Map<String, Object>> resolved = new ArrayList<>();
         for (String handle : citations) {
@@ -951,6 +1081,14 @@ public class AiAssistantPromptAssembler {
             }
             if (toolBudgetAudit.degraded()) {
                 metadata.put("toolResultBudget", toolBudgetAuditData(toolBudgetAudit));
+            }
+            if (skill != null) {
+                // A LinkedHashMap, not Map.of: this object is written into the durable answer
+                // document, and Map.of's iteration order is randomized per JVM.
+                Map<String, Object> skillReference = new LinkedHashMap<>();
+                skillReference.put("key", skill.key());
+                skillReference.put("version", skill.version());
+                metadata.put("skill", skillReference);
             }
             return objectMapper.writeValueAsString(metadata);
         } catch (JacksonException exception) {

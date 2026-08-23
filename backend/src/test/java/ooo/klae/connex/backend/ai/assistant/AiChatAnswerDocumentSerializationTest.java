@@ -29,6 +29,8 @@ import ooo.klae.connex.backend.dto.AiChatAnswerRowDto;
 import ooo.klae.connex.backend.dto.AiChatCitationDto;
 import ooo.klae.connex.backend.dto.AiChatCoverageDto;
 import ooo.klae.connex.backend.dto.AiChatProgressItemDto;
+import ooo.klae.connex.backend.dto.AiChatQueryScopeDto;
+import ooo.klae.connex.backend.dto.AiChatScopeReferenceDto;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -147,6 +149,82 @@ class AiChatAnswerDocumentSerializationTest {
         assertTrue(json.contains("\"periodStart\":null"), json);
         assertTrue(json.contains("\"periodEnd\":null"), json);
         assertTrue(json.contains("\"count\":null"), json);
+    }
+
+    /**
+     * The declared skill is durable evaluation metadata and a browser-facing attribution. Under the
+     * application-wide {@code non_null} inclusion the whole key would simply vanish for the generic
+     * loop, which is correct, but it must survive the round trip when a skill did produce the answer.
+     */
+    @Test
+    void theDeclaredSkillSurvivesTheDurableRoundTripAndItsAbsenceStaysDistinct() {
+        String routed = promptAssembler.finalMetadata(
+                7,
+                List.of("r1"),
+                List.of(),
+                Map.of("r1", new AiChatResourceRegistry.ResourceRef("deal", 19)),
+                Map.of("r1", new AiChatRecordObservation(null, null)),
+                List.of(new AiAssistantStep.AnswerBlock(
+                        "fact", null, "Atlas is active.",
+                        List.of(), List.of(), List.of("r1"))),
+                new AiAssistantStep.Coverage(
+                        "complete", null, null, null, List.of("records"), List.of(), false),
+                List.of(new AiChatProgressItemDto(0, "scope", "complete", null, false)),
+                AiAssistantPromptAssembler.ToolBudgetAudit.NONE,
+                new AiAssistantPromptAssembler.SkillReference("activity_digest_v1", "1.0.0"));
+
+        assertTrue(
+                routed.contains("\"skill\":{\"key\":\"activity_digest_v1\",\"version\":\"1.0.0\"}"),
+                routed);
+
+        AiChatMessage message = new AiChatMessage();
+        message.setId(23);
+        message.setAuthorKind("assistant");
+        message.setContent("Atlas is active.");
+        message.setStructuredJson(routed);
+        Deal deal = new Deal();
+        deal.setId(19);
+        deal.setName("Atlas renewal");
+        when(dealMapper.getByIds(3, List.of(19))).thenReturn(List.of(deal));
+
+        List<AiChatCitationDto> citations = projector.project(3, List.of(message))
+                .citationsByMessage().get(23);
+        AiChatAnswerDocumentDto document = projector.answerDocument(message, citations);
+
+        assertNotNull(document);
+        assertNotNull(document.skill(), "the declared skill was dropped by non_null serialization");
+        assertEquals("activity_digest_v1", document.skill().key());
+        assertEquals("1.0.0", document.skill().version());
+        assertTrue(objectMapper.writeValueAsString(document).contains("\"skill\":"),
+                "the browser-facing answer document dropped the skill key");
+    }
+
+    /**
+     * The interpreted scope is stored as JSON on the turn and read back to restate the same breadth
+     * the requester was shown, so every field of it must survive a write-read round trip through the
+     * production mapper — including the nullable ones the {@code non_null} inclusion would erase.
+     */
+    @Test
+    void theInterpretedQueryScopeSurvivesAWriteThenReadRoundTrip() {
+        AiChatQueryScopeDto scope = new AiChatQueryScopeDto(
+                true, "2026-05-26", "2026-08-23", 90, "members",
+                List.of(new AiChatScopeReferenceDto(4, "")),
+                List.of("cool", "cold"), List.of("company"),
+                List.of(new AiChatScopeReferenceDto(3, "")), List.of("open"),
+                List.of("meeting"), new AiChatScopeReferenceDto(17, ""),
+                null, false, 200, 100, 10, List.of("period_capped"));
+
+        String json = objectMapper.writeValueAsString(scope);
+        AiChatQueryScopeDto restored = objectMapper.readValue(json, AiChatQueryScopeDto.class);
+
+        assertTrue(json.contains("\"matchedRecordCount\":null"), json);
+        assertTrue(json.contains("\"savedView\":{"), json);
+        assertEquals(scope, restored);
+        assertNull(restored.matchedRecordCount());
+        assertEquals(List.of("cool", "cold"), restored.warmthBands());
+        assertEquals(17, restored.savedView().id());
+        assertEquals(4, restored.owners().getFirst().id());
+        assertEquals(List.of("period_capped"), restored.unavailable());
     }
 
     private static ObjectMapper productionObjectMapper() {

@@ -74,13 +74,37 @@ public class AiAssistantToolExecutor {
     private final CompanyMapper companyMapper;
     private final DealMapper dealMapper;
     private final AiAssistantDateResolver dateResolver;
+    private final AiAssistantScopeReadService scopeReadService;
 
-    /** Executes one validated, enabled tool call. */
+    /** Executes one validated, enabled tool call outside any declared query scope. */
     public AiAssistantToolResult execute(
             String name,
             JsonNode args,
             AiChatResourceRegistry resources,
             boolean includePrivateNotes) {
+        return execute(name, args, resources, includePrivateNotes, AiChatQueryScope.none());
+    }
+
+    /**
+     * Executes one validated, enabled tool call under the turn's declared query scope.
+     *
+     * <p>The declared scope is applied by the server, not proposed by the model, so a scoped tool
+     * can only ever narrow within what the caller already stated. A model argument may further
+     * restrict the read; it can never widen it past the interpretation the caller was shown.
+     *
+     * @param name declared tool key
+     * @param args validated raw arguments
+     * @param resources per-turn handle registry
+     * @param includePrivateNotes whether owner-private notes may be read for this session
+     * @param scope validated declared query scope for the turn
+     * @return the tool result
+     */
+    public AiAssistantToolResult execute(
+            String name,
+            JsonNode args,
+            AiChatResourceRegistry resources,
+            boolean includePrivateNotes,
+            AiChatQueryScope scope) {
         validateReferences(name, args, resources);
         if (!toolCatalog.isExecutable(name)) {
             throw AiAssistantLoopException.malformed(toolCatalog.unavailableReason(name));
@@ -91,6 +115,7 @@ public class AiAssistantToolExecutor {
                 case "get_record" -> getRecord(args, resources, includePrivateNotes);
                 case "list_activities" -> listActivities(args, resources);
                 case "list_tasks" -> listTasks(args, resources);
+                case "list_scope_activities" -> listScopeActivities(args, resources, scope);
                 case "aggregate_metric" -> aggregateMetric(args);
                 case "find_schedule_conflicts" -> findScheduleConflicts(args, resources);
                 default -> throw AiAssistantLoopException.malformed("unknown_tool");
@@ -299,6 +324,21 @@ public class AiAssistantToolExecutor {
                 .map(AiAssistantToolExecutor::taskData)
                 .toList();
         return result(Map.of("handle", requiredText(args, "handle"), "tasks", data), List.of());
+    }
+
+    private AiAssistantToolResult listScopeActivities(
+            JsonNode args, AiChatResourceRegistry resources, AiChatQueryScope scope) {
+        return scopeReadService.scopeActivities(
+                scope,
+                optionalText(args, "records"),
+                null,
+                stringList(args.get("warmth")),
+                args.get("days") == null || args.get("days").isNull()
+                        ? null
+                        : args.get("days").asInt(),
+                AiChatScopeBounds.MAX_ACTIVITY_ROWS,
+                AiChatScopeBounds.DEFAULT_ACTIVITY_ROWS_PER_RECORD,
+                resources);
     }
 
     private AiAssistantToolResult aggregateMetric(JsonNode args) {
@@ -774,6 +814,19 @@ public class AiAssistantToolExecutor {
                 .map(AiChatPageContextDto::id)
                 .distinct()
                 .toList();
+    }
+
+    private static List<String> stringList(JsonNode node) {
+        if (node == null || node.isNull() || !node.isArray()) {
+            return List.of();
+        }
+        List<String> values = new ArrayList<>();
+        for (JsonNode value : node) {
+            if (value.isString()) {
+                values.add(value.asString());
+            }
+        }
+        return List.copyOf(values);
     }
 
     private static Set<String> requestedKinds(JsonNode node) {

@@ -479,6 +479,60 @@ class AiChatMapperTest extends AbstractMapperTest {
             () -> chatMapper.insertMessage(mismatched));
     }
 
+    /**
+     * Skill attribution is durable evaluation metadata, so the statement must be workspace- and
+     * session-scoped and must only ever land on a turn that is still running: attributing a turn
+     * that has already ended would make a failure look like the work of a declaration it never ran.
+     */
+    @Test
+    void turnSkillAttributionIsScopedToARunningTurnAndRoundTripsWithTheStoredScope() {
+        User owner = newUser();
+        AiChatSession session = session(workspace, owner, "Skill routing", "private");
+        message(session, owner, 1, "List recent activity for cool accounts");
+        AiChatTurn turn = new AiChatTurn();
+        turn.setWorkspaceId(workspace.getId());
+        turn.setSessionId(session.getId());
+        turn.setRequestedByUserId(owner.getId());
+        turn.setStatus("queued");
+        turn.setScopeJson("{\"declared\":true,\"warmthBands\":[\"cool\"]}");
+        chatMapper.insertTurn(turn);
+
+        assertEquals(0, chatMapper.applyTurnSkill(
+            workspace.getId(), session.getId(), turn.getId(),
+            "activity_digest_v1", "1.0.0"));
+        assertEquals(1, chatMapper.markTurnRunning(
+            workspace.getId(), session.getId(), turn.getId()));
+        assertEquals(0, chatMapper.applyTurnSkill(
+            workspace.getId() + 1, session.getId(), turn.getId(),
+            "activity_digest_v1", "1.0.0"));
+        assertEquals(1, chatMapper.applyTurnSkill(
+            workspace.getId(), session.getId(), turn.getId(),
+            "activity_digest_v1", "1.0.0"));
+
+        AiChatTurn stored = chatMapper.getTurnById(
+            workspace.getId(), session.getId(), turn.getId());
+        assertEquals("activity_digest_v1", stored.getSkillKey());
+        assertEquals("1.0.0", stored.getSkillVersion());
+        assertNotNull(stored.getScopeJson());
+        assertTrue(stored.getScopeJson().contains("cool"));
+    }
+
+    @Test
+    void aTurnSkillKeyWithoutItsVersionIsRefusedByTheDurableConstraint() {
+        User owner = newUser();
+        AiChatSession session = session(workspace, owner, "Skill pairing", "private");
+        AiChatTurn turn = new AiChatTurn();
+        turn.setWorkspaceId(workspace.getId());
+        turn.setSessionId(session.getId());
+        turn.setRequestedByUserId(owner.getId());
+        turn.setStatus("queued");
+        chatMapper.insertTurn(turn);
+        chatMapper.markTurnRunning(workspace.getId(), session.getId(), turn.getId());
+
+        assertThrows(DataIntegrityViolationException.class, () -> chatMapper.applyTurnSkill(
+            workspace.getId(), session.getId(), turn.getId(), "activity_digest_v1", null));
+    }
+
     private AiChatSession session(
             Workspace targetWorkspace, User owner, String title, String visibility) {
         AiChatSession session = new AiChatSession();

@@ -81,7 +81,8 @@ class AiAssistantToolExecutorTest {
         executor = new AiAssistantToolExecutor(
                 new AiAssistantToolCatalog(), searchService, personService, companyService,
                 dealService, activityService, taskService, historyService, scoringService, workspaceService,
-                personMapper, companyMapper, dealMapper, dateResolver);
+                personMapper, companyMapper, dealMapper, dateResolver,
+                mock(AiAssistantScopeReadService.class));
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
     }
 

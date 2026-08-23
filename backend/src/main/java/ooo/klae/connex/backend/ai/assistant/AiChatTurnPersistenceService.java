@@ -87,6 +87,34 @@ public class AiChatTurnPersistenceService {
             long restrictionEpoch,
             AiPrivacyMode privacyMode,
             boolean streamed) {
+        return queue(
+                sessionId, request, restrictionEpoch, privacyMode, streamed,
+                AiChatQueryScope.none(), null);
+    }
+
+    /**
+     * Commits a user message and turn together with the exact query scope it was authorized to
+     * read, so a later read of the turn restates the same breadth the requester was shown.
+     *
+     * @param sessionId owning session
+     * @param request validated turn request
+     * @param restrictionEpoch processing-restriction fence captured before admission
+     * @param privacyMode immutable privacy posture
+     * @param streamed whether terminal text is streamed
+     * @param scope validated declared query scope
+     * @param interpretedScopeJson serialized interpreted scope echo, or null when none was declared
+     * @return committed durable preparation
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.AI_USE)
+    public AiChatQueuedTurn queue(
+            int sessionId,
+            AiChatTurnCreateRequest request,
+            long restrictionEpoch,
+            AiPrivacyMode privacyMode,
+            boolean streamed,
+            AiChatQueryScope scope,
+            String interpretedScopeJson) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
         requireActiveAiAccess(workspaceId, userId);
@@ -141,6 +169,7 @@ public class AiChatTurnPersistenceService {
         turn.setSessionId(sessionId);
         turn.setRequestedByUserId(userId);
         turn.setStatus(QUEUED);
+        turn.setScopeJson(interpretedScopeJson);
         turn.setPrivacyMode(privacyMode.name().toLowerCase(java.util.Locale.ROOT));
         turn.setStreamed(streamed);
         chatMapper.insertTurn(turn);
@@ -155,7 +184,27 @@ public class AiChatTurnPersistenceService {
                 workspaceId, userId, sessionId, turn.getId(), message.getId(),
                 message.getSeq(), restrictionEpoch,
                 !SHARED.equals(session.getVisibility()),
-                request.pageContext(), attachmentIds, privacyMode, streamed);
+                request.pageContext(), attachmentIds, privacyMode, streamed, scope);
+    }
+
+    /**
+     * Records the declared skill a running turn routed to.
+     *
+     * <p>Written before the plan executes so a turn that later fails still names the declaration
+     * that produced it, which is what makes a failure attributable to a specific skill version.
+     *
+     * @param turn running turn
+     * @param skillKey stable catalog key
+     * @param skillVersion semantic version of the declaration
+     * @return whether the running turn accepted the attribution
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
+    public boolean applySkill(AiChatQueuedTurn turn, String skillKey, String skillVersion) {
+        requireCurrentActor(turn);
+        lockAuthorizedTurn(turn, RUNNING);
+        return chatMapper.applyTurnSkill(
+                turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                skillKey, skillVersion) == 1;
     }
 
     /** Returns one authorized durable turn after applying its lazy generation deadline. */

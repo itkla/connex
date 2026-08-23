@@ -209,7 +209,8 @@ class AiAssistantPromptInjectionGoldenTest {
                 mock(PersonMapper.class),
                 mock(CompanyMapper.class),
                 mock(DealMapper.class),
-                mock(AiAssistantDateResolver.class));
+                mock(AiAssistantDateResolver.class),
+                mock(AiAssistantScopeReadService.class));
         assertThrows(AiAssistantLoopException.class, () ->
                 executor.execute(parsed.tool().name(), parsed.tool().args(), resources, true));
         verifyNoInteractions(

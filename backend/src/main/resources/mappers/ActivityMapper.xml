@@ -63,6 +63,105 @@
             AND <include refid="assistantProcessablePerson"/>))
   </sql>
 
+  <!-- Cohort visibility mirrors assistantProcessablePerson but makes the processing-restriction
+       clauses switchable, so the same predicate can produce both the answer's rows and the count
+       that proves whether restricted subjects were excluded from it. -->
+  <sql id="scopePersonReadable">
+    <if test="honorRestrictions">
+      p.archived_at IS NULL
+      AND p.suspended_at IS NULL
+      AND p.provision_ceased_at IS NULL
+      AND
+    </if>
+    (p.workspace_id = #{workspaceId}
+      <!-- A workspace that belongs to no organization contributes no sibling ids, and emitting the
+           branch anyway would render as IN () and fail the whole read. -->
+      <if test="organizationWorkspaceIds != null and organizationWorkspaceIds.size() > 0">
+        OR (p.workspace_id IN
+          <foreach item="organizationWorkspaceId" collection="organizationWorkspaceIds"
+                   open="(" separator="," close=")">#{organizationWorkspaceId}</foreach>
+          AND EXISTS (SELECT 1 FROM person_share ps
+            WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+      </if>
+    )
+  </sql>
+
+  <sql id="scopeLinkedPeopleReadable">
+    (a.person_id IS NULL OR EXISTS (SELECT 1 FROM person p
+      WHERE p.id = a.person_id
+        AND <include refid="scopePersonReadable"/>))
+    AND NOT EXISTS (SELECT 1 FROM entity_reference linked_reference
+      WHERE linked_reference.workspace_id = #{workspaceId}
+        AND linked_reference.source_type = 'activity'
+        AND linked_reference.source_id = a.id
+        AND linked_reference.ref_type = 'person'
+        AND NOT EXISTS (SELECT 1 FROM person p
+          WHERE p.id = linked_reference.ref_id
+            AND <include refid="scopePersonReadable"/>))
+  </sql>
+
+  <!-- A company-scoped activity is attributed to its contact's employer first and to its deal's
+       company otherwise, so one activity belongs to exactly one cohort record and the per-record
+       cap stays meaningful. -->
+  <sql id="scopeRecordIdExpression">
+    <choose>
+      <when test="cohortKind == 'person'">a.person_id</when>
+      <when test="cohortKind == 'deal'">a.deal_id</when>
+      <otherwise>COALESCE(cohort_person.company_id, cohort_deal.company_id)</otherwise>
+    </choose>
+  </sql>
+
+  <sql id="scopeCohortJoins">
+    <if test="cohortKind == 'company'">
+      LEFT JOIN person cohort_person ON cohort_person.id = a.person_id
+      LEFT JOIN deal cohort_deal
+        ON cohort_deal.workspace_id = a.workspace_id AND cohort_deal.id = a.deal_id
+    </if>
+  </sql>
+
+  <sql id="scopeActivityPredicate">
+    a.workspace_id = #{workspaceId}
+    AND <include refid="scopeRecordIdExpression"/> IN
+      <foreach item="recordId" collection="recordIds" open="(" separator="," close=")">#{recordId}</foreach>
+    AND <include refid="scopeLinkedPeopleReadable"/>
+    <if test="startUtc != null">
+      AND a.timestamp &gt;= #{startUtc}
+    </if>
+    <if test="endUtc != null">
+      AND a.timestamp &lt;= #{endUtc}
+    </if>
+    <if test="types != null and types.size() > 0">
+      AND LOWER(TRIM(a.type)) IN
+        <foreach item="activityType" collection="types" open="(" separator="," close=")">#{activityType}</foreach>
+    </if>
+  </sql>
+
+  <select id="getAiAssistantScopeActivities"
+          resultType="ooo.klae.connex.backend.ai.assistant.AiAssistantScopeActivity">
+    SELECT ranked.id, ranked.scope_record_id, ranked.type, ranked.subject, ranked.notes,
+           ranked.timestamp, ranked.person_id, ranked.deal_id
+    FROM (
+      SELECT a.id, a.type, a.subject, a.notes, a.timestamp, a.person_id, a.deal_id,
+             <include refid="scopeRecordIdExpression"/> AS scope_record_id,
+             ROW_NUMBER() OVER (
+               PARTITION BY <include refid="scopeRecordIdExpression"/>
+               ORDER BY a.timestamp DESC, a.id DESC) AS scope_rank
+      FROM activity a
+      <include refid="scopeCohortJoins"/>
+      WHERE <include refid="scopeActivityPredicate"/>
+    ) ranked
+    WHERE ranked.scope_rank &lt;= #{perRecordLimit}
+    ORDER BY ranked.timestamp DESC, ranked.id DESC
+    LIMIT #{limit}
+  </select>
+
+  <select id="countAiAssistantScopeActivities" resultType="long">
+    SELECT COUNT(*)
+    FROM activity a
+    <include refid="scopeCohortJoins"/>
+    WHERE <include refid="scopeActivityPredicate"/>
+  </select>
+
   <select id="getAllActivities" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
     WHERE workspace_id = #{workspaceId} ORDER BY timestamp DESC

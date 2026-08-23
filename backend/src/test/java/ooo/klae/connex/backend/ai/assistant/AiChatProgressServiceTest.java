@@ -73,6 +73,10 @@ class AiChatProgressServiceTest {
         assertEquals("deals", AiChatProgressService.sourceForTool("get_deal_brief"));
         assertEquals("schedule", AiChatProgressService.sourceForTool("find_schedule_conflicts"));
         assertEquals("notes", AiChatProgressService.sourceForTool("create_note"));
+        assertEquals(
+                "activities", AiChatProgressService.sourceForTool("list_scope_activities"));
+        assertEquals("metrics", AiChatProgressService.sourceForTool("relationship_metrics"));
+        assertEquals("deals", AiChatProgressService.sourceForTool("deal_attention"));
         assertEquals("other", AiChatProgressService.sourceForTool("a_future_tool"));
         assertTrue(AiChatProgressService.PROGRESS_SOURCES.containsAll(
                 AiAssistantStepGuard.COVERAGE_SOURCES));

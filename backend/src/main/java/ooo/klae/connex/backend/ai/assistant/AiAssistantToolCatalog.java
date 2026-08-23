@@ -174,6 +174,10 @@ public class AiAssistantToolCatalog {
         add(tools, executable("get_record", handle()));
         add(tools, executable("list_activities", handle(), integer("limit", false, 1, 20)));
         add(tools, executable("list_tasks", handle(), integer("limit", false, 1, 20)));
+        add(tools, executable("list_scope_activities",
+                string("records", false, 4, 7, Set.of("person", "company", "deal")),
+                stringList("warmth", false, 1, 4, Set.of("hot", "warm", "cool", "cold")),
+                integer("days", false, 1, 365)));
         add(tools, executable("aggregate_metric",
                 string("metric", true, 1, 32, Set.of(
                         "deal_metrics", "deal_kpis", "activity_volume",
@@ -220,6 +224,8 @@ public class AiAssistantToolCatalog {
             case "get_record" -> "Load the visible details for one record handle.";
             case "list_activities" -> "List recent visible activities for one record handle.";
             case "list_tasks" -> "List visible tasks for one record handle.";
+            case "list_scope_activities" -> "List recent activity across a bounded set of records "
+                    + "in one call instead of asking record by record.";
             case "aggregate_metric" -> "Calculate a supported workspace relationship or pipeline metric.";
             case "find_schedule_conflicts" -> "Find visible scheduling conflicts for one record and time range.";
             case "create_activity" -> "Create an immediately executed, undoable activity for one record.";
