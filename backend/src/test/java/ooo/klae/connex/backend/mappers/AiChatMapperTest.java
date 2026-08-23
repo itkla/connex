@@ -13,6 +13,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
@@ -529,8 +530,12 @@ class AiChatMapperTest extends AbstractMapperTest {
         chatMapper.insertTurn(turn);
         chatMapper.markTurnRunning(workspace.getId(), session.getId(), turn.getId());
 
-        assertThrows(DataIntegrityViolationException.class, () -> chatMapper.applyTurnSkill(
-            workspace.getId(), session.getId(), turn.getId(), "activity_digest_v1", null));
+        DataAccessException refused = assertThrows(DataAccessException.class,
+            () -> chatMapper.applyTurnSkill(
+                workspace.getId(), session.getId(), turn.getId(), "activity_digest_v1", null));
+        assertTrue(String.valueOf(refused.getMostSpecificCause().getMessage())
+                .contains("chk_ai_chat_turn_skill_pairing"),
+            "expected the skill-pairing CHECK constraint to refuse the write");
     }
 
     private AiChatSession session(
