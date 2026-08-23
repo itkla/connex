@@ -14,12 +14,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 
-import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 
 class NoteMentionTest extends AbstractServiceTest {
@@ -28,6 +29,7 @@ class NoteMentionTest extends AbstractServiceTest {
     @Autowired NotificationMapper notificationMapper;
     @Autowired PersonService personService;
     @Autowired ReferenceService referenceService;
+    @Autowired CompanyService companyService;
 
     private String mention(String label, User user) {
         return "[" + label + "](user:" + user.getId() + ")";
@@ -319,6 +321,61 @@ class NoteMentionTest extends AbstractServiceTest {
         authenticateAs(other, workspace.getId());
 
         assertEquals("(private note)", noteService.getNoteById(source.getId()).getContent());
+    }
+
+    @Test
+    void archivedReferenceTarget_isRedactedAndRestoredWithoutDeletingTheReference() {
+        Company company = newCompany();
+        Note source = noteService.create(draft(
+            "See [Confidential account](company:" + company.getId() + ")"));
+
+        companyService.archiveCompany(company.getId());
+
+        Note archived = noteService.getNoteById(source.getId());
+        assertEquals("See (unavailable reference)", archived.getContent());
+        assertTrue(archived.getReferences().isEmpty());
+
+        companyService.restoreCompany(company.getId());
+
+        Note restored = noteService.getNoteById(source.getId());
+        assertTrue(restored.getContent().contains("Confidential account"));
+        assertTrue(restored.getReferences().stream()
+            .anyMatch(reference -> "company".equals(reference.getRefType())
+                && reference.getRefId() == company.getId()));
+    }
+
+    @Test
+    void removedMemberReference_isRedactedOnEveryRead() {
+        User departed = newUser();
+        Note source = noteService.create(draft("Ask " + mention("Departed member", departed)));
+
+        workspaceMapper.removeMember(workspace.getId(), departed.getId());
+
+        Note fetched = noteService.getNoteById(source.getId());
+        assertEquals("Ask (unavailable reference)", fetched.getContent());
+        assertTrue(fetched.getReferences().isEmpty());
+    }
+
+    @Test
+    void backlinksRequireAVisibleTargetAndResumeAfterRestore() {
+        Company company = newCompany();
+        Note source = noteService.create(draft(
+            "See [Account](company:" + company.getId() + ")"));
+
+        assertEquals(List.of(source.getId()), noteService
+            .getNotesReferencing("company", company.getId()).stream().map(Note::getId).toList());
+        assertEquals(List.of(source.getId()), noteService
+            .getNotesReferencing("COMPANY", company.getId()).stream().map(Note::getId).toList());
+
+        companyService.archiveCompany(company.getId());
+        assertThrows(ResourceNotFoundException.class,
+            () -> noteService.getNotesReferencing("company", company.getId()));
+        assertThrows(ResourceNotFoundException.class,
+            () -> noteService.getNotesReferencing("unsupported", company.getId()));
+
+        companyService.restoreCompany(company.getId());
+        assertEquals(List.of(source.getId()), noteService
+            .getNotesReferencing("company", company.getId()).stream().map(Note::getId).toList());
     }
 
     /**

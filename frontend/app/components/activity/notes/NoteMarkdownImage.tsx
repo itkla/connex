@@ -5,7 +5,10 @@ import { ImageOff } from "lucide-react";
 
 import { normalizeNoteImageSource } from "./editor/noteImageSource";
 
-/** Renders a validated note image with an accessible browser-load fallback. */
+/**
+ * Renders a validated note image directly in the browser so arbitrary reader-provided HTTPS hosts
+ * never transit the server-side image optimizer, while preserving no-referrer loading and fallback.
+ */
 export default function NoteMarkdownImage({ source, alt }: { source: string; alt: string }) {
     const normalizedSource = normalizeNoteImageSource(source);
     const [failed, setFailed] = useState(false);
@@ -28,6 +31,7 @@ export default function NoteMarkdownImage({ source, alt }: { source: string; alt
                 alt={alt}
                 loading="lazy"
                 decoding="async"
+                referrerPolicy="no-referrer"
                 onError={() => setFailed(true)}
             />
             <span className="note-image-caption">{alt}</span>

@@ -4,13 +4,17 @@ import {
     getContacts,
     getCurrentUserResultFromCookie,
     getDeals,
-    getNotes,
     getUsers,
 } from "@/app/lib/api";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import NotesBrowser from "@/app/components/activity/notes/NotesBrowser";
+import { NOTE_URL_KEY, parseDeepLinkId } from "@/app/hooks/listStateUrl";
 
-export default async function NotesPage() {
+type NotesPageProps = {
+    searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
+
+export default async function NotesPage({ searchParams }: NotesPageProps) {
     const cookie = (await headers()).get('cookie');
     const userResult = await getCurrentUserResultFromCookie(cookie);
     if (!userResult.ok) {
@@ -21,10 +25,16 @@ export default async function NotesPage() {
         redirect('/auth/login');
     }
 
+    const noteParam = (await searchParams)[NOTE_URL_KEY];
+    const rawNoteId = Array.isArray(noteParam) ? noteParam[0] : noteParam;
+    const noteId = parseDeepLinkId(rawNoteId ?? null);
+    if (noteId !== null) {
+        redirect(`/activity/notes/${noteId}`);
+    }
+
     const init = { headers: { cookie: cookie ?? '' }, cache: 'no-store' as const };
 
-    const [allNotes, persons, deals, users] = await Promise.all([
-        getNotes(init),
+    const [persons, deals, users] = await Promise.all([
         getContacts({}, init),
         getDeals(init),
         getUsers(init),
@@ -32,7 +42,6 @@ export default async function NotesPage() {
 
     return (
         <NotesBrowser
-            notes={allNotes}
             persons={persons}
             deals={deals}
             users={users}

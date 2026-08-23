@@ -17,6 +17,11 @@ public interface AttachmentMapper {
     Attachment getCreatedById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Attachment getMetadataById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    List<Integer> getVisibleIdsIn(
+        @Param("workspaceId") int workspaceId,
+        @Param("ids") List<Integer> ids,
+        @Param("currentUserId") int currentUserId
+    );
     Attachment getByUrl(@Param("workspaceId") int workspaceId, @Param("url") String url);
     Attachment getMetadataByUrl(@Param("workspaceId") int workspaceId, @Param("url") String url);
     List<Attachment> getAssistantSessionAttachments(

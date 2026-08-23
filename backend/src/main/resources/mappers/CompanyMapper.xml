@@ -882,6 +882,15 @@
       SELECT 1 FROM company c WHERE <include refid="visible"/> AND c.id = #{id}
     )
   </select>
+
+  <select id="getVisibleIdsIn" resultType="int">
+    SELECT c.id
+    FROM company c
+    WHERE <include refid="visible"/>
+      AND c.id IN
+      <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    ORDER BY c.id
+  </select>
   <select id="existsOwned" resultType="boolean">
     SELECT EXISTS(SELECT 1 FROM company
       WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NULL)

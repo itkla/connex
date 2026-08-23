@@ -2,12 +2,15 @@ package ooo.klae.connex.backend.services;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.EntityReference;
@@ -17,12 +20,16 @@ import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.EntityReferenceMapper;
 
 class ReferenceServiceTest extends AbstractServiceTest {
 
     @Autowired ReferenceService referenceService;
+    @Autowired NoteService noteService;
     @Autowired EntityReferenceMapper entityReferenceMapper;
+    @Autowired AttachmentMapper attachmentMapper;
 
     private String mention(String label, User user) {
         return "[" + label + "](user:" + user.getId() + ")";
@@ -212,6 +219,56 @@ class ReferenceServiceTest extends AbstractServiceTest {
         assertEquals(2, refs.size());
         assertTrue(refs.stream().anyMatch(r -> "company".equals(r.getRefType()) && r.getRefId() == company.getId()));
         assertTrue(refs.stream().anyMatch(r -> "deal".equals(r.getRefType()) && r.getRefId() == deal.getId()));
+    }
+
+    /**
+     * Direct visibility guards accept the same case-insensitive type syntax as Markdown references.
+     */
+    @Test
+    void requireVisibleTarget_canonicalizesReferenceType() {
+        Company company = newCompany();
+
+        assertDoesNotThrow(() -> referenceService.requireVisibleTarget(
+            workspace.getId(), "COMPANY", company.getId(), currentUser.getId()));
+    }
+
+    /**
+     * A file owned by another member's private note is hidden everywhere its own read surface is hidden.
+     */
+    @Test
+    void privateNoteAttachment_isRedactedAndCannotBeUsedForBacklinks() {
+        Note privateNote = new Note();
+        privateNote.setWorkspaceId(workspace.getId());
+        privateNote.setContent("private attachment owner");
+        privateNote.setVisibility("private");
+        privateNote.setAuthor(currentUser);
+        noteMapper.insert(privateNote);
+
+        Attachment attachment = new Attachment();
+        attachment.setWorkspaceId(workspace.getId());
+        attachment.setEntityType("note");
+        attachment.setEntityId(privateNote.getId());
+        attachment.setFileName("private.pdf");
+        attachment.setUrl("https://example.com/" + unique() + ".pdf");
+        attachmentMapper.insert(attachment);
+
+        Note source = new Note();
+        source.setWorkspaceId(workspace.getId());
+        source.setContent("[Private file](file&#58;" + attachment.getId() + ")");
+        source.setVisibility("workspace");
+        source.setAuthor(currentUser);
+        noteMapper.insert(source);
+        referenceService.syncReferences(workspace.getId(), source.getId(), source.getContent());
+        assertEquals(1, stored(source).size());
+
+        User other = newUser();
+        authenticateAs(other, workspace.getId());
+
+        Note hidden = noteService.getNoteById(source.getId());
+        assertEquals("(unavailable reference)", hidden.getContent());
+        assertTrue(hidden.getReferences().isEmpty());
+        assertThrows(ResourceNotFoundException.class,
+            () -> noteService.getNotesReferencing("file", attachment.getId()));
     }
 
     /**

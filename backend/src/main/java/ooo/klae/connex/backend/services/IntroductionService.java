@@ -554,7 +554,7 @@ public class IntroductionService {
         }
         Map<Integer, List<EntityReference>> bySource = referenceService.referencesBySource(
             workspaceId, ReferenceService.SOURCE_INTRODUCTION, items.stream().map(IntroductionDto::getId).toList());
-        List<ReferenceService.ReaderVisibleContent> visible = referenceService.redactInvisibleNoteTargets(
+        List<ReferenceService.ReaderVisibleContent> visible = referenceService.redactInvisibleTargets(
             workspaceId,
             items.stream()
                 .map(item -> new ReferenceService.ReaderVisibleContent(

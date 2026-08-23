@@ -15,6 +15,7 @@ import ooo.klae.connex.backend.dto.NoteDto;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.NoteService;
+import ooo.klae.connex.backend.util.LikePattern;
 import ooo.klae.connex.backend.util.PageBounds;
 import ooo.klae.connex.backend.tenant.TenantJournalAttributable;
 
@@ -63,12 +64,17 @@ public class NoteController {
     public PageResponse<NoteDto> getNotesPage(
         @RequestParam(defaultValue = "1") int page,
         @RequestParam(defaultValue = "25") int size,
+        @RequestParam(required = false) String q,
+        @RequestParam(required = false) String sort,
+        @RequestParam(required = false) String dir,
         @RequestParam(defaultValue = "false") boolean workspaceOnly
     ) {
         PageBounds bounds = PageBounds.of(page, size);
-        List<NoteDto> items = noteService.getNotesPage(bounds.size(), bounds.offset(), workspaceOnly)
+        String query = q == null || q.isBlank() ? null : LikePattern.containing(q.trim());
+        List<NoteDto> items = noteService.getNotesPage(
+            query, sort, dir, bounds.size(), bounds.offset(), workspaceOnly)
             .stream().map(NoteDto::from).toList();
-        return new PageResponse<>(items, noteService.countNotes(workspaceOnly));
+        return new PageResponse<>(items, noteService.countNotes(query, workspaceOnly));
     }
 
     /**

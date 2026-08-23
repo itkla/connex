@@ -678,7 +678,7 @@ public class RecordCommentService {
             workspaceId,
             ReferenceService.SOURCE_COMMENT,
             comments.stream().map(comment -> commentSourceId(comment.getId())).toList());
-        List<ReferenceService.ReaderVisibleContent> visible = referenceService.redactInvisibleNoteTargets(
+        List<ReferenceService.ReaderVisibleContent> visible = referenceService.redactInvisibleTargets(
             workspaceId,
             comments.stream()
                 .map(comment -> new ReferenceService.ReaderVisibleContent(

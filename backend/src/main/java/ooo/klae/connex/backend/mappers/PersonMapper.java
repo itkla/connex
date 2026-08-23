@@ -73,6 +73,10 @@ public interface PersonMapper {
     List<Person> getPersonsByCompanyIds(@Param("workspaceId") int workspaceId,
             @Param("companyIds") List<Integer> companyIds);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    List<Integer> getVisibleIdsIn(
+        @Param("workspaceId") int workspaceId,
+        @Param("ids") List<Integer> ids
+    );
     /**
      * True only when the workspace OWNS an ACTIVE contact (excludes records merely shared in and
      * records that have been archived); for write scoping.

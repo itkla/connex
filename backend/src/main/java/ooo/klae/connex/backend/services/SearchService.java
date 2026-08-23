@@ -17,6 +17,9 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 
+import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.dto.AttachmentDto;
 import ooo.klae.connex.backend.dto.CampaignSummaryDto;
@@ -40,9 +43,16 @@ import ooo.klae.connex.backend.util.LikePattern;
 
 import org.springframework.stereotype.Service;
 
+import java.text.Normalizer;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -58,6 +68,10 @@ import lombok.RequiredArgsConstructor;
 public class SearchService {
 
     private static final int MAX_QUERY_LENGTH = 200;
+    private static final int RESULT_LIMIT = 10;
+    private static final int CANDIDATE_BATCH_SIZE = 25;
+    private static final int MAX_CANDIDATES = 250;
+    private static final Pattern COMBINING_MARKS = Pattern.compile("\\p{M}+");
 
     private final CompanyMapper companyMapper;
     private final PersonMapper personMapper;
@@ -96,10 +110,16 @@ public class SearchService {
         }
 
         String pattern = LikePattern.containing(trimmed);
+        String needle = foldSearchText(trimmed);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
         Set<Permission> permissions = workspaceService.permissionsFor(workspaceId, userId);
         auditService.record("search", "search", null, query, "Search performed", null);
+        List<Activity> activities = searchVisibleActivities(workspaceId, pattern, needle);
+        List<Note> notes = mergeVisibleNotes(
+            searchVisibleNotes(workspaceId, pattern, needle, userId),
+            searchVisibleNotesByAuthor(workspaceId, pattern, userId));
+        List<Task> tasks = searchVisibleTasks(workspaceId, pattern, needle);
         return new SearchResultsDto(
             companyMapper.search(workspaceId, pattern).stream().map(CompanyDto::from).toList(),
             personMapper.search(workspaceId, pattern).stream().map(PersonDto::from).toList(),
@@ -107,9 +127,9 @@ public class SearchService {
                 .stream().map(DealDto::from).toList(),
             pipelineMapper.search(workspaceId, pattern).stream().map(PipelineDto::from).toList(),
             tagMapper.search(workspaceId, pattern).stream().map(TagDto::from).toList(),
-            referenceService.hydrateActivities(workspaceId, activityMapper.search(workspaceId, pattern)).stream().map(ActivityDto::from).toList(),
-            referenceService.hydrate(workspaceId, noteMapper.searchVisible(workspaceId, pattern, userId)).stream().map(NoteDto::from).toList(),
-            referenceService.hydrateTasks(workspaceId, taskMapper.search(workspaceId, pattern)).stream().map(TaskDto::from).toList(),
+            activities.stream().map(ActivityDto::from).toList(),
+            notes.stream().map(NoteDto::from).toList(),
+            tasks.stream().map(TaskDto::from).toList(),
             userMapper.search(workspaceId, pattern).stream().map(UserDto::from).toList(),
             attachmentMapper.search(workspaceId, pattern).stream().map(AttachmentDto::from).toList(),
             productMapper.search(workspaceId, pattern),
@@ -122,6 +142,140 @@ public class SearchService {
             gated(permissions, Permission.RULE_MANAGE,
                 () -> workflowMapper.search(workspaceId, pattern))
         );
+    }
+
+    private List<Activity> searchVisibleActivities(int workspaceId, String pattern, String needle) {
+        List<Activity> visible = new ArrayList<>();
+        int offset = 0;
+        while (visible.size() < RESULT_LIMIT && offset < MAX_CANDIDATES) {
+            int limit = Math.min(CANDIDATE_BATCH_SIZE, MAX_CANDIDATES - offset);
+            List<Activity> batch = activityMapper.search(workspaceId, pattern, limit, offset);
+            if (batch.isEmpty()) {
+                return visible;
+            }
+            visible.addAll(referenceService.hydrateActivities(workspaceId, batch).stream()
+                .filter(activity -> visibleTextMatches(needle, activity.getSubject(), activity.getNotes()))
+                .limit(RESULT_LIMIT - visible.size())
+                .toList());
+            offset += batch.size();
+            if (batch.size() < limit) {
+                return visible;
+            }
+        }
+        return visible;
+    }
+
+    private List<Note> searchVisibleNotes(
+            int workspaceId, String pattern, String needle, int currentUserId) {
+        List<Note> visible = new ArrayList<>();
+        int offset = 0;
+        while (visible.size() < RESULT_LIMIT && offset < MAX_CANDIDATES) {
+            int limit = Math.min(CANDIDATE_BATCH_SIZE, MAX_CANDIDATES - offset);
+            List<Note> batch = noteMapper.searchVisible(
+                workspaceId, pattern, currentUserId, limit, offset);
+            if (batch.isEmpty()) {
+                return visible;
+            }
+            visible.addAll(referenceService.hydrate(workspaceId, batch).stream()
+                .filter(note -> visibleNoteMatches(needle, note))
+                .limit(RESULT_LIMIT - visible.size())
+                .toList());
+            offset += batch.size();
+            if (batch.size() < limit) {
+                return visible;
+            }
+        }
+        return visible;
+    }
+
+    private List<Note> searchVisibleNotesByAuthor(
+            int workspaceId, String pattern, int currentUserId) {
+        List<Note> visible = new ArrayList<>();
+        int offset = 0;
+        while (visible.size() < RESULT_LIMIT && offset < MAX_CANDIDATES) {
+            int limit = Math.min(CANDIDATE_BATCH_SIZE, MAX_CANDIDATES - offset);
+            List<Note> batch = noteMapper.getVisibleNotesPage(
+                workspaceId, currentUserId, null, List.of(), "created", "desc", limit, offset);
+            if (batch.isEmpty()) {
+                return visible;
+            }
+            List<Integer> authorIds = batch.stream()
+                .map(Note::getAuthor)
+                .filter(author -> author != null)
+                .map(author -> author.getId())
+                .distinct()
+                .toList();
+            Set<Integer> matchingAuthorIds = authorIds.isEmpty()
+                ? Set.of()
+                : Set.copyOf(userMapper.findMatchingWorkspaceMemberIdsIn(
+                    workspaceId, pattern, authorIds));
+            List<Note> matches = batch.stream()
+                .filter(note -> note.getAuthor() != null
+                    && matchingAuthorIds.contains(note.getAuthor().getId()))
+                .limit(RESULT_LIMIT - visible.size())
+                .toList();
+            visible.addAll(referenceService.hydrate(workspaceId, matches));
+            offset += batch.size();
+            if (batch.size() < limit) {
+                return visible;
+            }
+        }
+        return visible;
+    }
+
+    private List<Task> searchVisibleTasks(int workspaceId, String pattern, String needle) {
+        List<Task> visible = new ArrayList<>();
+        int offset = 0;
+        while (visible.size() < RESULT_LIMIT && offset < MAX_CANDIDATES) {
+            int limit = Math.min(CANDIDATE_BATCH_SIZE, MAX_CANDIDATES - offset);
+            List<Task> batch = taskMapper.search(workspaceId, pattern, limit, offset);
+            if (batch.isEmpty()) {
+                return visible;
+            }
+            visible.addAll(referenceService.hydrateTasks(workspaceId, batch).stream()
+                .filter(task -> visibleTextMatches(needle, task.getDescription()))
+                .limit(RESULT_LIMIT - visible.size())
+                .toList());
+            offset += batch.size();
+            if (batch.size() < limit) {
+                return visible;
+            }
+        }
+        return visible;
+    }
+
+    private static boolean visibleNoteMatches(String needle, Note note) {
+        return visibleTextMatches(needle,
+            note.getTitle(),
+            note.getContent(),
+            note.getPerson() == null ? null : note.getPerson().getName(),
+            note.getDeal() == null ? null : note.getDeal().getName());
+    }
+
+    private static List<Note> mergeVisibleNotes(
+            List<Note> contentMatches, List<Note> authorMatches) {
+        Map<Integer, Note> unique = new LinkedHashMap<>();
+        contentMatches.forEach(note -> unique.put(note.getId(), note));
+        authorMatches.forEach(note -> unique.putIfAbsent(note.getId(), note));
+        return unique.values().stream()
+            .sorted(Comparator.comparing(Note::getCreatedAt).reversed()
+                .thenComparing(Comparator.comparingInt(Note::getId).reversed()))
+            .limit(RESULT_LIMIT)
+            .toList();
+    }
+
+    private static boolean visibleTextMatches(String needle, String... values) {
+        for (String value : values) {
+            if (value != null && foldSearchText(value).contains(needle)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String foldSearchText(String value) {
+        String normalized = Normalizer.normalize(value, Normalizer.Form.NFKD);
+        return COMBINING_MARKS.matcher(normalized).replaceAll("").toLowerCase(Locale.ROOT);
     }
 
     /**

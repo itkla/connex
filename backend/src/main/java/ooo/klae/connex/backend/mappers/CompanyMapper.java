@@ -135,6 +135,10 @@ public interface CompanyMapper {
     List<Company> getByIds(@Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids);
     List<Company> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    List<Integer> getVisibleIdsIn(
+        @Param("workspaceId") int workspaceId,
+        @Param("ids") List<Integer> ids
+    );
     /**
      * True only when the workspace OWNS an ACTIVE company (excludes records merely shared in and
      * records that have been archived); for write scoping.

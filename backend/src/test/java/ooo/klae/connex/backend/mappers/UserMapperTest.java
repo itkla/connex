@@ -218,6 +218,25 @@ class UserMapperTest extends AbstractMapperTest {
                 .stream().anyMatch(u -> u.getId() == mine.getId()));
     }
 
+    @Test
+    void findMatchingWorkspaceMemberIdsInRestrictsMatchesToRequestedMembers() {
+        String marker = "bounded_" + unique();
+        User first = newUser();
+        User second = newUser();
+        User third = newUser();
+        first.setDisplayName(marker + "_1");
+        second.setDisplayName(marker + "_2");
+        third.setDisplayName(marker + "_3");
+        userMapper.update(first);
+        userMapper.update(second);
+        userMapper.update(third);
+
+        List<Integer> matching = userMapper.findMatchingWorkspaceMemberIdsIn(
+            workspace.getId(), "%" + marker + "%", List.of(first.getId(), third.getId()));
+
+        assertEquals(List.of(first.getId(), third.getId()), matching);
+    }
+
     /**
      * countUsers excludes the reserved {@code __connex_system__} actor, so a fresh instance (only the
      * seeded system actor) reads zero real users and the bootstrap runner can fire (#81 Phase 2).

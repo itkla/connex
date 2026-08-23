@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -12,12 +14,14 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.ShareBlockedPrivacyHoldException;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
@@ -26,6 +30,7 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 class ShareServiceTest extends AbstractServiceTest {
 
     @Autowired ShareService shareService;
+    @Autowired NoteService noteService;
     @Autowired WorkspaceService workspaceService;
     @Autowired TenantContext tenantContext;
     @Autowired OrganizationMapper organizationMapper;
@@ -89,6 +94,47 @@ class ShareServiceTest extends AbstractServiceTest {
         authenticateAs(currentUser, b.getId());
 
         assertNull(companyMapper.getCompanyById(b.getId(), company.getId()));
+    }
+
+    /**
+     * Reader-time authorization masks a frozen reference label immediately after unshare and restores
+     * the original link after re-share without rewriting the note or its reference row.
+     */
+    @Test
+    void unshareMasksExistingNoteReferencesAndBacklinksUntilReshared() {
+        WorkspaceMembershipDto owner = workspaceService.createWorkspace("Reference Owner WS", currentUser.getId());
+        WorkspaceMembershipDto grantee = createSiblingWorkspace(owner, "Reference Grantee WS");
+        Company company = companyIn(owner.getId());
+
+        authenticateAs(currentUser, owner.getId());
+        shareService.share("company", company.getId(), grantee.getId(), false);
+        authenticateAs(currentUser, grantee.getId());
+        Note draft = new Note();
+        draft.setVisibility("workspace");
+        draft.setContent("See [Confidential account](company:" + company.getId() + ")");
+        Note source = noteService.create(draft);
+        assertTrue(noteService.getNoteById(source.getId()).getContent().contains("Confidential account"));
+        assertEquals(1, noteService.getNotesReferencing("company", company.getId()).size());
+
+        authenticateAs(currentUser, owner.getId());
+        shareService.unshare("company", company.getId(), grantee.getId());
+        authenticateAs(currentUser, grantee.getId());
+        Note hidden = noteService.getNoteById(source.getId());
+        assertEquals("See (unavailable reference)", hidden.getContent());
+        assertTrue(hidden.getReferences().isEmpty());
+        assertThrows(ResourceNotFoundException.class,
+            () -> noteService.getNotesReferencing("company", company.getId()));
+
+        authenticateAs(currentUser, owner.getId());
+        shareService.share("company", company.getId(), grantee.getId(), false);
+        authenticateAs(currentUser, grantee.getId());
+        Note restored = noteService.getNoteById(source.getId());
+        assertTrue(restored.getContent().contains("Confidential account"));
+        assertTrue(restored.getReferences().stream()
+            .anyMatch(reference -> "company".equals(reference.getRefType())
+                && reference.getRefId() == company.getId()));
+        assertEquals(List.of(source.getId()), noteService
+            .getNotesReferencing("company", company.getId()).stream().map(Note::getId).toList());
     }
 
     @Test

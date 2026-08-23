@@ -59,6 +59,30 @@
     ORDER BY u.id
   </select>
 
+  <select id="findMatchingWorkspaceMemberIds" resultType="int">
+    SELECT u.id
+    FROM app_user u
+    JOIN workspace_member wm ON wm.user_id = u.id
+    WHERE wm.workspace_id = #{workspaceId}
+      AND wm.status IN ('active', 'pending')
+      AND (u.username LIKE #{query} OR u.display_name LIKE #{query})
+    ORDER BY u.id
+  </select>
+
+  <select id="findMatchingWorkspaceMemberIdsIn" resultType="int">
+    SELECT u.id
+    FROM app_user u
+    JOIN workspace_member wm ON wm.user_id = u.id
+    WHERE wm.workspace_id = #{workspaceId}
+      AND wm.status IN ('active', 'pending')
+      AND (u.username LIKE #{query} OR u.display_name LIKE #{query})
+      AND u.id IN
+      <foreach item="id" collection="ids" open="(" separator="," close=")">
+        #{id}
+      </foreach>
+    ORDER BY u.id
+  </select>
+
   <select id="getUserById" resultType="User">
     SELECT <include refid="userColumns"/>
     FROM app_user WHERE id = #{id}

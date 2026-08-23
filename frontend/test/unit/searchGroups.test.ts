@@ -175,6 +175,45 @@ describe("global search reaches every first-class sidebar object", () => {
         expect(built.flatMap((group) => group.rows).map((row) => row.index)).toEqual([0, 1, 2]);
     });
 
+    it("uses note titles, Markdown-free snippets, and detail routes for activity records", () => {
+        const built = groups({
+            activities: [{ id: 4, type: "Meeting", subject: "Renewal review", createdById: 2 }],
+            notes: [{
+                id: 5,
+                title: "Account plan",
+                content: "## Next step\n\n**Call** [Acme](company:7)",
+                author: 2,
+                createdAt: "2026-08-20T12:00:00Z",
+                updatedAt: "2026-08-20T12:00:00Z",
+            }],
+            tasks: [{
+                id: 6,
+                description: "**Call** [Acme](company:7)",
+                completed: false,
+                status: "todo",
+                position: 0,
+                assignedToId: 2,
+                createdAt: "2026-08-20T12:00:00Z",
+                updatedAt: "2026-08-20T12:00:00Z",
+            }],
+        });
+
+        expect(built.map((group) => group.key)).toEqual(["activities", "notes", "tasks"]);
+        expect(built[0].rows[0]).toMatchObject({
+            href: "/activity/activities/4",
+            label: "Renewal review",
+        });
+        expect(built[1].rows[0]).toMatchObject({
+            href: "/activity/notes/5",
+            label: "Account plan",
+            subtitle: "Next step Call Acme",
+        });
+        expect(built[2].rows[0]).toMatchObject({
+            href: "/activity/tasks/6",
+            label: "Call Acme",
+        });
+    });
+
     it("serves a denied group empty rather than absent, so no group is rendered for it", () => {
         expect(groups({})).toEqual([]);
     });
