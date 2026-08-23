@@ -128,7 +128,9 @@ test.describe("Ask Connex dual surface", () => {
         });
         await expect(pin).toHaveAttribute("aria-pressed", "false");
         await pin.click();
-        await expect(pin).toHaveAttribute("aria-pressed", "true");
+        await expect(context.getByRole("button", {
+            name: copy("en", "unpinContext").replace("{label}", contact.name),
+        })).toHaveAttribute("aria-pressed", "true");
 
         await page.goto(`/records/companies/${fixture.companies.primary.id}`);
         await openDrawer(page);
@@ -244,7 +246,7 @@ test.describe("Ask Connex dual surface", () => {
 
     test("the command palette reaches the workspace without a sidebar destination", async ({ page }) => {
         await page.goto("/dashboard");
-        await expect(page.getByRole("navigation", {
+        await expect(page.getByRole("complementary", {
             name: message("en", "common", "CommonSidebar.ariaPrimarySidebar"),
         })).toBeVisible();
         await expect(page.getByRole("link", { name: copy("en", "title"), exact: true })).toHaveCount(0);
