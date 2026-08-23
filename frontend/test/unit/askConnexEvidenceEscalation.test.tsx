@@ -148,6 +148,7 @@ const labels: AskConnexAnswerDocumentLabels = {
     truncated: "Results were bounded",
     unsupported: "No source for this — read it as unconfirmed.",
     whatChecked: "What I checked",
+    withheldEvidence: "Sources for the rows not shown",
 };
 
 const CITATION: AiChatCitation = {

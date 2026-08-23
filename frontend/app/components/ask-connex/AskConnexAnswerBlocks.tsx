@@ -23,6 +23,7 @@ import {
     blockEvidence,
     isUnsupportedBlock,
     rowCitations,
+    withheldRowEvidence,
     type AskConnexAnswerBounds,
     type AskConnexAnswerDocumentLabels,
 } from '@/app/components/ask-connex/answerDocument';
@@ -36,6 +37,7 @@ import type {
     AiChatAnswerBlock,
     AiChatAnswerBlockKind,
     AiChatAnswerRow,
+    AiChatCitation,
 } from '@/app/lib/types';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -105,31 +107,48 @@ function BlockBody({ body, className }: { body: string | null; className?: strin
 }
 
 /**
- * What a bounded list withheld, and the one place the rest of it can be read.
+ * What a bounded list withheld, the sources backing what it withheld, and the one place the rest of
+ * it can be read.
  *
  * The count is stated rather than implied: a list that simply stops looks like a short list, and a
- * reader deciding whether an answer covered their question has to know the difference.
+ * reader deciding whether an answer covered their question has to know the difference. Evidence that
+ * belonged to the withheld rows is named here too, under its own label, so bounding never removes
+ * the last visible source from a block and never lets uncited rows read as established.
  */
 function BoundedFooter({
     hidden,
     total,
+    withheld,
     bounds,
     labels,
 }: {
     hidden: number;
     total: number;
+    withheld?: { evidence: AiChatCitation[]; caveats: string[] };
     bounds: AskConnexAnswerBounds;
     labels: AskConnexAnswerDocumentLabels;
 }) {
     if (hidden === 0) return null;
     return (
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pt-0.5 text-xs text-muted-foreground">
-            <span>{labels.boundedRows(total - hidden, total)}</span>
-            {bounds.onOpenFullView ? (
-                <Button type="button" variant="ghost" size="inline" onClick={bounds.onOpenFullView}>
-                    <ArrowsPointingOutIcon aria-hidden className="size-3.5" />
-                    {labels.viewAll}
-                </Button>
+        <div className="space-y-1.5 pt-0.5">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                <span>{labels.boundedRows(total - hidden, total)}</span>
+                {bounds.onOpenFullView ? (
+                    <Button type="button" variant="ghost" size="inline" onClick={bounds.onOpenFullView}>
+                        <ArrowsPointingOutIcon aria-hidden className="size-3.5" />
+                        {labels.viewAll}
+                    </Button>
+                ) : null}
+            </div>
+            {withheld && withheld.evidence.length > 0 ? (
+                <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground">{labels.withheldEvidence}</p>
+                    <AskConnexEvidenceRow
+                        evidence={withheld.evidence}
+                        caveats={withheld.caveats}
+                        labels={labels}
+                    />
+                </div>
             ) : null}
         </div>
     );
@@ -389,7 +408,10 @@ function DraftBlock({ block, labels }: { block: AiChatAnswerBlock; labels: AskCo
  * The structured presentation for the row-bearing kinds, or null when the block carries no rows.
  *
  * Bounding happens here rather than inside each kind, so every structured kind stops at the same
- * place and says so the same way, and the kinds themselves stay presentational.
+ * place and says so the same way, and the kinds themselves stay presentational. What bounding must
+ * never hide is evidence: the withheld rows' sources travel to the truncation line, which keeps the
+ * block's visible sourcing equal to its whole sourcing and so keeps the unsupported marker — decided
+ * from the block — honest about what is on screen.
  */
 function StructuredRows({ block, caveats, bounds, labels }: BlockProps) {
     const all = answerRows(block);
@@ -414,6 +436,7 @@ function StructuredRows({ block, caveats, bounds, labels }: BlockProps) {
             <BoundedFooter
                 hidden={hidden}
                 total={all.length}
+                withheld={{ evidence: withheldRowEvidence(all.slice(rows.length)), caveats }}
                 bounds={bounds}
                 labels={labels}
             />

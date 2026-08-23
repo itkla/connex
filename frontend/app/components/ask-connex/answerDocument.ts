@@ -49,6 +49,7 @@ export type AskConnexAnswerDocumentLabels = {
     truncated: string;
     unsupported: string;
     whatChecked: string;
+    withheldEvidence: string;
 };
 
 /** The placeholder shown where the server established no value for a structured field. */
@@ -127,11 +128,40 @@ export function blockEvidence(block: AiChatAnswerBlock): AiChatCitation[] {
  * Whether a factual block reached the viewer with nothing to back it up. Row-level citations count,
  * so a metric grid whose evidence hangs off individual tiles is supported even when the block
  * itself carries none.
+ *
+ * Every row citation this weighs has to be one the surface actually shows, or an unsourced-looking
+ * block would be silently excused by evidence the reader cannot see. A bounded surface therefore
+ * keeps the citations of the rows it withheld on screen — see {@link withheldRowEvidence} — rather
+ * than dropping them with the rows.
  */
 export function isUnsupportedBlock(block: AiChatAnswerBlock): boolean {
     if (!EVIDENCE_BEARING_KINDS.has(block.kind)) return false;
     if (blockEvidence(block).length > 0) return false;
     return answerRows(block).every((row) => rowCitations(row).length === 0);
+}
+
+/**
+ * The citations belonging to rows a bounded surface did not render, deduplicated and in row order.
+ *
+ * Bounding is a display limit, not an evidence limit: hiding the one cited row of a long table would
+ * otherwise leave five uncited rows reading as established fact, with no marker and no warning. The
+ * withheld rows' sources stay reachable on the truncation line instead, attributed to the rows that
+ * were withheld rather than to the ones on screen.
+ *
+ * @param withheld the rows the surface did not render, in document order
+ */
+export function withheldRowEvidence(withheld: readonly AiChatAnswerRow[]): AiChatCitation[] {
+    const seen = new Set<string>();
+    const citations: AiChatCitation[] = [];
+    for (const row of withheld) {
+        for (const citation of rowCitations(row)) {
+            const key = citationKey(citation);
+            if (seen.has(key)) continue;
+            seen.add(key);
+            citations.push(citation);
+        }
+    }
+    return citations;
 }
 
 /**

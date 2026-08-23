@@ -61,6 +61,7 @@ import AskConnexAnswerDocument, {
 import {
     AskConnexContextStrip,
     AskConnexScopeNotice,
+    hasAskConnexContextInputs,
     type AskConnexContextLabels,
 } from '@/app/components/ask-connex/AskConnexContextCockpit';
 import AskConnexTab from '@/app/components/ask-connex/AskConnexTab';
@@ -92,6 +93,7 @@ import {
     ASK_CONNEX_WIDTHS,
     askConnexRecovery,
     askConnexSessionActivity,
+    askConnexSessionReaders,
     askConnexTerminalKind,
     askConnexWidthLength,
     filterAskConnexSessions,
@@ -1085,6 +1087,10 @@ function HeaderChip({
  * The width control and the handoff into the full workspace sit on the state tier rather than
  * beside the close control: both change which surface you are reading in, and neither belongs in
  * the row where a mis-aimed click closes the panel.
+ *
+ * The access line counts the members reading the chat rather than everyone the participants
+ * endpoint returns; pending invitations stay in the sharing dialog, which names them as pending and
+ * offers the controls that act on them.
  */
 function SurfaceHeader({
     workspace,
@@ -1114,6 +1120,7 @@ function SurfaceHeader({
     onOpenWorkspace: () => void;
 }) {
     const shared = activeSession?.visibility === 'shared';
+    const readers = askConnexSessionReaders(participants);
     const title = activeSession?.title ?? labels.newChat;
     const StateIcon = activeState === null ? null : ACTIVE_STATE_ICONS[activeState];
     const stateLabel = activeState === 'running'
@@ -1155,10 +1162,10 @@ function SurfaceHeader({
                     {contextCount > 0 ? (
                         <span className="truncate">{labels.contextSummary(contextCount)}</span>
                     ) : null}
-                    {workspace && shared && participants.length > 0 ? (
+                    {workspace && shared && readers.length > 0 ? (
                         <span className="flex min-w-0 items-center gap-1.5">
                             <AvatarGroup aria-label={labels.participants}>
-                                {participants.map((participant) => (
+                                {readers.map((participant) => (
                                     <Avatar
                                         key={participant.userId}
                                         size="sm"
@@ -1171,7 +1178,7 @@ function SurfaceHeader({
                                     </Avatar>
                                 ))}
                             </AvatarGroup>
-                            <span className="truncate">{labels.participantCount(participants.length)}</span>
+                            <span className="truncate">{labels.participantCount(readers.length)}</span>
                         </span>
                     ) : null}
                 </div>
@@ -1364,22 +1371,41 @@ function ConversationSurface({
         composerRef.current?.focus();
     };
 
+    const carryingContext = hasAskConnexContextInputs({
+        implicitContext,
+        pinnedContext,
+        selectionContext,
+        unsupportedPageContext,
+        attachments,
+        fileAttachments,
+    });
+
     /**
-     * Returns the member to the inputs that decide breadth.
+     * Returns the member to the inputs that decide breadth, and makes the move visible.
      *
      * Where that is depends on what made the request broad: carried records are removed in the
-     * context strip, and a question that was broad on its own words is narrowed in the composer.
-     * Re-arming the scope confirmation makes the next send announce the new breadth rather than
-     * inheriting agreement given to the old one.
+     * context strip, and a question that was broad on its own words is narrowed in the composer, so
+     * a request with no carried records lands in the composer rather than on an empty strip. The
+     * strip takes focus as a group and shows a ring while it holds it, because focus arrives here
+     * from a click and nothing else would tell the member the press did anything.
+     */
+    const focusBreadthInputs = () => {
+        const group = carryingContext ? contextGroupRef.current : null;
+        if (group !== null) {
+            group.focus();
+            return;
+        }
+        composerRef.current?.focus();
+    };
+
+    /**
+     * Re-arms the scope confirmation and hands the member back the inputs that decide breadth, so
+     * the next send announces the new breadth rather than inheriting agreement given to the old one.
      */
     const narrowScope = () => {
         setPendingScope(null);
         setConfirmedScopeKey(null);
-        if (contextGroupRef.current !== null) {
-            contextGroupRef.current.focus();
-            return;
-        }
-        composerRef.current?.focus();
+        focusBreadthInputs();
     };
 
     return (
@@ -1639,7 +1665,7 @@ function ConversationSurface({
                             }}
                             onEdit={() => {
                                 setPendingScope(null);
-                                contextGroupRef.current?.focus();
+                                focusBreadthInputs();
                             }}
                         />
                     ) : null}
@@ -1921,7 +1947,16 @@ function WorkspaceSessionRail({
     );
 }
 
-/** Responsive Ask Connex session, transcript, context, and composer surface. */
+/**
+ * Responsive Ask Connex session, transcript, context, and composer surface.
+ *
+ * The desktop panel animates its transform and nothing else. Its width is the width the member
+ * chose, applied as a plain style: a panel that reached a new width over a spring would relayout its
+ * whole transcript on every frame of that spring, and it could not be kept in step with the shell
+ * column the page reflows into without the shell paying the same cost again. Resizing is therefore
+ * a discrete change on both surfaces at once; opening and closing stays animated, and there the
+ * panel only translates.
+ */
 export default function AskConnexDrawer(props: AskConnexDrawerProps) {
     const {
         open,
@@ -2103,10 +2138,8 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
                 aria-hidden={!open}
                 inert={!open}
                 initial={false}
-                animate={{
-                    transform: open ? 'translateX(0%)' : 'translateX(100%)',
-                    width: askConnexWidthLength(width),
-                }}
+                style={{ width: askConnexWidthLength(width) }}
+                animate={{ transform: open ? 'translateX(0%)' : 'translateX(100%)' }}
                 transition={instantOpen || reduceMotion ? instant : springSmooth}
                 onAnimationComplete={() => onOpenChangeComplete(open)}
                 className={cn(

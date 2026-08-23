@@ -483,6 +483,7 @@
       "exclusions": "Not included",
       "truncated": "Results were bounded",
       "boundedRows": "Showing {shown} of {total} here",
+      "withheldEvidence": "Sources for the rows not shown",
       "viewAll": "Open in full view",
       "whatChecked": "What I checked",
       "period": "Period: {start} – {end}",

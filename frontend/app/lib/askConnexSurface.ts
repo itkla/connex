@@ -1,5 +1,5 @@
 import { viewPreferenceStorageKey } from '@/app/hooks/viewPreference';
-import type { AiChatSession } from '@/app/lib/types';
+import type { AiChatParticipant, AiChatSession } from '@/app/lib/types';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 
 /**
@@ -33,6 +33,20 @@ export const ASK_CONNEX_WIDTH_REM: Record<AskConnexWidth, number> = {
 /** The CSS length one width state occupies, for the panel and the shell column alike. */
 export function askConnexWidthLength(width: AskConnexWidth): string {
     return `${ASK_CONNEX_WIDTH_REM[width]}rem`;
+}
+
+/**
+ * The members a shared chat is actually being read by.
+ *
+ * The participants endpoint returns invitations alongside the members who accepted them, because
+ * the sharing dialog has to offer controls for both. Anywhere that answers "who can see this" counts
+ * only the members who joined: an invitation grants nothing until it is accepted, so counting a
+ * pending invitee would tell an owner their chat is already in front of someone who cannot open it.
+ */
+export function askConnexSessionReaders(
+    participants: readonly AiChatParticipant[],
+): AiChatParticipant[] {
+    return participants.filter((participant) => participant.status === 'joined');
 }
 
 /** Scoped browser-storage key for the member's chosen drawer width. */

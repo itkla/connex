@@ -113,6 +113,7 @@ import {
     createAskConnexStream,
     createAskConnexStreamStore,
     failAskConnexStreamHydration,
+    reconcileAskConnexSettledStream,
     requestAskConnexTurnCancel,
     settleAskConnexStreamHydration,
     shouldDropAskConnexStream,
@@ -151,6 +152,12 @@ const noopCleanup = () => {};
 type AskConnexContextValue = {
     open: boolean;
     instantOpen: boolean;
+    /**
+     * Whether the last change to {@link width} was a member resizing the panel, which the shell
+     * column adopts without animating so it never disagrees with the panel about how wide the panel
+     * is. Cleared whenever the panel opens or closes, which is animated.
+     */
+    instantWidth: boolean;
     working: boolean;
     workspace: boolean;
     /**
@@ -378,6 +385,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
     const [open, setOpen] = useState(false);
     const [instantOpen, setInstantOpen] = useState(false);
+    const [instantWidth, setInstantWidth] = useState(false);
     const [width, setWidth] = useState<AskConnexWidth>(ASK_CONNEX_DEFAULT_WIDTH);
     const [desktopRoot, setDesktopRoot] = useState<HTMLElement | null>(null);
     const [workspaceRoot, setWorkspaceRoot] = useState<HTMLElement | null>(null);
@@ -640,18 +648,32 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         setWidth(parseStoredAskConnexWidth(safeStorageGet(widthKey)) ?? ASK_CONNEX_DEFAULT_WIDTH);
     }, [activeWorkspaceId, userId, widthKey]);
 
+    /**
+     * Applies a chosen panel width, and marks the change as one the shell must adopt without
+     * animating. Resizing is a discrete preference rather than a movement: the panel and the column
+     * the page reflows into are two elements whose widths have to agree at every instant, and
+     * neither can reach a new width without relaying out its subtree on every frame it moves. The
+     * shell reads this alongside the open/close animation, which stays animated because it carries
+     * the panel in and out of the page.
+     */
     const changeWidth = useCallback((next: AskConnexWidth) => {
+        setInstantWidth(true);
         setWidth(next);
         safeStorageSet(widthKey, next);
     }, [widthKey]);
 
     const openDrawer = useCallback((source: OpenSource = 'standard') => {
         if (open) return;
+        setInstantWidth(false);
         setInstantOpen(source === 'keyboard');
         setOpen(true);
     }, [open]);
-    const closeDrawer = useCallback(() => setOpen(false), []);
+    const closeDrawer = useCallback(() => {
+        setInstantWidth(false);
+        setOpen(false);
+    }, []);
     const closeDrawerInstant = useCallback(() => {
+        setInstantWidth(false);
         setInstantOpen(true);
         setOpen(false);
     }, []);
@@ -661,6 +683,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             identity,
             context: snapshotAskConnexSourceContext(context.record, context.selection),
         });
+        setInstantWidth(false);
         setOpen(false);
         const session = activeSessionRef.current;
         router.push(session ? `/ask-connex/${session.id}` : '/ask-connex');
@@ -678,6 +701,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         workspaceReturnRef.current = false;
         setWorkspaceSourceContext(null);
         setInstantOpen(false);
+        setInstantWidth(false);
         setOpen(true);
     }, [workspaceMode]);
 
@@ -917,8 +941,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             absorbTurnPartial(durable, streamEpochRef.current);
             safeStorageRemove(turnKey);
             setSubmissionBlocked(false);
-            await refreshTranscript(stored.sessionId, signal, true);
-            if (shouldDropAskConnexStream(durable.status, durable.terminalReason)) resetStream();
+            await reconcileAskConnexSettledStream(
+                durable.status,
+                durable.terminalReason,
+                resetStream,
+                () => refreshTranscript(stored.sessionId, signal, true),
+            );
             await refreshSessions(signal);
             if (durable.status === 'failed') {
                 deferredErrorToast(
@@ -978,8 +1006,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             const stored = parseStoredAskConnexTurn(safeStorageGet(turnKey));
             if (stored?.turnId === durable.turnId) safeStorageRemove(turnKey);
             setSubmissionBlocked(false);
-            await refreshTranscript(durable.sessionId, signal, true);
-            if (shouldDropAskConnexStream(durable.status, durable.terminalReason)) resetStream();
+            await reconcileAskConnexSettledStream(
+                durable.status,
+                durable.terminalReason,
+                resetStream,
+                () => refreshTranscript(durable.sessionId, signal, true),
+            );
             await refreshSessions(signal);
             if (durable.status === 'failed') {
                 deferredErrorToast(
@@ -1938,6 +1970,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             truncated: t('answerDocument.truncated'),
             unsupported: t('answerDocument.unsupported'),
             whatChecked: t('answerDocument.whatChecked'),
+            withheldEvidence: t('answerDocument.withheldEvidence'),
         },
         assistantAuthor: t('assistantAuthor'),
         archive: t('archive'),
@@ -2125,6 +2158,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         () => ({
             open,
             instantOpen,
+            instantWidth,
             working,
             workspace: workspaceMode,
             width,
@@ -2132,7 +2166,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             closeDrawer,
             openWorkspace,
         }),
-        [closeDrawer, instantOpen, open, openDrawer, openWorkspace, width, working, workspaceMode],
+        [closeDrawer, instantOpen, instantWidth, open, openDrawer, openWorkspace, width, working, workspaceMode],
     );
 
     return (

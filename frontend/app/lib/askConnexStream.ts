@@ -85,6 +85,41 @@ export function shouldDropAskConnexStream(status: string, reason: string | null)
     return status === 'resolved' || isAskConnexAuthorizationWithdrawal(reason);
 }
 
+/**
+ * Sequences a settled turn's stream drop around the durable transcript reconciliation that follows
+ * it, and answers when each side of that sequence runs.
+ *
+ * A turn that ended by withdrawing the requester's authorization drops its buffered tail *before*
+ * the reconciliation is even requested: the text is no longer this reader's to see, so it cannot
+ * stay on screen for the duration of a network round trip, and it is dropped again once the request
+ * settles so a reconciliation that throws cannot leave it behind. Every other droppable status — a
+ * resolved answer, whose words arrive as the transcript message the refresh is fetching — drops
+ * only after reconciliation, so the answer never blinks out of the conversation in between.
+ *
+ * @param status the turn's settled status
+ * @param reason the turn's terminal reason
+ * @param dropStream discards the buffered stream; called more than once on the withdrawal path
+ * @param reconcile refreshes the durable transcript; its rejection propagates to the caller
+ */
+export async function reconcileAskConnexSettledStream(
+    status: string,
+    reason: string | null,
+    dropStream: () => void,
+    reconcile: () => Promise<unknown>,
+): Promise<void> {
+    if (isAskConnexAuthorizationWithdrawal(reason)) {
+        dropStream();
+        try {
+            await reconcile();
+        } finally {
+            dropStream();
+        }
+        return;
+    }
+    await reconcile();
+    if (shouldDropAskConnexStream(status, reason)) dropStream();
+}
+
 /** Returns whether a durable reset invalidation starts a fresh stream for this turn. */
 export function shouldResetAskConnexStream(
     state: AskConnexStreamState | null,

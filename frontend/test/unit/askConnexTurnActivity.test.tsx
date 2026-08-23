@@ -64,6 +64,7 @@ const labels: AskConnexTurnLabels = {
         truncated: "Results were bounded",
         unsupported: "No source for this — read it as unconfirmed.",
         whatChecked: "What I checked",
+        withheldEvidence: "Sources for the rows not shown",
     },
     assistantAuthor: "Connex",
     partialAnswer: "Unfinished answer — this is as far as the assistant got before it stopped.",

@@ -483,6 +483,7 @@
       "exclusions": "含まれていないもの",
       "truncated": "結果は上限内に絞られています",
       "boundedRows": "{total}件中{shown}件をここに表示",
+      "withheldEvidence": "表示されていない行の根拠",
       "viewAll": "全画面ですべて表示",
       "whatChecked": "確認したこと",
       "period": "対象期間：{start}〜{end}",

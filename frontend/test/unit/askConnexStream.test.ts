@@ -8,6 +8,7 @@ import {
     createAskConnexStream,
     createAskConnexStreamStore,
     failAskConnexStreamHydration,
+    reconcileAskConnexSettledStream,
     requestAskConnexTurnCancel,
     settleAskConnexStreamHydration,
     shouldDropAskConnexStream,
@@ -47,6 +48,67 @@ describe('settled answer retention', () => {
             expect(shouldDropAskConnexStream('failed', reason)).toBe(true);
             expect(shouldDropAskConnexStream('timed_out', reason)).toBe(true);
         }
+    });
+});
+
+describe('settled answer reconciliation', () => {
+    function withdrawnStore(): {
+        store: ReturnType<typeof createAskConnexStreamStore>;
+        drop: () => void;
+    } {
+        const store = createAskConnexStreamStore();
+        store.publish({ turnId: 9, text: 'Text this member may no longer read' });
+        return { store, drop: () => store.publish(null) };
+    }
+
+    for (const reason of ['access_revoked', 'restrictions_changed']) {
+        it(`clears a ${reason} tail before the transcript request, not after it`, async () => {
+            const { store, drop } = withdrawnStore();
+            let duringRefresh: unknown = 'unobserved';
+
+            await reconcileAskConnexSettledStream('failed', reason, drop, async () => {
+                duringRefresh = store.getSnapshot();
+            });
+
+            expect(duringRefresh).toBeNull();
+            expect(store.getSnapshot()).toBeNull();
+        });
+
+        it(`keeps a ${reason} tail cleared when the transcript request fails`, async () => {
+            const { store, drop } = withdrawnStore();
+            const failure = new Error('transcript unavailable');
+
+            await expect(reconcileAskConnexSettledStream('failed', reason, drop, async () => {
+                expect(store.getSnapshot()).toBeNull();
+                throw failure;
+            })).rejects.toBe(failure);
+
+            expect(store.getSnapshot()).toBeNull();
+        });
+    }
+
+    it('keeps a resolved tail on screen until the transcript carrying it has arrived', async () => {
+        const store = createAskConnexStreamStore();
+        const tail = { turnId: 9, text: 'The finished answer' };
+        store.publish(tail);
+        let duringRefresh: unknown = 'unobserved';
+
+        await reconcileAskConnexSettledStream('resolved', null, () => store.publish(null), async () => {
+            duringRefresh = store.getSnapshot();
+        });
+
+        expect(duringRefresh).toEqual(tail);
+        expect(store.getSnapshot()).toBeNull();
+    });
+
+    it('leaves a stopped answer its own words, which no transcript message repeats', async () => {
+        const store = createAskConnexStreamStore();
+        const tail = { turnId: 9, text: 'As far as it got' };
+        store.publish(tail);
+
+        await reconcileAskConnexSettledStream('cancelled', null, () => store.publish(null), async () => {});
+
+        expect(store.getSnapshot()).toEqual(tail);
     });
 });
 

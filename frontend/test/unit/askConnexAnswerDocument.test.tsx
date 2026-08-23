@@ -74,6 +74,7 @@ const labels: AskConnexAnswerDocumentLabels = {
     truncated: "Results were bounded",
     unsupported: "No source for this — read it as unconfirmed.",
     whatChecked: "What I checked",
+    withheldEvidence: "Sources for the rows not shown",
 };
 
 function citation(overrides: Partial<AiChatCitation> = {}): AiChatCitation {
@@ -818,5 +819,56 @@ describe("long answers at drawer width", () => {
         const html = renderBlock(block("draft", { body: "Dear team", items }), [], drawer);
         expect(html).toContain("Line 8");
         expect(html).not.toContain("showing");
+    });
+
+    it("keeps the evidence of a withheld row on screen rather than bounding it away", () => {
+        const source = citation({ handle: "h9", id: 91, label: "Q3 pipeline review" });
+        const rows = Array.from({ length: 7 }, (_, index) => (
+            index === 5
+                ? row({ label: `Row ${index}`, evidence: [source] })
+                : row({ label: `Row ${index}` })
+        ));
+        const html = renderBlock(block("metric", { rows }), [], drawer);
+
+        expect(html).toContain("showing 5 of 7");
+        expect(html).not.toContain("Row 5");
+        expect(html).toContain(labels.withheldEvidence);
+        expect(html).toContain("Q3 pipeline review");
+        expect(html).not.toContain(labels.unsupported);
+    });
+
+    it("still warns when the rows it withheld were themselves unsourced", () => {
+        const rows = Array.from({ length: 7 }, (_, index) => row({ label: `Row ${index}` }));
+        const html = renderBlock(block("metric", { rows }), [], drawer);
+
+        expect(html).toContain("showing 5 of 7");
+        expect(html).not.toContain(labels.withheldEvidence);
+        expect(html).toContain(labels.unsupported);
+    });
+
+    it("names each withheld source once however many withheld rows cite it", () => {
+        const source = citation({ handle: "h9", id: 91, label: "Q3 pipeline review" });
+        const rows = Array.from({ length: 8 }, (_, index) => (
+            index >= 5
+                ? row({ label: `Row ${index}`, evidence: [source] })
+                : row({ label: `Row ${index}` })
+        ));
+        const html = renderBlock(block("comparison", { rows }), [], drawer);
+
+        expect(html.split("Q3 pipeline review").length - 1).toBe(1);
+    });
+
+    it("leaves the truncation line alone once the surface shows every row", () => {
+        const source = citation({ handle: "h9", id: 91, label: "Q3 pipeline review" });
+        const rows = Array.from({ length: 7 }, (_, index) => (
+            index === 5
+                ? row({ label: `Row ${index}`, evidence: [source] })
+                : row({ label: `Row ${index}` })
+        ));
+        const html = renderBlock(block("metric", { rows }), [], UNBOUNDED_ANSWER);
+
+        expect(html).toContain("Row 5");
+        expect(html).not.toContain(labels.withheldEvidence);
+        expect(html).toContain("Q3 pipeline review");
     });
 });

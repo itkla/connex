@@ -7,6 +7,7 @@ import {
     askConnexActiveState,
     askConnexRecovery,
     askConnexSessionActivity,
+    askConnexSessionReaders,
     askConnexTerminalKind,
     askConnexWidthLength,
     askConnexWidthStorageKey,
@@ -16,7 +17,7 @@ import {
     isAskConnexAuthorizationWithdrawal,
     parseStoredAskConnexWidth,
 } from "@/app/lib/askConnexSurface";
-import type { AiChatSession } from "@/app/lib/types";
+import type { AiChatParticipant, AiChatSession } from "@/app/lib/types";
 
 const NOW = Date.parse("2026-03-10T12:00:00Z");
 
@@ -107,6 +108,37 @@ describe("bounded answer lists", () => {
         const result = boundedAnswerEntries(entries, null);
         expect(result.entries).not.toBe(entries);
         expect(result.entries).toEqual(entries);
+    });
+});
+
+describe("who a shared chat is being read by", () => {
+    function participant(overrides: Partial<AiChatParticipant> = {}): AiChatParticipant {
+        return {
+            userId: 1,
+            displayName: "Aiko Tanaka",
+            profilePictureUrl: null,
+            role: "participant",
+            status: "joined",
+            currentUser: false,
+            ...overrides,
+        };
+    }
+
+    it("counts the members who joined and not the ones still invited", () => {
+        const readers = askConnexSessionReaders([
+            participant({ userId: 1, role: "owner" }),
+            participant({ userId: 2, status: "invited", displayName: "Kenji Mori" }),
+            participant({ userId: 3, displayName: "Sara Ito" }),
+        ]);
+
+        expect(readers.map((reader) => reader.userId)).toEqual([1, 3]);
+    });
+
+    it("returns nobody when every share is still an unaccepted invitation", () => {
+        expect(askConnexSessionReaders([
+            participant({ userId: 2, status: "invited" }),
+            participant({ userId: 3, status: "invited" }),
+        ])).toEqual([]);
     });
 });
 
