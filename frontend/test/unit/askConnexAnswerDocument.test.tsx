@@ -14,10 +14,12 @@ import {
     AskConnexUnsupportedEvidence,
 } from "@/app/components/ask-connex/AskConnexEvidence";
 import {
+    UNBOUNDED_ANSWER,
     answerRows,
     evidenceCaveats,
     isStructuredBlockKind,
     isUnsupportedBlock,
+    type AskConnexAnswerBounds,
     type AskConnexAnswerDocumentLabels,
 } from "@/app/components/ask-connex/answerDocument";
 import type {
@@ -41,6 +43,8 @@ vi.mock("next/link", async () => {
 const labels: AskConnexAnswerDocumentLabels = {
     absoluteTime: (instant) => `abs(${instant})`,
     blockKind: (kind) => `kind:${kind}`,
+    boundedRows: (shown, total) => `showing ${shown} of ${total}`,
+    viewAll: "Open in full view",
     citationKind: (kind) => `citationKind:${kind}`,
     comparisonAgainst: "Compared with",
     comparisonValue: "Value",
@@ -70,6 +74,7 @@ const labels: AskConnexAnswerDocumentLabels = {
     truncated: "Results were bounded",
     unsupported: "No source for this — read it as unconfirmed.",
     whatChecked: "What I checked",
+    withheldEvidence: "Sources for the rows not shown",
 };
 
 function citation(overrides: Partial<AiChatCitation> = {}): AiChatCitation {
@@ -124,9 +129,18 @@ function coverage(overrides: Partial<AiChatCoverage> = {}): AiChatCoverage {
     };
 }
 
-function renderBlock(target: AiChatAnswerBlock, caveats: string[] = []): string {
+function renderBlock(
+    target: AiChatAnswerBlock,
+    caveats: string[] = [],
+    bounds: AskConnexAnswerBounds = UNBOUNDED_ANSWER,
+): string {
     return renderToStaticMarkup(
-        <AskConnexAnswerBlock block={target} caveats={caveats} labels={labels} />,
+        <AskConnexAnswerBlock
+            block={target}
+            caveats={caveats}
+            bounds={bounds}
+            labels={labels}
+        />,
     );
 }
 
@@ -712,7 +726,14 @@ describe("a draft is copied whole", () => {
         const interactive = installInteractiveDocument();
         const root = createRoot(interactive.container);
         await act(async () => {
-            root.render(<AskConnexAnswerBlock block={target} caveats={[]} labels={labels} />);
+            root.render(
+                <AskConnexAnswerBlock
+                    block={target}
+                    caveats={[]}
+                    bounds={UNBOUNDED_ANSWER}
+                    labels={labels}
+                />,
+            );
         });
         const control = interactive.elements.find(
             (element) => element.tagName === "BUTTON" && element.textContent.includes("Copy"),
@@ -753,5 +774,101 @@ describe("a draft is copied whole", () => {
 
         expect(disabled).toBe(true);
         expect(copied).toEqual([]);
+    });
+});
+
+describe("long answers at drawer width", () => {
+    const many = Array.from({ length: 12 }, (_, index) => row({ label: `Row ${index}` }));
+    const drawer: AskConnexAnswerBounds = { cap: 5, onOpenFullView: () => {} };
+
+    it("renders every row when the surface is the workspace", () => {
+        const html = renderBlock(block("timeline", { rows: many }), [], UNBOUNDED_ANSWER);
+        expect(html).toContain("Row 11");
+        expect(html).not.toContain("showing");
+    });
+
+    it("stops at the cap and says how much it withheld", () => {
+        const html = renderBlock(block("timeline", { rows: many }), [], drawer);
+        expect(html).toContain("Row 4");
+        expect(html).not.toContain("Row 5");
+        expect(html).toContain("showing 5 of 12");
+    });
+
+    it("offers the full workspace rather than a sideways scroll", () => {
+        const html = renderBlock(block("comparison", { rows: many }), [], drawer);
+        expect(html).toContain(labels.viewAll);
+        expect(html).not.toContain("overflow-x");
+    });
+
+    it("bounds a long item list the same way it bounds rows", () => {
+        const items = Array.from({ length: 9 }, (_, index) => `Item ${index}`);
+        const html = renderBlock(block("list", { items }), [], drawer);
+        expect(html).toContain("Item 4");
+        expect(html).not.toContain("Item 5");
+        expect(html).toContain("showing 5 of 9");
+    });
+
+    it("never hides a single row behind an affordance that costs more than it saves", () => {
+        const html = renderBlock(block("timeline", { rows: many.slice(0, 6) }), [], drawer);
+        expect(html).toContain("Row 5");
+        expect(html).not.toContain("showing");
+    });
+
+    it("keeps a draft whole, because a draft is meant to be read and copied entire", () => {
+        const items = Array.from({ length: 9 }, (_, index) => `Line ${index}`);
+        const html = renderBlock(block("draft", { body: "Dear team", items }), [], drawer);
+        expect(html).toContain("Line 8");
+        expect(html).not.toContain("showing");
+    });
+
+    it("keeps the evidence of a withheld row on screen rather than bounding it away", () => {
+        const source = citation({ handle: "h9", id: 91, label: "Q3 pipeline review" });
+        const rows = Array.from({ length: 7 }, (_, index) => (
+            index === 5
+                ? row({ label: `Row ${index}`, evidence: [source] })
+                : row({ label: `Row ${index}` })
+        ));
+        const html = renderBlock(block("metric", { rows }), [], drawer);
+
+        expect(html).toContain("showing 5 of 7");
+        expect(html).not.toContain("Row 5");
+        expect(html).toContain(labels.withheldEvidence);
+        expect(html).toContain("Q3 pipeline review");
+        expect(html).not.toContain(labels.unsupported);
+    });
+
+    it("still warns when the rows it withheld were themselves unsourced", () => {
+        const rows = Array.from({ length: 7 }, (_, index) => row({ label: `Row ${index}` }));
+        const html = renderBlock(block("metric", { rows }), [], drawer);
+
+        expect(html).toContain("showing 5 of 7");
+        expect(html).not.toContain(labels.withheldEvidence);
+        expect(html).toContain(labels.unsupported);
+    });
+
+    it("names each withheld source once however many withheld rows cite it", () => {
+        const source = citation({ handle: "h9", id: 91, label: "Q3 pipeline review" });
+        const rows = Array.from({ length: 8 }, (_, index) => (
+            index >= 5
+                ? row({ label: `Row ${index}`, evidence: [source] })
+                : row({ label: `Row ${index}` })
+        ));
+        const html = renderBlock(block("comparison", { rows }), [], drawer);
+
+        expect(html.split("Q3 pipeline review").length - 1).toBe(1);
+    });
+
+    it("leaves the truncation line alone once the surface shows every row", () => {
+        const source = citation({ handle: "h9", id: 91, label: "Q3 pipeline review" });
+        const rows = Array.from({ length: 7 }, (_, index) => (
+            index === 5
+                ? row({ label: `Row ${index}`, evidence: [source] })
+                : row({ label: `Row ${index}` })
+        ));
+        const html = renderBlock(block("metric", { rows }), [], UNBOUNDED_ANSWER);
+
+        expect(html).toContain("Row 5");
+        expect(html).not.toContain(labels.withheldEvidence);
+        expect(html).toContain("Q3 pipeline review");
     });
 });

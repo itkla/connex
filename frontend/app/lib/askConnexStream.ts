@@ -1,3 +1,4 @@
+import { isAskConnexAuthorizationWithdrawal } from '@/app/lib/askConnexSurface';
 import type { AiChatDeltaFrame, AiChatRealtimeFrame } from '@/app/lib/types';
 import type { AskConnexTurnState } from '@/app/lib/askConnex';
 
@@ -71,14 +72,52 @@ function mergePartial(
 /**
  * Whether a settled answer's streamed tail must be discarded rather than kept on screen.
  *
- * Only a resolved answer's tail is dropped: its finished text is already the persisted transcript
- * message, so keeping the tail would render the same words twice. Every other settled status keeps
- * what was written, which is the same gate the server applies when it decides whether to return the
- * retained partial to its requester — the two sides must agree or the retained text is discarded on
- * arrival.
+ * A resolved answer's tail is dropped because its finished text is already the persisted transcript
+ * message, so keeping the tail would render the same words twice. A turn that ended by withdrawing
+ * the requester's authorization is dropped because the server purges its durable partial for
+ * exactly that reason — a locally buffered copy is text this reader is no longer entitled to, and
+ * keeping it would leave the client showing, and offering to continue from, an answer the server
+ * has already refused to return. Every other settled status keeps what was written, which is the
+ * same gate the server applies to the retained partial; the two sides must agree or the retained
+ * text is discarded on arrival.
  */
-export function shouldDropAskConnexStream(status: string): boolean {
-    return status === 'resolved';
+export function shouldDropAskConnexStream(status: string, reason: string | null): boolean {
+    return status === 'resolved' || isAskConnexAuthorizationWithdrawal(reason);
+}
+
+/**
+ * Sequences a settled turn's stream drop around the durable transcript reconciliation that follows
+ * it, and answers when each side of that sequence runs.
+ *
+ * A turn that ended by withdrawing the requester's authorization drops its buffered tail *before*
+ * the reconciliation is even requested: the text is no longer this reader's to see, so it cannot
+ * stay on screen for the duration of a network round trip, and it is dropped again once the request
+ * settles so a reconciliation that throws cannot leave it behind. Every other droppable status — a
+ * resolved answer, whose words arrive as the transcript message the refresh is fetching — drops
+ * only after reconciliation, so the answer never blinks out of the conversation in between.
+ *
+ * @param status the turn's settled status
+ * @param reason the turn's terminal reason
+ * @param dropStream discards the buffered stream; called more than once on the withdrawal path
+ * @param reconcile refreshes the durable transcript; its rejection propagates to the caller
+ */
+export async function reconcileAskConnexSettledStream(
+    status: string,
+    reason: string | null,
+    dropStream: () => void,
+    reconcile: () => Promise<unknown>,
+): Promise<void> {
+    if (isAskConnexAuthorizationWithdrawal(reason)) {
+        dropStream();
+        try {
+            await reconcile();
+        } finally {
+            dropStream();
+        }
+        return;
+    }
+    await reconcile();
+    if (shouldDropAskConnexStream(status, reason)) dropStream();
 }
 
 /** Returns whether a durable reset invalidation starts a fresh stream for this turn. */

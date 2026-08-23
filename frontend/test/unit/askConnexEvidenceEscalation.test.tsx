@@ -117,6 +117,8 @@ vi.mock("@/components/ui/responsive-dialog", async () => {
 const labels: AskConnexAnswerDocumentLabels = {
     absoluteTime: (instant) => `abs(${instant})`,
     blockKind: (kind) => `kind:${kind}`,
+    boundedRows: (shown, total) => `showing ${shown} of ${total}`,
+    viewAll: "Open in full view",
     citationKind: (kind) => `citationKind:${kind}`,
     comparisonAgainst: "Compared with",
     comparisonValue: "Value",
@@ -146,6 +148,7 @@ const labels: AskConnexAnswerDocumentLabels = {
     truncated: "Results were bounded",
     unsupported: "No source for this — read it as unconfirmed.",
     whatChecked: "What I checked",
+    withheldEvidence: "Sources for the rows not shown",
 };
 
 const CITATION: AiChatCitation = {

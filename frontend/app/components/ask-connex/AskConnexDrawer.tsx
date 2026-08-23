@@ -17,12 +17,18 @@ import {
     ArrowRightStartOnRectangleIcon,
     ArrowDownIcon,
     ArrowUpIcon,
+    ArrowsPointingInIcon,
+    Bars3BottomLeftIcon,
     CheckIcon,
+    ChevronDoubleLeftIcon,
+    ChevronDoubleRightIcon,
     ClockIcon,
     EllipsisHorizontalIcon,
     ExclamationCircleIcon,
     ExclamationTriangleIcon,
+    HandRaisedIcon,
     LinkIcon,
+    LockClosedIcon,
     MagnifyingGlassIcon,
     PaperClipIcon,
     PencilSquareIcon,
@@ -45,7 +51,9 @@ import AccessDenied from '@/app/components/AccessDenied';
 import { EmptyState } from '@/app/components/EmptyState';
 import ErrorState from '@/app/components/ErrorState';
 import SectionBoundary from '@/app/components/SectionBoundary';
-import MentionEditor from '@/app/components/activity/notes/MentionEditor';
+import MentionEditor, {
+    type MentionEditorHandle,
+} from '@/app/components/activity/notes/MentionEditor';
 import AskConnexAnswerDocument, {
     AskConnexCheckedTrail,
     type AskConnexAnswerDocumentLabels,
@@ -53,6 +61,7 @@ import AskConnexAnswerDocument, {
 import {
     AskConnexContextStrip,
     AskConnexScopeNotice,
+    hasAskConnexContextInputs,
     type AskConnexContextLabels,
 } from '@/app/components/ask-connex/AskConnexContextCockpit';
 import AskConnexTab from '@/app/components/ask-connex/AskConnexTab';
@@ -79,8 +88,25 @@ import {
     hasPendingAskConnexFileOperation,
     latestAskConnexSuggestions,
 } from '@/app/lib/askConnex';
+import {
+    ASK_CONNEX_DRAWER_ROW_CAP,
+    ASK_CONNEX_WIDTHS,
+    askConnexRecovery,
+    askConnexSessionActivity,
+    askConnexSessionReaders,
+    askConnexTerminalKind,
+    askConnexWidthLength,
+    filterAskConnexSessions,
+    groupAskConnexSessions,
+    type AskConnexActiveState,
+    type AskConnexFailureMessage,
+    type AskConnexRecovery,
+    type AskConnexSessionGroupKey,
+    type AskConnexWidth,
+} from '@/app/lib/askConnexSurface';
+import type { AskConnexAnswerBounds } from '@/app/components/ask-connex/answerDocument';
 import type { AskConnexStreamStore } from '@/app/lib/askConnexStream';
-import { easeOut, instant, springSmooth } from '@/app/lib/motion';
+import { durationMicro, easeOut, instant, springSmooth } from '@/app/lib/motion';
 import type {
     AiChatCitation,
     AiChatMessage,
@@ -91,6 +117,7 @@ import type {
     WorkspaceMember,
 } from '@/app/lib/types';
 import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { IconButton } from '@/components/ui/icon-button';
 import {
@@ -116,6 +143,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { SegmentedControl } from '@/components/ui/segmented-control';
 import {
     Message,
     MessageAvatar,
@@ -154,6 +182,16 @@ type UnavailableState = {
     body: string;
 } | null;
 
+const noopRecovery = () => {};
+
+/** A settled answer with no route out: the member stopped it themselves. */
+const NO_RECOVERY: AskConnexRecovery = {
+    retry: false,
+    continueFromPartial: false,
+    narrowScope: false,
+    narrowScopeFirst: false,
+};
+
 /**
  * The vocabulary the live and settled answer surfaces need: the streamed tail, its partial-answer
  * disclosure, the status line, and the milestone trail beneath it.
@@ -161,16 +199,16 @@ type UnavailableState = {
 export type AskConnexTurnLabels = {
     answerDocument: AskConnexAnswerDocumentLabels;
     assistantAuthor: string;
-    budgetExhausted: string;
-    toolResultBudgetExhausted: string;
+    continueFromPartial: string;
+    narrowScope: string;
     partialAnswer: string;
     retry: string;
     stop: string;
     stopping: string;
+    /** One sentence per classified failure, so a newly classified reason cannot go unexplained. */
+    terminalMessage: Record<AskConnexFailureMessage, string>;
     turnAccepted: string;
     turnCancelled: string;
-    turnFailed: string;
-    turnImageUnsupported: string;
     turnResolved: string;
     turnStreaming: string;
     turnTimedOut: string;
@@ -237,6 +275,20 @@ type AskConnexDrawerLabels = AskConnexContextLabels & AskConnexTurnLabels & {
     typing: (names: string) => string;
     unshare: string;
     openWorkspace: string;
+    width: string;
+    widthCompact: string;
+    widthComfortable: string;
+    visibilityPrivate: string;
+    visibilityShared: string;
+    stateRunning: string;
+    stateAwaitingApproval: string;
+    stateFailed: string;
+    contextSummary: (count: number) => string;
+    participantCount: (count: number) => string;
+    sessionActivity: (time: string) => string;
+    sessionRail: string;
+    sessionGroup: (key: AskConnexSessionGroupKey) => string;
+    relativeTime: (instant: string) => string;
     toolCard: AskConnexToolCardLabels;
 };
 
@@ -281,9 +333,22 @@ type AskConnexDrawerProps = {
     toolCalls: AskConnexToolCardState[];
     actionableToolCallIds: ReadonlySet<number>;
     canRetryTurn: boolean;
+    /**
+     * The message that continues a stopped answer, already composed from the question that produced
+     * it, or null when nothing was retained to continue from. The surface hands it to the composer
+     * for the member to read and edit rather than sending it, because it is an ordinary question and
+     * the member is the one asking it.
+     */
+    continuePrompt: string | null;
+    width: AskConnexWidth;
+    activeState: AskConnexActiveState;
+    contextCount: number;
+    /** The shared render clock, so every relative time in the rail agrees within one frame. */
+    now: number;
     unavailable: UnavailableState;
     starterPrompts: string[];
     labels: AskConnexDrawerLabels;
+    onWidthChange: (width: AskConnexWidth) => void;
     onOpenChange: (open: boolean) => void;
     onOpenChangeComplete: (open: boolean) => void;
     onKeyboardClose: () => void;
@@ -327,6 +392,8 @@ type ConversationSurfaceProps = Omit<
     | 'onRename'
 > & {
     closeButton: ReactNode;
+    /** Whether this mount can offer the width control — the routed workspace has no width to pick. */
+    resizable: boolean;
     onBeginRename: () => void;
     onManageSharing: () => void;
 };
@@ -437,6 +504,7 @@ function TranscriptMessage({
     suggestions,
     toolCalls,
     actionableToolCallIds,
+    bounds,
     labels,
     onSend,
     onToolAction,
@@ -448,6 +516,7 @@ function TranscriptMessage({
     suggestions: string[];
     toolCalls: AskConnexToolCardState[];
     actionableToolCallIds: ReadonlySet<number>;
+    bounds: AskConnexAnswerBounds;
     labels: AskConnexDrawerLabels;
     onSend: (content?: string) => void;
     onToolAction: (toolCallId: number, action: AskConnexToolAction) => void;
@@ -502,6 +571,7 @@ function TranscriptMessage({
                             ? (
                                 <AskConnexAnswerDocument
                                     document={message.answerDocument}
+                                    bounds={bounds}
                                     labels={labels.answerDocument}
                                 />
                             )
@@ -609,32 +679,62 @@ function SettledTurnActivity({
     destructive,
     progress,
     labels,
-    canRetry,
+    recovery,
     onRetry,
+    onContinueFromPartial,
+    onNarrowScope,
 }: {
     icon: ReactNode;
     message: string;
     destructive?: boolean;
     progress: AiChatProgressItem[];
     labels: AskConnexTurnLabels;
-    canRetry: boolean;
+    recovery: AskConnexRecovery;
     onRetry: () => void;
+    onContinueFromPartial: () => void;
+    onNarrowScope: () => void;
 }) {
+    const narrow = recovery.narrowScope ? (
+        <Button
+            key="narrow"
+            type="button"
+            variant={recovery.narrowScopeFirst ? 'outline' : 'ghost'}
+            size="inline"
+            onClick={onNarrowScope}
+        >
+            <ArrowsPointingInIcon />
+            {labels.narrowScope}
+        </Button>
+    ) : null;
+    const continueFromPartial = recovery.continueFromPartial ? (
+        <Button key="continue" type="button" variant="ghost" size="inline" onClick={onContinueFromPartial}>
+            <Bars3BottomLeftIcon />
+            {labels.continueFromPartial}
+        </Button>
+    ) : null;
+    const retry = recovery.retry ? (
+        <Button key="retry" type="button" variant="outline" size="inline" onClick={onRetry}>
+            <ArrowPathIcon />
+            {labels.retry}
+        </Button>
+    ) : null;
+    const routes = recovery.narrowScopeFirst
+        ? [narrow, continueFromPartial, retry]
+        : [retry, continueFromPartial, narrow];
+    const offered = routes.filter((route) => route !== null);
+
     return (
         <div className="space-y-2 px-4 py-2 text-xs text-muted-foreground">
             <div
                 role="status"
-                className={cn('flex items-center gap-2', destructive && 'text-destructive')}
+                className={cn('flex items-start gap-2', destructive && 'text-destructive')}
             >
-                {icon}
-                <span>{message}</span>
+                <span className="mt-px shrink-0">{icon}</span>
+                <span className="leading-relaxed">{message}</span>
             </div>
             <AskConnexCheckedTrail progress={progress} labels={labels.answerDocument} />
-            {canRetry ? (
-                <Button type="button" variant="outline" size="inline" onClick={onRetry}>
-                    <ArrowPathIcon />
-                    {labels.retry}
-                </Button>
+            {offered.length > 0 ? (
+                <div className="flex flex-wrap items-center gap-1.5">{offered}</div>
             ) : null}
         </div>
     );
@@ -655,18 +755,26 @@ export function TurnActivity({
     streaming,
     cancelling,
     canRetry,
+    hasPartial = false,
     labels,
     onCancel,
     onRetry,
+    onContinueFromPartial = noopRecovery,
+    onNarrowScope = noopRecovery,
 }: {
     turn: AskConnexTurnState;
     streaming: boolean;
     cancelling: boolean;
     canRetry: boolean;
+    /** Whether words were retained from this answer before it stopped. */
+    hasPartial?: boolean;
     labels: AskConnexTurnLabels;
     onCancel: () => void;
     onRetry: () => void;
+    onContinueFromPartial?: () => void;
+    onNarrowScope?: () => void;
 }) {
+    const recovery = askConnexRecovery(turn.phase, turn.reason, canRetry, hasPartial);
     if (turn.phase === 'idle') return null;
     if (turn.phase === 'resolved') {
         return (
@@ -681,17 +789,13 @@ export function TurnActivity({
             <SettledTurnActivity
                 icon={<ExclamationCircleIcon className="size-3.5" />}
                 destructive
-                message={turn.reason === 'image_input_unsupported'
-                    ? labels.turnImageUnsupported
-                    : turn.reason === 'tool_result_budget_exhausted'
-                        ? labels.toolResultBudgetExhausted
-                        : turn.reason === 'budget_exhausted'
-                            ? labels.budgetExhausted
-                            : labels.turnFailed}
+                message={labels.terminalMessage[askConnexTerminalKind(turn.reason).message]}
                 progress={turn.progress}
                 labels={labels}
-                canRetry={canRetry}
+                recovery={recovery}
                 onRetry={onRetry}
+                onContinueFromPartial={onContinueFromPartial}
+                onNarrowScope={onNarrowScope}
             />
         );
     }
@@ -702,8 +806,10 @@ export function TurnActivity({
                 message={labels.turnTimedOut}
                 progress={turn.progress}
                 labels={labels}
-                canRetry={canRetry}
+                recovery={recovery}
                 onRetry={onRetry}
+                onContinueFromPartial={onContinueFromPartial}
+                onNarrowScope={onNarrowScope}
             />
         );
     }
@@ -714,8 +820,10 @@ export function TurnActivity({
                 message={labels.turnCancelled}
                 progress={turn.progress}
                 labels={labels}
-                canRetry={false}
+                recovery={NO_RECOVERY}
                 onRetry={onRetry}
+                onContinueFromPartial={onContinueFromPartial}
+                onNarrowScope={onNarrowScope}
             />
         );
     }
@@ -913,6 +1021,202 @@ function SessionMenu({
     );
 }
 
+const ACTIVE_STATE_ICONS = {
+    running: SparklesIcon,
+    awaitingApproval: HandRaisedIcon,
+    failed: ExclamationCircleIcon,
+} as const;
+
+/**
+ * One fact about the chat, stated as a word and an icon.
+ *
+ * Every chip in the metadata row carries both channels, so nothing here is legible only to a reader
+ * who can tell the hues apart, and the row reads the same at the drawer's narrowest width as it
+ * does across the workspace.
+ */
+function HeaderChip({
+    icon: Icon,
+    label,
+    tone,
+    arrives,
+}: {
+    icon: typeof SparklesIcon;
+    label: string;
+    tone?: 'destructive';
+    /**
+     * Whether this chip comes and goes with the chat's state. One that does arrives rather than
+     * appears, so a row that gains a chip mid-read does not look like the header changed shape on
+     * its own; one that is always there has no arrival to show.
+     */
+    arrives?: boolean;
+}) {
+    const reduceMotion = useReducedMotion() ?? false;
+    const chip = (
+        <Badge
+            variant="outline"
+            className={cn('shrink-0 font-normal', tone === 'destructive' && 'text-destructive')}
+        >
+            <Icon aria-hidden />
+            {label}
+        </Badge>
+    );
+    if (!arrives) return chip;
+    return (
+        <motion.span
+            className="inline-flex shrink-0"
+            initial={reduceMotion
+                ? { opacity: 0 }
+                : { opacity: 0, transform: 'translateY(-0.125rem)' }}
+            animate={{ opacity: 1, transform: 'translateY(0rem)' }}
+            transition={reduceMotion ? instant : { duration: durationMicro, ease: easeOut }}
+        >
+            {chip}
+        </motion.span>
+    );
+}
+
+/**
+ * The header both Ask Connex surfaces wear.
+ *
+ * Two tiers, in the order a reader needs them: what this chat is, then everything about it that
+ * changes — who can see it, whether it is doing something right now, and how much it is carrying.
+ * The state tier exists because none of those facts were previously readable without opening a
+ * menu, scrolling the transcript, or both, and a member glancing at the header has to be able to
+ * tell a private chat from a shared one and a working answer from a settled one.
+ *
+ * The width control and the handoff into the full workspace sit on the state tier rather than
+ * beside the close control: both change which surface you are reading in, and neither belongs in
+ * the row where a mis-aimed click closes the panel.
+ *
+ * The access line counts the members reading the chat rather than everyone the participants
+ * endpoint returns; pending invitations stay in the sharing dialog, which names them as pending and
+ * offers the controls that act on them.
+ */
+function SurfaceHeader({
+    workspace,
+    resizable,
+    activeSession,
+    participants,
+    activeState,
+    contextCount,
+    width,
+    labels,
+    closeButton,
+    sessionMenu,
+    onWidthChange,
+    onOpenWorkspace,
+}: {
+    workspace: boolean;
+    resizable: boolean;
+    activeSession: AiChatSession | null;
+    participants: AiChatParticipant[];
+    activeState: AskConnexActiveState;
+    contextCount: number;
+    width: AskConnexWidth;
+    labels: AskConnexDrawerLabels;
+    closeButton: ReactNode;
+    sessionMenu: ReactNode;
+    onWidthChange: (width: AskConnexWidth) => void;
+    onOpenWorkspace: () => void;
+}) {
+    const shared = activeSession?.visibility === 'shared';
+    const readers = askConnexSessionReaders(participants);
+    const title = activeSession?.title ?? labels.newChat;
+    const StateIcon = activeState === null ? null : ACTIVE_STATE_ICONS[activeState];
+    const stateLabel = activeState === 'running'
+        ? labels.stateRunning
+        : activeState === 'awaitingApproval'
+            ? labels.stateAwaitingApproval
+            : labels.stateFailed;
+
+    return (
+        <header className="flex shrink-0 flex-col gap-1 border-b border-border px-3 py-2">
+            <div className="flex min-h-8 items-center gap-1">
+                {workspace ? (
+                    <h1 className="min-w-0 flex-1 truncate px-2 text-sm font-medium text-foreground">
+                        {title}
+                    </h1>
+                ) : (
+                    <p className="min-w-0 flex-1 truncate px-2 text-sm font-medium text-foreground">
+                        {title}
+                    </p>
+                )}
+                {sessionMenu}
+                {closeButton}
+            </div>
+            <div className="flex min-w-0 items-center gap-2 px-2">
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                    <HeaderChip
+                        icon={shared ? UserGroupIcon : LockClosedIcon}
+                        label={shared ? labels.visibilityShared : labels.visibilityPrivate}
+                    />
+                    {StateIcon !== null ? (
+                        <HeaderChip
+                            key={activeState}
+                            icon={StateIcon}
+                            label={stateLabel}
+                            tone={activeState === 'failed' ? 'destructive' : undefined}
+                            arrives
+                        />
+                    ) : null}
+                    {contextCount > 0 ? (
+                        <span className="truncate">{labels.contextSummary(contextCount)}</span>
+                    ) : null}
+                    {workspace && shared && readers.length > 0 ? (
+                        <span className="flex min-w-0 items-center gap-1.5">
+                            <AvatarGroup aria-label={labels.participants}>
+                                {readers.map((participant) => (
+                                    <Avatar
+                                        key={participant.userId}
+                                        size="sm"
+                                        title={participant.displayName}
+                                    >
+                                        <AvatarImage src={participant.profilePictureUrl ?? undefined} alt="" />
+                                        <AvatarFallback>
+                                            {participant.displayName.slice(0, 1).toUpperCase()}
+                                        </AvatarFallback>
+                                    </Avatar>
+                                ))}
+                            </AvatarGroup>
+                            <span className="truncate">{labels.participantCount(readers.length)}</span>
+                        </span>
+                    ) : null}
+                </div>
+                {resizable ? (
+                    <>
+                        <SegmentedControl
+                            className="shrink-0"
+                            size="inline"
+                            ariaLabel={labels.width}
+                            value={width}
+                            onChange={onWidthChange}
+                            options={ASK_CONNEX_WIDTHS.map((option) => ({
+                                value: option,
+                                icon: option === 'compact'
+                                    ? <ChevronDoubleRightIcon />
+                                    : <ChevronDoubleLeftIcon />,
+                                ariaLabel: option === 'compact'
+                                    ? labels.widthCompact
+                                    : labels.widthComfortable,
+                            }))}
+                        />
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="inline"
+                            className="shrink-0"
+                            onClick={onOpenWorkspace}
+                        >
+                            <ArrowsPointingOutIcon />
+                            {labels.openWorkspace}
+                        </Button>
+                    </>
+                ) : null}
+            </div>
+        </header>
+    );
+}
+
 function ConversationSurface({
     sessions,
     invitations,
@@ -945,10 +1249,17 @@ function ConversationSurface({
     toolCalls,
     actionableToolCallIds,
     canRetryTurn,
+    continuePrompt,
+    width,
+    activeState,
+    contextCount,
+    participants,
     unavailable,
     starterPrompts,
     labels,
     closeButton,
+    resizable,
+    onWidthChange,
     onSelectSession,
     onNewChat,
     onBeginRename,
@@ -992,9 +1303,32 @@ function ConversationSurface({
         [toolCardInsertionIds, visibleMessages],
     );
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const composerRef = useRef<MentionEditorHandle>(null);
     const [recordPickerRequest, setRecordPickerRequest] = useState(0);
     const fileOperationPending = hasPendingAskConnexFileOperation(fileAttachments);
     const busy = working || fileOperationPending;
+    /**
+     * The workspace renders every row of an answer; the drawer bounds long lists and offers the
+     * workspace for the rest, so a forty-row timeline is never squeezed into the panel or turned
+     * into a sideways scroll.
+     */
+    const bounds = useMemo<AskConnexAnswerBounds>(
+        () => workspace
+            ? { cap: null, onOpenFullView: null }
+            : { cap: ASK_CONNEX_DRAWER_ROW_CAP, onOpenFullView: onOpenWorkspace },
+        [onOpenWorkspace, workspace],
+    );
+    /**
+     * Whether this answer left words behind when it stopped.
+     *
+     * Read from the streaming flag rather than by subscribing to the stream store: the store
+     * publishes at animation-frame cadence while an answer is being written, and a subscription here
+     * would re-render the whole transcript on every frame. The flag carries the same fact — it is
+     * raised the first time text is published and lowered when the stream is discarded, which
+     * happens for a resolved answer, whose words are the transcript, and for a turn that ended by
+     * withdrawing this member's authority to read what it wrote.
+     */
+    const hasPartialAnswer = streaming;
     const suggestions = useMemo(
         () => latestAskConnexSuggestions(messages, busy),
         [busy, messages],
@@ -1024,49 +1358,91 @@ function ConversationSurface({
         onSend(content);
     };
 
+    /**
+     * Hands a stopped answer back to the member as an ordinary question they can read and edit.
+     *
+     * The message is appended through the composer rather than sent, because continuing is a new
+     * question and Ask Connex does not ask questions on the member's behalf. Appending also keeps
+     * anything already typed instead of replacing it.
+     */
+    const continueFromPartial = () => {
+        if (continuePrompt === null) return;
+        composerRef.current?.appendParagraph(continuePrompt);
+        composerRef.current?.focus();
+    };
+
+    const carryingContext = hasAskConnexContextInputs({
+        implicitContext,
+        pinnedContext,
+        selectionContext,
+        unsupportedPageContext,
+        attachments,
+        fileAttachments,
+    });
+
+    /**
+     * Returns the member to the inputs that decide breadth, and makes the move visible.
+     *
+     * Where that is depends on what made the request broad: carried records are removed in the
+     * context strip, and a question that was broad on its own words is narrowed in the composer, so
+     * a request with no carried records lands in the composer rather than on an empty strip. The
+     * strip takes focus as a group and shows a ring while it holds it, because focus arrives here
+     * from a click and nothing else would tell the member the press did anything.
+     */
+    const focusBreadthInputs = () => {
+        const group = carryingContext ? contextGroupRef.current : null;
+        if (group !== null) {
+            group.focus();
+            return;
+        }
+        composerRef.current?.focus();
+    };
+
+    /**
+     * Re-arms the scope confirmation and hands the member back the inputs that decide breadth, so
+     * the next send announces the new breadth rather than inheriting agreement given to the old one.
+     */
+    const narrowScope = () => {
+        setPendingScope(null);
+        setConfirmedScopeKey(null);
+        focusBreadthInputs();
+    };
+
     return (
         <div className={cn(
             'flex h-full min-h-0 flex-col text-popover-foreground',
             workspace ? 'bg-background' : 'bg-popover',
         )}>
-            <header className="flex shrink-0 items-center gap-1 border-b border-border px-3 py-2">
-                {workspace ? (
-                    <h1 className="min-w-0 flex-1 truncate px-2 text-sm font-medium text-foreground">
-                        {activeSession?.title ?? labels.newChat}
-                    </h1>
-                ) : (
-                    <p className="min-w-0 flex-1 truncate px-2 text-sm font-medium text-foreground">
-                        {activeSession?.title ?? labels.newChat}
-                    </p>
+            <SurfaceHeader
+                workspace={workspace}
+                resizable={resizable}
+                activeSession={activeSession}
+                participants={participants}
+                activeState={activeState}
+                contextCount={contextCount}
+                width={width}
+                labels={labels}
+                closeButton={closeButton}
+                onWidthChange={onWidthChange}
+                onOpenWorkspace={onOpenWorkspace}
+                sessionMenu={(
+                    <SessionMenu
+                        sessions={sessions}
+                        invitations={invitations}
+                        activeSession={activeSession}
+                        canShare={canShare}
+                        working={busy}
+                        labels={labels}
+                        onSelectSession={onSelectSession}
+                        onNewChat={onNewChat}
+                        onBeginRename={onBeginRename}
+                        onArchive={onArchive}
+                        onJoinInvitation={onJoinInvitation}
+                        onManageSharing={onManageSharing}
+                        onLeave={onLeave}
+                    />
                 )}
-                <SessionMenu
-                    sessions={sessions}
-                    invitations={invitations}
-                    activeSession={activeSession}
-                    canShare={canShare}
-                    working={busy}
-                    labels={labels}
-                    onSelectSession={onSelectSession}
-                    onNewChat={onNewChat}
-                    onBeginRename={onBeginRename}
-                    onArchive={onArchive}
-                    onJoinInvitation={onJoinInvitation}
-                    onManageSharing={onManageSharing}
-                    onLeave={onLeave}
-                />
-                {!workspace ? (
-                    <IconButton
-                        type="button"
-                        variant="ghost"
-                        size="icon-toolbar"
-                        label={labels.openWorkspace}
-                        onClick={onOpenWorkspace}
-                    >
-                        <ArrowsPointingOutIcon className="size-4" />
-                    </IconButton>
-                ) : null}
-                {closeButton}
-            </header>
+            />
 
             {activeSession?.visibility === 'shared' && presence ? (
                 <PresenceStrip presence={presence} labels={labels} />
@@ -1183,6 +1559,7 @@ function ConversationSurface({
                                                                 suggestions={message.id === latestMessageId ? suggestions : []}
                                                                 toolCalls={toolCardAnchors.byMessageId.get(message.id) ?? []}
                                                                 actionableToolCallIds={actionableToolCallIds}
+                                                                bounds={bounds}
                                                                 labels={labels}
                                                                 onSend={requestSend}
                                                                 onToolAction={onToolAction}
@@ -1221,9 +1598,12 @@ function ConversationSurface({
                                         streaming={streaming}
                                         cancelling={cancelling}
                                         canRetry={canRetryTurn}
+                                        hasPartial={hasPartialAnswer}
                                         labels={labels}
                                         onCancel={onCancelTurn}
                                         onRetry={onRetryTurn}
+                                        onContinueFromPartial={continueFromPartial}
+                                        onNarrowScope={narrowScope}
                                     />
                                 </MessageScrollerItem>
                             ) : null}
@@ -1285,7 +1665,7 @@ function ConversationSurface({
                             }}
                             onEdit={() => {
                                 setPendingScope(null);
-                                contextGroupRef.current?.focus();
+                                focusBreadthInputs();
                             }}
                         />
                     ) : null}
@@ -1296,6 +1676,7 @@ function ConversationSurface({
                     ) : null}
                     <div data-base-ui-swipe-ignore className="rounded-2xl border border-input bg-background p-2 focus-within:ring-2 focus-within:ring-ring/50">
                         <MentionEditor
+                            handleRef={composerRef}
                             value={composer}
                             onChange={onComposerChange}
                             onSubmit={() => requestSend()}
@@ -1379,6 +1760,7 @@ function ConversationSurface({
  */
 function SessionRailRow({
     title,
+    meta,
     current,
     disabled,
     leading,
@@ -1386,6 +1768,7 @@ function SessionRailRow({
     onSelect,
 }: {
     title: string;
+    meta?: ReactNode;
     current: boolean;
     disabled: boolean;
     leading?: ReactNode;
@@ -1399,22 +1782,43 @@ function SessionRailRow({
             aria-current={current ? 'page' : undefined}
             onClick={onSelect}
             className={cn(
-                'flex min-h-10 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50',
+                'flex min-h-11 w-full items-start gap-2 rounded-lg px-3 py-2 text-left text-sm outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50',
                 current && 'bg-muted font-medium text-foreground',
             )}
         >
-            {leading}
-            <span className="min-w-0 flex-1 truncate">{title}</span>
-            {trailing}
+            {leading ? <span className="mt-0.5 shrink-0">{leading}</span> : null}
+            <span className="min-w-0 flex-1">
+                <span className="block truncate">{title}</span>
+                {meta ? (
+                    <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs font-normal text-muted-foreground">
+                        {meta}
+                    </span>
+                ) : null}
+            </span>
+            {trailing ? <span className="mt-0.5 shrink-0">{trailing}</span> : null}
         </button>
     );
 }
 
+/**
+ * The workspace's session rail.
+ *
+ * Chats are banded by when they were last active rather than listed flat, because "the one I was in
+ * this morning" is how a member looks for a chat and a title alone does not answer it. Each row
+ * says when it was last active and whether other members can see it; the chat currently open also
+ * says what it is doing, which is the one row whose live state this client actually follows.
+ *
+ * Bands the list cannot support honestly are absent rather than approximated: the session list
+ * carries no running, failed, or pending-approval flag for any chat but the open one, and a band
+ * derived from data the client does not have would be right only by accident.
+ */
 function WorkspaceSessionRail({
     sessions,
     invitations,
     activeSession,
+    activeState,
     working,
+    now,
     labels,
     onSelectSession,
     onJoinInvitation,
@@ -1423,23 +1827,38 @@ function WorkspaceSessionRail({
     sessions: AiChatSession[];
     invitations: AiChatSession[];
     activeSession: AiChatSession | null;
+    activeState: AskConnexActiveState;
     working: boolean;
+    now: number;
     labels: AskConnexDrawerLabels;
     onSelectSession: (session: AiChatSession) => void;
     onJoinInvitation: (session: AiChatSession) => void;
     onNewChat: () => void;
 }) {
     const [query, setQuery] = useState('');
-    const normalized = query.trim().toLocaleLowerCase();
-    const filtered = normalized.length === 0
-        ? sessions
-        : sessions.filter((session) => session.title.toLocaleLowerCase().includes(normalized));
+    const filtered = useMemo(() => filterAskConnexSessions(sessions, query), [query, sessions]);
+    const filteredInvitations = useMemo(
+        () => filterAskConnexSessions(invitations, query),
+        [invitations, query],
+    );
+    const groups = useMemo(
+        () => groupAskConnexSessions(filtered, filteredInvitations, now),
+        [filtered, filteredInvitations, now],
+    );
+    const stateLabel = activeState === 'running'
+        ? labels.stateRunning
+        : activeState === 'awaitingApproval'
+            ? labels.stateAwaitingApproval
+            : activeState === 'failed'
+                ? labels.stateFailed
+                : null;
+
     return (
         <aside className="hidden min-h-0 w-72 shrink-0 flex-col border-r border-border bg-muted/30 md:flex">
             <div className="flex items-center gap-2 border-b border-border px-4 py-3">
                 <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-foreground">{labels.title}</p>
-                    <p className="truncate text-xs text-muted-foreground">{labels.recentSessions}</p>
+                    <p className="truncate text-xs text-muted-foreground">{labels.sessionRail}</p>
                 </div>
                 <IconButton
                     type="button"
@@ -1464,33 +1883,61 @@ function WorkspaceSessionRail({
                     />
                 </div>
             </div>
-            <nav aria-label={labels.recentSessions} className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-                {invitations.map((invitation) => (
-                    <SessionRailRow
-                        key={`invitation:${invitation.id}`}
-                        title={invitation.title}
-                        current={false}
-                        disabled={working}
-                        leading={<UserPlusIcon className="size-4 shrink-0 text-muted-foreground" />}
-                        trailing={<span className="text-xs text-muted-foreground">{labels.join}</span>}
-                        onSelect={() => onJoinInvitation(invitation)}
-                    />
-                ))}
-                {filtered.length === 0 ? (
+            <nav aria-label={labels.sessionRail} className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+                {groups.length === 0 ? (
                     <p className="px-3 py-8 text-center text-xs text-muted-foreground">
-                        {labels.noMatchingSessions}
+                        {query.trim().length > 0 ? labels.noMatchingSessions : labels.noRecentSessions}
                     </p>
-                ) : filtered.map((session) => (
-                    <SessionRailRow
-                        key={session.id}
-                        title={session.title}
-                        current={activeSession?.id === session.id}
-                        disabled={working}
-                        trailing={session.visibility === 'shared'
-                            ? <UserGroupIcon className="size-4 shrink-0 text-muted-foreground" />
-                            : null}
-                        onSelect={() => onSelectSession(session)}
-                    />
+                ) : groups.map((group) => (
+                    <section key={group.key} aria-labelledby={`ask-connex-rail-${group.key}`}>
+                        <h2
+                            id={`ask-connex-rail-${group.key}`}
+                            className="px-3 pt-3 pb-1 text-xs font-medium text-muted-foreground"
+                        >
+                            {labels.sessionGroup(group.key)}
+                        </h2>
+                        {group.sessions.map((session) => {
+                            const invitation = group.key === 'invitations';
+                            const current = !invitation && activeSession?.id === session.id;
+                            const lastActive = session.lastMessageAt ?? session.updatedAt;
+                            const activity = askConnexSessionActivity(session);
+                            return (
+                                <SessionRailRow
+                                    key={`${group.key}:${session.id}`}
+                                    title={session.title}
+                                    current={current}
+                                    disabled={working}
+                                    leading={invitation
+                                        ? <UserPlusIcon className="size-4 text-muted-foreground" />
+                                        : null}
+                                    meta={(
+                                        <>
+                                            {session.visibility === 'shared' ? (
+                                                <UserGroupIcon aria-hidden className="size-3.5 shrink-0" />
+                                            ) : null}
+                                            {activity > 0 ? (
+                                                <time
+                                                    dateTime={new Date(activity).toISOString()}
+                                                    className="truncate"
+                                                >
+                                                    {labels.sessionActivity(labels.relativeTime(lastActive))}
+                                                </time>
+                                            ) : null}
+                                            {current && stateLabel !== null ? (
+                                                <span className="truncate">{stateLabel}</span>
+                                            ) : null}
+                                        </>
+                                    )}
+                                    trailing={invitation
+                                        ? <span className="text-xs text-muted-foreground">{labels.join}</span>
+                                        : null}
+                                    onSelect={() => invitation
+                                        ? onJoinInvitation(session)
+                                        : onSelectSession(session)}
+                                />
+                            );
+                        })}
+                    </section>
                 ))}
             </nav>
             <p className="border-t border-border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
@@ -1500,7 +1947,16 @@ function WorkspaceSessionRail({
     );
 }
 
-/** Responsive Ask Connex session, transcript, context, and composer surface. */
+/**
+ * Responsive Ask Connex session, transcript, context, and composer surface.
+ *
+ * The desktop panel animates its transform and nothing else. Its width is the width the member
+ * chose, applied as a plain style: a panel that reached a new width over a spring would relayout its
+ * whole transcript on every frame of that spring, and it could not be kept in step with the shell
+ * column the page reflows into without the shell paying the same cost again. Resizing is therefore
+ * a discrete change on both surfaces at once; opening and closing stays animated, and there the
+ * panel only translates.
+ */
 export default function AskConnexDrawer(props: AskConnexDrawerProps) {
     const {
         open,
@@ -1508,6 +1964,7 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         isMobile,
         showTab,
         workspace,
+        width,
         desktopRoot,
         workspaceRoot,
         activeSession,
@@ -1622,11 +2079,18 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         toolCalls: props.toolCalls,
         actionableToolCallIds: props.actionableToolCallIds,
         canRetryTurn: props.canRetryTurn,
+        continuePrompt: props.continuePrompt,
+        width: props.width,
+        activeState: props.activeState,
+        contextCount: props.contextCount,
+        now: props.now,
         unavailable: props.unavailable,
         starterPrompts: props.starterPrompts,
         labels: props.labels,
         workspace: props.workspace,
         closeButton: null,
+        resizable: false,
+        onWidthChange: props.onWidthChange,
         onSelectSession: props.onSelectSession,
         onNewChat: props.onNewChat,
         onBeginRename: beginRename,
@@ -1674,17 +2138,19 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
                 aria-hidden={!open}
                 inert={!open}
                 initial={false}
+                style={{ width: askConnexWidthLength(width) }}
                 animate={{ transform: open ? 'translateX(0%)' : 'translateX(100%)' }}
                 transition={instantOpen || reduceMotion ? instant : springSmooth}
                 onAnimationComplete={() => onOpenChangeComplete(open)}
                 className={cn(
-                    'absolute inset-y-0 right-0 w-96 border-l border-border bg-popover',
+                    'absolute inset-y-0 right-0 border-l border-border bg-popover',
                     open ? 'pointer-events-auto' : 'pointer-events-none',
                 )}
             >
                 <ConversationSurface
                     {...surfaceProps}
                     open={open}
+                    resizable
                     closeButton={(
                         <IconButton
                             type="button"
@@ -1708,7 +2174,9 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
                 sessions={props.sessions}
                 invitations={props.invitations}
                 activeSession={props.activeSession}
+                activeState={props.activeState}
                 working={props.working}
+                now={props.now}
                 labels={labels}
                 onSelectSession={props.onSelectSession}
                 onJoinInvitation={props.onJoinInvitation}

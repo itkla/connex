@@ -13,7 +13,7 @@ import {
 } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useParams, usePathname, useRouter } from 'next/navigation';
-import { SparklesIcon } from '@heroicons/react/24/outline';
+import { ArrowsPointingOutIcon, SparklesIcon } from '@heroicons/react/24/outline';
 
 import AskConnexDrawer from '@/app/components/ask-connex/AskConnexDrawer';
 import { formatAnswerInstant } from '@/app/components/ask-connex/answerDocument';
@@ -98,12 +98,22 @@ import {
     type StoredAskConnexTurn,
 } from '@/app/lib/askConnex';
 import {
+    ASK_CONNEX_DEFAULT_WIDTH,
+    askConnexActiveState,
+    askConnexWidthStorageKey,
+    parseStoredAskConnexWidth,
+    type AskConnexActiveState,
+    type AskConnexSessionGroupKey,
+    type AskConnexWidth,
+} from '@/app/lib/askConnexSurface';
+import {
     absorbAskConnexStreamPartial,
     applyAskConnexStreamDelta,
     createAskConnexFrameCoalescer,
     createAskConnexStream,
     createAskConnexStreamStore,
     failAskConnexStreamHydration,
+    reconcileAskConnexSettledStream,
     requestAskConnexTurnCancel,
     settleAskConnexStreamHydration,
     shouldDropAskConnexStream,
@@ -142,12 +152,31 @@ const noopCleanup = () => {};
 type AskConnexContextValue = {
     open: boolean;
     instantOpen: boolean;
+    /**
+     * Whether the last change to {@link width} was a member resizing the panel, which the shell
+     * column adopts without animating so it never disagrees with the panel about how wide the panel
+     * is. Cleared whenever the panel opens or closes, which is animated.
+     */
+    instantWidth: boolean;
     working: boolean;
     workspace: boolean;
+    /**
+     * How wide the desktop panel currently runs. The app shell reads it so the column it opens
+     * beside the page and the panel that fills that column are always the same width.
+     */
+    width: AskConnexWidth;
     openDrawer: (source?: OpenSource) => void;
     closeDrawer: () => void;
     openWorkspace: () => void;
 };
+
+/**
+ * How much of the question a continuation message carries forward.
+ *
+ * Long enough that the continuation reads as the same request, short enough that it stays a message
+ * the member can read at a glance before sending it.
+ */
+const ASK_CONNEX_CONTINUE_QUESTION_LIMIT = 240;
 
 /**
  * Registration for the two host nodes the single Ask Connex controller portals into: the app
@@ -296,6 +325,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const sessionKey = askConnexSessionStorageKey(userId, activeWorkspaceId);
     const turnKey = askConnexTurnStorageKey(userId, activeWorkspaceId);
     const pinnedKey = askConnexPinnedStorageKey(userId, activeWorkspaceId);
+    const widthKey = askConnexWidthStorageKey(userId, activeWorkspaceId);
     const [workspaceSourceContext, setWorkspaceSourceContext] = useState<{
         identity: string;
         context: AskConnexSourceContext;
@@ -355,6 +385,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
     const [open, setOpen] = useState(false);
     const [instantOpen, setInstantOpen] = useState(false);
+    const [instantWidth, setInstantWidth] = useState(false);
+    const [width, setWidth] = useState<AskConnexWidth>(ASK_CONNEX_DEFAULT_WIDTH);
     const [desktopRoot, setDesktopRoot] = useState<HTMLElement | null>(null);
     const [workspaceRoot, setWorkspaceRoot] = useState<HTMLElement | null>(null);
     const [stateIdentity, setStateIdentity] = useState<string | null>(null);
@@ -597,7 +629,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
      */
     const absorbTurnPartial = useCallback((durable: AiChatTurn, streamEpoch: number) => {
         if (streamEpoch !== streamEpochRef.current) return;
-        if (shouldDropAskConnexStream(durable.status)) return;
+        if (shouldDropAskConnexStream(durable.status, durable.terminalReason)) return;
         const partial = durable.partialContent ?? '';
         if (partial.length === 0) return;
         const current = streamRef.current?.turnId === durable.turnId
@@ -611,13 +643,37 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         }
     }, [hydrateStream, invalidateStream]);
 
+    useEffect(() => {
+        if (userId === null || activeWorkspaceId === null) return;
+        setWidth(parseStoredAskConnexWidth(safeStorageGet(widthKey)) ?? ASK_CONNEX_DEFAULT_WIDTH);
+    }, [activeWorkspaceId, userId, widthKey]);
+
+    /**
+     * Applies a chosen panel width, and marks the change as one the shell must adopt without
+     * animating. Resizing is a discrete preference rather than a movement: the panel and the column
+     * the page reflows into are two elements whose widths have to agree at every instant, and
+     * neither can reach a new width without relaying out its subtree on every frame it moves. The
+     * shell reads this alongside the open/close animation, which stays animated because it carries
+     * the panel in and out of the page.
+     */
+    const changeWidth = useCallback((next: AskConnexWidth) => {
+        setInstantWidth(true);
+        setWidth(next);
+        safeStorageSet(widthKey, next);
+    }, [widthKey]);
+
     const openDrawer = useCallback((source: OpenSource = 'standard') => {
         if (open) return;
+        setInstantWidth(false);
         setInstantOpen(source === 'keyboard');
         setOpen(true);
     }, [open]);
-    const closeDrawer = useCallback(() => setOpen(false), []);
+    const closeDrawer = useCallback(() => {
+        setInstantWidth(false);
+        setOpen(false);
+    }, []);
     const closeDrawerInstant = useCallback(() => {
+        setInstantWidth(false);
         setInstantOpen(true);
         setOpen(false);
     }, []);
@@ -627,6 +683,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             identity,
             context: snapshotAskConnexSourceContext(context.record, context.selection),
         });
+        setInstantWidth(false);
         setOpen(false);
         const session = activeSessionRef.current;
         router.push(session ? `/ask-connex/${session.id}` : '/ask-connex');
@@ -644,6 +701,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         workspaceReturnRef.current = false;
         setWorkspaceSourceContext(null);
         setInstantOpen(false);
+        setInstantWidth(false);
         setOpen(true);
     }, [workspaceMode]);
 
@@ -657,17 +715,29 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             : sourceRecord
                 ? t('entryPoint.record', { label: sourceRecord.label })
                 : t('entryPoint.workspace');
-        return [{
-            id: 'workspace.ask-connex',
-            group: 'workspace',
-            labelKey: 'askConnex',
-            label,
-            keywords: ['ask', 'ai', 'connex'],
-            icon: SparklesIcon,
-            order: 90,
-            execute: () => openDrawer(),
-        }];
-    }, [openDrawer, selectionContext, sourceRecord, t, workspaceMode]);
+        return [
+            {
+                id: 'workspace.ask-connex',
+                group: 'workspace',
+                labelKey: 'askConnex',
+                label,
+                keywords: ['ask', 'ai', 'connex'],
+                icon: SparklesIcon,
+                order: 90,
+                execute: () => openDrawer(),
+            },
+            {
+                id: 'workspace.ask-connex-workspace',
+                group: 'workspace',
+                labelKey: 'askConnexWorkspace',
+                label: t('openWorkspaceAction'),
+                keywords: ['ask', 'ai', 'connex', 'workspace', 'full'],
+                icon: ArrowsPointingOutIcon,
+                order: 91,
+                execute: () => openWorkspace(),
+            },
+        ];
+    }, [openDrawer, openWorkspace, selectionContext, sourceRecord, t, workspaceMode]);
     useRegisterActions(contextualActions);
 
     useEffect(() => {
@@ -871,8 +941,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             absorbTurnPartial(durable, streamEpochRef.current);
             safeStorageRemove(turnKey);
             setSubmissionBlocked(false);
-            await refreshTranscript(stored.sessionId, signal, true);
-            if (shouldDropAskConnexStream(durable.status)) resetStream();
+            await reconcileAskConnexSettledStream(
+                durable.status,
+                durable.terminalReason,
+                resetStream,
+                () => refreshTranscript(stored.sessionId, signal, true),
+            );
             await refreshSessions(signal);
             if (durable.status === 'failed') {
                 deferredErrorToast(
@@ -932,8 +1006,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             const stored = parseStoredAskConnexTurn(safeStorageGet(turnKey));
             if (stored?.turnId === durable.turnId) safeStorageRemove(turnKey);
             setSubmissionBlocked(false);
-            await refreshTranscript(durable.sessionId, signal, true);
-            if (shouldDropAskConnexStream(durable.status)) resetStream();
+            await reconcileAskConnexSettledStream(
+                durable.status,
+                durable.terminalReason,
+                resetStream,
+                () => refreshTranscript(durable.sessionId, signal, true),
+            );
             await refreshSessions(signal);
             if (durable.status === 'failed') {
                 deferredErrorToast(
@@ -1791,6 +1869,38 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         && !working
         && !contextOverflow;
 
+    /**
+     * The one thing this chat is doing that the header and its rail row should say out loud.
+     *
+     * Derived from state this client already follows — the answer it is watching and the proposals
+     * it has been offered — rather than from anything the session list claims, so it is never a
+     * guess about a chat that is not on screen.
+     */
+    const activeState = useMemo<AskConnexActiveState>(
+        () => askConnexActiveState({
+            phase: turn.phase,
+            pendingApprovals: actionableToolCallIds.size,
+        }),
+        [actionableToolCallIds, turn.phase],
+    );
+
+    /**
+     * The message that continues a stopped answer.
+     *
+     * A stopped answer leaves no assistant message behind, so nothing about it reaches the next
+     * request on its own: continuing is an ordinary question, composed from the one that produced
+     * the partial and handed to the member to read, edit, and send. Available only while a retry
+     * would also be — the same question has to still be readable and the surface has to be able to
+     * send it.
+     */
+    const continuePrompt = useMemo(() => {
+        if (retryPrompt === null || !canRetryTurn) return null;
+        const question = retryPrompt.length > ASK_CONNEX_CONTINUE_QUESTION_LIMIT
+            ? `${retryPrompt.slice(0, ASK_CONNEX_CONTINUE_QUESTION_LIMIT)}…`
+            : retryPrompt;
+        return t('continuePrompt', { question });
+    }, [canRetryTurn, retryPrompt, t]);
+
     const starterPromptKind = implicitContext?.kind
         ?? selectionContext?.pageContext[0]?.kind
         ?? null;
@@ -1822,6 +1932,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         answerDocument: {
             absoluteTime: (instant: string) => formatAnswerInstant(instant, locale),
             blockKind: (kind: AiChatAnswerBlockKind) => t(`answerDocument.blockKinds.${kind}`),
+            boundedRows: (shown: number, total: number) =>
+                t('answerDocument.boundedRows', { shown, total }),
+            viewAll: t('answerDocument.viewAll'),
             citationKind,
             comparisonAgainst: t('answerDocument.comparisonAgainst'),
             comparisonValue: t('answerDocument.comparisonValue'),
@@ -1857,11 +1970,23 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             truncated: t('answerDocument.truncated'),
             unsupported: t('answerDocument.unsupported'),
             whatChecked: t('answerDocument.whatChecked'),
+            withheldEvidence: t('answerDocument.withheldEvidence'),
         },
         assistantAuthor: t('assistantAuthor'),
         archive: t('archive'),
-        budgetExhausted: t('budgetExhausted'),
-        toolResultBudgetExhausted: t('toolResultBudgetExhausted'),
+        terminalMessage: {
+            generic: t('turnFailed'),
+            breadthSteps: t('stepCapExceeded'),
+            breadthResults: t('toolResultBudgetExhausted'),
+            skillBudget: t('skillBudgetExceeded'),
+            toolAuthority: t('toolOutsideSkillAuthority'),
+            budget: t('budgetExhausted'),
+            capacity: t('capacityExhausted'),
+            workspaceDisabled: t('workspaceDisabled'),
+            accessRevoked: t('accessRevoked'),
+            restrictionsChanged: t('restrictionsChanged'),
+            imageUnsupported: t('turnImageUnsupported'),
+        },
         citations: t('citations'),
         disclosureCreation: tDisclosure('sessionCreation'),
         disclosureList: tDisclosure('sessionList'),
@@ -1897,7 +2022,6 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         removeFile: (label: string) => t('removeFile', { label }),
         uploadProgress: (progress: number) => t('upload.progress', { progress }),
         uploadRemoving: t('upload.removing'),
-        turnImageUnsupported: t('turnImageUnsupported'),
         emptyBody: t('emptyBody'),
         emptyTitle: t('emptyTitle'),
         formerMember: t('formerMember'),
@@ -1948,13 +2072,28 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         stopping: t('stopping'),
         turnAccepted: t('turnAccepted'),
         turnCancelled: t('turnCancelled'),
-        turnFailed: t('turnFailed'),
         turnResolved: t('turnResolved'),
         turnStreaming: t('turnStreaming'),
         turnTimedOut: t('turnTimedOut'),
         turnWorking: t('turnWorking'),
         partialAnswer: t('partialAnswer'),
+        continueFromPartial: t('continueFromPartial'),
+        narrowScope: t('narrowScope'),
         openWorkspace: t('openWorkspace'),
+        width: t('width'),
+        widthCompact: t('widthCompact'),
+        widthComfortable: t('widthComfortable'),
+        visibilityPrivate: t('visibilityPrivate'),
+        visibilityShared: t('visibilityShared'),
+        stateRunning: t('stateRunning'),
+        stateAwaitingApproval: t('stateAwaitingApproval'),
+        stateFailed: t('stateFailed'),
+        contextSummary: (count: number) => t('contextSummary', { count }),
+        participantCount: (count: number) => t('participantCount', { count }),
+        sessionActivity: (time: string) => t('sessionActivity', { time }),
+        sessionRail: t('sessionRail'),
+        sessionGroup: (key: AskConnexSessionGroupKey) => t(`sessionGroups.${key}`),
+        relativeTime: (instant: string) => formatRelativeTime(instant, locale, now),
         toolCard: {
             actionFailed: t('toolCards.failures.actionFailed'),
             approve: t('toolCards.actions.approve'),
@@ -2019,13 +2158,15 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         () => ({
             open,
             instantOpen,
+            instantWidth,
             working,
             workspace: workspaceMode,
+            width,
             openDrawer,
             closeDrawer,
             openWorkspace,
         }),
-        [closeDrawer, instantOpen, open, openDrawer, openWorkspace, working, workspaceMode],
+        [closeDrawer, instantOpen, instantWidth, open, openDrawer, openWorkspace, width, working, workspaceMode],
     );
 
     return (
@@ -2076,9 +2217,15 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     ? actionableToolCallIds
                     : EMPTY_ASK_CONNEX_TOOL_CALL_IDS}
                 canRetryTurn={scoped && canRetryTurn}
+                continuePrompt={scoped ? continuePrompt : null}
+                width={width}
+                activeState={scoped ? activeState : null}
+                contextCount={scoped ? contextResult.pageContext.length + fileContextCount : 0}
+                now={now}
                 unavailable={unavailable}
                 starterPrompts={starterPrompts}
                 labels={labels}
+                onWidthChange={changeWidth}
                 onOpenChange={setOpen}
                 onOpenChangeComplete={() => setInstantOpen(false)}
                 onKeyboardClose={closeDrawerInstant}

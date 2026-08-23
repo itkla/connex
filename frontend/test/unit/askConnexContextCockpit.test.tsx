@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     AskConnexContextStrip,
     AskConnexScopeNotice,
+    hasAskConnexContextInputs,
     type AskConnexContextLabels,
 } from "@/app/components/ask-connex/AskConnexContextCockpit";
 import {
@@ -130,6 +131,47 @@ function byLabel(elements: InteractiveElement[], label: string): InteractiveElem
         `Control labelled "${label}"`,
     );
 }
+
+describe("narrowing what an answer covers", () => {
+    const NOTHING = {
+        implicitContext: null,
+        pinnedContext: [],
+        selectionContext: null,
+        unsupportedPageContext: null,
+        attachments: [],
+        fileAttachments: [],
+    };
+
+    it("reports nothing to narrow when no context was carried", () => {
+        expect(hasAskConnexContextInputs(NOTHING)).toBe(false);
+    });
+
+    it("reports nothing to narrow when the strip is only showing a limit or an undo", () => {
+        expect(renderToStaticMarkup(strip({ overflow: true }))).not.toBe("");
+        expect(renderToStaticMarkup(strip({ corrected: true }))).not.toBe("");
+        expect(hasAskConnexContextInputs(NOTHING)).toBe(false);
+    });
+
+    it("reports something to narrow for every kind of carried input", () => {
+        const carried = [
+            { ...NOTHING, implicitContext: AIKO },
+            { ...NOTHING, pinnedContext: [ACME] },
+            { ...NOTHING, selectionContext: selection() },
+            { ...NOTHING, unsupportedPageContext: { type: "deal" as const, label: "Deals" } },
+            { ...NOTHING, attachments: [ACME] },
+            { ...NOTHING, fileAttachments: [readyFile("notes.txt")] },
+        ];
+        for (const inputs of carried) expect(hasAskConnexContextInputs(inputs)).toBe(true);
+    });
+
+    it("shows a ring while the strip holds focus, because focus arrives here from a click", () => {
+        const markup = renderToStaticMarkup(strip({ implicitContext: AIKO }));
+
+        expect(markup).toContain('role="group"');
+        expect(markup).toContain("focus:ring-2");
+        expect(markup).toContain("focus:ring-ring");
+    });
+});
 
 describe("context cockpit states", () => {
     it("renders nothing when the request carries no context and nothing was corrected", () => {

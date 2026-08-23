@@ -53,6 +53,32 @@ export type AskConnexContextLabels = {
     uploadRemoving: string;
 };
 
+/** The inputs a context strip carries: everything the next answer will read, chip by chip. */
+export type AskConnexContextInputs = {
+    implicitContext: AskConnexAttachment | null;
+    pinnedContext: readonly AskConnexAttachment[];
+    selectionContext: AskConnexSelectionContext | null;
+    unsupportedPageContext: { type: AskConnexSelectionContext['type']; label: string } | null;
+    attachments: readonly AskConnexAttachment[];
+    fileAttachments: readonly AskConnexFileAttachment[];
+};
+
+/**
+ * Whether the strip is carrying an input a member can take out.
+ *
+ * The strip also renders for a limit warning and for the undo affordance a correction leaves behind,
+ * so its presence is not the same question. Anything sending a member to the strip to narrow what an
+ * answer covers has to ask this one instead, or it can land them on a strip with nothing to narrow.
+ */
+export function hasAskConnexContextInputs(inputs: AskConnexContextInputs): boolean {
+    return inputs.implicitContext !== null
+        || inputs.pinnedContext.length > 0
+        || inputs.selectionContext !== null
+        || inputs.unsupportedPageContext !== null
+        || inputs.attachments.length > 0
+        || inputs.fileAttachments.length > 0;
+}
+
 /**
  * One control inside a context chip. Chips commit to the badge height rather than the button
  * height scale, so their inline controls are part of the chip's own shape; `Button`/`IconButton`
@@ -140,14 +166,15 @@ export function AskConnexContextStrip({
     onReset: () => void;
 }) {
     const reduceMotion = useReducedMotion() ?? false;
-    if (!implicitContext
-            && pinnedContext.length === 0
-            && !selectionContext
-            && !unsupportedPageContext
-            && attachments.length === 0
-            && fileAttachments.length === 0
-            && !overflow
-            && !corrected) return null;
+    const carrying = hasAskConnexContextInputs({
+        implicitContext,
+        pinnedContext,
+        selectionContext,
+        unsupportedPageContext,
+        attachments,
+        fileAttachments,
+    });
+    if (!carrying && !overflow && !corrected) return null;
     const unavailableExplanation = selectionContext?.unavailableReason === 'scope'
         ? labels.contextScopeUnsupported
         : unsupportedPageContext !== null
@@ -164,7 +191,7 @@ export function AskConnexContextStrip({
             ref={groupRef}
             role="group"
             tabIndex={-1}
-            className="mb-2 outline-none"
+            className="mb-2 rounded-lg outline-none focus:ring-2 focus:ring-ring"
             aria-label={labels.context}
         >
             <div className="flex min-w-0 items-center gap-1.5 overflow-x-auto">

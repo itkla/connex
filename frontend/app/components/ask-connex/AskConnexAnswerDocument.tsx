@@ -11,10 +11,12 @@ import {
 
 import AskConnexAnswerBlock from '@/app/components/ask-connex/AskConnexAnswerBlocks';
 import {
+    UNBOUNDED_ANSWER,
     answerBlockSignature,
     answerInstant,
     answerListKeys,
     evidenceCaveats,
+    type AskConnexAnswerBounds,
     type AskConnexAnswerDocumentLabels,
 } from '@/app/components/ask-connex/answerDocument';
 import type {
@@ -165,9 +167,11 @@ export function AskConnexCoverageDisclosure({
  */
 export default function AskConnexAnswerDocument({
     document,
+    bounds = UNBOUNDED_ANSWER,
     labels,
 }: {
     document: AiChatAnswerDocument;
+    bounds?: AskConnexAnswerBounds;
     labels: AskConnexAnswerDocumentLabels;
 }) {
     const caveats = useMemo(
@@ -185,6 +189,7 @@ export default function AskConnexAnswerDocument({
                     key={keys[index]}
                     block={block}
                     caveats={caveats}
+                    bounds={bounds}
                     labels={labels}
                 />
             ))}

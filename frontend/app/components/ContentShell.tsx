@@ -10,6 +10,7 @@ import NavBreadcrumb from "@/app/components/NavBreadcrumb";
 import MobileBottomBar from "@/app/components/MobileBottomBar";
 import { useAskConnex, useAskConnexMount } from "@/app/components/ask-connex/AskConnexProvider";
 import { useSidebarMode } from "@/app/hooks/useSidebarMode";
+import { askConnexWidthLength } from "@/app/lib/askConnexSurface";
 import { instant, springSmooth } from "@/app/lib/motion";
 import { useTranslations } from "next-intl";
 
@@ -25,6 +26,16 @@ function getAskConnexPushSnapshot(): boolean {
     return window.matchMedia(ASK_CONNEX_PUSH_QUERY).matches;
 }
 
+/**
+ * The authenticated app frame: sidebar, toolbar, page, and the column the Ask Connex panel opens
+ * into beside the page.
+ *
+ * That column is the one place this shell animates a layout property, and it is unavoidable: the
+ * page genuinely becomes narrower when the panel opens, and no transform can reflow a page. The cost
+ * is confined to that moment. A member resizing the panel is adopted instantly rather than springing
+ * the whole page through another set of frames — `instantWidth` says so — and the panel itself only
+ * translates, so neither surface relayouts its own subtree per frame while it moves.
+ */
 export default function ContentShell({
     sidebar,
     children,
@@ -107,10 +118,12 @@ export default function ContentShell({
                 initial={false}
                 animate={{
                     gridTemplateColumns: askConnex.open && !askConnex.workspace && pushesAskConnex
-                        ? "minmax(0, 1fr) 24rem"
+                        ? `minmax(0, 1fr) ${askConnexWidthLength(askConnex.width)}`
                         : "minmax(0, 1fr) 0rem",
                 }}
-                transition={askConnex.instantOpen || reduceMotion ? instant : springSmooth}
+                transition={askConnex.instantOpen || askConnex.instantWidth || reduceMotion
+                    ? instant
+                    : springSmooth}
             >
                 <div className="flex min-w-0 flex-col">
                     {!askConnex.workspace ? (
