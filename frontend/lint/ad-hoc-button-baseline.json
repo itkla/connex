@@ -28,7 +28,6 @@
     "app/components/activity/notes/editor/FileReferencePopover.tsx": 2,
     "app/components/activity/tasks/EditTaskSheet.tsx": 1,
     "app/components/admin/AuditLogBrowser.tsx": 2,
-    "app/components/ask-connex/AskConnexDrawer.tsx": 15,
     "app/components/ask-connex/AskConnexTab.tsx": 1,
     "app/components/ask-connex/AskConnexToolCard.tsx": 3,
     "app/components/attachments/Attachments.tsx": 3,

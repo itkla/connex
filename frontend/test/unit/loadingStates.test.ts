@@ -157,6 +157,19 @@ type SharedSkeleton = {
  */
 const SHARED_SKELETONS: SharedSkeleton[] = [
     {
+        component: "app/components/ask-connex/AskConnexWorkspaceSkeleton.tsx",
+        consumers: [
+            {
+                file: "app/(app)/ask-connex/loading.tsx",
+                specifier: "@/app/components/ask-connex/AskConnexWorkspaceSkeleton",
+            },
+            {
+                file: "app/(app)/ask-connex/[sessionId]/loading.tsx",
+                specifier: "@/app/components/ask-connex/AskConnexWorkspaceSkeleton",
+            },
+        ],
+    },
+    {
         component: "app/components/organization/OrganizationOverviewSkeleton.tsx",
         consumers: [
             {

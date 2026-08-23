@@ -13,6 +13,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -158,7 +159,7 @@ class AiChatTurnPersistenceServiceTest {
     }
 
     @Test
-    void appendPartialBatchPersistsAndPublishesTheSameUtf16Batch() {
+    void appendPartialBatchPersistsAndPublishesTheSameUtf16BatchOnlyToRequester() {
         AiChatQueuedTurn streamed = new AiChatQueuedTurn(
                 7, 11, 13, 17, 19, 1, 23L, false, List.of(), List.of(),
                 AiPrivacyMode.UNMASKED, true);
@@ -168,12 +169,98 @@ class AiChatTurnPersistenceServiceTest {
 
         assertEquals(3, service.appendPartialBatch(streamed, 0, "A😀"));
 
-        verify(realtimeDispatcher).sessionAfterCommit(
-                org.mockito.ArgumentMatchers.eq(7),
-                org.mockito.ArgumentMatchers.eq(13),
+        verify(realtimeDispatcher).userAfterCommit(
+                org.mockito.ArgumentMatchers.eq(11),
                 argThat(frame -> frame.seq() == 0
                         && "delta".equals(frame.kind())
                         && "A😀".equals(frame.text())));
+    }
+
+    @Test
+    void revokedParticipantCannotPersistOrReceiveAnotherStreamBatch() {
+        AiChatQueuedTurn streamed = new AiChatQueuedTurn(
+                7, 11, 13, 17, 19, 1, 23L, false, List.of(), List.of(),
+                AiPrivacyMode.UNMASKED, true);
+        AiChatSession shared = new AiChatSession();
+        shared.setId(TURN.sessionId());
+        shared.setCreatedByUserId(99);
+        shared.setVisibility("shared");
+        shared.setStatus("active");
+        when(chatMapper.getSessionByIdForUpdate(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(shared);
+        when(chatMapper.isParticipant(
+                TURN.workspaceId(), TURN.sessionId(), TURN.userId())).thenReturn(false);
+
+        assertThrows(
+                ResourceNotFoundException.class,
+                () -> service.appendPartialBatch(streamed, 0, "Revoked"));
+
+        verify(chatMapper, never()).appendTurnPartialContent(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId(), 0, "Revoked", 7);
+        verify(realtimeDispatcher, never()).userAfterCommit(
+                org.mockito.ArgumentMatchers.eq(TURN.userId()), any());
+    }
+
+    @Test
+    void changedRestrictionEpochRejectsAStreamBatchBeforePersistence() {
+        AiChatQueuedTurn streamed = new AiChatQueuedTurn(
+                7, 11, 13, 17, 19, 1, 23L, false, List.of(), List.of(),
+                AiPrivacyMode.UNMASKED, true);
+        storedTurn.setStreamed(true);
+        when(restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
+                TURN.workspaceId(), TURN.restrictionEpoch())).thenReturn(false);
+
+        AiAssistantLoopException exception = assertThrows(
+                AiAssistantLoopException.class,
+                () -> service.appendPartialBatch(streamed, 0, "Restricted"));
+
+        assertEquals("restrictions_changed", exception.terminalReason());
+        verify(chatMapper, never()).appendTurnPartialContent(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId(), 0, "Restricted", 10);
+    }
+
+    @Test
+    void failedTerminalizationRetainsAScreenableDurablePartialAnswer() {
+        storedTurn.setStreamed(true);
+        storedTurn.setPartialContentUtf16Offset(7);
+        storedTurn.setPartialContent("Atlas renewal is slipping");
+        when(chatMapper.updateTurnTerminal(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId(),
+                "failed", "restrictions_changed", null, null)).thenReturn(1);
+
+        assertTrue(service.markTerminal(TURN, "failed", "restrictions_changed"));
+
+        InOrder order = inOrder(chatMapper);
+        order.verify(chatMapper).getSessionByIdForUpdate(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId());
+        order.verify(chatMapper).getTurnByIdForUpdate(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
+        order.verify(chatMapper).updateTurnTerminal(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId(),
+                "failed", "restrictions_changed", null, null);
+        verify(chatMapper, never()).resetTurnPartialContent(
+                anyInt(), anyInt(), anyInt(), anyInt());
+    }
+
+    @Test
+    void failedTerminalizationPurgesAPartialAnswerTheSpecialCareScreenExcludes() {
+        storedTurn.setStreamed(true);
+        storedTurn.setPartialContentUtf16Offset(7);
+        storedTurn.setPartialContent("The contact disclosed a cancer diagnosis during the call.");
+        when(chatMapper.resetTurnPartialContent(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId(), 7)).thenReturn(1);
+        when(chatMapper.updateTurnTerminal(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId(),
+                "failed", "restrictions_changed", null, null)).thenReturn(1);
+
+        assertTrue(service.markTerminal(TURN, "failed", "restrictions_changed"));
+
+        InOrder order = inOrder(chatMapper);
+        order.verify(chatMapper).resetTurnPartialContent(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId(), 7);
+        order.verify(chatMapper).updateTurnTerminal(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId(),
+                "failed", "restrictions_changed", null, null);
     }
 
     @Test

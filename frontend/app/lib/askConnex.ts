@@ -1,10 +1,14 @@
-import type { ActiveRecordRef } from '@/app/lib/actions/types';
+import type { ActiveRecordRef, ActiveSelection, RecordType } from '@/app/lib/actions/types';
+import { AI_CHAT_PROGRESS_SOURCES } from '@/app/lib/types';
 import type {
     AiAssistantToolCall,
     AiAssistantToolCallMutation,
     AiChatCitation,
     AiChatMessage,
     AiChatPageContext,
+    AiChatPageContextKind,
+    AiChatProgressItem,
+    AiChatProgressSource,
     Page,
 } from '@/app/lib/types';
 import { viewPreferenceStorageKey } from '@/app/hooks/viewPreference';
@@ -21,6 +25,55 @@ export const ASK_CONNEX_CONTEXT_LIMIT = 10;
 /** A supported attached record parsed from the mention editor's serialized value. */
 export type AskConnexAttachment = AiChatPageContext & {
     label: string;
+};
+
+/** Explicit selected-row context, including unsupported types that must remain visible but unsent. */
+export type AskConnexSelectionContext = {
+    type: RecordType;
+    count: number;
+    available: boolean;
+    unavailableReason: 'record_type' | 'scope' | 'invalid' | null;
+    pageContext: AiChatPageContext[];
+};
+
+/** Stable source-page context retained while the routed workspace replaces its contributor page. */
+export type AskConnexSourceContext = {
+    record: ActiveRecordRef | null;
+    selection: ActiveSelection | null;
+};
+
+/**
+ * Everything the user has said about the context they were offered: the inferred page record and
+ * selected rows they took out, and the records they pinned so navigating away no longer drops them.
+ *
+ * Dismissals are deliberately not persisted — they belong to the request being composed. Pins are,
+ * because keeping a record across navigation is the whole point of pinning it.
+ */
+export type AskConnexContextCorrections = {
+    pageDismissed: boolean;
+    selectionDismissed: boolean;
+    pinned: readonly AskConnexAttachment[];
+};
+
+/** No correction: the request carries exactly the context the page inferred. */
+export const EMPTY_ASK_CONNEX_CORRECTIONS: AskConnexContextCorrections = {
+    pageDismissed: false,
+    selectionDismissed: false,
+    pinned: [],
+};
+
+/**
+ * The record count at which a request is broad enough that the user should see what it will cover
+ * before it runs. One subject, or a subject plus a couple of comparisons, needs no confirmation;
+ * a browser selection carried into a question does.
+ */
+export const ASK_CONNEX_SCOPE_PREVIEW_THRESHOLD = 5;
+
+/** What a broad request will actually read, counted by record kind, in the order it will be sent. */
+export type AskConnexScopePreview = {
+    total: number;
+    records: { kind: AiChatPageContextKind; count: number }[];
+    files: number;
 };
 
 /** Client upload lifecycle for one assistant-session file chip. */
@@ -192,12 +245,20 @@ export type AskConnexTurnState = {
     turnId: number | null;
     generationHandle: string | null;
     reason: string | null;
+    progress: AiChatProgressItem[];
 };
 
 /** Events that advance or clear the provider-owned assistant turn state. */
 export type AskConnexTurnEvent =
-    | { type: 'accepted'; sessionId: number; turnId: number; generationHandle: string; status: string }
-    | { type: 'status'; status: string; reason?: string | null }
+    | {
+        type: 'accepted';
+        sessionId: number;
+        turnId: number;
+        generationHandle: string | null;
+        status: string;
+        progress?: AiChatProgressItem[];
+    }
+    | { type: 'status'; status: string; reason?: string | null; progress?: AiChatProgressItem[] }
     | { type: 'reset' };
 
 /** User action exposed by an assistant tool-call card. */
@@ -280,6 +341,7 @@ export const EMPTY_ASK_CONNEX_TURN: AskConnexTurnState = {
     turnId: null,
     generationHandle: null,
     reason: null,
+    progress: [],
 };
 
 function toolCardState(toolCall: AiAssistantToolCall): AskConnexToolCardState {
@@ -561,6 +623,136 @@ export function askConnexTurnStorageKey(userId: number | null, workspaceId: numb
     return viewPreferenceStorageKey('ask-connex:turn', userId, workspaceId);
 }
 
+/** Builds the pinned-context key using the established user/workspace preference scheme. */
+export function askConnexPinnedStorageKey(userId: number | null, workspaceId: number | null): string {
+    return viewPreferenceStorageKey('ask-connex:pinned', userId, workspaceId);
+}
+
+const ASK_CONNEX_PROGRESS_SOURCES: ReadonlySet<string> = new Set(AI_CHAT_PROGRESS_SOURCES);
+
+/**
+ * Narrows an untrusted realtime `tool` value to a known progress milestone.
+ *
+ * The allowlist is derived from {@link AI_CHAT_PROGRESS_SOURCES}, the same tuple the union is built
+ * from, so the runtime check and the type can never disagree. A hand-written list here previously
+ * omitted four backend sources, and because an unrecognized source discards the whole frame, those
+ * milestones silently vanished from the live trail.
+ * @param value untrusted value from a realtime frame
+ * @returns whether the value names a known progress milestone
+ */
+export function isAskConnexProgressSource(value: unknown): value is AiChatProgressSource {
+    return typeof value === 'string' && ASK_CONNEX_PROGRESS_SOURCES.has(value);
+}
+
+function isPinnedKind(value: unknown): value is AiChatPageContextKind {
+    return value === 'person' || value === 'company' || value === 'deal';
+}
+
+/**
+ * Parses persisted pins at the browser-storage trust boundary. Anything malformed is dropped
+ * rather than repaired, so a tampered entry can never widen what a request reads.
+ */
+export function parseStoredAskConnexPins(value: string | null): AskConnexAttachment[] {
+    if (value == null) return [];
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(value);
+    } catch {
+        return [];
+    }
+    if (!Array.isArray(parsed)) return [];
+    const pins: AskConnexAttachment[] = [];
+    const seen = new Set<string>();
+    for (const entry of parsed) {
+        if (typeof entry !== 'object' || entry === null) continue;
+        if (!('kind' in entry) || !('id' in entry) || !('label' in entry)) continue;
+        const { kind, id, label } = entry;
+        if (!isPinnedKind(kind)) continue;
+        if (typeof id !== 'number' || !Number.isSafeInteger(id) || id <= 0) continue;
+        if (typeof label !== 'string' || label.trim().length === 0) continue;
+        const key = `${kind}:${id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        pins.push({ kind, id, label: label.trim() });
+        if (pins.length === ASK_CONNEX_CONTEXT_LIMIT) break;
+    }
+    return pins;
+}
+
+/** Serializes pins for scoped browser storage. */
+export function serializeAskConnexPins(pins: readonly AskConnexAttachment[]): string {
+    return JSON.stringify(pins);
+}
+
+/** Adds or removes one pin, keeping the newest first and never exceeding the per-request cap. */
+export function toggleAskConnexPin(
+    pins: readonly AskConnexAttachment[],
+    attachment: AskConnexAttachment,
+): AskConnexAttachment[] {
+    const remaining = pins.filter(
+        (pin) => pin.kind !== attachment.kind || pin.id !== attachment.id,
+    );
+    if (remaining.length !== pins.length) return remaining;
+    return [attachment, ...remaining].slice(0, ASK_CONNEX_CONTEXT_LIMIT);
+}
+
+/** Whether a record is currently kept across navigation. */
+export function isAskConnexPinned(
+    pins: readonly AskConnexAttachment[],
+    attachment: AskConnexAttachment | null,
+): boolean {
+    if (attachment === null) return false;
+    return pins.some((pin) => pin.kind === attachment.kind && pin.id === attachment.id);
+}
+
+/** Whether the user has taken something out of the context the page offered. */
+export function askConnexContextCorrected(corrections: AskConnexContextCorrections): boolean {
+    return corrections.pageDismissed || corrections.selectionDismissed;
+}
+
+/**
+ * Summarizes what a request will read, or null when it is narrow enough to run unannounced.
+ *
+ * The counts come from the records the request will actually carry, so the summary can never
+ * promise a breadth the turn does not have. Attached files are reported but do not by themselves
+ * make a request broad: their cost is bounded at upload, unlike a carried browser selection.
+ */
+export function askConnexScopePreview(
+    pageContext: readonly AiChatPageContext[],
+    fileCount: number,
+): AskConnexScopePreview | null {
+    if (pageContext.length < ASK_CONNEX_SCOPE_PREVIEW_THRESHOLD) return null;
+    const counts = new Map<AiChatPageContextKind, number>();
+    for (const entry of pageContext) {
+        counts.set(entry.kind, (counts.get(entry.kind) ?? 0) + 1);
+    }
+    return {
+        total: pageContext.length,
+        records: [...counts.entries()].map(([kind, count]) => ({ kind, count })),
+        files: Math.max(0, fileCount),
+    };
+}
+
+/**
+ * A stable identity for one interpreted scope.
+ *
+ * Agreeing to review a scope agrees to *that* scope: the key changes the moment a record enters or
+ * leaves, so a confirmation can never be inherited by a broader request the user never saw.
+ */
+export function askConnexScopePreviewKey(preview: AskConnexScopePreview | null): string | null {
+    if (preview === null) return null;
+    const records = preview.records.map(({ kind, count }) => `${kind}:${count}`).join(',');
+    return `${records}/${preview.files}`;
+}
+
+/** Whether a request still needs the user's agreement before it runs. */
+export function askConnexScopeNeedsConfirmation(
+    scopeKey: string | null,
+    confirmedKey: string | null,
+): boolean {
+    return scopeKey !== null && scopeKey !== confirmedKey;
+}
+
 /** Parses a persisted positive integer id without accepting partial or unsafe numbers. */
 export function parseStoredAskConnexSession(value: string | null): number | null {
     if (value == null || !/^[1-9]\d*$/.test(value)) return null;
@@ -631,14 +823,79 @@ export function activeRecordAskConnexContext(record: ActiveRecordRef | null): As
     return { kind: record.type, id, label: record.label };
 }
 
-/** Merges implicit page context with attached records and reports cap overflow explicitly. */
+/** Converts the current list selection without silently dropping unsupported or invalid rows. */
+export function activeSelectionAskConnexContext(
+    selection: ActiveSelection | null,
+): AskConnexSelectionContext | null {
+    if (selection == null || selection.ids.size === 0) return null;
+    const supportedType = selection.type === 'person'
+        || selection.type === 'company'
+        || selection.type === 'deal'
+        ? selection.type
+        : null;
+    const ids = selection.scope.kind === 'single_record'
+        ? [selection.scope.recordId]
+        : selection.scope.kind === 'page_selection' || selection.scope.kind === 'explicit_selection'
+            ? selection.scope.recordIds
+            : null;
+    const exactScope = ids !== null;
+    const valid = ids !== null
+        && ids.length > 0
+        && ids.every((id) => Number.isSafeInteger(id) && id > 0)
+        && new Set(ids).size === ids.length;
+    return {
+        type: selection.type,
+        count: selection.ids.size,
+        available: supportedType !== null && exactScope && valid,
+        unavailableReason: supportedType === null
+            ? 'record_type'
+            : !exactScope
+                ? 'scope'
+                : valid
+                    ? null
+                    : 'invalid',
+        pageContext: supportedType !== null && exactScope && valid
+            ? ids.map((id) => ({ kind: supportedType, id }))
+            : [],
+    };
+}
+
+/** Copies transient action context before navigation unmounts the contributing record surface. */
+export function snapshotAskConnexSourceContext(
+    record: ActiveRecordRef | null,
+    selection: ActiveSelection | null,
+): AskConnexSourceContext {
+    return {
+        record: record === null ? null : { ...record },
+        selection: selection === null
+            ? null
+            : { ...selection, ids: new Set(selection.ids) },
+    };
+}
+
+/**
+ * Merges implicit page context, kept records, selected rows, and mentions, and reports cap overflow
+ * explicitly.
+ *
+ * Corrections are applied here rather than at the call sites so the chips a user sees and the
+ * records a request carries are computed from one rule: anything the user took out is absent from
+ * both, and anything pinned is present in both.
+ */
 export function mergeAskConnexContext(
     record: ActiveRecordRef | null,
     content: string,
+    selection: ActiveSelection | null = null,
+    corrections: AskConnexContextCorrections = EMPTY_ASK_CONNEX_CORRECTIONS,
 ): { pageContext: AiChatPageContext[]; attachments: AskConnexAttachment[]; overflow: boolean } {
-    const implicit = activeRecordAskConnexContext(record);
+    const implicit = corrections.pageDismissed ? null : activeRecordAskConnexContext(record);
+    const selected = corrections.selectionDismissed ? null : activeSelectionAskConnexContext(selection);
     const attachments = extractAskConnexAttachments(content);
-    const merged = implicit ? [implicit, ...attachments] : attachments;
+    const merged = [
+        ...(implicit ? [implicit] : []),
+        ...corrections.pinned,
+        ...(selected?.available ? selected.pageContext : []),
+        ...attachments,
+    ];
     const unique = new Map(merged.map((item) => [`${item.kind}:${item.id}`, item]));
     const pageContext = [...unique.values()].map(({ kind, id }) => ({ kind, id }));
     return {
@@ -661,6 +918,7 @@ export function reduceAskConnexTurn(
             turnId: event.turnId,
             generationHandle: event.generationHandle,
             reason: null,
+            progress: event.progress ?? [],
         };
     }
     const phase = event.status === 'queued' || event.status === 'accepted'
@@ -674,7 +932,12 @@ export function reduceAskConnexTurn(
               : event.status === 'cancelled'
                 ? 'cancelled'
                 : 'failed';
-    return { ...state, phase, reason: event.reason ?? null };
+    return {
+        ...state,
+        phase,
+        reason: event.reason ?? null,
+        progress: event.progress ?? state.progress,
+    };
 }
 
 /** Route for one cited record, matching the records browser's detail paths. */
@@ -786,6 +1049,21 @@ export function latestAskConnexSuggestions(
         if (unique.size === ASK_CONNEX_SUGGESTION_LIMIT) break;
     }
     return [...unique];
+}
+
+/**
+ * The prompt a stopped answer offers to send again: the most recent thing the member themselves
+ * wrote. A withheld or empty message carries nothing to resend, so it yields nothing to offer.
+ */
+export function askConnexRetryPrompt(messages: readonly AiChatMessage[]): string | null {
+    for (let index = messages.length - 1; index >= 0; index--) {
+        const message = messages[index];
+        if (message === undefined || message.authorKind !== 'user') continue;
+        if (message.contentWithheld === true) return null;
+        const content = message.content.trim();
+        return content.length === 0 ? null : content;
+    }
+    return null;
 }
 
 /** Groups consecutive messages by sender without crossing a required transcript insertion point. */

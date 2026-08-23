@@ -58,6 +58,7 @@ import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import ooo.klae.connex.backend.ai.provider.AiToolCall;
 import ooo.klae.connex.backend.beans.AiChatMessage;
+import ooo.klae.connex.backend.dto.AiChatProgressItemDto;
 import ooo.klae.connex.backend.exceptions.AiBudgetExhaustedException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
@@ -90,6 +91,7 @@ class AiChatAgentLoopServiceTest {
     private AiChatMemoryService memoryService;
     private AiChatAttachmentContextService attachmentContextService;
     private AiChatTurnPersistenceService persistenceService;
+    private AiChatProgressService progressService;
     private AiRestrictionEpoch restrictionEpoch;
     private WorkspaceService workspaceService;
     private AiChatRealtimeDispatcher realtimeDispatcher;
@@ -108,6 +110,7 @@ class AiChatAgentLoopServiceTest {
         memoryService = mock(AiChatMemoryService.class);
         attachmentContextService = mock(AiChatAttachmentContextService.class);
         persistenceService = mock(AiChatTurnPersistenceService.class);
+        progressService = mock(AiChatProgressService.class);
         restrictionEpoch = mock(AiRestrictionEpoch.class);
         workspaceService = mock(WorkspaceService.class);
         realtimeDispatcher = mock(AiChatRealtimeDispatcher.class);
@@ -128,6 +131,7 @@ class AiChatAgentLoopServiceTest {
                 memoryService,
                 attachmentContextService,
                 persistenceService,
+                progressService,
                 restrictionEpoch,
                 workspaceService,
                 objectMapper,
@@ -139,6 +143,8 @@ class AiChatAgentLoopServiceTest {
         userMessage.setAuthorKind("user");
         userMessage.setContent("Summarize my pipeline");
         when(persistenceService.markRunning(TURN)).thenReturn(true);
+        when(progressService.project(anyInt(), anyInt(), anyInt(), any()))
+                .thenReturn(List.of());
         when(workspaceService.isMember(TURN.workspaceId(), TURN.userId())).thenReturn(true);
         doReturn(directAdmission).when(invocationAdmissionService).acquireDirect();
         when(memoryService.prepare(eq(TURN), any(), any(Instant.class))).thenReturn(new AiChatMemory(
@@ -1421,7 +1427,13 @@ class AiChatAgentLoopServiceTest {
                     AiRawOutputGuard outputGuard = invocation.getArgument(2);
                     assertEquals("bare_placeholder", outputGuard.rejectionReason(objectMapper.readTree(
                             "{\"tool\":null,\"final\":{\"text\":\"Follow up with P1.\","
-                                    + "\"citations\":[],\"suggestions\":[],\"title\":null}}")));
+                                    + "\"citations\":[],\"suggestions\":[],\"title\":null,"
+                                    + "\"blocks\":[{\"kind\":\"answer\",\"title\":null,"
+                                    + "\"body\":\"Follow up with P1.\",\"items\":[],\"rows\":[],"
+                                    + "\"citations\":[]}],\"coverage\":{\"status\":\"insufficient\","
+                                    + "\"asOf\":null,\"periodStart\":null,\"periodEnd\":null,"
+                                    + "\"sources\":[],\"exclusions\":[],"
+                                    + "\"truncated\":false}}}")));
                     return new AiStructuredRepairAttempt<>(
                             new AiStructuredOutcome.Malformed<>(
                                     "malformed_output", 3, 4, "stop"),
@@ -1585,7 +1597,7 @@ class AiChatAgentLoopServiceTest {
     }
 
     @Test
-    void resolvedFinalPersistsDisplayReasoningAndCountsItsProviderTokens() throws Exception {
+    void resolvedFinalDiscardsProviderReasoningAndCountsItsProviderTokens() throws Exception {
         AiAssistantStep finalStep = new AiAssistantStep(
                 null, new AiAssistantStep.FinalAnswer("Pipeline is healthy.", List.of()));
         when(invocationService.completeStructuredRepairable(
@@ -1597,6 +1609,9 @@ class AiChatAgentLoopServiceTest {
                         Optional.of("Compared the authorized pipeline signals.")));
         when(persistenceService.resolve(
                 eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+        when(progressService.project(7, 13, 17, "resolved")).thenReturn(List.of(
+                new AiChatProgressItemDto(0, "scope", "complete", null, false),
+                new AiChatProgressItemDto(65, "answer", "complete", null, false)));
 
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
 
@@ -1604,9 +1619,11 @@ class AiChatAgentLoopServiceTest {
         ArgumentCaptor<String> metadata = ArgumentCaptor.forClass(String.class);
         verify(persistenceService).resolve(
                 eq(TURN), eq("Pipeline is healthy."), metadata.capture(), eq(13), eq(21));
-        assertEquals(
-                "Compared the authorized pipeline signals.",
-                objectMapper.readTree(metadata.getValue()).path("reasoning").asString());
+        JsonNode persistedMetadata = objectMapper.readTree(metadata.getValue());
+        assertFalse(persistedMetadata.has("reasoning"));
+        assertEquals("answer", persistedMetadata.path("blocks").path(0).path("kind").asString());
+        assertEquals("insufficient", persistedMetadata.path("coverage").path("status").asString());
+        assertEquals("answer", persistedMetadata.path("progress").path(1).path("source").asString());
     }
 
     @Test
@@ -1676,6 +1693,96 @@ class AiChatAgentLoopServiceTest {
                         .toList());
         verify(persistenceService).applyGeneratedTitle(
                 TURN, "Mina Patel relationship review");
+    }
+
+    @Test
+    void persistedTextMatchesTheTerminalTextAndCoverageUsesDurableProgress() throws Exception {
+        var finalAnswer = new AiAssistantStep.FinalAnswer(
+                "Two matching records were found: Atlas and Beacon.",
+                List.of(),
+                List.of(),
+                null,
+                List.of(new AiAssistantStep.AnswerBlock(
+                        "fact",
+                        "Grounded result",
+                        "Two matching records were found.",
+                        List.of("Atlas", "Beacon"),
+                        List.of(),
+                        List.of())),
+                new AiAssistantStep.Coverage(
+                        "complete", "2026-08-21", null, null,
+                        List.of("records"), List.of(), false));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(new AiAssistantStep(null, finalAnswer)));
+        when(progressService.project(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId(), "resolved"))
+                .thenReturn(List.of(new AiChatProgressItemDto(
+                        1, "records", "complete", 2, true)));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<String> metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(
+                eq(TURN),
+                eq("Two matching records were found: Atlas and Beacon."),
+                metadata.capture(),
+                eq(3),
+                eq(5));
+        JsonNode persisted = objectMapper.readTree(metadata.getValue());
+        JsonNode coverage = persisted.path("coverage");
+        assertEquals("partial", coverage.path("status").asString());
+        assertTrue(coverage.path("truncated").asBoolean());
+        assertEquals("bounded_results", coverage.path("exclusions").path(0).asString());
+        assertEquals(
+                "Grounded result",
+                persisted.path("blocks").path(0).path("title").asString());
+    }
+
+    @Test
+    void specialCareTextInsideARowOmitsTheWholeAnswerDocument() throws Exception {
+        var finalAnswer = new AiAssistantStep.FinalAnswer(
+                "Two accounts are ready for outreach.",
+                List.of(),
+                List.of(),
+                null,
+                List.of(new AiAssistantStep.AnswerBlock(
+                        "timeline",
+                        "Recent contact",
+                        null,
+                        List.of(),
+                        List.of(new AiAssistantStep.Row(
+                                "Atlas renewal",
+                                "Call completed",
+                                "Rescheduled after the buyer's cancer treatment",
+                                "2026-08-20T09:00:00Z",
+                                List.of())),
+                        List.of())),
+                new AiAssistantStep.Coverage(
+                        "complete", null, null, null,
+                        List.of("activities"), List.of(), false));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(new AiAssistantStep(null, finalAnswer)));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<String> metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(
+                eq(TURN), eq("[omitted by policy]"), metadata.capture(), eq(3), eq(5));
+        String persisted = metadata.getValue();
+        assertFalse(persisted.contains("cancer"));
+        assertFalse(persisted.contains("Atlas renewal"));
+        assertTrue(objectMapper.readTree(persisted).path("blocks").isEmpty());
+        verify(persistenceService, never()).applyGeneratedTitle(eq(TURN), any());
     }
 
     @Test
@@ -2002,6 +2109,7 @@ class AiChatAgentLoopServiceTest {
                 memoryService,
                 attachmentContextService,
                 persistenceService,
+                progressService,
                 restrictionEpoch,
                 workspaceService,
                 objectMapper,

@@ -68,6 +68,19 @@ function mergePartial(
     });
 }
 
+/**
+ * Whether a settled answer's streamed tail must be discarded rather than kept on screen.
+ *
+ * Only a resolved answer's tail is dropped: its finished text is already the persisted transcript
+ * message, so keeping the tail would render the same words twice. Every other settled status keeps
+ * what was written, which is the same gate the server applies when it decides whether to return the
+ * retained partial to its requester — the two sides must agree or the retained text is discarded on
+ * arrival.
+ */
+export function shouldDropAskConnexStream(status: string): boolean {
+    return status === 'resolved';
+}
+
 /** Returns whether a durable reset invalidation starts a fresh stream for this turn. */
 export function shouldResetAskConnexStream(
     state: AskConnexStreamState | null,

@@ -238,6 +238,10 @@ public interface AiChatMapper {
         @Param("sessionId") int sessionId,
         @Param("ids") List<Integer> ids);
 
+    AiChatTurn getLatestActiveTurnBySession(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId);
+
     int markTurnRunning(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
@@ -302,6 +306,12 @@ public interface AiChatMapper {
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
         @Param("pendingOnly") boolean pendingOnly,
+        @Param("limit") int limit);
+
+    List<AiChatToolCall> listToolCallsByTurn(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("idempotencyPrefix") String idempotencyPrefix,
         @Param("limit") int limit);
 
     AiChatToolCall getToolCallBySessionForUpdate(

@@ -23,6 +23,8 @@ public final class RequestPathRedactor {
         "/activity/tasks",
         "/activity/tasks/{id}",
         "/admin/logs",
+        "/ask-connex",
+        "/ask-connex/{sessionId}",
         "/auth/{action}",
         "/auth/confirm-email",
         "/auth/forgot-password",

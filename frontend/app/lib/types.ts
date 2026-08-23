@@ -2852,7 +2852,6 @@ export type AiChatSession = {
     updatedAt: string;
 };
 
-/** API representation of one ordered assistant chat message. */
 /**
  * One record an assistant answer cited, projected for the current viewer. Citations the viewer may
  * not access are omitted by the backend rather than marked, so a shared session can legitimately
@@ -2864,8 +2863,130 @@ export type AiChatCitation = {
     kind: 'person' | 'company' | 'deal';
     id: number;
     label?: string | null;
+    /** ISO-8601 instant the cited value was last true, or null when the source carries no timestamp. */
+    asOf?: string | null;
+    /** Viewer-safe excerpt or structured value the citation supports, or null when none was projected. */
+    detail?: string | null;
 };
 
+/** Closed presentation vocabulary for one native Ask Connex answer block. */
+export type AiChatAnswerBlockKind =
+    | 'answer'
+    | 'fact'
+    | 'inference'
+    | 'recommendation'
+    | 'metric'
+    | 'list'
+    | 'comparison'
+    | 'timeline'
+    | 'draft'
+    | 'extraction'
+    | 'diff'
+    | 'limitation';
+
+/**
+ * One structured line inside a block whose kind carries tabular meaning. The four fields are read
+ * differently per kind and the block kind is the only thing that says how: `metric` reads
+ * label/value as a tile with `detail` as its delta or qualifier, `comparison` reads `value` and
+ * `detail` as the two compared sides, `timeline` reads `at` as the entry's instant, `diff` reads
+ * `value` as the before and `detail` as the after, and `extraction` reads label/value as a field
+ * pair. Every string field is nullable because the server projects only what it could establish.
+ */
+export interface AiChatAnswerRow {
+    label: string;
+    value: string | null;
+    detail: string | null;
+    /** ISO-8601 instant this row happened, or null for rows that are not events. */
+    at: string | null;
+    /** Citations already authorized for the current viewer, supporting this row alone. */
+    evidence: AiChatCitation[];
+}
+
+/**
+ * One answer-document block with evidence already authorized for the current viewer.
+ *
+ * `rows` is only ever populated for the structured kinds (`metric`, `comparison`, `timeline`,
+ * `diff`, `extraction`); every other kind carries an empty array and renders from `body`/`items`.
+ */
+export type AiChatAnswerBlock = {
+    kind: AiChatAnswerBlockKind;
+    title: string | null;
+    body: string | null;
+    items: string[];
+    rows: AiChatAnswerRow[];
+    evidence: AiChatCitation[];
+};
+
+/**
+ * The one canonical source vocabulary shared by coverage disclosure and the checked trail, so
+ * "Sources checked" and "What I checked" can never describe the same turn differently. It mirrors
+ * the backend's `AiAssistantStepGuard.COVERAGE_SOURCES` exactly.
+ *
+ * This is a runtime tuple rather than a bare union because the realtime frame parser has to reject
+ * unknown sources at runtime: deriving both the type and the allowlist from one value makes it
+ * impossible for a hand-maintained runtime check to drift from the union it claims to narrow.
+ */
+export const AI_CHAT_SOURCES = [
+    'records',
+    'deals',
+    'activities',
+    'tasks',
+    'notes',
+    'files',
+    'metrics',
+    'schedule',
+    'actions',
+    'other',
+] as const;
+
+/** One category the assistant declares as checked for an answer. */
+export type AiChatSource = (typeof AI_CHAT_SOURCES)[number];
+
+/**
+ * The progress vocabulary: every coverage source plus the two synthetic milestones that bracket a
+ * turn. It mirrors the backend's `AiChatProgressService.PROGRESS_SOURCES`.
+ */
+export const AI_CHAT_PROGRESS_SOURCES = [...AI_CHAT_SOURCES, 'scope', 'answer'] as const;
+
+/** One milestone category in the assistant's live and durable checked-source trail. */
+export type AiChatProgressSource = (typeof AI_CHAT_PROGRESS_SOURCES)[number];
+
+/** Bounded coverage, freshness, and exclusion disclosure for one answer. */
+export type AiChatCoverage = {
+    status: 'complete' | 'partial' | 'insufficient';
+    asOf: string | null;
+    periodStart: string | null;
+    periodEnd: string | null;
+    sources: AiChatSource[];
+    exclusions: (
+        | 'private_data'
+        | 'restricted_records'
+        | 'unavailable_sources'
+        | 'unsupported_context'
+        | 'bounded_results'
+        | 'tool_failure'
+    )[];
+    truncated: boolean;
+};
+
+/** One durable, viewer-safe milestone in the assistant's checked-source trail. */
+export type AiChatProgressItem = {
+    seq: number;
+    source: AiChatProgressSource;
+    status: 'running' | 'proposed' | 'complete' | 'failed' | 'skipped' | 'timed_out' | 'cancelled';
+    count: number | null;
+    truncated: boolean;
+};
+
+/** Native answer document projected from validated durable metadata. */
+export type AiChatAnswerDocument = {
+    turnId: number;
+    blocks: AiChatAnswerBlock[];
+    coverage: AiChatCoverage;
+    progress: AiChatProgressItem[];
+};
+
+/** API representation of one ordered assistant chat message. */
 export type AiChatMessage = {
     id: number;
     sessionId: number;
@@ -2874,12 +2995,12 @@ export type AiChatMessage = {
     authorUserId: number | null;
     authorDisplayName: string | null;
     content: string;
-    reasoning?: string | null;
     contentWithheld?: boolean;
     historySummarized?: boolean;
     createdAt: string;
     citations?: AiChatCitation[] | null;
     suggestions?: string[] | null;
+    answerDocument?: AiChatAnswerDocument | null;
 };
 
 /** Viewer-safe membership state for one shared assistant session participant. */
@@ -2906,9 +3027,11 @@ export type AiChatRealtimeFrame = {
     turnId: number;
     seq: number;
     kind: 'session' | 'message' | 'state' | 'reset' | 'step' | 'terminal';
-    tool: string | null;
+    tool: AiChatProgressItem['source'] | null;
     status: string;
     reason: string | null;
+    toolCallId?: number | null;
+    text?: null;
 };
 
 /**
@@ -2918,6 +3041,8 @@ export type AiChatRealtimeFrame = {
  * against a REST-hydrated persisted partial by comparing offsets against applied length.
  */
 export type AiChatDeltaFrame = {
+    workspaceId: number;
+    sessionId: number;
     turnId: number;
     seq: number;
     kind: 'delta';
@@ -2956,6 +3081,7 @@ export type AiOrganizationBudget = {
 export type AiChatSessionDetail = {
     session: AiChatSession;
     messages: Page<AiChatMessage>;
+    activeTurn: AiChatTurn | null;
 };
 
 /** Request body for starting one bounded assistant turn. */
@@ -2979,6 +3105,7 @@ export type AiChatTurn = {
     status: string;
     terminalReason: string | null;
     partialContent?: string | null;
+    progress: AiChatProgressItem[];
 };
 
 /** Viewer-authorized target identity for an assistant write-tool call. */

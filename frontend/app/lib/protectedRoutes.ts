@@ -2,6 +2,7 @@ const PROTECTED_PREFIXES = [
     '/account',
     '/activity',
     '/admin',
+    '/ask-connex',
     '/dashboard',
     '/library',
     '/marketing',

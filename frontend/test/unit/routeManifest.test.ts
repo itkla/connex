@@ -9,6 +9,7 @@ import {
     SHIPPED_APP_ROUTES,
     SHIPPED_ROUTE_QUERY_PARAMS,
 } from "@/app/lib/routeManifest";
+import { isProtectedPath } from "@/app/lib/protectedRoutes";
 import {
     ACTIVITY_URL_KEY,
     COMMENT_URL_KEY,
@@ -152,6 +153,13 @@ describe("shipped route manifest", () => {
 
     it("registers no route the app does not ship", () => {
         expect(shippedRoutes.filter((route) => !filesystemRoutes.includes(route))).toEqual([]);
+    });
+
+    it("sends a signed-out visitor to sign in from every shipped route", () => {
+        expect(shippedRoutes.filter((route) => !isProtectedPath(route))).toEqual([]);
+        expect(isProtectedPath("/ask-connex")).toBe(true);
+        expect(isProtectedPath("/ask-connex/42")).toBe(true);
+        expect(isProtectedPath("/ask-connex-marketing")).toBe(false);
     });
 
     it("stays in sync with the manifest the backend validates action URLs against", () => {

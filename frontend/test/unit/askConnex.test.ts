@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -5,6 +7,7 @@ import {
     EMPTY_ASK_CONNEX_TURN,
     AskConnexFileRemovalError,
     actionableAskConnexToolCallIds,
+    activeSelectionAskConnexContext,
     anchorAskConnexToolCards,
     askConnexCitationHref,
     askConnexCitations,
@@ -12,6 +15,7 @@ import {
     askConnexLatestMessages,
     askConnexTranscript,
     askConnexMessageContent,
+    askConnexRetryPrompt,
     askConnexSessionStorageKey,
     askConnexToolCardAffordances,
     askConnexToolCardStatus,
@@ -22,6 +26,7 @@ import {
     extractAskConnexAttachments,
     groupAskConnexMessages,
     hasPendingAskConnexFileOperation,
+    isAskConnexProgressSource,
     latestAskConnexSuggestions,
     loadAskConnexLatestMessages,
     mergeAskConnexContext,
@@ -35,8 +40,10 @@ import {
     removeAskConnexAttachment,
     restoreAskConnexFileAfterFailedRemoval,
     serializeStoredAskConnexTurn,
+    snapshotAskConnexSourceContext,
     type AskConnexFileAttachment,
 } from '@/app/lib/askConnex';
+import { AI_CHAT_PROGRESS_SOURCES, AI_CHAT_SOURCES } from '@/app/lib/types';
 import type { AiAssistantToolCall } from '@/app/lib/types';
 
 const TOOL_SUMMARY_LABELS = {
@@ -134,6 +141,99 @@ describe('Ask Connex context merging', () => {
 
         expect(result.pageContext).toHaveLength(11);
         expect(result.overflow).toBe(true);
+    });
+
+    it('merges supported selected rows after page context and de-duplicates overlaps', () => {
+        const selection = {
+            type: 'person' as const,
+            ids: new Set([7, 8]),
+            sourceSurface: 'record_list' as const,
+            scope: { kind: 'explicit_selection' as const, recordIds: [7, 8] },
+        };
+
+        expect(activeSelectionAskConnexContext(selection)).toEqual({
+            type: 'person',
+            count: 2,
+            available: true,
+            unavailableReason: null,
+            pageContext: [
+                { kind: 'person', id: 7 },
+                { kind: 'person', id: 8 },
+            ],
+        });
+        expect(mergeAskConnexContext(
+            { type: 'person', id: 7, label: 'Kenji' },
+            'Compare [Mina](person:9)',
+            selection,
+        ).pageContext).toEqual([
+            { kind: 'person', id: 7 },
+            { kind: 'person', id: 8 },
+            { kind: 'person', id: 9 },
+        ]);
+    });
+
+    it('keeps unsupported or invalid selections visible while excluding them from the request', () => {
+        const unsupported = {
+            type: 'task' as const,
+            ids: new Set([41, 42]),
+            sourceSurface: 'record_list' as const,
+            scope: { kind: 'explicit_selection' as const, recordIds: [41, 42] },
+        };
+        const invalid = {
+            type: 'deal' as const,
+            ids: new Set(['not-an-id']),
+            sourceSurface: 'record_list' as const,
+            scope: { kind: 'explicit_selection' as const, recordIds: [] },
+        };
+
+        expect(activeSelectionAskConnexContext(unsupported)).toMatchObject({
+            count: 2,
+            available: false,
+            unavailableReason: 'record_type',
+            pageContext: [],
+        });
+        expect(activeSelectionAskConnexContext(invalid)).toMatchObject({
+            count: 1,
+            available: false,
+            unavailableReason: 'invalid',
+            pageContext: [],
+        });
+        expect(mergeAskConnexContext(null, 'Summarize this selection', unsupported).pageContext)
+            .toEqual([]);
+    });
+
+    it('keeps all-matching scopes visible without substituting loaded row ids', () => {
+        const selection = {
+            type: 'company' as const,
+            ids: new Set([3, 4]),
+            sourceSurface: 'record_list' as const,
+            scope: { kind: 'filter_match' as const, filter: { industry: ['Software'] } },
+        };
+
+        expect(activeSelectionAskConnexContext(selection)).toMatchObject({
+            count: 2,
+            available: false,
+            unavailableReason: 'scope',
+            pageContext: [],
+        });
+    });
+
+    it('snapshots source context before the contributor page unmounts', () => {
+        const ids = new Set([7, 8]);
+        const snapshot = snapshotAskConnexSourceContext(
+            { type: 'person', id: 7, label: 'Kenji' },
+            {
+                type: 'person',
+                ids,
+                sourceSurface: 'record_list',
+                scope: { kind: 'explicit_selection', recordIds: [7, 8] },
+            },
+        );
+
+        ids.clear();
+
+        expect(snapshot.record).toEqual({ type: 'person', id: 7, label: 'Kenji' });
+        expect([...(snapshot.selection?.ids ?? [])]).toEqual([7, 8]);
     });
 
     it('removes only the selected attachment token', () => {
@@ -751,6 +851,46 @@ describe('Ask Connex citations', () => {
     });
 });
 
+describe('Ask Connex retry prompt', () => {
+    const user = {
+        id: 1,
+        sessionId: 4,
+        seq: 1,
+        authorKind: 'user' as const,
+        authorUserId: 11,
+        authorDisplayName: 'Aiko',
+        content: 'Which deals are cooling?',
+        createdAt: '2026-08-11T10:00:00Z',
+    };
+    const reply = {
+        ...user,
+        id: 2,
+        seq: 2,
+        authorKind: 'assistant' as const,
+        authorUserId: null,
+        authorDisplayName: null,
+        content: 'Two deals are cooling.',
+    };
+
+    it('offers the most recent thing the member wrote', () => {
+        expect(askConnexRetryPrompt([user, reply])).toBe('Which deals are cooling?');
+        expect(askConnexRetryPrompt([
+            user,
+            reply,
+            { ...user, id: 3, seq: 3, content: '  Any at risk?  ' },
+        ])).toBe('Any at risk?');
+    });
+
+    it('offers nothing when there is nothing of the member’s to send again', () => {
+        expect(askConnexRetryPrompt([])).toBeNull();
+        expect(askConnexRetryPrompt([reply])).toBeNull();
+        expect(askConnexRetryPrompt([{ ...user, content: '   ' }])).toBeNull();
+        expect(askConnexRetryPrompt([
+            { ...user, content: '', contentWithheld: true },
+        ])).toBeNull();
+    });
+});
+
 describe('Ask Connex follow-up suggestions', () => {
     const assistant = {
         id: 2,
@@ -974,5 +1114,78 @@ describe('Ask Connex transcript grouping', () => {
             messages: [visible],
             historySummarized: true,
         });
+    });
+});
+
+const BACKEND_ASSISTANT_DIR = path.join(
+    process.cwd(),
+    "..",
+    "backend",
+    "src",
+    "main",
+    "java",
+    "ooo",
+    "klae",
+    "connex",
+    "backend",
+    "ai",
+    "assistant",
+);
+
+function javaStringSetLiteral(source: string, constant: string): string[] {
+    const declaration = new RegExp(
+        `Set<String> ${constant} = Set\\.of\\(([\\s\\S]*?)\\);`,
+    ).exec(source);
+    if (!declaration) throw new Error(`Could not read ${constant} from the backend source`);
+    return [...declaration[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+}
+
+function javaStringConstant(source: string, constant: string): string {
+    const declaration = new RegExp(
+        `String ${constant} = "([^"]+)";`,
+    ).exec(source);
+    if (!declaration) throw new Error(`Could not read ${constant} from the backend source`);
+    return declaration[1];
+}
+
+describe('assistant progress vocabulary', () => {
+    const guardSource = readFileSync(
+        path.join(BACKEND_ASSISTANT_DIR, 'AiAssistantStepGuard.java'),
+        'utf8',
+    );
+    const progressSource = readFileSync(
+        path.join(BACKEND_ASSISTANT_DIR, 'AiChatProgressService.java'),
+        'utf8',
+    );
+
+    it('matches the backend coverage-source vocabulary exactly', () => {
+        expect([...AI_CHAT_SOURCES].toSorted()).toEqual(
+            javaStringSetLiteral(guardSource, 'COVERAGE_SOURCES').toSorted(),
+        );
+    });
+
+    it('adds only the two synthetic milestones the backend brackets a turn with', () => {
+        expect(progressSource).toMatch(
+            /PROGRESS_SOURCES = union\(\s*AiAssistantStepGuard\.COVERAGE_SOURCES,\s*SCOPE,\s*ANSWER\)/,
+        );
+        const synthetic = [
+            javaStringConstant(progressSource, 'SCOPE'),
+            javaStringConstant(progressSource, 'ANSWER'),
+        ];
+
+        expect([...AI_CHAT_PROGRESS_SOURCES].toSorted()).toEqual(
+            [...javaStringSetLiteral(guardSource, 'COVERAGE_SOURCES'), ...synthetic].toSorted(),
+        );
+    });
+
+    it('accepts every backend milestone and rejects anything else', () => {
+        for (const source of AI_CHAT_PROGRESS_SOURCES) {
+            expect(isAskConnexProgressSource(source)).toBe(true);
+        }
+        expect(isAskConnexProgressSource('reasoning')).toBe(false);
+        expect(isAskConnexProgressSource('')).toBe(false);
+        expect(isAskConnexProgressSource(null)).toBe(false);
+        expect(isAskConnexProgressSource(undefined)).toBe(false);
+        expect(isAskConnexProgressSource(3)).toBe(false);
     });
 });

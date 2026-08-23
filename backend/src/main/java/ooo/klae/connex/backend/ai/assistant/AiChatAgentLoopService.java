@@ -46,6 +46,7 @@ import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
+import ooo.klae.connex.backend.dto.AiChatProgressItemDto;
 import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.AiBudgetExhaustedException;
@@ -69,7 +70,6 @@ public class AiChatAgentLoopService {
     private static final int MAX_CONSECUTIVE_NO_PROGRESS_STEPS = 2;
     private static final String INTERNAL_ERROR = "internal_error";
     private static final int MAX_FINAL_CHARS = 16_000;
-    private static final int MAX_REASONING_CHARS = 16_000;
     private static final int MAX_GENERATED_TITLE_CHARS = 80;
     private static final double TEMPERATURE = 0.1;
 
@@ -85,6 +85,7 @@ public class AiChatAgentLoopService {
     private final AiChatMemoryService memoryService;
     private final AiChatAttachmentContextService attachmentContextService;
     private final AiChatTurnPersistenceService persistenceService;
+    private final AiChatProgressService progressService;
     private final AiRestrictionEpoch restrictionEpoch;
     private final WorkspaceService workspaceService;
     private final ObjectMapper objectMapper;
@@ -137,8 +138,6 @@ public class AiChatAgentLoopService {
                     : List.of();
             Map<String, AiAssistantToolResult> toolResultCache = new HashMap<>();
             Set<String> seenToolResults = new HashSet<>();
-            List<String> reasoningParts = new ArrayList<>();
-            boolean reasoningRejected = false;
             AiStructuredRepair repair = null;
             Integer nativeToolsDegradedStatus = null;
             ToolBudgetAudit toolBudgetAudit = ToolBudgetAudit.NONE;
@@ -268,13 +267,6 @@ public class AiChatAgentLoopService {
                         continue;
                     }
                     outcome = java.util.Objects.requireNonNull(attempt, "attempt").outcome();
-                    if (aiProperties.isAssistantThinkingEnabled() && !reasoningRejected
-                            && attempt.reasoning().isPresent()
-                            && !appendReasoning(
-                                    reasoningParts, attempt.reasoning().orElseThrow())) {
-                        reasoningParts.clear();
-                        reasoningRejected = true;
-                    }
                     requireWorkspaceEnabled(turn);
                     persistenceService.requireRunning(turn);
                     inputTokens = addTokens(inputTokens, inputTokens(outcome));
@@ -559,9 +551,22 @@ public class AiChatAgentLoopService {
                     throw exception;
                 }
                 boolean omitted = MaskingEngine.OMITTED_BY_POLICY.equals(persistedText);
+                Optional<List<AiAssistantStep.AnswerBlock>> screenedBlocks =
+                        screenedAnswerBlocks(finalAnswer.blocks());
+                // The persisted transcript text stays exactly the screened terminal text that was
+                // streamed to the requester. Rendering the blocks here instead would repaint the
+                // answer with different prose the moment the transcript refreshed; the typed
+                // document in structured_json is the surface that carries the blocks.
+                if (screenedBlocks.isEmpty()) {
+                    persistedText = MaskingEngine.OMITTED_BY_POLICY;
+                    omitted = true;
+                }
                 List<String> citations = omitted ? List.of() : finalAnswer.citations();
                 try {
                     resources.requireKnownCitations(citations);
+                    if (!omitted) {
+                        requireBlockCitations(screenedBlocks.orElseThrow(), citations);
+                    }
                 } catch (AiAssistantLoopException exception) {
                     resetMalformedStream(streamingProgress, streamingObserver);
                     throw exception;
@@ -569,11 +574,17 @@ public class AiChatAgentLoopService {
                 List<String> suggestions = omitted
                         ? List.of()
                         : AiAssistantStepGuard.filterSuggestions(finalAnswer.suggestions());
+                List<AiChatProgressItemDto> progress = progressService.project(
+                        turn.workspaceId(), turn.sessionId(), turn.turnId(), "resolved");
+                AiAssistantStep.Coverage coverage = omitted
+                        ? null
+                        : AiChatProgressService.reconcileCoverage(
+                                finalAnswer.coverage(), progress, toolBudgetAudit);
                 String metadata = promptAssembler.finalMetadata(
                         turn.turnId(), citations, suggestions, resources.snapshot(),
-                        reasoningParts.isEmpty()
-                                ? Optional.empty()
-                                : Optional.of(String.join("\n\n", reasoningParts)),
+                        omitted ? List.of() : screenedBlocks.orElseThrow(),
+                        coverage,
+                        progress,
                         toolBudgetAudit);
                 requireCurrentAccess(turn);
                 persistenceService.resolve(
@@ -635,6 +646,47 @@ public class AiChatAgentLoopService {
         return SpecialCareTextScreen.screen(text).excluded()
                 ? MaskingEngine.OMITTED_BY_POLICY
                 : text;
+    }
+
+    private static Optional<List<AiAssistantStep.AnswerBlock>> screenedAnswerBlocks(
+            List<AiAssistantStep.AnswerBlock> blocks) {
+        if (blocks == null || blocks.isEmpty()) {
+            return Optional.empty();
+        }
+        for (AiAssistantStep.AnswerBlock block : blocks) {
+            // Every free-text field a block can carry is screened, including structured rows:
+            // an unscreened field is durably persisted into the answer document and rendered to
+            // shared-session viewers, and special-care text must be excluded in both privacy modes.
+            if (block == null
+                    || excludedGeneratedText(block.title())
+                    || excludedGeneratedText(block.body())
+                    || block.items().stream().anyMatch(AiChatAgentLoopService::excludedGeneratedText)
+                    || block.rows().stream().anyMatch(AiChatAgentLoopService::excludedGeneratedRow)) {
+                return Optional.empty();
+            }
+        }
+        return Optional.of(List.copyOf(blocks));
+    }
+
+    private static boolean excludedGeneratedRow(AiAssistantStep.Row row) {
+        return row == null
+                || excludedGeneratedText(row.label())
+                || excludedGeneratedText(row.value())
+                || excludedGeneratedText(row.detail())
+                || excludedGeneratedText(row.at());
+    }
+
+    private static boolean excludedGeneratedText(String value) {
+        return value != null && SpecialCareTextScreen.screen(value).excluded();
+    }
+
+    private static void requireBlockCitations(
+            List<AiAssistantStep.AnswerBlock> blocks, List<String> citations) {
+        Set<String> allowed = Set.copyOf(citations);
+        if (blocks.stream().flatMap(block -> block.citations().stream())
+                .anyMatch(citation -> !allowed.contains(citation))) {
+            throw AiAssistantLoopException.malformed("unknown_citation");
+        }
     }
 
     private boolean restrictionsChanged(AiChatQueuedTurn turn) {
@@ -729,11 +781,12 @@ public class AiChatAgentLoopService {
     }
 
     private void publish(AiChatQueuedTurn turn, AiChatStepFrameDto frame) {
-        realtimeDispatcher.sessionNow(turn.workspaceId(), turn.sessionId(), frame);
+        realtimeDispatcher.sessionNow(
+                turn.workspaceId(), turn.sessionId(), AiChatProgressService.sharedFrame(frame));
     }
 
     private void publish(int userId, AiChatStepFrameDto frame) {
-        realtimeDispatcher.userAfterCommit(userId, frame);
+        realtimeDispatcher.userAfterCommit(userId, AiChatProgressService.viewerFrame(frame));
     }
 
     private void failTool(AiChatQueuedTurn turn, int toolCallId, String reason) {
@@ -775,20 +828,6 @@ public class AiChatAgentLoopService {
         return additional > Integer.MAX_VALUE - current
                 ? Integer.MAX_VALUE
                 : current + additional;
-    }
-
-    private static boolean appendReasoning(
-            List<String> reasoningParts, String reasoning) {
-        int used = reasoningParts.stream().mapToInt(String::length).sum()
-                + reasoningParts.size() * 2;
-        if (reasoning.isBlank()) {
-            return true;
-        }
-        if (reasoning.length() > MAX_REASONING_CHARS - used) {
-            return false;
-        }
-        reasoningParts.add(reasoning);
-        return true;
     }
 
     private ToolBudgetAudit requireAdditionalToolCapacity(
