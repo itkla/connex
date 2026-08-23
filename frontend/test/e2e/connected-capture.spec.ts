@@ -254,10 +254,15 @@ for (const locale of ['en', 'ja'] as const) {
         await useLocale(page, locale);
         await page.goto('/account/connections');
 
+        const manage = page.getByRole('button', {
+            name: message(locale, 'account', 'AccountConnections.manage'),
+        });
         const configure = page.getByRole('button', {
             name: message(locale, 'account', 'AccountCaptureProvider.configure'),
         });
         await expect.poll(() => captureRequests).toBeGreaterThan(0);
+        await expect(manage).toBeVisible();
+        await manage.click();
         await expect(configure).toBeVisible();
         await configure.click();
         await expect(page.getByRole('heading', {

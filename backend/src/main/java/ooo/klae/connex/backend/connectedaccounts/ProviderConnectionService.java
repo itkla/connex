@@ -197,7 +197,7 @@ public class ProviderConnectionService {
         } catch (RuntimeException exception) {
             log.warn(
                 "Superseded {} authorization could not be revoked: {}",
-                provider,
+                provider.strip().replace('\r', ' ').replace('\n', ' ').replace('\t', ' '),
                 exception.getClass().getSimpleName());
         }
     }
