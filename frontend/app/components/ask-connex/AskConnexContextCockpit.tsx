@@ -7,6 +7,7 @@ import {
     BookmarkSlashIcon,
     DocumentTextIcon,
     ExclamationCircleIcon,
+    FunnelIcon,
     ListBulletIcon,
     MapPinIcon,
     PhotoIcon,
@@ -16,10 +17,13 @@ import { motion, useReducedMotion } from 'motion/react';
 
 import type {
     AskConnexAttachment,
+    AskConnexDeclaredScope,
     AskConnexFileAttachment,
+    AskConnexRequestScope,
     AskConnexScopePreview,
     AskConnexSelectionContext,
 } from '@/app/lib/askConnex';
+import type { AskConnexScopeChip } from '@/app/lib/askConnexScope';
 import { durationMicro, easeOut, instant } from '@/app/lib/motion';
 import { formatFileSize } from '@/app/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -47,7 +51,17 @@ export type AskConnexContextLabels = {
     scopeConfirm: string;
     scopeEdit: string;
     scopeSummary: (preview: AskConnexScopePreview) => string;
+    scopeDeclaredSummary: (declared: AskConnexDeclaredScope) => string;
     scopeTitle: string;
+    scopeFilters: string;
+    scopeFiltersSet: (count: number) => string;
+    scopeChipKind: (kind: AskConnexScopeChip['kind']) => string;
+    scopeChipValues: (values: string[]) => string;
+    /** One interpreted period stated as a date range, or empty when there is no whole span. */
+    scopePeriodRange: (values: string[]) => string;
+    scopeWarmthBand: (band: string) => string;
+    scopeRecordKind: (kind: string) => string;
+    scopeDealStatus: (status: string) => string;
     unpinContext: (label: string) => string;
     uploadProgress: (progress: number) => string;
     uploadRemoving: string;
@@ -61,6 +75,8 @@ export type AskConnexContextInputs = {
     unsupportedPageContext: { type: AskConnexSelectionContext['type']; label: string } | null;
     attachments: readonly AskConnexAttachment[];
     fileAttachments: readonly AskConnexFileAttachment[];
+    /** Declared filters the request carries, which narrow it exactly as removing a record does. */
+    scopeChips?: readonly AskConnexScopeChip[];
 };
 
 /**
@@ -76,7 +92,32 @@ export function hasAskConnexContextInputs(inputs: AskConnexContextInputs): boole
         || inputs.selectionContext !== null
         || inputs.unsupportedPageContext !== null
         || inputs.attachments.length > 0
-        || inputs.fileAttachments.length > 0;
+        || inputs.fileAttachments.length > 0
+        || (inputs.scopeChips?.length ?? 0) > 0;
+}
+
+/**
+ * The values one declared filter names, in the member's language.
+ *
+ * A filter whose values the member already chose by name — stages, owners, a saved view — states
+ * them; a filter over a fixed vocabulary states that vocabulary's own product words rather than the
+ * codes the contract uses for them; and a period states one span rather than the two dates it is
+ * bounded by, because "the 25th and the 23rd" is a list of days and not the window a request reads.
+ */
+function scopeChipValues(chip: AskConnexScopeChip, labels: AskConnexContextLabels): string {
+    if (chip.kind === 'period') {
+        return labels.scopePeriodRange(chip.values);
+    }
+    if (chip.kind === 'warmth') {
+        return labels.scopeChipValues(chip.values.map((value) => labels.scopeWarmthBand(value)));
+    }
+    if (chip.kind === 'recordKinds') {
+        return labels.scopeChipValues(chip.values.map((value) => labels.scopeRecordKind(value)));
+    }
+    if (chip.kind === 'dealStatuses') {
+        return labels.scopeChipValues(chip.values.map((value) => labels.scopeDealStatus(value)));
+    }
+    return labels.scopeChipValues(chip.values);
 }
 
 /**
@@ -131,6 +172,8 @@ export function AskConnexContextStrip({
     unsupportedPageContext,
     attachments,
     fileAttachments,
+    scopeChips,
+    scopeRefusal,
     canRemoveFiles,
     fileOperationPending,
     overflow,
@@ -142,6 +185,7 @@ export function AskConnexContextStrip({
     onUnpin,
     onRemovePage,
     onRemoveSelection,
+    onEditScope,
     onReset,
 }: {
     groupRef: RefObject<HTMLDivElement | null>;
@@ -152,6 +196,9 @@ export function AskConnexContextStrip({
     unsupportedPageContext: { type: AskConnexSelectionContext['type']; label: string } | null;
     attachments: AskConnexAttachment[];
     fileAttachments: AskConnexFileAttachment[];
+    scopeChips: readonly AskConnexScopeChip[];
+    /** A refused set of filters, stated in plain language, or null when nothing was refused. */
+    scopeRefusal: string | null;
     canRemoveFiles: boolean;
     fileOperationPending: boolean;
     overflow: boolean;
@@ -163,6 +210,7 @@ export function AskConnexContextStrip({
     onUnpin: (attachment: AskConnexAttachment) => void;
     onRemovePage: () => void;
     onRemoveSelection: () => void;
+    onEditScope: () => void;
     onReset: () => void;
 }) {
     const reduceMotion = useReducedMotion() ?? false;
@@ -173,8 +221,9 @@ export function AskConnexContextStrip({
         unsupportedPageContext,
         attachments,
         fileAttachments,
+        scopeChips,
     });
-    if (!carrying && !overflow && !corrected) return null;
+    if (!carrying && !overflow && !corrected && scopeRefusal === null) return null;
     const unavailableExplanation = selectionContext?.unavailableReason === 'scope'
         ? labels.contextScopeUnsupported
         : unsupportedPageContext !== null
@@ -328,7 +377,35 @@ export function AskConnexContextStrip({
                         </Badge>
                     );
                 })}
+                {scopeChips.map((chip) => {
+                    const values = scopeChipValues(chip, labels);
+                    return (
+                        <Badge
+                            key={`scope:${chip.key}`}
+                            variant="outline"
+                            className="max-w-56 shrink-0 pr-1 text-muted-foreground"
+                        >
+                            <FunnelIcon />
+                            <span className="shrink-0 font-medium">{labels.scopeChipKind(chip.kind)}</span>
+                            {values.length > 0 ? (
+                                <>
+                                    <span aria-hidden>·</span>
+                                    <span className="truncate">{values}</span>
+                                </>
+                            ) : null}
+                            <ChipControl
+                                label={labels.scopeEdit}
+                                onClick={onEditScope}
+                            >
+                                <FunnelIcon className="size-3" />
+                            </ChipControl>
+                        </Badge>
+                    );
+                })}
             </div>
+            {scopeRefusal !== null ? (
+                <p role="alert" className="mt-1.5 text-xs text-destructive">{scopeRefusal}</p>
+            ) : null}
             {unavailableExplanation ? (
                 <p className="mt-1.5 text-xs text-muted-foreground">{unavailableExplanation}</p>
             ) : null}
@@ -359,12 +436,12 @@ export function AskConnexContextStrip({
  * named group, so what a screen reader hears is the held scope and not a re-read of two buttons.
  */
 export function AskConnexScopeNotice({
-    preview,
+    scope,
     labels,
     onConfirm,
     onEdit,
 }: {
-    preview: AskConnexScopePreview;
+    scope: AskConnexRequestScope;
     labels: AskConnexContextLabels;
     onConfirm: () => void;
     onEdit: () => void;
@@ -381,7 +458,9 @@ export function AskConnexScopeNotice({
             className="mb-2 border-y border-border py-2"
         >
             <p role="status" className="text-xs leading-relaxed text-foreground">
-                {labels.scopeSummary(preview)}
+                {scope.records === null ? '' : labels.scopeSummary(scope.records)}
+                {scope.records !== null && scope.declared !== null ? ' ' : ''}
+                {scope.declared === null ? '' : labels.scopeDeclaredSummary(scope.declared)}
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
                 <Button type="button" size="inline" onClick={onConfirm}>

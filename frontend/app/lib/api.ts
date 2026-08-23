@@ -5307,6 +5307,34 @@ export function leaveAiChatPresence(id: number, init: RequestInit = {}) {
     return deleteJson<void>(`/api/ai/assistant/sessions/${id}/presence`, init);
 }
 
+/**
+ * Lists the declared assistant capabilities this member can run, optionally for one record kind.
+ *
+ * The directory is the only source contextual entry points are built from: a suggestion whose
+ * backing capability is absent here is never offered, so a page cannot advertise work the server
+ * would decline. Listing needs no configured AI provider — describing the surface and running a
+ * request are separate gates.
+ */
+export function getAiAssistantSkills(
+    context?: Types.AiChatPageContextKind,
+    init: RequestInit = {},
+) {
+    const suffix = context === undefined ? "" : `?context=${encodeURIComponent(context)}`;
+    return getJson<Types.AiAssistantSkill[]>(`/api/ai/assistant/skills${suffix}`, init);
+}
+
+/** Evaluates one declared scope without asking anything, so its real breadth can be reviewed first. */
+export function previewAiChatScope(
+    payload: Types.AiChatScopePreviewRequest,
+    init: RequestInit = {},
+) {
+    return postJson<Types.AiChatScopePreview>(
+        "/api/ai/assistant/sessions/scope-preview",
+        payload,
+        init,
+    );
+}
+
 export async function startAiChatTurn(
     sessionId: number,
     payload: Types.AiChatTurnCreateRequest,

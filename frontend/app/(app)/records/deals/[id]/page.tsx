@@ -71,6 +71,7 @@ import Attachments from '@/app/components/attachments/Attachments';
 import CommentsSection from '@/app/components/records/comments/CommentsSection';
 import SummaryTile from '@/app/components/SummaryTile';
 import { EngagementSparkline, type EngagementPoint } from '@/app/components/records/companies/CompanyCard';
+import AskConnexRecordEntry from '@/app/components/ask-connex/AskConnexRecordEntry';
 import DealActionsMenu from '@/app/components/records/deals/DealActionsMenu';
 import DealActivityBreakdown from '@/app/components/records/deals/DealActivityBreakdown';
 import EngineEvaluationPanel from '@/app/components/records/EngineEvaluationPanel';
@@ -308,7 +309,8 @@ export default async function DealPage({ params }: DealPageProps) {
                         </header>
                     </RecordDetailSection>
 
-                    <RecordDetailSection recordKind="deal" section="actions" className="mt-4 flex justify-end">
+                    <RecordDetailSection recordKind="deal" section="actions" className="mt-4 flex flex-wrap justify-end gap-2">
+                        <AskConnexRecordEntry kind="deal" />
                         <DealActionsMenu
                             deal={deal}
                             pipelines={pipelines}

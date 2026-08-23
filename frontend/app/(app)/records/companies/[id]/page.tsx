@@ -35,6 +35,7 @@ import { formatDate, formatDateTime } from "@/app/lib/utils";
 import Rise from "@/app/components/motion/Rise";
 import { PageShell } from "@/app/components/PageShell";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
+import AskConnexRecordEntry from "@/app/components/ask-connex/AskConnexRecordEntry";
 import CompanyActionsMenu from "@/app/components/records/companies/CompanyActionsMenu";
 import CompanyAvatar from "@/app/components/records/companies/CompanyAvatar";
 import { EngagementSparkline, RevenueTiles } from "@/app/components/records/companies/CompanyCard";
@@ -200,7 +201,8 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                         </header>
                     </RecordDetailSection>
 
-                    <RecordDetailSection recordKind="company" section="actions" className="mt-4 flex justify-end">
+                    <RecordDetailSection recordKind="company" section="actions" className="mt-4 flex flex-wrap justify-end gap-2">
+                        <AskConnexRecordEntry kind="company" />
                         <CompanyActionsMenu company={company} />
                     </RecordDetailSection>
                 </Rise>

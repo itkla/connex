@@ -15,9 +15,13 @@ import { useLocale, useTranslations } from 'next-intl';
 import { useParams, usePathname, useRouter } from 'next/navigation';
 import { ArrowsPointingOutIcon, SparklesIcon } from '@heroicons/react/24/outline';
 
-import AskConnexDrawer from '@/app/components/ask-connex/AskConnexDrawer';
+import AskConnexDrawer, {
+    type AskConnexJobOffer,
+    type AskConnexScopeSurface,
+} from '@/app/components/ask-connex/AskConnexDrawer';
 import { formatAnswerInstant } from '@/app/components/ask-connex/answerDocument';
 import { useActions, useRegisterActions } from '@/app/hooks/useActions';
+import { useAskConnexSkills } from '@/app/hooks/useAskConnexSkills';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { useLiveNow } from '@/app/hooks/useNow';
@@ -45,6 +49,7 @@ import {
     joinAiChatSession,
     leaveAiChatPresence,
     leaveAiChatSession,
+    previewAiChatScope,
     rejectAiAssistantToolCall,
     removeAiChatParticipant,
     resolveAcceptedAiGeneration,
@@ -56,15 +61,19 @@ import {
     updateAiChatSession,
 } from '@/app/lib/api';
 import {
+    EMPTY_ASK_CONNEX_REQUEST_SCOPE,
     EMPTY_ASK_CONNEX_TOOL_CARDS,
     EMPTY_ASK_CONNEX_TURN,
     AskConnexFileRemovalError,
     actionableAskConnexToolCallIds,
     activeRecordAskConnexContext,
     activeSelectionAskConnexContext,
+    appendAskConnexPrompt,
     askConnexContextCorrected,
     askConnexMessageContent,
     askConnexPinnedStorageKey,
+    askConnexPromptContent,
+    askConnexRequestScope,
     askConnexRetryPrompt,
     askConnexScopePreview,
     askConnexSessionStorageKey,
@@ -89,6 +98,7 @@ import {
     toggleAskConnexPin,
     type AskConnexAttachment,
     type AskConnexContextCorrections,
+    type AskConnexDeclaredScope,
     type AskConnexFileAttachment,
     type AskConnexScopePreview,
     type AskConnexSelectionContext,
@@ -97,6 +107,21 @@ import {
     type AskConnexToolCardFailure,
     type StoredAskConnexTurn,
 } from '@/app/lib/askConnex';
+import { askConnexJobContext, askConnexJobs } from '@/app/lib/askConnexEntryPoints';
+import {
+    ASK_CONNEX_SCOPE_PREVIEW_DEBOUNCE_MS,
+    EMPTY_ASK_CONNEX_SCOPE_DRAFT,
+    askConnexScopeAccepted,
+    askConnexScopeChips,
+    askConnexScopeFilterCount,
+    askConnexScopePeriodLabel,
+    askConnexScopeRefusal,
+    askConnexScopeRequest,
+    type AskConnexScopeChip,
+    type AskConnexScopeDraft,
+    type AskConnexScopePreviewState,
+    type AskConnexScopeReason,
+} from '@/app/lib/askConnexScope';
 import {
     ASK_CONNEX_DEFAULT_WIDTH,
     askConnexActiveState,
@@ -133,9 +158,11 @@ import type {
     AiChatCoverage,
     AiChatDeltaFrame,
     AiChatMessage,
+    AiChatPageContext,
     AiChatParticipant,
     AiChatPresence,
     AiChatProgressItem,
+    AiChatQueryScopeRequest,
     AiChatSession,
     AiChatTurn,
     AiChatTurnGenerationResult,
@@ -148,6 +175,15 @@ const ASK_CONNEX_MESSAGE_PAGE_SIZE = 50;
 const EMPTY_ASK_CONNEX_TOOL_CALL_IDS: ReadonlySet<number> = new Set();
 const EMPTY_ASK_CONNEX_PINS: readonly AskConnexAttachment[] = [];
 const noopCleanup = () => {};
+
+/**
+ * A job a surface hands to Ask Connex: what to ask, and the records the page does not already
+ * carry that the question is about.
+ */
+export type AskConnexOpenRequest = {
+    prompt: string;
+    mentions?: readonly AskConnexAttachment[];
+};
 
 type AskConnexContextValue = {
     open: boolean;
@@ -168,6 +204,15 @@ type AskConnexContextValue = {
     openDrawer: (source?: OpenSource) => void;
     closeDrawer: () => void;
     openWorkspace: () => void;
+    /**
+     * Opens Ask Connex with a job already written into the composer, ready to read and send.
+     *
+     * The one way a surface starts a contextual request: nothing is sent, the message is ordinary
+     * text the member can edit or discard, and anything already typed is kept above it. Records the
+     * page does not carry travel as the same reference chips the mention picker writes, so they
+     * appear in the context strip and can be taken back out there.
+     */
+    openWithPrompt: (request: AskConnexOpenRequest) => void;
 };
 
 /**
@@ -230,6 +275,18 @@ function deferredErrorToast(message: string): void {
     window.setTimeout(() => toastError(message), 0);
 }
 
+/**
+ * Reads a refused scope out of a failed request.
+ *
+ * The server states which declared filter it could not honour as the last word of a message it also
+ * writes for its own records. Only that recognized vocabulary is taken from it; the message itself
+ * never reaches the screen, and anything else is left to the ordinary failure path.
+ */
+function scopeRefusalReason(error: unknown): AskConnexScopeReason | null {
+    if (!(error instanceof ApiError) || error.status !== 400) return null;
+    return askConnexScopeRefusal(error.message);
+}
+
 function toolCardFailure(error: unknown, action: AskConnexToolAction): AskConnexToolCardFailure {
     if (!(error instanceof ApiError)) return 'actionFailed';
     if (action === 'undo' && error.status === 409) return 'undoConflict';
@@ -257,13 +314,6 @@ function safeStorageGet(key: string): string | null {
     } catch {
         return null;
     }
-}
-
-function starterPromptKeys(kind: AskConnexAttachment['kind'] | null): string[] {
-    if (kind === 'person') return ['starters.person.followUp', 'starters.person.activity', 'starters.person.stalled'];
-    if (kind === 'company') return ['starters.company.relationships', 'starters.company.activity', 'starters.company.risks'];
-    if (kind === 'deal') return ['starters.deal.summary', 'starters.deal.risks', 'starters.deal.nextStep'];
-    return ['starters.workspace.followUps', 'starters.workspace.risks', 'starters.workspace.activity'];
 }
 
 function readyFileAttachment(attachment: AiChatAttachment): AskConnexFileAttachment {
@@ -305,6 +355,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         [showApiError],
     );
     const tDisclosure = useTranslations('Assistant.disclosure');
+    const tWarmth = useTranslations('Temperature');
     const locale = useLocale();
     const now = useLiveNow();
     const router = useRouter();
@@ -315,6 +366,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const { context } = useActions();
     const { activeWorkspaceId, switching } = useWorkspace();
     const permission = usePermissionCheck('AI_USE');
+    const skills = useAskConnexSkills();
     const attachmentCreatePermission = usePermissionCheck('ATTACHMENT_CREATE');
     const attachmentDeletePermission = usePermissionCheck('ATTACHMENT_DELETE');
     const sharePermission = usePermissionCheck('AI_SESSION_SHARE');
@@ -406,6 +458,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const [submissionBlocked, setSubmissionBlocked] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [reloadVersion, setReloadVersion] = useState(0);
+    const [promptRequest, setPromptRequest] = useState(0);
+    const [scopeDraft, setScopeDraft] = useState<AskConnexScopeDraft>(EMPTY_ASK_CONNEX_SCOPE_DRAFT);
+    const [scopeEditorOpen, setScopeEditorOpen] = useState(false);
+    const [scopeInterpretation, setScopeInterpretation] = useState<{
+        key: string;
+        state: AskConnexScopePreviewState;
+    } | null>(null);
     const [streaming, setStreaming] = useState(false);
     const [cancelling, setCancelling] = useState(false);
     const [streamStore] = useState(createAskConnexStreamStore);
@@ -416,6 +475,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     );
 
     const messagesRef = useRef<AiChatMessage[]>([]);
+    const composerRef = useRef('');
+    const pageContextRef = useRef<AiChatPageContext[]>([]);
+    const scopeRequestRef = useRef<AiChatQueryScopeRequest | null>(null);
     const identityControllerRef = useRef<AbortController | null>(null);
     const sessionControllerRef = useRef<AbortController | null>(null);
     const tempMessageIdRef = useRef(-1);
@@ -488,6 +550,39 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         () => askConnexScopePreview(contextResult.pageContext, contextFiles),
         [contextFiles, contextResult.pageContext],
     );
+    const scopeRequest = useMemo(() => askConnexScopeRequest(scopeDraft), [scopeDraft]);
+    const scopeRequestKey = useMemo(
+        () => scopeRequest === null ? null : JSON.stringify(scopeRequest),
+        [scopeRequest],
+    );
+    const scopePreviewState = useMemo<AskConnexScopePreviewState>(
+        () => {
+            if (scopeRequestKey === null) return { status: 'idle' };
+            return scopeInterpretation?.key === scopeRequestKey
+                ? scopeInterpretation.state
+                : { status: 'loading' };
+        },
+        [scopeInterpretation, scopeRequestKey],
+    );
+    const interpretedScope = scopePreviewState.status === 'ready' ? scopePreviewState.scope : null;
+    const declaredScope = useMemo<AskConnexDeclaredScope | null>(
+        () => {
+            if (scopeRequestKey === null || scopePreviewState.status !== 'ready') return null;
+            return {
+                matchedRecordCount: scopePreviewState.scope.matchedRecordCount,
+                truncated: scopePreviewState.scope.matchedRecordCountTruncated,
+                recordCap: scopePreviewState.scope.recordCap,
+                identity: scopeRequestKey,
+                confirmationRecommended: scopePreviewState.confirmationRecommended,
+            };
+        },
+        [scopePreviewState, scopeRequestKey],
+    );
+    const requestScope = useMemo(
+        () => askConnexRequestScope(scopePreview, declaredScope),
+        [declaredScope, scopePreview],
+    );
+    const scopeChips = useMemo(() => askConnexScopeChips(interpretedScope), [interpretedScope]);
     const toolActionPending = toolCalls.some((toolCall) => toolCall.pendingAction !== null);
     const actionableToolCallIds = useMemo(
         () => actionableAskConnexToolCallIds(toolCalls, messages, userId),
@@ -513,7 +608,70 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
     useEffect(() => {
         typingRef.current = composer.trim().length > 0;
+        composerRef.current = askConnexMessageContent(composer);
     }, [composer]);
+
+    useEffect(() => {
+        pageContextRef.current = contextResult.pageContext;
+    }, [contextResult.pageContext]);
+
+    useEffect(() => {
+        scopeRequestRef.current = scopeRequest;
+    }, [scopeRequest]);
+
+    /**
+     * Asks the server what the declared filters actually cover.
+     *
+     * Deliberately driven by the filters alone. The question itself is sent so the server can
+     * recognize which capability would run, but it is read from a ref rather than being a
+     * dependency: a preview evaluates a whole cohort and is rate limited, so it follows a settled
+     * selection instead of every keystroke on the way to one. A refusal, a spent allowance, and an
+     * unavailable feature are each kept apart, because the remedy for each is different and only one
+     * of them is something the member can fix in the form.
+     */
+    useEffect(() => {
+        if (scopeRequestKey === null) return;
+        if (permission !== 'granted' || activeWorkspaceId === null || switching) return;
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => {
+            const declared = scopeRequestRef.current;
+            if (declared === null) return;
+            previewAiChatScope(
+                {
+                    content: composerRef.current,
+                    pageContext: pageContextRef.current,
+                    scope: declared,
+                },
+                { signal: controller.signal },
+            ).then((preview) => {
+                if (controller.signal.aborted) return;
+                setScopeInterpretation({
+                    key: scopeRequestKey,
+                    state: {
+                        status: 'ready',
+                        scope: preview.scope,
+                        skillKey: preview.skillKey,
+                        confirmationRecommended: preview.confirmationRecommended,
+                    },
+                });
+            }).catch((error: unknown) => {
+                if (controller.signal.aborted) return;
+                const status = error instanceof ApiError ? error.status : null;
+                const state: AskConnexScopePreviewState = status === 400
+                    ? { status: 'refused', reason: scopeRefusalReason(error) }
+                    : status === 429
+                        ? { status: 'throttled' }
+                        : status === 403
+                            ? { status: 'unavailable' }
+                            : { status: 'failed' };
+                setScopeInterpretation({ key: scopeRequestKey, state });
+            });
+        }, ASK_CONNEX_SCOPE_PREVIEW_DEBOUNCE_MS);
+        return () => {
+            window.clearTimeout(timer);
+            controller.abort();
+        };
+    }, [activeWorkspaceId, permission, scopeRequestKey, switching]);
 
     useEffect(() => {
         workspaceSessionIdRef.current = workspaceSessionId;
@@ -688,6 +846,31 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         const session = activeSessionRef.current;
         router.push(session ? `/ask-connex/${session.id}` : '/ask-connex');
     }, [context.record, context.selection, identity, router]);
+    /**
+     * Writes one job into the composer and brings Ask Connex on screen.
+     *
+     * Nothing is asked here. A contextual entry point states the job; the member reads it, edits it
+     * if they want something else, and sends it themselves — which is also why anything already
+     * typed is kept and the new message joins it rather than replacing it.
+     */
+    const openWithPrompt = useCallback((request: AskConnexOpenRequest) => {
+        const content = askConnexPromptContent(request.prompt, request.mentions ?? []);
+        if (content.length === 0) return;
+        setComposer((current) => appendAskConnexPrompt(current, content));
+        setPromptRequest((version) => version + 1);
+        if (!workspaceMode) openDrawer();
+    }, [openDrawer, workspaceMode]);
+
+    /**
+     * Marks the outstanding job request as honoured.
+     *
+     * Held here rather than inside the surface that honours it, because a phone does not keep the
+     * panel mounted: a mark that lives in the surface dies with it, and the next plain open replays a
+     * request that was already served — raising the keyboard over a conversation nobody asked to type
+     * into. Clearing it here means a surface that mounts afterwards has nothing outstanding to honour.
+     */
+    const consumePromptRequest = useCallback(() => setPromptRequest(0), []);
+
     const closeWorkspace = useCallback(() => {
         if (workspaceReturnRef.current) {
             router.back();
@@ -1076,6 +1259,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             resetStream();
             dispatchTurn({ type: 'reset' });
             dispatchToolCalls({ type: 'reset' });
+            setScopeDraft(EMPTY_ASK_CONNEX_SCOPE_DRAFT);
+            setScopeInterpretation(null);
+            setScopeEditorOpen(false);
             setLoadState('loading');
             setLoadError(null);
 
@@ -1732,8 +1918,15 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             const accepted = await startAiChatTurn(session.id, {
                 content,
                 pageContext: requestContext.pageContext,
+                ...(scopeRequest === null ? {} : { scope: scopeRequest }),
             });
             if (activeSignal.aborted) return;
+            const acceptedScope = accepted.scope;
+            if (acceptedScope != null && scopeRequestKey !== null) {
+                setScopeInterpretation((current) => current === null || current.key !== scopeRequestKey
+                    ? current
+                    : { key: scopeRequestKey, state: askConnexScopeAccepted(current.state, acceptedScope) });
+            }
             const stored = {
                 sessionId: accepted.sessionId,
                 turnId: accepted.turnId,
@@ -1767,6 +1960,20 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             await followTurn(stored, activeSignal);
         } catch (error) {
             if (activeSignal.aborted) return;
+            /**
+             * A refused scope is not a broken assistant. The server declined this combination of
+             * filters and said which one it could not honour, so the message stays where the filters
+             * are set and the panel keeps working — blocking submission here would leave the member
+             * unable to send the corrected question.
+             */
+            const refusal = scopeRefusalReason(error);
+            if (refusal !== null && scopeRequestKey !== null) {
+                setScopeInterpretation({
+                    key: scopeRequestKey,
+                    state: { status: 'refused', reason: refusal },
+                });
+                return;
+            }
             if (error instanceof ApiError && error.status === 403) {
                 setFeatureUnavailable(true);
             } else {
@@ -1783,7 +1990,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             submittingRef.current = false;
             setSubmitting(false);
         }
-    }, [activeSession, composer, corrections, featureUnavailable, fileContextCount, fileOperationPending, followTurn, permission, refreshTranscript, resetStream, router, sessionKey, showApiError, sourceRecord, sourceSelection, submissionBlocked, t, turn.phase, turnKey, userDisplayName, userId, workspaceMode]);
+    }, [activeSession, composer, corrections, featureUnavailable, fileContextCount, fileOperationPending, followTurn, permission, refreshTranscript, resetStream, router, scopeRequest, scopeRequestKey, sessionKey, showApiError, sourceRecord, sourceSelection, submissionBlocked, t, turn.phase, turnKey, userDisplayName, userId, workspaceMode]);
 
     const retryPrompt = useMemo(() => askConnexRetryPrompt(messages), [messages]);
     const retryTurn = useCallback(() => {
@@ -1901,12 +2108,26 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         return t('continuePrompt', { question });
     }, [canRetryTurn, retryPrompt, t]);
 
-    const starterPromptKind = implicitContext?.kind
-        ?? selectionContext?.pageContext[0]?.kind
-        ?? null;
-    const starterPrompts = useMemo(
-        () => starterPromptKeys(starterPromptKind).map((key) => t(key)),
-        [starterPromptKind, t],
+    /**
+     * The jobs this surface can offer, resolved from the server's own capability directory.
+     *
+     * The record the panel is looking at decides which readings apply, and whether there is a record
+     * at all decides whether a capability that refuses without one may be offered. A browser
+     * selection is deliberately not that record: every record job is written about one relationship,
+     * account, or deal, so a panel carrying only a selection offers the jobs that need no subject
+     * rather than speaking about the first of twelve as though the other eleven were not there.
+     * Nothing here is generated: the list is the intersection of what the member may run and what
+     * this client has written product copy for, in the catalog's order, so it does not reshuffle
+     * between renders.
+     */
+    const jobContextKind = implicitContext?.kind ?? null;
+    const jobs = useMemo<AskConnexJobOffer[]>(
+        () => askConnexJobs(skills, askConnexJobContext(jobContextKind)).map((job) => ({
+            id: job.id,
+            label: t(`jobs.${job.id}.label`),
+            prompt: t(`jobs.${job.id}.prompt`),
+        })),
+        [jobContextKind, skills, t],
     );
     const scopeList = useMemo(
         () => new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' }),
@@ -1919,6 +2140,19 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         if (preview.files > 0) parts.push(t('scopeFiles', { count: preview.files }));
         return t('scopeSummary', { scope: scopeList.format(parts) });
     }, [scopeList, t]);
+    /**
+     * What the declared filters cover, in one sentence, from the server's own count.
+     *
+     * A cohort the retrieval will only partly read says so in the same breath, because a count the
+     * request cannot honour in full is exactly the promise this sentence exists to avoid making.
+     */
+    const scopeDeclaredSummary = useCallback((declared: AskConnexDeclaredScope) => {
+        if (declared.matchedRecordCount === null) return t('scope.preview.matchedUnknown');
+        const matched = t('scope.preview.matched', { count: declared.matchedRecordCount });
+        return declared.truncated
+            ? `${matched} ${t('scope.preview.truncated', { count: declared.recordCap })}`
+            : matched;
+    }, [t]);
     const citationKind = useCallback(
         (kind: AiChatCitation['kind']) =>
             kind === 'person'
@@ -2008,8 +2242,19 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         unpinContext: (label: string) => t('unpinContext', { label }),
         scopeTitle: t('scopeTitle'),
         scopeSummary,
+        scopeDeclaredSummary,
         scopeConfirm: t('scopeConfirm'),
         scopeEdit: t('scopeEdit'),
+        scopeFilters: t('scope.open'),
+        scopeFiltersSet: (count: number) => t('scope.openSet', { count }),
+        scopeChipKind: (kind: AskConnexScopeChip['kind']) => t(`scope.chips.${kind}`),
+        scopeChipValues: (values: string[]) => scopeList.format(values),
+        scopePeriodRange: (values: string[]) => askConnexScopePeriodLabel(values, locale),
+        scopeWarmthBand: (band: string) => tWarmth(band),
+        scopeRecordKind: (kind: string) => t(`scope.recordKinds.${kind}`),
+        scopeDealStatus: (status: string) => t(`scope.dealStatuses.${status}`),
+        suggestions: t('suggestions'),
+        dismissSuggestions: t('dismissSuggestions'),
         contextSelected: (count: number, type: AskConnexSelectionContext['type']) =>
             t('contextSelected', { count, type: t(`recordTypes.${type}`) }),
         contextScopeUnsupported: t('contextScopeUnsupported'),
@@ -2152,7 +2397,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 requestCompleted: t('toolCards.summaries.requestCompleted'),
             },
         },
-    }), [citationKind, locale, now, scopeSummary, t, tDisclosure]);
+    }), [citationKind, locale, now, scopeDeclaredSummary, scopeList, scopeSummary, t, tDisclosure, tWarmth]);
 
     const value = useMemo<AskConnexContextValue>(
         () => ({
@@ -2165,8 +2410,28 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             openDrawer,
             closeDrawer,
             openWorkspace,
+            openWithPrompt,
         }),
-        [closeDrawer, instantOpen, instantWidth, open, openDrawer, openWorkspace, width, working, workspaceMode],
+        [closeDrawer, instantOpen, instantWidth, open, openDrawer, openWithPrompt, openWorkspace, width, working, workspaceMode],
+    );
+
+    const scopeSurface = useMemo<AskConnexScopeSurface>(
+        () => ({
+            draft: scopeDraft,
+            editorOpen: scopeEditorOpen,
+            skills,
+            filterCount: askConnexScopeFilterCount(scopeDraft),
+            chips: scopeChips,
+            preview: scopePreviewState,
+            refusal: scopePreviewState.status === 'refused'
+                ? scopePreviewState.reason === null
+                    ? t('scope.reasons.unknown')
+                    : t(`scope.reasons.${scopePreviewState.reason}`)
+                : null,
+            onDraftChange: setScopeDraft,
+            onEditorOpenChange: setScopeEditorOpen,
+        }),
+        [scopeChips, scopeDraft, scopeEditorOpen, scopePreviewState, skills, t],
     );
 
     return (
@@ -2200,7 +2465,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 pinnedContext={scoped ? carriedPins : EMPTY_ASK_CONNEX_PINS}
                 pageContextPinned={pageContextPinned}
                 contextCorrected={contextCorrected}
-                scopePreview={scoped ? scopePreview : null}
+                requestScope={scoped ? requestScope : EMPTY_ASK_CONNEX_REQUEST_SCOPE}
+                scope={scopeSurface}
                 attachments={scoped ? visibleAttachments : []}
                 fileAttachments={scoped ? fileAttachments : []}
                 canAttachFiles={attachmentCreatePermission === 'granted'}
@@ -2223,7 +2489,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 contextCount={scoped ? contextResult.pageContext.length + fileContextCount : 0}
                 now={now}
                 unavailable={unavailable}
-                starterPrompts={starterPrompts}
+                jobs={scoped ? jobs : []}
+                promptRequest={promptRequest}
+                onPromptConsumed={consumePromptRequest}
                 labels={labels}
                 onWidthChange={changeWidth}
                 onOpenChange={setOpen}

@@ -458,7 +458,12 @@
     "entryPoint": {
       "workspace": "Ask Connex about this workspace",
       "record": "Ask Connex about {label}",
-      "selection": "Ask Connex about {count} selected {type}"
+      "selection": "Ask Connex about {count} selected {type}",
+      "recordMenu": {
+        "person": "Ask about this contact",
+        "company": "Ask about this company",
+        "deal": "Ask about this deal"
+      }
     },
     "recordTypes": {
       "person": "contacts",
@@ -632,28 +637,6 @@
       "limit": "Context limit reached",
       "removeFailed": "Couldn't remove the file"
     },
-    "starters": {
-      "person": {
-        "followUp": "Schedule a follow-up",
-        "activity": "Summarize recent activity",
-        "stalled": "What’s stalled here?"
-      },
-      "company": {
-        "relationships": "Who are the strongest relationships here?",
-        "activity": "Summarize recent activity",
-        "risks": "What needs attention?"
-      },
-      "deal": {
-        "summary": "Summarize this deal",
-        "risks": "What could block this deal?",
-        "nextStep": "What should happen next?"
-      },
-      "workspace": {
-        "followUps": "Which follow-ups need attention?",
-        "risks": "Which relationships are cooling?",
-        "activity": "Summarize recent workspace activity"
-      }
-    },
     "unavailable": {
       "permissionTitle": "Ask Connex isn’t available to your role",
       "permissionBody": "Your workspace role does not include permission to use AI features.",
@@ -682,10 +665,280 @@
     "citations": "Sources",
     "citationKindPerson": "Contact",
     "citationKindCompany": "Company",
-    "citationKindDeal": "Deal"
+    "citationKindDeal": "Deal",
+    "suggestions": "Things I can do here",
+    "dismissSuggestions": "Hide these suggestions",
+    "jobs": {
+      "relationshipBrief": {
+        "label": "Brief me on this relationship",
+        "prompt": "Brief me on this relationship."
+      },
+      "companyBrief": {
+        "label": "Brief me on this company",
+        "prompt": "Brief me on this company."
+      },
+      "relationshipCooling": {
+        "label": "Why is this relationship cooling?",
+        "prompt": "Why is this relationship cooling?"
+      },
+      "companyCooling": {
+        "label": "Which relationships here are cooling?",
+        "prompt": "Which relationships at this company are cooling, and why?"
+      },
+      "dealRisk": {
+        "label": "Explain this deal's risks",
+        "prompt": "Explain what puts this deal at risk."
+      },
+      "contactActivity": {
+        "label": "Summarize recent activity",
+        "prompt": "Summarize the recent activity with this contact."
+      },
+      "companyActivity": {
+        "label": "Summarize recent activity",
+        "prompt": "Summarize the recent activity at this company."
+      },
+      "dealActivity": {
+        "label": "Summarize activity on this deal",
+        "prompt": "Summarize the recent activity on this deal."
+      },
+      "companyPipeline": {
+        "label": "Which deals need attention?",
+        "prompt": "Which deals at this company need attention, and what is each one waiting on?"
+      },
+      "dealPipeline": {
+        "label": "What is this deal waiting on?",
+        "prompt": "What is this deal waiting on, and how does it compare with the rest of the pipeline?"
+      },
+      "relationshipChanges": {
+        "label": "What changed recently?",
+        "prompt": "What changed here recently?"
+      },
+      "dealChanges": {
+        "label": "What changed since the stage moved?",
+        "prompt": "What changed on this deal since it moved stage?"
+      },
+      "introPath": {
+        "label": "Find an intro path",
+        "prompt": "Who could introduce me here, and what is that route based on?"
+      },
+      "meetingPreparation": {
+        "label": "Prepare me for the next meeting",
+        "prompt": "Prepare me for the next meeting here."
+      },
+      "meetingFollowUp": {
+        "label": "Pull out decisions and commitments",
+        "prompt": "Pull out the decisions, commitments, and owners from the recent meetings here."
+      },
+      "followUpDraft": {
+        "label": "Draft a follow-up",
+        "prompt": "Draft a follow-up message I can edit before sending."
+      },
+      "stakeholderGaps": {
+        "label": "Who is missing?",
+        "prompt": "Which roles or people are we missing a relationship with here?"
+      },
+      "companyReview": {
+        "label": "Prepare a company review",
+        "prompt": "Prepare a review of this company."
+      },
+      "commitments": {
+        "label": "Find open commitments",
+        "prompt": "What has been promised here, by whom, and what is still open?"
+      },
+      "dataQuality": {
+        "label": "Check for missing details",
+        "prompt": "Which details here are missing or contradict each other?"
+      },
+      "workspaceWorkBrief": {
+        "label": "What should I do today?",
+        "prompt": "What relationship work is worth doing today?"
+      },
+      "workspacePipeline": {
+        "label": "Which deals need attention?",
+        "prompt": "Which deals need attention, and what is each one waiting on?"
+      },
+      "workspaceActivity": {
+        "label": "Summarize recent activity",
+        "prompt": "Summarize the recent activity in this workspace."
+      },
+      "workspaceReport": {
+        "label": "Build a report from a question",
+        "prompt": "Build a report answering a question about this workspace."
+      }
+    },
+    "scope": {
+      "title": "Filters",
+      "description": "Choose which records this question covers. Ask Connex reads only what you name here.",
+      "open": "Add filters",
+      "openSet": "Filters · {count}",
+      "clear": "Clear filters",
+      "done": "Done",
+      "period": {
+        "label": "Period",
+        "modeLabel": "How to state the period",
+        "any": "Any time",
+        "recent": "Recent",
+        "range": "Dates",
+        "days": "{count, plural, one {Last # day} other {Last # days}}",
+        "start": "From",
+        "end": "To"
+      },
+      "owners": {
+        "label": "Owner",
+        "modeLabel": "Whose records to cover",
+        "allTeam": "Everyone",
+        "me": "Me",
+        "members": "Chosen members",
+        "cap": "You can name up to {count} members. Clear one to choose another."
+      },
+      "warmth": {
+        "label": "Warmth"
+      },
+      "recordKinds": {
+        "label": "Record types",
+        "person": "Contacts",
+        "company": "Companies",
+        "deal": "Deals"
+      },
+      "dealStatuses": {
+        "label": "Deal status",
+        "open": "Open",
+        "won": "Won",
+        "lost": "Lost"
+      },
+      "stages": {
+        "label": "Stages",
+        "cap": "You can name up to {count} stages. Clear one to choose another."
+      },
+      "savedView": {
+        "label": "Saved view"
+      },
+      "chips": {
+        "period": "Period",
+        "owners": "Owner",
+        "warmth": "Warmth",
+        "recordKinds": "Record types",
+        "dealStatuses": "Deal status",
+        "stages": "Stages",
+        "savedView": "Saved view"
+      },
+      "problem": {
+        "periodOrder": "The first date has to come before the second one.",
+        "periodLength": "Choose a window of 1 to 365 days.",
+        "membersMissing": "Choose at least one member, or go back to everyone."
+      },
+      "preview": {
+        "title": "What this covers",
+        "idle": "Choose a filter to see what it covers.",
+        "loading": "Checking what this covers…",
+        "matched": "{count, plural, one {# record matches} other {# records match}} these filters.",
+        "matchedUnknown": "These filters are ready to use.",
+        "truncated": "Ask Connex will read the first {count} of them.",
+        "capability": "It will use {name}.",
+        "throttled": "That was a lot of changes at once — the count will catch up in a moment.",
+        "unavailable": "Ask Connex isn't available in this workspace right now, so these filters can't be checked here.",
+        "failed": "Couldn't check what these filters cover. Try again in a moment."
+      },
+      "reasons": {
+        "unknown": "Ask Connex can't cover exactly this combination of filters. Change one of them and try again.",
+        "other": "One of the filters you set couldn't be applied to this question.",
+        "deal_status_unsupported_for_attention": "A deals review always looks at open deals, so the won and lost filters don't apply to it.",
+        "period_capped": "A period can reach back one year, so the earlier part of the one you chose is left out.",
+        "record_kind_ambiguous_for_cohort": "Say whether this covers contacts, companies, or deals — the question fits more than one.",
+        "record_kind_outside_declared_scope": "This question is about a record type your filters leave out. Add that type, or ask about one you kept.",
+        "saved_view_scope_changed": "That saved view changed while this was being prepared. Choose it again to use the current one.",
+        "saved_view_scope_unsupported": "Ask Connex can't reproduce that saved view exactly, so it won't pretend to. Use the filters here instead.",
+        "stage_scope_unsupported_for_cohort": "Stages and deal status only apply when deals are included. Add deals, or clear those two filters.",
+        "tool_cannot_honor_declared_scope": "Answering this would mean reading outside the filters you set, so it stopped instead. Widen them, or ask something narrower.",
+        "warmth_outside_declared_scope": "This question is about a warmth band your filters leave out. Add that band, or ask about one you kept.",
+        "warmth_unsupported_for_deals": "Warmth describes relationships with people and companies, so it doesn't narrow a set of deals."
+      }
+    },
+    "signals": {
+      "relationship_decay": {
+        "label": "Explain why this signal fired",
+        "prompt": "Radar says the relationship with {subject} is cooling. Explain why, from what has actually been logged."
+      },
+      "deal_risk": {
+        "label": "Explain why this signal fired",
+        "prompt": "Radar flagged {subject} as at risk. Explain why, from what has actually been logged."
+      },
+      "warm_path": {
+        "label": "Explain this intro path",
+        "prompt": "Radar found an intro path to {subject}. Explain who could introduce me and what that route is based on."
+      }
+    }
   },
   "SearchLayout": {
     "title": "Search",
     "description": "Search across your workspace"
+  },
+  "askConnex": {
+    "skills": {
+      "relationshipCoolingExplanation": {
+        "name": "Cooling relationship",
+        "description": "Explains why one contact or company has gone quieter, from the logged activity and the warmth reading behind it."
+      },
+      "activityDigest": {
+        "name": "Activity digest",
+        "description": "Summarizes what has been logged across the records in view, over a period you choose."
+      },
+      "relationshipBrief": {
+        "name": "Relationship brief",
+        "description": "Pulls together what you already know about one contact or company before you speak to them."
+      },
+      "pipelineAttentionReview": {
+        "name": "Deals needing attention",
+        "description": "Reviews open deals against the Connex risk model and explains what each one is waiting on."
+      },
+      "relationshipChangeSummary": {
+        "name": "What changed",
+        "description": "Reports what moved on a record since you last looked at it."
+      },
+      "introductionPathExplanation": {
+        "name": "Intro path",
+        "description": "Explains who could introduce you, and what that route is based on."
+      },
+      "meetingPreparation": {
+        "name": "Meeting preparation",
+        "description": "Gathers the people, history, and open threads you need before a meeting."
+      },
+      "meetingFollowUpExtraction": {
+        "name": "Meeting follow-ups",
+        "description": "Pulls the decisions, commitments, and owners out of what a meeting produced."
+      },
+      "followUpDraft": {
+        "name": "Follow-up draft",
+        "description": "Drafts a follow-up message for you to edit before you send it."
+      },
+      "dealRiskReview": {
+        "name": "Deal risk review",
+        "description": "Explains what puts a deal at risk, from its own history and the Connex risk model."
+      },
+      "stakeholderGapAnalysis": {
+        "name": "Missing stakeholders",
+        "description": "Points out the roles and people a deal or company has no relationship with yet."
+      },
+      "companyReview": {
+        "name": "Company review",
+        "description": "Prepares a review of one company from its relationships, deals, and recent activity."
+      },
+      "dailyWorkBrief": {
+        "name": "Today's brief",
+        "description": "Summarizes the relationship work worth doing today."
+      },
+      "commitmentExtraction": {
+        "name": "Open commitments",
+        "description": "Finds what has been promised, by whom, and what is still outstanding."
+      },
+      "dataQualityReview": {
+        "name": "Data quality review",
+        "description": "Points out records whose details are missing or contradict each other."
+      },
+      "naturalLanguageReport": {
+        "name": "Report from a question",
+        "description": "Builds a report that answers a question about your workspace."
+      }
+    }
   }
 }

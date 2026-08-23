@@ -291,6 +291,81 @@ test.describe("Ask Connex dual surface", () => {
         ).toBeVisible();
     });
 
+    test("a record's entry point opens the panel with the job written and the record in context", async ({ page }, testInfo) => {
+        const contact = runFixture(testInfo.project.name).contacts.peek;
+        await page.goto(`/records/contacts/${contact.id}`);
+        await expect(page.getByRole("heading", { name: contact.name }).first()).toBeVisible();
+
+        const entry = page.getByRole("button", { name: copy("en", "entryPoint.recordMenu.person") });
+        await expect(entry).toBeVisible();
+        await entry.click();
+        await page.getByRole("menuitem", { name: copy("en", "jobs.relationshipBrief.label") }).click();
+
+        const drawer = panel(page);
+        await expect(drawer).toHaveAttribute("aria-hidden", "false");
+        await expect(drawer.getByRole("combobox", { name: copy("en", "composerAria") }))
+            .toContainText(copy("en", "jobs.relationshipBrief.prompt"));
+
+        const context = drawer.getByRole("group", { name: copy("en", "context") });
+        await expect(context.getByText(contact.name, { exact: true })).toBeVisible();
+        await expect(context.getByText(copy("en", "contextPage"), { exact: true })).toBeVisible();
+        await expect(page).toHaveURL(new RegExp(`/records/contacts/${contact.id}`));
+    });
+
+    test("a record's entry point offers only the jobs its record kind supports", async ({ page }, testInfo) => {
+        const fixture = runFixture(testInfo.project.name);
+        await page.goto(`/records/deals/${fixture.deals.primary.id}`);
+
+        const entry = page.getByRole("button", { name: copy("en", "entryPoint.recordMenu.deal") });
+        await expect(entry).toBeVisible();
+        await entry.click();
+
+        await expect(
+            page.getByRole("menuitem", { name: copy("en", "jobs.dealActivity.label") }),
+        ).toBeVisible();
+        await expect(
+            page.getByRole("menuitem", { name: copy("en", "jobs.relationshipBrief.label") }),
+        ).toHaveCount(0);
+    });
+
+    test("the scope editor carries a filter and states only what it can honestly say", async ({ page }, testInfo) => {
+        const contact = runFixture(testInfo.project.name).contacts.peek;
+        await page.goto(`/records/contacts/${contact.id}`);
+        await openDrawer(page);
+        const drawer = panel(page);
+
+        await drawer.getByRole("button", { name: copy("en", "scope.open") }).click();
+        const editor = page.getByRole("dialog", { name: copy("en", "scope.title") });
+        await expect(editor).toBeVisible();
+        await expect(editor.getByText(copy("en", "scope.preview.idle"))).toBeVisible();
+
+        /**
+         * One group, not two. The field is a fieldset named by its legend, and the control inside it
+         * names the choice it offers rather than repeating the field, so a member hearing "Period"
+         * hears the field once.
+         */
+        const period = editor.getByRole("group", { name: copy("en", "scope.period.label") });
+        await expect(period).toHaveCount(1);
+        await period.getByRole("button", { name: copy("en", "scope.period.recent") }).click();
+        const window = period.getByRole("button", { name: /30/ });
+        await window.click();
+        await expect(window).toHaveAttribute("aria-pressed", "true");
+
+        /**
+         * The count itself needs a configured provider, which this stack deliberately has none of.
+         * What has to hold either way is that the filter is carried and the panel says plainly why
+         * it cannot state a count, rather than showing a number it never obtained.
+         */
+        await expect(editor.getByText(copy("en", "scope.preview.unavailable")))
+            .toBeVisible({ timeout: 15_000 });
+
+        await editor.getByRole("button", { name: copy("en", "scope.done") }).click();
+        await expect(editor).toBeHidden();
+        await expect(
+            drawer.getByRole("button", { name: copy("en", "scope.openSet").replace("{count}", "1") }),
+        ).toBeVisible();
+    });
+
     test("the bottom bar opens Ask Connex as a full-screen task @mobile-only", async ({ page }, testInfo) => {
         const contact = runFixture(testInfo.project.name).contacts.peek;
         await page.goto(`/records/contacts/${contact.id}`);
