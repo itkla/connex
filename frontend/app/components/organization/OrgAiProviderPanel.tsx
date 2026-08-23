@@ -476,12 +476,12 @@ export default function OrgAiProviderPanel({
                     <fieldset disabled={saving} className="space-y-4 border-t border-border pt-4">
                         <div className="grid gap-4 sm:grid-cols-2">
                             <div className="space-y-1.5">
-                                <Label htmlFor="ai-provider">{t("provider")}</Label>
+                                <Label htmlFor="ai-provider-kind">{t("provider")}</Label>
                                 <Select
                                     value={form.provider}
                                     onValueChange={(value) => set("provider", value as AiProviderKind)}
                                 >
-                                    <SelectTrigger id="ai-provider" className="w-full">
+                                    <SelectTrigger id="ai-provider-kind" className="w-full">
                                         <SelectValue />
                                     </SelectTrigger>
                                     <SelectContent>

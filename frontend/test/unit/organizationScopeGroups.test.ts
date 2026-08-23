@@ -52,6 +52,10 @@ import type { InstanceCapabilities } from "@/app/lib/types";
  * What it deliberately does not assert: how the sections look, whether an arrival lands where the
  * reader expected, and whether the organization roster behaves for a real owner against a real
  * backend. Those are the browser pass's job.
+ *
+ * It also does not assert anything about the legacy `/organization` layout. That layout carries the
+ * same identity-test bug this one fixes (#1422), and pinning its current bytes here would turn a
+ * gate over the new destinations into a tripwire that fails the moment the old one is repaired.
  */
 const APP = path.join(process.cwd(), "app");
 const COMPONENTS = path.join(APP, "components", "settings");
@@ -65,10 +69,70 @@ const OVERVIEW_PANEL = path.join(ORG_COMPONENTS, "OrganizationOverviewPanel.tsx"
 const MEMBERS_PANEL = path.join(ORG_COMPONENTS, "OrgMembersPanel.tsx");
 const DOMAINS_PANEL = path.join(ORG_COMPONENTS, "OrgAllowedDomainsPanel.tsx");
 const SETTINGS_LAYOUT = path.join(APP, "(app)", "settings", "organization", "layout.tsx");
-const LEGACY_LAYOUT = path.join(APP, "(app)", "organization", "layout.tsx");
+
+/**
+ * Every file this suite reads, read once.
+ *
+ * The one-spelling scan and the id-collision scan both walk the whole `app/` tree, and re-reading it
+ * per test made the pair the slowest thing in the suite — slow enough to trip the 30s timeout on a
+ * loaded machine, which reads as a failure and is only contention.
+ */
+const sources = new Map<string, string>();
 
 function source(file: string): string {
-    return readFileSync(file, "utf8");
+    const cached = sources.get(file);
+    if (cached !== undefined) return cached;
+    const text = readFileSync(file, "utf8");
+    sources.set(file, text);
+    return text;
+}
+
+/**
+ * The message key the 2026-08-19 ruling retired, held as a widened `string`.
+ *
+ * The manifest narrows every title key to a union of what it actually names, so once the key left
+ * that union a literal comparison stopped type-checking. Keeping it here as a plain string is what
+ * lets the assertion below stay compilable and stay meaningful.
+ */
+const RETIRED_PAGE_NAME_KEY: string = "Organization.tabOverview";
+
+/** Every `@/app/components/...` module a file imports, resolved to a path on disk. */
+function componentImports(file: string): string[] {
+    const matches = source(file).matchAll(/from "@\/app\/(components\/[^"]+)"/g);
+    return [...matches].map((match) => path.join(APP, `${match[1]}.tsx`)).filter(existsSync);
+}
+
+/** A page's view and every component reachable from it, which is what its anchors are drawn from. */
+function composedSources(view: string): string[] {
+    const seen = new Set<string>();
+    const queue = [view];
+    while (queue.length > 0) {
+        const next = queue.pop();
+        if (next === undefined || seen.has(next)) continue;
+        seen.add(next);
+        queue.push(...componentImports(next));
+    }
+    return [...seen];
+}
+
+/**
+ * The section slugs a page's own markup also spends on an element of its own.
+ *
+ * A section slug is a DOM id: {@link SettingsSectionRegion} puts it on the region wrapper so the
+ * fragment resolves there. If a control inside the composed panels already carries that id, the
+ * document holds it twice, the region wins on tree order, and any `htmlFor` or `aria-labelledby`
+ * pointing at the control silently retargets a layout div — the label stops focusing its input and
+ * the input loses its accessible name. It costs a rename, and nothing else catches it.
+ */
+function collidingSectionIds(
+    sections: readonly string[],
+    sources: readonly string[],
+): readonly string[] {
+    const taken = new Set<string>();
+    for (const text of sources) {
+        for (const match of text.matchAll(/\bid="([^"]+)"/g)) taken.add(match[1]);
+    }
+    return sections.filter((section) => taken.has(section));
 }
 
 function routeDir(route: string): string {
@@ -140,7 +204,7 @@ const GROUPS: readonly ScopeGroup[] = [
         manifestSections: MANIFEST_ORGANIZATION_DATA_REQUESTS_SECTIONS,
         href: organizationDataRequestsSectionHref as (section: never) => string,
         view: DATA_REQUESTS_VIEW,
-        titleKey: "Organization.tabDataRequests",
+        titleKey: "SettingsNav.groupDataRequests",
     },
     {
         id: "organization.audit-diagnostics",
@@ -210,6 +274,30 @@ describe("each organization destination owns the sections its manifest group pro
         ).toContain("if (!sections) return children;");
     });
 
+    it.each(GROUPS)("$id spends each section slug on the region and nowhere else", (group) => {
+        const composed = composedSources(group.view).map(source);
+
+        expect(
+            collidingSectionIds(group.sections, composed),
+            "a control already carrying this id makes the document hold it twice; the region wins on tree order, so the control's label retargets a layout div and the control loses its accessible name",
+        ).toEqual([]);
+    });
+
+    it("catches the collision this rule was written for", () => {
+        const panel = 'const Provider = () => <SelectTrigger id="ai-provider" className="w-full" />;';
+
+        expect(
+            collidingSectionIds(ORGANIZATION_AI_GOVERNANCE_SECTIONS, [panel]),
+            "the AI provider select carried the section's own slug until this PR renamed it to ai-provider-kind",
+        ).toEqual(["ai-provider"]);
+        expect(
+            collidingSectionIds(ORGANIZATION_AI_GOVERNANCE_SECTIONS, [
+                panel.replace("ai-provider", "ai-provider-kind"),
+            ]),
+            "and the rename is what clears it",
+        ).toEqual([]);
+    });
+
     it("builds every deep link from one place, so an anchor cannot be spelled two ways", () => {
         expect(organizationGeneralSectionHref("lifecycle")).toBe(
             `${ORGANIZATION_GENERAL_ROUTE}#lifecycle`,
@@ -266,7 +354,7 @@ const organizationEntries: readonly SettingsEntry[] = SETTINGS_ENTRIES.filter(
 
 describe("organization standing decides who reaches the organization destinations", () => {
     it("declares the scope gate on every destination and every section it absorbed", () => {
-        const grouped = SETTINGS_ENTRIES.filter(
+        const grouped: readonly SettingsEntry[] = SETTINGS_ENTRIES.filter(
             (entry) =>
                 entry.group?.startsWith("organization.") === true
                 && entry.kind === "destination",
@@ -294,10 +382,6 @@ describe("organization standing decides who reaches the organization destination
             layout.includes("activeWorkspace.orgRole === null"),
             "the payload omits the role rather than nulling it, so an identity test admits the viewer this gate exists to refuse; organizationSettingsGate.test.tsx holds the behavior",
         ).toBe(false);
-        expect(
-            source(LEGACY_LAYOUT),
-            "and the legacy layout keeps the same gate, from the same source, unchanged",
-        ).toContain("const isOrgAdmin = activeWorkspace.orgRole !== null;");
         expect(layout).toContain('state="ask-admin"');
         expect(
             layout,
@@ -411,13 +495,20 @@ describe("the organization destinations keep the write boundaries their panels e
 
 describe("the retired page name does not follow the content to its new home", () => {
     it("leaves Organization.tabOverview on the legacy tab strip alone", () => {
-        const named = [
+        /**
+         * Widened on purpose. The manifest's `as const` narrows every title key to a union the
+         * retired key has already left, so comparing against the literal is a type error rather
+         * than a passing assertion — and deleting the check because it "cannot match" would retire
+         * the gate along with the key. Through `string` the comparison stays legal and regains its
+         * meaning the moment someone puts the key back.
+         */
+        const named: readonly (string | null)[] = [
             ...SETTINGS_ENTRIES.map((entry) => entry.titleKey),
             ...SETTINGS_GROUPS.map((group) => group.titleKey),
-        ].filter((key): key is string => key !== null);
+        ];
 
         expect(
-            named.filter((key) => key === "Organization.tabOverview"),
+            named.filter((key) => key === RETIRED_PAGE_NAME_KEY),
             "§7 retires Overview as a page name and the 2026-08-19 ruling names this group General, so nothing the settings navigation renders may resolve to it",
         ).toEqual([]);
         expect(
