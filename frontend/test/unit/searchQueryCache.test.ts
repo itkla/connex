@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+    entriesForWorkspace,
     isFresh,
     nearestPrefixResults,
     rememberSearch,
@@ -95,5 +96,19 @@ describe("global search query cache", () => {
         const cache = cacheOf([["a", 1]]);
 
         expect(nearestPrefixResults(cache, "ac", MIN_QUERY_LENGTH)).toBeNull();
+    });
+
+    it("serves nothing from a workspace the cache was not filled in", () => {
+        const scoped = { workspaceId: 7, entries: cacheOf([["acme", 1]]) };
+
+        expect(entriesForWorkspace(scoped, 7).has("acme")).toBe(true);
+        expect(entriesForWorkspace(scoped, 8).size).toBe(0);
+        expect(entriesForWorkspace(scoped, null).size).toBe(0);
+    });
+
+    it("keeps a workspace's results out of the prefix fallback too", () => {
+        const scoped = { workspaceId: 7, entries: cacheOf([["acme", 1]]) };
+
+        expect(nearestPrefixResults(entriesForWorkspace(scoped, 8), "acme corp", MIN_QUERY_LENGTH)).toBeNull();
     });
 });

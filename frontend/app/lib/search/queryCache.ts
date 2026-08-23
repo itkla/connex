@@ -6,6 +6,24 @@ export type CachedSearch = { data: SearchResults; fetchedAt: number };
 /** Recently resolved searches, oldest key first, keyed by trimmed query. */
 export type SearchCache = ReadonlyMap<string, CachedSearch>;
 
+/**
+ * A cache bound to the workspace whose results it holds. Workspace switches are client-side
+ * navigations that keep the app shell mounted, so the binding is what stops one workspace's records
+ * from being served into another.
+ */
+export type ScopedSearchCache = { workspaceId: number | null; entries: SearchCache };
+
+/** A cache holding nothing, for the first render and for any workspace the cache is not bound to. */
+export const EMPTY_SEARCH_CACHE: SearchCache = new Map();
+
+/**
+ * The cached entries usable in `workspaceId`, which is nothing at all unless the cache was filled
+ * while that same workspace was active.
+ */
+export function entriesForWorkspace(cache: ScopedSearchCache, workspaceId: number | null): SearchCache {
+    return cache.workspaceId === workspaceId ? cache.entries : EMPTY_SEARCH_CACHE;
+}
+
 /** How many resolved queries the global search keeps before evicting the least recently used. */
 export const SEARCH_CACHE_LIMIT = 24;
 

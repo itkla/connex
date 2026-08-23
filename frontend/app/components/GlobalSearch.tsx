@@ -11,12 +11,20 @@ import { Loader2Icon } from 'lucide-react';
 import { CommandGroup, CommandItem, CommandList, CommandSeparator, CommandShortcut } from '@/components/ui/command';
 import { easeOut, instant, springJiggle, springSmooth, springSnappy } from '@/app/lib/motion';
 import { useActions, useAvailableActions } from '@/app/hooks/useActions';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { useShortcutPlatform } from '@/app/hooks/useShortcutPlatform';
 import { ACTION_GROUPS, type ActionGroup, type AppAction } from '@/app/lib/actions/types';
 import { formatShortcut } from '@/app/lib/actions/shortcut';
 import { search as searchApi } from '@/app/lib/api';
 import { buildSearchGroups, openResult, type ResultGroup } from '@/app/lib/search/resultGroups';
-import { isFresh, nearestPrefixResults, rememberSearch, type SearchCache } from '@/app/lib/search/queryCache';
+import {
+    EMPTY_SEARCH_CACHE,
+    entriesForWorkspace,
+    isFresh,
+    nearestPrefixResults,
+    rememberSearch,
+    type ScopedSearchCache,
+} from '@/app/lib/search/queryCache';
 import { cn } from '@/lib/utils';
 
 const MIN_QUERY_LENGTH = 2;
@@ -104,12 +112,15 @@ export default function GlobalSearch() {
 
     const { run, pendingIds } = useActions();
     const available = useAvailableActions();
+    const { activeWorkspaceId } = useWorkspace();
 
     const [mode, setMode] = useState<Mode>('inline');
     const [query, setQuery] = useState(urlQuery);
     const [inlineOpen, setInlineOpen] = useState(false);
     const [expanded, setExpanded] = useState(false);
-    const [searchCache, setSearchCache] = useState<SearchCache>(() => new Map());
+    const [scopedCache, setScopedCache] = useState<ScopedSearchCache>(
+        () => ({ workspaceId: activeWorkspaceId, entries: EMPTY_SEARCH_CACHE }),
+    );
     const [failedQuery, setFailedQuery] = useState<string | null>(null);
     const [activeIndex, setActiveIndex] = useState(-1);
 
@@ -136,6 +147,7 @@ export default function GlobalSearch() {
         if (urlQuery) setQuery(urlQuery);
     }, [urlQuery]);
 
+    const searchCache = entriesForWorkspace(scopedCache, activeWorkspaceId);
     const cached = shouldSearch ? searchCache.get(trimmed) ?? null : null;
 
     useEffect(() => {
@@ -145,7 +157,10 @@ export default function GlobalSearch() {
         const timer = setTimeout(() => {
             setFailedQuery((current) => (current === trimmed ? null : current));
             searchApi(trimmed, { signal: controller.signal })
-                .then((data) => setSearchCache((current) => rememberSearch(current, trimmed, data, Date.now())))
+                .then((data) => setScopedCache((current) => ({
+                    workspaceId: activeWorkspaceId,
+                    entries: rememberSearch(entriesForWorkspace(current, activeWorkspaceId), trimmed, data, Date.now()),
+                })))
                 .catch(() => {
                     if (!controller.signal.aborted) setFailedQuery(trimmed);
                 });
@@ -154,7 +169,7 @@ export default function GlobalSearch() {
             controller.abort();
             clearTimeout(timer);
         };
-    }, [trimmed, shouldSearch, cached]);
+    }, [trimmed, shouldSearch, cached, activeWorkspaceId]);
 
     const paletteData = cached?.data ?? null;
     const inlineData = cached?.data ?? nearestPrefixResults(searchCache, trimmed, MIN_QUERY_LENGTH);
