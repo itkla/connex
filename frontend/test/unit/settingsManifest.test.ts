@@ -359,6 +359,86 @@ describe("settings manifest names real authorization", () => {
 
         expect(inconsistent).toEqual([]);
     });
+
+    it("keeps an any-of permission gate a named consolidation decision, not a default", () => {
+        const loose = entries
+            .filter((entry) => entry.access.permissionMatch === "any")
+            .map((entry) => entry.id);
+
+        expect(
+            loose,
+            "loosening a destination's gate is how a consolidated page stays reachable by either of the roles it merged; each one is enumerated here",
+        ).toEqual(["workspace.audit-diagnostics"]);
+    });
+
+    it("loosens a permission gate only where consolidation earned it", () => {
+        expect(unearnedLooseGates(entries)).toEqual([]);
+    });
+});
+
+/**
+ * Destinations whose any-of permission gate is not backed by what they consolidated.
+ *
+ * An any-of gate is only honest on a page that absorbed two independently gated jobs: it must name
+ * more than one permission, hold more than one absorbed section, and name no permission that none
+ * of those sections actually reads. Anything else is a strict gate wearing a looser name, which
+ * would quietly widen who can reach a settings destination.
+ */
+function unearnedLooseGates(candidates: readonly SettingsEntry[]): readonly string[] {
+    return candidates
+        .filter((entry) => entry.access.permissionMatch === "any")
+        .filter((entry) => {
+            const absorbed = candidates.filter(
+                (candidate) =>
+                    candidate.id !== entry.id
+                    && candidate.canonicalRoute === entry.canonicalRoute
+                    && candidate.canonicalSection !== null,
+            );
+            const covered = new Set(absorbed.flatMap((candidate) => candidate.access.permissions));
+            return (
+                entry.access.permissions.length < 2
+                || absorbed.length < 2
+                || entry.access.permissions.some((permission) => !covered.has(permission))
+            );
+        })
+        .map((entry) => entry.id);
+}
+
+describe("the permission-match gate refuses a loosening it has not earned", () => {
+    const template = SETTINGS_ENTRIES.find((entry) => entry.id === "workspace.audit-diagnostics");
+
+    function withLooseGate(access: Partial<SettingsEntry["access"]>): readonly SettingsEntry[] {
+        if (!template) throw new Error("workspace.audit-diagnostics is the template for this probe");
+        return [
+            ...SETTINGS_ENTRIES.filter((entry) => entry.id !== template.id),
+            { ...template, id: "test.loose", access: { ...template.access, ...access } },
+        ];
+    }
+
+    it("catches an any-of gate over a single permission", () => {
+        expect(unearnedLooseGates(withLooseGate({ permissions: ["AUDIT_READ"] }))).toEqual([
+            "test.loose",
+        ]);
+    });
+
+    it("catches an any-of gate widened with a permission none of its sections reads", () => {
+        expect(
+            unearnedLooseGates(
+                withLooseGate({ permissions: ["AUDIT_READ", "WORKSPACE_SETTINGS", "DEAL_CREATE"] }),
+            ),
+        ).toEqual(["test.loose"]);
+    });
+
+    it("catches an any-of gate on a destination that consolidated nothing", () => {
+        if (!template) throw new Error("workspace.audit-diagnostics is the template for this probe");
+        const orphan: SettingsEntry = {
+            ...template,
+            id: "test.orphan",
+            canonicalRoute: "/settings/workspace/nothing",
+        };
+
+        expect(unearnedLooseGates([...SETTINGS_ENTRIES, orphan])).toEqual(["test.orphan"]);
+    });
 });
 
 /** Forwards naming a route the app does not serve. */

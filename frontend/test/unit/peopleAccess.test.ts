@@ -29,6 +29,13 @@ const MEMBERS_PANEL = path.join(process.cwd(), "app", "components", "settings", 
 const DOMAINS_PANEL = path.join(process.cwd(), "app", "components", "settings", "AllowedDomainsPanel.tsx");
 const USERS_BROWSER = path.join(process.cwd(), "app", "components", "records", "users", "UsersBrowser.tsx");
 const ARRIVAL_HOOK = path.join(process.cwd(), "app", "hooks", "useSectionArrival.ts");
+const SECTION_REGION = path.join(
+    process.cwd(),
+    "app",
+    "components",
+    "settings",
+    "SettingsSectionRegion.tsx",
+);
 
 function source(file: string): string {
     return readFileSync(file, "utf8");
@@ -156,18 +163,22 @@ describe("people & access arrives at the section a deep link asked for", () => {
     });
 
     it("lets a keyboard reader land on the section a fragment addressed", () => {
+        const region = source(SECTION_REGION);
         const view = source(PEOPLE_ACCESS);
 
-        expect(view, "the router focuses the fragment target; a div is not focusable without this")
+        expect(region, "the router focuses the fragment target; a div is not focusable without this")
             .toContain("tabIndex={-1}");
-        expect(view.match(/tabIndex=\{-1\}/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+        expect(
+            view,
+            "the directory's member-detail anchor is this page's own, and needs the same treatment",
+        ).toContain("tabIndex={-1}");
     });
 
     it("marks the section it arrived at, and lets the mark expire", () => {
-        const page = source(PEOPLE_ACCESS);
+        const region = source(SECTION_REGION);
         const hook = source(ARRIVAL_HOOK);
 
-        expect(page).toContain("data-arrived");
+        expect(region).toContain("data-arrived");
         expect(hook).toContain("setArrived(null)");
     });
 });
@@ -257,13 +268,16 @@ describe("people & access gates its sections without hiding them", () => {
         expect(page).toContain('usePermissionCheck("WORKSPACE_SETTINGS")');
         expect(page, "a refused section explains itself where it stands rather than vanishing")
             .toContain("SettingsAvailabilityNotice");
-        expect(page, "a refusal and a failed lookup are different things to be told").toContain(
+        expect(
+            source(SECTION_REGION),
+            "a refusal and a failed lookup are different things to be told",
+        ).toContain(
             'if (check === "denied") return <SettingsAvailabilityNotice variant="inline" state="ask-admin" />;',
         );
         expect(
             page,
             "the unresolved case names the lookup that failed: the viewer's permissions, not a feature's availability",
-        ).toContain('title={t("accessCheckFailedTitle")}');
+        ).toContain('retryTitle={t("accessCheckFailedTitle")}');
     });
 
     it("keeps the page itself ungated, because its roster renders for any member", () => {

@@ -8,6 +8,7 @@
     "newButton": "新規ポリシー",
     "templatesLink": "ドキュメントテンプレート",
     "sectionPolicies": "ポリシー",
+    "sectionDescription": "生成したドキュメントを確定する前に社内承認が必要となる条件と、承認する担当者を設定します。",
     "searchPlaceholder": "ポリシーを検索",
     "emptyTitle": "承認ポリシーはまだありません",
     "emptyBody": "ポリシーを設定すると、見積書・提案書・注文書・契約書をドキュメント種別、合計金額、割引率に応じて確定前に社内承認へ回せます。",

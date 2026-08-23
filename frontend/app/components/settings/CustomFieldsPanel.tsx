@@ -41,8 +41,23 @@ const ENTITY_TYPES: CustomFieldEntityType[] = ["company", "person", "deal"];
 const rowActionTrigger =
     "flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100";
 
-export default function CustomFieldsPanel() {
+/**
+ * Where the panel is rendering, so one component serves both of its homes while #1340 migrates the
+ * workspace destinations.
+ *
+ * - `page` is `/settings/custom-fields` exactly as it ships: the three record-type headings are the
+ *   page's only headings, because the page itself is named for them by the tab strip.
+ * - `section` is the custom-fields section of CRM configuration. That section carries the name the
+ *   deep link advertises, which this panel never displays — it names the record types instead — so
+ *   the page supplies the heading and these three step down to `h3` beneath it.
+ */
+export type CustomFieldsPresentation = "page" | "section";
+
+export default function CustomFieldsPanel({
+    presentation = "page",
+}: { presentation?: CustomFieldsPresentation } = {}) {
     const t = useTranslations("WorkspaceCustomFields");
+    const headingLevel = presentation === "section" ? 3 : 2;
     const { activeWorkspaceId } = useWorkspace();
     const workspaceId = activeWorkspaceId;
 
@@ -175,6 +190,7 @@ export default function CustomFieldsPanel() {
             {ENTITY_TYPES.map((entityType, index) => (
                 <Rise key={entityType} index={index} className="space-y-4">
                     <SettingsSection
+                        headingLevel={headingLevel}
                         title={entityLabels[entityType]}
                         action={
                             !loading && (

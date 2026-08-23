@@ -47,5 +47,40 @@
         "directoryFailedTitle": "Couldn't load the member directory",
         "directoryTitle": "Member directory",
         "metaDescription": "Manage members, roles, allowed domains, and the member directory for this workspace."
+    },
+    "SettingsGap": {
+        "title": "Not available here"
+    },
+    "SettingsCommunications": {
+        "accessCheckFailedBody": "This is a problem reading your permissions, not a decision about them. Try again in a moment.",
+        "accessCheckFailedTitle": "Couldn't check your access",
+        "description": "How {workspace} sends mail: the server behind its own messages, the service behind its campaigns, and what it decides on its members' behalf.",
+        "metaDescription": "Set up this workspace's mail server, campaign delivery, and notification defaults.",
+        "notificationDefaultsDescription": "The notification settings this workspace would choose for its members before they change their own.",
+        "notificationDefaultsGapAction": "Notification preferences",
+        "notificationDefaultsGapBody": "A workspace can't set notification defaults for its members yet — everyone chooses their own, and nothing here overrides them. Yours are on your notification preferences.",
+        "notificationDefaultsTitle": "Notification defaults"
+    },
+    "SettingsCrm": {
+        "accessCheckFailedBody": "This is a problem reading your permissions, not a decision about them. Try again in a moment.",
+        "accessCheckFailedTitle": "Couldn't check your access",
+        "approvalPoliciesFailedBody": "No policy changed. The list itself didn't load, so try again in a moment.",
+        "approvalPoliciesFailedTitle": "Couldn't load approval policies",
+        "customFieldsDescription": "Extra details this workspace records on its companies, contacts, and deals, beyond the fields Connex ships with.",
+        "description": "How {workspace} shapes its records: the details they carry, how a contact is judged, what needs approval, and what runs on its own.",
+        "metaDescription": "Set up custom fields, qualification criteria, approval policies, and automation for this workspace.",
+        "workflowsDescription": "The automation that acts on these records when something changes or on a schedule.",
+        "workflowsGapAction": "Go to Workflows",
+        "workflowsGapBody": "Workflows are built and turned on from their own surface, not from settings. There is nothing to configure here yet.",
+        "workflowsTitle": "Workflow configuration"
+    },
+    "SettingsAuditDiagnostics": {
+        "accessCheckFailedBody": "This is a problem reading your permissions, not a decision about them. Try again in a moment.",
+        "accessCheckFailedTitle": "Couldn't check your access",
+        "auditFailedBody": "Nothing was hidden from you and nothing was lost. The log itself didn't load, so try again in a moment.",
+        "auditFailedTitle": "Couldn't load the audit log",
+        "description": "What has happened in {workspace}, and whether the services it depends on are healthy.",
+        "diagnosticsDescription": "The state of this workspace's mail, background jobs, and stored credentials, with the deployment settings behind them.",
+        "metaDescription": "Review this workspace's audit log and check the health of the services behind it."
     }
 }

@@ -102,6 +102,18 @@ export type SettingsConditionalForward = {
 export type SettingsAccess = {
     /** Backend `Permission` constants required to render the destination's content. */
     permissions: readonly string[];
+    /**
+     * Whether every required permission must be held, or any one of them.
+     *
+     * `"all"` for a destination that serves one job, which is every destination that existed before
+     * the scope groups: lacking the permission its content needs leaves nothing to render. `"any"`
+     * is what consolidation introduces — a destination that absorbed two independently gated jobs
+     * is reachable by a reader who can read either of them, and refuses the other section in place.
+     * Without it a merge would have to pick one of the two permissions and hide the page from a
+     * role holding only the other, which is how a workspace's auditor would lose the audit log to a
+     * destination named for it.
+     */
+    permissionMatch: "all" | "any";
     /** Capability requirements the destination's content depends on. */
     capabilities: readonly SettingsCapabilityRequirement[];
     /** Whether every capability requirement must hold, or any one of them. */
@@ -208,6 +220,7 @@ export type SettingsEntry = {
 
 const NO_ACCESS_REQUIREMENTS: SettingsAccess = {
     permissions: [],
+    permissionMatch: "all",
     capabilities: [],
     capabilityMatch: "all",
     orgAdmin: false,
@@ -292,6 +305,13 @@ export const SETTINGS_GROUPS = [
         order: 3,
         titleKey: "SettingsNav.groupCrmConfiguration",
         epicName: "CRM configuration",
+        /**
+         * Named for the job, not for the surface it points at. The sidebar's "Workflows" is a
+         * different destination, and §7 gives every destination exactly one name — a settings-search
+         * hit reading "Workflows" that leads here instead of to `/workflows` is precisely the
+         * collision this epic exists to remove. §7 calls this job workflow configuration.
+         */
+        gapSections: [{ slug: "workflows", titleKey: "SettingsCrm.workflowsTitle" }],
     },
     {
         id: "workspace.communications",
@@ -300,6 +320,12 @@ export const SETTINGS_GROUPS = [
         order: 4,
         titleKey: "SettingsNav.groupCommunications",
         epicName: "Communications",
+        gapSections: [
+            {
+                slug: "notification-defaults",
+                titleKey: "SettingsCommunications.notificationDefaultsTitle",
+            },
+        ],
     },
     {
         id: "workspace.data-privacy",
@@ -402,6 +428,7 @@ export const SETTINGS_ENTRIES = [
         titleKey: "AccountConnections.title",
         access: {
             permissions: [],
+            permissionMatch: "all",
             capabilities: [
                 { key: "connectedAccounts.google", expected: true },
                 { key: "connectedAccounts.microsoft", expected: true },
@@ -430,6 +457,7 @@ export const SETTINGS_ENTRIES = [
         titleKey: "CommonSidebar.navCaptureReviews",
         access: {
             permissions: [],
+            permissionMatch: "all",
             capabilities: [
                 { key: "connectedCapture.google", expected: true },
                 { key: "connectedCapture.microsoft", expected: true },
@@ -516,6 +544,7 @@ export const SETTINGS_ENTRIES = [
         titleKey: "CommonSidebar.navAuditLog",
         access: {
             permissions: ["AUDIT_READ"],
+            permissionMatch: "all",
             capabilities: [],
             capabilityMatch: "all",
             orgAdmin: false,
@@ -539,6 +568,7 @@ export const SETTINGS_ENTRIES = [
         titleKey: null,
         access: {
             permissions: [],
+            permissionMatch: "all",
             capabilities: [],
             capabilityMatch: "all",
             orgAdmin: true,
@@ -562,6 +592,7 @@ export const SETTINGS_ENTRIES = [
         titleKey: "Organization.tabAi",
         access: {
             permissions: [],
+            permissionMatch: "all",
             capabilities: [],
             capabilityMatch: "all",
             orgAdmin: true,
@@ -585,6 +616,7 @@ export const SETTINGS_ENTRIES = [
         titleKey: "Organization.tabDomains",
         access: {
             permissions: [],
+            permissionMatch: "all",
             capabilities: [],
             capabilityMatch: "all",
             orgAdmin: true,
@@ -608,6 +640,7 @@ export const SETTINGS_ENTRIES = [
         titleKey: "Organization.tabAudit",
         access: {
             permissions: [],
+            permissionMatch: "all",
             capabilities: [],
             capabilityMatch: "all",
             orgAdmin: true,
@@ -631,6 +664,7 @@ export const SETTINGS_ENTRIES = [
         titleKey: "Organization.tabDataRequests",
         access: {
             permissions: [],
+            permissionMatch: "all",
             capabilities: [],
             capabilityMatch: "all",
             orgAdmin: true,
@@ -654,6 +688,7 @@ export const SETTINGS_ENTRIES = [
         titleKey: "Organization.tabDiagnostics",
         access: {
             permissions: [],
+            permissionMatch: "all",
             capabilities: [],
             capabilityMatch: "all",
             orgAdmin: true,
@@ -677,6 +712,7 @@ export const SETTINGS_ENTRIES = [
         titleKey: "Organization.tabMembers",
         access: {
             permissions: [],
+            permissionMatch: "all",
             capabilities: [],
             capabilityMatch: "all",
             orgAdmin: true,
@@ -700,6 +736,7 @@ export const SETTINGS_ENTRIES = [
         titleKey: "Organization.tabOverview",
         access: {
             permissions: [],
+            permissionMatch: "all",
             capabilities: [],
             capabilityMatch: "all",
             orgAdmin: true,
@@ -723,6 +760,7 @@ export const SETTINGS_ENTRIES = [
         titleKey: "Organization.tabSso",
         access: {
             permissions: [],
+            permissionMatch: "all",
             capabilities: [{ key: "sso", expected: true }],
             capabilityMatch: "all",
             orgAdmin: true,
@@ -746,6 +784,7 @@ export const SETTINGS_ENTRIES = [
         titleKey: "CommonSidebar.navApprovalPolicies",
         access: {
             permissions: [],
+            permissionMatch: "all",
             capabilities: [],
             capabilityMatch: "all",
             orgAdmin: false,
@@ -784,6 +823,7 @@ export const SETTINGS_ENTRIES = [
         titleKey: "WorkspaceSettings.tabCustomFields",
         access: {
             permissions: ["CUSTOM_FIELD_MANAGE"],
+            permissionMatch: "all",
             capabilities: [],
             capabilityMatch: "all",
             orgAdmin: false,
@@ -807,6 +847,7 @@ export const SETTINGS_ENTRIES = [
         titleKey: "WorkspaceSettings.tabData",
         access: {
             permissions: [],
+            permissionMatch: "all",
             capabilities: [],
             capabilityMatch: "all",
             orgAdmin: false,
@@ -839,6 +880,7 @@ export const SETTINGS_ENTRIES = [
         titleKey: "WorkspaceSettings.tabDelivery",
         access: {
             permissions: ["WORKSPACE_SETTINGS"],
+            permissionMatch: "all",
             capabilities: [],
             capabilityMatch: "all",
             orgAdmin: false,
@@ -862,6 +904,7 @@ export const SETTINGS_ENTRIES = [
         titleKey: "WorkspaceSettings.tabDiagnostics",
         access: {
             permissions: ["WORKSPACE_SETTINGS"],
+            permissionMatch: "all",
             capabilities: [],
             capabilityMatch: "all",
             orgAdmin: false,
@@ -885,6 +928,7 @@ export const SETTINGS_ENTRIES = [
         titleKey: "WorkspaceSettings.tabEmail",
         access: {
             permissions: ["WORKSPACE_SETTINGS"],
+            permissionMatch: "all",
             capabilities: [{ key: "mailManaged", expected: false }],
             capabilityMatch: "all",
             orgAdmin: false,
@@ -908,6 +952,7 @@ export const SETTINGS_ENTRIES = [
         titleKey: "WorkspaceSettings.tabGeneral",
         access: {
             permissions: ["WORKSPACE_SETTINGS"],
+            permissionMatch: "all",
             capabilities: [],
             capabilityMatch: "all",
             orgAdmin: false,
@@ -931,6 +976,7 @@ export const SETTINGS_ENTRIES = [
         titleKey: "WorkspaceSettings.tabMembers",
         access: {
             permissions: [],
+            permissionMatch: "all",
             capabilities: [],
             capabilityMatch: "all",
             orgAdmin: false,
@@ -984,6 +1030,7 @@ export const SETTINGS_ENTRIES = [
         titleKey: "WorkspaceSettings.tabQualification",
         access: {
             permissions: ["WORKSPACE_SETTINGS"],
+            permissionMatch: "all",
             capabilities: [],
             capabilityMatch: "all",
             orgAdmin: false,
@@ -1007,6 +1054,7 @@ export const SETTINGS_ENTRIES = [
         titleKey: "WorkspaceSettings.tabRoles",
         access: {
             permissions: ["ROLE_MANAGE"],
+            permissionMatch: "all",
             capabilities: [],
             capabilityMatch: "all",
             orgAdmin: false,
@@ -1078,6 +1126,94 @@ export const SETTINGS_ENTRIES = [
         aliasKey: null,
     },
     {
+        id: "workspace.audit-diagnostics",
+        currentRoute: "/settings/workspace/audit-diagnostics",
+        kind: "destination",
+        group: "workspace.audit-diagnostics",
+        canonicalRoute: "/settings/workspace/audit-diagnostics",
+        canonicalSection: null,
+        redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
+        titleKey: "SettingsNav.groupAuditDiagnostics",
+        access: {
+            /**
+             * Either permission reaches this destination, because it absorbed two independently
+             * gated jobs: an auditor holds `AUDIT_READ` and a workspace administrator holds
+             * `WORKSPACE_SETTINGS`, and both have something to read here. Requiring both would take
+             * the audit log away from the role named for it.
+             */
+            permissions: ["AUDIT_READ", "WORKSPACE_SETTINGS"],
+            permissionMatch: "any",
+            capabilities: [],
+            capabilityMatch: "all",
+            orgAdmin: false,
+            manage: [],
+            orgWrite: null,
+            states: ["ask-admin", "retry"],
+        },
+        entryPoints: [],
+        aliasKey: null,
+    },
+    {
+        id: "workspace.communications",
+        currentRoute: "/settings/workspace/communications",
+        kind: "destination",
+        group: "workspace.communications",
+        canonicalRoute: "/settings/workspace/communications",
+        canonicalSection: null,
+        redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
+        titleKey: "SettingsNav.groupCommunications",
+        access: {
+            /**
+             * One permission, because every section here reads workspace mail configuration behind
+             * it. A member without it would find a destination made entirely of refusals, so the
+             * navigation declines to offer one rather than advertising a locked door.
+             */
+            permissions: ["WORKSPACE_SETTINGS"],
+            permissionMatch: "all",
+            capabilities: [],
+            capabilityMatch: "all",
+            orgAdmin: false,
+            manage: [],
+            orgWrite: null,
+            states: ["ask-admin", "retry"],
+        },
+        entryPoints: [],
+        aliasKey: null,
+    },
+    {
+        id: "workspace.crm",
+        currentRoute: "/settings/workspace/crm",
+        kind: "destination",
+        group: "workspace.crm",
+        canonicalRoute: "/settings/workspace/crm",
+        canonicalSection: null,
+        redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
+        titleKey: "SettingsNav.groupCrmConfiguration",
+        access: {
+            /**
+             * Ungated, as the approval-policy browser it absorbed already is: that section renders
+             * for any member and gates only its writes. The two sections whose reads need a
+             * permission explain themselves where they stand.
+             */
+            permissions: [],
+            permissionMatch: "all",
+            capabilities: [],
+            capabilityMatch: "all",
+            orgAdmin: false,
+            manage: ["CUSTOM_FIELD_MANAGE", "DOCUMENT_MANAGE", "WORKSPACE_SETTINGS"],
+            orgWrite: null,
+            states: [],
+        },
+        entryPoints: [],
+        aliasKey: null,
+    },
+    {
         id: "workspace.people",
         currentRoute: "/settings/workspace/people",
         kind: "destination",
@@ -1090,6 +1226,7 @@ export const SETTINGS_ENTRIES = [
         titleKey: "SettingsNav.groupPeopleAccess",
         access: {
             permissions: [],
+            permissionMatch: "all",
             capabilities: [],
             capabilityMatch: "all",
             orgAdmin: false,
@@ -1121,6 +1258,7 @@ export const SETTINGS_ENTRIES = [
         titleKey: "SettingsPeople.directoryTitle",
         access: {
             permissions: [],
+            permissionMatch: "all",
             capabilities: [],
             capabilityMatch: "all",
             orgAdmin: false,

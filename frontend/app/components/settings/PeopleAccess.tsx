@@ -10,70 +10,31 @@ import MembersPanel from "@/app/components/settings/MembersPanel";
 import RolesPanel from "@/app/components/settings/RolesPanel";
 import SettingsAvailabilityNotice from "@/app/components/settings/SettingsAvailabilityNotice";
 import { SettingsSection } from "@/app/components/settings/SettingsSection";
+import {
+    SectionRefusal,
+    SettingsSectionRegion,
+} from "@/app/components/settings/SettingsSectionRegion";
 import { usePermissionCheck } from "@/app/hooks/usePermissions";
 import { useSectionArrival } from "@/app/hooks/useSectionArrival";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
-import { PEOPLE_SECTIONS, type PeopleSection } from "@/app/lib/peopleSections";
+import { PEOPLE_SECTIONS } from "@/app/lib/peopleSections";
 import type { PermissionCheck } from "@/app/lib/permissionState";
 import type { User } from "@/app/lib/types";
-import { cn } from "@/lib/utils";
 
 /**
- * One addressable region of the page: the anchor a deep link resolves against, and the arrival mark
- * a reader who followed one needs in order to see which section answered them.
+ * The refusal posture for a section whose read the backend gates, in this page's voice.
  *
- * The mark is a background wash rather than an outline. An outline on a settings section reads as a
- * validation state; a wash that recedes reads as "here", which is all it has to say.
- */
-function PeopleSectionRegion({
-    section,
-    arrived,
-    register,
-    children,
-}: {
-    section: PeopleSection;
-    arrived: string | null;
-    register: (section: string) => (element: HTMLElement | null) => void;
-    children: React.ReactNode;
-}) {
-    return (
-        <div
-            id={section}
-            ref={register(section)}
-            tabIndex={-1}
-            data-arrived={arrived === section ? "" : undefined}
-            className={cn(
-                "-mx-3 scroll-mt-24 rounded-2xl px-3 py-3 outline-none transition-colors duration-(--motion-expressive) ease-calm motion-reduce:transition-none",
-                arrived === section ? "bg-muted/50" : "bg-transparent",
-            )}
-        >
-            {children}
-        </div>
-    );
-}
-
-/**
- * The refusal posture for a section whose read the backend gates.
- *
- * #1340's rule is that a managed destination never vanishes and never teleports: a member who
- * cannot read roles still sees that roles exist here and is told who can change that, rather than
- * finding a page with a hole in it. A failed permission lookup is kept apart from a refusal,
- * because "we could not check" and "you may not" are different things to be told.
- *
- * The unresolved case says what actually failed. The shared notice's own retry copy is about
- * checking whether a *feature* is available, which is the state its first consumers were in; here
- * the lookup that failed is the viewer's permissions, and a member reading "we couldn't check
- * feature availability" under Roles would be told about the wrong thing entirely.
+ * The postures themselves are shared; what belongs to this page is the copy for the unresolved
+ * case, which must name the lookup that failed. A member reading "we couldn't check feature
+ * availability" under Roles would be told about the wrong thing entirely.
  */
 function RefusedSection({ check }: { check: Exclude<PermissionCheck, "granted"> }) {
     const t = useTranslations("SettingsPeople");
-    if (check === "denied") return <SettingsAvailabilityNotice variant="inline" state="ask-admin" />;
     return (
-        <SettingsAvailabilityNotice
-            variant="inline"
-            state="retry"
-            title={t("accessCheckFailedTitle")}
-            body={t("accessCheckFailedBody")}
+        <SectionRefusal
+            check={check}
+            retryTitle={t("accessCheckFailedTitle")}
+            retryBody={t("accessCheckFailedBody")}
         />
     );
 }
@@ -128,11 +89,11 @@ export default function PeopleAccess({
                 />
             </Rise>
 
-            <PeopleSectionRegion section="members" arrived={arrived} register={register}>
+            <SettingsSectionRegion section="members" arrived={arrived} register={register}>
                 <MembersPanel currentUserId={currentUserId} presentation="consolidated" />
-            </PeopleSectionRegion>
+            </SettingsSectionRegion>
 
-            <PeopleSectionRegion section="roles" arrived={arrived} register={register}>
+            <SettingsSectionRegion section="roles" arrived={arrived} register={register}>
                 <Rise>
                     <SettingsSection title={tRoles("title")} description={tRoles("subtitle")}>
                         {roles === "granted" ? (
@@ -142,9 +103,9 @@ export default function PeopleAccess({
                         )}
                     </SettingsSection>
                 </Rise>
-            </PeopleSectionRegion>
+            </SettingsSectionRegion>
 
-            <PeopleSectionRegion section="allowed-domains" arrived={arrived} register={register}>
+            <SettingsSectionRegion section="allowed-domains" arrived={arrived} register={register}>
                 <Rise>
                     <SettingsSection
                         title={tMembers("domainsTitle")}
@@ -157,9 +118,9 @@ export default function PeopleAccess({
                         )}
                     </SettingsSection>
                 </Rise>
-            </PeopleSectionRegion>
+            </SettingsSectionRegion>
 
-            <PeopleSectionRegion section="directory" arrived={arrived} register={register}>
+            <SettingsSectionRegion section="directory" arrived={arrived} register={register}>
                 <Rise>
                     <SettingsSection title={t("directoryTitle")} description={t("directoryDescription")}>
                         <div
@@ -181,7 +142,7 @@ export default function PeopleAccess({
                         </div>
                     </SettingsSection>
                 </Rise>
-            </PeopleSectionRegion>
+            </SettingsSectionRegion>
         </div>
     );
 }
