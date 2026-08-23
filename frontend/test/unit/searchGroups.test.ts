@@ -226,13 +226,11 @@ describe("global search reaches every first-class sidebar object", () => {
             .map((match) => match[1]);
 
         expect(keys).toContain("documentTemplates");
-        for (const literal of [
-            source("app/lib/api.ts").split("const EMPTY_SEARCH_RESULTS: Types.SearchResults = {")[1].split("};")[0],
-            source("app/components/GlobalSearch.tsx").split("const EMPTY_RESULTS: SearchResults = {")[1].split("};")[0],
-        ]) {
-            for (const key of keys) {
-                expect(literal, `${key} is missing from an empty-results literal`).toContain(`${key}: []`);
-            }
+        const literal = source("app/lib/api.ts")
+            .split("const EMPTY_SEARCH_RESULTS: Types.SearchResults = {")[1]
+            .split("};")[0];
+        for (const key of keys) {
+            expect(literal, `${key} is missing from the empty-results literal`).toContain(`${key}: []`);
         }
     });
 });

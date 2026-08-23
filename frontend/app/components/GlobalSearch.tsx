@@ -15,8 +15,8 @@ import { useShortcutPlatform } from '@/app/hooks/useShortcutPlatform';
 import { ACTION_GROUPS, type ActionGroup, type AppAction } from '@/app/lib/actions/types';
 import { formatShortcut } from '@/app/lib/actions/shortcut';
 import { search as searchApi } from '@/app/lib/api';
-import type { SearchResults } from '@/app/lib/types';
 import { buildSearchGroups, openResult, type ResultGroup } from '@/app/lib/search/resultGroups';
+import { isFresh, nearestPrefixResults, rememberSearch, type SearchCache } from '@/app/lib/search/queryCache';
 import { cn } from '@/lib/utils';
 
 const MIN_QUERY_LENGTH = 2;
@@ -50,7 +50,6 @@ const PILL_INPUT =
     'w-full rounded-full bg-transparent py-2.5 pr-16 pl-11 text-base text-foreground placeholder:text-muted-foreground outline-none';
 
 type Mode = 'inline' | 'palette';
-type ScopedResults = { query: string; data: SearchResults };
 
 function actionLabel(action: AppAction, t: (key: string) => string): string {
     return action.label ?? t(action.labelKey);
@@ -84,31 +83,13 @@ function viewportSnapshot(): string {
     return `${viewport?.offsetLeft ?? 0}:${viewport?.offsetTop ?? 0}:${viewport?.width ?? window.innerWidth}:${viewport?.height ?? window.innerHeight}`;
 }
 
-const EMPTY_RESULTS: SearchResults = {
-    users: [],
-    companies: [],
-    people: [],
-    deals: [],
-    pipelines: [],
-    tags: [],
-    activities: [],
-    notes: [],
-    tasks: [],
-    attachments: [],
-    products: [],
-    campaigns: [],
-    reports: [],
-    documentTemplates: [],
-    documents: [],
-    workflows: [],
-};
-
 /**
  * The unified global search surface. As an inline field in the app header it runs the debounced
  * record-search dropdown; pressing `Cmd/Ctrl+K` opens a centred command palette with permission-aware
  * registry commands and record search while carrying the query across. The panel expands to a larger
  * scrollable window on hover while the centred field stays anchored and focused. Escape, outside-click,
- * or selecting a result returns focus to the element that opened the palette.
+ * or selecting a result returns focus to the element that opened the palette. Queries already searched
+ * in this session render from cache with no debounce and no request, and revalidate once they age out.
  */
 export default function GlobalSearch() {
     const tSearch = useTranslations('CommonSearchBar');
@@ -128,7 +109,8 @@ export default function GlobalSearch() {
     const [query, setQuery] = useState(urlQuery);
     const [inlineOpen, setInlineOpen] = useState(false);
     const [expanded, setExpanded] = useState(false);
-    const [results, setResults] = useState<ScopedResults | null>(null);
+    const [searchCache, setSearchCache] = useState<SearchCache>(() => new Map());
+    const [failedQuery, setFailedQuery] = useState<string | null>(null);
     const [activeIndex, setActiveIndex] = useState(-1);
 
     const containerRef = useRef<HTMLDivElement>(null);
@@ -154,33 +136,38 @@ export default function GlobalSearch() {
         if (urlQuery) setQuery(urlQuery);
     }, [urlQuery]);
 
+    const cached = shouldSearch ? searchCache.get(trimmed) ?? null : null;
+
     useEffect(() => {
         if (!shouldSearch) return;
+        if (cached !== null && isFresh(cached, Date.now())) return;
         const controller = new AbortController();
         const timer = setTimeout(() => {
+            setFailedQuery((current) => (current === trimmed ? null : current));
             searchApi(trimmed, { signal: controller.signal })
-                .then((data) => setResults({ query: trimmed, data }))
+                .then((data) => setSearchCache((current) => rememberSearch(current, trimmed, data, Date.now())))
                 .catch(() => {
-                    if (!controller.signal.aborted) setResults({ query: trimmed, data: EMPTY_RESULTS });
+                    if (!controller.signal.aborted) setFailedQuery(trimmed);
                 });
         }, DEBOUNCE_MS);
         return () => {
             controller.abort();
             clearTimeout(timer);
         };
-    }, [trimmed, shouldSearch]);
+    }, [trimmed, shouldSearch, cached]);
 
-    const paletteData = results?.query === trimmed ? results.data : null;
+    const paletteData = cached?.data ?? null;
+    const inlineData = cached?.data ?? nearestPrefixResults(searchCache, trimmed, MIN_QUERY_LENGTH);
     const paletteRecordGroups = useMemo<ResultGroup[]>(
         () => (trimmed.length >= MIN_QUERY_LENGTH ? buildSearchGroups(paletteData, tSearch) : []),
         [paletteData, trimmed, tSearch],
     );
     const inlineGroups = useMemo<ResultGroup[]>(
-        () => (trimmed.length >= MIN_QUERY_LENGTH ? buildSearchGroups(results?.data ?? null, tSearch) : []),
-        [results, trimmed, tSearch],
+        () => (trimmed.length >= MIN_QUERY_LENGTH ? buildSearchGroups(inlineData, tSearch) : []),
+        [inlineData, trimmed, tSearch],
     );
     const flatRows = useMemo(() => inlineGroups.flatMap((group) => group.rows), [inlineGroups]);
-    const searching = shouldSearch && results?.query !== trimmed;
+    const searching = shouldSearch && cached === null && failedQuery !== trimmed;
 
     const commandGroups = useMemo(() => {
         const groupsToScan = lowerQuery ? ACTION_GROUPS : EMPTY_GROUP_ORDER;
