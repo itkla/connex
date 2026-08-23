@@ -1,70 +1,88 @@
 'use client';
 
+import { startTransition, useOptimistic, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useLocale, useTranslations } from "next-intl";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { EllipsisVerticalIcon, PencilIcon, TrashIcon, InformationCircleIcon } from "@heroicons/react/24/outline";
+
 import { Deal, Task, UpdateTaskPayload } from "@/app/lib/types";
 import { DropdownMenu, DropdownMenuItem, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { EllipsisVerticalIcon, PencilIcon, CheckCircleIcon, TrashIcon, InformationCircleIcon } from "@heroicons/react/24/outline";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatDate } from "@/app/lib/utils";
+import { easeOut } from "@/app/lib/motion";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { deleteTask, updateTask } from "@/app/lib/api";
-import { useRouter } from "next/navigation";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useState } from "react";
 import EditTaskSheet from "@/app/components/activity/tasks/EditTaskSheet";
 import NoteContent from "@/app/components/activity/notes/NoteContent";
-import { useLocale, useTranslations } from "next-intl";
 
+/**
+ * The open-task list on the deal detail page. Completing a task is a single click on its checkbox:
+ * the row leaves the list immediately and the optimistic state holds until the refreshed server data
+ * lands, so the round trip never blocks the feedback. Editing and deleting stay in the row menu.
+ */
 export default function DealTaskList({ dealId, companyId, tasks, deals }: { dealId: number, companyId?: number | null, tasks: Task[], deals: Deal[] }) {
     const t = useTranslations('DealsTaskList');
     const locale = useLocale();
-    const openTasks = tasks.filter((task) => !task.completed);
+    const router = useRouter();
+    const reduce = useReducedMotion() ?? false;
     const [editTaskOpen, setEditTaskOpen] = useState(false);
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
-    const router = useRouter();
-    const deleteThisTask = async (taskId: number) => {
-        try {
-            await deleteTask(taskId);
-            toastSuccess(t('taskDeleted'));
-            router.refresh();
-        } catch (err) {
-            toastError(err instanceof Error ? err.message : t('failedToDeleteTask'));
-        }
+
+    const openTasks = tasks.filter((task) => !task.completed);
+    const [visibleTasks, dismissTask] = useOptimistic<Task[], number>(
+        openTasks,
+        (state, taskId) => state.filter((task) => task.id !== taskId),
+    );
+
+    const deleteThisTask = (task: Task) => {
+        startTransition(async () => {
+            dismissTask(task.id);
+            try {
+                await deleteTask(task.id);
+                toastSuccess(t('taskDeleted'));
+                router.refresh();
+            } catch (err) {
+                toastError(err instanceof Error ? err.message : t('failedToDeleteTask'));
+            }
+        });
     };
 
-    const markTaskAsComplete = async (taskId: number) => {
-
+    const markTaskAsComplete = (task: Task) => {
         const payload: UpdateTaskPayload = {
-            // load the task details in, then overwrite the fields that are changed
-            description: tasks.find((t) => t.id === taskId)?.description,
-            dueDate: tasks.find((t) => t.id === taskId)?.dueDate,
-            assignedToId: tasks.find((t) => t.id === taskId)?.assignedToId,
-            personId: tasks.find((t) => t.id === taskId)?.personId ?? undefined,
-            dealId: dealId,
+            description: task.description,
+            dueDate: task.dueDate,
+            assignedToId: task.assignedToId,
+            personId: task.personId ?? undefined,
+            dealId,
             completed: true,
         };
-        try {
-            await updateTask(taskId, payload);
-            toastSuccess(t('taskMarkedAsComplete'));
-            router.refresh();
-        } catch (err) {
-            toastError(err instanceof Error ? err.message : t('failedToMarkTaskAsComplete'));
-        }
+        startTransition(async () => {
+            dismissTask(task.id);
+            try {
+                await updateTask(task.id, payload);
+                toastSuccess(t('taskMarkedAsComplete'));
+                router.refresh();
+            } catch (err) {
+                toastError(err instanceof Error ? err.message : t('failedToMarkTaskAsComplete'));
+            }
+        });
     };
 
-    const editTask = (taskId: number) => {
-        const found = tasks.find((t) => t.id === taskId);
-        if (!found) return;
-        setSelectedTask(found);
+    const editTask = (task: Task) => {
+        setSelectedTask(task);
         setEditTaskOpen(true);
     };
 
     return (
         <>
-            {openTasks.length > 0 ? (
+            {visibleTasks.length > 0 ? (
                 <>
                     <div className="mb-3 mt-6 flex h-8 items-center">
                         <h2 className="px-6 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
-                            {t('openTasksHeading', { count: openTasks.length })}
+                            {t('openTasksHeading', { count: visibleTasks.length })}
                         </h2>
                         <Tooltip>
                             <TooltipTrigger asChild>
@@ -82,54 +100,58 @@ export default function DealTaskList({ dealId, companyId, tasks, deals }: { deal
                     </div>
                     <div className="overflow-hidden rounded-2xl bg-muted ring-1 ring-border">
                         <ul className="divide-y divide-border">
-                            {openTasks.map((task) => (
-                                <li key={task.id} className="px-6 py-3 flex items-center justify-between">
-                                    <div className="">
-                                        <p className="text-sm text-foreground"><NoteContent content={task.description} references={task.references} /></p>
-                                        {task.dueDate ? (
-                                            <p className="mt-0.5 text-xs text-muted-foreground">
-                                                {t('due', { date: formatDate(task.dueDate, locale) })}
-                                            </p>
-                                        ) : null}
-                                    </div>
-                                    <DropdownMenu>
-                                        <DropdownMenuTrigger asChild>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                className="p-1 h-8 w-8 rounded-full shadow-none border-none bg-transparent hover:bg-muted focus:ring-0 focus:ring-offset-0"
-                                            >
-                                                <EllipsisVerticalIcon className="size-4" />
-                                            </Button>
-                                        </DropdownMenuTrigger>
+                            <AnimatePresence initial={false}>
+                                {visibleTasks.map((task) => (
+                                    <motion.li
+                                        key={task.id}
+                                        layout={!reduce}
+                                        initial={false}
+                                        exit={reduce ? { opacity: 0 } : { opacity: 0, x: 8 }}
+                                        transition={{ duration: 0.2, ease: easeOut }}
+                                        className="flex items-center gap-3 px-6 py-3"
+                                    >
+                                        <Checkbox
+                                            checked={false}
+                                            onCheckedChange={(value) => {
+                                                if (value === true) markTaskAsComplete(task);
+                                            }}
+                                            aria-label={t('ariaCompleteTask')}
+                                            className="size-[18px] shrink-0 rounded-full border-border transition data-[state=checked]:border-brand data-[state=checked]:bg-brand data-[state=checked]:text-brand-foreground"
+                                        />
+                                        <div className="min-w-0 flex-1">
+                                            <p className="text-sm text-foreground"><NoteContent content={task.description} references={task.references} /></p>
+                                            {task.dueDate ? (
+                                                <p className="mt-0.5 text-xs text-muted-foreground">
+                                                    {t('due', { date: formatDate(task.dueDate, locale) })}
+                                                </p>
+                                            ) : null}
+                                        </div>
+                                        <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="p-1 h-8 w-8 shrink-0 rounded-full shadow-none border-none bg-transparent hover:bg-muted focus:ring-0 focus:ring-offset-0"
+                                                >
+                                                    <EllipsisVerticalIcon className="size-4" />
+                                                </Button>
+                                            </DropdownMenuTrigger>
 
-                                        <DropdownMenuContent align="end">
-                                            <DropdownMenuItem onClick={() => {
-                                                editTask(task.id);
-                                            }}>
-                                                <PencilIcon className="size-4" />
-                                                {t('edit')}
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem onClick={() => {
-                                                markTaskAsComplete(task.id);
-                                            }}>
-                                                <CheckCircleIcon className="size-4" />
-                                                {t('markAsComplete')}
-                                            </DropdownMenuItem>
-                                            <DropdownMenuSeparator />
-                                            <DropdownMenuItem variant="destructive" onClick={() => {
-                                                deleteThisTask(task.id);
-                                            }}>
-                                                <TrashIcon className="size-4" />
-                                                {t('delete')}
-                                            </DropdownMenuItem>
-                                        </DropdownMenuContent>
-                                    </DropdownMenu>
-                                    {/* <Button variant="outline" size="sm">
-                                        <EllipsisVerticalIcon className="size-4" />
-                                    </Button> */}
-                                </li>
-                            ))}
+                                            <DropdownMenuContent align="end">
+                                                <DropdownMenuItem onClick={() => editTask(task)}>
+                                                    <PencilIcon className="size-4" />
+                                                    {t('edit')}
+                                                </DropdownMenuItem>
+                                                <DropdownMenuSeparator />
+                                                <DropdownMenuItem variant="destructive" onClick={() => deleteThisTask(task)}>
+                                                    <TrashIcon className="size-4" />
+                                                    {t('delete')}
+                                                </DropdownMenuItem>
+                                            </DropdownMenuContent>
+                                        </DropdownMenu>
+                                    </motion.li>
+                                ))}
+                            </AnimatePresence>
                         </ul>
                     </div>
                 </>
