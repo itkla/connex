@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import {
     ArrowRightCircleIcon,
+    ArrowsPointingOutIcon,
     CheckBadgeIcon,
     CheckIcon,
     ExclamationTriangleIcon,
@@ -14,6 +15,7 @@ import {
 
 import {
     ANSWER_ROW_PLACEHOLDER,
+    UNBOUNDED_ANSWER,
     answerInstant,
     answerListKeys,
     answerRowSignature,
@@ -21,12 +23,14 @@ import {
     blockEvidence,
     isUnsupportedBlock,
     rowCitations,
+    type AskConnexAnswerBounds,
     type AskConnexAnswerDocumentLabels,
 } from '@/app/components/ask-connex/answerDocument';
 import {
     AskConnexEvidenceRow,
     AskConnexUnsupportedEvidence,
 } from '@/app/components/ask-connex/AskConnexEvidence';
+import { boundedAnswerEntries } from '@/app/lib/askConnexSurface';
 import { copyToClipboard } from '@/app/lib/utils';
 import type {
     AiChatAnswerBlock,
@@ -39,6 +43,7 @@ import { cn } from '@/lib/utils';
 type BlockProps = {
     block: AiChatAnswerBlock;
     caveats: string[];
+    bounds: AskConnexAnswerBounds;
     labels: AskConnexAnswerDocumentLabels;
 };
 
@@ -99,16 +104,70 @@ function BlockBody({ body, className }: { body: string | null; className?: strin
     );
 }
 
-function BlockItems({ items, ordered }: { items: string[]; ordered?: boolean }) {
+/**
+ * What a bounded list withheld, and the one place the rest of it can be read.
+ *
+ * The count is stated rather than implied: a list that simply stops looks like a short list, and a
+ * reader deciding whether an answer covered their question has to know the difference.
+ */
+function BoundedFooter({
+    hidden,
+    total,
+    bounds,
+    labels,
+}: {
+    hidden: number;
+    total: number;
+    bounds: AskConnexAnswerBounds;
+    labels: AskConnexAnswerDocumentLabels;
+}) {
+    if (hidden === 0) return null;
+    return (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pt-0.5 text-xs text-muted-foreground">
+            <span>{labels.boundedRows(total - hidden, total)}</span>
+            {bounds.onOpenFullView ? (
+                <Button type="button" variant="ghost" size="inline" onClick={bounds.onOpenFullView}>
+                    <ArrowsPointingOutIcon aria-hidden className="size-3.5" />
+                    {labels.viewAll}
+                </Button>
+            ) : null}
+        </div>
+    );
+}
+
+function BlockItems({
+    items,
+    ordered,
+    bounds,
+    labels,
+}: {
+    items: string[];
+    ordered?: boolean;
+    bounds: AskConnexAnswerBounds;
+    labels: AskConnexAnswerDocumentLabels;
+}) {
     if (items.length === 0) return null;
+    const { entries, hidden } = boundedAnswerEntries(items, bounds.cap);
     const className = 'space-y-1.5 pl-5 leading-relaxed marker:text-muted-foreground';
-    const keys = answerListKeys(items);
-    const children = items.map((item, index) => (
+    const keys = answerListKeys(entries);
+    const children = entries.map((item, index) => (
         <li key={keys[index]} className={cn('break-words', ordered ? 'list-decimal' : 'list-disc')}>
             {item}
         </li>
     ));
-    return ordered ? <ol className={className}>{children}</ol> : <ul className={className}>{children}</ul>;
+    return (
+        <div className="space-y-1.5">
+            {ordered
+                ? <ol className={className}>{children}</ol>
+                : <ul className={className}>{children}</ul>}
+            <BoundedFooter
+                hidden={hidden}
+                total={items.length}
+                bounds={bounds}
+                labels={labels}
+            />
+        </div>
+    );
 }
 
 function MetricRows({ rows, caveats, labels }: RowProps) {
@@ -320,22 +379,46 @@ function DraftBlock({ block, labels }: { block: AiChatAnswerBlock; labels: AskCo
             </figcaption>
             <div className="px-3 py-2.5">
                 <BlockBody body={block.body} className="text-sm text-foreground" />
-                <BlockItems items={block.items} />
+                <BlockItems items={block.items} bounds={UNBOUNDED_ANSWER} labels={labels} />
             </div>
         </figure>
     );
 }
 
-/** The structured presentation for the row-bearing kinds, or null when the block carries no rows. */
-function StructuredRows({ block, caveats, labels }: BlockProps) {
-    const rows = answerRows(block);
-    if (rows.length === 0) return null;
-    if (block.kind === 'metric') return <MetricRows rows={rows} caveats={caveats} labels={labels} />;
-    if (block.kind === 'comparison') return <ComparisonRows rows={rows} caveats={caveats} labels={labels} />;
-    if (block.kind === 'timeline') return <TimelineRows rows={rows} caveats={caveats} labels={labels} />;
-    if (block.kind === 'diff') return <DiffRows rows={rows} caveats={caveats} labels={labels} />;
-    if (block.kind === 'extraction') return <ExtractionRows rows={rows} caveats={caveats} labels={labels} />;
-    return null;
+/**
+ * The structured presentation for the row-bearing kinds, or null when the block carries no rows.
+ *
+ * Bounding happens here rather than inside each kind, so every structured kind stops at the same
+ * place and says so the same way, and the kinds themselves stay presentational.
+ */
+function StructuredRows({ block, caveats, bounds, labels }: BlockProps) {
+    const all = answerRows(block);
+    if (all.length === 0) return null;
+    const { entries: rows, hidden } = boundedAnswerEntries(all, bounds.cap);
+    const rowProps: RowProps = { rows, caveats, labels };
+    const presentation = block.kind === 'metric'
+        ? <MetricRows {...rowProps} />
+        : block.kind === 'comparison'
+            ? <ComparisonRows {...rowProps} />
+            : block.kind === 'timeline'
+                ? <TimelineRows {...rowProps} />
+                : block.kind === 'diff'
+                    ? <DiffRows {...rowProps} />
+                    : block.kind === 'extraction'
+                        ? <ExtractionRows {...rowProps} />
+                        : null;
+    if (presentation === null) return null;
+    return (
+        <div className="space-y-1.5">
+            {presentation}
+            <BoundedFooter
+                hidden={hidden}
+                total={all.length}
+                bounds={bounds}
+                labels={labels}
+            />
+        </div>
+    );
 }
 
 /**
@@ -347,9 +430,11 @@ function StructuredRows({ block, caveats, labels }: BlockProps) {
  * structure. The structured kinds are identified by the component they render as, and fall back to
  * `body`/`items` when a payload arrives without rows.
  */
-export default function AskConnexAnswerBlock({ block, caveats, labels }: BlockProps) {
+export default function AskConnexAnswerBlock({ block, caveats, bounds, labels }: BlockProps) {
     const rows = answerRows(block);
-    const structured = <StructuredRows block={block} caveats={caveats} labels={labels} />;
+    const structured = (
+        <StructuredRows block={block} caveats={caveats} bounds={bounds} labels={labels} />
+    );
     const evidence = blockEvidence(block);
 
     if (block.kind === 'draft') {
@@ -366,7 +451,7 @@ export default function AskConnexAnswerBlock({ block, caveats, labels }: BlockPr
             <section className="space-y-2">
                 <BlockTitle title={block.title} />
                 <BlockBody body={block.body} className="text-[0.9375rem] text-foreground" />
-                <BlockItems items={block.items} />
+                <BlockItems items={block.items} bounds={bounds} labels={labels} />
                 <AskConnexEvidenceRow evidence={evidence} caveats={caveats} labels={labels} />
                 {isUnsupportedBlock(block) ? <AskConnexUnsupportedEvidence labels={labels} /> : null}
             </section>
@@ -382,7 +467,7 @@ export default function AskConnexAnswerBlock({ block, caveats, labels }: BlockPr
                     <div className="space-y-2 rounded-lg bg-muted/70 px-3 py-2.5">
                         <BlockTitle title={block.title} />
                         <BlockBody body={block.body} className="text-sm text-foreground" />
-                        <BlockItems items={block.items} />
+                        <BlockItems items={block.items} bounds={bounds} labels={labels} />
                     </div>
                     <AskConnexEvidenceRow evidence={evidence} caveats={caveats} labels={labels} />
                 </section>
@@ -395,7 +480,7 @@ export default function AskConnexAnswerBlock({ block, caveats, labels }: BlockPr
                     <div className="space-y-1.5 rounded-lg border border-dashed border-border px-3 py-2.5 text-xs text-muted-foreground">
                         <BlockTitle title={block.title} />
                         <BlockBody body={block.body} />
-                        <BlockItems items={block.items} />
+                        <BlockItems items={block.items} bounds={bounds} labels={labels} />
                     </div>
                 </section>
             );
@@ -405,7 +490,12 @@ export default function AskConnexAnswerBlock({ block, caveats, labels }: BlockPr
                 {marker}
                 <BlockTitle title={block.title} />
                 <BlockBody body={block.body} className="text-sm text-foreground" />
-                <BlockItems items={block.items} ordered={block.kind === 'recommendation'} />
+                <BlockItems
+                    items={block.items}
+                    ordered={block.kind === 'recommendation'}
+                    bounds={bounds}
+                    labels={labels}
+                />
                 <AskConnexEvidenceRow evidence={evidence} caveats={caveats} labels={labels} />
                 {isUnsupportedBlock(block) ? <AskConnexUnsupportedEvidence labels={labels} /> : null}
             </section>
@@ -425,7 +515,7 @@ export default function AskConnexAnswerBlock({ block, caveats, labels }: BlockPr
                 )}
             />
             {structured}
-            <BlockItems items={block.items} />
+            <BlockItems items={block.items} bounds={bounds} labels={labels} />
             <AskConnexEvidenceRow evidence={evidence} caveats={caveats} labels={labels} />
             {isUnsupportedBlock(block) ? <AskConnexUnsupportedEvidence labels={labels} /> : null}
         </section>

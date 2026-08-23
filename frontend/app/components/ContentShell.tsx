@@ -10,6 +10,7 @@ import NavBreadcrumb from "@/app/components/NavBreadcrumb";
 import MobileBottomBar from "@/app/components/MobileBottomBar";
 import { useAskConnex, useAskConnexMount } from "@/app/components/ask-connex/AskConnexProvider";
 import { useSidebarMode } from "@/app/hooks/useSidebarMode";
+import { askConnexWidthLength } from "@/app/lib/askConnexSurface";
 import { instant, springSmooth } from "@/app/lib/motion";
 import { useTranslations } from "next-intl";
 
@@ -107,7 +108,7 @@ export default function ContentShell({
                 initial={false}
                 animate={{
                     gridTemplateColumns: askConnex.open && !askConnex.workspace && pushesAskConnex
-                        ? "minmax(0, 1fr) 24rem"
+                        ? `minmax(0, 1fr) ${askConnexWidthLength(askConnex.width)}`
                         : "minmax(0, 1fr) 0rem",
                 }}
                 transition={askConnex.instantOpen || reduceMotion ? instant : springSmooth}

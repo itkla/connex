@@ -29,15 +29,23 @@ function applyAll(state: AskConnexStreamState, frames: AiChatDeltaFrame[]): AskC
 
 describe('settled answer retention', () => {
     it('drops the streamed tail only for the answer that finished', () => {
-        expect(shouldDropAskConnexStream('resolved')).toBe(true);
+        expect(shouldDropAskConnexStream('resolved', null)).toBe(true);
         for (const status of ['failed', 'cancelled', 'timed_out']) {
-            expect(shouldDropAskConnexStream(status)).toBe(false);
+            expect(shouldDropAskConnexStream(status, null)).toBe(false);
+            expect(shouldDropAskConnexStream(status, 'request_failed')).toBe(false);
         }
     });
 
     it('keeps the tail while the answer is still being produced', () => {
         for (const status of ['accepted', 'queued', 'running']) {
-            expect(shouldDropAskConnexStream(status)).toBe(false);
+            expect(shouldDropAskConnexStream(status, null)).toBe(false);
+        }
+    });
+
+    it('drops a partial the member is no longer entitled to, as the server already has', () => {
+        for (const reason of ['access_revoked', 'restrictions_changed']) {
+            expect(shouldDropAskConnexStream('failed', reason)).toBe(true);
+            expect(shouldDropAskConnexStream('timed_out', reason)).toBe(true);
         }
     });
 });

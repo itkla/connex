@@ -1,3 +1,4 @@
+import { isAskConnexAuthorizationWithdrawal } from '@/app/lib/askConnexSurface';
 import type { AiChatDeltaFrame, AiChatRealtimeFrame } from '@/app/lib/types';
 import type { AskConnexTurnState } from '@/app/lib/askConnex';
 
@@ -71,14 +72,17 @@ function mergePartial(
 /**
  * Whether a settled answer's streamed tail must be discarded rather than kept on screen.
  *
- * Only a resolved answer's tail is dropped: its finished text is already the persisted transcript
- * message, so keeping the tail would render the same words twice. Every other settled status keeps
- * what was written, which is the same gate the server applies when it decides whether to return the
- * retained partial to its requester — the two sides must agree or the retained text is discarded on
- * arrival.
+ * A resolved answer's tail is dropped because its finished text is already the persisted transcript
+ * message, so keeping the tail would render the same words twice. A turn that ended by withdrawing
+ * the requester's authorization is dropped because the server purges its durable partial for
+ * exactly that reason — a locally buffered copy is text this reader is no longer entitled to, and
+ * keeping it would leave the client showing, and offering to continue from, an answer the server
+ * has already refused to return. Every other settled status keeps what was written, which is the
+ * same gate the server applies to the retained partial; the two sides must agree or the retained
+ * text is discarded on arrival.
  */
-export function shouldDropAskConnexStream(status: string): boolean {
-    return status === 'resolved';
+export function shouldDropAskConnexStream(status: string, reason: string | null): boolean {
+    return status === 'resolved' || isAskConnexAuthorizationWithdrawal(reason);
 }
 
 /** Returns whether a durable reset invalidation starts a fresh stream for this turn. */

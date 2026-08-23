@@ -18,6 +18,8 @@ import { parseMysqlDateTime } from '@/app/lib/utils';
 export type AskConnexAnswerDocumentLabels = {
     absoluteTime: (instant: string) => string;
     blockKind: (kind: AiChatAnswerBlockKind) => string;
+    boundedRows: (shown: number, total: number) => string;
+    viewAll: string;
     citationKind: (kind: AiChatCitation['kind']) => string;
     comparisonAgainst: string;
     comparisonValue: string;
@@ -51,6 +53,22 @@ export type AskConnexAnswerDocumentLabels = {
 
 /** The placeholder shown where the server established no value for a structured field. */
 export const ANSWER_ROW_PLACEHOLDER = '—';
+
+/**
+ * How much of a long answer list this surface shows, and where the rest of it lives.
+ *
+ * The quick drawer carries a cap and a way into the workspace; the workspace itself carries neither,
+ * because it is the place the drawer hands off to and has nowhere further to send a reader.
+ */
+export type AskConnexAnswerBounds = {
+    /** Rows or items to show before withholding the rest, or null to show every one. */
+    cap: number | null;
+    /** Opens the full workspace on the same chat, or null when this surface already is it. */
+    onOpenFullView: (() => void) | null;
+};
+
+/** The workspace's own bounds: everything rendered, nowhere further to hand off to. */
+export const UNBOUNDED_ANSWER: AskConnexAnswerBounds = { cap: null, onOpenFullView: null };
 
 /** The kinds whose meaning is carried by `rows` rather than by `body`/`items`. */
 const STRUCTURED_KINDS: ReadonlySet<AiChatAnswerBlockKind> = new Set<AiChatAnswerBlockKind>([
