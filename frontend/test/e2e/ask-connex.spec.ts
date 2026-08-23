@@ -342,9 +342,10 @@ test.describe("Ask Connex dual surface", () => {
         /**
          * One group, not two. The field is a fieldset named by its legend, and the control inside it
          * names the choice it offers rather than repeating the field, so a member hearing "Period"
-         * hears the field once.
+         * hears the field once. `exact` matters: role-name matching is substring by default, and the
+         * control's own name ("How to state the period") contains the field's.
          */
-        const period = editor.getByRole("group", { name: copy("en", "scope.period.label") });
+        const period = editor.getByRole("group", { name: copy("en", "scope.period.label"), exact: true });
         await expect(period).toHaveCount(1);
         await period.getByRole("button", { name: copy("en", "scope.period.recent") }).click();
         const window = period.getByRole("button", { name: /30/ });
