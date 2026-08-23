@@ -113,8 +113,8 @@ export default function CrmConfiguration({ policies }: { policies: ApprovalPolic
                 arrived={arrived}
                 register={register}
             >
-                <Rise>
-                    {policies === null ? (
+                {policies === null ? (
+                    <Rise>
                         <SettingsSection
                             title={tPolicies("title")}
                             description={tPolicies("sectionDescription")}
@@ -126,10 +126,10 @@ export default function CrmConfiguration({ policies }: { policies: ApprovalPolic
                                 body={t("approvalPoliciesFailedBody")}
                             />
                         </SettingsSection>
-                    ) : (
-                        <ApprovalPoliciesBrowser policies={policies} presentation="section" />
-                    )}
-                </Rise>
+                    </Rise>
+                ) : (
+                    <ApprovalPoliciesBrowser policies={policies} presentation="section" />
+                )}
             </SettingsSectionRegion>
 
             <SettingsSectionRegion section="workflows" arrived={arrived} register={register}>
