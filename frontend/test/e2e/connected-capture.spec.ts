@@ -135,6 +135,7 @@ for (const locale of ['en', 'ja'] as const) {
         let approvedInteractionId: number | null = null;
         let resetRequested = false;
         let resetPolls = 0;
+        let resetCaptureFailures = 0;
         let resetConnectionPolls = 0;
         let connected = true;
 
@@ -157,7 +158,16 @@ for (const locale of ['en', 'ja'] as const) {
                 captureRequests += 1;
                 if (resetRequested) {
                     resetPolls += 1;
-                    if (resetPolls >= 2) {
+                    if (resetPolls === 2) {
+                        resetCaptureFailures += 1;
+                        await route.fulfill({
+                            status: 503,
+                            contentType: 'application/json',
+                            body: JSON.stringify({ message: 'temporary failure' }),
+                        });
+                        return;
+                    }
+                    if (resetPolls >= 3) {
                         overview = {
                             ...overview,
                             accountResetAvailable: false,
@@ -334,11 +344,13 @@ for (const locale of ['en', 'ja'] as const) {
         expect(resetRequested).toBe(true);
         await expect(page.getByRole('button', {
             name: message(locale, 'account', 'AccountConnections.resetProviderAccount'),
-        })).toHaveCount(0, { timeout: 10_000 });
+        })).toHaveCount(0, { timeout: 15_000 });
         await expect(page.getByRole('button', {
             name: message(locale, 'account', 'AccountConnections.connectProvider')
                 .replace('{provider}', providerName),
         })).toBeVisible();
+        expect(resetCaptureFailures).toBe(1);
+        expect(resetPolls).toBeGreaterThanOrEqual(3);
         expect(resetConnectionPolls).toBeGreaterThanOrEqual(2);
     });
 }

@@ -797,6 +797,23 @@ describe("manage drawer route state", () => {
     });
 });
 
+describe("active lifecycle polling", () => {
+    it("reschedules from the reload generation and refreshes both lifecycle views", () => {
+        const panel = source("app/components/account/ConnectionsPanel.tsx");
+        const effect = panel.slice(
+            panel.indexOf("if (!activeCaptureOperation) return;"),
+            panel.indexOf(
+                "useEffect(() => {",
+                panel.indexOf("if (!activeCaptureOperation) return;") + 1,
+            ),
+        );
+
+        expect(effect).toContain("setCaptureReloadKey((current) => current + 1)");
+        expect(effect).toContain("setConnectionsReloadKey((current) => current + 1)");
+        expect(effect).toContain("[activeCaptureOperation, captureReloadKey]");
+    });
+});
+
 describe("workspace defaults are visible and edit-gated", () => {
     it("renders the effective policy for every reader and the control for none but administrators", () => {
         const drawer = source("app/components/account/connected-capture/ManageConnectionDrawer.tsx");

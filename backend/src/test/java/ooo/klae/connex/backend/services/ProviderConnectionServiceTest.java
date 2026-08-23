@@ -41,6 +41,8 @@ class ProviderConnectionServiceTest extends AbstractServiceTest {
     @Autowired UserProviderSecretCipher secretCipher;
     @Autowired ProviderConnectionMapper providerConnectionMapper;
     @MockitoBean ProviderTokenClient tokenClient;
+    // This rollback-wrapped suite must not self-block the service's REQUIRES_NEW audit appends.
+    @MockitoBean AuditService auditService;
 
     @BeforeEach
     void enableGoogle() {
@@ -284,7 +286,9 @@ class ProviderConnectionServiceTest extends AbstractServiceTest {
         ProviderConnection tombstone = providerConnectionMapper
             .getByUserAndProvider(currentUser.getId(), "google");
         assertEquals("disconnected", tombstone.getStatus());
-        assertEquals("account-old", tombstone.getProviderAccountId());
+        assertEquals(
+            "google:https://accounts.example.test:account-old",
+            tombstone.getProviderAccountId());
         assertNull(tombstone.getCredentialRef());
     }
 

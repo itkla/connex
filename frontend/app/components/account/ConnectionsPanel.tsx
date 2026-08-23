@@ -268,7 +268,7 @@ export default function ConnectionsPanel({
             setConnectionsReloadKey((current) => current + 1);
         }, 4000);
         return () => window.clearTimeout(timeout);
-    }, [activeCaptureOperation, captureOverview]);
+    }, [activeCaptureOperation, captureReloadKey]);
 
     useEffect(() => {
         const connected = searchParams.get("connected");
