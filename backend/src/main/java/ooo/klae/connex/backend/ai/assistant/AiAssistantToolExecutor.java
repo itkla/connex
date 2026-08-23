@@ -74,23 +74,51 @@ public class AiAssistantToolExecutor {
     private final CompanyMapper companyMapper;
     private final DealMapper dealMapper;
     private final AiAssistantDateResolver dateResolver;
+    private final AiAssistantScopeReadService scopeReadService;
 
-    /** Executes one validated, enabled tool call. */
+    /** Executes one validated, enabled tool call outside any declared query scope. */
     public AiAssistantToolResult execute(
             String name,
             JsonNode args,
             AiChatResourceRegistry resources,
             boolean includePrivateNotes) {
+        return execute(name, args, resources, includePrivateNotes, AiChatQueryScope.none());
+    }
+
+    /**
+     * Executes one validated, enabled tool call under the turn's declared query scope.
+     *
+     * <p>The declared scope is applied by the server, not proposed by the model, so a scoped tool
+     * can only ever narrow within what the caller already stated. A model argument may further
+     * restrict the read; it can never widen it past the interpretation the caller was shown. A read
+     * the scope cannot be applied to at all is refused by {@link AiChatScopedToolPolicy} rather than
+     * executed from the model's arguments behind an echo the result would not describe.
+     *
+     * @param name declared tool key
+     * @param args validated raw arguments
+     * @param resources per-turn handle registry
+     * @param includePrivateNotes whether owner-private notes may be read for this session
+     * @param scope validated declared query scope for the turn
+     * @return the tool result
+     */
+    public AiAssistantToolResult execute(
+            String name,
+            JsonNode args,
+            AiChatResourceRegistry resources,
+            boolean includePrivateNotes,
+            AiChatQueryScope scope) {
         validateReferences(name, args, resources);
         if (!toolCatalog.isExecutable(name)) {
             throw AiAssistantLoopException.malformed(toolCatalog.unavailableReason(name));
         }
+        AiChatScopedToolPolicy.requireHonorsDeclaredScope(name, scope);
         try {
             return switch (name) {
                 case "search_records" -> search(args, resources);
                 case "get_record" -> getRecord(args, resources, includePrivateNotes);
-                case "list_activities" -> listActivities(args, resources);
+                case "list_activities" -> listActivities(args, resources, scope);
                 case "list_tasks" -> listTasks(args, resources);
+                case "list_scope_activities" -> listScopeActivities(args, resources, scope);
                 case "aggregate_metric" -> aggregateMetric(args);
                 case "find_schedule_conflicts" -> findScheduleConflicts(args, resources);
                 default -> throw AiAssistantLoopException.malformed("unknown_tool");
@@ -227,14 +255,26 @@ public class AiAssistantToolExecutor {
         return result(record.data(), record.identifiers());
     }
 
-    private AiAssistantToolResult listActivities(JsonNode args, AiChatResourceRegistry resources) {
+    /**
+     * Reads one record's recent activity inside the turn's declared period.
+     *
+     * <p>A subject skill or a generic step can ask for a record's history while the turn declares a
+     * bounded period, and the rows it hands the model are what the answer is grounded in. Reading
+     * the latest rows regardless would put activity from outside the window into provider evidence
+     * under an echo that named a narrower one, so the declared boundaries reach the query and the
+     * result restates the period it actually covered.
+     */
+    private AiAssistantToolResult listActivities(
+            JsonNode args, AiChatResourceRegistry resources, AiChatQueryScope scope) {
         ResourceRef resource = resources.resolve(requiredText(args, "handle"), RECORD_KINDS);
         int limit = integer(args, "limit", DEFAULT_LIMIT);
+        AiChatScopePeriod period = AiChatScopePeriod.of(scope, workspaceService);
         List<Activity> activities = switch (resource.kind()) {
             case "person" -> {
                 requireProcessablePerson(resource.id());
                 yield filterRestrictedLinkedPeople(
-                        historyService.activitiesForPerson(resource.id(), limit),
+                        historyService.activitiesForPerson(
+                                resource.id(), period.startUtc(), period.endUtc(), limit),
                         Activity::getPerson,
                         Activity::getReferences,
                         resources.maskingContext());
@@ -242,7 +282,8 @@ public class AiAssistantToolExecutor {
             case "company" -> {
                 companyService.getCompanyById(resource.id());
                 yield filterRestrictedLinkedPeople(
-                        historyService.activitiesForCompany(resource.id(), limit),
+                        historyService.activitiesForCompany(
+                                resource.id(), period.startUtc(), period.endUtc(), limit),
                         Activity::getPerson,
                         Activity::getReferences,
                         resources.maskingContext());
@@ -250,7 +291,8 @@ public class AiAssistantToolExecutor {
             case "deal" -> {
                 dealService.getDealById(resource.id());
                 yield filterRestrictedLinkedPeople(
-                        historyService.activitiesForDeal(resource.id(), limit),
+                        historyService.activitiesForDeal(
+                                resource.id(), period.startUtc(), period.endUtc(), limit),
                         Activity::getPerson,
                         Activity::getReferences,
                         resources.maskingContext());
@@ -261,7 +303,14 @@ public class AiAssistantToolExecutor {
                 .limit(limit)
                 .map(AiAssistantToolExecutor::activityData)
                 .toList();
-        return result(Map.of("handle", requiredText(args, "handle"), "activities", data), List.of());
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("handle", requiredText(args, "handle"));
+        if (period.bounded()) {
+            result.put("periodStart", period.start().toString());
+            result.put("periodEnd", period.end().toString());
+        }
+        result.put("activities", data);
+        return result(result, List.of());
     }
 
     private AiAssistantToolResult listTasks(JsonNode args, AiChatResourceRegistry resources) {
@@ -299,6 +348,21 @@ public class AiAssistantToolExecutor {
                 .map(AiAssistantToolExecutor::taskData)
                 .toList();
         return result(Map.of("handle", requiredText(args, "handle"), "tasks", data), List.of());
+    }
+
+    private AiAssistantToolResult listScopeActivities(
+            JsonNode args, AiChatResourceRegistry resources, AiChatQueryScope scope) {
+        return scopeReadService.scopeActivities(
+                scope,
+                optionalText(args, "records"),
+                null,
+                stringList(args.get("warmth")),
+                args.get("days") == null || args.get("days").isNull()
+                        ? null
+                        : args.get("days").asInt(),
+                AiChatScopeBounds.MAX_ACTIVITY_ROWS,
+                AiChatScopeBounds.DEFAULT_ACTIVITY_ROWS_PER_RECORD,
+                resources);
     }
 
     private AiAssistantToolResult aggregateMetric(JsonNode args) {
@@ -774,6 +838,19 @@ public class AiAssistantToolExecutor {
                 .map(AiChatPageContextDto::id)
                 .distinct()
                 .toList();
+    }
+
+    private static List<String> stringList(JsonNode node) {
+        if (node == null || node.isNull() || !node.isArray()) {
+            return List.of();
+        }
+        List<String> values = new ArrayList<>();
+        for (JsonNode value : node) {
+            if (value.isString()) {
+                values.add(value.asString());
+            }
+        }
+        return List.copyOf(values);
     }
 
     private static Set<String> requestedKinds(JsonNode node) {

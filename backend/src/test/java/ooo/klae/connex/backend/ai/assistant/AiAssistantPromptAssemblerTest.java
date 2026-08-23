@@ -23,6 +23,7 @@ import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import ooo.klae.connex.backend.ai.provider.AiToolCall;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
+import ooo.klae.connex.backend.dto.MemberScope;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -1113,5 +1114,80 @@ class AiAssistantPromptAssemblerTest {
                 turn.tool(),
                 "{\"query\":\"" + marker.repeat(60) + "\"}",
                 thoughtSignature);
+    }
+
+    /**
+     * On the smallest supported context window the tool allocation is two kilobytes, which one long
+     * note can exceed on a read that entirely succeeded. Replacing the whole result with a budget
+     * marker would leave the synthesis model with no records and no citation handles for evidence
+     * the server did retrieve, so rows are dropped and the loss is disclosed instead.
+     */
+    @Test
+    void skillEvidenceTooLargeForTheStepKeepsAFittingSubsetAndDisclosesTheRest() throws Exception {
+        AiChatMessage request = new AiChatMessage();
+        request.setAuthorKind("user");
+        request.setContent("Brief me on this account");
+        List<Map<String, Object>> rows = List.of(
+                Map.of("handle", "r1", "notes", "FIRST_ROW_MUST_SURVIVE"),
+                Map.of("handle", "r2", "notes", "SECOND_ROW_MUST_BE_DROPPED".repeat(80)));
+        AiAssistantPromptAssembler.SkillContext skill =
+                new AiAssistantPromptAssembler.SkillContext(
+                        "Server-owned skill: relationship brief.",
+                        Map.of(
+                                "skill", "relationship_brief_v1",
+                                "evidence", List.of(Map.of(
+                                        "kind", "list_activities",
+                                        "status", "ok",
+                                        "data", Map.of("activities", rows)))));
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                512, 4_000, 1_000, 1_000, 2_048, 8_000);
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(request),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(),
+                new MaskingContext(),
+                new AiChatResourceRegistry(),
+                List.of(),
+                budget,
+                null,
+                skill);
+        String serialized = objectMapper.writeValueAsString(prompt.getMessages());
+
+        assertTrue(serialized.contains("FIRST_ROW_MUST_SURVIVE"));
+        assertFalse(serialized.contains("SECOND_ROW_MUST_BE_DROPPED"));
+        assertTrue(serialized.contains("truncated: showing 1 of 2 items"));
+        assertFalse(serialized.contains("budget_exceeded"));
+    }
+
+    /**
+     * The declared-scope instruction is server-authored and per-turn, so it travels outside the
+     * CRM_DATA delimiters and never enters the fixed envelope the answer budget pays for.
+     */
+    @Test
+    void theDeclaredScopeInstructionTravelsPerTurnOutsideTheUntrustedDataDelimiters() {
+        AiChatMessage request = new AiChatMessage();
+        request.setAuthorKind("user");
+        request.setContent("What happened with my accounts?");
+        AiChatQueryScope declared = new AiChatQueryScope(
+                true, null, null, 90, MemberScope.allTeam(), List.of(), List.of("company"),
+                List.of(), List.of(), List.of(), null);
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(request),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(),
+                new MaskingContext(),
+                new AiChatResourceRegistry(),
+                List.of(),
+                new AiAssistantPromptBudget(512, 4_000, 1_000, 1_000, 2_048, 8_000),
+                null,
+                AiAssistantPromptAssembler.SkillContext.NONE.withScopeDirective(
+                        AiChatScopedToolPolicy.directive(declared)));
+
+        assertFalse(prompt.getSystemPrompt().contains("server-declared query scope"));
+        assertTrue(prompt.getMessages().stream()
+                .anyMatch(message -> message.getContent() != null
+                        && message.getContent().contains("server-declared query scope")));
     }
 }

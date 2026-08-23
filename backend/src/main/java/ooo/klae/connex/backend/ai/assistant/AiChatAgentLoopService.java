@@ -69,6 +69,7 @@ public class AiChatAgentLoopService {
     static final int HARD_MAX_STEPS = 64;
     private static final int MAX_CONSECUTIVE_NO_PROGRESS_STEPS = 2;
     private static final String INTERNAL_ERROR = "internal_error";
+    private static final String TOOL_OUTSIDE_SKILL_AUTHORITY = "tool_outside_skill_authority";
     private static final int MAX_FINAL_CHARS = 16_000;
     private static final int MAX_GENERATED_TITLE_CHARS = 80;
     private static final double TEMPERATURE = 0.1;
@@ -82,6 +83,8 @@ public class AiChatAgentLoopService {
     private final AiAssistantToolExecutor toolExecutor;
     private final AiAssistantWriteToolService writeToolService;
     private final AiAssistantPromptAssembler promptAssembler;
+    private final AiSkillRouter skillRouter;
+    private final AiSkillPlanRunner skillPlanRunner;
     private final AiChatMemoryService memoryService;
     private final AiChatAttachmentContextService attachmentContextService;
     private final AiChatTurnPersistenceService persistenceService;
@@ -146,10 +149,57 @@ public class AiChatAgentLoopService {
             int noProgressSteps = 0;
             int inputTokens = addTokens(memory.inputTokens(), attachmentContext.inputTokens());
             int outputTokens = addTokens(memory.outputTokens(), attachmentContext.outputTokens());
+            AiSkillRouter.Routing routing = skillRouter.route(
+                    turn.workspaceId(),
+                    turn.userId(),
+                    initiatingMessage.getContent(),
+                    promptContext,
+                    turn.scope());
+            // Carried on every turn that declares a scope, routed or not: the generic loop is
+            // exactly where a model would otherwise reach for a read the declaration cannot be
+            // applied to and have the turn refused for it.
+            String scopeDirective = AiChatScopedToolPolicy.directive(turn.scope());
+            AiAssistantPromptAssembler.SkillContext skillContext =
+                    AiAssistantPromptAssembler.SkillContext.NONE
+                            .withScopeDirective(scopeDirective);
+            AiAssistantPromptAssembler.SkillReference skillReference = null;
+            int stepOffset = 0;
             int maxSteps = Math.min(
                     governanceService.assistantMaxSteps(turn.workspaceId()), HARD_MAX_STEPS);
+            if (routing.routed()) {
+                AiSkillPlanRunner.Execution execution = skillPlanRunner.run(
+                        turn,
+                        routing,
+                        turn.scope(),
+                        resources,
+                        memory.budget().toolResultBytes(),
+                        () -> requireCurrentToolExecution(turn));
+                // Every step the plan consumed already owns a durable idempotency key, so the
+                // model loop resumes after them even when the plan produced nothing usable.
+                stepOffset = execution.lastStepNumber();
+                maxSteps = Math.min(maxSteps, HARD_MAX_STEPS - stepOffset);
+                if (execution.executed()) {
+                    // Attribution is written only once the plan actually produced the evidence the
+                    // answer is built from, so the durable turn row and the answer's own skill
+                    // metadata can never name a declaration the turn did not really run under.
+                    persistenceService.applySkill(
+                            turn, routing.skill().key(), routing.skill().version());
+                    skillReference = new AiAssistantPromptAssembler.SkillReference(
+                            routing.skill().key(), routing.skill().version());
+                    skillContext = new AiAssistantPromptAssembler.SkillContext(
+                            routing.skill().directive(), execution.evidence(), scopeDirective);
+                    // The server-owned plan already retrieved the evidence, so the model gets the
+                    // skill's small synthesis budget instead of the improvisation budget.
+                    maxSteps = Math.min(maxSteps, routing.skill().budgets().maxModelSteps());
+                }
+            }
 
-            for (int stepNumber = 1; stepNumber <= maxSteps; stepNumber++) {
+            AiSkillCatalog.SkillSpec activeSkill = skillReference == null ? null : routing.skill();
+            int consumedSteps = 0;
+            int stepCursor = 0;
+            while (consumedSteps < maxSteps && stepOffset + stepCursor < HARD_MAX_STEPS) {
+                stepCursor++;
+                int stepNumber = stepOffset + stepCursor;
                 requireWorkspaceEnabled(turn);
                 if (deadlineReached(deadline)) {
                     return AiGenerationTaskResult.timedOut("turn_deadline_exceeded");
@@ -169,7 +219,8 @@ public class AiChatAgentLoopService {
                                     maskingContext,
                                     resources,
                                     attachmentContext.data(),
-                                    memory.budget())
+                                    memory.budget(),
+                                    skillContext)
                             : promptAssembler.assemble(
                                     history,
                                     pageContext,
@@ -178,7 +229,8 @@ public class AiChatAgentLoopService {
                                     resources,
                                     attachmentContext.data(),
                                     memory.budget(),
-                                    stepRepair);
+                                    stepRepair,
+                                    skillContext);
                     AiAssistantPromptAssembler.NativeReplay nativeReplay = nativeTools
                             ? promptAssembler.nativeReplay(
                                     toolTurns,
@@ -290,6 +342,9 @@ public class AiChatAgentLoopService {
                     if (repair != null || attempt.repair().isEmpty()) {
                         return AiGenerationTaskResult.failed("schema_repair_failed");
                     }
+                    // A repair iteration produced no model decision, so it is not charged to the
+                    // step budget. It is still bounded: a second consecutive malformed step ends
+                    // the turn above, and the backstop bounds the step numbers regardless.
                     repair = attempt.repair().orElseThrow();
                     continue;
                 }
@@ -302,7 +357,9 @@ public class AiChatAgentLoopService {
                     return AiGenerationTaskResult.failed("malformed_output");
                 }
                 repair = null;
+                consumedSteps++;
                 if (step.tool() != null) {
+                    requireSkillAuthority(activeSkill, step.tool().name());
                     if (streamingObserver != null) {
                         streamingObserver.requireNoTerminalText();
                     }
@@ -484,7 +541,7 @@ public class AiChatAgentLoopService {
                         requireCurrentToolExecution(turn);
                         AiAssistantToolResult toolResult = toolExecutor.execute(
                                 step.tool().name(), step.tool().args(), resources,
-                                turn.includePrivateNotes());
+                                turn.includePrivateNotes(), turn.scope());
                         ToolTurn admittedTurn = new ToolTurn(
                                 stepNumber, step.tool().name(), toolResult);
                         toolBudgetAudit = requireAdditionalToolCapacity(
@@ -590,7 +647,8 @@ public class AiChatAgentLoopService {
                         omitted ? List.of() : screenedBlocks.orElseThrow(),
                         coverage,
                         progress,
-                        toolBudgetAudit);
+                        toolBudgetAudit,
+                        skillReference);
                 requireCurrentAccess(turn);
                 persistenceService.resolve(
                         turn, persistedText, metadata, inputTokens, outputTokens);
@@ -601,9 +659,7 @@ public class AiChatAgentLoopService {
                         new AiChatTurnGenerationResult(turn.turnId(), "resolved"));
             }
             return AiGenerationTaskResult.failed(
-                    maxSteps == HARD_MAX_STEPS
-                            ? "agent_backstop_exceeded"
-                            : "step_cap_exceeded");
+                    exhaustionReason(maxSteps, stepOffset + stepCursor, skillReference != null));
         } catch (AiAssistantLoopException exception) {
             if ("turn_deadline_exceeded".equals(exception.terminalReason())) {
                 return AiGenerationTaskResult.timedOut(exception.terminalReason());
@@ -645,6 +701,42 @@ public class AiChatAgentLoopService {
             }
             return AiGenerationTaskResult.failed(INTERNAL_ERROR);
         }
+    }
+
+    /**
+     * Refuses a synthesis-step tool a routed skill never declared.
+     *
+     * <p>{@code allowedTools} and {@code authority} bound the whole turn, not just the server-owned
+     * plan. Once a skill has run, the model's remaining steps exist to synthesize its evidence: a
+     * read-authority skill must not be able to reach a write tool, and no skill may cause a tool it
+     * never declared to run, however the model phrases the request.
+     */
+    private void requireSkillAuthority(AiSkillCatalog.SkillSpec skill, String toolName) {
+        if (skill == null) {
+            return;
+        }
+        boolean forbiddenWrite = skill.authority() == AiSkillCatalog.Authority.READ
+                && toolCatalog.isWrite(toolName);
+        if (forbiddenWrite || !skill.allowedTools().contains(toolName)) {
+            throw new AiAssistantLoopException(
+                    TOOL_OUTSIDE_SKILL_AUTHORITY, TOOL_OUTSIDE_SKILL_AUTHORITY);
+        }
+    }
+
+    /**
+     * Names the budget a turn exhausted.
+     *
+     * <p>A routed turn is clamped to its skill's small synthesis budget, which is a different
+     * failure from the generic loop running out of improvisation steps: telling a member to narrow
+     * their scope is the wrong advice when the cohort read already succeeded and only the write-up
+     * did not converge.
+     */
+    private static String exhaustionReason(
+            int maxSteps, int lastStepNumber, boolean routedSkill) {
+        if (lastStepNumber >= HARD_MAX_STEPS || maxSteps == HARD_MAX_STEPS) {
+            return "agent_backstop_exceeded";
+        }
+        return routedSkill ? "skill_budget_exceeded" : "step_cap_exceeded";
     }
 
     private static String screenedFinalText(String text) {

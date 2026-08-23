@@ -155,7 +155,8 @@ class ShareReadIsolationMapperTest extends AbstractMapperTest {
         assertEquals(
                 List.of(visibleActivity.getId()),
                 activityMapper.getAiAssistantActivitiesByDealId(
-                        workspace.getId(), deal.getId(), organizationWorkspaceIds, 1).stream()
+                        workspace.getId(), deal.getId(), organizationWorkspaceIds,
+                        null, null, 1).stream()
                         .map(Activity::getId)
                         .toList());
         assertEquals(
@@ -167,7 +168,8 @@ class ShareReadIsolationMapperTest extends AbstractMapperTest {
         assertEquals(
                 List.of(visibleActivity.getId()),
                 activityMapper.getAiAssistantActivitiesByCompanyId(
-                        workspace.getId(), deal.getCompanyId(), organizationWorkspaceIds, 1).stream()
+                        workspace.getId(), deal.getCompanyId(), organizationWorkspaceIds,
+                        null, null, 1).stream()
                         .map(Activity::getId)
                         .toList());
         assertEquals(

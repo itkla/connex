@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
@@ -28,34 +29,52 @@ public class AiAssistantHistoryService {
     private final WorkspaceService workspaceService;
     private final ReferenceService referenceService;
 
-    List<Activity> activitiesForPerson(int personId, int limit) {
+    /**
+     * One record's activity, bounded to a period when the turn declared one.
+     *
+     * <p>The bounds reach the query rather than filtering its rows afterwards: a trailing read that
+     * returned the newest rows and then discarded the out-of-period ones would hand back fewer rows
+     * than the caller asked for while in-period rows it never looked at still existed.
+     *
+     * @param startUtc inclusive lower bound on the stored timestamp, or null when unbounded
+     * @param endUtc inclusive upper bound on the stored timestamp, or null when unbounded
+     */
+    List<Activity> activitiesForPerson(
+            int personId, LocalDateTime startUtc, LocalDateTime endUtc, int limit) {
         requireLimit(limit);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Integer> organizationWorkspaceIds = currentOrganizationWorkspaceIds(workspaceId);
         return referenceService.hydrateActivities(
                 workspaceId,
                 activityMapper.getAiAssistantActivitiesByPersonId(
-                        workspaceId, personId, organizationWorkspaceIds, limit));
+                        workspaceId, personId, organizationWorkspaceIds,
+                        startUtc, endUtc, limit));
     }
 
-    List<Activity> activitiesForDeal(int dealId, int limit) {
+    /** One deal's activity, bounded to a period when the turn declared one. */
+    List<Activity> activitiesForDeal(
+            int dealId, LocalDateTime startUtc, LocalDateTime endUtc, int limit) {
         requireLimit(limit);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Integer> organizationWorkspaceIds = currentOrganizationWorkspaceIds(workspaceId);
         return referenceService.hydrateActivities(
                 workspaceId,
                 activityMapper.getAiAssistantActivitiesByDealId(
-                        workspaceId, dealId, organizationWorkspaceIds, limit));
+                        workspaceId, dealId, organizationWorkspaceIds,
+                        startUtc, endUtc, limit));
     }
 
-    List<Activity> activitiesForCompany(int companyId, int limit) {
+    /** One company's activity, bounded to a period when the turn declared one. */
+    List<Activity> activitiesForCompany(
+            int companyId, LocalDateTime startUtc, LocalDateTime endUtc, int limit) {
         requireLimit(limit);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Integer> organizationWorkspaceIds = currentOrganizationWorkspaceIds(workspaceId);
         return referenceService.hydrateActivities(
                 workspaceId,
                 activityMapper.getAiAssistantActivitiesByCompanyId(
-                        workspaceId, companyId, organizationWorkspaceIds, limit));
+                        workspaceId, companyId, organizationWorkspaceIds,
+                        startUtc, endUtc, limit));
     }
 
     List<Task> tasksForPerson(int personId, int limit) {

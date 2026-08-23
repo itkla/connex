@@ -30,6 +30,8 @@ public class AiChatTurnTerminalCoordinator {
             "no_progress",
             "agent_backstop_exceeded",
             "step_cap_exceeded",
+            "skill_budget_exceeded",
+            "tool_outside_skill_authority",
             "workspace_disabled",
             "generation_capacity",
             AiAssistantTerminalReasons.RESTRICTIONS_CHANGED,

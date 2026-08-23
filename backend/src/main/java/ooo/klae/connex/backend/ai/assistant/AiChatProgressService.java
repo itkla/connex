@@ -111,7 +111,9 @@ public class AiChatProgressService {
         return switch (tool == null ? "" : tool) {
             case "search_records", "get_record" -> "records";
             case "get_deal_brief" -> "deals";
-            case "list_activities", "create_activity" -> "activities";
+            case "list_activities", "create_activity", "list_scope_activities" -> "activities";
+            case "relationship_metrics" -> "metrics";
+            case "deal_attention" -> "deals";
             case "find_schedule_conflicts" -> "schedule";
             case "list_tasks", "create_task" -> "tasks";
             case "aggregate_metric" -> "metrics";
@@ -163,8 +165,11 @@ public class AiChatProgressService {
             Integer count = switch (toolCall.getToolName()) {
                 case "search_records" -> arraySize(result, "records");
                 case "get_record", "create_activity", "create_task", "create_note",
-                        "add_tag", "change_deal_stage", "assign_owner" -> 1;
-                case "list_activities" -> arraySize(result, "activities");
+                        "add_tag", "change_deal_stage", "assign_owner",
+                        "relationship_metrics" -> 1;
+                case "list_activities", "list_scope_activities" ->
+                        arraySize(result, "activities");
+                case "deal_attention" -> arraySize(result, "deals");
                 case "list_tasks" -> arraySize(result, "tasks");
                 case "find_schedule_conflicts" -> arraySize(result, "conflicts");
                 default -> null;

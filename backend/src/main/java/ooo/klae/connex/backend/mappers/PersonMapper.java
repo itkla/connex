@@ -29,6 +29,7 @@ import ooo.klae.connex.backend.warmth.RelationshipWarmthModel.SqlParameters;
 public interface PersonMapper {
     List<Person> getAllPersons(int workspaceId);
     List<Person> getProcessablePersons(int workspaceId);
+    List<Integer> getAssistantProcessablePersonIds(int workspaceId);
     List<Person> getPersonsForNetworkReport(
             @Param("workspaceId") int workspaceId,
             @Param("limit") int limit);

@@ -19,11 +19,12 @@ class AiAssistantToolCatalogTest {
         assertEquals(
                 List.of(
                         "search_records", "get_record", "list_activities", "list_tasks",
+                        "list_scope_activities",
                         "aggregate_metric", "find_schedule_conflicts", "get_deal_brief",
                         "create_activity", "create_task", "create_note", "add_tag",
                         "change_deal_stage", "assign_owner"),
                 catalog.tools().stream().map(AiAssistantToolCatalog.ToolSpec::name).toList());
-        assertEquals(12, catalog.tools().stream()
+        assertEquals(13, catalog.tools().stream()
                 .filter(AiAssistantToolCatalog.ToolSpec::executable)
                 .count());
         assertTrue(catalog.isExecutable("find_schedule_conflicts"));
@@ -55,10 +56,39 @@ class AiAssistantToolCatalogTest {
     }
 
     @Test
+    void theBulkActivityToolAcceptsOnlyNarrowingArgumentsAndNeverARawScope() throws Exception {
+        assertTrue(catalog.isExecutable("list_scope_activities"));
+        assertEquals(
+                AiAssistantToolCatalog.ToolTier.READ, catalog.tier("list_scope_activities"));
+        assertTrue(catalog.permitsArguments(
+                "list_scope_activities", objectMapper.readTree("{}")));
+        assertTrue(catalog.permitsArguments(
+                "list_scope_activities",
+                objectMapper.readTree(
+                        "{\"records\":\"company\",\"warmth\":[\"cool\",\"cold\"],"
+                                + "\"days\":90}")));
+        assertFalse(catalog.permitsArguments(
+                "list_scope_activities",
+                objectMapper.readTree("{\"records\":\"note\"}")));
+        assertFalse(catalog.permitsArguments(
+                "list_scope_activities",
+                objectMapper.readTree("{\"warmth\":[\"lukewarm\"]}")));
+        assertFalse(catalog.permitsArguments(
+                "list_scope_activities",
+                objectMapper.readTree("{\"days\":366}")));
+        assertFalse(catalog.permitsArguments(
+                "list_scope_activities",
+                objectMapper.readTree("{\"ownerIds\":[4]}")));
+        assertFalse(catalog.permitsArguments(
+                "list_scope_activities",
+                objectMapper.readTree("{\"limit\":500}")));
+    }
+
+    @Test
     void nativeDefinitionsMirrorExecutableCatalogSchemasWithoutReservedTools() {
         var definitions = catalog.nativeDefinitions(objectMapper);
 
-        assertEquals(12, definitions.size());
+        assertEquals(13, definitions.size());
         assertEquals(
                 catalog.tools().stream()
                         .filter(AiAssistantToolCatalog.ToolSpec::executable)

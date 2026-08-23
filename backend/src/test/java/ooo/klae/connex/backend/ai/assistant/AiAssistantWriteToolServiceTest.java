@@ -143,7 +143,8 @@ class AiAssistantWriteToolServiceTest {
                 personMapper,
                 mock(CompanyMapper.class),
                 mock(DealMapper.class),
-                dateResolver);
+                dateResolver,
+                mock(AiAssistantScopeReadService.class));
         service = new AiAssistantWriteToolService(
                 catalog,
                 readExecutor,

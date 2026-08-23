@@ -380,5 +380,171 @@
       "ada@example.com",
       "987654321"
     ]
+  },
+  {
+    "id": "en-skill-routing-activity-digest",
+    "locale": "en",
+    "category": "skill_routing",
+    "skill": "activity_digest_v1",
+    "request": "List recent activities for cool or cold accounts.",
+    "expectedSkill": "activity_digest_v1"
+  },
+  {
+    "id": "ja-skill-routing-activity-digest",
+    "locale": "ja",
+    "category": "skill_routing",
+    "skill": "activity_digest_v1",
+    "request": "直近の活動を取引先ごとに一覧にしてください。",
+    "expectedSkill": "activity_digest_v1"
+  },
+  {
+    "id": "en-skill-routing-relationship-cooling",
+    "locale": "en",
+    "category": "skill_routing",
+    "skill": "relationship_cooling_explanation_v1",
+    "request": "Why is this relationship cooling?",
+    "expectedSkill": "relationship_cooling_explanation_v1",
+    "context": [
+      {
+        "kind": "company",
+        "id": 12
+      }
+    ]
+  },
+  {
+    "id": "ja-skill-routing-relationship-cooling",
+    "locale": "ja",
+    "category": "skill_routing",
+    "skill": "relationship_cooling_explanation_v1",
+    "request": "この関係が冷めてきた理由を教えてください。",
+    "expectedSkill": "relationship_cooling_explanation_v1",
+    "context": [
+      {
+        "kind": "company",
+        "id": 12
+      }
+    ]
+  },
+  {
+    "id": "en-skill-routing-relationship-brief",
+    "locale": "en",
+    "category": "skill_routing",
+    "skill": "relationship_brief_v1",
+    "request": "Tell me about this account before my call.",
+    "expectedSkill": "relationship_brief_v1",
+    "context": [
+      {
+        "kind": "company",
+        "id": 12
+      }
+    ]
+  },
+  {
+    "id": "ja-skill-routing-relationship-brief",
+    "locale": "ja",
+    "category": "skill_routing",
+    "skill": "relationship_brief_v1",
+    "request": "この取引先の概要を教えてください。",
+    "expectedSkill": "relationship_brief_v1",
+    "context": [
+      {
+        "kind": "company",
+        "id": 12
+      }
+    ]
+  },
+  {
+    "id": "en-skill-routing-pipeline-attention",
+    "locale": "en",
+    "category": "skill_routing",
+    "skill": "pipeline_attention_review_v1",
+    "request": "Which open deals need attention this week?",
+    "expectedSkill": "pipeline_attention_review_v1"
+  },
+  {
+    "id": "ja-skill-routing-pipeline-attention",
+    "locale": "ja",
+    "category": "skill_routing",
+    "skill": "pipeline_attention_review_v1",
+    "request": "リスクのある案件はどれですか。",
+    "expectedSkill": "pipeline_attention_review_v1"
+  },
+  {
+    "id": "en-skill-routing-field-question-fallback",
+    "locale": "en",
+    "category": "skill_routing",
+    "request": "Tell me about the pricing on this deal.",
+    "context": [
+      {
+        "kind": "company",
+        "id": 12
+      }
+    ],
+    "expectedFallback": true
+  },
+  {
+    "id": "ja-skill-routing-field-question-fallback",
+    "locale": "ja",
+    "category": "skill_routing",
+    "request": "この商談の価格について教えてください。",
+    "context": [
+      {
+        "kind": "company",
+        "id": 12
+      }
+    ],
+    "expectedFallback": true
+  },
+  {
+    "id": "en-skill-routing-scheduling-fallback",
+    "locale": "en",
+    "category": "skill_routing",
+    "request": "Do I have any scheduling conflicts on Thursday afternoon?",
+    "context": [
+      {
+        "kind": "company",
+        "id": 12
+      }
+    ],
+    "expectedFallback": true
+  },
+  {
+    "id": "ja-skill-routing-scheduling-fallback",
+    "locale": "ja",
+    "category": "skill_routing",
+    "request": "木曜日の午後に予定の重複はありますか。",
+    "context": [
+      {
+        "kind": "company",
+        "id": 12
+      }
+    ],
+    "expectedFallback": true
+  },
+  {
+    "id": "en-skill-routing-novel-analysis-fallback",
+    "locale": "en",
+    "category": "skill_routing",
+    "request": "How does our win rate compare with the previous quarter?",
+    "context": [
+      {
+        "kind": "company",
+        "id": 12
+      }
+    ],
+    "expectedFallback": true
+  },
+  {
+    "id": "ja-skill-routing-novel-analysis-fallback",
+    "locale": "ja",
+    "category": "skill_routing",
+    "request": "前四半期と比べて受注率はどう変わりましたか。",
+    "context": [
+      {
+        "kind": "company",
+        "id": 12
+      }
+    ],
+    "expectedFallback": true
   }
 ]

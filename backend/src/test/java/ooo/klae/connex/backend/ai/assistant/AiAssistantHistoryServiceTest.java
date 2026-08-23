@@ -63,11 +63,11 @@ class AiAssistantHistoryServiceTest {
         List<Task> dealTasks = List.of(new Task());
         List<Task> companyTasks = List.of(new Task());
         List<Note> companyNotes = List.of(new Note());
-        when(activityMapper.getAiAssistantActivitiesByPersonId(7, 17, List.of(7, 9), 3))
+        when(activityMapper.getAiAssistantActivitiesByPersonId(7, 17, List.of(7, 9), null, null, 3))
                 .thenReturn(personActivities);
-        when(activityMapper.getAiAssistantActivitiesByDealId(7, 8, List.of(7, 9), 4))
+        when(activityMapper.getAiAssistantActivitiesByDealId(7, 8, List.of(7, 9), null, null, 4))
                 .thenReturn(dealActivities);
-        when(activityMapper.getAiAssistantActivitiesByCompanyId(7, 5, List.of(7, 9), 7))
+        when(activityMapper.getAiAssistantActivitiesByCompanyId(7, 5, List.of(7, 9), null, null, 7))
                 .thenReturn(companyActivities);
         when(taskMapper.getAiAssistantTasksByPersonId(7, 17, List.of(7, 9), 5))
                 .thenReturn(personTasks);
@@ -85,17 +85,17 @@ class AiAssistantHistoryServiceTest {
         when(referenceService.hydrateTasks(7, companyTasks)).thenReturn(companyTasks);
         when(referenceService.hydrate(7, companyNotes)).thenReturn(companyNotes);
 
-        assertEquals(personActivities, service.activitiesForPerson(17, 3));
-        assertEquals(dealActivities, service.activitiesForDeal(8, 4));
-        assertEquals(companyActivities, service.activitiesForCompany(5, 7));
+        assertEquals(personActivities, service.activitiesForPerson(17, null, null, 3));
+        assertEquals(dealActivities, service.activitiesForDeal(8, null, null, 4));
+        assertEquals(companyActivities, service.activitiesForCompany(5, null, null, 7));
         assertEquals(personTasks, service.tasksForPerson(17, 5));
         assertEquals(dealTasks, service.tasksForDeal(8, 6));
         assertEquals(companyTasks, service.tasksForCompany(5, 8));
         assertEquals(companyNotes, service.notesForCompany(5, 9));
 
-        verify(activityMapper).getAiAssistantActivitiesByPersonId(7, 17, List.of(7, 9), 3);
-        verify(activityMapper).getAiAssistantActivitiesByDealId(7, 8, List.of(7, 9), 4);
-        verify(activityMapper).getAiAssistantActivitiesByCompanyId(7, 5, List.of(7, 9), 7);
+        verify(activityMapper).getAiAssistantActivitiesByPersonId(7, 17, List.of(7, 9), null, null, 3);
+        verify(activityMapper).getAiAssistantActivitiesByDealId(7, 8, List.of(7, 9), null, null, 4);
+        verify(activityMapper).getAiAssistantActivitiesByCompanyId(7, 5, List.of(7, 9), null, null, 7);
         verify(taskMapper).getAiAssistantTasksByPersonId(7, 17, List.of(7, 9), 5);
         verify(taskMapper).getAiAssistantTasksByDealId(7, 8, List.of(7, 9), 6);
         verify(taskMapper).getAiAssistantTasksByCompanyId(7, 5, List.of(7, 9), 8);
@@ -105,7 +105,7 @@ class AiAssistantHistoryServiceTest {
 
     @Test
     void historyLimitsFailClosedOutsideTheToolContract() {
-        assertThrows(IllegalArgumentException.class, () -> service.activitiesForPerson(17, 0));
+        assertThrows(IllegalArgumentException.class, () -> service.activitiesForPerson(17, null, null, 0));
         assertThrows(IllegalArgumentException.class, () -> service.tasksForDeal(8, 21));
 
         verifyNoInteractions(

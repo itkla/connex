@@ -267,11 +267,11 @@ class ActivityMapperTest extends AbstractMapperTest {
                 restrictedPerson.getName());
 
         List<Activity> personPage = activityMapper.getAiAssistantActivitiesByPersonId(
-                workspace.getId(), person.getId(), List.of(workspace.getId()), 1);
+                workspace.getId(), person.getId(), List.of(workspace.getId()), null, null, 1);
         List<Activity> dealPage = activityMapper.getAiAssistantActivitiesByDealId(
-                workspace.getId(), deal.getId(), List.of(workspace.getId()), 1);
+                workspace.getId(), deal.getId(), List.of(workspace.getId()), null, null, 1);
         List<Activity> companyPage = activityMapper.getAiAssistantActivitiesByCompanyId(
-                workspace.getId(), deal.getCompanyId(), List.of(workspace.getId()), 1);
+                workspace.getId(), deal.getCompanyId(), List.of(workspace.getId()), null, null, 1);
 
         assertEquals(List.of(newerPersonActivity.getId()),
                 personPage.stream().map(Activity::getId).toList());
