@@ -66,7 +66,7 @@
         "accessCheckFailedTitle": "アクセス権を確認できませんでした",
         "approvalPoliciesFailedBody": "ポリシーは変更されていません。一覧の読み込みに失敗しただけですので、しばらくしてからもう一度お試しください。",
         "approvalPoliciesFailedTitle": "承認ポリシーを読み込めませんでした",
-        "customFieldsDescription": "Connex に標準で用意された項目に加えて、{workspace} が会社・連絡先・案件に記録する独自の項目です。",
+        "customFieldsDescription": "Connex に標準で用意された項目に加えて、このワークスペースが会社・連絡先・案件に記録する独自の項目です。",
         "description": "{workspace} のレコードの形を決める設定です。記録する項目、連絡先の評価基準、承認が必要な条件、そして自動で動く処理をまとめています。",
         "metaDescription": "このワークスペースのカスタムフィールド、評価基準、承認ポリシー、自動化を設定します。",
         "workflowsDescription": "レコードの変更時やスケジュールに応じて、これらのレコードを自動で処理する仕組みです。",

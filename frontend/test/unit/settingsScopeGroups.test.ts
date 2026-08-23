@@ -248,6 +248,39 @@ describe("the scope destinations gate their sections without hiding them", () =>
     });
 });
 
+describe("the scope destinations' copy resolves to finished sentences", () => {
+    const NAMESPACES = ["SettingsCommunications", "SettingsCrm", "SettingsAuditDiagnostics", "SettingsGap"];
+    /** The only keys these pages render with arguments; everything else must stand on its own. */
+    const INTERPOLATED = new Set(["description"]);
+
+    it.each(["en", "ja"])("leaves no unfilled placeholder in the %s catalog", (locale) => {
+        const catalog = JSON.parse(
+            readFileSync(path.join(process.cwd(), "messages", locale, "settings.json"), "utf8"),
+        ) as Record<string, Record<string, string>>;
+
+        const unfilled: string[] = [];
+        for (const namespace of NAMESPACES) {
+            for (const [key, value] of Object.entries(catalog[namespace] ?? {})) {
+                if (INTERPOLATED.has(key)) continue;
+                if (/\{[a-zA-Z]/.test(value)) unfilled.push(`${namespace}.${key}`);
+            }
+        }
+
+        expect(
+            unfilled,
+            "a string with a placeholder that its call site passes no argument for renders the braces to the reader",
+        ).toEqual([]);
+    });
+
+    it("passes the workspace name to every string that asks for one", () => {
+        for (const view of [COMMUNICATIONS_VIEW, CRM_VIEW, AUDIT_VIEW]) {
+            expect(source(view)).toContain(
+                't("description", { workspace: activeWorkspace?.name ?? "" })',
+            );
+        }
+    });
+});
+
 describe("the consolidations name the jobs they cannot yet do", () => {
     it.each([
         {

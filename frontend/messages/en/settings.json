@@ -66,7 +66,7 @@
         "accessCheckFailedTitle": "Couldn't check your access",
         "approvalPoliciesFailedBody": "No policy changed. The list itself didn't load, so try again in a moment.",
         "approvalPoliciesFailedTitle": "Couldn't load approval policies",
-        "customFieldsDescription": "Extra details {workspace} records on its companies, contacts, and deals, beyond the fields Connex ships with.",
+        "customFieldsDescription": "Extra details this workspace records on its companies, contacts, and deals, beyond the fields Connex ships with.",
         "description": "How {workspace} shapes its records: the details they carry, how a contact is judged, what needs approval, and what runs on its own.",
         "metaDescription": "Set up custom fields, qualification criteria, approval policies, and automation for this workspace.",
         "workflowsDescription": "The automation that acts on these records when something changes or on a schedule.",
