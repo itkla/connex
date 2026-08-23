@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import WorkspaceSettingsChrome from "@/app/components/settings/WorkspaceSettingsChrome";
 import { PermissionsProvider } from "@/app/hooks/usePermissions";
+import { SETTINGS_GROUPS } from "@/app/lib/settingsManifest";
 
 const { pathnameState } = vi.hoisted(() => ({ pathnameState: { value: "/settings/members" } }));
 
@@ -65,4 +66,16 @@ describe("the settings home does not inherit the workspace tab strip", () => {
         expect(html).toContain("/settings/roles");
         expect(html).toContain("Manage this workspace.");
     });
+
+    it.each(SETTINGS_GROUPS.map((group) => group.route))(
+        "renders neither at the canonical destination %s",
+        (route) => {
+            pathnameState.value = route;
+
+            expect(
+                chrome(),
+                "a scope-group page is named for the job it owns; a second header saying Settings and the strip it replaced must not stack above it",
+            ).toBe("");
+        },
+    );
 });
