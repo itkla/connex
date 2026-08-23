@@ -47,5 +47,39 @@
         "directoryFailedTitle": "メンバー一覧を読み込めませんでした",
         "directoryTitle": "メンバー一覧",
         "metaDescription": "このワークスペースのメンバー、ロール、許可するドメイン、メンバー一覧を管理します。"
+    },
+    "SettingsGap": {
+        "title": "ここではまだご利用いただけません"
+    },
+    "SettingsCommunications": {
+        "accessCheckFailedBody": "権限の判定結果ではなく、権限の読み取りに失敗しています。しばらくしてからもう一度お試しください。",
+        "accessCheckFailedTitle": "アクセス権を確認できませんでした",
+        "description": "{workspace} のメール送信方法です。自社メールを送るサーバー、キャンペーンを配信するサービス、そしてメンバーに代わって決める設定をまとめています。",
+        "metaDescription": "このワークスペースのメールサーバー、キャンペーン配信、通知の初期設定を管理します。",
+        "notificationDefaultsDescription": "メンバーが自分で変更する前に、このワークスペースが初期値として選ぶ通知設定です。",
+        "notificationDefaultsGapAction": "通知設定を開く",
+        "notificationDefaultsGapBody": "ワークスペース単位で通知の初期設定を決めることはまだできません。通知はメンバーそれぞれが選ぶ設定に従い、ここから上書きされることはありません。ご自身の設定は通知設定から変更できます。",
+        "notificationDefaultsTitle": "通知の初期設定"
+    },
+    "SettingsCrm": {
+        "accessCheckFailedBody": "権限の判定結果ではなく、権限の読み取りに失敗しています。しばらくしてからもう一度お試しください。",
+        "accessCheckFailedTitle": "アクセス権を確認できませんでした",
+        "approvalPoliciesFailedBody": "ポリシーは変更されていません。一覧の読み込みに失敗しただけですので、しばらくしてからもう一度お試しください。",
+        "approvalPoliciesFailedTitle": "承認ポリシーを読み込めませんでした",
+        "customFieldsDescription": "Connex に標準で用意された項目に加えて、{workspace} が会社・連絡先・案件に記録する独自の項目です。",
+        "description": "{workspace} のレコードの形を決める設定です。記録する項目、連絡先の評価基準、承認が必要な条件、そして自動で動く処理をまとめています。",
+        "metaDescription": "このワークスペースのカスタムフィールド、評価基準、承認ポリシー、自動化を設定します。",
+        "workflowsDescription": "レコードの変更時やスケジュールに応じて、これらのレコードを自動で処理する仕組みです。",
+        "workflowsGapAction": "ワークフローを開く",
+        "workflowsGapBody": "ワークフローは設定画面ではなく、専用の画面で作成して有効にします。ここで設定する項目はまだありません。"
+    },
+    "SettingsAuditDiagnostics": {
+        "accessCheckFailedBody": "権限の判定結果ではなく、権限の読み取りに失敗しています。しばらくしてからもう一度お試しください。",
+        "accessCheckFailedTitle": "アクセス権を確認できませんでした",
+        "auditFailedBody": "情報が隠されたわけでも、失われたわけでもありません。ログの読み込みに失敗しただけですので、しばらくしてからもう一度お試しください。",
+        "auditFailedTitle": "監査ログを読み込めませんでした",
+        "description": "{workspace} でこれまでに行われた操作と、依存しているサービスが正常に動いているかを確認できます。",
+        "diagnosticsDescription": "このワークスペースのメール、バックグラウンド処理、保存された認証情報の状態と、その背後にある構成を表示します。",
+        "metaDescription": "このワークスペースの監査ログを確認し、背後のサービスの状態を点検します。"
     }
 }

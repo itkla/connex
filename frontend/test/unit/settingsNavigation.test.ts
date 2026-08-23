@@ -268,6 +268,58 @@ describe("settings navigation gates on the manifest's visibility bucket", () => 
         expect(ids).not.toContain("workspace.audit-log");
     });
 
+    it("offers a consolidated destination to a reader who can read either of the jobs it merged", () => {
+        const auditor = resolveSettingsNavigation(
+            context("en", { permissions: new Set(["AUDIT_READ"]) }),
+        );
+        const administrator = resolveSettingsNavigation(
+            context("en", { permissions: new Set(["WORKSPACE_SETTINGS"]) }),
+        );
+        const offered = (model: ReturnType<typeof resolveSettingsNavigation>) =>
+            model.flatMap((scope) => scope.groups.flatMap((group) => group.destinations.map((d) => d.id)));
+
+        expect(
+            offered(auditor),
+            "a role granted exactly the audit permission must not lose the audit log to the page named for it",
+        ).toContain("workspace.audit-diagnostics");
+        expect(
+            offered(administrator),
+            "and a workspace administrator without it keeps the diagnostics half",
+        ).toContain("workspace.audit-diagnostics");
+    });
+
+    it("still hides a consolidated destination from a reader who can read neither job", () => {
+        const model = resolveSettingsNavigation(
+            context("en", { permissions: new Set(["DEAL_CREATE"]) }),
+        );
+        const ids = model.flatMap((scope) => scope.groups.flatMap((group) => group.destinations.map((d) => d.id)));
+
+        expect(
+            ids,
+            "an any-of gate widens who reaches the page; it does not open it to everyone",
+        ).not.toContain("workspace.audit-diagnostics");
+    });
+
+    it("would hide the auditor if the gate were strict, which is why the manifest loosens it", () => {
+        const entry = entries.find((candidate) => candidate.id === "workspace.audit-diagnostics");
+        if (!entry) throw new Error("the consolidated audit destination is the subject of this probe");
+        const strict: SettingsEntry = {
+            ...entry,
+            access: { ...entry.access, permissionMatch: "all" },
+        };
+        const auditor: SettingsNavViewer = {
+            capabilities: ALL_CAPABILITIES,
+            permissions: new Set(["AUDIT_READ"]),
+            isOrgAdmin: false,
+        };
+
+        expect(entryVisible(entry, auditor)).toBe(true);
+        expect(
+            entryVisible(strict, auditor),
+            "the probe proves the loosening is load-bearing rather than decorative",
+        ).toBe(false);
+    });
+
     it("keeps a destination whose manage permission the viewer lacks", () => {
         const model = resolveSettingsNavigation(context("en", { permissions: new Set() }));
         const ids = model.flatMap((scope) => scope.groups.flatMap((group) => group.destinations.map((d) => d.id)));
@@ -281,7 +333,14 @@ describe("settings navigation gates on the manifest's visibility bucket", () => 
             "the roster's own job survives its consolidation; a viewer who cannot invite still reads the members",
         ).toContain("workspace.members");
         expect(ids).toContain("workspace.data");
-        expect(ids).toContain("workspace.approval-policies");
+        expect(
+            ids,
+            "CRM configuration absorbed the approval-policy browser, which is manage-gated the same way",
+        ).toContain("workspace.crm");
+        expect(
+            sectionIds,
+            "and the browser's own job survives that consolidation as a named section of it",
+        ).toContain("workspace.approval-policies");
     });
 
     it("drops the organization scope entirely for a viewer holding no organization role", () => {
@@ -300,11 +359,19 @@ describe("settings navigation gates on the manifest's visibility bucket", () => 
             email?.access.states,
             "Email keeps its place because it can say it is instance-managed; that claim is what makes it visible",
         ).toContain("managed");
+        const sectionIds = model.flatMap((scope) =>
+            scope.groups.flatMap((group) => group.sections.map((section) => section.id)),
+        );
+
+        expect(
+            sectionIds,
+            "#1340: a capability-managed destination never silently vanishes — it explains itself where its name is, which is now a section of Communications",
+        ).toContain("workspace.email");
+        expect(sectionIds).toContain("workspace.delivery");
         expect(
             ids,
-            "#1340: a capability-managed destination never silently vanishes — it explains itself where its name is",
-        ).toContain("workspace.email");
-        expect(ids).toContain("workspace.delivery");
+            "and the destination holding both stays offered, so that explanation is reachable",
+        ).toContain("workspace.communications");
     });
 
     it("keeps a destination whose any-of capabilities all resolved against it", () => {
@@ -334,7 +401,14 @@ describe("settings navigation gates on the manifest's visibility bucket", () => 
         const model = resolveSettingsNavigation(context("en", { capabilities: noCapabilities }));
         const ids = model.flatMap((scope) => scope.groups.flatMap((group) => group.destinations.map((d) => d.id)));
 
-        expect(ids).toContain("workspace.email");
+        const sectionIds = model.flatMap((scope) =>
+            scope.groups.flatMap((group) => group.sections.map((section) => section.id)),
+        );
+
+        expect(sectionIds, "email is a section of Communications now, and still named").toContain(
+            "workspace.email",
+        );
+        expect(ids).toContain("workspace.communications");
         expect(ids).toContain("organization.sso");
         expect(
             entries.filter((entry) => entry.conditionalForward !== null).map((entry) => entry.id),
@@ -348,6 +422,7 @@ describe("settings navigation gates on the manifest's visibility bucket", () => 
             id: "test.silent",
             access: {
                 permissions: [],
+                permissionMatch: "all",
                 capabilities: [{ key: "sso", expected: true }],
                 capabilityMatch: "all",
                 orgAdmin: false,
@@ -416,6 +491,7 @@ describe("settings navigation gates on the manifest's visibility bucket", () => 
             titleKey: "WorkspaceSettings.tabRoles",
             access: {
                 permissions: [],
+                permissionMatch: "all",
                 capabilities: [],
                 capabilityMatch: "all",
                 orgAdmin: false,

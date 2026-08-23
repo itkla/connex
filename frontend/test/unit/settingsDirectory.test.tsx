@@ -120,7 +120,10 @@ describe("the settings directory draws the navigation model", () => {
             .flatMap((scope) => scope.groups)
             .filter((group) => group.destinations.length > 1);
 
-        expect(several.length).toBeGreaterThan(3);
+        expect(
+            several.length,
+            "this population shrinks as #1340 migrates groups — a migrated group offers one destination — so the floor is only that the case still exists to be checked",
+        ).toBeGreaterThan(1);
         for (const group of several) {
             expect(
                 occurrences(`href="${group.href}"`),
@@ -130,6 +133,35 @@ describe("the settings directory draws the navigation model", () => {
                 if (destination.href === group.href) continue;
                 expect(markup).toContain(rendered(destination.title));
                 expect(occurrences(`href="${destination.href}"`)).toBe(1);
+            }
+        }
+    });
+
+    it("draws a migrated group as one row, not as a list of the destinations it absorbed", () => {
+        const migrated = model
+            .flatMap((scope) => scope.groups)
+            .filter((group) => group.sections.length > 0);
+
+        expect(
+            migrated.map((group) => group.id).sort(),
+            "every group whose canonical route is served",
+        ).toEqual([
+            "workspace.audit-diagnostics",
+            "workspace.communications",
+            "workspace.crm",
+            "workspace.people",
+        ]);
+        for (const group of migrated) {
+            expect(
+                group.destinations.map((destination) => destination.href),
+                `${group.id} offers its canonical destination and nothing beside it`,
+            ).toEqual([group.href]);
+            expect(occurrences(`href="${group.href}"`)).toBe(1);
+            for (const section of group.sections) {
+                expect(
+                    occurrences(`href="${section.href}"`),
+                    `${section.id} is searchable, not a second navigation row`,
+                ).toBe(0);
             }
         }
     });

@@ -41,6 +41,9 @@ export type BreadcrumbMessageKey =
     | "organization"
     | "overview"
     | "peopleAccess"
+    | "communications"
+    | "crmConfiguration"
+    | "auditDiagnostics"
     | "pipelines"
     | "products"
     | "profile"
@@ -133,6 +136,9 @@ const SETTINGS_ROUTES: Readonly<Record<string, StaticWorkspaceRoute>> = {
     "/settings/delivery": { key: "delivery" },
     "/settings/diagnostics": { key: "diagnostics", access: "diagnostics" },
     "/settings/workspace/people": { key: "peopleAccess" },
+    "/settings/workspace/communications": { key: "communications" },
+    "/settings/workspace/crm": { key: "crmConfiguration" },
+    "/settings/workspace/audit-diagnostics": { key: "auditDiagnostics" },
 };
 
 const ACCOUNT_ROUTES: Readonly<Record<string, BreadcrumbMessageKey>> = {

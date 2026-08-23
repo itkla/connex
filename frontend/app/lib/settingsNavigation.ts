@@ -179,6 +179,19 @@ function capabilitiesSatisfied(access: SettingsAccess, capabilities: InstanceCap
 }
 
 /**
+ * Whether the reader holds the permissions a destination's content needs.
+ *
+ * Empty is satisfied, which keeps an ungated destination visible. Otherwise the entry's own
+ * {@link SettingsAccess.permissionMatch} decides: `all` for a destination serving one job, `any`
+ * for a consolidated one whose sections are gated separately and refuse separately.
+ */
+function permissionsSatisfied(access: SettingsAccess, permissions: ReadonlySet<string>): boolean {
+    if (access.permissions.length === 0) return true;
+    const held = access.permissions.map((permission) => permissions.has(permission));
+    return access.permissionMatch === "any" ? held.some(Boolean) : held.every(Boolean);
+}
+
+/**
  * Whether the navigation may offer a destination to this viewer.
  *
  * Reads the manifest's visibility bucket only — `permissions`, `capabilities`, and `orgAdmin`. The
@@ -192,13 +205,17 @@ function capabilitiesSatisfied(access: SettingsAccess, capabilities: InstanceCap
  * same answer — so a destination that can state that answer keeps its place. See
  * {@link capabilitiesSatisfied}.
  *
+ * Which permissions must be held is the entry's own declaration. A destination serving one job
+ * needs all of them; a consolidated one that absorbed two independently gated jobs declares `any`
+ * and is reached by a reader who can read either, refusing the other section in place.
+ *
  * @param entry - the manifest entry
  * @param viewer - who is reading
  * @returns whether the destination appears in the navigation
  */
 export function entryVisible(entry: SettingsEntry, viewer: SettingsNavViewer): boolean {
     if (entry.access.orgAdmin && !viewer.isOrgAdmin) return false;
-    if (entry.access.permissions.some((permission) => !viewer.permissions.has(permission))) return false;
+    if (!permissionsSatisfied(entry.access, viewer.permissions)) return false;
     return capabilitiesSatisfied(entry.access, viewer.capabilities);
 }
 
