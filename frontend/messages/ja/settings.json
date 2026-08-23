@@ -25,6 +25,7 @@
         "groupCrmConfiguration": "CRM設定",
         "groupCommunications": "メールと通知",
         "groupDataPrivacy": "データとプライバシー",
+        "groupDataRequests": "データリクエスト",
         "groupAuditDiagnostics": "監査ログと診断",
         "groupOrganizationGeneral": "一般",
         "groupIdentityAdministrators": "認証と管理者",

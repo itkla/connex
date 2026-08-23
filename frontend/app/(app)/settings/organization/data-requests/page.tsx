@@ -4,12 +4,12 @@ import { getTranslations } from "next-intl/server";
 import OrganizationDataRequests from "@/app/components/settings/OrganizationDataRequests";
 
 export async function generateMetadata(): Promise<Metadata> {
-    const [tOrg, t] = await Promise.all([
-        getTranslations("Organization"),
+    const [tNav, t] = await Promise.all([
+        getTranslations("SettingsNav"),
         getTranslations("SettingsOrgDataRequests"),
     ]);
     return {
-        title: tOrg("tabDataRequests"),
+        title: tNav("groupDataRequests"),
         description: t("metaDescription"),
     };
 }

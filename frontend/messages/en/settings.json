@@ -25,6 +25,7 @@
         "groupCrmConfiguration": "CRM configuration",
         "groupCommunications": "Communications",
         "groupDataPrivacy": "Data & privacy",
+        "groupDataRequests": "Data requests",
         "groupAuditDiagnostics": "Audit & diagnostics",
         "groupOrganizationGeneral": "General",
         "groupIdentityAdministrators": "Identity & administrators",

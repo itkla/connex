@@ -382,7 +382,16 @@ export const SETTINGS_GROUPS = [
         scope: "organization",
         route: "/settings/organization/data-requests",
         order: 4,
-        titleKey: "Organization.tabDataRequests",
+        /**
+         * A settings-side label rather than the organization tab's own. The tab is named for the
+         * statutory instrument — 開示等請求 — and so is the tooling inside it, which §4 sanctions on
+         * a compliance surface. Reusing that key here would put the identical string on the group
+         * row and on the section beneath it, leaving a Japanese settings search with two hits that
+         * differ only by fragment. English never had that problem: "Data requests" names the job and
+         * "Data-subject requests" names the tooling. This is the same distinction, and the string is
+         * the one the breadcrumb already uses for this destination.
+         */
+        titleKey: "SettingsNav.groupDataRequests",
         epicName: "Data requests",
     },
     {
@@ -1106,7 +1115,7 @@ export const SETTINGS_ENTRIES = [
         redirectsTo: null,
         redirectQuery: [],
         conditionalForward: null,
-        titleKey: "Organization.tabDataRequests",
+        titleKey: "SettingsNav.groupDataRequests",
         access: {
             permissions: [],
             permissionMatch: "all",

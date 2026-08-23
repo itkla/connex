@@ -23,7 +23,7 @@ import { ORGANIZATION_DATA_REQUESTS_SECTIONS } from "@/app/lib/organizationSetti
  */
 export default function OrganizationDataRequests() {
     const t = useTranslations("SettingsOrgDataRequests");
-    const tNav = useTranslations("Organization");
+    const tNav = useTranslations("SettingsNav");
     const { activeWorkspace } = useWorkspace();
     const { register, arrived } = useSectionArrival(ORGANIZATION_DATA_REQUESTS_SECTIONS);
 
@@ -31,7 +31,7 @@ export default function OrganizationDataRequests() {
         <div className="flex flex-col gap-12">
             <Rise>
                 <PageHeader
-                    title={tNav("tabDataRequests")}
+                    title={tNav("groupDataRequests")}
                     description={t("description", {
                         organization: activeWorkspace?.orgName ?? "",
                     })}
