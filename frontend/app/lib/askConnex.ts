@@ -753,6 +753,87 @@ export function askConnexScopePreview(
 }
 
 /**
+ * The interpreted breadth of the filters a request declares, as the server evaluated them.
+ *
+ * Everything here comes from the server's own interpretation of the declared filters, so the
+ * sentence built from it states the query that will actually run rather than the one that was
+ * asked for.
+ */
+export type AskConnexDeclaredScope = {
+    /** Stable identity of exactly these filters, asked in exactly this question, from this page. */
+    identity: string;
+    /** Whether the server asked for this breadth to be reviewed before it runs. */
+    confirmationRecommended: boolean;
+    /**
+     * What the server established these filters cover, or null when it has established nothing.
+     *
+     * Null is the honest answer whenever the measurement does not describe the request that would
+     * actually run: a preview still in flight, one the allowance turned away, one that failed, and
+     * one taken for a different question all leave the breadth unknown. Unknown is never treated as
+     * narrow — a request nobody could measure is announced rather than run.
+     */
+    matched: {
+        count: number | null;
+        /** Whether the cohort exceeded the cap and the request will read only part of it. */
+        truncated: boolean;
+        recordCap: number;
+    } | null;
+    /** Whether the missing measurement is still being read, rather than having failed outright. */
+    measuring: boolean;
+};
+
+/**
+ * Everything the next request will read: the records it carries and the filters it declares.
+ *
+ * Both halves are held together because they are one question to the member — a request narrowed by
+ * filters and a request carrying a browser selection are both "what will this cover" — and because
+ * agreeing to one breadth has to mean agreeing to that exact combination of the two.
+ */
+export type AskConnexRequestScope = {
+    records: AskConnexScopePreview | null;
+    declared: AskConnexDeclaredScope | null;
+    /**
+     * The identity confirmation belongs to, or null when this request is narrow enough to run
+     * unannounced. Changing either half changes the identity and re-arms the confirmation.
+     */
+    identity: string | null;
+};
+
+/** No breadth worth announcing: an unfiltered question about one record or none. */
+export const EMPTY_ASK_CONNEX_REQUEST_SCOPE: AskConnexRequestScope = {
+    records: null,
+    declared: null,
+    identity: null,
+};
+
+/**
+ * Combines what a request carries with what it declares into one reviewable breadth.
+ *
+ * Confirmation is armed by any of three things: enough carried records to be broad on their own,
+ * filters the server itself asked to have reviewed, or filters whose breadth nothing established
+ * before the request went out. That last one is the whole point of announcing breadth at all — a
+ * scope that will be attached to the turn but was never measured is exactly the case where nobody
+ * can say the request is narrow, so it is treated as broad rather than waved through.
+ *
+ * Filters that narrow a request rather than widening it are shown as chips but do not by themselves
+ * hold the request back.
+ */
+export function askConnexRequestScope(
+    records: AskConnexScopePreview | null,
+    declared: AskConnexDeclaredScope | null,
+): AskConnexRequestScope {
+    const armed = records !== null
+        || (declared !== null && (declared.confirmationRecommended || declared.matched === null));
+    return {
+        records,
+        declared,
+        identity: armed
+            ? `${records?.identity ?? ''}/${declared?.identity ?? ''}`
+            : null,
+    };
+}
+
+/**
  * A stable identity for one interpreted scope.
  *
  * Agreeing to review a scope agrees to *that* scope, not to any scope of the same shape: the key is
@@ -762,14 +843,6 @@ export function askConnexScopePreview(
  */
 export function askConnexScopePreviewKey(preview: AskConnexScopePreview | null): string | null {
     return preview === null ? null : preview.identity;
-}
-
-/** Whether a request still needs the user's agreement before it runs. */
-export function askConnexScopeNeedsConfirmation(
-    scopeKey: string | null,
-    confirmedKey: string | null,
-): boolean {
-    return scopeKey !== null && scopeKey !== confirmedKey;
 }
 
 /** Parses a persisted positive integer id without accepting partial or unsafe numbers. */
@@ -816,6 +889,82 @@ export function extractAskConnexAttachments(content: string): AskConnexAttachmen
         references.push({ kind, id, label: match[1].trim() });
     }
     return references;
+}
+
+/**
+ * Serializes one record as the reference chip the composer and the context strip both understand.
+ *
+ * The label is written without the bracket characters the token syntax uses, so a record named with
+ * one cannot break the reference it appears in. Copy that needs the record inside a sentence takes
+ * this as a value, which is the only way a Japanese sentence can put the name where it belongs.
+ */
+export function askConnexMentionToken(attachment: AskConnexAttachment): string {
+    const label = attachment.label.replaceAll(/[[\]]/g, '').trim();
+    return label.length === 0 ? '' : `[${label}](${attachment.kind}:${attachment.id})`;
+}
+
+/**
+ * Composes the message a contextual entry point hands to the composer.
+ *
+ * Records the surface knows about but the page does not carry are appended as ordinary reference
+ * chips — the same tokens the mention picker writes — so an entry point opened from a list or a
+ * signal card adds context through the one mechanism the cockpit already shows and the member can
+ * already take back out. A label is written without the bracket characters the token syntax uses, so
+ * a record named with one cannot break the reference it appears in.
+ *
+ * @param prompt the job stated in the member's language
+ * @param mentions records the prompt is about that the current page does not already carry
+ * @returns composer content carrying the prompt and its references
+ */
+export function askConnexPromptContent(
+    prompt: string,
+    mentions: readonly AskConnexAttachment[] = [],
+): string {
+    const seen = new Set<string>();
+    const references: string[] = [];
+    for (const mention of mentions) {
+        const key = `${mention.kind}:${mention.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const token = askConnexMentionToken(mention);
+        if (token.length === 0) continue;
+        references.push(token);
+    }
+    return [prompt.trim(), ...references].filter((part) => part.length > 0).join(' ');
+}
+
+/**
+ * Adds one offered job to whatever the composer already holds.
+ *
+ * The single rule every surface that offers a job follows — a record's entry point, the strip above
+ * the composer, and the empty state alike — because a half-written question is the member's work and
+ * an offer is never worth destroying it for. An empty composer takes the job as its whole content; a
+ * composer with anything in it keeps it and the job joins it below.
+ *
+ * @param composer what is in the composer now
+ * @param job the offered question, already in the member's language
+ * @returns the composer's new content
+ */
+export function appendAskConnexPrompt(composer: string, job: string): string {
+    if (job.length === 0) return composer;
+    return composer.trim().length === 0 ? job : `${composer}\n\n${job}`;
+}
+
+/**
+ * Whether a surface should land the member in the composer for a job just written into it.
+ *
+ * The outstanding request lives with the composer's own content, in the provider, rather than in the
+ * surface that honours it: a phone does not keep the panel mounted, so a mark held inside the
+ * surface dies with it and the next plain open replays a request that was already honoured — which
+ * on a phone means raising the keyboard over a conversation nobody asked to type into. The provider
+ * clears the request as it is consumed, so a surface that mounts with none takes no focus.
+ *
+ * @param open whether the surface is actually on screen
+ * @param promptRequest the provider's outstanding job request, or zero when there is none
+ * @returns whether to move focus to the end of the composer
+ */
+export function askConnexPromptFocusPending(open: boolean, promptRequest: number): boolean {
+    return open && promptRequest > 0;
 }
 
 /** Converts serialized reference chips back to readable prompt text before submission. */

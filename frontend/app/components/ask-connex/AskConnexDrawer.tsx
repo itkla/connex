@@ -26,6 +26,7 @@ import {
     EllipsisHorizontalIcon,
     ExclamationCircleIcon,
     ExclamationTriangleIcon,
+    FunnelIcon,
     HandRaisedIcon,
     LinkIcon,
     LockClosedIcon,
@@ -64,6 +65,7 @@ import {
     hasAskConnexContextInputs,
     type AskConnexContextLabels,
 } from '@/app/components/ask-connex/AskConnexContextCockpit';
+import AskConnexScopeEditor from '@/app/components/ask-connex/AskConnexScopeEditor';
 import AskConnexTab from '@/app/components/ask-connex/AskConnexTab';
 import AskConnexToolCard, {
     type AskConnexToolCardLabels,
@@ -71,7 +73,7 @@ import AskConnexToolCard, {
 import type {
     AskConnexAttachment,
     AskConnexFileAttachment,
-    AskConnexScopePreview,
+    AskConnexRequestScope,
     AskConnexSelectionContext,
     AskConnexToolAction,
     AskConnexToolCardState,
@@ -79,15 +81,20 @@ import type {
 } from '@/app/lib/askConnex';
 import {
     anchorAskConnexToolCards,
+    appendAskConnexPrompt,
     askConnexCitationHref,
     askConnexCitations,
-    askConnexScopeNeedsConfirmation,
-    askConnexScopePreviewKey,
+    askConnexPromptFocusPending,
     askConnexTranscript,
     groupAskConnexMessages,
     hasPendingAskConnexFileOperation,
     latestAskConnexSuggestions,
 } from '@/app/lib/askConnex';
+import type {
+    AskConnexScopeChip,
+    AskConnexScopeDraft,
+    AskConnexScopePreviewState,
+} from '@/app/lib/askConnexScope';
 import {
     ASK_CONNEX_DRAWER_ROW_CAP,
     ASK_CONNEX_WIDTHS,
@@ -108,6 +115,7 @@ import type { AskConnexAnswerBounds } from '@/app/components/ask-connex/answerDo
 import type { AskConnexStreamStore } from '@/app/lib/askConnexStream';
 import { durationMicro, easeOut, instant, springSmooth } from '@/app/lib/motion';
 import type {
+    AiAssistantSkill,
     AiChatCitation,
     AiChatMessage,
     AiChatParticipant,
@@ -215,10 +223,45 @@ export type AskConnexTurnLabels = {
     turnWorking: string;
 };
 
+/**
+ * One job this surface can offer, already resolved into the member's language.
+ *
+ * Offers come from the server's capability directory, so the list is what Ask Connex can actually
+ * do here rather than a set of prompts this client invented.
+ */
+export type AskConnexJobOffer = {
+    id: string;
+    label: string;
+    prompt: string;
+};
+
+/** The declared-filter surface: what is set, what it turned out to cover, and how to change it. */
+export type AskConnexScopeSurface = {
+    draft: AskConnexScopeDraft;
+    editorOpen: boolean;
+    /** The caller's capability directory, so the preview can name what would run. */
+    skills: readonly AiAssistantSkill[];
+    filterCount: number;
+    chips: AskConnexScopeChip[];
+    preview: AskConnexScopePreviewState;
+    /** A refused scope, already stated in plain language, or null when nothing was refused. */
+    refusal: string | null;
+    /** Whether the filters as set cannot be sent, so the request waits rather than losing them. */
+    blocked: boolean;
+    /** The problem holding the request back, already stated in plain language, or null. */
+    problem: string | null;
+    onDraftChange: (draft: AskConnexScopeDraft) => void;
+    onEditorOpenChange: (open: boolean) => void;
+    /** Takes the question the breadth check should be about, at the moment one is being decided. */
+    onSettle: () => void;
+};
+
 type AskConnexDrawerLabels = AskConnexContextLabels & AskConnexTurnLabels & {
     addContext: string;
     addRecordContext: string;
     archive: string;
+    dismissSuggestions: string;
+    suggestions: string;
     attachFile: string;
     citations: string;
     disclosureCreation: string;
@@ -318,7 +361,9 @@ type AskConnexDrawerProps = {
     pinnedContext: readonly AskConnexAttachment[];
     pageContextPinned: boolean;
     contextCorrected: boolean;
-    scopePreview: AskConnexScopePreview | null;
+    /** Everything the next request will read: the records it carries and the filters it declares. */
+    requestScope: AskConnexRequestScope;
+    scope: AskConnexScopeSurface;
     attachments: AskConnexAttachment[];
     fileAttachments: AskConnexFileAttachment[];
     canAttachFiles: boolean;
@@ -346,7 +391,20 @@ type AskConnexDrawerProps = {
     /** The shared render clock, so every relative time in the rail agrees within one frame. */
     now: number;
     unavailable: UnavailableState;
-    starterPrompts: string[];
+    /** The jobs this surface offers, from the server's capability directory. */
+    jobs: AskConnexJobOffer[];
+    /**
+     * The outstanding job request, or zero when there is none. Raised whenever a contextual entry
+     * point writes a job into the composer, so the composer takes focus with the caret after it and
+     * the member lands where they can edit and send.
+     */
+    promptRequest: number;
+    /**
+     * Marks the outstanding request as honoured. Owned by the caller rather than the surface, so a
+     * surface that mounts afterwards — a phone reopening a panel it does not keep mounted — has
+     * nothing left to replay.
+     */
+    onPromptConsumed: () => void;
     labels: AskConnexDrawerLabels;
     onWidthChange: (width: AskConnexWidth) => void;
     onOpenChange: (open: boolean) => void;
@@ -438,6 +496,69 @@ function MessageCitations({
                 </li>
             ))}
         </ul>
+    );
+}
+
+/**
+ * The jobs this page supports, offered where the member is about to type.
+ *
+ * Quiet, bounded, and dismissible: it is a reminder of what Ask Connex can do here, not a gallery
+ * of prompts, so it disappears the moment anything is typed and never stands between the member and
+ * the composer. Choosing one writes the question into the composer and leaves the sending to them.
+ */
+function JobSuggestions({
+    jobs,
+    label,
+    dismissLabel,
+    onUse,
+    onDismiss,
+}: {
+    jobs: AskConnexJobOffer[];
+    label: string;
+    dismissLabel: string;
+    onUse: (job: AskConnexJobOffer) => void;
+    onDismiss: () => void;
+}) {
+    const reduceMotion = useReducedMotion() ?? false;
+    if (jobs.length === 0) return null;
+
+    return (
+        <motion.div
+            role="group"
+            aria-label={label}
+            initial={reduceMotion ? { opacity: 0 } : { opacity: 0, transform: 'translateY(0.25rem)' }}
+            animate={{ opacity: 1, transform: 'translateY(0rem)' }}
+            transition={reduceMotion ? instant : { duration: durationMicro, ease: easeOut }}
+            className="mb-2 flex min-w-0 items-center gap-1.5"
+        >
+            <div
+                data-base-ui-swipe-ignore
+                className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto"
+            >
+                {jobs.map((job) => (
+                    <Button
+                        key={job.id}
+                        type="button"
+                        size="inline"
+                        variant="outline"
+                        className="shrink-0 font-normal"
+                        onClick={() => onUse(job)}
+                    >
+                        {job.label}
+                    </Button>
+                ))}
+            </div>
+            <IconButton
+                type="button"
+                variant="ghost"
+                size="icon-inline"
+                label={dismissLabel}
+                className="shrink-0"
+                onClick={onDismiss}
+            >
+                <XMarkIcon className="size-3" />
+            </IconButton>
+        </motion.div>
     );
 }
 
@@ -1234,7 +1355,8 @@ function ConversationSurface({
     pinnedContext,
     pageContextPinned,
     contextCorrected,
-    scopePreview,
+    requestScope,
+    scope,
     attachments,
     fileAttachments,
     canAttachFiles,
@@ -1255,7 +1377,9 @@ function ConversationSurface({
     contextCount,
     participants,
     unavailable,
-    starterPrompts,
+    jobs,
+    promptRequest,
+    onPromptConsumed,
     labels,
     closeButton,
     resizable,
@@ -1335,23 +1459,90 @@ function ConversationSurface({
     );
     const latestMessageId = visibleMessages.at(-1)?.id ?? null;
     const historySummarized = transcript.historySummarized;
+    /**
+     * Whether to offer this page's jobs above the composer.
+     *
+     * Only once a conversation is under way — an empty chat already lists them in its empty state,
+     * and showing both would be the same offer twice. They appear between questions, when the
+     * composer is empty and the member has not just started typing, and are dismissed per set of
+     * jobs, so moving to a record that supports different work offers the new ones rather than
+     * staying silent because an earlier set was waved away.
+     */
+    const jobsKey = `${activeSession?.id ?? 'new'}|${jobs.map((job) => job.id).join(',')}`;
+    const [dismissedJobsKey, setDismissedJobsKey] = useState<string | null>(null);
+    const offeringJobs = jobs.length > 0
+        && visibleMessages.length > 0
+        && composer.trim().length === 0
+        && loadState === 'ready'
+        && unavailable === null
+        && !working
+        && dismissedJobsKey !== jobsKey;
     const canSend = composer.trim().length > 0
         && loadState === 'ready'
         && !contextOverflow
         && !contentTooLong
         && !fileOperationPending
+        && !scope.blocked
         && !busy
         && unavailable === null;
     const contextGroupRef = useRef<HTMLDivElement>(null);
-    const [confirmedScopeKey, setConfirmedScopeKey] = useState<string | null>(null);
-    const [pendingScope, setPendingScope] = useState<{ key: string; content?: string } | null>(null);
-    const scopeKey = askConnexScopePreviewKey(scopePreview);
-    const asking = pendingScope !== null && pendingScope.key === scopeKey;
+    const [pendingScope, setPendingScope] = useState<{ content?: string } | null>(null);
+    const scopeKey = requestScope.identity;
+    /**
+     * A held request keeps its notice until the member acts on it, not until its breadth changes.
+     *
+     * The breadth is still being measured while the notice is up, and the answer may well be that it
+     * needed no review — dropping the notice the moment that lands would take the member's own Send
+     * with it. What does close it is there being nothing left to announce: a request that no longer
+     * carries records or declares filters has no breadth to state, so the notice goes and Send is
+     * the member's to press again.
+     */
+    const asking = pendingScope !== null
+        && (requestScope.records !== null || requestScope.declared !== null);
 
+    /**
+     * Lands the member in the composer after a contextual entry point wrote a job into it.
+     *
+     * The job arrives as ordinary text they may want to change before sending, so focus goes to the
+     * end of it rather than to whatever control opened the panel. Exactly once per entry point, and
+     * only once the panel is actually on screen: an entry point pressed from a record opens the panel
+     * and writes the job in the same moment, while opening the panel by itself later must not take
+     * focus — on a phone that would raise the keyboard over the conversation. Consuming the request
+     * is what makes that hold: the mark belongs to the caller, not to this surface, which a phone
+     * unmounts with the panel.
+     */
+    useEffect(() => {
+        if (!askConnexPromptFocusPending(open, promptRequest)) return;
+        onPromptConsumed();
+        composerRef.current?.focus();
+    }, [onPromptConsumed, open, promptRequest]);
+
+    /**
+     * Offers one job to the composer, wherever it was offered from.
+     *
+     * The empty state and the strip above the composer hand a job over on the same terms a record's
+     * entry point does: a half-written question is the member's work, so an offer joins it rather
+     * than replacing it, and focus lands after it so the next thing they type continues the message.
+     */
+    const offerJob = (job: AskConnexJobOffer) => {
+        onComposerChange(appendAskConnexPrompt(composer, job.prompt));
+        composerRef.current?.focus();
+    };
+
+    /**
+     * Asks for one question to be sent, announcing its breadth first whenever it has one.
+     *
+     * Every broad request is announced, including the second one against filters that were already
+     * agreed to once: agreement is given to a question, not to a set of filters left in the form, and
+     * a notice that only ever appears once would let every later question inherit a review nobody
+     * performed on it. Settling the breadth check comes first, so what the notice states is measured
+     * against the question actually about to go out rather than an earlier one.
+     */
     const requestSend = (content?: string) => {
         if (!canSend) return;
-        if (scopeKey !== null && askConnexScopeNeedsConfirmation(scopeKey, confirmedScopeKey)) {
-            setPendingScope({ key: scopeKey, content });
+        scope.onSettle();
+        if (scopeKey !== null) {
+            setPendingScope({ content });
             return;
         }
         setPendingScope(null);
@@ -1378,6 +1569,7 @@ function ConversationSurface({
         unsupportedPageContext,
         attachments,
         fileAttachments,
+        scopeChips: scope.chips,
     });
 
     /**
@@ -1399,12 +1591,13 @@ function ConversationSurface({
     };
 
     /**
-     * Re-arms the scope confirmation and hands the member back the inputs that decide breadth, so
-     * the next send announces the new breadth rather than inheriting agreement given to the old one.
+     * Puts the held request down and hands the member back the inputs that decide breadth.
+     *
+     * Nothing is sent and nothing is agreed to: the next send announces whatever breadth the request
+     * has by then, so narrowing it here is a change of mind rather than a step on the way out.
      */
     const narrowScope = () => {
         setPendingScope(null);
-        setConfirmedScopeKey(null);
         focusBreadthInputs();
     };
 
@@ -1498,15 +1691,15 @@ function ConversationSurface({
                                         className="border-0 bg-transparent px-4 py-12"
                                         action={(
                                             <div className="flex w-full max-w-sm flex-col gap-1.5">
-                                                {starterPrompts.map((prompt) => (
+                                                {jobs.map((job) => (
                                                     <Button
-                                                        key={prompt}
+                                                        key={job.id}
                                                         type="button"
                                                         variant="ghost"
                                                         className="h-auto justify-start whitespace-normal bg-muted/60 py-2 text-left"
-                                                        onClick={() => onComposerChange(prompt)}
+                                                        onClick={() => offerJob(job)}
                                                     >
-                                                        {prompt}
+                                                        {job.label}
                                                     </Button>
                                                 ))}
                                                 <p className="pt-3 text-xs leading-relaxed text-muted-foreground">
@@ -1630,6 +1823,15 @@ function ConversationSurface({
                         requestSend();
                     }}
                 >
+                    {offeringJobs ? (
+                        <JobSuggestions
+                            jobs={jobs}
+                            label={labels.suggestions}
+                            dismissLabel={labels.dismissSuggestions}
+                            onUse={offerJob}
+                            onDismiss={() => setDismissedJobsKey(jobsKey)}
+                        />
+                    ) : null}
                     <AskConnexContextStrip
                         groupRef={contextGroupRef}
                         implicitContext={implicitContext}
@@ -1639,6 +1841,8 @@ function ConversationSurface({
                         unsupportedPageContext={unsupportedPageContext}
                         attachments={attachments}
                         fileAttachments={fileAttachments}
+                        scopeChips={scope.chips}
+                        scopeRefusal={scope.refusal}
                         canRemoveFiles={canRemoveFiles}
                         fileOperationPending={fileOperationPending}
                         overflow={contextOverflow}
@@ -1650,16 +1854,15 @@ function ConversationSurface({
                         onUnpin={onUnpinContext}
                         onRemovePage={onRemovePageContext}
                         onRemoveSelection={onRemoveSelectionContext}
+                        onEditScope={() => scope.onEditorOpenChange(true)}
                         onReset={onResetContext}
                     />
-                    {asking && scopePreview !== null ? (
+                    {asking ? (
                         <AskConnexScopeNotice
-                            preview={scopePreview}
+                            scope={requestScope}
                             labels={labels}
                             onConfirm={() => {
-                                if (scopeKey === null) return;
                                 const content = pendingScope?.content;
-                                setConfirmedScopeKey(scopeKey);
                                 setPendingScope(null);
                                 onSend(content);
                             }}
@@ -1729,11 +1932,26 @@ function ConversationSurface({
                                     </DropdownMenuItem>
                                 </DropdownMenuContent>
                             </DropdownMenu>
+                            <Button
+                                type="button"
+                                variant={scope.filterCount > 0 ? 'secondary' : 'ghost'}
+                                size="inline"
+                                className="shrink-0 font-normal"
+                                disabled={busy || loadState !== 'ready' || unavailable !== null}
+                                onClick={() => scope.onEditorOpenChange(true)}
+                            >
+                                <FunnelIcon className="size-3.5" />
+                                {scope.filterCount > 0
+                                    ? labels.scopeFiltersSet(scope.filterCount)
+                                    : labels.scopeFilters}
+                            </Button>
                             <div className="min-w-0 text-xs text-muted-foreground">
                                 {contentTooLong ? (
                                     <p role="alert" className="text-destructive">{labels.tooLong}</p>
+                                ) : scope.blocked && scope.problem !== null ? (
+                                    <p role="alert" className="truncate text-destructive">{scope.problem}</p>
                                 ) : (
-                                    <p>{labels.composerHint}</p>
+                                    <p className="hidden sm:block">{labels.composerHint}</p>
                                 )}
                             </div>
                             <IconButton
@@ -1747,6 +1965,14 @@ function ConversationSurface({
                             </IconButton>
                         </div>
                     </div>
+                    <AskConnexScopeEditor
+                        open={scope.editorOpen}
+                        draft={scope.draft}
+                        preview={scope.preview}
+                        skills={scope.skills}
+                        onOpenChange={scope.onEditorOpenChange}
+                        onDraftChange={scope.onDraftChange}
+                    />
                 </form>
             )}
         </div>
@@ -2064,7 +2290,8 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         pinnedContext: props.pinnedContext,
         pageContextPinned: props.pageContextPinned,
         contextCorrected: props.contextCorrected,
-        scopePreview: props.scopePreview,
+        requestScope: props.requestScope,
+        scope: props.scope,
         attachments: props.attachments,
         fileAttachments: props.fileAttachments,
         canAttachFiles: props.canAttachFiles,
@@ -2085,7 +2312,9 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         contextCount: props.contextCount,
         now: props.now,
         unavailable: props.unavailable,
-        starterPrompts: props.starterPrompts,
+        jobs: props.jobs,
+        promptRequest: props.promptRequest,
+        onPromptConsumed: props.onPromptConsumed,
         labels: props.labels,
         workspace: props.workspace,
         closeButton: null,

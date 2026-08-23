@@ -15,6 +15,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 import Rise from "@/app/components/motion/Rise";
 import { PageShell } from "@/app/components/PageShell";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
+import AskConnexRecordEntry from "@/app/components/ask-connex/AskConnexRecordEntry";
 import ContactActionsMenu from "@/app/components/records/contacts/ContactActionsMenu";
 import ContactAvatar from "@/app/components/records/contacts/ContactAvatar";
 import ContactConnections from "@/app/components/records/contacts/ContactConnections";
@@ -235,7 +236,8 @@ export default async function ContactPage({ params }: ContactPageProps) {
                         </header>
                     </RecordDetailSection>
 
-                    <RecordDetailSection recordKind="contact" section="actions" className="mt-4 flex justify-end">
+                    <RecordDetailSection recordKind="contact" section="actions" className="mt-4 flex flex-wrap justify-end gap-2">
+                        <AskConnexRecordEntry kind="person" />
                         <ContactActionsMenu
                             contact={contact}
                             currentUserId={currentUser.id}

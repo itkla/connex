@@ -9,7 +9,7 @@ import {
     type AskConnexContextLabels,
 } from "@/app/components/ask-connex/AskConnexContextCockpit";
 import {
-    askConnexScopeNeedsConfirmation,
+    askConnexRequestScope,
     askConnexScopePreview,
     askConnexScopePreviewKey,
     isAskConnexPinned,
@@ -21,6 +21,7 @@ import {
     type AskConnexFileAttachment,
     type AskConnexSelectionContext,
 } from "@/app/lib/askConnex";
+import { askConnexScopePeriodLabel } from "@/app/lib/askConnexScope";
 import {
     installInteractiveDocument,
     type InteractiveElement,
@@ -44,7 +45,18 @@ const labels: AskConnexContextLabels = {
     scopeConfirm: "Ask with this context",
     scopeEdit: "Change the context",
     scopeSummary: (preview) => `I'll read ${preview.total} records and ${preview.files} files.`,
+    scopeDeclaredSummary: (declared) => declared.matched === null
+        ? "The breadth of these filters was never checked."
+        : `${declared.matched.count ?? 0} records match these filters.`,
     scopeTitle: "What this will cover",
+    scopeFilters: "Add filters",
+    scopeFiltersSet: (count) => `Filters · ${count}`,
+    scopeChipKind: (kind) => `Filter:${kind}`,
+    scopeChipValues: (values) => values.join(", "),
+    scopePeriodRange: (values) => askConnexScopePeriodLabel(values, "en"),
+    scopeWarmthBand: (band) => `Band:${band}`,
+    scopeRecordKind: (kind) => `Kind:${kind}`,
+    scopeDealStatus: (status) => `Status:${status}`,
     unpinContext: (label) => `Stop keeping ${label} here`,
     uploadProgress: (progress) => `${progress}%`,
     uploadRemoving: "Removing…",
@@ -66,6 +78,8 @@ function strip(overrides: Partial<Parameters<typeof AskConnexContextStrip>[0]> =
             unsupportedPageContext={null}
             attachments={[]}
             fileAttachments={[]}
+            scopeChips={[]}
+            scopeRefusal={null}
             canRemoveFiles
             fileOperationPending={false}
             overflow={false}
@@ -77,6 +91,7 @@ function strip(overrides: Partial<Parameters<typeof AskConnexContextStrip>[0]> =
             onUnpin={() => {}}
             onRemovePage={() => {}}
             onRemoveSelection={() => {}}
+            onEditScope={() => {}}
             onReset={() => {}}
             {...overrides}
         />
@@ -162,6 +177,28 @@ describe("narrowing what an answer covers", () => {
             { ...NOTHING, fileAttachments: [readyFile("notes.txt")] },
         ];
         for (const inputs of carried) expect(hasAskConnexContextInputs(inputs)).toBe(true);
+    });
+
+    it("states a declared period as one range rather than a list of two days", () => {
+        const markup = renderToStaticMarkup(strip({
+            scopeChips: [
+                { key: "period", kind: "period", values: ["2026-07-25", "2026-08-23"] },
+            ],
+        }));
+
+        expect(markup).toContain("Filter:period");
+        expect(markup).toContain("Jul 25");
+        expect(markup).toContain("Aug 23");
+        expect(markup).not.toContain("2026-07-25");
+    });
+
+    it("shows a period chip's own name alone when the server named no whole span", () => {
+        const markup = renderToStaticMarkup(strip({
+            scopeChips: [{ key: "period", kind: "period", values: [] }],
+        }));
+
+        expect(markup).toContain("Filter:period");
+        expect(markup).not.toContain("·</span>");
     });
 
     it("shows a ring while the strip holds focus, because focus arrives here from a click", () => {
@@ -421,13 +458,11 @@ describe("interpreted scope", () => {
             [file("upload-b")],
         ));
 
-        expect(askConnexScopeNeedsConfirmation(first, null)).toBe(true);
-        expect(askConnexScopeNeedsConfirmation(first, first)).toBe(false);
-        expect(askConnexScopeNeedsConfirmation(wider, first)).toBe(true);
-        expect(askConnexScopeNeedsConfirmation(reordered, first)).toBe(false);
-        expect(askConnexScopeNeedsConfirmation(swapped, first)).toBe(true);
-        expect(askConnexScopeNeedsConfirmation(otherFile, withFile)).toBe(true);
-        expect(askConnexScopeNeedsConfirmation(null, null)).toBe(false);
+        expect(first).not.toBeNull();
+        expect(wider).not.toBe(first);
+        expect(reordered).toBe(first);
+        expect(swapped).not.toBe(first);
+        expect(otherFile).not.toBe(withFile);
     });
 
     it("states what it will read and offers both agreeing and correcting", () => {
@@ -438,7 +473,7 @@ describe("interpreted scope", () => {
         if (preview === null) throw new Error("expected a scope preview");
         const markup = renderToStaticMarkup(
             <AskConnexScopeNotice
-                preview={preview}
+                scope={askConnexRequestScope(preview, null)}
                 labels={labels}
                 onConfirm={() => {}}
                 onEdit={() => {}}
@@ -459,7 +494,7 @@ describe("interpreted scope", () => {
         if (preview === null) throw new Error("expected a scope preview");
         const markup = renderToStaticMarkup(
             <AskConnexScopeNotice
-                preview={preview}
+                scope={askConnexRequestScope(preview, null)}
                 labels={labels}
                 onConfirm={() => {}}
                 onEdit={() => {}}
@@ -487,7 +522,7 @@ describe("interpreted scope", () => {
         await act(async () => {
             root.render(
                 <AskConnexScopeNotice
-                    preview={preview}
+                    scope={askConnexRequestScope(preview, null)}
                     labels={labels}
                     onConfirm={() => events.push("confirm")}
                     onEdit={() => events.push("edit")}

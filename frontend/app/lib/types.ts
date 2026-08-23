@@ -3090,10 +3090,93 @@ export type AiChatSessionDetail = {
     activeTurn: AiChatTurn | null;
 };
 
+/** One declared assistant capability the calling member may run on the current surface. */
+export type AiAssistantSkill = {
+    key: string;
+    version: string;
+    /** Catalog-owned i18n key the client renders the product-language name from. */
+    nameKey: string;
+    /** Catalog-owned i18n key the client renders the product-language description from. */
+    descriptionKey: string;
+    contextKinds: AiChatPageContextKind[];
+    /** Whether the skill refuses without a record to anchor to. */
+    needsSubject: boolean;
+    authority: string;
+};
+
+/** How a declared scope names the members whose records it covers. */
+export type AiChatScopeOwnerMode = 'all_team' | 'me' | 'members';
+
+/** Relationship warmth bands a declared scope may cover. */
+export type AiChatScopeWarmthBand = 'hot' | 'warm' | 'cool' | 'cold';
+
+/** Deal statuses a declared scope may cover. */
+export type AiChatScopeDealStatus = 'open' | 'won' | 'lost';
+
+/** Declared query filters carried by one assistant request, validated and applied server-side. */
+export type AiChatQueryScopeRequest = {
+    periodStart?: string;
+    periodEnd?: string;
+    periodDays?: number;
+    ownerMode?: AiChatScopeOwnerMode;
+    ownerMemberIds?: number[];
+    warmthBands?: AiChatScopeWarmthBand[];
+    recordKinds?: AiChatPageContextKind[];
+    stageIds?: number[];
+    dealStatuses?: AiChatScopeDealStatus[];
+    activityTypes?: string[];
+    savedViewId?: number;
+};
+
+/** One authorized record named by an interpreted query scope. */
+export type AiChatScopeReference = {
+    id: number;
+    label: string;
+};
+
+/** The exact scope the server interpreted, including the caps the retrieval will apply. */
+export type AiChatQueryScope = {
+    declared: boolean;
+    periodStart: string | null;
+    periodEnd: string | null;
+    periodDays: number | null;
+    ownerMode: string;
+    owners: AiChatScopeReference[];
+    warmthBands: string[];
+    recordKinds: string[];
+    stages: AiChatScopeReference[];
+    dealStatuses: string[];
+    activityTypes: string[];
+    savedView: AiChatScopeReference | null;
+    matchedRecordCount: number | null;
+    matchedRecordCountTruncated: boolean;
+    recordCap: number;
+    activityCap: number;
+    perRecordCap: number;
+    /** Stable reasons a requested filter could not be applied, never silently dropped. */
+    unavailable: string[];
+};
+
+/** Request body for the interpreted-scope preview a declared scope is reviewed through. */
+export type AiChatScopePreviewRequest = {
+    content?: string;
+    pageContext?: AiChatPageContext[];
+    scope?: AiChatQueryScopeRequest;
+};
+
+/** The truthful breadth statement shown before a scoped assistant request runs. */
+export type AiChatScopePreview = {
+    scope: AiChatQueryScope;
+    skillKey: string | null;
+    skillVersion: string | null;
+    confirmationRecommended: boolean;
+};
+
 /** Request body for starting one bounded assistant turn. */
 export type AiChatTurnCreateRequest = {
     content: string;
     pageContext?: AiChatPageContext[];
+    scope?: AiChatQueryScopeRequest;
 };
 
 /** Accepted assistant turn and its opaque generation handle. */
@@ -3102,6 +3185,8 @@ export type AiChatTurnAccepted = {
     sessionId: number;
     generationHandle: string;
     status: string;
+    /** The exact scope the server interpreted, or null when the request declared none. */
+    scope?: AiChatQueryScope | null;
 };
 
 /** Caller-safe durable state for one assistant turn, including the persisted streamed partial. */

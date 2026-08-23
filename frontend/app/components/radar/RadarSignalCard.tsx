@@ -35,6 +35,7 @@ import {
     radarSubjectRecordHref,
 } from '@/app/components/radar/radarReferences';
 import { Badge } from '@/components/ui/badge';
+import AskConnexSignalEntry from '@/app/components/ask-connex/AskConnexSignalEntry';
 import { Button } from '@/components/ui/button';
 import { IconButton } from '@/components/ui/icon-button';
 import {
@@ -503,6 +504,10 @@ export default function RadarSignalCard({
                                             <DropdownMenuSeparator />
                                         </>
                                     ) : null}
+                                    <AskConnexSignalEntry
+                                        family={signal.family}
+                                        subject={{ ...signal.subject, label: subjectLabel }}
+                                    />
                                     <DropdownMenuItem onClick={onFollow} disabled={followed}>
                                         {followed ? <CheckCircleIcon aria-hidden /> : <BookmarkIcon aria-hidden />}
                                         {followed ? t('actions.followed') : t('actions.follow')}

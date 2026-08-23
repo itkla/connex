@@ -460,7 +460,12 @@
     "entryPoint": {
       "workspace": "このワークスペースについてAsk Connexに質問",
       "record": "{label}についてAsk Connexに質問",
-      "selection": "選択中の{type} {count}件についてAsk Connexに質問"
+      "selection": "選択中の{type} {count}件についてAsk Connexに質問",
+      "recordMenu": {
+        "person": "この連絡先について質問",
+        "company": "この会社について質問",
+        "deal": "この案件について質問"
+      }
     },
     "recordTypes": {
       "person": "連絡先",
@@ -634,28 +639,6 @@
       "limit": "コンテキストの上限に達しました",
       "removeFailed": "ファイルを削除できませんでした"
     },
-    "starters": {
-      "person": {
-        "followUp": "フォローアップを予定する",
-        "activity": "最近の活動を要約する",
-        "stalled": "何が停滞していますか？"
-      },
-      "company": {
-        "relationships": "最も強い関係は誰とのものですか？",
-        "activity": "最近の活動を要約する",
-        "risks": "注意すべき点は何ですか？"
-      },
-      "deal": {
-        "summary": "この案件を要約する",
-        "risks": "この案件の障害になりそうな点は？",
-        "nextStep": "次に何をすべきですか？"
-      },
-      "workspace": {
-        "followUps": "対応が必要なフォローアップは？",
-        "risks": "関係が冷えつつある相手は？",
-        "activity": "最近のワークスペース活動を要約する"
-      }
-    },
     "unavailable": {
       "permissionTitle": "現在のロールではAsk Connexを利用できません",
       "permissionBody": "現在のワークスペースロールにはAI機能を利用する権限がありません。",
@@ -684,10 +667,288 @@
     "citations": "参照元",
     "citationKindPerson": "連絡先",
     "citationKindCompany": "会社",
-    "citationKindDeal": "取引"
+    "citationKindDeal": "取引",
+    "suggestions": "ここでできること",
+    "dismissSuggestions": "これらの候補を隠す",
+    "jobs": {
+      "relationshipBrief": {
+        "label": "この関係について要点を教えて",
+        "prompt": "この関係について要点をまとめてください。"
+      },
+      "companyBrief": {
+        "label": "この会社について要点を教えて",
+        "prompt": "この会社について要点をまとめてください。"
+      },
+      "relationshipCooling": {
+        "label": "この関係が冷えている理由は？",
+        "prompt": "この関係が冷えつつある理由を説明してください。"
+      },
+      "companyCooling": {
+        "label": "冷えつつある関係は？",
+        "prompt": "この会社で冷えつつある関係と、その理由を教えてください。"
+      },
+      "dealRisk": {
+        "label": "この案件のリスクを説明して",
+        "prompt": "この案件のリスクになっている点を説明してください。"
+      },
+      "contactActivity": {
+        "label": "最近の活動を要約して",
+        "prompt": "この連絡先との最近の活動を要約してください。"
+      },
+      "companyActivity": {
+        "label": "最近の活動を要約して",
+        "prompt": "この会社での最近の活動を要約してください。"
+      },
+      "dealActivity": {
+        "label": "この案件の活動を要約して",
+        "prompt": "この案件の最近の活動を要約してください。"
+      },
+      "companyPipeline": {
+        "label": "注意が必要な案件は？",
+        "prompt": "この会社で注意が必要な案件と、それぞれ何を待っているかを教えてください。"
+      },
+      "dealPipeline": {
+        "label": "この案件は何を待っている？",
+        "prompt": "この案件が何を待っているか、他の案件と比べてどうかを教えてください。"
+      },
+      "relationshipChanges": {
+        "label": "最近の変化は？",
+        "prompt": "ここで最近何が変わったかを教えてください。"
+      },
+      "dealChanges": {
+        "label": "ステージ変更後の変化は？",
+        "prompt": "この案件がステージを移ってから何が変わったかを教えてください。"
+      },
+      "introPath": {
+        "label": "紹介ルートを探して",
+        "prompt": "ここへ紹介してもらえる人と、その根拠を教えてください。"
+      },
+      "meetingPreparation": {
+        "label": "次の打ち合わせの準備をして",
+        "prompt": "ここでの次の打ち合わせに向けて準備してください。"
+      },
+      "meetingFollowUp": {
+        "label": "決定事項と約束を抜き出して",
+        "prompt": "ここでの最近の打ち合わせから、決定事項・約束・担当者を抜き出してください。"
+      },
+      "followUpDraft": {
+        "label": "フォローアップの下書きを作って",
+        "prompt": "送信前に編集できるフォローアップの下書きを作ってください。"
+      },
+      "stakeholderGaps": {
+        "label": "足りない関係者は？",
+        "prompt": "ここでまだ関係が築けていない役割や人物を教えてください。"
+      },
+      "companyReview": {
+        "label": "会社レビューを準備して",
+        "prompt": "この会社のレビューを準備してください。"
+      },
+      "commitments": {
+        "label": "未完了の約束を探して",
+        "prompt": "ここで誰が何を約束し、何が未完了かを教えてください。"
+      },
+      "dataQuality": {
+        "label": "不足している情報を確認して",
+        "prompt": "ここで不足している情報や、矛盾している情報を教えてください。"
+      },
+      "workspaceWorkBrief": {
+        "label": "今日は何をすべき？",
+        "prompt": "今日取り組む価値のある関係構築の仕事を教えてください。"
+      },
+      "workspacePipeline": {
+        "label": "注意が必要な案件は？",
+        "prompt": "注意が必要な案件と、それぞれ何を待っているかを教えてください。"
+      },
+      "workspaceActivity": {
+        "label": "最近の活動を要約して",
+        "prompt": "このワークスペースでの最近の活動を要約してください。"
+      },
+      "workspaceReport": {
+        "label": "質問からレポートを作って",
+        "prompt": "このワークスペースについての質問に答えるレポートを作ってください。"
+      }
+    },
+    "scope": {
+      "title": "フィルター",
+      "description": "この質問が対象とするレコードを選びます。Ask Connex はここで指定した範囲だけを読みます。",
+      "open": "フィルターを追加",
+      "openSet": "フィルター · {count}",
+      "clear": "フィルターをクリア",
+      "done": "完了",
+      "period": {
+        "label": "期間",
+        "modeLabel": "期間の指定方法",
+        "any": "指定なし",
+        "recent": "直近",
+        "range": "日付",
+        "days": "直近 {count} 日",
+        "start": "開始日",
+        "end": "終了日"
+      },
+      "owners": {
+        "label": "担当者",
+        "modeLabel": "対象にする担当者の範囲",
+        "allTeam": "全員",
+        "me": "自分",
+        "members": "選んだメンバー",
+        "none": "選べるメンバーがいません。",
+        "cap": "指定できるメンバーは最大 {count} 人です。別のメンバーを選ぶには、いずれかを解除してください。"
+      },
+      "warmth": {
+        "label": "温度感"
+      },
+      "recordKinds": {
+        "label": "レコード種別",
+        "person": "連絡先",
+        "company": "会社",
+        "deal": "案件"
+      },
+      "dealStatuses": {
+        "label": "案件の状態",
+        "open": "進行中",
+        "won": "受注",
+        "lost": "失注"
+      },
+      "stages": {
+        "label": "ステージ",
+        "cap": "指定できるステージは最大 {count} 個です。別のステージを選ぶには、いずれかを解除してください。"
+      },
+      "savedView": {
+        "label": "保存ビュー"
+      },
+      "chips": {
+        "period": "期間",
+        "owners": "担当者",
+        "ownersMe": "自分のレコード",
+        "warmth": "温度感",
+        "recordKinds": "レコード種別",
+        "dealStatuses": "案件の状態",
+        "stages": "ステージ",
+        "savedView": "保存ビュー"
+      },
+      "problem": {
+        "periodOrder": "開始日は終了日より前にしてください。",
+        "periodLength": "1〜365 日の範囲で指定してください。",
+        "membersMissing": "メンバーを 1 人以上選ぶか、全員に戻してください。"
+      },
+      "options": {
+        "loading": "このワークスペースで選べる名前を読み込んでいます…",
+        "failed": "メンバー・ステージ・保存ビューを読み込めませんでした。",
+        "retry": "再試行"
+      },
+      "preview": {
+        "title": "対象になる範囲",
+        "idle": "フィルターを選ぶと、対象になる範囲が表示されます。",
+        "loading": "対象になる範囲を確認しています…",
+        "matched": "このフィルターに {count} 件のレコードが一致します。",
+        "matchedUnknown": "このフィルターで実行できます。",
+        "matchedUnchecked": "このフィルターが対象にする範囲は確認できませんでした。意図した範囲であることを確かめてから送信してください。",
+        "truncated": "そのうち先頭の {count} 件を読みます。",
+        "capability": "{name} を使います。",
+        "throttled": "短時間に変更が続いたため、件数の更新は少し後になります。",
+        "unavailable": "このワークスペースでは現在 Ask Connex を利用できないため、ここでフィルターを確認できません。",
+        "failed": "対象になる範囲を確認できませんでした。少し時間をおいてお試しください。"
+      },
+      "reasons": {
+        "unknown": "この組み合わせのフィルターには対応できません。いずれかを変更してお試しください。",
+        "other": "指定したフィルターのうち 1 つは、この質問には適用できませんでした。",
+        "deal_status_unsupported_for_attention": "案件のレビューは常に進行中の案件を対象とするため、受注・失注のフィルターは適用されません。",
+        "period_capped": "期間は最長 1 年まで遡れるため、指定された期間のうち古い部分は対象外になります。",
+        "record_kind_ambiguous_for_cohort": "連絡先・会社・案件のどれを対象にするか指定してください。この質問は複数に当てはまります。",
+        "record_kind_outside_declared_scope": "この質問は、フィルターで除外されているレコード種別に関するものです。その種別を追加するか、残した種別について質問してください。",
+        "saved_view_scope_changed": "準備中にその保存ビューが変更されました。もう一度選び直すと最新の内容で実行できます。",
+        "saved_view_scope_unsupported": "その保存ビューをそのまま再現できないため、実行しません。ここでフィルターを指定してください。",
+        "stage_scope_unsupported_for_cohort": "ステージと案件の状態は、案件を含めた場合にのみ適用されます。案件を追加するか、この 2 つのフィルターを外してください。",
+        "tool_cannot_honor_declared_scope": "この質問に答えるには指定されたフィルターの外まで読む必要があるため、中止しました。範囲を広げるか、より狭い質問にしてください。",
+        "warmth_outside_declared_scope": "この質問は、フィルターで除外されている温度帯に関するものです。その温度帯を追加するか、残した温度帯について質問してください。",
+        "warmth_unsupported_for_deals": "温度感は人や会社との関係を表すものなので、案件の絞り込みには使えません。"
+      }
+    },
+    "signals": {
+      "relationship_decay": {
+        "label": "このシグナルが出た理由を説明",
+        "prompt": "レーダーは {subject} との関係が冷えつつあると示しています。記録されている内容から、その理由を説明してください。"
+      },
+      "deal_risk": {
+        "label": "このシグナルが出た理由を説明",
+        "prompt": "レーダーは {subject} をリスクありとしています。記録されている内容から、その理由を説明してください。"
+      },
+      "warm_path": {
+        "label": "この紹介ルートを説明",
+        "prompt": "レーダーは {subject} への紹介ルートを見つけました。誰に紹介してもらえるか、その根拠は何かを説明してください。"
+      }
+    }
   },
   "SearchLayout": {
     "title": "検索",
     "description": "ワークスペース全体を検索"
+  },
+  "askConnex": {
+    "skills": {
+      "relationshipCoolingExplanation": {
+        "name": "関係の冷え込み",
+        "description": "記録された活動と温度感の読み取りから、連絡先や会社とのやり取りが減った理由を説明します。"
+      },
+      "activityDigest": {
+        "name": "活動ダイジェスト",
+        "description": "指定した期間について、対象のレコードに記録された活動を要約します。"
+      },
+      "relationshipBrief": {
+        "name": "関係の要点",
+        "description": "連絡先や会社と話す前に、すでに分かっていることをまとめます。"
+      },
+      "pipelineAttentionReview": {
+        "name": "注意が必要な案件",
+        "description": "進行中の案件を Connex のリスクモデルで確認し、それぞれ何を待っているかを説明します。"
+      },
+      "relationshipChangeSummary": {
+        "name": "変化の要約",
+        "description": "前回確認してからレコードで何が変わったかを報告します。"
+      },
+      "introductionPathExplanation": {
+        "name": "紹介ルート",
+        "description": "誰に紹介してもらえるか、その根拠は何かを説明します。"
+      },
+      "meetingPreparation": {
+        "name": "打ち合わせの準備",
+        "description": "打ち合わせ前に必要な参加者・経緯・未解決の論点をまとめます。"
+      },
+      "meetingFollowUpExtraction": {
+        "name": "打ち合わせのフォローアップ",
+        "description": "打ち合わせの内容から決定事項・約束・担当者を抜き出します。"
+      },
+      "followUpDraft": {
+        "name": "フォローアップの下書き",
+        "description": "送信前に編集できるフォローアップの下書きを作成します。"
+      },
+      "dealRiskReview": {
+        "name": "案件リスクの確認",
+        "description": "案件の経緯と Connex のリスクモデルから、リスクになっている点を説明します。"
+      },
+      "stakeholderGapAnalysis": {
+        "name": "不足している関係者",
+        "description": "案件や会社でまだ関係が築けていない役割や人物を示します。"
+      },
+      "companyReview": {
+        "name": "会社レビュー",
+        "description": "会社の関係・案件・最近の活動から、その会社のレビューを準備します。"
+      },
+      "dailyWorkBrief": {
+        "name": "今日の要点",
+        "description": "今日取り組む価値のある関係構築の仕事をまとめます。"
+      },
+      "commitmentExtraction": {
+        "name": "未完了の約束",
+        "description": "誰が何を約束し、何が未完了かを見つけます。"
+      },
+      "dataQualityReview": {
+        "name": "データ品質の確認",
+        "description": "情報が不足している、または矛盾しているレコードを示します。"
+      },
+      "naturalLanguageReport": {
+        "name": "質問からのレポート",
+        "description": "ワークスペースについての質問に答えるレポートを作成します。"
+      }
+    }
   }
 }
