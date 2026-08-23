@@ -15,10 +15,10 @@ import { DialogStatusCover, resolveDialogStatus } from '@/components/ui/dialog-s
 import UserAvatar from '@/app/components/records/users/UserAvatar';
 import {
     getActiveWorkspaceMembers,
-    getDealCollaborators,
     replaceDealCollaborators,
     updateDealOwner,
 } from '@/app/lib/api';
+import { pendingDealTeamWrites } from '@/app/lib/dealTeam';
 import { type User, type WorkspaceMember } from '@/app/lib/types';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { cn } from '@/lib/utils';
@@ -124,16 +124,17 @@ export default function DealTeamDialog({
     async function save() {
         setSaving(true);
         try {
-            await updateDealOwner(dealId, ownerId);
-            await replaceDealCollaborators(dealId, collaboratorIds.filter((id) => id !== ownerId));
-            await getDealCollaborators(dealId);
+            const writes = pendingDealTeamWrites(
+                { ownerId: initialOwnerId ?? null, collaboratorIds: initialCollaborators.map((user) => user.id) },
+                { ownerId, collaboratorIds },
+            );
+            if (writes.owner) await updateDealOwner(dealId, ownerId);
+            if (writes.collaboratorIds) await replaceDealCollaborators(dealId, writes.collaboratorIds);
             toastSuccess(t('dealTeamUpdated'));
             setSaving(false);
             setSuccess(true);
-            window.setTimeout(() => {
-                onOpenChange(false);
-                router.refresh();
-            }, 900);
+            router.refresh();
+            window.setTimeout(() => onOpenChange(false), 900);
         } catch (error) {
             setSaving(false);
             toastError(error instanceof Error ? error.message : t('dealTeamError'));
