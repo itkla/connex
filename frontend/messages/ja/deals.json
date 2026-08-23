@@ -156,7 +156,7 @@
         "openTasksTooltip": "この案件に紐づくタスクの一覧です。",
         "due": "期限 {date}",
         "edit": "編集",
-        "markAsComplete": "完了にする",
+        "ariaCompleteTask": "タスクを完了にする",
         "delete": "削除"
     },
     "DealsAging": {

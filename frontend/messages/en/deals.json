@@ -156,7 +156,7 @@
         "openTasksTooltip": "A list of tasks that are associated with this deal.",
         "due": "Due {date}",
         "edit": "Edit",
-        "markAsComplete": "Mark as complete",
+        "ariaCompleteTask": "Mark task complete",
         "delete": "Delete"
     },
     "DealsAging": {

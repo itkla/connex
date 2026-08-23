@@ -11,7 +11,8 @@
             "trigger": "検索とコマンド",
             "placeholder": "検索・移動…",
             "loading": "検索中…",
-            "noResults": "「{query}」に一致する結果がありません"
+            "noResults": "「{query}」に一致する結果がありません",
+            "failed": "検索を実行できませんでした。もう一度お試しください。"
         },
         "group": {
             "create": "作成",
