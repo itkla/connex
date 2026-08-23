@@ -93,7 +93,7 @@ export default function CrmConfigurationLoading() {
 
             <section className="space-y-4">
                 <SectionHeading />
-                <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border bg-card/40 px-6 py-12">
+                <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border bg-card px-6 py-12">
                     <Skeleton className="h-4 w-40" />
                     <Skeleton className="h-3.5 w-72 max-w-full" />
                     <Skeleton className="mt-1 h-8 w-36 rounded-full" />

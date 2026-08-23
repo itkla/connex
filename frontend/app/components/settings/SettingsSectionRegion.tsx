@@ -108,7 +108,7 @@ export function SectionNotYetAvailable({
 }) {
     const t = useTranslations("SettingsGap");
     return (
-        <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border bg-card/40 px-6 py-12 text-center">
+        <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border bg-card px-6 py-12 text-center">
             <p className="text-sm font-semibold text-foreground">{t("title")}</p>
             <p className="max-w-sm text-sm text-pretty text-muted-foreground">{body}</p>
             <div className="mt-1">{action}</div>
