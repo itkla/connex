@@ -674,6 +674,11 @@ public class AiChatTurnPersistenceService {
      * requester can still read what was established before the turn stopped. The partial is
      * re-screened for suspected special-care content here because a stopped turn never reaches the
      * terminal screen the resolved path applies, and it is purged when it cannot be shown.
+     *
+     * <p>A turn stopped by {@link AiAssistantTerminalReasons#AUTHORIZATION_WITHDRAWN} purges its
+     * partial unconditionally. The retained text carries no resource metadata, so a later read can
+     * only gate it on session access; retaining it would leave facts readable that the requester
+     * lost the right to read, or that a processing restriction withdrew mid-turn.
      */
     @Transactional(
         isolation = Isolation.READ_COMMITTED,
@@ -686,7 +691,8 @@ public class AiChatTurnPersistenceService {
         AiChatTurn stored = lockGenerationOwnedTurn(turn);
         if (RUNNING.equals(stored.getStatus())
                 && stored.isStreamed() && stored.getPartialContentUtf16Offset() > 0
-                && SpecialCareTextScreen.screen(stored.getPartialContent()).excluded()
+                && (AiAssistantTerminalReasons.withdrawsAuthorization(reason)
+                        || SpecialCareTextScreen.screen(stored.getPartialContent()).excluded())
                 && chatMapper.resetTurnPartialContent(
                         turn.workspaceId(), turn.sessionId(), turn.turnId(),
                         stored.getPartialContentUtf16Offset()) != 1) {

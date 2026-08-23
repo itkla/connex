@@ -16,6 +16,7 @@ import { useParams, usePathname, useRouter } from 'next/navigation';
 import { SparklesIcon } from '@heroicons/react/24/outline';
 
 import AskConnexDrawer from '@/app/components/ask-connex/AskConnexDrawer';
+import { formatAnswerInstant } from '@/app/components/ask-connex/answerDocument';
 import { useActions, useRegisterActions } from '@/app/hooks/useActions';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
@@ -114,7 +115,7 @@ import type { AppAction } from '@/app/lib/actions/types';
 import { AiGenerationError } from '@/app/lib/aiGeneration';
 import { createAiChatSocket } from '@/app/lib/realtime';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import { formatDateTime, formatRelativeTime } from '@/app/lib/utils';
+import { formatRelativeTime } from '@/app/lib/utils';
 import type {
     AiChatCitation,
     AiChatAnswerBlockKind,
@@ -404,7 +405,6 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const durableFollowerRef = useRef<number | null>(null);
     const workspaceReturnRef = useRef(false);
     const workspaceSessionIdRef = useRef(workspaceSessionId);
-    workspaceSessionIdRef.current = workspaceSessionId;
 
     const registerDesktopRoot = useCallback((node: HTMLElement | null) => {
         // A ref callback that returns a cleanup is never re-invoked with null; the parameter stays
@@ -446,13 +446,15 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     );
     const contentTooLong = askConnexMessageContent(composer).length > 16_000;
     const fileOperationPending = hasPendingAskConnexFileOperation(fileAttachments);
-    const fileContextCount = fileAttachments.filter(
-        (attachment) => attachment.status !== 'failed',
-    ).length;
+    const contextFiles = useMemo(
+        () => fileAttachments.filter((attachment) => attachment.status !== 'failed'),
+        [fileAttachments],
+    );
+    const fileContextCount = contextFiles.length;
     const contextOverflow = contextResult.pageContext.length + fileContextCount > 10;
     const scopePreview = useMemo(
-        () => askConnexScopePreview(contextResult.pageContext, fileContextCount),
-        [contextResult.pageContext, fileContextCount],
+        () => askConnexScopePreview(contextResult.pageContext, contextFiles),
+        [contextFiles, contextResult.pageContext],
     );
     const toolActionPending = toolCalls.some((toolCall) => toolCall.pendingAction !== null);
     const actionableToolCallIds = useMemo(
@@ -466,6 +468,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         || toolActionPending;
     const scoped = stateIdentity === identity && !switching;
     const presenceSessionId = activeSession?.visibility === 'shared' ? activeSession.id : null;
+    /**
+     * Whether the conversation is actually on screen, in the drawer or in the routed workspace.
+     * Presence is published from here, so gating it on the drawer alone would make every member
+     * reading a shared chat at `/ask-connex` invisible to the others once the backend TTL expired.
+     */
+    const surfaceVisible = open || workspaceMode;
 
     useEffect(() => {
         activeSessionRef.current = activeSession;
@@ -474,6 +482,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     useEffect(() => {
         typingRef.current = composer.trim().length > 0;
     }, [composer]);
+
+    useEffect(() => {
+        workspaceSessionIdRef.current = workspaceSessionId;
+    }, [workspaceSessionId]);
 
     const turnActive = turn.phase === 'accepted' || turn.phase === 'running';
     const activeTurn = useMemo(
@@ -899,6 +911,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             generationHandle: null,
             status: initial.status,
             progress: initial.progress,
+            cancellable: initial.requestedByCurrentUser === true,
         });
         absorbTurnPartial(initial, streamEpochRef.current);
         try {
@@ -1016,6 +1029,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                         turnId: storedTurn.turnId,
                         generationHandle: storedTurn.generationHandle,
                         status: 'accepted',
+                        cancellable: true,
                     });
                     await followTurn(storedTurn, controller.signal);
                 } else if (detail?.activeTurn) {
@@ -1214,7 +1228,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }, [activeWorkspaceId, clearActiveSession, enqueueRealtimeRefresh, handleStreamDelta, refreshSessions, resetStream, switching, userId]);
 
     useEffect(() => {
-        if (!open || presenceSessionId === null || loadState !== 'ready') {
+        if (!surfaceVisible || presenceSessionId === null || loadState !== 'ready') {
             return;
         }
         const sessionId = presenceSessionId;
@@ -1247,7 +1261,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             controller.abort();
             void leaveAiChatPresence(sessionId).catch(() => {});
         };
-    }, [loadState, open, presenceSessionId]);
+    }, [loadState, presenceSessionId, surfaceVisible]);
 
     const shareSession = useCallback(async (shared: boolean): Promise<boolean> => {
         if (!activeSession?.ownedByCurrentUser || sharePermission !== 'granted') return false;
@@ -1654,6 +1668,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 turnId: accepted.turnId,
                 generationHandle: accepted.generationHandle,
                 status: accepted.status,
+                cancellable: true,
             });
             const optimistic: AiChatMessage = {
                 id: tempMessageIdRef.current,
@@ -1805,7 +1820,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     );
     const labels = useMemo(() => ({
         answerDocument: {
-            absoluteTime: (instant: string) => formatDateTime(instant, locale),
+            absoluteTime: (instant: string) => formatAnswerInstant(instant, locale),
             blockKind: (kind: AiChatAnswerBlockKind) => t(`answerDocument.blockKinds.${kind}`),
             citationKind,
             comparisonAgainst: t('answerDocument.comparisonAgainst'),
@@ -1824,6 +1839,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             exclusion: (exclusion: AiChatCoverage['exclusions'][number]) =>
                 t(`answerDocument.exclusionsList.${exclusion}`),
             freshness: t('answerDocument.freshness'),
+            freshnessCurrent: t('answerDocument.freshnessCurrent'),
             moreDetail: t('answerDocument.moreDetail'),
             openRecord: t('answerDocument.openRecord'),
             period: (start: string, end: string) =>

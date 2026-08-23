@@ -11,7 +11,9 @@ import {
 
 import AskConnexAnswerBlock from '@/app/components/ask-connex/AskConnexAnswerBlocks';
 import {
+    answerBlockSignature,
     answerInstant,
+    answerListKeys,
     evidenceCaveats,
     type AskConnexAnswerDocumentLabels,
 } from '@/app/components/ask-connex/answerDocument';
@@ -172,11 +174,15 @@ export default function AskConnexAnswerDocument({
         () => evidenceCaveats(document.coverage, labels),
         [document.coverage, labels],
     );
+    const keys = useMemo(
+        () => answerListKeys(document.blocks.map(answerBlockSignature)),
+        [document.blocks],
+    );
     return (
         <article className="w-full space-y-5 text-sm text-foreground">
             {document.blocks.map((block, index) => (
                 <AskConnexAnswerBlock
-                    key={`${block.kind}:${index}`}
+                    key={keys[index]}
                     block={block}
                     caveats={caveats}
                     labels={labels}

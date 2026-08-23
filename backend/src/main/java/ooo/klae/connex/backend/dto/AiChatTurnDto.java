@@ -5,22 +5,29 @@ import java.util.Objects;
 
 import ooo.klae.connex.backend.beans.AiChatTurn;
 
-/** Caller-safe durable status for one assistant turn. */
+/**
+ * Caller-safe durable status for one assistant turn.
+ *
+ * @param requestedByCurrentUser whether the reader asked for this turn, and therefore whether the
+ *     cancellation endpoint would accept a stop request from them. A shared-session participant
+ *     watching another member's turn is not its requester and must not be offered that control.
+ */
 public record AiChatTurnDto(
         int turnId,
         int sessionId,
         String status,
         String terminalReason,
         String partialContent,
-        List<AiChatProgressItemDto> progress) {
+        List<AiChatProgressItemDto> progress,
+        boolean requestedByCurrentUser) {
 
     public AiChatTurnDto {
         progress = progress == null ? List.of() : List.copyOf(progress);
     }
 
-    /** Creates a non-streaming turn projection. */
+    /** Creates a non-streaming turn projection for its own requester. */
     public AiChatTurnDto(int turnId, int sessionId, String status, String terminalReason) {
-        this(turnId, sessionId, status, terminalReason, null, List.of());
+        this(turnId, sessionId, status, terminalReason, null, List.of(), true);
     }
 
     /** Creates a streaming turn projection without progress for legacy callers. */
@@ -30,7 +37,7 @@ public record AiChatTurnDto(
             String status,
             String terminalReason,
             String partialContent) {
-        this(turnId, sessionId, status, terminalReason, partialContent, List.of());
+        this(turnId, sessionId, status, terminalReason, partialContent, List.of(), true);
     }
 
     /**
@@ -53,7 +60,8 @@ public record AiChatTurnDto(
                 turn.isStreamed() && requester && !"resolved".equals(turn.getStatus())
                         ? turn.getPartialContent()
                         : null,
-                requester ? progress : sharedProgress(progress));
+                requester ? progress : sharedProgress(progress),
+                requester);
     }
 
     private static List<AiChatProgressItemDto> sharedProgress(

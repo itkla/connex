@@ -35,6 +35,20 @@ export function citationLabel(
     return citation.label?.trim() || labels.citationKind(citation.kind);
 }
 
+/**
+ * The label a citation's timestamp is filed under.
+ *
+ * A snapshot recorded by the answering turn is the answer's own freshness. A message stored before
+ * snapshots existed carries none, so its timestamp is a live read of the record as it stands now
+ * and is filed under the record instead — the two must never read alike.
+ */
+function freshnessLabel(
+    citation: AiChatCitation,
+    labels: AskConnexAnswerDocumentLabels,
+): string {
+    return citation.observed ? labels.freshness : labels.freshnessCurrent;
+}
+
 function Freshness({
     instant,
     labels,
@@ -76,7 +90,9 @@ export function AskConnexEvidenceDetail({
                 </div>
             ) : null}
             <div className="space-y-1">
-                <dt className="text-xs font-medium text-muted-foreground">{labels.freshness}</dt>
+                <dt className="text-xs font-medium text-muted-foreground">
+                    {freshnessLabel(citation, labels)}
+                </dt>
                 <dd className="text-foreground">
                     {citation.asOf
                         ? <Freshness instant={citation.asOf} labels={labels} />
@@ -106,15 +122,20 @@ export function AskConnexEvidenceDetail({
  * The second step of the evidence escalation: what the anchored peek shows. It names the record,
  * quotes what the citation supports, dates it, and offers both the deeper inspector and the record
  * itself, so a reader can stop at whichever depth answers the question.
+ *
+ * Following the record link dismisses the peek: the assistant surface deliberately survives the
+ * route change, so an anchored popup left open would sit on top of the record it just opened.
  */
 export function AskConnexEvidencePeekBody({
     citation,
     labels,
     onEscalate,
+    onNavigate,
 }: {
     citation: AiChatCitation;
     labels: AskConnexAnswerDocumentLabels;
     onEscalate: () => void;
+    onNavigate: () => void;
 }) {
     const label = citationLabel(citation, labels);
     const detail = citation.detail?.trim();
@@ -131,7 +152,10 @@ export function AskConnexEvidencePeekBody({
             ) : null}
             {citation.asOf ? (
                 <p className="text-xs text-muted-foreground">
-                    <span className="font-medium text-foreground">{labels.freshness}: </span>
+                    <span className="font-medium text-foreground">
+                        {freshnessLabel(citation, labels)}
+                        {': '}
+                    </span>
                     <Freshness instant={citation.asOf} labels={labels} />
                 </p>
             ) : null}
@@ -140,7 +164,7 @@ export function AskConnexEvidencePeekBody({
                     {labels.moreDetail}
                 </Button>
                 <Button asChild variant="ghost" size="inline">
-                    <Link href={askConnexCitationHref(citation)}>
+                    <Link href={askConnexCitationHref(citation)} onClick={onNavigate}>
                         {labels.openRecord}
                         <ArrowTopRightOnSquareIcon aria-hidden className="size-3.5" />
                     </Link>
@@ -155,6 +179,9 @@ export function AskConnexEvidencePeekBody({
  * the limits the answer declared, plus the normal authorized link out to the record itself. It uses
  * the shared responsive dialog, so it is a centered dialog on desktop and a bottom sheet on touch
  * rather than an assistant-only overlay grammar.
+ *
+ * Following the record link closes the inspector for the same reason the peek closes: the session
+ * survives the route change, so the overlay would otherwise sit on top of the record it opened.
  */
 export function AskConnexEvidenceInspector({
     citation,
@@ -189,7 +216,10 @@ export function AskConnexEvidenceInspector({
                         <Button type="button" variant="outline" size="dialog">{labels.dismiss}</Button>
                     </ResponsiveDialogClose>
                     <Button asChild size="dialog">
-                        <Link href={askConnexCitationHref(citation)}>
+                        <Link
+                            href={askConnexCitationHref(citation)}
+                            onClick={() => onOpenChange(false)}
+                        >
                             {labels.openRecord}
                             <ArrowTopRightOnSquareIcon aria-hidden className="size-3.5" />
                         </Link>
@@ -204,7 +234,8 @@ export function AskConnexEvidenceInspector({
  * One source marker. Pressing it opens the anchored peek; the peek escalates to the inspector and
  * both offer the same authorized deep link, so a reader can stop at whichever depth answers the
  * question. The peek is closed before the inspector opens so the two surfaces never animate over
- * each other.
+ * each other, and whichever surface opened the record closes itself on the way out so the reader
+ * arrives at the record rather than at an overlay covering it.
  */
 export function AskConnexEvidenceMarker({
     citation,
@@ -235,6 +266,7 @@ export function AskConnexEvidenceMarker({
                     <AskConnexEvidencePeekBody
                         citation={citation}
                         labels={labels}
+                        onNavigate={() => setPeekOpen(false)}
                         onEscalate={() => {
                             setPeekOpen(false);
                             setInspectorOpen(true);

@@ -86,6 +86,7 @@ public class AiChatAgentLoopService {
     private final AiChatAttachmentContextService attachmentContextService;
     private final AiChatTurnPersistenceService persistenceService;
     private final AiChatProgressService progressService;
+    private final AiChatCitationProjector citationProjector;
     private final AiRestrictionEpoch restrictionEpoch;
     private final WorkspaceService workspaceService;
     private final ObjectMapper objectMapper;
@@ -580,8 +581,12 @@ public class AiChatAgentLoopService {
                         ? null
                         : AiChatProgressService.reconcileCoverage(
                                 finalAnswer.coverage(), progress, toolBudgetAudit);
+                Map<String, AiChatResourceRegistry.ResourceRef> citedResources =
+                        resources.snapshot();
                 String metadata = promptAssembler.finalMetadata(
-                        turn.turnId(), citations, suggestions, resources.snapshot(),
+                        turn.turnId(), citations, suggestions, citedResources,
+                        citationProjector.observe(
+                                turn.workspaceId(), citations, citedResources),
                         omitted ? List.of() : screenedBlocks.orElseThrow(),
                         coverage,
                         progress,

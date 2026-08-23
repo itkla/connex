@@ -15,6 +15,8 @@ import {
 import {
     ANSWER_ROW_PLACEHOLDER,
     answerInstant,
+    answerListKeys,
+    answerRowSignature,
     answerRows,
     blockEvidence,
     isUnsupportedBlock,
@@ -100,8 +102,9 @@ function BlockBody({ body, className }: { body: string | null; className?: strin
 function BlockItems({ items, ordered }: { items: string[]; ordered?: boolean }) {
     if (items.length === 0) return null;
     const className = 'space-y-1.5 pl-5 leading-relaxed marker:text-muted-foreground';
+    const keys = answerListKeys(items);
     const children = items.map((item, index) => (
-        <li key={`${index}:${item}`} className={cn('break-words', ordered ? 'list-decimal' : 'list-disc')}>
+        <li key={keys[index]} className={cn('break-words', ordered ? 'list-decimal' : 'list-disc')}>
             {item}
         </li>
     ));
@@ -109,10 +112,11 @@ function BlockItems({ items, ordered }: { items: string[]; ordered?: boolean }) 
 }
 
 function MetricRows({ rows, caveats, labels }: RowProps) {
+    const keys = answerListKeys(rows.map(answerRowSignature));
     return (
         <div className="grid grid-cols-1 gap-px overflow-hidden rounded-xl bg-border ring-1 ring-border sm:grid-cols-2">
             {rows.map((row, index) => (
-                <div key={`${index}:${row.label}`} className="flex flex-col gap-1.5 bg-card p-3.5">
+                <div key={keys[index]} className="flex flex-col gap-1.5 bg-card p-3.5">
                     <span className="text-[0.6875rem] font-medium tracking-[0.12em] break-words text-muted-foreground uppercase">
                         {row.label}
                     </span>
@@ -134,10 +138,11 @@ function MetricRows({ rows, caveats, labels }: RowProps) {
 }
 
 function ComparisonRows({ rows, caveats, labels }: RowProps) {
+    const keys = answerListKeys(rows.map(answerRowSignature));
     return (
         <dl className="divide-y divide-border overflow-hidden rounded-xl ring-1 ring-border">
             {rows.map((row, index) => (
-                <div key={`${index}:${row.label}`} className="space-y-2 px-3 py-2.5">
+                <div key={keys[index]} className="space-y-2 px-3 py-2.5">
                     <dt className="text-xs font-medium break-words text-muted-foreground">{row.label}</dt>
                     <div className="grid grid-cols-2 gap-3">
                         <dd className="min-w-0">
@@ -165,13 +170,14 @@ function ComparisonRows({ rows, caveats, labels }: RowProps) {
 }
 
 function TimelineRows({ rows, caveats, labels }: RowProps) {
+    const keys = answerListKeys(rows.map(answerRowSignature));
     return (
         <ol className="space-y-0">
             {rows.map((row, index) => {
                 const at = answerInstant(row.at);
                 return (
                     <li
-                        key={`${index}:${row.label}`}
+                        key={keys[index]}
                         className="grid grid-cols-[0.75rem_minmax(0,1fr)] gap-x-3 pb-4 last:pb-0"
                     >
                         <span aria-hidden className="relative flex justify-center">
@@ -211,10 +217,11 @@ function TimelineRows({ rows, caveats, labels }: RowProps) {
 }
 
 function DiffRows({ rows, caveats, labels }: RowProps) {
+    const keys = answerListKeys(rows.map(answerRowSignature));
     return (
         <ul className="divide-y divide-border overflow-hidden rounded-xl ring-1 ring-border">
             {rows.map((row, index) => (
-                <li key={`${index}:${row.label}`} className="space-y-1.5 px-3 py-2.5">
+                <li key={keys[index]} className="space-y-1.5 px-3 py-2.5">
                     <span className="block text-xs font-medium break-words text-muted-foreground">
                         {row.label}
                     </span>
@@ -242,11 +249,12 @@ function DiffRows({ rows, caveats, labels }: RowProps) {
 }
 
 function ExtractionRows({ rows, caveats, labels }: RowProps) {
+    const keys = answerListKeys(rows.map(answerRowSignature));
     return (
         <dl className="divide-y divide-border overflow-hidden rounded-xl ring-1 ring-border">
             {rows.map((row, index) => (
                 <div
-                    key={`${index}:${row.label}`}
+                    key={keys[index]}
                     className="grid grid-cols-1 gap-x-3 gap-y-0.5 px-3 py-2 sm:grid-cols-[minmax(0,8rem)_minmax(0,1fr)]"
                 >
                     <dt className="text-xs font-medium break-words text-muted-foreground">{row.label}</dt>
@@ -269,9 +277,22 @@ function ExtractionRows({ rows, caveats, labels }: RowProps) {
     );
 }
 
+/**
+ * Everything the draft actually puts on screen, in the order it is read.
+ *
+ * A draft is valid with a body, with items, or with both, and the copy control has to hand over the
+ * whole thing — copying only the body silently dropped an item list the reader could see. The
+ * caption is deliberately excluded: it labels the draft rather than being part of it.
+ */
+function draftText(block: AiChatAnswerBlock): string {
+    return [block.body ?? '', ...block.items]
+        .filter((part) => part.trim().length > 0)
+        .join('\n');
+}
+
 function DraftBlock({ block, labels }: { block: AiChatAnswerBlock; labels: AskConnexAnswerDocumentLabels }) {
     const [copied, setCopied] = useState(false);
-    const body = block.body ?? '';
+    const draft = draftText(block);
 
     useEffect(() => {
         if (!copied) return;
@@ -288,8 +309,8 @@ function DraftBlock({ block, labels }: { block: AiChatAnswerBlock; labels: AskCo
                     type="button"
                     variant="ghost"
                     size="inline"
-                    disabled={body.length === 0}
-                    onClick={() => setCopied(copyToClipboard(body, labels.copyDraft))}
+                    disabled={draft.length === 0}
+                    onClick={() => setCopied(copyToClipboard(draft, labels.copyDraft))}
                 >
                     {copied
                         ? <CheckIcon aria-hidden className="size-3.5" />

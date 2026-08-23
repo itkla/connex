@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
@@ -39,6 +40,7 @@ import tools.jackson.databind.ObjectMapper;
 @RequiredArgsConstructor
 public class AiChatCitationProjector {
     private static final int MAX_CITATION_DETAIL_CHARS = 120;
+    private static final int MAX_STORED_INSTANT_CHARS = 64;
 
     private final ObjectMapper objectMapper;
     private final PersonMapper personMapper;
@@ -500,7 +502,8 @@ public class AiChatCitationProjector {
                         && kind != null && kind.isString() && isRecordKind(kind.asString())
                         && id != null && id.canConvertToInt() && id.asInt() > 0) {
                     stored.add(new StoredCitation(
-                            handle.asString(), kind.asString(), id.asInt()));
+                            handle.asString(), kind.asString(), id.asInt(),
+                            storedObservation(citation.get("observed"))));
                 }
             }
             return List.copyOf(stored);
@@ -595,10 +598,90 @@ public class AiChatCitationProjector {
         return Map.copyOf(names);
     }
 
+    /**
+     * Projects one stored citation through the viewer's live record visibility.
+     *
+     * <p>The label always comes from the live record, because identity is what the viewer is being
+     * shown and must never lag. Freshness and the subtitle come from the snapshot the answering turn
+     * recorded, so replaying an old transcript describes the evidence the answer was written
+     * against. A message stored before snapshots existed has none, and falls back to the live
+     * record while reporting that the values were not observed.
+     */
     private static AiChatCitationDto citation(StoredCitation citation, VisibleRecord record) {
+        AiChatRecordObservation observed = citation.observed();
         return new AiChatCitationDto(
-                citation.handle(), citation.kind(), citation.id(),
-                record.label(), record.asOf(), record.detail());
+                citation.handle(), citation.kind(), citation.id(), record.label(),
+                observed == null ? record.asOf() : observed.asOf(),
+                observed == null ? record.detail() : observed.detail(),
+                observed != null);
+    }
+
+    /**
+     * Reads one stored evidence snapshot, revalidating it on read rather than trusting the row.
+     *
+     * @param value stored {@code observed} object, or null for a message written before snapshots
+     * @return the snapshot, or null when the row carries none or carries an unreadable one
+     */
+    private static AiChatRecordObservation storedObservation(JsonNode value) {
+        if (value == null || !value.isObject()) {
+            return null;
+        }
+        JsonNode asOf = value.get("asOf");
+        JsonNode detail = value.get("detail");
+        if (asOf == null || detail == null
+                || !(asOf.isNull() || text(asOf, MAX_STORED_INSTANT_CHARS))
+                || !(detail.isNull() || text(detail, MAX_CITATION_DETAIL_CHARS))) {
+            return null;
+        }
+        String instant = asOf.isNull() ? null : storedInstant(asOf.asString());
+        if (!asOf.isNull() && instant == null) {
+            return null;
+        }
+        return new AiChatRecordObservation(instant, detail(nullableValue(detail)));
+    }
+
+    /** Re-normalizes a stored ISO-8601 evidence instant, or returns null when it is unreadable. */
+    private static String storedInstant(String value) {
+        try {
+            return Instant.parse(value.strip()).toString();
+        } catch (DateTimeParseException exception) {
+            return null;
+        }
+    }
+
+    /**
+     * Records the freshness and subtitle each cited record shows right now, so the answering turn
+     * can store them beside its citation handles.
+     *
+     * @param workspaceId resolved tenant workspace
+     * @param citations handles the answer cited
+     * @param resources server-only handle-to-record identities for the turn
+     * @return snapshot per cited handle, omitting records that are not currently visible
+     */
+    public Map<String, AiChatRecordObservation> observe(
+            int workspaceId,
+            List<String> citations,
+            Map<String, AiChatResourceRegistry.ResourceRef> resources) {
+        Map<String, RecordKey> keyByHandle = new LinkedHashMap<>();
+        for (String handle : citations) {
+            AiChatResourceRegistry.ResourceRef resource = resources.get(handle);
+            if (resource != null) {
+                keyByHandle.put(handle, new RecordKey(resource.kind(), resource.id()));
+            }
+        }
+        if (keyByHandle.isEmpty()) {
+            return Map.of();
+        }
+        Map<RecordKey, VisibleRecord> visible = visibleRecords(
+                workspaceId, new LinkedHashSet<>(keyByHandle.values()));
+        Map<String, AiChatRecordObservation> observed = new LinkedHashMap<>();
+        keyByHandle.forEach((handle, key) -> {
+            VisibleRecord record = visible.get(key);
+            if (record != null) {
+                observed.put(handle, new AiChatRecordObservation(record.asOf(), record.detail()));
+            }
+        });
+        return Map.copyOf(observed);
     }
 
     private static String safeLabel(String label) {
@@ -656,7 +739,8 @@ public class AiChatCitationProjector {
         return "person".equals(kind) || "company".equals(kind) || "deal".equals(kind);
     }
 
-    private record StoredCitation(String handle, String kind, int id) {
+    private record StoredCitation(
+            String handle, String kind, int id, AiChatRecordObservation observed) {
     }
 
     private record StoredSuggestions(int turnId, List<String> values) {

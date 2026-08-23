@@ -132,6 +132,7 @@ const labels: AskConnexAnswerDocumentLabels = {
     exclusions: "Not included",
     exclusion: (exclusion) => `exclusion:${exclusion}`,
     freshness: "Freshness",
+    freshnessCurrent: "Record updated",
     moreDetail: "More detail",
     openRecord: "Open record",
     period: (start, end) => `period ${start} to ${end}`,
@@ -284,6 +285,86 @@ describe("evidence escalation", () => {
             interactive.dispatch("click", marker);
         });
         expect(present(interactive.elements, "More detail")).toBe(true);
+
+        await act(async () => root.unmount());
+    });
+});
+
+describe("opening the record leaves the evidence surface behind", () => {
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    async function openMarker(): Promise<{
+        interactive: ReturnType<typeof installInteractiveDocument>;
+        root: { unmount: () => void };
+        marker: InteractiveElement;
+    }> {
+        const interactive = installInteractiveDocument();
+        const { createRoot } = await import("react-dom/client");
+        const root = createRoot(interactive.container);
+        await act(async () => {
+            root.render(
+                <AskConnexEvidenceMarker citation={CITATION} caveats={[]} labels={labels} />,
+            );
+        });
+        const marker = requiredElement(
+            interactive.elements,
+            (element) => element.tagName === "BUTTON" && element.textContent.includes("Aiko Tanaka"),
+            "Evidence marker",
+        );
+        await act(async () => {
+            interactive.dispatch("click", marker);
+        });
+        return { interactive, root, marker };
+    }
+
+    it("dismisses the peek when its record link is followed", async () => {
+        const { interactive, root, marker } = await openMarker();
+        const openRecord = requiredElement(
+            interactive.elements,
+            (element) => attached(element)
+                && element.tagName === "A"
+                && element.textContent.includes("Open record"),
+            "Peek record link",
+        );
+
+        await act(async () => {
+            interactive.dispatch("click", openRecord);
+        });
+
+        expect(marker.getAttribute("aria-expanded")).toBe("false");
+        expect(present(interactive.elements, "More detail")).toBe(false);
+
+        await act(async () => root.unmount());
+    });
+
+    it("dismisses the inspector when its record link is followed", async () => {
+        const { interactive, root } = await openMarker();
+        const escalate = requiredElement(
+            interactive.elements,
+            (element) => element.tagName === "BUTTON" && element.textContent.includes("More detail"),
+            "Peek escalation control",
+        );
+        await act(async () => {
+            interactive.dispatch("click", escalate);
+        });
+        const openRecord = requiredElement(
+            interactive.elements,
+            (element) => attached(element)
+                && element.tagName === "A"
+                && element.textContent.includes("Open record"),
+            "Inspector record link",
+        );
+
+        await act(async () => {
+            interactive.dispatch("click", openRecord);
+        });
+
+        expect(present(interactive.elements, "Excerpt")).toBe(false);
+        expect(interactive.elements.some(
+            (element) => element.getAttribute("data-inspector") !== null && attached(element),
+        )).toBe(false);
 
         await act(async () => root.unmount());
     });

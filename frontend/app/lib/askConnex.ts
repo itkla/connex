@@ -74,6 +74,11 @@ export type AskConnexScopePreview = {
     total: number;
     records: { kind: AiChatPageContextKind; count: number }[];
     files: number;
+    /**
+     * The exact records and files this scope carries, so a confirmation belongs to the scope the
+     * user actually reviewed rather than to any scope of the same shape.
+     */
+    identity: string;
 };
 
 /** Client upload lifecycle for one assistant-session file chip. */
@@ -246,6 +251,13 @@ export type AskConnexTurnState = {
     generationHandle: string | null;
     reason: string | null;
     progress: AiChatProgressItem[];
+    /**
+     * Whether this client may stop the turn. A shared-session participant who opened the session
+     * while another member's turn was running adopts that turn into the same state the requester
+     * uses, and the cancellation endpoint rejects them, so the stop control is theirs only when the
+     * server says the turn is their own.
+     */
+    cancellable: boolean;
 };
 
 /** Events that advance or clear the provider-owned assistant turn state. */
@@ -257,6 +269,7 @@ export type AskConnexTurnEvent =
         generationHandle: string | null;
         status: string;
         progress?: AiChatProgressItem[];
+        cancellable?: boolean;
     }
     | { type: 'status'; status: string; reason?: string | null; progress?: AiChatProgressItem[] }
     | { type: 'reset' };
@@ -342,6 +355,7 @@ export const EMPTY_ASK_CONNEX_TURN: AskConnexTurnState = {
     generationHandle: null,
     reason: null,
     progress: [],
+    cancellable: false,
 };
 
 function toolCardState(toolCall: AiAssistantToolCall): AskConnexToolCardState {
@@ -719,30 +733,35 @@ export function askConnexContextCorrected(corrections: AskConnexContextCorrectio
  */
 export function askConnexScopePreview(
     pageContext: readonly AiChatPageContext[],
-    fileCount: number,
+    files: readonly AskConnexFileAttachment[],
 ): AskConnexScopePreview | null {
     if (pageContext.length < ASK_CONNEX_SCOPE_PREVIEW_THRESHOLD) return null;
     const counts = new Map<AiChatPageContextKind, number>();
     for (const entry of pageContext) {
         counts.set(entry.kind, (counts.get(entry.kind) ?? 0) + 1);
     }
+    const recordIdentity = [...new Set(
+        pageContext.map((entry) => `${entry.kind}:${entry.id}`),
+    )].sort();
+    const fileIdentity = files.map((file) => file.clientId).sort();
     return {
         total: pageContext.length,
         records: [...counts.entries()].map(([kind, count]) => ({ kind, count })),
-        files: Math.max(0, fileCount),
+        files: files.length,
+        identity: `${recordIdentity.join(',')}/${fileIdentity.join(',')}`,
     };
 }
 
 /**
  * A stable identity for one interpreted scope.
  *
- * Agreeing to review a scope agrees to *that* scope: the key changes the moment a record enters or
- * leaves, so a confirmation can never be inherited by a broader request the user never saw.
+ * Agreeing to review a scope agrees to *that* scope, not to any scope of the same shape: the key is
+ * the sorted set of record identities and attached files, so swapping five records for five
+ * different ones re-arms the confirmation exactly as adding a sixth does. Files are included
+ * because replacing an attachment changes what the request reads just as replacing a record does.
  */
 export function askConnexScopePreviewKey(preview: AskConnexScopePreview | null): string | null {
-    if (preview === null) return null;
-    const records = preview.records.map(({ kind, count }) => `${kind}:${count}`).join(',');
-    return `${records}/${preview.files}`;
+    return preview === null ? null : preview.identity;
 }
 
 /** Whether a request still needs the user's agreement before it runs. */
@@ -919,6 +938,7 @@ export function reduceAskConnexTurn(
             generationHandle: event.generationHandle,
             reason: null,
             progress: event.progress ?? [],
+            cancellable: event.cancellable ?? false,
         };
     }
     const phase = event.status === 'queued' || event.status === 'accepted'

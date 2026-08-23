@@ -1,6 +1,6 @@
-import type { AnchorHTMLAttributes, PropsWithChildren } from "react";
+import { act, type AnchorHTMLAttributes, type PropsWithChildren } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import AskConnexAnswerBlock from "@/app/components/ask-connex/AskConnexAnswerBlocks";
 import AskConnexAnswerDocument, {
@@ -27,6 +27,7 @@ import type {
     AiChatCitation,
     AiChatCoverage,
 } from "@/app/lib/types";
+import { installInteractiveDocument } from "@/test/unit/helpers/interactiveDocument";
 
 vi.mock("next/link", async () => {
     const React = await import("react");
@@ -55,6 +56,7 @@ const labels: AskConnexAnswerDocumentLabels = {
     exclusions: "Not included",
     exclusion: (exclusion) => `exclusion:${exclusion}`,
     freshness: "Freshness",
+    freshnessCurrent: "Record updated",
     moreDetail: "More detail",
     openRecord: "Open record",
     period: (start, end) => `period ${start} to ${end}`,
@@ -78,6 +80,7 @@ function citation(overrides: Partial<AiChatCitation> = {}): AiChatCitation {
         label: "Aiko Tanaka",
         asOf: "2026-08-01T09:00:00Z",
         detail: "Met at the Osaka review",
+        observed: true,
         ...overrides,
     };
 }
@@ -441,7 +444,12 @@ describe("evidence escalation surfaces", () => {
 
     it("offers both the deeper inspector and the record from the peek", () => {
         const html = renderToStaticMarkup(
-            <AskConnexEvidencePeekBody citation={citation()} labels={labels} onEscalate={() => {}} />,
+            <AskConnexEvidencePeekBody
+                citation={citation()}
+                labels={labels}
+                onEscalate={() => {}}
+                onNavigate={() => {}}
+            />,
         );
         expect(html).toContain("Aiko Tanaka");
         expect(html).toContain("citationKind:person");
@@ -458,6 +466,7 @@ describe("evidence escalation surfaces", () => {
                 citation={citation({ asOf: null, detail: null })}
                 labels={labels}
                 onEscalate={() => {}}
+                onNavigate={() => {}}
             />,
         );
         expect(html).not.toContain("Freshness");
@@ -488,6 +497,23 @@ describe("evidence escalation surfaces", () => {
         expect(html).toContain("Freshness");
         expect(html).toContain("—");
         expect(html).not.toContain("Source limits");
+    });
+
+    it("files a snapshot under the answer's freshness and a live read under the record's", () => {
+        const snapshot = renderToStaticMarkup(
+            <AskConnexEvidenceDetail citation={citation()} caveats={[]} labels={labels} />,
+        );
+        const live = renderToStaticMarkup(
+            <AskConnexEvidenceDetail
+                citation={citation({ observed: false })}
+                caveats={[]}
+                labels={labels}
+            />,
+        );
+
+        expect(snapshot).toContain("Freshness");
+        expect(snapshot).not.toContain("Record updated");
+        expect(live).toContain("Record updated");
     });
 
     it("derives inspector caveats from the answer's own coverage", () => {
@@ -665,5 +691,67 @@ describe("whole answer document", () => {
         for (const forbidden of ["thinking", "<thinking", "system prompt", "token", "json"]) {
             expect(html.toLowerCase()).not.toContain(forbidden);
         }
+    });
+});
+
+describe("a draft is copied whole", () => {
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    async function copyDraft(target: AiChatAnswerBlock): Promise<{
+        copied: string[];
+        disabled: boolean;
+    }> {
+        const copied: string[] = [];
+        const { createRoot } = await import("react-dom/client");
+        vi.stubGlobal("navigator", {
+            ...globalThis.navigator,
+            clipboard: { writeText: (value: string) => copied.push(value) },
+        });
+        const interactive = installInteractiveDocument();
+        const root = createRoot(interactive.container);
+        await act(async () => {
+            root.render(<AskConnexAnswerBlock block={target} caveats={[]} labels={labels} />);
+        });
+        const control = interactive.elements.find(
+            (element) => element.tagName === "BUTTON" && element.textContent.includes("Copy"),
+        );
+        if (!control) throw new Error("Copy control was not rendered");
+        const disabled = control.getAttribute("disabled") !== null || control.disabled === true;
+        await act(async () => {
+            interactive.dispatch("click", control);
+        });
+        await act(async () => root.unmount());
+        return { copied, disabled };
+    }
+
+    it("copies the body and the items a mixed draft renders", async () => {
+        const { copied, disabled } = await copyDraft(block("draft", {
+            title: "Follow-up email",
+            body: "Hello Aiko,",
+            items: ["Confirm the renewal date", "Send the revised quote"],
+        }));
+
+        expect(disabled).toBe(false);
+        expect(copied).toEqual([
+            "Hello Aiko,\nConfirm the renewal date\nSend the revised quote",
+        ]);
+    });
+
+    it("copies an item-only draft rather than disabling itself", async () => {
+        const { copied, disabled } = await copyDraft(block("draft", {
+            items: ["Confirm the renewal date"],
+        }));
+
+        expect(disabled).toBe(false);
+        expect(copied).toEqual(["Confirm the renewal date"]);
+    });
+
+    it("stays disabled when the draft rendered nothing to copy", async () => {
+        const { copied, disabled } = await copyDraft(block("draft", { body: "   " }));
+
+        expect(disabled).toBe(true);
+        expect(copied).toEqual([]);
     });
 });

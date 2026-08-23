@@ -2867,6 +2867,12 @@ export type AiChatCitation = {
     asOf?: string | null;
     /** Viewer-safe excerpt or structured value the citation supports, or null when none was projected. */
     detail?: string | null;
+    /**
+     * Whether `asOf` and `detail` are the values the answering turn recorded rather than the
+     * record's state right now. An answer stored before turn-time evidence snapshots existed carries
+     * none, so its freshness has to be labelled as the record's own rather than the answer's.
+     */
+    observed?: boolean;
 };
 
 /** Closed presentation vocabulary for one native Ask Connex answer block. */
@@ -3106,6 +3112,12 @@ export type AiChatTurn = {
     terminalReason: string | null;
     partialContent?: string | null;
     progress: AiChatProgressItem[];
+    /**
+     * Whether the reader asked for this turn. A shared-session participant watching another
+     * member's turn is not its requester, and the cancellation endpoint rejects them, so the stop
+     * control must not be offered.
+     */
+    requestedByCurrentUser?: boolean;
 };
 
 /** Viewer-authorized target identity for an assistant write-tool call. */

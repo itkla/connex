@@ -96,6 +96,10 @@ function readyFile(fileName: string): AskConnexFileAttachment {
     };
 }
 
+function file(clientId: string): AskConnexFileAttachment {
+    return { ...readyFile("brief.txt"), clientId };
+}
+
 function selection(
     overrides: Partial<AskConnexSelectionContext> = {},
 ): AskConnexSelectionContext {
@@ -322,8 +326,8 @@ describe("interpreted scope", () => {
             id: index + 1,
         }));
 
-        expect(askConnexScopePreview(narrow, 0)).toBeNull();
-        expect(askConnexScopePreview([...narrow, { kind: "deal", id: 5 }], 0)).not.toBeNull();
+        expect(askConnexScopePreview(narrow, [])).toBeNull();
+        expect(askConnexScopePreview([...narrow, { kind: "deal", id: 5 }], [])).not.toBeNull();
     });
 
     it("counts only the records the request will actually carry", () => {
@@ -335,7 +339,7 @@ describe("interpreted scope", () => {
                 { kind: "person", id: 4 },
                 { kind: "person", id: 5 },
             ],
-            2,
+            [file("upload-a"), file("upload-b")],
         );
 
         expect(preview).toEqual({
@@ -345,29 +349,49 @@ describe("interpreted scope", () => {
                 { kind: "person", count: 2 },
             ],
             files: 2,
+            identity: "deal:1,deal:2,deal:3,person:4,person:5/upload-a,upload-b",
         });
     });
 
     it("re-asks when the scope changes and not when it is unchanged", () => {
         const first = askConnexScopePreviewKey(askConnexScopePreview(
             Array.from({ length: 5 }, (_, index) => ({ kind: "deal" as const, id: index + 1 })),
-            0,
+            [],
         ));
         const wider = askConnexScopePreviewKey(askConnexScopePreview(
             Array.from({ length: 6 }, (_, index) => ({ kind: "deal" as const, id: index + 1 })),
-            0,
+            [],
+        ));
+        const reordered = askConnexScopePreviewKey(askConnexScopePreview(
+            Array.from({ length: 5 }, (_, index) => ({ kind: "deal" as const, id: 5 - index })),
+            [],
+        ));
+        const swapped = askConnexScopePreviewKey(askConnexScopePreview(
+            Array.from({ length: 5 }, (_, index) => ({ kind: "deal" as const, id: index + 11 })),
+            [],
+        ));
+        const withFile = askConnexScopePreviewKey(askConnexScopePreview(
+            Array.from({ length: 5 }, (_, index) => ({ kind: "deal" as const, id: index + 1 })),
+            [file("upload-a")],
+        ));
+        const otherFile = askConnexScopePreviewKey(askConnexScopePreview(
+            Array.from({ length: 5 }, (_, index) => ({ kind: "deal" as const, id: index + 1 })),
+            [file("upload-b")],
         ));
 
         expect(askConnexScopeNeedsConfirmation(first, null)).toBe(true);
         expect(askConnexScopeNeedsConfirmation(first, first)).toBe(false);
         expect(askConnexScopeNeedsConfirmation(wider, first)).toBe(true);
+        expect(askConnexScopeNeedsConfirmation(reordered, first)).toBe(false);
+        expect(askConnexScopeNeedsConfirmation(swapped, first)).toBe(true);
+        expect(askConnexScopeNeedsConfirmation(otherFile, withFile)).toBe(true);
         expect(askConnexScopeNeedsConfirmation(null, null)).toBe(false);
     });
 
     it("states what it will read and offers both agreeing and correcting", () => {
         const preview = askConnexScopePreview(
             Array.from({ length: 5 }, (_, index) => ({ kind: "deal" as const, id: index + 1 })),
-            1,
+            [file("upload-a")],
         );
         if (preview === null) throw new Error("expected a scope preview");
         const markup = renderToStaticMarkup(
@@ -388,7 +412,7 @@ describe("interpreted scope", () => {
     it("announces the held scope, and only the scope, when the request waits", () => {
         const preview = askConnexScopePreview(
             Array.from({ length: 5 }, (_, index) => ({ kind: "deal" as const, id: index + 1 })),
-            1,
+            [file("upload-a")],
         );
         if (preview === null) throw new Error("expected a scope preview");
         const markup = renderToStaticMarkup(
@@ -413,7 +437,7 @@ describe("interpreted scope", () => {
         const root = createRoot(interactive.container);
         const preview = askConnexScopePreview(
             Array.from({ length: 5 }, (_, index) => ({ kind: "deal" as const, id: index + 1 })),
-            0,
+            [],
         );
         if (preview === null) throw new Error("expected a scope preview");
         const events: string[] = [];

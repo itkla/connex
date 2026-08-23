@@ -3,6 +3,15 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+    ANSWER_ROW_PLACEHOLDER,
+    answerBlockSignature,
+    answerListKeys,
+    answerRowSignature,
+    formatAnswerInstant,
+} from '@/app/components/ask-connex/answerDocument';
+import { parseMysqlDateTime } from '@/app/lib/utils';
+
+import {
     EMPTY_ASK_CONNEX_TOOL_CARDS,
     EMPTY_ASK_CONNEX_TURN,
     AskConnexFileRemovalError,
@@ -1187,5 +1196,71 @@ describe('assistant progress vocabulary', () => {
         expect(isAskConnexProgressSource(null)).toBe(false);
         expect(isAskConnexProgressSource(undefined)).toBe(false);
         expect(isAskConnexProgressSource(3)).toBe(false);
+    });
+});
+
+describe('answer timestamps read the same way twice', () => {
+    /**
+     * Every timestamp shape the backend step guard accepts, in a timezone that is not UTC. The
+     * relative half of a freshness line reads these through `parseMysqlDateTime`, so the absolute
+     * half has to reach the same instant or the two halves disagree by the offset.
+     */
+    const ACCEPTED_INSTANTS = [
+        '2026-08-01T09:00:00Z',
+        '2026-08-01T09:00:00+09:00',
+        '2026-08-01T09:00:00',
+        '2026-08-01',
+    ];
+
+    it('formats every accepted shape from the same instant the relative reading uses', () => {
+        for (const value of ACCEPTED_INSTANTS) {
+            const parsed = parseMysqlDateTime(value);
+            expect(Number.isNaN(parsed)).toBe(false);
+            expect(formatAnswerInstant(value, 'en-US'))
+                .toBe(new Intl.DateTimeFormat('en-US', value.length === 10
+                    ? { dateStyle: 'medium' }
+                    : { dateStyle: 'medium', timeStyle: 'short' })
+                    .format(new Date(parsed)));
+        }
+    });
+
+    it('reads an offset-less date-time as UTC, exactly as the relative half does', () => {
+        expect(formatAnswerInstant('2026-08-01T09:00:00', 'en-US')).toBe(
+            new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' })
+                .format(new Date('2026-08-01T09:00:00Z')),
+        );
+    });
+
+    it('keeps a calendar date on its own day rather than shifting it west of Greenwich', () => {
+        expect(formatAnswerInstant('2026-08-01', 'en-US')).toContain('Aug 1, 2026');
+    });
+
+    it('falls back to the placeholder rather than echoing something it cannot read', () => {
+        expect(formatAnswerInstant('the day of the review', 'en-US')).toBe(ANSWER_ROW_PLACEHOLDER);
+    });
+});
+
+describe('answer list keys', () => {
+    it('follows content rather than position', () => {
+        expect(answerListKeys(['b', 'a'])).toEqual(['b', 'a']);
+        expect(answerListKeys(['a', 'b']).toSorted()).toEqual(answerListKeys(['b', 'a']).toSorted());
+    });
+
+    it('never repeats a key when two entries say the same thing', () => {
+        const keys = answerListKeys(['same', 'same', 'other', 'same']);
+        expect(new Set(keys).size).toBe(keys.length);
+    });
+
+    it('signs a row and a block by what they render', () => {
+        expect(answerRowSignature({
+            label: 'Open pipeline', value: '12', detail: null, at: null, evidence: [],
+        })).not.toBe(answerRowSignature({
+            label: 'Open pipeline', value: '13', detail: null, at: null, evidence: [],
+        }));
+        expect(answerBlockSignature({
+            kind: 'fact', title: null, body: 'Atlas is active.', items: [], rows: [], evidence: [],
+        })).not.toBe(answerBlockSignature({
+            kind: 'fact', title: null, body: 'Atlas is closed.', items: [], rows: [], evidence: [],
+        }));
     });
 });

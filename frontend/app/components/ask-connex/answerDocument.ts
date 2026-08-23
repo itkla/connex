@@ -33,6 +33,7 @@ export type AskConnexAnswerDocumentLabels = {
     exclusions: string;
     exclusion: (exclusion: AiChatCoverage['exclusions'][number]) => string;
     freshness: string;
+    freshnessCurrent: string;
     moreDetail: string;
     openRecord: string;
     period: (start: string, end: string) => string;
@@ -162,4 +163,57 @@ export function answerInstant(value: string | null | undefined): string | null {
 /** A stable React key for one citation inside a block or row. */
 export function citationKey(citation: AiChatCitation): string {
     return `${citation.handle}:${citation.kind}:${citation.id}`;
+}
+
+const CALENDAR_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The absolute rendering of an answer timestamp.
+ *
+ * The step guard accepts an offset instant, an offset-less date-time, and a bare calendar date, and
+ * every accepted shape has to read the same way in both halves of a freshness line. This shares
+ * {@link parseMysqlDateTime} with `formatRelativeTime` — so an offset-less value is read as UTC and
+ * a calendar date as that calendar day — rather than handing the raw string to `new Date`, which
+ * reads a bare date as UTC midnight and lands on the previous day west of Greenwich.
+ *
+ * @param value an instant that already passed {@link answerInstant}
+ * @param locale BCP-47 locale tag
+ */
+export function formatAnswerInstant(value: string, locale: string): string {
+    const ms = parseMysqlDateTime(value);
+    if (Number.isNaN(ms)) return ANSWER_ROW_PLACEHOLDER;
+    const options: Intl.DateTimeFormatOptions = CALENDAR_DATE.test(value.trim())
+        ? { dateStyle: 'medium' }
+        : { dateStyle: 'medium', timeStyle: 'short' };
+    return new Intl.DateTimeFormat(locale, options).format(new Date(ms));
+}
+
+/**
+ * Collision-free React keys for one rendered answer list, derived from content alone.
+ *
+ * An answer's rows and blocks carry no server identity, so a key has to come from what the entry
+ * says. Two entries can legitimately say the same thing, which would duplicate a key, so repeats
+ * are disambiguated by how many identical entries preceded them — stable for every distinguishable
+ * entry, and no worse than the index for the interchangeable ones.
+ *
+ * @param signatures one content signature per entry, in render order
+ */
+export function answerListKeys(signatures: readonly string[]): string[] {
+    const seen = new Map<string, number>();
+    return signatures.map((signature) => {
+        const repeat = seen.get(signature) ?? 0;
+        seen.set(signature, repeat + 1);
+        return repeat === 0 ? signature : `${signature}#${repeat}`;
+    });
+}
+
+/** The content signature of one structured row. */
+export function answerRowSignature(row: AiChatAnswerRow): string {
+    return [row.label, row.value ?? '', row.detail ?? '', row.at ?? ''].join(' ');
+}
+
+/** The content signature of one answer-document block. */
+export function answerBlockSignature(block: AiChatAnswerBlock): string {
+    return [block.kind, block.title ?? '', block.body ?? '', block.items.join('')]
+        .join(' ');
 }

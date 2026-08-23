@@ -91,6 +91,19 @@ class AiChatTranscriptProjectionTest {
         assertNull(collaborator.partialContent());
         assertNull(collaborator.progress().getFirst().count());
         assertFalse(collaborator.progress().getFirst().truncated());
+        assertTrue(requester.requestedByCurrentUser());
+        assertFalse(collaborator.requestedByCurrentUser());
+    }
+
+    @Test
+    void anAnonymousReaderIsNeverTreatedAsTheTurnRequester() {
+        AiChatTurn turn = new AiChatTurn();
+        turn.setId(17);
+        turn.setSessionId(9);
+        turn.setRequestedByUserId(11);
+        turn.setStatus("running");
+
+        assertFalse(AiChatTurnDto.from(turn, List.of(), null).requestedByCurrentUser());
     }
 
     @Test

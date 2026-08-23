@@ -48,6 +48,7 @@ const labels: AskConnexTurnLabels = {
         exclusions: "Not included",
         exclusion: (exclusion) => `exclusion:${exclusion}`,
         freshness: "Freshness",
+        freshnessCurrent: "Record updated",
         moreDetail: "More detail",
         openRecord: "Open record",
         period: (start, end) => `period ${start} to ${end}`,
@@ -231,7 +232,7 @@ describe("what a stopped answer offers next", () => {
 
     it("announces each milestone while the answer is still being produced", () => {
         const markup = activity({
-            turn: turn({ phase: "running", progress: PROGRESS }),
+            turn: turn({ phase: "running", progress: PROGRESS, cancellable: true }),
             streaming: true,
         });
         const status = markup.indexOf('role="status"');
@@ -239,6 +240,16 @@ describe("what a stopped answer offers next", () => {
         expect(markup.indexOf("What I checked")).toBeGreaterThan(status);
         expect(markup).toContain("Writing…");
         expect(markup).toContain("Stop generating");
+    });
+
+    it("offers the stop control only to the member whose turn it is", () => {
+        const watched = activity({
+            turn: turn({ phase: "running", progress: PROGRESS }),
+            streaming: true,
+        });
+
+        expect(watched).toContain("Writing…");
+        expect(watched).not.toContain("Stop generating");
     });
 });
 

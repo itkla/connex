@@ -226,9 +226,9 @@ class AiChatTurnPersistenceServiceTest {
         storedTurn.setPartialContent("Atlas renewal is slipping");
         when(chatMapper.updateTurnTerminal(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId(),
-                "failed", "restrictions_changed", null, null)).thenReturn(1);
+                "failed", "provider_error", null, null)).thenReturn(1);
 
-        assertTrue(service.markTerminal(TURN, "failed", "restrictions_changed"));
+        assertTrue(service.markTerminal(TURN, "failed", "provider_error"));
 
         InOrder order = inOrder(chatMapper);
         order.verify(chatMapper).getSessionByIdForUpdate(
@@ -237,9 +237,71 @@ class AiChatTurnPersistenceServiceTest {
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
         order.verify(chatMapper).updateTurnTerminal(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId(),
-                "failed", "restrictions_changed", null, null);
+                "failed", "provider_error", null, null);
         verify(chatMapper, never()).resetTurnPartialContent(
                 anyInt(), anyInt(), anyInt(), anyInt());
+    }
+
+    @Test
+    void cancelledAndTimedOutTerminalizationRetainTheDurablePartialAnswer() {
+        when(chatMapper.updateTurnTerminal(
+                anyInt(), anyInt(), anyInt(), any(), any(), any(), any())).thenReturn(1);
+        for (String[] terminal : new String[][] {
+                {"cancelled", "cancelled"},
+                {"timed_out", "generation_timeout"},
+                {"failed", "no_progress"}}) {
+            clearInvocations(chatMapper);
+            storedTurn.setStreamed(true);
+            storedTurn.setPartialContentUtf16Offset(7);
+            storedTurn.setPartialContent("Atlas renewal is slipping");
+
+            assertTrue(service.markTerminal(TURN, terminal[0], terminal[1]));
+
+            verify(chatMapper).updateTurnTerminal(
+                    TURN.workspaceId(), TURN.sessionId(), TURN.turnId(),
+                    terminal[0], terminal[1], null, null);
+            verify(chatMapper, never()).resetTurnPartialContent(
+                    anyInt(), anyInt(), anyInt(), anyInt());
+        }
+    }
+
+    @Test
+    void authorizationWithdrawnTerminalizationPurgesTheDurablePartialAnswer() {
+        when(chatMapper.resetTurnPartialContent(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId(), 7)).thenReturn(1);
+        when(chatMapper.updateTurnTerminal(
+                anyInt(), anyInt(), anyInt(), any(), any(), any(), any())).thenReturn(1);
+        for (String reason : AiAssistantTerminalReasons.AUTHORIZATION_WITHDRAWN) {
+            clearInvocations(chatMapper);
+            storedTurn.setStreamed(true);
+            storedTurn.setPartialContentUtf16Offset(7);
+            storedTurn.setPartialContent("Atlas renewal is slipping");
+
+            assertTrue(service.markTerminal(TURN, "failed", reason));
+
+            InOrder order = inOrder(chatMapper);
+            order.verify(chatMapper).resetTurnPartialContent(
+                    TURN.workspaceId(), TURN.sessionId(), TURN.turnId(), 7);
+            order.verify(chatMapper).updateTurnTerminal(
+                    TURN.workspaceId(), TURN.sessionId(), TURN.turnId(),
+                    "failed", reason, null, null);
+        }
+    }
+
+    @Test
+    void authorizationWithdrawnTerminalizationFailsClosedWhenThePurgeMissesItsRow() {
+        storedTurn.setStreamed(true);
+        storedTurn.setPartialContentUtf16Offset(7);
+        storedTurn.setPartialContent("Atlas renewal is slipping");
+        when(chatMapper.resetTurnPartialContent(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId(), 7)).thenReturn(0);
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> service.markTerminal(TURN, "failed", "access_revoked"));
+
+        verify(chatMapper, never()).updateTurnTerminal(
+                anyInt(), anyInt(), anyInt(), any(), any(), any(), any());
     }
 
     @Test
@@ -251,16 +313,16 @@ class AiChatTurnPersistenceServiceTest {
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId(), 7)).thenReturn(1);
         when(chatMapper.updateTurnTerminal(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId(),
-                "failed", "restrictions_changed", null, null)).thenReturn(1);
+                "failed", "provider_error", null, null)).thenReturn(1);
 
-        assertTrue(service.markTerminal(TURN, "failed", "restrictions_changed"));
+        assertTrue(service.markTerminal(TURN, "failed", "provider_error"));
 
         InOrder order = inOrder(chatMapper);
         order.verify(chatMapper).resetTurnPartialContent(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId(), 7);
         order.verify(chatMapper).updateTurnTerminal(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId(),
-                "failed", "restrictions_changed", null, null);
+                "failed", "provider_error", null, null);
     }
 
     @Test

@@ -889,18 +889,26 @@ public class AiAssistantPromptAssembler {
                 citations,
                 suggestions,
                 resources,
+                Map.of(),
                 List.of(),
                 null,
                 List.of(),
                 ToolBudgetAudit.NONE);
     }
 
-    /** Serializes final viewer metadata with a typed answer and additive server audit counters. */
+    /**
+     * Serializes final viewer metadata with a typed answer and additive server audit counters.
+     *
+     * <p>Each cited handle carries the freshness and subtitle the record showed while this turn ran,
+     * so a later read renders the evidence the answer was written against instead of relabelling it
+     * with whatever the record says today. Authorization, visibility, and identity stay live reads.
+     */
     public String finalMetadata(
             int turnId,
             List<String> citations,
             List<String> suggestions,
             Map<String, AiChatResourceRegistry.ResourceRef> resources,
+            Map<String, AiChatRecordObservation> observations,
             List<AiAssistantStep.AnswerBlock> blocks,
             AiAssistantStep.Coverage coverage,
             List<AiChatProgressItemDto> progress,
@@ -912,10 +920,15 @@ public class AiAssistantPromptAssembler {
             if (resource == null) {
                 throw AiAssistantLoopException.malformed("unknown_citation");
             }
-            resolved.add(Map.of(
-                    "handle", handle,
-                    "kind", resource.kind(),
-                    "id", resource.id()));
+            Map<String, Object> citation = new LinkedHashMap<>();
+            citation.put("handle", handle);
+            citation.put("kind", resource.kind());
+            citation.put("id", resource.id());
+            AiChatRecordObservation observation = observations.get(handle);
+            if (observation != null) {
+                citation.put("observed", observation);
+            }
+            resolved.add(citation);
         }
         List<Map<String, Object>> replayResources = resources.entrySet().stream()
                 .map(entry -> Map.<String, Object>of(

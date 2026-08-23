@@ -92,6 +92,7 @@ class AiChatAgentLoopServiceTest {
     private AiChatAttachmentContextService attachmentContextService;
     private AiChatTurnPersistenceService persistenceService;
     private AiChatProgressService progressService;
+    private AiChatCitationProjector citationProjector;
     private AiRestrictionEpoch restrictionEpoch;
     private WorkspaceService workspaceService;
     private AiChatRealtimeDispatcher realtimeDispatcher;
@@ -111,6 +112,7 @@ class AiChatAgentLoopServiceTest {
         attachmentContextService = mock(AiChatAttachmentContextService.class);
         persistenceService = mock(AiChatTurnPersistenceService.class);
         progressService = mock(AiChatProgressService.class);
+        citationProjector = mock(AiChatCitationProjector.class);
         restrictionEpoch = mock(AiRestrictionEpoch.class);
         workspaceService = mock(WorkspaceService.class);
         realtimeDispatcher = mock(AiChatRealtimeDispatcher.class);
@@ -132,6 +134,7 @@ class AiChatAgentLoopServiceTest {
                 attachmentContextService,
                 persistenceService,
                 progressService,
+                citationProjector,
                 restrictionEpoch,
                 workspaceService,
                 objectMapper,
@@ -2110,6 +2113,7 @@ class AiChatAgentLoopServiceTest {
                 attachmentContextService,
                 persistenceService,
                 progressService,
+                citationProjector,
                 restrictionEpoch,
                 workspaceService,
                 objectMapper,

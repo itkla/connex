@@ -445,6 +445,7 @@
       "unsupported": "No source for this — read it as unconfirmed.",
       "coverage": "Coverage",
       "freshness": "Freshness",
+      "freshnessCurrent": "Record updated",
       "sources": "Sources checked",
       "exclusions": "Not included",
       "truncated": "Results were bounded",

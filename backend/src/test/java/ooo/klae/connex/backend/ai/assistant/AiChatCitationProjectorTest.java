@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.assistant;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -362,6 +363,147 @@ class AiChatCitationProjectorTest {
         assertEquals("Manufacturing", citations.get(1).detail());
         assertNull(citations.get(2).asOf());
         assertEquals("Negotiation", citations.get(2).detail());
+        assertFalse(citations.get(0).observed());
+        assertFalse(citations.get(1).observed());
+        assertFalse(citations.get(2).observed());
+    }
+
+    @Test
+    void storedEvidenceSnapshotOutlivesLaterChangesToTheCitedRecord() {
+        AiChatMessage message = new AiChatMessage();
+        message.setId(23);
+        message.setAuthorKind("assistant");
+        message.setStructuredJson("""
+                {"citations":[
+                {"handle":"r1","kind":"deal","id":31,
+                "observed":{"asOf":"2026-08-01T09:00:00Z","detail":"Discovery"}}],
+                "resources":[{"handle":"r1","kind":"deal","id":31}]}
+                """);
+        Deal deal = new Deal();
+        deal.setId(31);
+        deal.setName("Atlas renewal");
+        deal.setStageId(5);
+        deal.setUpdatedAt("2026-08-20 12:00:00");
+        Stage stage = new Stage();
+        stage.setId(5);
+        stage.setName("Negotiation");
+        when(dealMapper.getByIds(3, List.of(31))).thenReturn(List.of(deal));
+        when(pipelineMapper.getAllStages(3)).thenReturn(List.of(stage));
+
+        AiChatCitationDto citation = projector.project(3, List.of(message))
+                .citationsByMessage().get(23).getFirst();
+
+        assertEquals("Atlas renewal", citation.label());
+        assertEquals("2026-08-01T09:00:00Z", citation.asOf());
+        assertEquals("Discovery", citation.detail());
+        assertTrue(citation.observed());
+    }
+
+    @Test
+    void aStoredSnapshotOfARecordThatBecameInvisibleIsStillWithheld() {
+        AiChatMessage message = new AiChatMessage();
+        message.setId(23);
+        message.setAuthorKind("assistant");
+        message.setStructuredJson("""
+                {"citations":[
+                {"handle":"r1","kind":"person","id":11,
+                "observed":{"asOf":"2026-08-01T09:00:00Z","detail":"Atlas Manufacturing"}}],
+                "resources":[{"handle":"r1","kind":"person","id":11}]}
+                """);
+        Person restricted = person(11);
+        restricted.setSuspendedAt(LocalDateTime.now());
+        when(personMapper.getByIds(3, List.of(11))).thenReturn(List.of(restricted));
+
+        AiChatCitationProjector.Projection projection = projector.project(3, List.of(message));
+
+        assertEquals(Set.of(23), projection.withheldMessageIds());
+        assertEquals(List.of(), projection.citationsByMessage().get(23));
+    }
+
+    @Test
+    void anUnreadableStoredSnapshotFallsBackToTheLiveRecordWithoutClaimingObservation() {
+        AiChatMessage message = new AiChatMessage();
+        message.setId(23);
+        message.setAuthorKind("assistant");
+        message.setStructuredJson("""
+                {"citations":[
+                {"handle":"r1","kind":"company","id":21,
+                "observed":{"asOf":"the day of the review","detail":"Manufacturing"}}],
+                "resources":[{"handle":"r1","kind":"company","id":21}]}
+                """);
+        when(companyMapper.getByIds(3, List.of(21))).thenReturn(List.of(company()));
+
+        AiChatCitationDto citation = projector.project(3, List.of(message))
+                .citationsByMessage().get(23).getFirst();
+
+        assertEquals("2026-08-19T09:30:00Z", citation.asOf());
+        assertEquals("Manufacturing", citation.detail());
+        assertFalse(citation.observed());
+    }
+
+    @Test
+    void aStoredSnapshotWithoutFreshnessStaysASnapshotRatherThanReadingTheRecord() {
+        AiChatMessage message = new AiChatMessage();
+        message.setId(23);
+        message.setAuthorKind("assistant");
+        message.setStructuredJson("""
+                {"citations":[
+                {"handle":"r1","kind":"company","id":21,
+                "observed":{"asOf":null,"detail":null}}],
+                "resources":[{"handle":"r1","kind":"company","id":21}]}
+                """);
+        when(companyMapper.getByIds(3, List.of(21))).thenReturn(List.of(company()));
+
+        AiChatCitationDto citation = projector.project(3, List.of(message))
+                .citationsByMessage().get(23).getFirst();
+
+        assertEquals("Atlas Manufacturing", citation.label());
+        assertNull(citation.asOf());
+        assertNull(citation.detail());
+        assertTrue(citation.observed());
+    }
+
+    @Test
+    void observeSnapshotsFreshnessAndSubtitleForEveryCitedAndVisibleRecord() {
+        Company employer = new Company();
+        employer.setId(21);
+        employer.setName("Atlas Manufacturing");
+        Person person = person(11);
+        person.setName("Aiko Tanaka");
+        person.setUpdatedAt("2026-08-20 12:00:00");
+        person.setCompany(employer);
+        Person restricted = person(12);
+        restricted.setSuspendedAt(LocalDateTime.now());
+        when(personMapper.getByIds(3, List.of(11, 12)))
+                .thenReturn(List.of(person, restricted));
+
+        Map<String, AiChatRecordObservation> observed = projector.observe(
+                3,
+                List.of("r1", "r2", "r3"),
+                Map.of(
+                        "r1", new AiChatResourceRegistry.ResourceRef("person", 11),
+                        "r2", new AiChatResourceRegistry.ResourceRef("person", 12)));
+
+        assertEquals(
+                Map.of("r1", new AiChatRecordObservation(
+                        "2026-08-20T12:00:00Z", "Atlas Manufacturing")),
+                observed);
+    }
+
+    @Test
+    void observeReadsNothingWhenTheAnswerCitedNoResolvableResource() {
+        assertEquals(Map.of(), projector.observe(3, List.of("r1"), Map.of()));
+        assertEquals(Map.of(), projector.observe(3, List.of(), Map.of(
+                "r1", new AiChatResourceRegistry.ResourceRef("person", 11))));
+    }
+
+    private Company company() {
+        Company company = new Company();
+        company.setId(21);
+        company.setName("Atlas Manufacturing");
+        company.setIndustry("Manufacturing");
+        company.setUpdatedAt("2026-08-19 09:30:00");
+        return company;
     }
 
     private AiChatTurn turn(int id, Integer requesterId) {

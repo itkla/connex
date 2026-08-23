@@ -645,6 +645,10 @@ function SettledTurnActivity({
  *
  * While the answer runs, the whole region is the announced status so each new milestone is spoken
  * as it lands rather than only the overall phase; the streamed words themselves are never announced.
+ *
+ * The stop control appears only for the member who asked. A participant who opened a shared session
+ * mid-turn adopts that turn into the same state, and the cancellation endpoint rejects anyone but
+ * its requester, so offering the control to them would be a button that can only fail.
  */
 export function TurnActivity({
     turn,
@@ -726,16 +730,18 @@ export function TurnActivity({
                         : streaming
                             ? labels.turnStreaming
                             : labels.turnWorking}</span>
-                <IconButton
-                    type="button"
-                    variant="ghost"
-                    size="icon-toolbar"
-                    label={labels.stop}
-                    disabled={cancelling}
-                    onClick={onCancel}
-                >
-                    <StopIcon className="size-3.5" />
-                </IconButton>
+                {turn.cancellable ? (
+                    <IconButton
+                        type="button"
+                        variant="ghost"
+                        size="icon-toolbar"
+                        label={labels.stop}
+                        disabled={cancelling}
+                        onClick={onCancel}
+                    >
+                        <StopIcon className="size-3.5" />
+                    </IconButton>
+                ) : null}
             </div>
             <AskConnexCheckedTrail
                 progress={turn.progress}

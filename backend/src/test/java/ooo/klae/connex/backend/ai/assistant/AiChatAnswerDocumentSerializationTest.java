@@ -63,6 +63,7 @@ class AiChatAnswerDocumentSerializationTest {
                 List.of("r1"),
                 List.of(),
                 Map.of("r1", new AiChatResourceRegistry.ResourceRef("deal", 19)),
+                Map.of("r1", new AiChatRecordObservation(null, null)),
                 List.of(
                         new AiAssistantStep.AnswerBlock(
                                 "fact", null, "Atlas is active.",
@@ -88,6 +89,7 @@ class AiChatAnswerDocumentSerializationTest {
         assertTrue(metadata.contains("\"detail\":null"), metadata);
         assertTrue(metadata.contains("\"at\":null"), metadata);
         assertTrue(metadata.contains("\"count\":null"), metadata);
+        assertTrue(metadata.contains("\"observed\":{\"asOf\":null,\"detail\":null}"), metadata);
 
         AiChatMessage message = new AiChatMessage();
         message.setId(23);
