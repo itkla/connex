@@ -289,7 +289,11 @@ describe("organization standing decides who reaches the organization destination
         expect(
             layout,
             "these routes are under /settings, whose layout knows only about the workspace",
-        ).toContain("activeWorkspace.orgRole === null");
+        ).toContain("activeWorkspace.orgRole == null");
+        expect(
+            layout.includes("activeWorkspace.orgRole === null"),
+            "the payload omits the role rather than nulling it, so an identity test admits the viewer this gate exists to refuse; organizationSettingsGate.test.tsx holds the behavior",
+        ).toBe(false);
         expect(
             source(LEGACY_LAYOUT),
             "and the legacy layout keeps the same gate, from the same source, unchanged",

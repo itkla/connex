@@ -20,6 +20,15 @@ import { getMyWorkspacesResultFromCookie } from "@/app/lib/api";
  * which says the specific thing a general notice cannot: that this needs organization standing, not
  * a workspace role.
  *
+ * The check is nullish rather than an identity test against `null`, and that is the whole gate. The
+ * workspace payload omits `orgRole` entirely for a member who holds none — the field is typed
+ * `OrgRole | null` but arrives absent — so `=== null` reads `undefined` and admits exactly the
+ * viewer it exists to refuse. The legacy organization layout still tests identity and is wrong in
+ * the same way; it is left alone here because #1340 does not touch those routes, and it fails
+ * closed twice over regardless: every organization panel refuses a 403 in place and every
+ * organization endpoint requires the role. That does not make the entry point honest, which is why
+ * this one is fixed.
+ *
  * {@link OrganizationWorkspaceGuard} stays, for the same reason it exists on the legacy routes: the
  * standing resolved here belongs to one workspace, and a switch to another must withhold the page
  * rather than let it keep rendering against authority the reader may no longer hold.
@@ -40,7 +49,7 @@ export default async function OrganizationSettingsLayout({
     if (!activeWorkspace) {
         return <WorkspaceUnavailablePage />;
     }
-    if (activeWorkspace.orgRole === null) {
+    if (activeWorkspace.orgRole == null) {
         const t = await getTranslations("Organization");
         return (
             <SettingsAvailabilityNotice
