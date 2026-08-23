@@ -227,6 +227,7 @@
     "placeholder": "何でも検索",
     "searching": "検索中...",
     "noResults": "「{query}」の検索結果はありません",
+    "searchFailed": "検索を実行できませんでした。もう一度お試しください。",
     "resultsHeading": "「{query}」の検索結果",
     "groupCompanies": "会社",
     "groupPeople": "連絡先",

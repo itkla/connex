@@ -11,7 +11,8 @@
             "trigger": "Search & commands",
             "placeholder": "Search or jump to…",
             "loading": "Searching…",
-            "noResults": "No results for “{query}”"
+            "noResults": "No results for “{query}”",
+            "failed": "We couldn't run that search. Try again."
         },
         "group": {
             "create": "Create",

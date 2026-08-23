@@ -171,8 +171,10 @@ export default function GlobalSearch() {
         };
     }, [trimmed, shouldSearch, cached, activeWorkspaceId]);
 
+    const searchFailed = shouldSearch && cached === null && failedQuery === trimmed;
     const paletteData = cached?.data ?? null;
-    const inlineData = cached?.data ?? nearestPrefixResults(searchCache, trimmed, MIN_QUERY_LENGTH);
+    const inlineData = cached?.data
+        ?? (searchFailed ? null : nearestPrefixResults(searchCache, trimmed, MIN_QUERY_LENGTH));
     const paletteRecordGroups = useMemo<ResultGroup[]>(
         () => (trimmed.length >= MIN_QUERY_LENGTH ? buildSearchGroups(paletteData, tSearch) : []),
         [paletteData, trimmed, tSearch],
@@ -182,7 +184,7 @@ export default function GlobalSearch() {
         [inlineData, trimmed, tSearch],
     );
     const flatRows = useMemo(() => inlineGroups.flatMap((group) => group.rows), [inlineGroups]);
-    const searching = shouldSearch && cached === null && failedQuery !== trimmed;
+    const searching = shouldSearch && cached === null && !searchFailed;
 
     const commandGroups = useMemo(() => {
         const groupsToScan = lowerQuery ? ACTION_GROUPS : EMPTY_GROUP_ORDER;
@@ -341,7 +343,7 @@ export default function GlobalSearch() {
     const inlineRecordCount = flatRows.length;
     const paletteRecordCount = paletteRecordGroups.reduce((sum, group) => sum + group.rows.length, 0);
     const commandCount = commandGroups.reduce((sum, entry) => sum + entry.actions.length, 0);
-    const showNoResults = trimmed.length > 0 && !searching && commandCount + paletteRecordCount === 0;
+    const showNoResults = trimmed.length > 0 && !searching && !searchFailed && commandCount + paletteRecordCount === 0;
     const availablePanelHeight = Math.max(0, Math.floor(currentViewportHeight / 2 - PANEL_VIEWPORT_CLEARANCE));
     const collapsedPanelHeight = Math.min(PANEL_COLLAPSED, availablePanelHeight);
     const expandedPanelHeight = Math.min(PANEL_EXPANDED, availablePanelHeight);
@@ -403,7 +405,10 @@ export default function GlobalSearch() {
                                     <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
                                 </div>
                             ) : null}
-                            {!searching && inlineRecordCount === 0 ? (
+                            {searchFailed ? (
+                                <p className="px-3 py-2 text-sm text-muted-foreground">{tSearch('searchFailed')}</p>
+                            ) : null}
+                            {!searching && !searchFailed && inlineRecordCount === 0 ? (
                                 <p className="px-3 py-2 text-sm text-muted-foreground">{tSearch('noResults', { query: trimmed })}</p>
                             ) : null}
                             {inlineGroups.map((group) => (
@@ -595,6 +600,10 @@ export default function GlobalSearch() {
                                                 <Loader2Icon className="size-4 animate-spin" />
                                                 {tActions('palette.loading')}
                                             </div>
+                                        ) : null}
+
+                                        {searchFailed ? (
+                                            <div className="py-8 text-center text-sm text-muted-foreground">{tActions('palette.failed')}</div>
                                         ) : null}
 
                                         {showNoResults ? (

@@ -227,6 +227,7 @@
     "placeholder": "Search for anything",
     "searching": "Searching...",
     "noResults": "No results for “{query}”",
+    "searchFailed": "We couldn't run that search. Try again.",
     "resultsHeading": "Results for “{query}”",
     "groupCompanies": "Companies",
     "groupPeople": "Contacts",
