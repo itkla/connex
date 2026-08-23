@@ -1,3 +1,4 @@
+import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import { cn } from "@/lib/utils";
 
 /**
@@ -42,5 +43,67 @@ export function SettingsSection({
             </div>
             {children}
         </section>
+    );
+}
+
+/**
+ * Which of its two homes is rendering a panel while #1340 migrates the administration destinations.
+ *
+ * - `page` is the panel's own route, exactly as it ships: an uppercase eyebrow under the shell's
+ *   page title, which is the only heading that route has.
+ * - `section` is one section of a consolidated scope destination, where the page is a single outline
+ *   of section headings and the eyebrow would read as a third, smaller kind of title.
+ */
+export type SettingsPanelPresentation = "page" | "section";
+
+/**
+ * The heading a panel puts above itself, in whichever home is showing it.
+ *
+ * The organization panels all open the same way — an eyebrow, then a description paragraph beside
+ * it — so the switch between their two presentations is one decision rather than six copies of it.
+ * The legacy shape is reproduced exactly, `px-6` alignment included, because those routes must keep
+ * rendering as they ship until #1340's redirects retire them.
+ *
+ * @param presentation - which home is rendering the panel
+ * @param title - the panel's own name, identical in both homes
+ * @param description - the sentence under it
+ * @param action - controls the heading carries, such as a filter or a reload
+ * @param descriptionClassName - the legacy paragraph's own classes, where a panel constrains its
+ * measure; ignored in the section presentation, which constrains it for every panel
+ * @param headingLevel - the level this heading takes in the section presentation, so a panel that
+ * names a part of itself sits under its own name rather than beside it
+ */
+export function SettingsPanelHeading({
+    presentation,
+    title,
+    description,
+    action,
+    descriptionClassName,
+    headingLevel,
+}: {
+    presentation: SettingsPanelPresentation;
+    title: string;
+    description: string;
+    action?: React.ReactNode;
+    descriptionClassName?: string;
+    headingLevel?: 2 | 3;
+}) {
+    if (presentation === "section") {
+        return (
+            <SettingsSection
+                title={title}
+                description={description}
+                action={action}
+                headingLevel={headingLevel}
+            />
+        );
+    }
+    return (
+        <div>
+            <SectionHeader title={title} action={action} />
+            <p className={cn("px-6 text-sm text-muted-foreground", descriptionClassName)}>
+                {description}
+            </p>
+        </div>
     );
 }

@@ -350,6 +350,16 @@ export const SETTINGS_GROUPS = [
         order: 1,
         titleKey: "SettingsNav.groupOrganizationGeneral",
         epicName: "General",
+        /**
+         * Two of the three jobs `/organization/overview` served had no address of their own: how the
+         * organization's workspaces and authority fit together, and the export and deletion that end
+         * them were blocks inside a page named for none of them. The consolidation gives each one,
+         * which is what these entries record; the third keeps the entry the old route already had.
+         */
+        gapSections: [
+            { slug: "layout", titleKey: "OrgOverview.layoutTitle" },
+            { slug: "lifecycle", titleKey: "OrgOverview.lifecycleTitle" },
+        ],
     },
     {
         id: "organization.identity",
@@ -372,7 +382,16 @@ export const SETTINGS_GROUPS = [
         scope: "organization",
         route: "/settings/organization/data-requests",
         order: 4,
-        titleKey: "Organization.tabDataRequests",
+        /**
+         * A settings-side label rather than the organization tab's own. The tab is named for the
+         * statutory instrument — 開示等請求 — and so is the tooling inside it, which §4 sanctions on
+         * a compliance surface. Reusing that key here would put the identical string on the group
+         * row and on the section beneath it, leaving a Japanese settings search with two hits that
+         * differ only by fragment. English never had that problem: "Data requests" names the job and
+         * "Data-subject requests" names the tooling. This is the same distinction, and the string is
+         * the one the breadcrumb already uses for this destination.
+         */
+        titleKey: "SettingsNav.groupDataRequests",
         epicName: "Data requests",
     },
     {
@@ -652,16 +671,21 @@ export const SETTINGS_ENTRIES = [
         aliasKey: null,
     },
     {
-        id: "organization.data-requests",
+        /**
+         * Named for the section it becomes rather than for the group that now owns its route: the
+         * group is "Data requests" and this is the tooling itself, which the surface has always
+         * called data-subject requests.
+         */
+        id: "organization.data-subject-requests",
         currentRoute: "/organization/data-requests",
         kind: "destination",
         group: "organization.data-requests",
         canonicalRoute: "/settings/organization/data-requests",
-        canonicalSection: null,
+        canonicalSection: "requests",
         redirectsTo: null,
         redirectQuery: [],
         conditionalForward: null,
-        titleKey: "Organization.tabDataRequests",
+        titleKey: "OrgDataRequests.title",
         access: {
             permissions: [],
             permissionMatch: "all",
@@ -729,11 +753,17 @@ export const SETTINGS_ENTRIES = [
         kind: "destination",
         group: "organization.general",
         canonicalRoute: "/settings/organization/general",
-        canonicalSection: null,
+        canonicalSection: "identity",
         redirectsTo: null,
         redirectQuery: [],
         conditionalForward: null,
-        titleKey: "Organization.tabOverview",
+        /**
+         * The shipped `Organization.tabOverview` stays on the legacy tab strip and goes no further.
+         * §7 retires "Overview" as a page name and the 2026-08-19 ruling names this group General,
+         * so the job this entry becomes is named for what it does — the organization's identity —
+         * rather than for the tab it arrived on.
+         */
+        titleKey: "OrgOverview.identityTitle",
         access: {
             permissions: [],
             permissionMatch: "all",
@@ -1014,6 +1044,152 @@ export const SETTINGS_ENTRIES = [
         conditionalForward: null,
         titleKey: null,
         access: NO_ACCESS_REQUIREMENTS,
+        entryPoints: [],
+        aliasKey: null,
+    },
+    {
+        id: "organization.ai-governance",
+        currentRoute: "/settings/organization/ai-governance",
+        kind: "destination",
+        group: "organization.ai-governance",
+        canonicalRoute: "/settings/organization/ai-governance",
+        canonicalSection: null,
+        redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
+        titleKey: "SettingsNav.groupAiDataGovernance",
+        access: {
+            /**
+             * No workspace permission reaches an organization surface. Everything here is gated on
+             * organization standing alone, which the route's own layout resolves before the page
+             * renders — the same fact the legacy tab strip sits behind.
+             */
+            permissions: [],
+            permissionMatch: "all",
+            capabilities: [],
+            capabilityMatch: "all",
+            orgAdmin: true,
+            manage: [],
+            orgWrite: "admin",
+            states: ["ask-admin", "retry"],
+        },
+        entryPoints: [],
+        aliasKey: null,
+    },
+    {
+        id: "organization.audit-diagnostics",
+        currentRoute: "/settings/organization/audit-diagnostics",
+        kind: "destination",
+        group: "organization.audit-diagnostics",
+        canonicalRoute: "/settings/organization/audit-diagnostics",
+        canonicalSection: null,
+        redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
+        titleKey: "SettingsNav.groupAuditDiagnostics",
+        access: {
+            /**
+             * Both jobs this destination absorbed were gated identically — on organization standing
+             * and nothing else — so consolidating them needs none of the any-of loosening the
+             * workspace audit page required. Reading here changes nothing, hence no write role.
+             */
+            permissions: [],
+            permissionMatch: "all",
+            capabilities: [],
+            capabilityMatch: "all",
+            orgAdmin: true,
+            manage: [],
+            orgWrite: null,
+            states: ["ask-admin", "retry"],
+        },
+        entryPoints: [],
+        aliasKey: null,
+    },
+    {
+        id: "organization.data-requests",
+        currentRoute: "/settings/organization/data-requests",
+        kind: "destination",
+        group: "organization.data-requests",
+        canonicalRoute: "/settings/organization/data-requests",
+        canonicalSection: null,
+        redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
+        titleKey: "SettingsNav.groupDataRequests",
+        access: {
+            permissions: [],
+            permissionMatch: "all",
+            capabilities: [],
+            capabilityMatch: "all",
+            orgAdmin: true,
+            manage: [],
+            orgWrite: "admin",
+            states: ["ask-admin", "retry"],
+        },
+        entryPoints: [],
+        aliasKey: null,
+    },
+    {
+        id: "organization.general",
+        currentRoute: "/settings/organization/general",
+        kind: "destination",
+        group: "organization.general",
+        canonicalRoute: "/settings/organization/general",
+        canonicalSection: null,
+        redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
+        titleKey: "SettingsNav.groupOrganizationGeneral",
+        access: {
+            permissions: [],
+            permissionMatch: "all",
+            capabilities: [],
+            capabilityMatch: "all",
+            orgAdmin: true,
+            manage: [],
+            /**
+             * Renaming the organization is an administrator's to do. Deleting a workspace or the
+             * organization is not, and the lifecycle block has always said so where it stands —
+             * this records the lower bar the destination as a whole admits, not its strictest one.
+             */
+            orgWrite: "admin",
+            states: ["ask-admin", "retry"],
+        },
+        entryPoints: [],
+        aliasKey: null,
+    },
+    {
+        id: "organization.identity",
+        currentRoute: "/settings/organization/identity",
+        kind: "destination",
+        group: "organization.identity",
+        canonicalRoute: "/settings/organization/identity",
+        canonicalSection: null,
+        redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
+        titleKey: "SettingsNav.groupIdentityAdministrators",
+        access: {
+            permissions: [],
+            permissionMatch: "all",
+            /**
+             * Single sign-on is one section of three, so the deployment not having it does not take
+             * the destination down: the section says so where it stands and the roster and the
+             * domain policy carry on. The requirement is recorded on the absorbed entry, which is
+             * what the navigation reads when it decides whether to name that section.
+             */
+            capabilities: [],
+            capabilityMatch: "all",
+            orgAdmin: true,
+            manage: [],
+            /**
+             * Allowed domains and single sign-on are an administrator's to change; the roster is
+             * the organization owner's alone, and refuses in place rather than taking the lower bar
+             * off the destination that also holds the other two.
+             */
+            orgWrite: "admin",
+            states: ["ask-admin", "retry"],
+        },
         entryPoints: [],
         aliasKey: null,
     },

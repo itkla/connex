@@ -113,6 +113,11 @@ const ROUTE_CASES = [
     ["/settings/workspace/communications", "shell"],
     ["/settings/workspace/crm", "shell"],
     ["/settings/workspace/audit-diagnostics", "shell"],
+    ["/settings/organization/general", "shell"],
+    ["/settings/organization/identity", "shell"],
+    ["/settings/organization/ai-governance", "shell"],
+    ["/settings/organization/data-requests", "shell"],
+    ["/settings/organization/audit-diagnostics", "shell"],
     ["/users/1", "shell"],
     ["/users", "shell"],
     ["/workflows/1", "owned"],
@@ -277,6 +282,29 @@ describe("breadcrumb route registry", () => {
             "/organization/members",
             context({ organizationAccessible: false }),
         )).toEqual({ kind: "denied", crumbs: [] });
+    });
+
+    it.each([
+        "/settings/organization/general",
+        "/settings/organization/identity",
+        "/settings/organization/ai-governance",
+        "/settings/organization/data-requests",
+        "/settings/organization/audit-diagnostics",
+    ])("does not link %s for a non-administrator either", (pathname) => {
+        expect(
+            resolveBreadcrumbRoute(pathname, context({ organizationAccessible: false })),
+            "moving an organization job under /settings must not move it out from behind the organization gate",
+        ).toEqual({ kind: "denied", crumbs: [] });
+    });
+
+    it("roots an organization settings trail at the organization, not the active workspace", () => {
+        const trail = resolveBreadcrumbRoute("/settings/organization/identity", context());
+
+        expect(trail.crumbs.map((crumb) => crumb.pathname)).toEqual([
+            "/organization",
+            "/settings",
+            "/settings/organization/identity",
+        ]);
     });
 
     it.each([

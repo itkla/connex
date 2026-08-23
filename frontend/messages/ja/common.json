@@ -304,6 +304,8 @@
     "crmConfiguration": "CRM設定",
     "communications": "メールと通知",
     "auditDiagnostics": "監査ログと診断",
+    "identityAdministrators": "認証と管理者",
+    "aiDataGovernance": "AIとデータガバナンス",
     "members": "メンバー",
     "roles": "ロール",
     "customFields": "カスタムフィールド",

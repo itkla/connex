@@ -23,8 +23,11 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import Rise from "@/app/components/motion/Rise";
+import {
+    SettingsPanelHeading,
+    type SettingsPanelPresentation,
+} from "@/app/components/settings/SettingsSection";
 import { NoAccessCard, EmptyRow, ListCard, rowActionTrigger } from "@/app/components/organization/OrgPrimitives";
 import DataRequestDialog from "@/app/components/organization/DataRequestDialog";
 
@@ -65,7 +68,18 @@ function isOverdue(request: DataSubjectRequest) {
  * Org-admin tracker for APPI data-subject (開示等) requests: lifecycle list, intake and
  * edit dialogs, and the subject-scoped disclosure download for verified disclosure requests.
  */
-export default function DataRequestsPanel() {
+/**
+ * The organization's data-subject requests under the APPI, and the disclosure exports assembled for
+ * them. §4 sanctions the statutory register on this compliance surface; it is deliberate here and
+ * nowhere else.
+ *
+ * @param presentation - which of the panel's two homes is rendering it; defaults to its own route
+ */
+export default function DataRequestsPanel({
+    presentation = "page",
+}: {
+    presentation?: SettingsPanelPresentation;
+} = {}) {
     const t = useTranslations("OrgDataRequests");
     const locale = useLocale();
     const { activeWorkspace } = useWorkspace();
@@ -174,36 +188,35 @@ export default function DataRequestsPanel() {
 
     return (
         <Rise className="space-y-4">
-            <div>
-                <SectionHeader
-                    title={t("title")}
-                    action={
-                        <div className="flex items-center gap-2">
-                            <Select
-                                value={statusFilter}
-                                onValueChange={(value) => setStatusFilter(value as DataSubjectRequestStatus | "all")}
-                            >
-                                <SelectTrigger size="sm" aria-label={t("filterLabel")}>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent align="end">
-                                    <SelectItem value="all">{t("filterAll")}</SelectItem>
-                                    {REQUEST_STATUSES.map((status) => (
-                                        <SelectItem key={status} value={status}>
-                                            {t(`status_${status}`)}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                            <Button size="sm" onClick={openCreate}>
-                                <PlusIcon className="size-4" />
-                                {t("newRequest")}
-                            </Button>
-                        </div>
-                    }
-                />
-                <p className="px-6 text-sm text-muted-foreground">{t("subtitle")}</p>
-            </div>
+            <SettingsPanelHeading
+                presentation={presentation}
+                title={t("title")}
+                description={t("subtitle")}
+                action={
+                    <div className="flex items-center gap-2">
+                        <Select
+                            value={statusFilter}
+                            onValueChange={(value) => setStatusFilter(value as DataSubjectRequestStatus | "all")}
+                        >
+                            <SelectTrigger size="sm" aria-label={t("filterLabel")}>
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent align="end">
+                                <SelectItem value="all">{t("filterAll")}</SelectItem>
+                                {REQUEST_STATUSES.map((status) => (
+                                    <SelectItem key={status} value={status}>
+                                        {t(`status_${status}`)}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <Button size="sm" onClick={openCreate}>
+                            <PlusIcon className="size-4" />
+                            {t("newRequest")}
+                        </Button>
+                    </div>
+                }
+            />
 
             {loading ? (
                 <ListCard>
