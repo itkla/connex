@@ -26,19 +26,18 @@ export async function generateMetadata(): Promise<Metadata> {
  * section reports as a retryable state rather than telling an administrator their instance lacks a
  * feature it may well have.
  *
- * The viewer is read for the roster, which marks their own row. Both reads fail softly: a broken
- * session takes the whole page down, since the roster is what this destination is named for, but a
- * capability read that fails takes only its own section's certainty with it.
+ * The viewer is read for the roster, which marks their own row. That read comes first and alone:
+ * authentication settles before any other read starts, so a page whose session has gone does not
+ * fire requests on its way to saying so. A capability read that then fails takes only its own
+ * section's certainty with it.
  */
 export default async function OrganizationIdentityPage() {
     const cookie = (await headers()).get("cookie");
-    const [userResult, capabilities] = await Promise.all([
-        getCurrentUserResultFromCookie(cookie),
-        getCapabilitiesResultFromCookie(cookie),
-    ]);
+    const userResult = await getCurrentUserResultFromCookie(cookie);
     if (!userResult.ok) {
         return <WorkspaceUnavailablePage />;
     }
+    const capabilities = await getCapabilitiesResultFromCookie(cookie);
     return (
         <OrganizationIdentity
             sso={capabilities.ok ? capabilities.data.sso : null}
