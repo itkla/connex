@@ -45,15 +45,36 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import Rise from "@/app/components/motion/Rise";
+import {
+    SettingsPanelHeading,
+    type SettingsPanelPresentation,
+} from "@/app/components/settings/SettingsSection";
 import { NoAccessCard, EmptyRow, ListCard, rowActionTrigger } from "@/app/components/organization/OrgPrimitives";
 
 function initial(name: string) {
     return name.trim().charAt(0).toUpperCase() || "?";
 }
 
-export default function OrgMembersPanel({ currentUserId }: { currentUserId: number | null }) {
+/**
+ * The organization's administrators, and — for an owner — the controls that change them.
+ *
+ * Every mutation here is owner-only on the backend: adding an administrator, changing a role, and
+ * removing one all pass `requireOrgOwner`. So an administrator who is not an owner reads the roster
+ * and is offered nothing, rather than being shown controls that would come back refused. §6's rule
+ * is to prefer no entry point over a locked door, and the manifest records the same fact as this
+ * destination's `orgWrite: "owner"`.
+ *
+ * @param currentUserId - the viewer, so the roster can mark their own row
+ * @param presentation - which of the panel's two homes is rendering it; defaults to its own route
+ */
+export default function OrgMembersPanel({
+    currentUserId,
+    presentation = "page",
+}: {
+    currentUserId: number | null;
+    presentation?: SettingsPanelPresentation;
+}) {
     const t = useTranslations("OrgMembers");
     const showApiError = useApiErrorToast("OrgMembers");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
@@ -155,10 +176,11 @@ export default function OrgMembersPanel({ currentUserId }: { currentUserId: numb
     return (
         <div className="space-y-10">
             <Rise className="space-y-3">
-                <div>
-                    <SectionHeader title={t("title")} />
-                    <p className="px-6 text-sm text-muted-foreground">{t("subtitle")}</p>
-                </div>
+                <SettingsPanelHeading
+                    presentation={presentation}
+                    title={t("title")}
+                    description={t("subtitle")}
+                />
 
                 {loading ? (
                     <ListCard>
@@ -249,10 +271,12 @@ export default function OrgMembersPanel({ currentUserId }: { currentUserId: numb
 
             {isOwner && (
                 <Rise className="space-y-4">
-                    <div>
-                        <SectionHeader title={t("addTitle")} />
-                        <p className="px-6 text-sm text-muted-foreground">{t("addSubtitle")}</p>
-                    </div>
+                    <SettingsPanelHeading
+                        presentation={presentation}
+                        title={t("addTitle")}
+                        description={t("addSubtitle")}
+                        headingLevel={3}
+                    />
                     <form
                         onSubmit={(e) => {
                             e.preventDefault();

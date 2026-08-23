@@ -23,7 +23,10 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import Rise from "@/app/components/motion/Rise";
-import SectionHeader from "@/app/components/dashboard/SectionHeader";
+import {
+    SettingsPanelHeading,
+    type SettingsPanelPresentation,
+} from "@/app/components/settings/SettingsSection";
 
 type FormState = {
     protocol: SsoProtocol;
@@ -66,7 +69,19 @@ function toForm(config: SsoConnectionDto, fallbackWorkspaceId: number | null): F
     };
 }
 
-export default function SsoPanel() {
+/**
+ * The organization's single sign-on connection.
+ *
+ * Whether the deployment has single sign-on at all is the caller's question, not this panel's:
+ * both of its homes resolve the capability first and explain a disabled instance in place.
+ *
+ * @param presentation - which of the panel's two homes is rendering it; defaults to its own route
+ */
+export default function SsoPanel({
+    presentation = "page",
+}: {
+    presentation?: SettingsPanelPresentation;
+} = {}) {
     const t = useTranslations("WorkspaceSso");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { activeWorkspaceId } = useWorkspace();
@@ -162,10 +177,12 @@ export default function SsoPanel() {
 
     return (
         <Rise className="space-y-3">
-            <div>
-                <SectionHeader title={t("title")} />
-                <p className="max-w-prose px-6 text-sm text-muted-foreground">{t("subtitle")}</p>
-            </div>
+            <SettingsPanelHeading
+                presentation={presentation}
+                title={t("title")}
+                description={t("subtitle")}
+                descriptionClassName="max-w-prose"
+            />
 
             {error ? (
                 <div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-card px-4 py-8 text-center">

@@ -13,6 +13,8 @@ import Rise from "@/app/components/motion/Rise";
 import SectionBoundary from "@/app/components/SectionBoundary";
 import SectionUnavailable from "@/app/components/SectionUnavailable";
 import { SettingsSection } from "@/app/components/settings/SettingsSection";
+import { SettingsSectionRegion } from "@/app/components/settings/SettingsSectionRegion";
+import type { SectionArrival } from "@/app/hooks/useSectionArrival";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { ApiError, getOrganizationLayout } from "@/app/lib/api";
 import {
@@ -21,7 +23,46 @@ import {
 } from "@/app/lib/organizationOverviewState";
 import { toastError } from "@/app/lib/toast";
 
-export default function OrganizationOverviewPanel() {
+/**
+ * One of the panel's three blocks, addressable when a consolidated destination is showing it.
+ *
+ * The panel owns the three headings, so the regions that make them deep-linkable have to be inside
+ * it rather than around it. On its own route there is nothing to arrive at and no fragment to
+ * resolve, so the wrapper collapses to what ships today: the block, and nothing around it.
+ */
+function OverviewRegion({
+    section,
+    sections,
+    children,
+}: {
+    section: string;
+    sections: SectionArrival | undefined;
+    children: React.ReactNode;
+}) {
+    if (!sections) return children;
+    return (
+        <SettingsSectionRegion
+            section={section}
+            arrived={sections.arrived}
+            register={sections.register}
+        >
+            {children}
+        </SettingsSectionRegion>
+    );
+}
+
+/**
+ * The organization's own record: the name every workspace under it shares, how those workspaces and
+ * their authority fit together, and the export and deletion that end them.
+ *
+ * @param sections - the arrival registrar of the consolidated destination showing this panel, so its
+ * three blocks each keep a deep link; omitted on the panel's own route, which has no sections
+ */
+export default function OrganizationOverviewPanel({
+    sections,
+}: {
+    sections?: SectionArrival;
+} = {}) {
     const t = useTranslations("OrgOverview");
     const router = useRouter();
     const {
@@ -139,50 +180,56 @@ export default function OrganizationOverviewPanel() {
             body={t("loadFailedBody")}
         >
             <div className="space-y-10">
-                <Rise>
-                    <SettingsSection title={t("identityTitle")} description={t("identityDescription")}>
-                        <OrganizationIdentityForm
-                            key={state.organization.id}
-                            organization={state.organization}
-                            onUpdated={(organization) => dispatch({
-                                type: "organizationUpdated",
-                                orgId: organization.id,
-                                organization,
-                            })}
-                            onReconcile={() => dispatch({ type: "retry" })}
-                        />
-                    </SettingsSection>
-                </Rise>
-                <Rise>
-                    <SettingsSection title={t("layoutTitle")} description={t("layoutDescription")}>
-                        <OrganizationLayoutPanel
-                            organization={state.organization}
-                            authorityMemberships={state.authorityMemberships}
-                            workspaces={state.workspaces}
-                            activeWorkspaceId={activeWorkspaceId}
-                            hasMore={state.hasMoreAuthority || state.hasMoreWorkspaces}
-                            loadingMore={state.loadingMore}
-                            switching={switching}
-                            onLoadMore={() => void loadMore()}
-                            onNavigate={(workspaceId, href) => void navigate(workspaceId, href)}
-                        />
-                    </SettingsSection>
-                </Rise>
-                <Rise>
-                    <SettingsSection
-                        title={t("lifecycleTitle")}
-                        description={t("lifecycleDescription")}
-                    >
-                        <OrganizationLifecyclePanel
-                            organization={state.organization}
-                            workspaces={state.workspaces}
-                            orgRole={orgRole}
-                            hasMore={state.hasMoreAuthority || state.hasMoreWorkspaces}
-                            loadingMore={state.loadingMore}
-                            onLoadMore={() => void loadMore()}
-                        />
-                    </SettingsSection>
-                </Rise>
+                <OverviewRegion section="identity" sections={sections}>
+                    <Rise>
+                        <SettingsSection title={t("identityTitle")} description={t("identityDescription")}>
+                            <OrganizationIdentityForm
+                                key={state.organization.id}
+                                organization={state.organization}
+                                onUpdated={(organization) => dispatch({
+                                    type: "organizationUpdated",
+                                    orgId: organization.id,
+                                    organization,
+                                })}
+                                onReconcile={() => dispatch({ type: "retry" })}
+                            />
+                        </SettingsSection>
+                    </Rise>
+                </OverviewRegion>
+                <OverviewRegion section="layout" sections={sections}>
+                    <Rise>
+                        <SettingsSection title={t("layoutTitle")} description={t("layoutDescription")}>
+                            <OrganizationLayoutPanel
+                                organization={state.organization}
+                                authorityMemberships={state.authorityMemberships}
+                                workspaces={state.workspaces}
+                                activeWorkspaceId={activeWorkspaceId}
+                                hasMore={state.hasMoreAuthority || state.hasMoreWorkspaces}
+                                loadingMore={state.loadingMore}
+                                switching={switching}
+                                onLoadMore={() => void loadMore()}
+                                onNavigate={(workspaceId, href) => void navigate(workspaceId, href)}
+                            />
+                        </SettingsSection>
+                    </Rise>
+                </OverviewRegion>
+                <OverviewRegion section="lifecycle" sections={sections}>
+                    <Rise>
+                        <SettingsSection
+                            title={t("lifecycleTitle")}
+                            description={t("lifecycleDescription")}
+                        >
+                            <OrganizationLifecyclePanel
+                                organization={state.organization}
+                                workspaces={state.workspaces}
+                                orgRole={orgRole}
+                                hasMore={state.hasMoreAuthority || state.hasMoreWorkspaces}
+                                loadingMore={state.loadingMore}
+                                onLoadMore={() => void loadMore()}
+                            />
+                        </SettingsSection>
+                    </Rise>
+                </OverviewRegion>
             </div>
         </SectionBoundary>
     );

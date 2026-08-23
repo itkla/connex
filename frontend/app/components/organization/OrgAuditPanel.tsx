@@ -12,8 +12,11 @@ import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { orgAuditActionKey, titleCaseAction } from "@/app/lib/orgAuditActionLabel";
 import { isSensitiveAuditEntry } from "@/app/lib/auditPresentation";
 import { Button } from "@/components/ui/button";
-import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import Rise from "@/app/components/motion/Rise";
+import {
+    SettingsPanelHeading,
+    type SettingsPanelPresentation,
+} from "@/app/components/settings/SettingsSection";
 import { NoAccessCard, EmptyRow, ListCard } from "@/app/components/organization/OrgPrimitives";
 
 const PAGE_SIZE = 30;
@@ -30,7 +33,19 @@ function relativeTime(iso: string, locale: string, now: number) {
     return new Date(then).toLocaleDateString(locale);
 }
 
-export default function OrgAuditPanel() {
+/**
+ * The organization's own audit log: the governance events that happen above any single workspace.
+ *
+ * Reading it requires an organization administrator, which both of this panel's homes establish
+ * before rendering it, so the panel carries no gate of its own.
+ *
+ * @param presentation - which of the panel's two homes is rendering it; defaults to its own route
+ */
+export default function OrgAuditPanel({
+    presentation = "page",
+}: {
+    presentation?: SettingsPanelPresentation;
+} = {}) {
     const t = useTranslations("OrgAudit");
     const messages = useMessages();
     const locale = useLocale();
@@ -97,10 +112,11 @@ export default function OrgAuditPanel() {
 
     return (
         <Rise className="space-y-4">
-            <div>
-                <SectionHeader title={t("title")} />
-                <p className="px-6 text-sm text-muted-foreground">{t("subtitle")}</p>
-            </div>
+            <SettingsPanelHeading
+                presentation={presentation}
+                title={t("title")}
+                description={t("subtitle")}
+            />
 
             {loading ? (
                 <ListCard>

@@ -19,11 +19,27 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
-import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import Rise from "@/app/components/motion/Rise";
+import {
+    SettingsPanelHeading,
+    type SettingsPanelPresentation,
+} from "@/app/components/settings/SettingsSection";
 import { NoAccessCard, EmptyRow, ListCard, rowActionTrigger } from "@/app/components/organization/OrgPrimitives";
 
-export default function OrgAllowedDomainsPanel() {
+/**
+ * The email domains an invitation into any workspace of this organization must match.
+ *
+ * Reads and writes alike require an organization administrator, which both of this panel's homes
+ * establish before rendering it, so the panel carries no role gate of its own: the manifest records
+ * that as `orgWrite: "admin"`, and an owner and an administrator see the same controls here.
+ *
+ * @param presentation - which of the panel's two homes is rendering it; defaults to its own route
+ */
+export default function OrgAllowedDomainsPanel({
+    presentation = "page",
+}: {
+    presentation?: SettingsPanelPresentation;
+} = {}) {
     const t = useTranslations("OrgDomains");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { activeWorkspace } = useWorkspace();
@@ -96,10 +112,11 @@ export default function OrgAllowedDomainsPanel() {
 
     return (
         <Rise className="space-y-4">
-            <div>
-                <SectionHeader title={t("title")} />
-                <p className="px-6 text-sm text-muted-foreground">{t("subtitle")}</p>
-            </div>
+            <SettingsPanelHeading
+                presentation={presentation}
+                title={t("title")}
+                description={t("subtitle")}
+            />
 
             <form
                 onSubmit={(e) => {
