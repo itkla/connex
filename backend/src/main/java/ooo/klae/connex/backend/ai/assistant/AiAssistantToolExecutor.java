@@ -90,7 +90,9 @@ public class AiAssistantToolExecutor {
      *
      * <p>The declared scope is applied by the server, not proposed by the model, so a scoped tool
      * can only ever narrow within what the caller already stated. A model argument may further
-     * restrict the read; it can never widen it past the interpretation the caller was shown.
+     * restrict the read; it can never widen it past the interpretation the caller was shown. A read
+     * the scope cannot be applied to at all is refused by {@link AiChatScopedToolPolicy} rather than
+     * executed from the model's arguments behind an echo the result would not describe.
      *
      * @param name declared tool key
      * @param args validated raw arguments
@@ -109,11 +111,12 @@ public class AiAssistantToolExecutor {
         if (!toolCatalog.isExecutable(name)) {
             throw AiAssistantLoopException.malformed(toolCatalog.unavailableReason(name));
         }
+        AiChatScopedToolPolicy.requireHonorsDeclaredScope(name, scope);
         try {
             return switch (name) {
                 case "search_records" -> search(args, resources);
                 case "get_record" -> getRecord(args, resources, includePrivateNotes);
-                case "list_activities" -> listActivities(args, resources);
+                case "list_activities" -> listActivities(args, resources, scope);
                 case "list_tasks" -> listTasks(args, resources);
                 case "list_scope_activities" -> listScopeActivities(args, resources, scope);
                 case "aggregate_metric" -> aggregateMetric(args);
@@ -252,14 +255,26 @@ public class AiAssistantToolExecutor {
         return result(record.data(), record.identifiers());
     }
 
-    private AiAssistantToolResult listActivities(JsonNode args, AiChatResourceRegistry resources) {
+    /**
+     * Reads one record's recent activity inside the turn's declared period.
+     *
+     * <p>A subject skill or a generic step can ask for a record's history while the turn declares a
+     * bounded period, and the rows it hands the model are what the answer is grounded in. Reading
+     * the latest rows regardless would put activity from outside the window into provider evidence
+     * under an echo that named a narrower one, so the declared boundaries reach the query and the
+     * result restates the period it actually covered.
+     */
+    private AiAssistantToolResult listActivities(
+            JsonNode args, AiChatResourceRegistry resources, AiChatQueryScope scope) {
         ResourceRef resource = resources.resolve(requiredText(args, "handle"), RECORD_KINDS);
         int limit = integer(args, "limit", DEFAULT_LIMIT);
+        AiChatScopePeriod period = AiChatScopePeriod.of(scope, workspaceService);
         List<Activity> activities = switch (resource.kind()) {
             case "person" -> {
                 requireProcessablePerson(resource.id());
                 yield filterRestrictedLinkedPeople(
-                        historyService.activitiesForPerson(resource.id(), limit),
+                        historyService.activitiesForPerson(
+                                resource.id(), period.startUtc(), period.endUtc(), limit),
                         Activity::getPerson,
                         Activity::getReferences,
                         resources.maskingContext());
@@ -267,7 +282,8 @@ public class AiAssistantToolExecutor {
             case "company" -> {
                 companyService.getCompanyById(resource.id());
                 yield filterRestrictedLinkedPeople(
-                        historyService.activitiesForCompany(resource.id(), limit),
+                        historyService.activitiesForCompany(
+                                resource.id(), period.startUtc(), period.endUtc(), limit),
                         Activity::getPerson,
                         Activity::getReferences,
                         resources.maskingContext());
@@ -275,7 +291,8 @@ public class AiAssistantToolExecutor {
             case "deal" -> {
                 dealService.getDealById(resource.id());
                 yield filterRestrictedLinkedPeople(
-                        historyService.activitiesForDeal(resource.id(), limit),
+                        historyService.activitiesForDeal(
+                                resource.id(), period.startUtc(), period.endUtc(), limit),
                         Activity::getPerson,
                         Activity::getReferences,
                         resources.maskingContext());
@@ -286,7 +303,14 @@ public class AiAssistantToolExecutor {
                 .limit(limit)
                 .map(AiAssistantToolExecutor::activityData)
                 .toList();
-        return result(Map.of("handle", requiredText(args, "handle"), "activities", data), List.of());
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("handle", requiredText(args, "handle"));
+        if (period.bounded()) {
+            result.put("periodStart", period.start().toString());
+            result.put("periodEnd", period.end().toString());
+        }
+        result.put("activities", data);
+        return result(result, List.of());
     }
 
     private AiAssistantToolResult listTasks(JsonNode args, AiChatResourceRegistry resources) {

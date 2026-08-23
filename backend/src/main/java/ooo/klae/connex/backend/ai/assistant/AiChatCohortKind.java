@@ -34,6 +34,9 @@ final class AiChatCohortKind {
     static final String DEAL_STATUS_UNSUPPORTED_FOR_ATTENTION =
             "deal_status_unsupported_for_attention";
 
+    /** Stable refusal reason for a declaration of several kinds that nothing narrows to one. */
+    static final String RECORD_KIND_AMBIGUOUS = "record_kind_ambiguous_for_cohort";
+
     /** Record kinds a cohort may cover. */
     static final Set<String> KINDS = Set.of("person", "company", "deal");
 
@@ -70,7 +73,7 @@ final class AiChatCohortKind {
             String contextKind,
             List<String> requestedBands) {
         List<String> bands = bands(scope, requestedBands);
-        String kind = kind(scope, requestedKind, contextKind, bands);
+        String kind = kind(scope, requestedKind, contextKind);
         if (DEAL.equals(kind) && !bands.isEmpty()) {
             throw AiAssistantLoopException.malformed(WARMTH_UNSUPPORTED_FOR_DEALS);
         }
@@ -107,8 +110,7 @@ final class AiChatCohortKind {
     private static String kind(
             AiChatQueryScope scope,
             String requestedKind,
-            String contextKind,
-            List<String> bands) {
+            String contextKind) {
         List<String> declared = scope.recordKinds();
         if (requestedKind != null && !requestedKind.isBlank()) {
             String candidate = requestedKind.trim().toLowerCase(Locale.ROOT);
@@ -130,6 +132,14 @@ final class AiChatCohortKind {
                 && (declared.isEmpty() || declared.contains(contextKind))) {
             return contextKind;
         }
-        return bands.isEmpty() && declared.contains("person") ? "person" : "company";
+        if (declared.size() > 1) {
+            // One cohort read covers one kind. Picking a listed kind here would let the preview
+            // count contacts while the executed turn, narrowing the same declaration by a tool
+            // argument, read companies — and the confirmed number would describe neither. Counting
+            // every declared kind is a different retrieval contract than this one implements, so the
+            // honest bound is to require the declaration to resolve to a single kind first.
+            throw AiAssistantLoopException.malformed(RECORD_KIND_AMBIGUOUS);
+        }
+        return "company";
     }
 }

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -139,6 +140,42 @@ class AiSkillPlanRunnerTest {
 
         verify(scopeReadService).scopeActivities(
                 any(), eq(null), eq("person"), eq(List.of()), any(), anyInt(), anyInt(), any());
+    }
+
+    /**
+     * A subject skill's activity read is the evidence its answer is built from. Passing the turn's
+     * declared scope into it is what stops a bounded-period brief from grounding itself in activity
+     * the requester's own period statement excluded.
+     */
+    @Test
+    void aSubjectPlansActivityReadCarriesTheTurnsDeclaredScopeIntoTheExecutor() {
+        AiAssistantToolExecutor toolExecutor = mock(AiAssistantToolExecutor.class);
+        when(toolExecutor.execute(anyString(), any(), any(), anyBoolean(), any()))
+                .thenReturn(new AiAssistantToolResult(java.util.Map.of("handle", "r1"), List.of()));
+        AiSkillPlanRunner subjectRunner = new AiSkillPlanRunner(
+                persistenceService, toolExecutor, scopeReadService,
+                new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog()),
+                mock(AiChatRealtimeDispatcher.class), workspaceService, objectMapper);
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register("person", 12);
+        AiChatQueryScope declared = new AiChatQueryScope(
+                true, java.time.LocalDate.parse("2026-08-01"),
+                java.time.LocalDate.parse("2026-08-22"), 22,
+                ooo.klae.connex.backend.dto.MemberScope.allTeam(), List.of(), List.of(),
+                List.of(), List.of(), List.of(), null);
+
+        subjectRunner.run(
+                TURN,
+                new AiSkillRouter.Routing(
+                        skillCatalog.find("relationship_brief_v1").orElseThrow(),
+                        AiSkillRouter.MATCHED,
+                        new AiSkillRouter.Subject("person", 12),
+                        false),
+                declared,
+                resources, 16_384, () -> { });
+
+        verify(toolExecutor).execute(
+                eq("list_activities"), any(), any(), anyBoolean(), eq(declared));
     }
 
     private AiSkillRouter.Routing routing(String key) {

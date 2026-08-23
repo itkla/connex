@@ -18,6 +18,7 @@ import static org.mockito.Mockito.when;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -57,6 +58,8 @@ class AiAssistantScopeReadServiceTest {
     private SegmentMapper segmentMapper;
     private CompanyMapper companyMapper;
     private SavedViewService savedViewService;
+    private PersonMapper personMapper;
+    private WorkspaceService workspaceService;
     private AiAssistantScopeReadService service;
 
     @BeforeEach
@@ -68,9 +71,9 @@ class AiAssistantScopeReadServiceTest {
         savedViewService = mock(SavedViewService.class);
         ScoringService scoringService = mock(ScoringService.class);
         DealRiskService dealRiskService = mock(DealRiskService.class);
-        PersonMapper personMapper = mock(PersonMapper.class);
+        personMapper = mock(PersonMapper.class);
         DealMapper dealMapper = mock(DealMapper.class);
-        WorkspaceService workspaceService = mock(WorkspaceService.class);
+        workspaceService = mock(WorkspaceService.class);
         OrganizationWorkspaceScopeControlAccess workspaceScopeControlAccess =
                 mock(OrganizationWorkspaceScopeControlAccess.class);
         ObjectMapper objectMapper = JsonMapper.builder().build();
@@ -484,6 +487,183 @@ class AiAssistantScopeReadServiceTest {
         assertEquals(
                 List.of("warmth_cool", "warmth_cold"),
                 warmth.getConditions().stream().map(condition -> condition.getKey()).toList());
+    }
+
+    /**
+     * A view can be edited into a different definition that is still perfectly executable. The
+     * cohort would then be a set nobody previewed and the persisted echo does not describe, so the
+     * definition admitted with the turn is compared by digest and a changed view is refused.
+     */
+    @Test
+    void aSavedViewEditedIntoADifferentDefinitionRefusesInsteadOfExecutingTheNewOne() {
+        when(savedViewService.getById(17)).thenReturn(view(
+                "{\"segments\":{\"match\":\"all\",\"conditions\":"
+                        + "[{\"type\":\"predicate\",\"key\":\"at_risk\"}]}}"));
+
+        AiAssistantLoopException failure = assertThrows(
+                AiAssistantLoopException.class,
+                () -> service.cohort("company", savedViewScope("cooling"), List.of()));
+
+        assertEquals("saved_view_scope_changed", failure.detailReason());
+        verify(segmentService, never()).evaluate(anyString(), any(SegmentDefinition.class));
+    }
+
+    @Test
+    void aSavedViewUnchangedSinceAdmissionStillBoundsTheCohort() {
+        when(savedViewService.getById(17)).thenReturn(view(
+                "{\"segments\":{\"match\":\"all\",\"conditions\":"
+                        + "[{\"type\":\"predicate\",\"key\":\"cooling\"}]}}"));
+        when(segmentService.evaluate(eq("company"), any(SegmentDefinition.class)))
+                .thenReturn(List.of(1, 2));
+
+        AiAssistantScopeReadService.Cohort cohort =
+                service.cohort("company", savedViewScope("cooling"), List.of());
+
+        assertEquals(2, cohort.matchedCount());
+    }
+
+    /**
+     * The record kind is a declared facet like any other. A pipeline review routed from a request
+     * that declared companies must decline rather than substitute a deal cohort behind a scope chip
+     * the requester confirmed as companies.
+     */
+    @Test
+    void aPipelineAttentionReviewIsRefusedWhenTheDeclaredKindsExcludeDeals() {
+        AiChatQueryScope companies = new AiChatQueryScope(
+                true, null, null, 90, MemberScope.allTeam(), List.of(), List.of("company"),
+                List.of(), List.of(), List.of(), null);
+
+        AiAssistantLoopException failure = assertThrows(
+                AiAssistantLoopException.class,
+                () -> service.previewCohort(companies, null, true));
+
+        assertEquals("record_kind_outside_declared_scope", failure.detailReason());
+        assertThrows(
+                AiAssistantLoopException.class,
+                () -> service.dealAttention(
+                        companies, 10, new AiChatResourceRegistry()));
+        verify(segmentService, never()).evaluate(anyString(), any(SegmentDefinition.class));
+    }
+
+    /**
+     * The reads suppress a provision-ceased contact's rows, but the match count and the capped
+     * cohort are computed before those reads. Counting one would make the honesty counters an oracle
+     * for exactly the contacts a processing restriction exists to keep out of an AI answer.
+     */
+    @Test
+    void provisionCeasedContactsLeaveTheCohortBeforeItIsCountedOrCapped() {
+        when(segmentService.evaluate(eq("person"), any(SegmentDefinition.class)))
+                .thenReturn(List.of(1, 2, 3));
+        when(personMapper.getAssistantProcessablePersonIds(WORKSPACE_ID))
+                .thenReturn(List.of(1, 3));
+        AiChatQueryScope people = new AiChatQueryScope(
+                true, null, null, 90, MemberScope.allTeam(), List.of("cool"),
+                List.of("person"), List.of(), List.of(), List.of(), null);
+
+        AiAssistantScopeReadService.Cohort cohort = service.cohort(
+                "person", people, List.of("cool"));
+
+        assertEquals(2, cohort.matchedCount());
+        assertEquals(List.of(3, 1), cohort.ids());
+        assertTrue(cohort.restrictedExcluded());
+    }
+
+    @Test
+    void anUnconstrainedPersonCohortReadsTheProcessableUniverseRatherThanTheSegmentOne() {
+        when(personMapper.getAssistantProcessablePersonIds(WORKSPACE_ID))
+                .thenReturn(List.of(4, 5));
+
+        AiAssistantScopeReadService.Cohort cohort = service.cohort(
+                "person", AiChatQueryScope.none(), List.of());
+
+        assertEquals(2, cohort.matchedCount());
+        verify(segmentMapper, never()).personIdsInWorkspace(anyInt());
+    }
+
+    /**
+     * The scope chip states local dates, so the query has to cover the local days those dates name.
+     * Reading them as UTC would put part of the following local day inside a one-day scope and drop
+     * the prior local evening out of it.
+     */
+    @Test
+    void declaredDatesResolveIntoTheWorkspaceReportingCalendarsOwnBoundaries() {
+        when(workspaceService.getCurrentAnalyticsTimezone()).thenReturn("America/Los_Angeles");
+        cohortOf(2);
+        when(segmentMapper.companyIdsInWorkspace(WORKSPACE_ID)).thenReturn(List.of(1, 2));
+        when(activityMapper.countAiAssistantScopeActivities(
+                anyInt(), anyList(), anyString(), anyList(), any(), any(), anyList(),
+                anyBoolean())).thenReturn(0L);
+        when(activityMapper.getAiAssistantScopeActivities(
+                anyInt(), anyList(), anyString(), anyList(), any(), any(), anyList(),
+                anyBoolean(), anyInt(), anyInt())).thenReturn(List.of());
+        AiChatQueryScope oneLocalDay = new AiChatQueryScope(
+                true, LocalDate.parse("2026-08-22"), LocalDate.parse("2026-08-22"), 1,
+                MemberScope.allTeam(), List.of(), List.of("company"), List.of(), List.of(),
+                List.of(), null);
+
+        AiAssistantToolResult result = service.scopeActivities(
+                oneLocalDay, "company", null, List.of(), null, 50, 5,
+                new AiChatResourceRegistry());
+
+        assertEquals("2026-08-22", interpretedScope(result).get("periodStart"));
+        assertEquals("2026-08-22", interpretedScope(result).get("periodEnd"));
+        verify(activityMapper).getAiAssistantScopeActivities(
+                anyInt(), anyList(), anyString(), anyList(),
+                eq(LocalDateTime.parse("2026-08-22T07:00")),
+                eq(LocalDateTime.parse("2026-08-23T06:59:59.999999999")),
+                anyList(), anyBoolean(), anyInt(), anyInt());
+    }
+
+    /**
+     * Two declared kinds and nothing to narrow them leaves the preview counting one kind while the
+     * executed turn could legally read the other, so the confirmed number would describe neither.
+     */
+    @Test
+    void aDeclarationOfSeveralKindsThatNothingNarrowsIsRefusedRatherThanSilentlyResolved() {
+        AiChatQueryScope bothKinds = new AiChatQueryScope(
+                true, null, null, 90, MemberScope.allTeam(), List.of(),
+                List.of("person", "company"), List.of(), List.of(), List.of(), null);
+
+        AiAssistantLoopException failure = assertThrows(
+                AiAssistantLoopException.class,
+                () -> service.previewCohort(bothKinds, null, false));
+
+        assertEquals("record_kind_ambiguous_for_cohort", failure.detailReason());
+        verify(segmentService, never()).evaluate(anyString(), any(SegmentDefinition.class));
+    }
+
+    @Test
+    void anAnchoringPageRecordStillResolvesASeveralKindDeclaration() {
+        when(segmentService.evaluate(eq("person"), any(SegmentDefinition.class)))
+                .thenReturn(List.of(1));
+        when(personMapper.getAssistantProcessablePersonIds(WORKSPACE_ID))
+                .thenReturn(List.of(1));
+        AiChatQueryScope bothKinds = new AiChatQueryScope(
+                true, null, null, 90,
+                new MemberScope(MemberScope.Mode.ME, 11, List.of()), List.of(),
+                List.of("person", "company"), List.of(), List.of(), List.of(), null);
+
+        assertEquals("person", service.previewCohort(bothKinds, "person", false).kind());
+    }
+
+    private SavedView view(String config) {
+        SavedView view = new SavedView();
+        view.setId(17);
+        view.setRecordType("company");
+        view.setName("Cooling enterprise");
+        view.setConfig(JsonMapper.builder().build().readTree(config));
+        return view;
+    }
+
+    private AiChatQueryScope savedViewScope(String predicateKey) {
+        SavedView admitted = view(
+                "{\"segments\":{\"match\":\"all\",\"conditions\":"
+                        + "[{\"type\":\"predicate\",\"key\":\"" + predicateKey + "\"}]}}");
+        return new AiChatQueryScope(
+                true, null, null, 90, MemberScope.allTeam(), List.of(), List.of("company"),
+                List.of(), List.of(), List.of(), 17,
+                AiChatSavedViewScope.fingerprint(JsonMapper.builder().build(), admitted)
+                        .orElseThrow());
     }
 
     private static AiChatQueryScope coolAndColdCompanies() {

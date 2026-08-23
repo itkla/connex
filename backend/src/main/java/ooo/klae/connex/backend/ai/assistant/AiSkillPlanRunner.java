@@ -171,13 +171,16 @@ public class AiSkillPlanRunner {
         return switch (step.kind()) {
             case GET_RECORD -> toolExecutor.execute(
                     "get_record", handleArguments(subjectHandle, null),
-                    resources, includePrivateNotes);
+                    resources, includePrivateNotes, scope);
+            // The declared period reaches this read, not just the turn's echo: a brief or a cooling
+            // explanation asked for a bounded window must not ground its answer in activity from
+            // outside it.
             case LIST_ACTIVITIES -> toolExecutor.execute(
                     "list_activities", handleArguments(subjectHandle, step.rowLimit()),
-                    resources, includePrivateNotes);
+                    resources, includePrivateNotes, scope);
             case LIST_TASKS -> toolExecutor.execute(
                     "list_tasks", handleArguments(subjectHandle, step.rowLimit()),
-                    resources, includePrivateNotes);
+                    resources, includePrivateNotes, scope);
             case RELATIONSHIP_METRICS -> scopeReadService.relationshipMetrics(
                     routing.subject().kind(), routing.subject().id(), subjectHandle);
             case SCOPE_ACTIVITIES -> scopeReadService.scopeActivities(

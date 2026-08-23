@@ -23,6 +23,8 @@ import ooo.klae.connex.backend.dto.MemberScope;
  * @param dealStatuses resolved deal statuses, empty when unfiltered
  * @param activityTypes resolved activity types, empty when unfiltered
  * @param savedViewId authorized saved view whose segment definition bounds the cohort, or null
+ * @param savedViewFingerprint opaque digest of the saved view's executable segment definition as it
+ *     stood at admission, or null when no view is declared
  */
 public record AiChatQueryScope(
         boolean declared,
@@ -35,7 +37,25 @@ public record AiChatQueryScope(
         List<Integer> stageIds,
         List<String> dealStatuses,
         List<String> activityTypes,
-        Integer savedViewId) {
+        Integer savedViewId,
+        String savedViewFingerprint) {
+
+    /** Creates a scope whose saved view, if any, carries no admission fingerprint. */
+    public AiChatQueryScope(
+            boolean declared,
+            LocalDate periodStart,
+            LocalDate periodEnd,
+            Integer periodDays,
+            MemberScope memberScope,
+            List<String> warmthBands,
+            List<String> recordKinds,
+            List<Integer> stageIds,
+            List<String> dealStatuses,
+            List<String> activityTypes,
+            Integer savedViewId) {
+        this(declared, periodStart, periodEnd, periodDays, memberScope, warmthBands,
+                recordKinds, stageIds, dealStatuses, activityTypes, savedViewId, null);
+    }
 
     public AiChatQueryScope {
         memberScope = memberScope == null ? MemberScope.allTeam() : memberScope;
@@ -50,7 +70,7 @@ public record AiChatQueryScope(
     public static AiChatQueryScope none() {
         return new AiChatQueryScope(
                 false, null, null, null, MemberScope.allTeam(),
-                List.of(), List.of(), List.of(), List.of(), List.of(), null);
+                List.of(), List.of(), List.of(), List.of(), List.of(), null, null);
     }
 
     /** @return whether the scope constrains which records a cohort may contain */

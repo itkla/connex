@@ -2,7 +2,6 @@ package ooo.klae.connex.backend.ai.assistant;
 
 import java.time.Clock;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -147,7 +146,8 @@ public class AiChatQueryScopeResolver {
                 stages.stream().map(Stage::getId).toList(),
                 dealStatuses,
                 activityTypes(request.activityTypes()),
-                savedView == null ? null : savedView.getId());
+                savedView == null ? null : savedView.getId(),
+                savedViewFingerprint(savedView));
         return new Resolution(
                 scope,
                 interpreted(scope, owners, savedView, unavailable));
@@ -211,6 +211,24 @@ public class AiChatQueryScopeResolver {
     }
 
     /**
+     * Binds the digest of the saved-view definition this admission accepted into the scope.
+     *
+     * <p>{@link #boundRecordKinds} has already refused a view the server cannot execute in full, so
+     * a missing digest here would mean the definition became unreadable between two calls in the
+     * same request; refusing rather than admitting an unfingerprinted view keeps the execution-time
+     * comparison mandatory instead of optional.
+     */
+    private String savedViewFingerprint(SavedView savedView) {
+        if (savedView == null) {
+            return null;
+        }
+        return AiChatSavedViewScope.fingerprint(objectMapper, savedView)
+                .orElseThrow(() -> new BadRequestException(
+                        "Saved view scope cannot be applied to an assistant query: "
+                                + SAVED_VIEW_SCOPE_UNSUPPORTED));
+    }
+
+    /**
      * Re-resolves the display labels of a stored interpretation under the reader's authorization.
      *
      * <p>Durable turn scope stores identifiers only, so an erased member never remains named in a
@@ -233,9 +251,7 @@ public class AiChatQueryScopeResolver {
                 relabelledOwners(stored.owners()),
                 stored.warmthBands(),
                 stored.recordKinds(),
-                stageReferences(stored.stages().stream()
-                        .map(AiChatScopeReferenceDto::id)
-                        .toList()),
+                relabelledStages(stored.stages()),
                 stored.dealStatuses(),
                 stored.activityTypes(),
                 relabelledSavedView(stored.savedView()),
@@ -263,6 +279,29 @@ public class AiChatQueryScopeResolver {
                 .map(owner -> new AiChatScopeReferenceDto(
                         owner.id(), namesById.getOrDefault(owner.id(), "")))
                 .toList();
+    }
+
+    /**
+     * Restates stored stage filters under the reader's current authorization.
+     *
+     * <p>A stage that was deleted, or whose pipeline is no longer shared with this reader, keeps its
+     * identifier and loses its label exactly as an erased owner or an inaccessible saved view does.
+     * Dropping the entry instead would restate the completed query as unfiltered by stage, which
+     * makes a narrow historical read look broader than the one that actually ran.
+     */
+    private List<AiChatScopeReferenceDto> relabelledStages(
+            List<AiChatScopeReferenceDto> stages) {
+        if (stages.isEmpty()) {
+            return List.of();
+        }
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        List<AiChatScopeReferenceDto> references = new ArrayList<>();
+        for (AiChatScopeReferenceDto stored : stages) {
+            Stage stage = pipelineMapper.getVisibleStageById(workspaceId, stored.id());
+            references.add(new AiChatScopeReferenceDto(
+                    stored.id(), stage == null ? "" : label(stage.getName())));
+        }
+        return List.copyOf(references);
     }
 
     private AiChatScopeReferenceDto relabelledSavedView(AiChatScopeReferenceDto savedView) {
@@ -407,7 +446,15 @@ public class AiChatQueryScopeResolver {
         return value == null ? "" : value;
     }
 
+    /**
+     * The current date in the workspace's reporting calendar.
+     *
+     * <p>Every other user-facing date window in Connex — report periods, analytics ranges, revenue
+     * months — is resolved against {@code getCurrentAnalyticsTimezone}, and a scope chip that says
+     * "today" has to name the same day those surfaces do. Resolving it in UTC would, near midnight
+     * in a workspace east or west of it, silently shift a one-day scope onto a neighbouring day.
+     */
     private LocalDate today() {
-        return LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC);
+        return LocalDate.now(clock.withZone(AiChatScopeCalendar.zone(workspaceService)));
     }
 }

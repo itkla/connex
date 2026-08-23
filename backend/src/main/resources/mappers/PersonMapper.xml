@@ -108,6 +108,18 @@
     ORDER BY p.name
   </select>
 
+  <!-- The contacts an assistant cohort may count, not just read. Deliberately workspace-local,
+       matching the smart-segment evaluator's own person universe, and carrying the same
+       processing-restriction clauses as ActivityMapper.assistantProcessablePerson so a
+       provision-ceased contact never reaches a match count or a capped cohort. -->
+  <select id="getAssistantProcessablePersonIds" resultType="int">
+    SELECT id FROM person
+    WHERE workspace_id = #{workspaceId}
+      AND archived_at IS NULL
+      AND suspended_at IS NULL
+      AND provision_ceased_at IS NULL
+  </select>
+
   <!-- Normalized interaction type and model weight for one activity row, shared by the
        workspace-wide aggregate and the subject-scoped evidence union so both read the same
        attribution vocabulary. Requires the table aliased `a`. -->

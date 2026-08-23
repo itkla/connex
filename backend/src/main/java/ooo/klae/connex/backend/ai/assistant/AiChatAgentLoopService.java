@@ -155,8 +155,13 @@ public class AiChatAgentLoopService {
                     initiatingMessage.getContent(),
                     promptContext,
                     turn.scope());
+            // Carried on every turn that declares a scope, routed or not: the generic loop is
+            // exactly where a model would otherwise reach for a read the declaration cannot be
+            // applied to and have the turn refused for it.
+            String scopeDirective = AiChatScopedToolPolicy.directive(turn.scope());
             AiAssistantPromptAssembler.SkillContext skillContext =
-                    AiAssistantPromptAssembler.SkillContext.NONE;
+                    AiAssistantPromptAssembler.SkillContext.NONE
+                            .withScopeDirective(scopeDirective);
             AiAssistantPromptAssembler.SkillReference skillReference = null;
             int stepOffset = 0;
             int maxSteps = Math.min(
@@ -182,7 +187,7 @@ public class AiChatAgentLoopService {
                     skillReference = new AiAssistantPromptAssembler.SkillReference(
                             routing.skill().key(), routing.skill().version());
                     skillContext = new AiAssistantPromptAssembler.SkillContext(
-                            routing.skill().directive(), execution.evidence());
+                            routing.skill().directive(), execution.evidence(), scopeDirective);
                     // The server-owned plan already retrieved the evidence, so the model gets the
                     // skill's small synthesis budget instead of the improvisation budget.
                     maxSteps = Math.min(maxSteps, routing.skill().budgets().maxModelSteps());

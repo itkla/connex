@@ -13,6 +13,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -31,6 +32,8 @@ import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
+import ooo.klae.connex.backend.dto.DealKpisDto;
+import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.dto.SearchResultsDto;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
@@ -171,9 +174,9 @@ class AiAssistantToolExecutorTest {
         when(personMapper.getPersonById(7, 17)).thenReturn(person);
         when(dealService.getDealById(8)).thenReturn(deal);
         when(companyService.getCompanyById(5)).thenReturn(company);
-        when(historyService.activitiesForPerson(17, 3)).thenReturn(List.of());
-        when(historyService.activitiesForDeal(8, 4)).thenReturn(List.of());
-        when(historyService.activitiesForCompany(5, 7)).thenReturn(List.of());
+        when(historyService.activitiesForPerson(17, null, null, 3)).thenReturn(List.of());
+        when(historyService.activitiesForDeal(8, null, null, 4)).thenReturn(List.of());
+        when(historyService.activitiesForCompany(5, null, null, 7)).thenReturn(List.of());
         when(historyService.tasksForPerson(17, 5)).thenReturn(List.of());
         when(historyService.tasksForDeal(8, 6)).thenReturn(List.of());
         when(historyService.tasksForCompany(5, 8)).thenReturn(List.of());
@@ -213,9 +216,9 @@ class AiAssistantToolExecutorTest {
                 resources,
                 true);
 
-        verify(historyService).activitiesForPerson(17, 3);
-        verify(historyService).activitiesForDeal(8, 4);
-        verify(historyService).activitiesForCompany(5, 7);
+        verify(historyService).activitiesForPerson(17, null, null, 3);
+        verify(historyService).activitiesForDeal(8, null, null, 4);
+        verify(historyService).activitiesForCompany(5, null, null, 7);
         verify(historyService).tasksForPerson(17, 5);
         verify(historyService).tasksForDeal(8, 6);
         verify(historyService).tasksForCompany(5, 8);
@@ -303,12 +306,12 @@ class AiAssistantToolExecutorTest {
         deal.setId(8);
         deal.setName("Example Deal");
         when(companyService.getCompanyById(5)).thenReturn(company);
-        when(historyService.activitiesForCompany(5, 5)).thenReturn(
+        when(historyService.activitiesForCompany(5, null, null, 5)).thenReturn(
                 List.of(activity, referencedActivity));
         when(historyService.tasksForCompany(5, 5)).thenReturn(List.of(task));
         when(historyService.notesForCompany(5, 10)).thenReturn(List.of(note));
         when(dealService.getDealById(8)).thenReturn(deal);
-        when(historyService.activitiesForDeal(8, 5)).thenReturn(
+        when(historyService.activitiesForDeal(8, null, null, 5)).thenReturn(
                 List.of(activity, referencedActivity));
         when(dealService.getNotesByDealId(8)).thenReturn(List.of(note));
         AiChatResourceRegistry resources = new AiChatResourceRegistry();
@@ -590,5 +593,84 @@ class AiAssistantToolExecutorTest {
                 LocalDateTime.parse("2026-08-11T09:00:00"),
                 LocalDateTime.parse("2026-08-11T11:00:00"),
                 101);
+    }
+
+    /**
+     * Only the scope-aware read receives the turn's declared scope. A metric or a search executed
+     * from the model's own arguments would answer a differently-shaped question while the accepted
+     * turn still echoed the declaration, so those reads are refused rather than quietly widened.
+     */
+    @Test
+    void aDeclaredScopeRefusesTheGenericReadsItCannotBeAppliedTo() throws Exception {
+        AiChatQueryScope declared = new AiChatQueryScope(
+                true, null, null, 90, new MemberScope(MemberScope.Mode.ME, 11, List.of()),
+                List.of(), List.of("deal"), List.of(), List.of(), List.of(), null);
+
+        AiAssistantLoopException metric = assertThrows(
+                AiAssistantLoopException.class,
+                () -> executor.execute(
+                        "aggregate_metric",
+                        objectMapper.readTree("{\"metric\":\"deal_kpis\",\"days\":90}"),
+                        new AiChatResourceRegistry(), true, declared));
+        AiAssistantLoopException search = assertThrows(
+                AiAssistantLoopException.class,
+                () -> executor.execute(
+                        "search_records",
+                        objectMapper.readTree("{\"query\":\"tokyo\"}"),
+                        new AiChatResourceRegistry(), true, declared));
+
+        assertEquals("tool_cannot_honor_declared_scope", metric.detailReason());
+        assertEquals("tool_cannot_honor_declared_scope", search.detailReason());
+        verifyNoInteractions(searchService, dealService);
+    }
+
+    @Test
+    void aTurnThatDeclaresNoScopeLeavesTheGenericReadsExactlyAsTheyWere() throws Exception {
+        when(dealService.getDealKpis(null, 90, MemberScope.allTeam())).thenReturn(
+                new DealKpisDto(0, null, 0, null, 0, 0, 0, 0, null, null, 0, null,
+                        List.of(), List.of(), List.of(), List.of()));
+
+        AiAssistantToolResult result = executor.execute(
+                "aggregate_metric",
+                objectMapper.readTree("{\"metric\":\"deal_kpis\",\"days\":90}"),
+                new AiChatResourceRegistry(), true);
+
+        assertEquals("deal_kpis", result.data().get("metric"));
+        verify(dealService).getDealKpis(null, 90, MemberScope.allTeam());
+    }
+
+    /**
+     * A record's history is time-series evidence, so a turn that declared a bounded period must not
+     * ground its answer in the latest rows from outside it. The bounds reach the query and the
+     * result restates the window it covered.
+     */
+    @Test
+    void aDeclaredPeriodBoundsARecordsActivityReadAndIsRestatedInTheResult() throws Exception {
+        when(workspaceService.getCurrentAnalyticsTimezone()).thenReturn("America/Los_Angeles");
+        Person person = new Person();
+        person.setId(17);
+        when(personMapper.getPersonById(7, 17)).thenReturn(person);
+        when(historyService.activitiesForPerson(
+                eq(17), any(LocalDateTime.class), any(LocalDateTime.class), eq(5)))
+                .thenReturn(List.of());
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register("person", 17);
+        AiChatQueryScope declared = new AiChatQueryScope(
+                true, LocalDate.parse("2026-08-22"), LocalDate.parse("2026-08-22"), 1,
+                MemberScope.allTeam(), List.of(), List.of(), List.of(), List.of(),
+                List.of(), null);
+
+        AiAssistantToolResult result = executor.execute(
+                "list_activities",
+                objectMapper.readTree("{\"handle\":\"r1\",\"limit\":5}"),
+                resources, true, declared);
+
+        assertEquals("2026-08-22", result.data().get("periodStart"));
+        assertEquals("2026-08-22", result.data().get("periodEnd"));
+        verify(historyService).activitiesForPerson(
+                17,
+                LocalDateTime.parse("2026-08-22T07:00"),
+                LocalDateTime.parse("2026-08-23T06:59:59.999999999"),
+                5);
     }
 }

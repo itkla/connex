@@ -3,7 +3,7 @@ package ooo.klae.connex.backend.ai.assistant;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -78,8 +78,23 @@ public class AiAssistantScopeReadService {
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
-    /** One resolved cohort and the honesty counters its resolution produced. */
-    public record Cohort(String kind, List<Integer> ids, int matchedCount, boolean truncated) {
+    /**
+     * One resolved cohort and the honesty counters its resolution produced.
+     *
+     * @param kind cohort record kind
+     * @param ids capped cohort record identifiers
+     * @param matchedCount records the scope matched that this contract may process
+     * @param truncated whether the cohort cap was reached
+     * @param restrictedExcluded whether the evaluated segment named records this contract then
+     *     removed, disclosed as a category and never as a count. An unconstrained cohort reads a
+     *     universe that never contained them, so it reports false rather than a hidden difference.
+     */
+    public record Cohort(
+            String kind,
+            List<Integer> ids,
+            int matchedCount,
+            boolean truncated,
+            boolean restrictedExcluded) {
         public Cohort {
             ids = List.copyOf(ids);
         }
@@ -121,11 +136,14 @@ public class AiAssistantScopeReadService {
         int perRecord = clamp(perRecordLimit, 1,
                 AiChatScopeBounds.MAX_ACTIVITY_ROWS_PER_RECORD,
                 AiChatScopeBounds.DEFAULT_ACTIVITY_ROWS_PER_RECORD);
-        Period period = period(scope, requestedDays);
+        AiChatScopePeriod period = period(scope, requestedDays);
         Cohort cohort = cohort(kind, scope, bands);
         List<String> exclusions = new ArrayList<>();
         if (cohort.truncated()) {
             exclusions.add("bounded_results");
+        }
+        if (cohort.restrictedExcluded()) {
+            exclusions.add("restricted_records");
         }
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("scope", interpretedScopeData(kind, bands, period, scope));
@@ -365,9 +383,12 @@ public class AiAssistantScopeReadService {
     public Cohort cohort(String kind, AiChatQueryScope scope, List<String> bands) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         SegmentDefinition definition = cohortDefinition(kind, scope, bands);
-        List<Integer> matched = definition == null
+        List<Integer> evaluated = definition == null
                 ? universe(workspaceId, kind)
                 : segmentService.evaluate(kind, definition);
+        List<Integer> matched = definition == null
+                ? evaluated
+                : processable(workspaceId, kind, evaluated);
         List<Integer> ordered = matched.stream()
                 .sorted(java.util.Comparator.reverseOrder())
                 .toList();
@@ -376,7 +397,26 @@ public class AiAssistantScopeReadService {
                 kind,
                 ordered.stream().limit(AiChatScopeBounds.MAX_COHORT_RECORDS).toList(),
                 ordered.size(),
-                truncated);
+                truncated,
+                matched.size() != evaluated.size());
+    }
+
+    /**
+     * Removes the records this contract may not process from an evaluated cohort.
+     *
+     * <p>The segment evaluator's ordinary person universe suppresses suspended and archived contacts
+     * but not contacts whose processing the workspace has ceased, and the retrieval below suppresses
+     * those only when it reads their rows. Counting them first would make the match count and the
+     * capped cohort into an oracle for exactly the contacts a restriction exists to keep out of an
+     * AI answer, so the same predicate the reads apply bounds the count as well.
+     */
+    private List<Integer> processable(int workspaceId, String kind, List<Integer> matched) {
+        if (!"person".equals(kind) || matched.isEmpty()) {
+            return matched;
+        }
+        Set<Integer> allowed = Set.copyOf(
+                personMapper.getAssistantProcessablePersonIds(workspaceId));
+        return matched.stream().filter(allowed::contains).toList();
     }
 
     /**
@@ -412,7 +452,7 @@ public class AiAssistantScopeReadService {
                         .toList()));
             }
         }
-        SegmentDefinition savedView = savedViewDefinition(kind, scope.savedViewId());
+        SegmentDefinition savedView = savedViewDefinition(kind, scope);
         if (savedView != null) {
             groups.add(savedView);
         }
@@ -432,8 +472,14 @@ public class AiAssistantScopeReadService {
      * <p>Refusing rather than returning null is the whole point: a view that was accepted at request
      * time and then edited, retyped, or emptied before this read would otherwise collapse the cohort
      * to the workspace universe while the echoed scope still claimed the view had bounded it.
+     *
+     * <p>Still applying is not the same as still describing the same records. An edit that swaps one
+     * executable segment for another leaves every check above satisfied while the cohort silently
+     * becomes a different set from the one the preview counted and the persisted echo names, so the
+     * admitted definition's digest is compared and a changed view is refused outright.
      */
-    private SegmentDefinition savedViewDefinition(String kind, Integer savedViewId) {
+    private SegmentDefinition savedViewDefinition(String kind, AiChatQueryScope scope) {
+        Integer savedViewId = scope.savedViewId();
         if (savedViewId == null) {
             return null;
         }
@@ -441,14 +487,26 @@ public class AiAssistantScopeReadService {
         if (!kind.equals(view.getRecordType())) {
             throw AiAssistantLoopException.malformed(AiChatSavedViewScope.UNSUPPORTED);
         }
-        return AiChatSavedViewScope.definition(objectMapper, view)
+        SegmentDefinition definition = AiChatSavedViewScope.definition(objectMapper, view)
                 .orElseThrow(() -> AiAssistantLoopException.malformed(
                         AiChatSavedViewScope.UNSUPPORTED));
+        String admitted = scope.savedViewFingerprint();
+        if (admitted == null) {
+            // A scope carrying a view but no admission digest was never resolved through the
+            // authorizing path, so there is nothing to compare the current definition against.
+            // Reading it anyway would restore exactly the unverified execution above closes.
+            throw AiAssistantLoopException.malformed(AiChatSavedViewScope.UNSUPPORTED);
+        }
+        if (!admitted.equals(
+                AiChatSavedViewScope.fingerprint(objectMapper, view).orElse(null))) {
+            throw AiAssistantLoopException.malformed(AiChatSavedViewScope.CHANGED);
+        }
+        return definition;
     }
 
     private List<Integer> universe(int workspaceId, String kind) {
         return switch (kind) {
-            case "person" -> segmentMapper.personIdsInWorkspace(workspaceId);
+            case "person" -> personMapper.getAssistantProcessablePersonIds(workspaceId);
             case "deal" -> segmentMapper.dealIdsInWorkspace(workspaceId);
             default -> segmentMapper.companyIdsInWorkspace(workspaceId);
         };
@@ -458,13 +516,20 @@ public class AiAssistantScopeReadService {
      * Narrows a declared scope to the open deals a pipeline attention review covers.
      *
      * <p>The review reads open deals only, so a scope that declares warmth — which the deterministic
-     * risk model does not consume — or that excludes open deals entirely is refused rather than
-     * quietly overridden into a query the requester never asked for.
+     * risk model does not consume — that declares record kinds excluding deals, or that excludes
+     * open deals entirely is refused rather than quietly overridden into a query the requester never
+     * asked for. The record kind is a declared facet like any other: a review routed from a request
+     * that named companies must decline, not silently substitute a deal cohort behind a scope chip
+     * that still says companies.
      */
     private static AiChatQueryScope attentionScope(AiChatQueryScope scope) {
         if (!scope.warmthBands().isEmpty()) {
             throw AiAssistantLoopException.malformed(
                     AiChatCohortKind.WARMTH_UNSUPPORTED_FOR_DEALS);
+        }
+        if (!scope.recordKinds().isEmpty() && !scope.recordKinds().contains("deal")) {
+            throw AiAssistantLoopException.malformed(
+                    AiChatCohortKind.RECORD_KIND_OUTSIDE_SCOPE);
         }
         if (!scope.dealStatuses().isEmpty() && !scope.dealStatuses().contains("open")) {
             throw AiAssistantLoopException.malformed(
@@ -476,7 +541,8 @@ public class AiAssistantScopeReadService {
         return new AiChatQueryScope(
                 scope.declared(), scope.periodStart(), scope.periodEnd(), scope.periodDays(),
                 scope.memberScope(), scope.warmthBands(), scope.recordKinds(), scope.stageIds(),
-                List.of("open"), scope.activityTypes(), scope.savedViewId());
+                List.of("open"), scope.activityTypes(), scope.savedViewId(),
+                scope.savedViewFingerprint());
     }
 
     private Map<Integer, RecordLabel> labels(int workspaceId, String kind, List<Integer> ids) {
@@ -507,9 +573,18 @@ public class AiAssistantScopeReadService {
                 && person.getProvisionCeasedAt() == null && person.getArchivedAt() == null;
     }
 
-    private Period period(AiChatQueryScope scope, Integer requestedDays) {
+    /**
+     * Resolves the local period a read covers and the stored-timestamp boundaries that express it.
+     *
+     * <p>The dates are the workspace's reporting calendar, matching the echo the requester was shown
+     * and every other user-facing date window in the product; the boundaries are the UTC instants
+     * those local days begin and end at, so a scope of one local day never leaks part of the
+     * neighbouring one.
+     */
+    private AiChatScopePeriod period(AiChatQueryScope scope, Integer requestedDays) {
+        ZoneId zone = AiChatScopeCalendar.zone(workspaceService);
         LocalDate end = scope.periodEnd() == null
-                ? LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC)
+                ? LocalDate.now(clock.withZone(zone))
                 : scope.periodEnd();
         LocalDate start;
         if (scope.periodStart() != null) {
@@ -528,10 +603,7 @@ public class AiAssistantScopeReadService {
                 start = narrowed;
             }
         }
-        return new Period(
-                start, end,
-                LocalDateTime.of(start, LocalTime.MIN),
-                LocalDateTime.of(end, LocalTime.MAX));
+        return AiChatScopePeriod.between(start, end, zone);
     }
 
     /**
@@ -542,7 +614,7 @@ public class AiAssistantScopeReadService {
      * a scope declaring one that the resolved cohort cannot honour is refused before this runs.
      */
     private static Map<String, Object> interpretedScopeData(
-            String kind, List<String> bands, Period period, AiChatQueryScope scope) {
+            String kind, List<String> bands, AiChatScopePeriod period, AiChatQueryScope scope) {
         Map<String, Object> interpreted = new LinkedHashMap<>();
         interpreted.put("records", kind);
         interpreted.put("warmth", bands);
@@ -648,10 +720,6 @@ public class AiAssistantScopeReadService {
     }
 
     private record RecordLabel(String name) {
-    }
-
-    private record Period(
-            LocalDate start, LocalDate end, LocalDateTime startUtc, LocalDateTime endUtc) {
     }
 
     private static final class TextBudget {

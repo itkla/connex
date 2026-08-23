@@ -49,6 +49,18 @@
           WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId})))
   </sql>
 
+  <!-- The turn's declared period, applied inside the per-record assistant reads rather than
+       filtered afterwards. Absent bounds leave the read unbounded, which is what a turn that
+       declared no period asked for. -->
+  <sql id="assistantPeriodBounds">
+    <if test="startUtc != null">
+      AND a.timestamp &gt;= #{startUtc}
+    </if>
+    <if test="endUtc != null">
+      AND a.timestamp &lt;= #{endUtc}
+    </if>
+  </sql>
+
   <sql id="assistantLinkedPeopleProcessable">
     (a.person_id IS NULL OR EXISTS (SELECT 1 FROM person p
       WHERE p.id = a.person_id
@@ -356,6 +368,7 @@
     FROM activity a
     WHERE a.workspace_id = #{workspaceId} AND a.person_id = #{personId}
       AND <include refid="assistantLinkedPeopleProcessable"/>
+      <include refid="assistantPeriodBounds"/>
     ORDER BY a.timestamp DESC, a.id DESC
     LIMIT #{limit}
   </select>
@@ -391,6 +404,7 @@
     FROM activity a
     WHERE a.workspace_id = #{workspaceId} AND a.deal_id = #{dealId}
       AND <include refid="assistantLinkedPeopleProcessable"/>
+      <include refid="assistantPeriodBounds"/>
     ORDER BY a.timestamp DESC, a.id DESC
     LIMIT #{limit}
   </select>
@@ -428,6 +442,7 @@
             AND <include refid="assistantProcessablePerson"/>)
         OR EXISTS (SELECT 1 FROM deal d
           WHERE d.workspace_id = #{workspaceId} AND d.id = a.deal_id AND d.company_id = #{companyId}))
+      <include refid="assistantPeriodBounds"/>
     ORDER BY a.timestamp DESC, a.id DESC
     LIMIT #{limit}
   </select>

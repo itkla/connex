@@ -104,17 +104,32 @@ public class AiAssistantPromptAssembler {
      *
      * @param directive bounded server-authored instruction for the selected skill
      * @param evidence plan results, entering the prompt as untrusted CRM data
+     * @param scopeDirective bounded server-authored instruction naming the reads the turn's declared
+     *     query scope can be applied to, or null when the turn declares no scope
      */
-    public record SkillContext(String directive, Map<String, Object> evidence) {
-        public static final SkillContext NONE = new SkillContext(null, Map.of());
+    public record SkillContext(
+            String directive, Map<String, Object> evidence, String scopeDirective) {
+        public static final SkillContext NONE = new SkillContext(null, Map.of(), null);
+
+        /** Creates a contract for a turn that declares no query scope. */
+        public SkillContext(String directive, Map<String, Object> evidence) {
+            this(directive, evidence, null);
+        }
 
         public SkillContext {
             evidence = evidence == null ? Map.of() : Map.copyOf(evidence);
         }
 
-        /** @return whether the turn carries no server-owned skill contract */
+        /** @return whether the turn carries no server-authored contract at all */
         public boolean isEmpty() {
-            return (directive == null || directive.isBlank()) && evidence.isEmpty();
+            return (directive == null || directive.isBlank())
+                    && (scopeDirective == null || scopeDirective.isBlank())
+                    && evidence.isEmpty();
+        }
+
+        /** Returns this contract with the declared-scope instruction attached. */
+        public SkillContext withScopeDirective(String declaredScopeDirective) {
+            return new SkillContext(directive, evidence, declaredScopeDirective);
         }
     }
 
@@ -359,9 +374,9 @@ public class AiAssistantPromptAssembler {
     }
 
     /**
-     * Appends the selected skill's contract and plan evidence.
+     * Appends the turn's server-authored contract and any plan evidence.
      *
-     * <p>The directive is server-authored and travels outside the CRM_DATA delimiters, exactly as a
+     * <p>The directives are server-authored and travel outside the CRM_DATA delimiters, exactly as a
      * schema-repair instruction does; the evidence travels inside them, because it is retrieved
      * tenant content and must remain untrusted data.
      */
@@ -377,9 +392,81 @@ public class AiAssistantPromptAssembler {
                 && budget.fits(skill.directive(), AiSkillCatalog.maxDirectiveBytes())) {
             prompt.userTurn(skill.directive());
         }
+        if (skill.scopeDirective() != null && !skill.scopeDirective().isBlank()
+                && budget.fits(skill.scopeDirective(), AiSkillCatalog.maxDirectiveBytes())) {
+            prompt.userTurn(skill.scopeDirective());
+        }
         if (!skill.evidence().isEmpty()) {
-            prompt.userTurn(boundedCrmData(
-                    "skill_evidence", skill.evidence(), context, budget.toolResultBytes()));
+            prompt.userTurn(boundedSkillEvidence(
+                    skill.evidence(), context, budget, budget.toolResultBytes()));
+        }
+    }
+
+    /**
+     * Fits a plan's evidence into the step's tool allocation by dropping rows, never by dropping it
+     * whole.
+     *
+     * <p>On the smallest supported context window that allocation is two kilobytes, which ordinary
+     * long notes can exceed on a read that entirely succeeded. Replacing the result with a bare
+     * budget marker would leave the synthesis model with no records and no citation handles for
+     * evidence the server did retrieve, so trailing rows are dropped until the payload fits and the
+     * loss is stated in the same {@code [truncated: showing N of M items]} vocabulary a bounded tool
+     * replay uses. Only when a single disclosed row still cannot fit does the marker stand alone.
+     */
+    private String boundedSkillEvidence(
+            Map<String, Object> evidence,
+            MaskingContext context,
+            AiAssistantPromptBudget budget,
+            int budgetBytes) {
+        JsonNode masked = maskStrings(objectMapper.valueToTree(evidence), context);
+        if (!(masked instanceof ObjectNode candidate)) {
+            throw new IllegalStateException("Assistant skill evidence payload is invalid");
+        }
+        String exact = crmDataMasked("skill_evidence", candidate);
+        if (budget.fits(exact, budgetBytes)) {
+            return exact;
+        }
+        List<ArrayNode> arrays = new ArrayList<>();
+        collectRowArrays(candidate, arrays);
+        int totalItems = arrays.stream().mapToInt(ArrayNode::size).sum();
+        int shownItems = totalItems;
+        while (totalItems != 0) {
+            candidate.put("budgetDisclosure", truncatedItemsMarker(shownItems, totalItems));
+            String content = crmDataMasked("skill_evidence", candidate);
+            if (budget.fits(content, budgetBytes)) {
+                return content;
+            }
+            if (shownItems == 0 || !dropTrailingArrayItem(arrays)) {
+                break;
+            }
+            shownItems--;
+        }
+        return boundedCrmData(
+                "skill_evidence", Map.of("status", BUDGET_EXCEEDED), context, budgetBytes);
+    }
+
+    /**
+     * Collects the arrays that actually carry rows, rather than the ones that carry plan steps.
+     *
+     * <p>Plan evidence nests its rows two levels down, inside one entry per executed step. Dropping
+     * from the outermost array would discard a whole step — the entire result of one read — where
+     * dropping from the innermost one costs a row, so only arrays with no array beneath them are
+     * offered up. The nesting also means the counts a disclosure states are counts of rows, which is
+     * what the {@code showing N of M items} vocabulary promises.
+     */
+    private static void collectRowArrays(JsonNode node, List<ArrayNode> arrays) {
+        if (node instanceof ArrayNode array) {
+            int before = arrays.size();
+            for (JsonNode child : array) {
+                collectRowArrays(child, arrays);
+            }
+            if (arrays.size() == before) {
+                arrays.add(array);
+            }
+            return;
+        }
+        if (node instanceof ObjectNode object) {
+            object.properties().forEach(entry -> collectRowArrays(entry.getValue(), arrays));
         }
     }
 

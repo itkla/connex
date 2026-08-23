@@ -1,5 +1,9 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
 
@@ -15,11 +19,19 @@ import tools.jackson.databind.ObjectMapper;
  * <p>Admission and execution ask the same question through this class. A view that is accepted at
  * request time and then edited before the turn reads it is re-checked here and refused, rather than
  * degrading into a workspace-wide cohort behind a scope chip that still claims the view applied.
+ *
+ * <p>Re-checking executability is not enough on its own. An edit that leaves the view executable but
+ * changes which records it selects would otherwise run the new definition under the preview and the
+ * persisted echo of the old one, so admission also takes a {@link #fingerprint} of the definition it
+ * accepted and execution refuses when the digest no longer matches.
  */
 final class AiChatSavedViewScope {
 
     /** Stable refusal reason for a saved view the server cannot apply in full. */
     static final String UNSUPPORTED = "saved_view_scope_unsupported";
+
+    /** Stable refusal reason for a saved view edited between admission and the executed read. */
+    static final String CHANGED = "saved_view_scope_changed";
 
     private AiChatSavedViewScope() {
     }
@@ -68,6 +80,34 @@ final class AiChatSavedViewScope {
             return Optional.empty();
         }
         return Optional.of(definition);
+    }
+
+    /**
+     * Returns an opaque digest of the executable segment definition of a saved view.
+     *
+     * <p>The digest is taken over the definition the server would evaluate rather than over the
+     * stored configuration node, so a cosmetic rewrite that reorders keys or renames the view keeps
+     * the same fingerprint while any change to the records it selects produces a different one. It
+     * is a hash, never the definition itself: the value is carried through the turn and must not
+     * become a second copy of tenant filter content.
+     *
+     * @param objectMapper mapper used to read and canonicalize the stored segment definition
+     * @param view accessible saved view
+     * @return the digest, or empty when the view cannot apply in full
+     */
+    static Optional<String> fingerprint(ObjectMapper objectMapper, SavedView view) {
+        return definition(objectMapper, view)
+                .map(definition -> digest(objectMapper.writeValueAsString(definition)));
+    }
+
+    private static String digest(String canonical) {
+        try {
+            byte[] hash = MessageDigest.getInstance("SHA-256")
+                    .digest(canonical.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hash);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
     }
 
     private static boolean isEmpty(List<?> values) {

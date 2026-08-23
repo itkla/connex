@@ -63,6 +63,8 @@ public interface ActivityMapper {
         @Param("workspaceId") int workspaceId,
         @Param("personId") int personId,
         @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
+        @Param("startUtc") LocalDateTime startUtc,
+        @Param("endUtc") LocalDateTime endUtc,
         @Param("limit") int limit);
     List<Activity> getActivitiesByPersonIdInWindow(
         @Param("workspaceId") int workspaceId,
@@ -130,6 +132,8 @@ public interface ActivityMapper {
         @Param("workspaceId") int workspaceId,
         @Param("dealId") int dealId,
         @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
+        @Param("startUtc") LocalDateTime startUtc,
+        @Param("endUtc") LocalDateTime endUtc,
         @Param("limit") int limit);
     List<Activity> getActivitiesByCreatedById(@Param("workspaceId") int workspaceId, @Param("createdById") int createdById);
     List<Activity> getCompanyActivities(@Param("workspaceId") int workspaceId,
@@ -138,6 +142,8 @@ public interface ActivityMapper {
         @Param("workspaceId") int workspaceId,
         @Param("companyId") int companyId,
         @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
+        @Param("startUtc") LocalDateTime startUtc,
+        @Param("endUtc") LocalDateTime endUtc,
         @Param("limit") int limit);
     List<Activity> getActivitiesByDealCompanyIds(@Param("workspaceId") int workspaceId,
             @Param("companyIds") List<Integer> companyIds);

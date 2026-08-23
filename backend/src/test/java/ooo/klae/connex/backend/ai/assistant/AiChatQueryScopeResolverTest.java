@@ -363,6 +363,63 @@ class AiChatQueryScopeResolverTest {
         assertEquals("", relabelled.savedView().label());
     }
 
+    /**
+     * The digest binds the definition this admission accepted, so the executed read can tell an
+     * unchanged view from one edited into a different, still-executable definition.
+     */
+    @Test
+    void anAcceptedSavedViewCarriesTheDigestOfTheDefinitionItWasAdmittedWith() {
+        SavedView admitted = savedView(17, "Cooling enterprise",
+                "{\"version\":1,\"segments\":{\"match\":\"all\",\"conditions\":"
+                        + "[{\"type\":\"predicate\",\"key\":\"cooling\"}]}}");
+        when(savedViewService.getById(17)).thenReturn(admitted);
+
+        AiChatQueryScopeResolver.Resolution resolution = resolver.resolve(
+                new AiChatQueryScopeRequest(
+                        null, null, null, null, List.of(), List.of(), List.of(),
+                        List.of(), List.of(), List.of(), 17));
+
+        assertEquals(
+                AiChatSavedViewScope.fingerprint(objectMapper, admitted).orElseThrow(),
+                resolution.scope().savedViewFingerprint());
+    }
+
+    /**
+     * Restating a completed turn without a filter it actually applied makes the historical read look
+     * broader than it was, so an unresolvable stage keeps its identifier exactly as an erased owner
+     * and an inaccessible saved view already do.
+     */
+    @Test
+    void aStoredStageThatNoLongerResolvesKeepsItsIdentifierAndLosesOnlyItsLabel() {
+        when(pipelineMapper.getVisibleStageById(WORKSPACE_ID, 3)).thenReturn(null);
+
+        AiChatQueryScopeDto relabelled = resolver.relabel(new AiChatQueryScopeDto(
+                true, null, null, 90, "all_team", List.of(), List.of(), List.of("deal"),
+                List.of(new AiChatScopeReferenceDto(3, "")), List.of("open"), List.of(),
+                null, null, false, 200, 100, 10, List.of()));
+
+        assertEquals(1, relabelled.stages().size());
+        assertEquals(3, relabelled.stages().getFirst().id());
+        assertEquals("", relabelled.stages().getFirst().label());
+    }
+
+    /**
+     * Every other user-facing date window in the product resolves against the workspace's reporting
+     * calendar, and a scope chip that names a day has to name the same day those surfaces do.
+     */
+    @Test
+    void aTrailingWindowResolvesInTheWorkspaceReportingCalendarRatherThanUtc() {
+        when(workspaceService.getCurrentAnalyticsTimezone()).thenReturn("America/Los_Angeles");
+
+        AiChatQueryScopeResolver.Resolution resolution = resolver.resolve(
+                new AiChatQueryScopeRequest(
+                        null, null, 1, null, List.of(), List.of(), List.of("company"),
+                        List.of(), List.of(), List.of(), null));
+
+        assertEquals("2026-08-22", resolution.interpreted().periodEnd());
+        assertEquals("2026-08-22", resolution.interpreted().periodStart());
+    }
+
     private static Stage stage(int id, String name) {
         Stage stage = new Stage();
         stage.setId(id);
