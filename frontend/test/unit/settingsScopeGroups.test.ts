@@ -281,6 +281,25 @@ describe("the scope destinations' copy resolves to finished sentences", () => {
     });
 });
 
+/**
+ * The JSX of one section of a page, from its region's opening marker to that region's close.
+ *
+ * Assertions about a section have to be scoped to it. A `not.toContain` over a whole file passes
+ * the moment the string it looks for is spelled with different whitespace, which is how a gate ends
+ * up matching nothing at all and reporting success forever.
+ *
+ * @param view - the page component's source
+ * @param slug - the section to slice out
+ * @returns that section's JSX
+ */
+function gapSectionJsx(view: string, slug: string): string {
+    const start = view.indexOf(`section="${slug}"`);
+    if (start === -1) throw new Error(`no section marker for ${slug}`);
+    const end = view.indexOf("</SettingsSectionRegion>", start);
+    if (end === -1) throw new Error(`unterminated region for ${slug}`);
+    return view.slice(start, end);
+}
+
 describe("the consolidations name the jobs they cannot yet do", () => {
     it.each([
         {
@@ -288,7 +307,7 @@ describe("the consolidations name the jobs they cannot yet do", () => {
             slug: "notification-defaults",
             titleKey: "SettingsCommunications.notificationDefaultsTitle",
         },
-        { group: "workspace.crm", slug: "workflows", titleKey: "CommonSidebar.navWorkflows" },
+        { group: "workspace.crm", slug: "workflows", titleKey: "SettingsCrm.workflowsTitle" },
     ])("declares $slug as a route gap, because no route ever served it", ({ group, slug, titleKey }) => {
         const groups: readonly SettingsGroup[] = SETTINGS_GROUPS;
         const manifestGroup = groups.find((candidate) => candidate.id === group);
@@ -302,6 +321,20 @@ describe("the consolidations name the jobs they cannot yet do", () => {
         ).toBe(false);
     });
 
+    it.each(["en", "ja"])("names a gap for its job, not for the surface it points at, in %s", (locale) => {
+        const catalog = JSON.parse(
+            readFileSync(path.join(process.cwd(), "messages", locale, "settings.json"), "utf8"),
+        ) as Record<string, Record<string, string>>;
+        const sidebar = JSON.parse(
+            readFileSync(path.join(process.cwd(), "messages", locale, "common.json"), "utf8"),
+        ) as Record<string, Record<string, string>>;
+
+        expect(
+            catalog.SettingsCrm.workflowsTitle,
+            "§7 gives every destination one name; borrowing the sidebar's would put two destinations under one word in settings search",
+        ).not.toBe(sidebar.CommonSidebar.navWorkflows);
+    });
+
     it.each([
         { view: COMMUNICATIONS_VIEW, target: '<Link href="/account/notifications">' },
         { view: CRM_VIEW, target: '<Link href="/workflows">' },
@@ -312,6 +345,32 @@ describe("the consolidations name the jobs they cannot yet do", () => {
         expect(text, "the only honest action is the surface that exists").toContain(target);
     });
 
+    it("opens a gated surface only to a reader who may enter it", () => {
+        const text = source(CRM_VIEW);
+        const region = source(SECTION_REGION);
+
+        expect(
+            text,
+            "the workflows surface needs RULE_MANAGE, and this section renders on an ungated page",
+        ).toContain('usePermissionCheck("RULE_MANAGE")');
+        expect(
+            gapSectionJsx(text, "workflows"),
+            "an unconditional link would give every member one click to an access-denied page",
+        ).toContain('workflows === "granted" ? (');
+        expect(
+            region,
+            "so the posture must be able to render without an action at all",
+        ).toContain("action?: React.ReactNode;");
+        expect(region).toContain("{action ? <div className=\"mt-1\">{action}</div> : null}");
+    });
+
+    it("leaves an ungated surface's link unconditional", () => {
+        expect(
+            gapSectionJsx(source(COMMUNICATIONS_VIEW), "notification-defaults"),
+            "personal notification preferences are every member's own; gating that link would hide a page that works",
+        ).not.toContain("usePermissionCheck");
+    });
+
     it("never dresses a missing feature as a capability state", () => {
         const region = source(SECTION_REGION);
         const gapPosture = region.slice(region.indexOf("function SectionNotYetAvailable"));
@@ -320,10 +379,17 @@ describe("the consolidations name the jobs they cannot yet do", () => {
             gapPosture,
             'a gap is not "not enabled for this deployment" — no operator can turn it on — and not "managed", which would claim someone else already runs it',
         ).not.toContain("SettingsAvailabilityNotice");
-        for (const view of [COMMUNICATIONS_VIEW, CRM_VIEW]) {
-            const text = source(view);
-            expect(text).not.toContain('state="not-enabled"');
-            expect(text).not.toContain('state="managed"' + "\n" + '                                body');
+        for (const { view, slug } of [
+            { view: COMMUNICATIONS_VIEW, slug: "notification-defaults" },
+            { view: CRM_VIEW, slug: "workflows" },
+        ]) {
+            const jsx = gapSectionJsx(source(view), slug);
+
+            expect(
+                jsx,
+                `${slug} must not borrow a capability posture to explain a feature that does not exist`,
+            ).not.toMatch(/state=["'](managed|not-enabled)["']/);
+            expect(jsx).not.toContain("SettingsAvailabilityNotice");
         }
     });
 });

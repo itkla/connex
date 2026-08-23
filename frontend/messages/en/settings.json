@@ -49,7 +49,7 @@
         "metaDescription": "Manage members, roles, allowed domains, and the member directory for this workspace."
     },
     "SettingsGap": {
-        "title": "Not available here yet"
+        "title": "Not available here"
     },
     "SettingsCommunications": {
         "accessCheckFailedBody": "This is a problem reading your permissions, not a decision about them. Try again in a moment.",
@@ -71,7 +71,8 @@
         "metaDescription": "Set up custom fields, qualification criteria, approval policies, and automation for this workspace.",
         "workflowsDescription": "The automation that acts on these records when something changes or on a schedule.",
         "workflowsGapAction": "Go to Workflows",
-        "workflowsGapBody": "Workflows are built and turned on from their own surface, not from settings. There is nothing to configure here yet."
+        "workflowsGapBody": "Workflows are built and turned on from their own surface, not from settings. There is nothing to configure here yet.",
+        "workflowsTitle": "Workflow configuration"
     },
     "SettingsAuditDiagnostics": {
         "accessCheckFailedBody": "This is a problem reading your permissions, not a decision about them. Try again in a moment.",

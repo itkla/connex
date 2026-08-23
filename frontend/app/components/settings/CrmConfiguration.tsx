@@ -55,6 +55,13 @@ function RefusedSection({ check }: { check: Exclude<PermissionCheck, "granted"> 
  * `h3`. Qualification and approval policies name themselves; custom fields names the three record
  * types instead, so its section name comes from here.
  *
+ * The workflow section is the one place this page links out of itself, and that link is gated even
+ * though the section is not. The section explains a job that has no settings home yet, which is
+ * true for every member; entering the workflows surface needs `RULE_MANAGE`, which the sidebar
+ * already declines to offer without. Rendering the link unconditionally on an ungated page would
+ * give every member one click to an access-denied page, so the explanation stays and only the door
+ * is conditional.
+ *
  * @param policies - the workspace's approval policies, or null when that read failed
  */
 export default function CrmConfiguration({ policies }: { policies: ApprovalPolicy[] | null }) {
@@ -63,11 +70,11 @@ export default function CrmConfiguration({ policies }: { policies: ApprovalPolic
     const tFields = useTranslations("WorkspaceSettings");
     const tQualification = useTranslations("WorkspaceQualification");
     const tPolicies = useTranslations("ApprovalPoliciesBrowser");
-    const tWorkflows = useTranslations("CommonSidebar");
     const { activeWorkspace } = useWorkspace();
     const { register, arrived } = useSectionArrival(CRM_SECTIONS);
     const fields = usePermissionCheck("CUSTOM_FIELD_MANAGE");
     const qualification = usePermissionCheck("WORKSPACE_SETTINGS");
+    const workflows = usePermissionCheck("RULE_MANAGE");
 
     return (
         <div className="flex flex-col gap-12">
@@ -135,15 +142,17 @@ export default function CrmConfiguration({ policies }: { policies: ApprovalPolic
             <SettingsSectionRegion section="workflows" arrived={arrived} register={register}>
                 <Rise>
                     <SettingsSection
-                        title={tWorkflows("navWorkflows")}
+                        title={t("workflowsTitle")}
                         description={t("workflowsDescription")}
                     >
                         <SectionNotYetAvailable
                             body={t("workflowsGapBody")}
                             action={
-                                <Button asChild variant="outline" size="inline">
-                                    <Link href="/workflows">{t("workflowsGapAction")}</Link>
-                                </Button>
+                                workflows === "granted" ? (
+                                    <Button asChild variant="outline" size="inline">
+                                        <Link href="/workflows">{t("workflowsGapAction")}</Link>
+                                    </Button>
+                                ) : undefined
                             }
                         />
                     </SettingsSection>

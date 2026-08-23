@@ -49,7 +49,7 @@
         "metaDescription": "このワークスペースのメンバー、ロール、許可するドメイン、メンバー一覧を管理します。"
     },
     "SettingsGap": {
-        "title": "ここではまだご利用いただけません"
+        "title": "ここではご利用いただけません"
     },
     "SettingsCommunications": {
         "accessCheckFailedBody": "権限の判定結果ではなく、権限の読み取りに失敗しています。しばらくしてからもう一度お試しください。",
@@ -71,7 +71,8 @@
         "metaDescription": "このワークスペースのカスタムフィールド、評価基準、承認ポリシー、自動化を設定します。",
         "workflowsDescription": "レコードの変更時やスケジュールに応じて、これらのレコードを自動で処理する仕組みです。",
         "workflowsGapAction": "ワークフローを開く",
-        "workflowsGapBody": "ワークフローは設定画面ではなく、専用の画面で作成して有効にします。ここで設定する項目はまだありません。"
+        "workflowsGapBody": "ワークフローは設定画面ではなく、専用の画面で作成して有効にします。ここで設定する項目はまだありません。",
+        "workflowsTitle": "ワークフロー設定"
     },
     "SettingsAuditDiagnostics": {
         "accessCheckFailedBody": "権限の判定結果ではなく、権限の読み取りに失敗しています。しばらくしてからもう一度お試しください。",

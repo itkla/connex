@@ -93,25 +93,31 @@ export function SectionRefusal({
  *
  * Deliberately not a {@link SettingsAvailabilityState}. `not-enabled` would say an operator could
  * turn this on and `managed` would say someone else already runs it; both are false, and a settings
- * page that misreports why it is empty is worse than one that admits the gap. The action is the
- * only honest thing on offer: the surface that exists.
+ * page that misreports why it is empty is worse than one that admits the gap.
+ *
+ * The action is optional, because the surface serving the nearest shipped job may itself be gated.
+ * A gap section carries no gates of its own — it exists inside a destination that may be open to
+ * every member — so an unconditional link would hand a reader who cannot enter that surface a
+ * single click into an access-denied page. §6's rule is to prefer no entry point over a locked
+ * door; the explanation is worth reading either way, and only the door is conditional.
  *
  * @param body - what belongs here, and what to do in the meantime
- * @param action - the link to the surface that serves the nearest shipped job
+ * @param action - the way into the surface that serves the nearest shipped job, when the reader may
+ * actually enter it; omitted when they may not
  */
 export function SectionNotYetAvailable({
     body,
     action,
 }: {
     body: string;
-    action: React.ReactNode;
+    action?: React.ReactNode;
 }) {
     const t = useTranslations("SettingsGap");
     return (
         <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border bg-card px-6 py-12 text-center">
             <p className="text-sm font-semibold text-foreground">{t("title")}</p>
             <p className="max-w-sm text-sm text-pretty text-muted-foreground">{body}</p>
-            <div className="mt-1">{action}</div>
+            {action ? <div className="mt-1">{action}</div> : null}
         </div>
     );
 }

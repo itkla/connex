@@ -305,7 +305,13 @@ export const SETTINGS_GROUPS = [
         order: 3,
         titleKey: "SettingsNav.groupCrmConfiguration",
         epicName: "CRM configuration",
-        gapSections: [{ slug: "workflows", titleKey: "CommonSidebar.navWorkflows" }],
+        /**
+         * Named for the job, not for the surface it points at. The sidebar's "Workflows" is a
+         * different destination, and §7 gives every destination exactly one name — a settings-search
+         * hit reading "Workflows" that leads here instead of to `/workflows` is precisely the
+         * collision this epic exists to remove. §7 calls this job workflow configuration.
+         */
+        gapSections: [{ slug: "workflows", titleKey: "SettingsCrm.workflowsTitle" }],
     },
     {
         id: "workspace.communications",
