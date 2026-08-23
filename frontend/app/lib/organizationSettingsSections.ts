@@ -29,6 +29,7 @@ function manifestSections(groupId: string, route: string): readonly string[] {
     for (const entry of SETTINGS_ENTRIES) {
         if (
             entry.group === groupId
+            && entry.kind === "destination"
             && entry.canonicalRoute === route
             && entry.canonicalSection !== null
         ) {
