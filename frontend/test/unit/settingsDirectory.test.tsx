@@ -115,26 +115,32 @@ describe("the settings directory draws the navigation model", () => {
         }
     });
 
-    it("never draws a group's landing destination a second time beneath it", () => {
+    it("holds no group offering several destinations, now that every one has migrated", () => {
         const several = model
             .flatMap((scope) => scope.groups)
             .filter((group) => group.destinations.length > 1);
 
         expect(
-            several.length,
-            "this population shrinks as #1340 migrates groups — a migrated group offers one destination — so the floor is only that the case still exists to be checked",
-        ).toBeGreaterThan(1);
-        for (const group of several) {
-            expect(
-                occurrences(`href="${group.href}"`),
-                `${group.id} draws ${group.href} twice under two names`,
-            ).toBe(1);
-            for (const destination of group.destinations) {
-                if (destination.href === group.href) continue;
-                expect(markup).toContain(rendered(destination.title));
-                expect(occurrences(`href="${destination.href}"`)).toBe(1);
-            }
-        }
+            several.map((group) => group.id),
+            "a migrated group offers one destination and lists what it absorbed as sections; this population emptied as the last of them moved, and the constructed probe below is what keeps the rule checked",
+        ).toEqual([]);
+    });
+
+    it("never draws a group's landing destination a second time beneath it", () => {
+        const [scope] = model;
+        const [group] = scope.groups;
+        const landing = { ...group.destinations[0] };
+        const beside = { ...landing, id: "probe.beside", title: "Probe beside", href: "/settings/probe" };
+        const probe = renderToStaticMarkup(
+            <SettingsDirectory
+                scopes={[{ ...scope, groups: [{ ...group, destinations: [landing, beside] }] }]}
+            />,
+        );
+        const count = (needle: string) => probe.split(needle).length - 1;
+
+        expect(count(`href="${group.href}"`), "the landing destination is the group row alone").toBe(1);
+        expect(probe).toContain("Probe beside");
+        expect(count('href="/settings/probe"'), "and every other destination appears once beneath it").toBe(1);
     });
 
     it("draws a migrated group as one row, not as a list of the destinations it absorbed", () => {
@@ -146,6 +152,11 @@ describe("the settings directory draws the navigation model", () => {
             migrated.map((group) => group.id).sort(),
             "every group whose canonical route is served",
         ).toEqual([
+            "organization.ai-governance",
+            "organization.audit-diagnostics",
+            "organization.data-requests",
+            "organization.general",
+            "organization.identity",
             "workspace.audit-diagnostics",
             "workspace.communications",
             "workspace.crm",

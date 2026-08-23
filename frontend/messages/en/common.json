@@ -303,6 +303,8 @@
     "crmConfiguration": "CRM configuration",
     "communications": "Communications",
     "auditDiagnostics": "Audit & diagnostics",
+    "identityAdministrators": "Identity & administrators",
+    "aiDataGovernance": "AI & data governance",
     "members": "Members",
     "roles": "Roles",
     "customFields": "Custom fields",

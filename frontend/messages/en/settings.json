@@ -82,5 +82,28 @@
         "description": "What has happened in {workspace}, and whether the services it depends on are healthy.",
         "diagnosticsDescription": "The state of this workspace's mail, background jobs, and stored credentials, with the deployment settings behind them.",
         "metaDescription": "Review this workspace's audit log and check the health of the services behind it."
+    },
+    "SettingsOrgGeneral": {
+        "description": "What {organization} is called, the workspaces beneath it, and how either of them ends.",
+        "metaDescription": "Rename your organization, see the workspaces under it, and export or delete them."
+    },
+    "SettingsOrgIdentity": {
+        "description": "Who administers {organization}, who may be invited into its workspaces, and how they sign in.",
+        "metaDescription": "Manage organization administrators, allowed email domains, and single sign-on.",
+        "ssoCheckFailedTitle": "Couldn't check single sign-on",
+        "ssoCheckFailedBody": "Nothing changed and nothing is switched off. We couldn't read whether this instance has single sign-on, so try again in a moment."
+    },
+    "SettingsOrgAi": {
+        "description": "The AI provider {organization} brings, what its workspaces may do with it, and how much it may spend in a day.",
+        "metaDescription": "Configure your organization's AI provider, workspace controls, and daily limit."
+    },
+    "SettingsOrgDataRequests": {
+        "description": "Requests from the people in {organization}'s records to see, correct, or stop the use of their own data.",
+        "metaDescription": "Track requests to see, correct, or stop the use of personal data, and assemble disclosure exports."
+    },
+    "SettingsOrgAuditDiagnostics": {
+        "description": "What has happened above {organization}'s workspaces, and whether the services behind them are healthy.",
+        "metaDescription": "Review the organization audit log and check the health of the services behind it.",
+        "diagnosticsDescription": "The state of this organization's background jobs, stored credentials, and provider readiness, with the deployment settings behind them."
     }
 }

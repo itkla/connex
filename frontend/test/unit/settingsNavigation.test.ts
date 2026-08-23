@@ -409,7 +409,11 @@ describe("settings navigation gates on the manifest's visibility bucket", () => 
             "workspace.email",
         );
         expect(ids).toContain("workspace.communications");
-        expect(ids).toContain("organization.sso");
+        expect(
+            sectionIds,
+            "single sign-on is a section of Identity & administrators now, and an instance without it still names the section rather than dropping it",
+        ).toContain("organization.sso");
+        expect(ids).toContain("organization.identity");
         expect(
             entries.filter((entry) => entry.conditionalForward !== null).map((entry) => entry.id),
             "these two are visible because neither page forwards away from its own state any more",
@@ -451,9 +455,12 @@ describe("settings navigation gates on the manifest's visibility bucket", () => 
         const unresolved = resolveSettingsNavigation(context("en", { capabilities: null }));
         const ids = (model: ReturnType<typeof resolveSettingsNavigation>) =>
             model.flatMap((scope) => scope.groups.flatMap((group) => group.destinations.map((d) => d.id)));
+        const sectionIds = (model: ReturnType<typeof resolveSettingsNavigation>) =>
+            model.flatMap((scope) => scope.groups.flatMap((group) => group.sections.map((s) => s.id)));
 
         expect(ids(unresolved)).toEqual(ids(resolved));
-        expect(ids(unresolved)).toContain("organization.sso");
+        expect(sectionIds(unresolved)).toEqual(sectionIds(resolved));
+        expect(sectionIds(unresolved)).toContain("organization.sso");
     });
 
     it("reads every capability key the manifest can name", () => {

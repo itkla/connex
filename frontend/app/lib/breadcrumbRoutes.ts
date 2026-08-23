@@ -44,6 +44,8 @@ export type BreadcrumbMessageKey =
     | "communications"
     | "crmConfiguration"
     | "auditDiagnostics"
+    | "identityAdministrators"
+    | "aiDataGovernance"
     | "pipelines"
     | "products"
     | "profile"
@@ -149,6 +151,23 @@ const ACCOUNT_ROUTES: Readonly<Record<string, BreadcrumbMessageKey>> = {
     "/account/invites": "invites",
 };
 
+/**
+ * The organization scope's canonical settings destinations (#1340 PR 6).
+ *
+ * They live under `/settings` and are reached from the same navigation as every other settings job,
+ * but the thing they administer is the organization, so their trail is rooted there rather than in
+ * the active workspace. The organization gate applies exactly as it does to the legacy routes: a
+ * viewer holding no organization role gets no trail, because the page they are on is one they may
+ * not read.
+ */
+const ORGANIZATION_SETTINGS_ROUTES: Readonly<Record<string, BreadcrumbMessageKey>> = {
+    "/settings/organization/general": "general",
+    "/settings/organization/identity": "identityAdministrators",
+    "/settings/organization/ai-governance": "aiDataGovernance",
+    "/settings/organization/data-requests": "dataRequests",
+    "/settings/organization/audit-diagnostics": "auditDiagnostics",
+};
+
 const ORGANIZATION_ROUTES: Readonly<Record<string, BreadcrumbMessageKey>> = {
     "/organization/overview": "overview",
     "/organization/members": "members",
@@ -165,6 +184,7 @@ export const BREADCRUMB_STATIC_ROUTE_PATHS = [...new Set([
     ...Object.keys(STATIC_WORKSPACE_ROUTES),
     ...Object.keys(SETTINGS_ROUTES),
     ...Object.keys(ACCOUNT_ROUTES),
+    ...Object.keys(ORGANIZATION_SETTINGS_ROUTES),
     ...Object.keys(ORGANIZATION_ROUTES),
     "/account/connections/reviews",
     "/overview/reports/goals",
@@ -338,6 +358,16 @@ export function resolveBreadcrumbRoute(
         return shell(withWorkspace(context, [
             translatedCrumb(SETTINGS_HOME_ROUTE, "settings", context, true),
         ]));
+    }
+
+    const organizationSettingsRoute = ORGANIZATION_SETTINGS_ROUTES[pathname];
+    if (organizationSettingsRoute) {
+        if (!context.organizationAccessible) return empty("denied");
+        return shell([
+            organizationRoot(context),
+            translatedCrumb(SETTINGS_HOME_ROUTE, "settings", context),
+            translatedCrumb(pathname, organizationSettingsRoute, context, true),
+        ]);
     }
 
     const settingsRoute = SETTINGS_ROUTES[pathname];

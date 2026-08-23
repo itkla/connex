@@ -82,5 +82,28 @@
         "description": "{workspace} でこれまでに行われた操作と、依存しているサービスが正常に動いているかを確認できます。",
         "diagnosticsDescription": "このワークスペースのメール、バックグラウンド処理、保存された認証情報の状態と、その背後にある構成を表示します。",
         "metaDescription": "このワークスペースの監査ログを確認し、背後のサービスの状態を点検します。"
+    },
+    "SettingsOrgGeneral": {
+        "description": "{organization} の名称、その配下のワークスペース、そしてそれらを終了する方法をまとめています。",
+        "metaDescription": "組織名の変更、配下のワークスペースの確認、エクスポートと削除を行います。"
+    },
+    "SettingsOrgIdentity": {
+        "description": "{organization} を管理するメンバー、ワークスペースに招待できる相手、そしてログイン方法を設定します。",
+        "metaDescription": "組織管理者、許可するメールドメイン、シングルサインオンを管理します。",
+        "ssoCheckFailedTitle": "シングルサインオンの状態を確認できませんでした",
+        "ssoCheckFailedBody": "設定は変更されておらず、無効になったわけでもありません。このインスタンスでシングルサインオンが利用できるかを読み取れなかっただけですので、しばらくしてからもう一度お試しください。"
+    },
+    "SettingsOrgAi": {
+        "description": "{organization} が用意する AI プロバイダーと、各ワークスペースに認める範囲、そして1日あたりの上限を設定します。",
+        "metaDescription": "組織の AI プロバイダー、ワークスペースの制御、1日あたりの上限を設定します。"
+    },
+    "SettingsOrgDataRequests": {
+        "description": "{organization} が保有する記録について、本人から寄せられた開示・訂正・利用停止の請求を管理します。",
+        "metaDescription": "本人からの開示・訂正・利用停止の請求を管理し、開示用のエクスポートを作成します。"
+    },
+    "SettingsOrgAuditDiagnostics": {
+        "description": "{organization} のワークスペースを越えて行われた操作と、それを支えるサービスが正常に動いているかを確認できます。",
+        "metaDescription": "組織の監査ログを確認し、背後のサービスの状態を点検します。",
+        "diagnosticsDescription": "この組織のバックグラウンド処理、保存された認証情報、プロバイダーの準備状況と、その背後にある構成を表示します。"
     }
 }
