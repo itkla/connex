@@ -837,7 +837,13 @@ export const SETTINGS_ENTRIES = [
         conditionalForward: null,
         titleKey: "SettingsHome.title",
         access: NO_ACCESS_REQUIREMENTS,
-        entryPoints: [],
+        /**
+         * The settings home is what "Settings" means now, on both surfaces that used the word.
+         * Until #1340 PR 7 the sidebar item and the palette action named Settings both landed on
+         * `/settings/members` — the arbitrary tab the epic names as the failure it is replacing —
+         * while `/settings` itself was reachable from nowhere in the product.
+         */
+        entryPoints: ["sidebar", "command-palette"],
         aliasKey: null,
     },
     {
@@ -1014,7 +1020,12 @@ export const SETTINGS_ENTRIES = [
             orgWrite: null,
             states: [],
         },
-        entryPoints: ["settings-tabs", "sidebar", "command-palette", "contextual"],
+        /**
+         * No longer the sidebar's or the palette's Settings destination: both now name
+         * `settings.home`, and the members roster is reached as a section of People & access rather
+         * than as the thing the word "Settings" happens to open.
+         */
+        entryPoints: ["settings-tabs", "contextual"],
         aliasKey: null,
     },
     {
