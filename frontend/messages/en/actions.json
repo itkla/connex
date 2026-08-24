@@ -32,9 +32,7 @@
             "calendar": "Calendar",
             "reports": "Reports",
             "goals": "Goals",
-            "settings": "Settings",
             "products": "Products",
-            "organization": "Organization",
             "tasks": "Tasks",
             "activities": "Activities",
             "notes": "Notes",
@@ -46,17 +44,11 @@
             "tags": "Tags",
             "files": "Files",
             "workflows": "Workflows",
-            "captureReviews": "Capture reviews",
-            "users": "Users",
-            "approvalPolicies": "Approval policies",
-            "auditLog": "Audit log",
             "me": "Profile",
-            "account": "Account settings",
             "search": "Search",
             "docs": "Documentation",
             "savedView": "Saved view",
-            "recentRecord": "Recent record",
-            "diagnostics": "Diagnostics"
+            "recentRecord": "Recent record"
         },
         "create": {
             "company": "New company",

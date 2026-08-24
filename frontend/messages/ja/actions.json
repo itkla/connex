@@ -32,9 +32,7 @@
             "calendar": "カレンダー",
             "reports": "レポート",
             "goals": "目標",
-            "settings": "設定",
             "products": "商品",
-            "organization": "組織",
             "tasks": "タスク",
             "activities": "アクティビティ",
             "notes": "メモ",
@@ -46,17 +44,11 @@
             "tags": "タグ",
             "files": "ファイル",
             "workflows": "ワークフロー",
-            "captureReviews": "取り込みの確認",
-            "users": "ユーザー",
-            "approvalPolicies": "承認ポリシー",
-            "auditLog": "監査ログ",
             "me": "プロフィール",
-            "account": "アカウント設定",
             "search": "検索",
             "docs": "ヘルプドキュメント",
             "savedView": "保存済みビュー",
-            "recentRecord": "最近のレコード",
-            "diagnostics": "診断"
+            "recentRecord": "最近のレコード"
         },
         "create": {
             "company": "新しい会社",

@@ -1435,12 +1435,13 @@ export const SETTINGS_ENTRIES = [
         redirectQuery: [],
         conditionalForward: null,
         /**
-         * The consolidated name, not the shipped one. `CommonSidebar.navUsers` renders "Users" /
-         * 「ユーザー」, which PRODUCT.md §4 bans for a person in a workspace, and the banned-terms gate
-         * cannot catch it there because `user` is unclassifiable in the general case. This key is
-         * what the navigation and settings search show, and both now lead to the section of People &
-         * access that owns this job, which is named for members. The standalone `/users` page keeps
-         * its shipped label until its redirect lands.
+         * The consolidated name, not the one the sidebar used to carry. `CommonSidebar.navUsers`
+         * rendered "Users" / 「ユーザー」, which PRODUCT.md §4 bans for a person in a workspace and the
+         * banned-terms gate cannot catch, because `user` is unclassifiable in the general case; the
+         * key was deleted in #1340 PR 7 once every navigation surface read this one instead. The
+         * navigation and settings search now show this name and lead to the section of People &
+         * access that owns the job. The standalone `/users` page keeps its own heading until its
+         * redirect lands.
          */
         titleKey: "SettingsPeople.directoryTitle",
         access: {

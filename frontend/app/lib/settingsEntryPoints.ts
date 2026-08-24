@@ -33,8 +33,21 @@ export type SettingsDestination = {
  */
 type LabeledSettingsEntry = Extract<(typeof SETTINGS_ENTRIES)[number], { titleKey: string }>;
 
+/**
+ * A labeled entry whose address is concrete rather than a pattern.
+ *
+ * `workspace.people-detail` is what this excludes today: it serves `/users/[id]`, and a link to one
+ * member is an href the caller composes from an id, not an entry point this module can hand out. The
+ * exclusion is a type, so the contextual member links a later PR moves cannot resolve to the literal
+ * string `/users/[id]` and ship a row that leads nowhere.
+ */
+type AddressableSettingsEntry = Exclude<
+    LabeledSettingsEntry,
+    { currentRoute: `${string}[${string}` }
+>;
+
 /** The manifest entry ids a navigation surface may register. */
-export type SettingsDestinationId = LabeledSettingsEntry["id"];
+export type SettingsDestinationId = AddressableSettingsEntry["id"];
 
 /** The manifest's entries at their declared type, for the reads that do not need their literals. */
 const MANIFEST_ENTRIES: readonly SettingsEntry[] = SETTINGS_ENTRIES;
@@ -72,23 +85,38 @@ export function settingsRouteServed(route: string): boolean {
  * consolidation that has not shipped keeps its entry points on the working address and a consolidation
  * that has shipped moves them without anyone editing a surface.
  *
+ * Null for an entry that serves a route pattern, which is the same fact
+ * {@link SettingsDestinationId} excludes at the type level, stated once so the two cannot drift.
+ *
+ * `workspace.people-detail` is the entry this refuses today. It serves `/users/[id]` — a family of
+ * pages, not one destination — and the section it maps to is a stub that lands the reader on the
+ * list rather than on a member. Handing either out would give a navigation surface something that
+ * looks like an address and is not: the pattern leads nowhere, and the anchor answers a different
+ * question than the caller asked. A link to one member is an href its caller composes from an id.
+ *
  * @param entry - the manifest entry
- * @returns the href, fragment included where the job became a section of a shared destination
+ * @returns the href, fragment included where the job became a section of a shared destination, or
+ *          null when the entry names no single destination
  */
-export function settingsDestinationHref(entry: SettingsEntry): string {
-    if (!SERVED_ROUTES.has(entry.canonicalRoute)) return entry.currentRoute;
-    return entry.canonicalSection === null
-        ? entry.canonicalRoute
-        : `${entry.canonicalRoute}#${entry.canonicalSection}`;
+export function settingsDestinationHref(entry: SettingsEntry): string | null {
+    if (entry.currentRoute.includes("[")) return null;
+    const href = SERVED_ROUTES.has(entry.canonicalRoute)
+        ? (entry.canonicalSection === null
+            ? entry.canonicalRoute
+            : `${entry.canonicalRoute}#${entry.canonicalSection}`)
+        : entry.currentRoute;
+    return href.includes("[") ? null : href;
 }
 
 function destinationsById(): ReadonlyMap<string, SettingsDestination> {
     const destinations = new Map<string, SettingsDestination>();
     for (const entry of MANIFEST_ENTRIES) {
         if (entry.titleKey === null) continue;
+        const href = settingsDestinationHref(entry);
+        if (href === null) continue;
         destinations.set(entry.id, {
             id: entry.id,
-            href: settingsDestinationHref(entry),
+            href,
             titleKey: entry.titleKey,
             aliasKey: entry.aliasKey,
         });

@@ -12,7 +12,10 @@ import {
     type SettingsGroup,
 } from "@/app/lib/settingsManifest";
 import { SETTINGS_PALETTE_REGISTRATIONS } from "@/app/lib/actions/settingsNavigationActions";
-import { settingsDestinationHref } from "@/app/lib/settingsEntryPoints";
+import {
+    settingsDestinationHref,
+    settingsEntryPointDestinations,
+} from "@/app/lib/settingsEntryPoints";
 import { SHIPPED_APP_ROUTES } from "@/app/lib/routeManifest";
 
 /**
@@ -40,9 +43,11 @@ import { SHIPPED_APP_ROUTES } from "@/app/lib/routeManifest";
  *   to `sidebar` is not satisfied by a user-menu registration or the reverse.
  * - The settings shell reads every route it links from this manifest at render time, so it carried
  *   no literal href for the scan to find and was verified only by the data-level suite in
- *   `settingsNavigation.test.ts` — leaving a literal href added there to bypass both gates. The
- *   shell files are now scanned as navigation sources that may declare no entry point at all, so a
- *   hand-written settings link in one of them fails rather than passing unseen.
+ *   `settingsNavigation.test.ts` — leaving a literal href added there to bypass both gates. Shell
+ *   files are now scanned as navigation sources that may declare no entry point at all, so a
+ *   hand-written settings link in one of them fails rather than passing unseen. They are
+ *   **discovered, not listed**: a shell file is one that imports the manifest-resolved navigation,
+ *   so the shell files #1340 PR 8 adds are scanned without anyone remembering to extend a roster.
  */
 const APP_DIRECTORY = path.join(process.cwd(), "app", "(app)");
 
@@ -73,18 +78,56 @@ const REGISTER_ENTRY =
  * time, so a literal settings href appearing in one of them is a hand-written link that has escaped
  * the manifest, and the reverse-direction gate fails on it.
  */
-const NAVIGATION_SOURCES: ReadonlyArray<{
+const TAB_STRIP_SOURCES: ReadonlyArray<{
     file: string;
     points: readonly Exclude<SettingsEntryPoint, "contextual">[];
 }> = [
     { file: "app/components/account/AccountTabs.tsx", points: ["account-tabs"] },
     { file: "app/components/settings/SettingsTabs.tsx", points: ["settings-tabs"] },
     { file: "app/components/organization/OrgTabs.tsx", points: ["organization-tabs"] },
-    { file: "app/components/settings/SettingsHome.tsx", points: [] },
-    { file: "app/components/settings/SettingsDirectory.tsx", points: [] },
-    { file: "app/components/settings/SettingsDrillDown.tsx", points: [] },
-    { file: "app/components/settings/SettingsSearchResults.tsx", points: [] },
-    { file: "app/components/settings/SettingsScopeSpine.tsx", points: [] },
+];
+
+/** The import that makes a file part of the settings shell. */
+const SHELL_IMPORT = "@/app/lib/settingsNavigation";
+
+/** Whether a source file renders the manifest-resolved settings navigation. */
+function isShellSource(source: string): boolean {
+    return source.includes(SHELL_IMPORT);
+}
+
+/** Every `.ts`/`.tsx` file under a directory. */
+function sourceFilesUnder(directory: string, prefix: string): string[] {
+    const files: string[] = [];
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        const next = path.join(directory, entry.name);
+        if (entry.isDirectory()) files.push(...sourceFilesUnder(next, `${prefix}/${entry.name}`));
+        else if (/\.tsx?$/.test(entry.name)) files.push(`${prefix}/${entry.name}`);
+    }
+    return files;
+}
+
+/**
+ * The settings shell, discovered rather than listed.
+ *
+ * A shell file is one that renders the manifest-resolved navigation — it imports
+ * {@link SHELL_IMPORT} — which is a fact about what the file does, not about what it is called or
+ * where it sits. #1340 PR 8 adds shell files; each is scanned the moment it starts consuming the
+ * navigation, with no list here to remember to extend.
+ */
+function shellSources(): string[] {
+    return sourceFilesUnder(path.join(process.cwd(), "app"), "app")
+        .filter((file) => isShellSource(readSource(file)))
+        .sort();
+}
+
+const SHELL_SOURCES = shellSources();
+
+const NAVIGATION_SOURCES: ReadonlyArray<{
+    file: string;
+    points: readonly Exclude<SettingsEntryPoint, "contextual">[];
+}> = [
+    ...TAB_STRIP_SOURCES,
+    ...SHELL_SOURCES.map((file) => ({ file, points: [] as const })),
 ];
 
 /**
@@ -807,11 +850,24 @@ describe("an entry point resolves the canonical address once it is served", () =
                 .map((id) => entries.find((entry) => entry.id === id))
                 .filter((entry): entry is SettingsEntry => entry !== undefined)
                 .map((entry) => settingsDestinationHref(entry))
-                .filter((href) => !registeredRoutes.has(href.split("#")[0]))
-                .map((href) => `${source.describe} resolves to ${href}`),
+                .filter((href) => href === null || !registeredRoutes.has(href.split("#")[0]))
+                .map((href) => `${source.describe} resolves to ${href ?? "no address"}`),
         );
 
         expect(stranded).toEqual([]);
+    });
+
+    it("hands out no address for a route pattern, and keeps that entry off the resolver", () => {
+        const detail = entriesByRoute.get("/users/[id]");
+        if (!detail) throw new Error("workspace.people-detail left the manifest");
+
+        expect(
+            settingsDestinationHref(detail),
+            "a parameterized route is a pattern, not an address; resolving it would ship a link to the literal /users/[id]",
+        ).toBeNull();
+        expect(
+            settingsEntryPointDestinations("contextual").map((destination) => destination.id),
+        ).not.toContain(detail.id);
     });
 });
 
@@ -832,6 +888,32 @@ describe("the entry-point gate refuses a registration the manifest has not decla
     it("holds at zero for the registrations that actually ship", () => {
         expect(undeclaredRegistrations(point, declared, entries)).toEqual([]);
         expect(unshippedDeclarations(point, declared, entries)).toEqual([]);
+    });
+
+    /**
+     * An inventory, not the gate. Discovery is what scans a new shell file; this makes the shell's
+     * growth visible in review, so a file that starts rendering the settings navigation is noticed
+     * rather than merely tolerated.
+     */
+    it("holds the settings shell at the files that render the navigation today", () => {
+        expect(SHELL_SOURCES).toEqual([
+            "app/components/settings/SettingsDirectory.tsx",
+            "app/components/settings/SettingsDrillDown.tsx",
+            "app/components/settings/SettingsHome.tsx",
+            "app/components/settings/SettingsScopeSpine.tsx",
+            "app/components/settings/SettingsSearchResults.tsx",
+        ]);
+        expect(
+            NAVIGATION_SOURCES.filter((source) => source.points.length === 0).map((source) => source.file),
+        ).toEqual(SHELL_SOURCES);
+    });
+
+    it("catches a shell file that does not exist yet", () => {
+        expect(
+            isShellSource(`import { resolveSettingsNavigation } from "${SHELL_IMPORT}";`),
+            "a file rendering the manifest navigation is a shell file wherever it is added and whatever it is called",
+        ).toBe(true);
+        expect(isShellSource('import { SETTINGS_ENTRIES } from "@/app/lib/settingsManifest";')).toBe(false);
     });
 
     it("reads the sidebar and the user menu apart, so neither satisfies the other's claim", () => {

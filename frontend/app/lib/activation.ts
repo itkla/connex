@@ -1,4 +1,5 @@
 import type { ActiveRecordRef } from '@/app/lib/actions/types';
+import { settingsDestination } from '@/app/lib/settingsEntryPoints';
 import type { CapabilityAvailability } from '@/app/lib/capabilityAvailability';
 import type {
     Company,
@@ -256,7 +257,7 @@ export function buildActivationSteps(counts: ActivationCounts): ActivationStep[]
             done: counts.members > 1,
             required: false,
             actionId: null,
-            href: '/settings/members',
+            href: settingsDestination('workspace.members').href,
             count: counts.members,
             requireRelationshipTarget: false,
         });
