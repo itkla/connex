@@ -10,6 +10,7 @@ import { kanbanAccessibility } from '@/app/components/kanban/kanbanAccessibility
 import DealKanbanCard from '@/app/components/records/deals/DealKanbanCard';
 import { classifyStage } from './dealOutcome';
 import { getCompaniesByIds, getDealBoard, getDealRisks, moveDeal } from '@/app/lib/api';
+import { withDealMoved } from '@/app/lib/dealBoard';
 import { toastError } from '@/app/lib/toast';
 import type { Company, Deal, DealFilterParams, DealRisk, Pipeline, Stage } from '@/app/lib/types';
 import type { RecordReturnSelectionSnapshot } from '@/app/lib/recordReturnPath';
@@ -116,25 +117,26 @@ export default function DealsKanban({
         selected != null && pipelineOptions.some((pipeline) => pipeline.id === selected)
             ? selected
             : defaultPipelineId;
-    const [boardRevision, setBoardRevision] = useState(0);
-    const boardKey = selectedPipelineId == null ? null : `${selectedPipelineId}:${boardRevision}:${revision}`;
+    const boardKey = selectedPipelineId == null ? null : `${selectedPipelineId}:${revision}`;
     const [boardState, setBoardState] = useState<{
         key: string | null;
+        pipelineId: number | null;
         deals: Deal[];
         error: string | null;
-    }>({ key: null, deals: [], error: null });
+    }>({ key: null, pipelineId: null, deals: [], error: null });
 
     useEffect(() => {
         if (selectedPipelineId == null || boardKey == null) return;
         let cancelled = false;
         getDealBoard(selectedPipelineId)
             .then((loaded) => {
-                if (!cancelled) setBoardState({ key: boardKey, deals: loaded, error: null });
+                if (!cancelled) setBoardState({ key: boardKey, pipelineId: selectedPipelineId, deals: loaded, error: null });
             })
             .catch((error: unknown) => {
                 if (cancelled) return;
                 setBoardState({
                     key: boardKey,
+                    pipelineId: selectedPipelineId,
                     deals: [],
                     error: error instanceof Error ? error.message : t('loadFailed'),
                 });
@@ -144,11 +146,12 @@ export default function DealsKanban({
         };
     }, [boardKey, selectedPipelineId, t]);
 
-    const boardLoading = boardKey != null && boardState.key !== boardKey;
+    const boardShowsSelectedPipeline = boardState.pipelineId === selectedPipelineId && boardState.error === null;
+    const boardLoading = boardKey != null && boardState.key !== boardKey && !boardShowsSelectedPipeline;
     const boardError = boardState.key === boardKey ? boardState.error : null;
     const loadedBoardDeals = useMemo(
-        () => boardState.key === boardKey ? boardState.deals : [],
-        [boardKey, boardState],
+        () => boardShowsSelectedPipeline ? boardState.deals : [],
+        [boardShowsSelectedPipeline, boardState],
     );
     const [boardCompanies, setBoardCompanies] = useState<Map<number, Company>>(new Map());
 
@@ -210,12 +213,12 @@ export default function DealsKanban({
 
     const boardRisks = useMemo(() => {
         const combined = new Map(riskByDealId);
-        if (boardRiskState.key === boardKey) {
-            boardRiskState.risks.forEach((risk, dealId) => combined.set(dealId, risk));
-        }
+        boardRiskState.risks.forEach((risk, dealId) => combined.set(dealId, risk));
         return combined;
-    }, [boardKey, boardRiskState, riskByDealId]);
-    const boardRiskLoading = Boolean(filters.risk?.length) && boardRiskState.key !== boardKey;
+    }, [boardRiskState, riskByDealId]);
+    const boardRiskLoading = Boolean(filters.risk?.length)
+        && boardRiskState.key !== boardKey
+        && boardRiskState.key === null;
     const boardRiskError = boardRiskState.key === boardKey ? boardRiskState.error : null;
 
     const matchesBoardDeal = useCallback((deal: Deal) => {
@@ -303,14 +306,16 @@ export default function DealsKanban({
                       ? absoluteStageDeals.findIndex((deal) => deal.id === previousVisible.id) + 1
                       : absoluteStageDeals.length;
                 await moveDeal(dealId, stageId, absoluteIndex);
-                setBoardRevision((revision) => revision + 1);
+                setBoardState((current) => current.pipelineId !== selectedPipelineId
+                    ? current
+                    : { ...current, deals: withDealMoved(current.deals, dealId, stageId, absoluteIndex) });
                 onMoved();
             } catch (err) {
                 toastError(err instanceof Error ? err.message : t('moveFailed'));
                 throw err;
             }
         },
-        [loadedBoardDeals, matchesBoardDeal, onMoved, t],
+        [loadedBoardDeals, matchesBoardDeal, onMoved, selectedPipelineId, t],
     );
 
     const dealName = useCallback((id: UniqueIdentifier) => dealsById.get(Number(id))?.name ?? '', [dealsById]);
