@@ -63,6 +63,8 @@ const BASE_OVERVIEW: ProviderCaptureOverview = {
     reviewCount: 1,
     pendingApprovalCount: 0,
     activationReady: false,
+    retainedData: false,
+    accountResetAvailable: false,
     disclosures: {
         scopes: ['calendar.readonly', 'mail.readonly'],
         admittedFields: ['occurred_at', 'participants', 'subject'],
