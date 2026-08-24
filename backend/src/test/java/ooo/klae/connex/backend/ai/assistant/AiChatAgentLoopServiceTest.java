@@ -195,7 +195,7 @@ class AiChatAgentLoopServiceTest {
 
         assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
         assertEquals("no_progress", result.reason());
-        verify(invocationService, times(3)).completeStructuredRepairable(
+        verify(invocationService, times(4)).completeStructuredRepairable(
                 any(AiInvocation.class), eq(AiAssistantStep.class),
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class),
                 eq(directAdmission), any(Runnable.class));
@@ -263,7 +263,7 @@ class AiChatAgentLoopServiceTest {
 
         assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
         assertEquals("no_progress", result.reason());
-        verify(invocationService, times(3)).completeStructuredRepairable(
+        verify(invocationService, times(4)).completeStructuredRepairable(
                 any(AiInvocation.class), eq(AiAssistantStep.class),
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class),
                 eq(directAdmission), any(Runnable.class));
@@ -648,6 +648,134 @@ class AiChatAgentLoopServiceTest {
                 eq(TURN), eq("Pipeline is healthy."), any(), eq(9), eq(15));
     }
 
+    /**
+     * The last step a turn is allowed is spent answering rather than investigating once more.
+     *
+     * <p>Under the old loop the second step here would have run another tool whose result no step
+     * remained to read, and the requester would have been told the step cap was reached and given
+     * nothing. The provider-call count is identical either way: the closing step is inside the
+     * budget, not an extra call beyond it.
+     */
+    @Test
+    void theLastPermittedStepAnswersFromTheEvidenceAlreadyGathered() throws Exception {
+        when(governanceService.assistantMaxSteps(TURN.workspaceId())).thenReturn(2);
+        AiAssistantStep firstTool = toolStep(
+                "search_records", "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}");
+        AiAssistantStep secondTool = toolStep(
+                "aggregate_metric", "{\"metric\":\"deal_metrics\"}");
+        AiAssistantStep finalStep = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer(
+                        "Two deals are cooling. I could not check their activity.", List.of()));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(firstTool))
+                .thenReturn(parsed(finalStep))
+                .thenReturn(parsed(secondTool));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        verify(invocationService, times(2)).completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        verify(persistenceService).resolve(
+                eq(TURN),
+                eq("Two deals are cooling. I could not check their activity."),
+                any(), anyInt(), anyInt());
+    }
+
+    /** The closing step carries the server-authored instruction to answer without another tool. */
+    @Test
+    void theClosingStepInstructsTheModelToAnswerFromWhatItHas() throws Exception {
+        when(governanceService.assistantMaxSteps(TURN.workspaceId())).thenReturn(2);
+        AiAssistantStep firstTool = toolStep(
+                "search_records", "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}");
+        AiAssistantStep finalStep = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer("Bounded answer.", List.of()));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(firstTool))
+                .thenReturn(parsed(finalStep));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
+
+        service.run(TURN);
+
+        verify(invocationService, times(2)).completeStructuredRepairable(
+                invocations.capture(), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        assertFalse(promptText(invocations.getAllValues().getFirst())
+                .contains("no investigation steps left"));
+        assertTrue(promptText(invocations.getAllValues().getLast())
+                .contains("no investigation steps left"));
+    }
+
+    private String promptText(AiInvocation invocation) {
+        return objectMapper.writeValueAsString(invocation.prompt().getMessages());
+    }
+
+    /**
+     * A loop that stops making progress still answers.
+     *
+     * <p>The third step repeats a call whose result is already cached, which is what the
+     * no-progress guard exists to stop. Stopping it is right; settling the turn with nothing after
+     * two successful reads is not, so the guard now spends a closing step instead.
+     */
+    @Test
+    void aNoProgressLoopSpendsAClosingStepThatAnswers() throws Exception {
+        AiAssistantStep toolStep = toolStep(
+                "search_records", "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}");
+        AiAssistantStep finalStep = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer("Here is what I found.", List.of()));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(toolStep))
+                .thenReturn(parsed(toolStep))
+                .thenReturn(parsed(toolStep))
+                .thenReturn(parsed(finalStep));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        verify(persistenceService).resolve(
+                eq(TURN), eq("Here is what I found."), any(), anyInt(), anyInt());
+    }
+
+    /**
+     * The closing step is offered once, and a turn that still cannot answer settles on the reason
+     * it originally met rather than on a new one invented by the retry.
+     */
+    @Test
+    void aClosingStepThatStillCallsAToolSettlesOnTheOriginalReason() throws Exception {
+        AiAssistantStep toolStep = toolStep(
+                "search_records", "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}");
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(toolStep));
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("no_progress", result.reason());
+        verify(persistenceService, never()).resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt());
+    }
+
     @Test
     void nativeToolResultToolResultFinalCompletesWithStructuredSuggestionsAndTitle()
             throws Exception {
@@ -817,7 +945,7 @@ class AiChatAgentLoopServiceTest {
         assertEquals("malformed_output", result.reason());
         ArgumentCaptor<AiNativeToolRequest> requests =
                 ArgumentCaptor.forClass(AiNativeToolRequest.class);
-        verify(invocationService, times(2)).completeNativeToolsRepairable(
+        verify(invocationService, times(4)).completeNativeToolsRepairable(
                 any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
                 any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
                 any(AiResponseSchema.class), requests.capture(),
@@ -1127,7 +1255,7 @@ class AiChatAgentLoopServiceTest {
 
         assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
         assertEquals("no_progress", result.reason());
-        verify(invocationService, times(3)).completeNativeToolsRepairable(
+        verify(invocationService, times(4)).completeNativeToolsRepairable(
                 any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
                 any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
                 any(AiResponseSchema.class), any(AiNativeToolRequest.class),
@@ -1308,7 +1436,7 @@ class AiChatAgentLoopServiceTest {
 
         assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
         assertEquals("schema_repair_failed", result.reason());
-        verify(invocationService, times(2)).completeStructuredRepairable(
+        verify(invocationService, times(3)).completeStructuredRepairable(
                 any(AiInvocation.class), eq(AiAssistantStep.class),
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class),
                 eq(directAdmission), any(Runnable.class));
@@ -1996,7 +2124,7 @@ class AiChatAgentLoopServiceTest {
 
         assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
         assertEquals("tool_result_budget_exhausted", result.reason());
-        verify(invocationService).completeStructuredRepairable(
+        verify(invocationService, times(2)).completeStructuredRepairable(
                 any(AiInvocation.class), eq(AiAssistantStep.class),
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class),
                 eq(directAdmission), any(Runnable.class));
@@ -2299,6 +2427,33 @@ class AiChatAgentLoopServiceTest {
         assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
         assertEquals("tool_outside_skill_authority", result.reason());
         verify(persistenceService, never()).proposeTool(eq(TURN), anyInt(), any(), any());
+    }
+
+    /**
+     * The closing step does not launder a skill-boundary breach into a budget message.
+     *
+     * <p>A routed skill's synthesis budget is small, so its last permitted step is a closing step,
+     * and a closing step refuses every tool. Refusing it before classifying authority would record
+     * {@code skill_budget_exceeded} for a turn that actually reached outside its declaration, so
+     * the authority check runs first and the durable terminal reason keeps naming the boundary.
+     */
+    @Test
+    void aClosingStepNamesASkillBoundaryBreachRatherThanTheBudget() {
+        routedDigest();
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(toolStep("list_scope_activities", "{\"limit\":5}")))
+                .thenReturn(parsed(toolStep("list_scope_activities", "{\"limit\":6}")))
+                .thenReturn(parsed(toolStep(
+                        "search_records", "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}")));
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals("tool_outside_skill_authority", result.reason());
+        verify(persistenceService, never()).proposeTool(
+                eq(TURN), anyInt(), eq("search_records"), any());
     }
 
     @Test

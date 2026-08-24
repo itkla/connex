@@ -9,6 +9,7 @@ import {
     askConnexSessionActivity,
     askConnexSessionReaders,
     askConnexTerminalKind,
+    askConnexTimedOutMessage,
     askConnexWidthLength,
     askConnexWidthStorageKey,
     boundedAnswerEntries,
@@ -360,6 +361,22 @@ describe("failed-answer recovery", () => {
         });
     });
 
+    it("states a timeout as a timeout, including one this build cannot classify", () => {
+        for (const reason of [
+            null,
+            "generation_timeout",
+            "turn_deadline_exceeded",
+            "provider_idle_timeout",
+            "a_timeout_from_a_later_release",
+        ]) {
+            expect(askConnexTimedOutMessage(reason)).toBe("timeout");
+        }
+    });
+
+    it("states a timed-out turn that named a non-timeout reason with that reason", () => {
+        expect(askConnexTimedOutMessage("budget_exhausted")).toBe("budget");
+    });
+
     it("offers the same question again on a timeout, which says nothing about breadth", () => {
         for (const reason of [
             null,
@@ -421,25 +438,25 @@ describe("the terminal reason vocabulary", () => {
             ["attachment_auto_write_blocked", { category: "generic", message: "generic" }],
             ["budget_exhausted", { category: "capacity", message: "budget" }],
             ["generation_capacity", { category: "capacity", message: "capacity" }],
-            ["generation_timeout", { category: "generic", message: "generic" }],
+            ["generation_timeout", { category: "transient", message: "timeout" }],
             ["image_input_unsupported", { category: "unsupportedInput", message: "imageUnsupported" }],
-            ["internal_error", { category: "generic", message: "generic" }],
+            ["internal_error", { category: "transient", message: "internal" }],
             ["invocation_capacity_exhausted", { category: "capacity", message: "capacity" }],
-            ["malformed_output", { category: "generic", message: "generic" }],
-            ["no_progress", { category: "generic", message: "generic" }],
+            ["malformed_output", { category: "transient", message: "unreadable" }],
+            ["no_progress", { category: "transient", message: "stalled" }],
             ["org_invocation_quota_exhausted", { category: "capacity", message: "capacity" }],
-            ["provider_error", { category: "generic", message: "generic" }],
-            ["provider_idle_timeout", { category: "generic", message: "generic" }],
+            ["provider_error", { category: "transient", message: "provider" }],
+            ["provider_idle_timeout", { category: "transient", message: "timeout" }],
             ["quota_exhausted", { category: "capacity", message: "capacity" }],
-            ["reconciliation_failed", { category: "generic", message: "generic" }],
-            ["request_failed", { category: "generic", message: "generic" }],
+            ["reconciliation_failed", { category: "transient", message: "internal" }],
+            ["request_failed", { category: "transient", message: "internal" }],
             ["restrictions_changed", { category: "authorization", message: "restrictionsChanged" }],
-            ["schema_repair_failed", { category: "generic", message: "generic" }],
+            ["schema_repair_failed", { category: "transient", message: "unreadable" }],
             ["skill_budget_exceeded", { category: "synthesis", message: "skillBudget" }],
             ["step_cap_exceeded", { category: "breadth", message: "breadthSteps" }],
             ["tool_outside_skill_authority", { category: "generic", message: "toolAuthority" }],
             ["tool_result_budget_exhausted", { category: "breadth", message: "breadthResults" }],
-            ["turn_deadline_exceeded", { category: "generic", message: "generic" }],
+            ["turn_deadline_exceeded", { category: "transient", message: "timeout" }],
             ["workspace_disabled", { category: "availability", message: "workspaceDisabled" }],
         ]);
     });

@@ -128,9 +128,12 @@ import {
 import {
     ASK_CONNEX_DEFAULT_WIDTH,
     askConnexActiveState,
+    askConnexTerminalKind,
+    askConnexTimedOutMessage,
     askConnexWidthStorageKey,
     parseStoredAskConnexWidth,
     type AskConnexActiveState,
+    type AskConnexFailureMessage,
     type AskConnexSessionGroupKey,
     type AskConnexWidth,
 } from '@/app/lib/askConnexSurface';
@@ -367,6 +370,28 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             window.setTimeout(() => showApiError(error, fallbackKey), 0);
         },
         [showApiError],
+    );
+    const terminalMessages = useMemo<Record<AskConnexFailureMessage, string>>(() => ({
+        generic: t('turnFailed'),
+        breadthSteps: t('stepCapExceeded'),
+        breadthResults: t('toolResultBudgetExhausted'),
+        skillBudget: t('skillBudgetExceeded'),
+        toolAuthority: t('toolOutsideSkillAuthority'),
+        budget: t('budgetExhausted'),
+        capacity: t('capacityExhausted'),
+        workspaceDisabled: t('workspaceDisabled'),
+        accessRevoked: t('accessRevoked'),
+        restrictionsChanged: t('restrictionsChanged'),
+        imageUnsupported: t('turnImageUnsupported'),
+        provider: t('turnProviderUnavailable'),
+        internal: t('turnInternalError'),
+        unreadable: t('turnUnreadableAnswer'),
+        stalled: t('turnStalled'),
+        timeout: t('turnRanOutOfTime'),
+    }), [t]);
+    const terminalToast = useCallback(
+        (reason: string | null) => terminalMessages[askConnexTerminalKind(reason).message],
+        [terminalMessages],
     );
     const tDisclosure = useTranslations('Assistant.disclosure');
     const tWarmth = useTranslations('Temperature');
@@ -1202,17 +1227,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             );
             await refreshSessions(signal);
             if (durable.status === 'failed') {
-                deferredErrorToast(
-                    durable.terminalReason === 'image_input_unsupported'
-                        ? t('turnImageUnsupported')
-                        : durable.terminalReason === 'tool_result_budget_exhausted'
-                            ? t('toolResultBudgetExhausted')
-                            : durable.terminalReason === 'budget_exhausted'
-                                ? t('budgetExhausted')
-                                : t('toast.turnFailed'),
-                );
+                deferredErrorToast(terminalToast(durable.terminalReason));
             }
-            if (durable.status === 'timed_out') deferredErrorToast(t('toast.turnTimedOut'));
+            if (durable.status === 'timed_out') {
+                deferredErrorToast(
+                    terminalMessages[askConnexTimedOutMessage(durable.terminalReason)]);
+            }
         } catch (error) {
             if (signal.aborted) return;
             if (error instanceof ApiError && error.status === 403) {
@@ -1223,7 +1243,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             dispatchTurn({ type: 'status', status: 'failed', reason: 'reconciliation_failed' });
             deferApiError(error, 'toast.requestFailed');
         }
-    }, [absorbTurnPartial, clearActiveSession, deferApiError, pollDurableTurn, refreshSessions, refreshTranscript, resetStream, t, turnKey]);
+    }, [absorbTurnPartial, clearActiveSession, deferApiError, pollDurableTurn, refreshSessions, refreshTranscript, resetStream, terminalMessages, terminalToast, turnKey]);
 
     const followDurableTurn = useCallback(async (
         initial: AiChatTurn,
@@ -1267,17 +1287,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             );
             await refreshSessions(signal);
             if (durable.status === 'failed') {
-                deferredErrorToast(
-                    durable.terminalReason === 'image_input_unsupported'
-                        ? t('turnImageUnsupported')
-                        : durable.terminalReason === 'tool_result_budget_exhausted'
-                            ? t('toolResultBudgetExhausted')
-                            : durable.terminalReason === 'budget_exhausted'
-                                ? t('budgetExhausted')
-                                : t('toast.turnFailed'),
-                );
+                deferredErrorToast(terminalToast(durable.terminalReason));
             }
-            if (durable.status === 'timed_out') deferredErrorToast(t('toast.turnTimedOut'));
+            if (durable.status === 'timed_out') {
+                deferredErrorToast(
+                    terminalMessages[askConnexTimedOutMessage(durable.terminalReason)]);
+            }
         } catch (error) {
             if (signal.aborted) return;
             if (error instanceof ApiError && error.status === 403) {
@@ -1292,7 +1307,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 durableFollowerRef.current = null;
             }
         }
-    }, [absorbTurnPartial, clearActiveSession, deferApiError, pollDurableTurn, refreshSessions, refreshTranscript, resetStream, t, turnKey]);
+    }, [absorbTurnPartial, clearActiveSession, deferApiError, pollDurableTurn, refreshSessions, refreshTranscript, resetStream, terminalMessages, terminalToast, turnKey]);
 
     useEffect(() => {
         sessionEpochRef.current++;
@@ -2351,19 +2366,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         },
         assistantAuthor: t('assistantAuthor'),
         archive: t('archive'),
-        terminalMessage: {
-            generic: t('turnFailed'),
-            breadthSteps: t('stepCapExceeded'),
-            breadthResults: t('toolResultBudgetExhausted'),
-            skillBudget: t('skillBudgetExceeded'),
-            toolAuthority: t('toolOutsideSkillAuthority'),
-            budget: t('budgetExhausted'),
-            capacity: t('capacityExhausted'),
-            workspaceDisabled: t('workspaceDisabled'),
-            accessRevoked: t('accessRevoked'),
-            restrictionsChanged: t('restrictionsChanged'),
-            imageUnsupported: t('turnImageUnsupported'),
-        },
+        terminalMessage: terminalMessages,
         citations: t('citations'),
         disclosureCreation: tDisclosure('sessionCreation'),
         disclosureList: tDisclosure('sessionList'),
@@ -2462,7 +2465,6 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         turnCancelled: t('turnCancelled'),
         turnResolved: t('turnResolved'),
         turnStreaming: t('turnStreaming'),
-        turnTimedOut: t('turnTimedOut'),
         turnWorking: t('turnWorking'),
         partialAnswer: t('partialAnswer'),
         continueFromPartial: t('continueFromPartial'),
@@ -2592,7 +2594,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 requestCompleted: t('toolCards.summaries.requestCompleted'),
             },
         },
-    }), [citationKind, locale, now, outcomeValueText, scopeDeclaredSummary, scopeList, scopeSummary, t, tDisclosure, tWarmth]);
+    }), [citationKind, locale, now, outcomeValueText, scopeDeclaredSummary, scopeList, scopeSummary, t, terminalMessages, tDisclosure, tWarmth]);
 
     const value = useMemo<AskConnexContextValue>(
         () => ({

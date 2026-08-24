@@ -239,6 +239,9 @@ export type AskConnexRecovery = {
  *   routes that build on text it is no longer entitled to.
  * - `unsupportedInput` — a source that was sent cannot be read at all. The remedy is removing that
  *   source, not asking for less or asking again.
+ * - `transient` — the request was answerable and something along the way did not hold: the provider,
+ *   this service, the shape of what came back, or the time it had. None of them are statements
+ *   about breadth, so the route is asking again rather than asking for less.
  * - `generic` — anything else, including every reason this build has never heard of.
  */
 export type AskConnexFailureClass =
@@ -248,6 +251,7 @@ export type AskConnexFailureClass =
     | 'availability'
     | 'authorization'
     | 'unsupportedInput'
+    | 'transient'
     | 'generic';
 
 /** Which explanation a settled failure is stated with. */
@@ -262,7 +266,12 @@ export type AskConnexFailureMessage =
     | 'workspaceDisabled'
     | 'accessRevoked'
     | 'restrictionsChanged'
-    | 'imageUnsupported';
+    | 'imageUnsupported'
+    | 'provider'
+    | 'internal'
+    | 'unreadable'
+    | 'stalled'
+    | 'timeout';
 
 /** One terminal reason, classified: what kind of failure it is and how it is explained. */
 export type AskConnexTerminalKind = {
@@ -293,17 +302,17 @@ const TERMINAL_KINDS: Readonly<Record<string, AskConnexTerminalKind>> = {
     restrictions_changed: { category: 'authorization', message: 'restrictionsChanged' },
     image_input_unsupported: { category: 'unsupportedInput', message: 'imageUnsupported' },
     tool_outside_skill_authority: { category: 'generic', message: 'toolAuthority' },
-    provider_error: { category: 'generic', message: 'generic' },
-    malformed_output: { category: 'generic', message: 'generic' },
-    schema_repair_failed: { category: 'generic', message: 'generic' },
     attachment_auto_write_blocked: { category: 'generic', message: 'generic' },
-    no_progress: { category: 'generic', message: 'generic' },
-    internal_error: { category: 'generic', message: 'generic' },
-    generation_timeout: { category: 'generic', message: 'generic' },
-    turn_deadline_exceeded: { category: 'generic', message: 'generic' },
-    provider_idle_timeout: { category: 'generic', message: 'generic' },
-    request_failed: { category: 'generic', message: 'generic' },
-    reconciliation_failed: { category: 'generic', message: 'generic' },
+    provider_error: { category: 'transient', message: 'provider' },
+    internal_error: { category: 'transient', message: 'internal' },
+    reconciliation_failed: { category: 'transient', message: 'internal' },
+    request_failed: { category: 'transient', message: 'internal' },
+    malformed_output: { category: 'transient', message: 'unreadable' },
+    schema_repair_failed: { category: 'transient', message: 'unreadable' },
+    no_progress: { category: 'transient', message: 'stalled' },
+    generation_timeout: { category: 'transient', message: 'timeout' },
+    turn_deadline_exceeded: { category: 'transient', message: 'timeout' },
+    provider_idle_timeout: { category: 'transient', message: 'timeout' },
 };
 
 /** Every terminal reason this client classifies, sorted, so a test can enumerate the vocabulary. */
@@ -315,6 +324,19 @@ const GENERIC_KIND: AskConnexTerminalKind = { category: 'generic', message: 'gen
 export function askConnexTerminalKind(reason: string | null): AskConnexTerminalKind {
     if (reason === null) return GENERIC_KIND;
     return TERMINAL_KINDS[reason] ?? GENERIC_KIND;
+}
+
+/**
+ * How a timed-out answer is stated.
+ *
+ * A turn that settles `timed_out` ran out of time by saying so, which is why an unrecognized or
+ * absent reason states the timeout here rather than falling back to the generic failure. On a
+ * `failed` turn the phase says nothing about the cause, so the generic fallback is the honest one;
+ * on this one it would replace something true with something vaguer.
+ */
+export function askConnexTimedOutMessage(reason: string | null): AskConnexFailureMessage {
+    const kind = reason === null ? undefined : TERMINAL_KINDS[reason];
+    return kind === undefined ? 'timeout' : kind.message;
 }
 
 /**
@@ -336,6 +358,7 @@ const RECOVERY_BY_CLASS: Readonly<Record<AskConnexFailureClass, AskConnexRecover
     availability: { retry: false, continueFromPartial: false, narrowScope: false, narrowScopeFirst: false },
     authorization: { retry: false, continueFromPartial: false, narrowScope: false, narrowScopeFirst: false },
     unsupportedInput: { retry: false, continueFromPartial: false, narrowScope: false, narrowScopeFirst: false },
+    transient: { retry: true, continueFromPartial: true, narrowScope: false, narrowScopeFirst: false },
     generic: { retry: true, continueFromPartial: true, narrowScope: false, narrowScopeFirst: false },
 };
 

@@ -70,6 +70,40 @@ public class AiChatAgentLoopService {
     private static final int MAX_CONSECUTIVE_NO_PROGRESS_STEPS = 2;
     private static final String INTERNAL_ERROR = "internal_error";
     private static final String TOOL_OUTSIDE_SKILL_AUTHORITY = "tool_outside_skill_authority";
+    /**
+     * The terminal reasons that mean the turn ran out of room to investigate rather than losing the
+     * authority, the capacity, or the provider it needed.
+     *
+     * <p>Each of these settles with tool evidence already gathered and a requester who asked a
+     * question nobody answered, so the loop spends one closing step turning that evidence into an
+     * answer instead of reporting the guard it met. A reason outside this set either withdrew the
+     * requester's authority, exhausted the budget the closing step would itself have to spend, or
+     * left the provider unable to answer at all.
+     *
+     * <p>A demask warning is deliberately absent even though it settles as {@code malformed_output}:
+     * it means the step referenced a placeholder this turn never issued, and re-prompting a model
+     * that is already inventing identifiers is not a route back to a trustworthy answer.
+     */
+    private static final Set<String> CLOSABLE_REASONS = Set.of(
+            "agent_backstop_exceeded",
+            "malformed_output",
+            "no_progress",
+            "schema_repair_failed",
+            "skill_budget_exceeded",
+            "step_cap_exceeded",
+            "tool_result_budget_exhausted");
+    /**
+     * The server-authored instruction that turns the closing step into an answer.
+     *
+     * <p>Travels outside the CRM_DATA delimiters as every other directive does, and states the
+     * honesty requirement explicitly: a bounded answer that names what went unchecked is useful,
+     * and one that hides the gap is worse than the failure it replaced.
+     */
+    private static final String CLOSING_DIRECTIVE = """
+            You have no investigation steps left. Answer the question now, using only the evidence \
+            already gathered in this turn. Do not request another tool. Cite the records you did \
+            read, and state plainly in the answer which parts of the question you could not check \
+            and why. If the evidence supports no answer at all, say exactly that.""";
     private static final int MAX_FINAL_CHARS = 16_000;
     private static final int MAX_GENERATED_TITLE_CHARS = 80;
     private static final double TEMPERATURE = 0.1;
@@ -197,9 +231,32 @@ public class AiChatAgentLoopService {
             AiSkillCatalog.SkillSpec activeSkill = skillReference == null ? null : routing.skill();
             int consumedSteps = 0;
             int stepCursor = 0;
-            while (consumedSteps < maxSteps && stepOffset + stepCursor < HARD_MAX_STEPS) {
+            boolean closingAttempted = false;
+            boolean closingPending = false;
+            String closingReason = null;
+            steps:
+            while (true) {
+                boolean closing = closingPending;
+                closingPending = false;
+                if (consumedSteps >= maxSteps || stepOffset + stepCursor >= HARD_MAX_STEPS) {
+                    return AiGenerationTaskResult.failed(closing
+                            ? closingReason
+                            : exhaustionReason(
+                                    maxSteps, stepOffset + stepCursor, skillReference != null));
+                }
+                if (!closingAttempted
+                        && lastPermittedStep(
+                                consumedSteps, maxSteps, stepOffset + stepCursor + 1)) {
+                    closing = true;
+                    closingAttempted = true;
+                    closingReason = exhaustionReason(
+                            maxSteps, stepOffset + stepCursor + 1, skillReference != null);
+                }
                 stepCursor++;
                 int stepNumber = stepOffset + stepCursor;
+                AiAssistantPromptAssembler.SkillContext stepContext = closing
+                        ? skillContext.withClosingDirective(CLOSING_DIRECTIVE)
+                        : skillContext;
                 requireWorkspaceEnabled(turn);
                 if (deadlineReached(deadline)) {
                     return AiGenerationTaskResult.timedOut("turn_deadline_exceeded");
@@ -220,7 +277,7 @@ public class AiChatAgentLoopService {
                                     resources,
                                     attachmentContext.data(),
                                     memory.budget(),
-                                    skillContext)
+                                    stepContext)
                             : promptAssembler.assemble(
                                     history,
                                     pageContext,
@@ -230,7 +287,7 @@ public class AiChatAgentLoopService {
                                     attachmentContext.data(),
                                     memory.budget(),
                                     stepRepair,
-                                    skillContext);
+                                    stepContext);
                     AiAssistantPromptAssembler.NativeReplay nativeReplay = nativeTools
                             ? promptAssembler.nativeReplay(
                                     toolTurns,
@@ -330,7 +387,13 @@ public class AiChatAgentLoopService {
                     if (nativeMalformed) {
                         resetMalformedStream(streamingProgress, streamingObserver);
                         if (nativeMalformedRetried) {
-                            return AiGenerationTaskResult.failed("malformed_output");
+                            if (closingAttempted) {
+                                return AiGenerationTaskResult.failed("malformed_output");
+                            }
+                            closingAttempted = true;
+                            closingPending = true;
+                            closingReason = "malformed_output";
+                            continue steps;
                         }
                         nativeMalformedRetried = true;
                         stepRepair = attempt.repair().orElseThrow();
@@ -340,7 +403,13 @@ public class AiChatAgentLoopService {
                 if (outcome instanceof AiStructuredOutcome.Malformed<?>) {
                     resetMalformedStream(streamingProgress, streamingObserver);
                     if (repair != null || attempt.repair().isEmpty()) {
-                        return AiGenerationTaskResult.failed("schema_repair_failed");
+                        if (closingAttempted) {
+                            return AiGenerationTaskResult.failed("schema_repair_failed");
+                        }
+                        closingAttempted = true;
+                        closingPending = true;
+                        closingReason = "schema_repair_failed";
+                        continue steps;
                     }
                     // A repair iteration produced no model decision, so it is not charged to the
                     // step budget. It is still bounded: a second consecutive malformed step ends
@@ -350,7 +419,14 @@ public class AiChatAgentLoopService {
                 }
                 if (!(outcome instanceof AiStructuredOutcome.Parsed<?> parsed)
                         || !(parsed.value() instanceof AiAssistantStep step)) {
-                    return AiGenerationTaskResult.failed("malformed_output");
+                    if (closingAttempted) {
+                        return AiGenerationTaskResult.failed("malformed_output");
+                    }
+                    resetMalformedStream(streamingProgress, streamingObserver);
+                    closingAttempted = true;
+                    closingPending = true;
+                    closingReason = "malformed_output";
+                    continue steps;
                 }
                 if (parsed.demaskWarnings() != 0) {
                     resetMalformedStream(streamingProgress, streamingObserver);
@@ -360,6 +436,9 @@ public class AiChatAgentLoopService {
                 consumedSteps++;
                 if (step.tool() != null) {
                     requireSkillAuthority(activeSkill, step.tool().name());
+                    if (closing) {
+                        return AiGenerationTaskResult.failed(closingReason);
+                    }
                     if (streamingObserver != null) {
                         streamingObserver.requireNoTerminalText();
                     }
@@ -382,7 +461,13 @@ public class AiChatAgentLoopService {
                     if (cachedResult != null) {
                         noProgressSteps++;
                         if (noProgressSteps >= MAX_CONSECUTIVE_NO_PROGRESS_STEPS) {
-                            return AiGenerationTaskResult.failed("no_progress");
+                            if (closingAttempted) {
+                                return AiGenerationTaskResult.failed("no_progress");
+                            }
+                            closingAttempted = true;
+                            closingPending = true;
+                            closingReason = "no_progress";
+                            continue steps;
                         }
                         ToolTurn cachedTurn = new ToolTurn(
                                 stepNumber, step.tool().name(), cachedResult);
@@ -507,7 +592,13 @@ public class AiChatAgentLoopService {
                                         stepNumber, step.tool().name(), toolResult));
                             }
                             if (noProgressSteps >= MAX_CONSECUTIVE_NO_PROGRESS_STEPS) {
-                                return AiGenerationTaskResult.failed("no_progress");
+                                if (closingAttempted) {
+                                    return AiGenerationTaskResult.failed("no_progress");
+                                }
+                                closingAttempted = true;
+                                closingPending = true;
+                                closingReason = "no_progress";
+                                continue steps;
                             }
                         } catch (AiAssistantLoopException exception) {
                             failTool(turn, toolCallId, exception.detailReason());
@@ -515,6 +606,13 @@ public class AiChatAgentLoopService {
                                     turn.workspaceId(), turn.sessionId(), turn.turnId(),
                                     stepNumber, "step", step.tool().name(),
                                     "failed", exception.detailReason(), toolCallId));
+                            if (!closingAttempted
+                                    && CLOSABLE_REASONS.contains(exception.terminalReason())) {
+                                closingAttempted = true;
+                                closingPending = true;
+                                closingReason = exception.terminalReason();
+                                continue steps;
+                            }
                             return AiGenerationTaskResult.failed(exception.terminalReason());
                         } catch (RuntimeException exception) {
                             String reason = toolFailureReason(exception);
@@ -571,7 +669,13 @@ public class AiChatAgentLoopService {
                         }
                         toolTurns.add(admittedTurn);
                         if (noProgressSteps >= MAX_CONSECUTIVE_NO_PROGRESS_STEPS) {
-                            return AiGenerationTaskResult.failed("no_progress");
+                            if (closingAttempted) {
+                                return AiGenerationTaskResult.failed("no_progress");
+                            }
+                            closingAttempted = true;
+                            closingPending = true;
+                            closingReason = "no_progress";
+                            continue steps;
                         }
                     } catch (AiAssistantLoopException exception) {
                         failTool(turn, toolCallId, exception.detailReason());
@@ -579,6 +683,13 @@ public class AiChatAgentLoopService {
                                 turn.workspaceId(), turn.sessionId(), turn.turnId(),
                                 stepNumber, "step", step.tool().name(),
                                 "failed", exception.detailReason()));
+                        if (!closingAttempted
+                                && CLOSABLE_REASONS.contains(exception.terminalReason())) {
+                            closingAttempted = true;
+                            closingPending = true;
+                            closingReason = exception.terminalReason();
+                            continue steps;
+                        }
                         return AiGenerationTaskResult.failed(exception.terminalReason());
                     } catch (RuntimeException exception) {
                         String reason = toolFailureReason(exception);
@@ -597,7 +708,13 @@ public class AiChatAgentLoopService {
                         || finalAnswer.text().isBlank()
                         || finalAnswer.text().length() > MAX_FINAL_CHARS) {
                     resetMalformedStream(streamingProgress, streamingObserver);
-                    return AiGenerationTaskResult.failed("malformed_output");
+                    if (closingAttempted) {
+                        return AiGenerationTaskResult.failed("malformed_output");
+                    }
+                    closingAttempted = true;
+                    closingPending = true;
+                    closingReason = "malformed_output";
+                    continue steps;
                 }
                 String persistedText;
                 try {
@@ -658,8 +775,6 @@ public class AiChatAgentLoopService {
                 return AiGenerationTaskResult.resolved(
                         new AiChatTurnGenerationResult(turn.turnId(), "resolved"));
             }
-            return AiGenerationTaskResult.failed(
-                    exhaustionReason(maxSteps, stepOffset + stepCursor, skillReference != null));
         } catch (AiAssistantLoopException exception) {
             if ("turn_deadline_exceeded".equals(exception.terminalReason())) {
                 return AiGenerationTaskResult.timedOut(exception.terminalReason());
@@ -731,6 +846,26 @@ public class AiChatAgentLoopService {
      * their scope is the wrong advice when the cohort read already succeeded and only the write-up
      * did not converge.
      */
+    /**
+     * Whether the step about to run is the last one the turn is allowed.
+     *
+     * <p>The last permitted step becomes the closing step rather than one more investigation whose
+     * result no step remains to read. Spending it on an answer costs the turn nothing it could have
+     * kept, and it holds every cap exactly: the closing step is inside the budget, never an extra
+     * provider call beyond it. A turn allowed only one step keeps it, because a model that has read
+     * nothing has nothing to close over.
+     *
+     * @param consumedSteps model decisions charged to the budget so far
+     * @param maxSteps the turn's step allowance
+     * @param stepNumber the durable number of the step about to run
+     * @return true when no further step would follow this one
+     */
+    private static boolean lastPermittedStep(
+            int consumedSteps, int maxSteps, int stepNumber) {
+        return consumedSteps >= 1
+                && (consumedSteps + 1 >= maxSteps || stepNumber >= HARD_MAX_STEPS);
+    }
+
     private static String exhaustionReason(
             int maxSteps, int lastStepNumber, boolean routedSkill) {
         if (lastStepNumber >= HARD_MAX_STEPS || maxSteps == HARD_MAX_STEPS) {
