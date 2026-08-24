@@ -72,6 +72,7 @@ import { useRecentRecords } from '@/app/hooks/useRecentRecords';
 import { savedViewHref, savedViewRecordIcon, savedViewRecordPath, savedViewToken } from '@/app/lib/savedViewLink';
 import { recentRecordHref } from '@/app/lib/recentRecords';
 import type { SidebarSectionId } from '@/app/lib/sidebarSections';
+import { settingsDestination, type SettingsDestination } from '@/app/lib/settingsEntryPoints';
 import type { NavAccess } from '@/app/lib/navAccess';
 import { useSidebarSections } from '@/app/hooks/useSidebarSections';
 import { useNotifications } from '@/app/hooks/useNotifications';
@@ -97,9 +98,32 @@ type NavSection = {
     activePaths?: readonly string[];
 };
 
+/**
+ * A sidebar row for a settings, account, or administration destination (#1340 PR 7).
+ *
+ * The row carries no route and no label of its own: both come from the manifest entry named at the
+ * call site, so a destination that consolidates takes its sidebar row to the canonical address under
+ * the canonical name, and the manifest's `entryPoints` describes a registration that exists rather
+ * than one somebody remembered to keep in step.
+ *
+ * @param destination - the manifest destination the row registers
+ * @param icon - the row's leading icon, which the manifest does not describe
+ * @param translate - resolves an absolute message key in the reader's locale
+ * @param extra - row state the manifest does not describe, such as query-aware active matching
+ */
+function settingsNavItem(
+    destination: SettingsDestination,
+    icon: NavItem["icon"],
+    translate: (key: string) => string,
+    extra: Omit<Partial<NavItem>, "href" | "label"> = {},
+): NavItem {
+    return { label: translate(destination.titleKey), href: destination.href, icon, ...extra };
+}
+
 function useSections(navAccess: NavAccess): NavSection[] {
     const t = useTranslations("CommonSidebar");
     const tCapability = useTranslations("CapabilityUnavailable");
+    const tManifest = useTranslations();
     const { activeWorkspace } = useWorkspace();
     const isOrgAdmin = activeWorkspace?.orgRole != null;
     const sectionPathname = usePathname() ?? "";
@@ -107,27 +131,24 @@ function useSections(navAccess: NavAccess): NavSection[] {
     const captureReviewsActive =
         sectionPathname === "/account/connections" && sectionSearchParams.get("panel") === "reviews";
     const workspaceItems: NavItem[] = [
-        { label: t("navUsers"), href: "/users", icon: UserGroupIcon },
+        settingsNavItem(settingsDestination("workspace.people-directory"), UserGroupIcon, tManifest),
         ...(navAccess.workflows
             ? [{ label: t("navWorkflows"), href: "/workflows", icon: BoltIcon }]
             : []),
         ...(navAccess.captureReviews !== "disabled"
-            ? [{
-                label: t("navCaptureReviews"),
-                href: "/account/connections/reviews",
-                icon: InboxIcon,
+            ? [settingsNavItem(settingsDestination("account.capture-reviews"), InboxIcon, tManifest, {
                 active: captureReviewsActive,
                 availabilityLabel: navAccess.captureReviews === "unavailable"
                     ? tCapability("title")
                     : undefined,
-            }]
+            })]
             : []),
-        { label: t("navSettings"), href: "/settings/members", icon: Cog6ToothIcon },
+        settingsNavItem(settingsDestination("settings.home"), Cog6ToothIcon, tManifest),
         ...(isOrgAdmin
-            ? [{ label: t("navOrganization"), href: "/organization/members", icon: BuildingLibraryIcon }]
+            ? [settingsNavItem(settingsDestination("organization.administrators"), BuildingLibraryIcon, tManifest)]
             : []),
         ...(navAccess.auditLog
-            ? [{ label: t("navAuditLog"), href: "/admin/logs", icon: ClipboardDocumentListIcon }]
+            ? [settingsNavItem(settingsDestination("workspace.audit-log"), ClipboardDocumentListIcon, tManifest)]
             : []),
     ];
     const marketingSection: NavSection = {
@@ -184,12 +205,12 @@ function useSections(navAccess: NavAccess): NavSection[] {
             activePaths: ["/library"],
             items: [
                 { label: t("navDocuments"), href: "/library/documents", icon: DocumentDuplicateIcon },
-                {
-                    label: t("navApprovalPolicies"),
-                    href: "/records/approval-policies",
-                    icon: ShieldCheckIcon,
-                    nested: true,
-                },
+                settingsNavItem(
+                    settingsDestination("workspace.approval-policies"),
+                    ShieldCheckIcon,
+                    tManifest,
+                    { nested: true },
+                ),
                 { label: t("navTags"), href: "/library/tags", icon: TagIcon },
                 { label: t("navFiles"), href: "/library/files", icon: FolderIcon },
             ],
@@ -209,17 +230,32 @@ function useSections(navAccess: NavAccess): NavSection[] {
     ];
 }
 
+/**
+ * Whether a row's destination is the page being read.
+ *
+ * The fragment is dropped first: a consolidated settings destination is addressed at the section
+ * that absorbed the job, and a pathname never carries one, so matching the whole href would leave
+ * every deep-linked row permanently inactive. `longestMatchingHref` then still resolves the most
+ * specific row, so a reader on People & access sees that row marked rather than the Settings row
+ * above it.
+ */
 function isActive(pathname: string, href: string): boolean {
-    if (href === "/dashboard") return pathname === "/dashboard";
-    return pathname === href || pathname.startsWith(`${href}/`);
+    const path = href.split("#")[0];
+    if (path === "/dashboard") return pathname === "/dashboard";
+    return pathname === path || pathname.startsWith(`${path}/`);
 }
 
 function longestMatchingHref(items: readonly NavItem[], pathname: string): string | null {
     let longestMatch: string | null = null;
+    let longestPath = 0;
     for (const item of items) {
         if (item.active !== undefined) continue;
         if (!isActive(pathname, item.href)) continue;
-        if (longestMatch === null || item.href.length > longestMatch.length) longestMatch = item.href;
+        const pathLength = item.href.split("#")[0].length;
+        if (longestMatch === null || pathLength > longestPath) {
+            longestMatch = item.href;
+            longestPath = pathLength;
+        }
     }
     return longestMatch;
 }
@@ -484,7 +520,9 @@ function ThemeSubmenu() {
 
 function UserMenu({ user, onLogout, rail }: { user: User; onLogout: () => void; rail: boolean }) {
     const t = useTranslations("CommonSidebar");
+    const tManifest = useTranslations();
     const tn = useTranslations("Notifications");
+    const accountSettings = settingsDestination("account.home");
     const locale = useLocale();
     const router = useRouter();
     const { unread } = useNotifications();
@@ -564,11 +602,11 @@ function UserMenu({ user, onLogout, rail }: { user: User; onLogout: () => void; 
                     </DropdownMenu.Item>
                     <DropdownMenu.Item asChild>
                         <Link
-                            href="/account"
+                            href={accountSettings.href}
                             className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-brand-light data-[highlighted]:text-brand-dark"
                         >
                             <Cog6ToothIcon className="size-4" />
-                            {t("accountSettings")}
+                            {tManifest(accountSettings.titleKey)}
                         </Link>
                     </DropdownMenu.Item>
                     <DropdownMenu.Item asChild>
