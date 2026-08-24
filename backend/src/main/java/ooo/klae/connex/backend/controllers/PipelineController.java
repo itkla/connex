@@ -132,7 +132,7 @@ public class PipelineController {
     @PutMapping("/{pipelineId}/stages")
     public List<StageDto> replaceStages(@PathVariable int pipelineId, @Valid @RequestBody PipelineStagesDto dto) {
         return pipelineService
-            .replaceStages(pipelineId, dto.getStages().stream().map(StageDto::toBean).toList())
+            .replaceStages(pipelineId, dto.getStages().stream().map(PipelineStagesDto.Entry::toBean).toList())
             .stream().map(StageDto::from).toList();
     }
 
