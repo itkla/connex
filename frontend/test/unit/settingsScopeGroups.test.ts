@@ -342,7 +342,10 @@ describe("the consolidations name the jobs they cannot yet do", () => {
     });
 
     it.each([
-        { view: COMMUNICATIONS_VIEW, target: '<Link href="/account/notifications">' },
+        {
+            view: COMMUNICATIONS_VIEW,
+            target: '<Link href={settingsDestination("account.notifications").href}>',
+        },
         { view: CRM_VIEW, target: '<Link href="/workflows">' },
     ])("offers the surface that serves the nearest shipped job", ({ view, target }) => {
         const text = source(view);
@@ -515,13 +518,23 @@ describe("the shipped panels render from the destination that absorbed them", ()
 });
 
 describe("the scope destinations wear their own chrome", () => {
-    it.each(GROUPS)("$id steps out of the legacy settings header and tab strip", (group) => {
-        const chrome = source(path.join(COMPONENTS, "WorkspaceSettingsChrome.tsx"));
+    /**
+     * These pages used to be checked against the bail-out in `WorkspaceSettingsChrome`, which
+     * withheld the legacy "Settings" header and its nine-tab strip from any route the manifest named
+     * as a scope group. #1340's final PR shipped the last seven of those groups, which left the
+     * chrome with nothing to stand over, and it was deleted along with the strip and both remaining
+     * tab-strip entry points. The claim is therefore no longer "it steps aside for me" but "there is
+     * nothing left to step aside", which is the stronger of the two and is what this asserts.
+     */
+    it.each(GROUPS)("$id draws its own header, with no legacy chrome left to stack above it", (group) => {
+        const layout = source(path.join(APP, "(app)", "settings", "layout.tsx"));
 
-        expect(
-            chrome,
-            "the bail-out is read from the manifest, so a migrated group inherits it by existing",
-        ).toContain("SETTINGS_GROUPS.map((group) => group.route)");
+        expect(existsSync(path.join(COMPONENTS, "WorkspaceSettingsChrome.tsx"))).toBe(false);
+        expect(existsSync(path.join(COMPONENTS, "SettingsTabs.tsx"))).toBe(false);
+        expect(layout, "the segment layout carries the page width and nothing else").not.toContain(
+            "PageHeader",
+        );
+        expect(source(group.view)).toContain("<PageHeader");
         expect(SETTINGS_GROUPS.some((candidate) => candidate.route === group.route)).toBe(true);
     });
 

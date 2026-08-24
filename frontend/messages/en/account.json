@@ -1,16 +1,11 @@
 {
   "Account": {
-    "title": "Account",
-    "subtitle": "Manage your profile, security, and how Connex works for you.",
     "tabProfile": "Profile",
     "tabSecurity": "Security",
-    "tabConnections": "Connections",
     "tabNotifications": "Notifications",
     "tabInvites": "Invites"
   },
   "AccountProfile": {
-    "title": "Profile",
-    "subtitle": "Your personal details. This is how you appear to teammates across every workspace.",
     "photoHint": "A square JPEG, PNG, or WebP image works best.",
     "changePhoto": "Change photo",
     "photoAlt": "Your profile photo",
@@ -557,10 +552,6 @@
     "cancel": "Cancel",
     "left": "You left the workspace",
     "leaveFailed": "Could not leave the workspace."
-  },
-  "AccountLayout": {
-    "title": "Account settings",
-    "description": "Manage your profile, security, and how Connex works for you"
   },
   "AccountConnectionConsent": {
     "title": "Connect {provider}",

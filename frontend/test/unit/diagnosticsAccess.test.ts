@@ -4,11 +4,11 @@ import { describe, expect, it } from "vitest";
 
 import { DEFAULT_CAPABILITIES } from "@/app/lib/api";
 import { NO_NAV_ACCESS, resolveNavAccess } from "@/app/lib/navAccess";
+import { SETTINGS_ENTRIES } from "@/app/lib/settingsManifest";
 
 const PANEL = "app/components/diagnostics/DiagnosticsPanel.tsx";
 const SETTINGS_ACTIONS = "app/lib/actions/settingsNavigationActions.ts";
 const SEED_ACTIONS = "app/lib/actions/seedActions.ts";
-const SETTINGS_TABS = "app/components/settings/SettingsTabs.tsx";
 
 function source(relativePath: string): string {
     return readFileSync(path.resolve(process.cwd(), relativePath), "utf8");
@@ -109,9 +109,20 @@ describe("diagnostics is offered exactly where its permission holds", () => {
         expect(resolveNavAccess(DEFAULT_CAPABILITIES, []).diagnostics).toBe(false);
     });
 
-    it("gates the palette entry and the settings tab on that same resolved access", () => {
+    it("gates the palette entry and the settings navigation on that same resolved access", () => {
+        const destination = SETTINGS_ENTRIES.find(
+            (entry) => entry.currentRoute === "/settings/workspace/audit-diagnostics",
+        );
+
         expect(source(SETTINGS_ACTIONS)).toContain("reachable: (navAccess) => navAccess.diagnostics");
         expect(source(SEED_ACTIONS)).not.toContain("/settings/diagnostics");
-        expect(source(SETTINGS_TABS)).toContain('usePermission("WORKSPACE_SETTINGS")');
+        /**
+         * The peer-tab strip that used to carry this gate went with its last two destinations in
+         * #1340's final scope-group PR. What gates the destination now is the manifest, which the
+         * settings navigation reads: the consolidated page is reachable by either of the two
+         * permissions it merged, and a workspace administrator holds this one.
+         */
+        expect(destination?.access.permissions).toContain("WORKSPACE_SETTINGS");
+        expect(destination?.access.permissionMatch).toBe("any");
     });
 });

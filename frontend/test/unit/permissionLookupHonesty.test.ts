@@ -17,7 +17,7 @@ vi.mock('next-intl/server', () => ({
     getLocale: () => Promise.resolve('en'),
 }));
 
-const CONNECTIONS_PAGE = 'app/(app)/account/connections/page.tsx';
+const CONNECTIONS_PAGE = 'app/(app)/settings/personal/connected-accounts/page.tsx';
 const CONNECTIONS_PANEL = 'app/components/account/ConnectionsPanel.tsx';
 const SNAPSHOT_PAGE = 'app/(app)/overview/reports/[id]/snapshots/[snapshotId]/page.tsx';
 

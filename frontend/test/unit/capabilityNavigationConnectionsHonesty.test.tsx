@@ -371,7 +371,7 @@ describe("app-shell capability navigation honesty", () => {
         const html = renderToStaticMarkup(sidebar);
 
         expect(sidebar.props.navAccess.captureReviews).toBe("enabled");
-        expect(html).toContain("/account/connections/reviews");
+        expect(html).toContain("/settings/personal/connected-accounts#reviews");
         expect(html).not.toContain("CapabilityUnavailable.title");
     });
 
@@ -384,7 +384,7 @@ describe("app-shell capability navigation honesty", () => {
         const html = renderToStaticMarkup(sidebar);
 
         expect(sidebar.props.navAccess.captureReviews).toBe("unavailable");
-        expect(html).toContain("/account/connections/reviews");
+        expect(html).toContain("/settings/personal/connected-accounts#reviews");
         expect(html).toContain("CapabilityUnavailable.title");
         expect(html).toContain("CommonSidebar.navDashboard");
     });
@@ -503,8 +503,8 @@ describe("capture-review route capability honesty", () => {
     it("redirects to connections only when every capture provider resolves disabled", async () => {
         stubAppReads(DISABLED_CAPABILITIES);
 
-        await expect(CaptureReviewsPage()).rejects.toThrow("redirect:/account/connections");
+        await expect(CaptureReviewsPage()).rejects.toThrow("redirect:/settings/personal/connected-accounts");
 
-        expect(redirectMock).toHaveBeenCalledWith("/account/connections");
+        expect(redirectMock).toHaveBeenCalledWith("/settings/personal/connected-accounts");
     });
 });

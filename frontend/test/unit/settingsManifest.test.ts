@@ -775,14 +775,36 @@ describe("the redirect gates refuse a matrix that has drifted from the manifest"
         ).toBe(1);
     });
 
+    /**
+     * `offCanonicalRedirects` only judges an entry whose canonical destination is actually served —
+     * otherwise it would demand that a redirect point at a page that does not exist. Every canonical
+     * destination ships now, so the silence can no longer be shown against the manifest itself and
+     * is shown against a synthetic entry instead. Both branches are exercised: the same template
+     * with a served canonical is caught, so the silence is a rule and not an inability to fire.
+     */
     it("stays silent for a job whose canonical destination has not shipped", () => {
         if (!held) throw new Error("legacy.settings-security is the template for this probe");
+        const unshipped: SettingsEntry = {
+            ...held,
+            id: "test.unshipped",
+            canonicalRoute: "/settings/personal/unbuilt",
+        };
+        const drifted: SettingsEntry = {
+            ...held,
+            id: "test.drifted",
+            redirectsTo: "/account/security",
+        };
 
         expect(
             settingsRouteServed(held.canonicalRoute),
-            "this expectation is what makes the assertion below meaningful; it inverts when /settings/personal/security ships",
-        ).toBe(false);
-        expect(offCanonicalRedirects([held])).toEqual([]);
+            "the personal scope ships now, which is what makes the synthetic entry necessary",
+        ).toBe(true);
+        expect(settingsRouteServed(unshipped.canonicalRoute)).toBe(false);
+        expect(offCanonicalRedirects([unshipped])).toEqual([]);
+        expect(
+            offCanonicalRedirects([drifted]).length,
+            "and the same template with a served canonical is still caught, so the silence is a rule",
+        ).toBe(1);
     });
 
     it("catches a fragment the entry never claimed", () => {
@@ -937,9 +959,11 @@ describe("settings manifest owns each canonical destination once", () => {
      * inventory of exactly which addresses do, so an accidental collision has to be added here to
      * pass rather than disappearing into a set that was always going to be unique.
      *
-     * Each pair below is one canonical address reached by two legacy names. Five are the personal
-     * scope's `/settings/*` aliases for `/account/*`, which stay until the personal routes ship; the
-     * sixth is `/organization` and the group route it now forwards to.
+     * Each line below is one canonical address reached by more than one name. Seven of the nine are
+     * the personal and workspace groups whose canonical destinations shipped last: each is its own
+     * entry plus the one or two retired addresses that forward onto it, which is what a completed
+     * consolidation looks like in this table. The other two are `/organization` and the legacy
+     * `/settings/sso`, whose successors arrived earlier.
      */
     it("enumerates every canonical address that more than one entry resolves to", () => {
         const byLink = new Map<string, string[]>();
@@ -955,10 +979,13 @@ describe("settings manifest owns each canonical destination once", () => {
         expect(collapsed).toEqual([
             "/settings/organization/general# <- organization.general, organization.home",
             "/settings/organization/identity#sso <- legacy.settings-sso, organization.sso",
-            "/settings/personal/notifications# <- account.notifications, legacy.settings-notifications",
-            "/settings/personal/profile# <- account.home, account.profile",
-            "/settings/personal/security# <- account.security, legacy.settings-security",
-            "/settings/personal/workspaces# <- account.invites, legacy.settings-membership",
+            "/settings/personal/connected-accounts# <- account.connections, personal.connected-accounts",
+            "/settings/personal/notifications# <- account.notifications, legacy.settings-notifications, personal.notifications",
+            "/settings/personal/profile# <- account.home, account.profile, personal.profile",
+            "/settings/personal/security# <- account.security, legacy.settings-security, personal.security",
+            "/settings/personal/workspaces# <- account.invites, legacy.settings-membership, personal.workspaces",
+            "/settings/workspace/data-privacy# <- workspace.data, workspace.data-privacy",
+            "/settings/workspace/general# <- workspace.general, workspace.identity",
         ]);
     });
 });
@@ -1040,11 +1067,18 @@ describe("settings manifest agrees with the navigation that links into settings"
      * A canary over the scan itself, not over the manifest: it fails if the reconciliation above
      * ever runs against nothing and passes vacuously.
      *
-     * Lowered from 20 in #1340 PR 8, and only because the surface it counts genuinely shrank. The
-     * organization tab strip was deleted and the workspace strip fell from nine links to two, which
-     * is the point of the PR — those destinations are now reached through the manifest-resolved
-     * navigation rather than spelled on a strip. The mark tracks the surface down; it must never be
-     * lowered to accommodate a scan that stopped finding files it should still be reading.
+     * Lowered from 20 to 12 in #1340 PR 8, and from 12 to 7 here — each time because the surface it
+     * counts genuinely shrank, and each time in the commit that shrank it. PR 8 deleted the
+     * organization strip and cut the workspace strip from nine links to two; this PR shipped the
+     * seven destinations those last two strips existed for, so `AccountTabs` and `SettingsTabs` were
+     * deleted and `linked` went to zero. What the canary now counts is `named` alone: the entry ids
+     * the sidebar, the user menu, and the palette register through the manifest, which is the whole
+     * of the hand-registered settings surface that remains.
+     *
+     * The mark tracks the surface down; it must never be lowered to accommodate a scan that stopped
+     * finding files it should still be reading. The distinction is that `TAB_STRIP_SOURCES` is now
+     * empty by decision rather than by a scan failing — the files it named are deleted, and their
+     * entry-point variants were removed from `SettingsEntryPoint` so nothing can claim them.
      */
     it("scans navigation sources that actually carry settings links", () => {
         const linked = NAVIGATION_SOURCES.flatMap((source) => linkedRoutes(source.file)).filter(
@@ -1052,7 +1086,7 @@ describe("settings manifest agrees with the navigation that links into settings"
         );
         const named = GENERATED_SOURCES.flatMap((source) => source.registered());
 
-        expect(new Set([...linked, ...named]).size).toBeGreaterThan(12);
+        expect(new Set([...linked, ...named]).size).toBeGreaterThan(7);
     });
 });
 
@@ -1123,17 +1157,37 @@ describe("an entry point resolves the canonical address once it is served", () =
         );
     });
 
+    /**
+     * The rule is that an entry point sits on the address that works: the canonical destination once
+     * some page serves it, and the entry's own route until then. Both halves were once visible in
+     * the manifest, because the personal scope had not shipped. It has, so the first half is
+     * asserted against the two jobs that moved and the second against a synthetic entry whose
+     * canonical route nothing serves — which is the only way left to show that the fallback is a
+     * rule rather than a branch that can no longer be reached.
+     */
     it("keeps a job whose canonical destination has not shipped on the address that works", () => {
         const account = entriesByRoute.get("/account");
         const reviews = entriesByRoute.get("/account/connections/reviews");
         if (!account || !reviews) throw new Error("the personal-scope jobs left the manifest");
+        const unshipped: SettingsEntry = {
+            ...account,
+            id: "test.unshipped",
+            canonicalRoute: "/settings/personal/unbuilt",
+        };
 
         expect(
             registeredRoutes.has(account.canonicalRoute),
-            "this expectation is what makes the two below meaningful; it inverts when /settings/personal/profile ships",
-        ).toBe(false);
-        expect(settingsDestinationHref(account)).toBe("/account");
-        expect(settingsDestinationHref(reviews)).toBe("/account/connections/reviews");
+            "the personal scope ships now, so both jobs resolve to their canonical destinations",
+        ).toBe(true);
+        expect(settingsDestinationHref(account)).toBe("/settings/personal/profile");
+        expect(settingsDestinationHref(reviews)).toBe(
+            "/settings/personal/connected-accounts#reviews",
+        );
+        expect(registeredRoutes.has(unshipped.canonicalRoute)).toBe(false);
+        expect(
+            settingsDestinationHref(unshipped),
+            "an unserved canonical leaves the entry point on the route that still renders",
+        ).toBe("/account");
     });
 
     it("addresses a destination that owns its canonical route without a fragment", () => {

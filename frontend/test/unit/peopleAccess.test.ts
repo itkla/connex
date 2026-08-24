@@ -496,15 +496,18 @@ describe("the shipped panels still render in the home they had", () => {
 });
 
 describe("people & access wears its own chrome", () => {
-    it("steps out of the legacy settings header and tab strip", () => {
-        const chrome = source(
-            path.join(process.cwd(), "app", "components", "settings", "WorkspaceSettingsChrome.tsx"),
-        );
+    it("draws its own header, over a segment layout that draws none", () => {
+        const layout = source(path.join(process.cwd(), "app", "(app)", "settings", "layout.tsx"));
 
-        expect(chrome).toContain("OWN_CHROME_ROUTES");
-        expect(chrome, "the bail-out is read from the manifest, so a later group inherits it")
-            .toContain("SETTINGS_GROUPS.map((group) => group.route)");
-        expect(chrome).toContain("if (OWN_CHROME_ROUTES.has(pathname)) return null;");
+        expect(
+            existsSync(
+                path.join(process.cwd(), "app", "components", "settings", "WorkspaceSettingsChrome.tsx"),
+            ),
+            "the legacy chrome dissolved when its last two destinations moved",
+        ).toBe(false);
+        expect(layout).not.toContain("PageHeader");
+        expect(layout, "and the strip it rendered went with it").not.toContain("SettingsTabs");
+        expect(source(PEOPLE_ACCESS)).toContain("<PageHeader");
     });
 
     it("names itself with the key the navigation labels the group with", () => {

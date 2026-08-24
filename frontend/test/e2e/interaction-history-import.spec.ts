@@ -18,7 +18,7 @@ function activityCsv(email: string, sourceId: string, subject: string): Buffer {
 }
 
 async function openHistoryImport(page: Page, locale: "en" | "ja") {
-    await page.goto("/settings/data");
+    await page.goto("/settings/workspace/data-privacy");
     await page.getByRole("button", {
         name: message(locale, "workspace", "WorkspaceData.historyAction"),
     }).click();
