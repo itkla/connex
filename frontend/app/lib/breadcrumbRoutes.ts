@@ -335,14 +335,6 @@ function shell(crumbs: BreadcrumbCrumb[]): BreadcrumbResolution {
 }
 
 /**
- * The trail for a canonical settings destination, or null when the reader may not be there.
- *
- * The scope decides the root, exhaustively: an organization destination is rooted in the
- * organization and refuses a reader holding no role there, exactly as the legacy organization
- * routes do; a workspace destination is rooted in the active workspace; a personal one is rooted in
- * Settings alone, because nothing about it belongs to the workspace the reader happens to be in.
- */
-/**
  * The crumb for the Connected accounts destination, as a parent rather than as the current page.
  *
  * Its name is the manifest group's, resolved the way {@link canonicalSettingsTrail} resolves every
@@ -360,6 +352,14 @@ function connectedAccountsCrumb(context: BreadcrumbRouteContext): BreadcrumbCrum
     );
 }
 
+/**
+ * The trail for a canonical settings destination, or null when the reader may not be there.
+ *
+ * The scope decides the root, exhaustively: an organization destination is rooted in the
+ * organization and refuses a reader holding no role there, exactly as the legacy organization
+ * routes do; a workspace destination is rooted in the active workspace; a personal one is rooted in
+ * Settings alone, because nothing about it belongs to the workspace the reader happens to be in.
+ */
 function canonicalSettingsTrail(
     pathname: string,
     group: SettingsGroup,

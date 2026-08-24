@@ -199,13 +199,6 @@ function declaringEntries(point: SettingsEntryPoint): readonly string[] {
     return entries.filter((entry) => entry.entryPoints.includes(point)).map((entry) => entry.id);
 }
 
-/** The sources that can register a given entry point through a literal route. */
-function sourcesRegistering(point: Exclude<SettingsEntryPoint, "contextual">): string[] {
-    return NAVIGATION_SOURCES.filter((source) => source.points.includes(point)).map(
-        (source) => source.file,
-    );
-}
-
 const HREF_PATTERN = /href[=:]\s*\{?["'](\/[^"'\s]*)["']/g;
 const PALETTE_PATTERN =
     /(?:navigateAction\(\s*"[^"]+",\s*"[^"]+",\s*"(\/[^"]*)"|router\.(?:push|replace)\(\s*"(\/[^"]*)")/g;
@@ -1016,24 +1009,23 @@ function unshippedDeclarations(
         .sort();
 }
 
+/**
+ * **The forward direction — "every declared entry point is really registered somewhere" — is not
+ * checked here any more, and its test was deleted rather than left passing.** It reconciled a
+ * manifest claim against a source file that spells routes by hand, and there is no such file left:
+ * the last two tab strips went with the destinations they existed for, so `TAB_STRIP_SOURCES` is
+ * empty and the filter that test opened with could never match. A test that cannot fail is worse
+ * than no test, because it reads like coverage.
+ *
+ * `GENERATED_SOURCES` owns that direction now, and owns it more strictly. The suite below
+ * ("settings manifest entry points are generated from the registrations that ship") reconciles both
+ * ways per surface — `undeclaredRegistrations` catches a registration the manifest does not declare,
+ * `unshippedDeclarations` catches a declaration nothing registers — and each has a mutation probe
+ * beside it proving it fires. What survives here is the reverse direction over the shell files,
+ * which is a different claim: a shell renders the navigation from the manifest at request time, so a
+ * literal settings href appearing in one is a hand-written link that has escaped it.
+ */
 describe("settings manifest agrees with the navigation that links into settings", () => {
-    it("finds every declared registry entry point in the source that registers it", () => {
-        const missing = entries.flatMap((entry) =>
-            entry.entryPoints
-                .filter((point): point is Exclude<SettingsEntryPoint, "contextual"> => point !== "contextual")
-                .filter((point) => sourcesRegistering(point).length > 0)
-                .filter(
-                    (point) =>
-                        !sourcesRegistering(point).some((file) =>
-                            linkedRoutes(file).includes(entry.currentRoute),
-                        ),
-                )
-                .map((point) => `${entry.id} claims ${point} but no such registration links ${entry.currentRoute}`),
-        );
-
-        expect(missing).toEqual([]);
-    });
-
     it("declares an entry point for every registered destination a navigation source links to", () => {
         const undeclared = NAVIGATION_SOURCES.flatMap((source) =>
             [...new Set(linkedRoutes(source.file))]
@@ -1064,29 +1056,41 @@ describe("settings manifest agrees with the navigation that links into settings"
     });
 
     /**
-     * A canary over the scan itself, not over the manifest: it fails if the reconciliation above
-     * ever runs against nothing and passes vacuously.
+     * A canary over the scans, not over the manifest: it fails if the reconciliation runs against
+     * nothing and starts passing vacuously.
      *
-     * Lowered from 20 to 12 in #1340 PR 8, and from 12 to 7 here — each time because the surface it
-     * counts genuinely shrank, and each time in the commit that shrank it. PR 8 deleted the
-     * organization strip and cut the workspace strip from nine links to two; this PR shipped the
-     * seven destinations those last two strips existed for, so `AccountTabs` and `SettingsTabs` were
-     * deleted and `linked` went to zero. What the canary now counts is `named` alone: the entry ids
-     * the sidebar, the user menu, and the palette register through the manifest, which is the whole
-     * of the hand-registered settings surface that remains.
+     * **It counts per surface rather than in aggregate, and that changed here.** The old form summed
+     * every registration into one set and checked the total against a mark, which worked while a tab
+     * strip contributed most of the count. It does not work now: `linked` is zero, because the last
+     * two strips are deleted and the shell files spell no routes, so an aggregate mark would be met
+     * by the palette alone and one silently broken scrape — a renamed `useSections`, a `functionBody`
+     * that stops matching — would sail through it. Requiring every lane to report registrations is
+     * what makes a broken scrape fail rather than merely lower a number.
      *
      * The mark tracks the surface down; it must never be lowered to accommodate a scan that stopped
-     * finding files it should still be reading. The distinction is that `TAB_STRIP_SOURCES` is now
-     * empty by decision rather than by a scan failing — the files it named are deleted, and their
-     * entry-point variants were removed from `SettingsEntryPoint` so nothing can claim them.
+     * finding files it should still be reading. `TAB_STRIP_SOURCES` is empty by decision rather than
+     * by a scan failing — the files it named are deleted, and their entry-point variants were removed
+     * from `SettingsEntryPoint`, so nothing can claim them. That the shell scan still finds its files
+     * is gated by the inventory below, which pins them by name.
      */
-    it("scans navigation sources that actually carry settings links", () => {
-        const linked = NAVIGATION_SOURCES.flatMap((source) => linkedRoutes(source.file)).filter(
-            underSettingsRoot,
-        );
-        const named = GENERATED_SOURCES.flatMap((source) => source.registered());
+    it("scans navigation sources that actually register settings destinations", () => {
+        const perSurface = GENERATED_SOURCES.map((source) => ({
+            describe: source.describe,
+            count: source.registered().length,
+        }));
 
-        expect(new Set([...linked, ...named]).size).toBeGreaterThan(7);
+        expect(
+            perSurface.filter((surface) => surface.count === 0),
+            "a generated surface reporting nothing means its scrape broke, not that it stopped registering",
+        ).toEqual([]);
+        expect(
+            new Set(GENERATED_SOURCES.flatMap((source) => source.registered())).size,
+            "the hand-registered settings surface that remains, counted once per destination",
+        ).toBeGreaterThan(7);
+        expect(
+            SHELL_SOURCES.length,
+            "and the shell scan still finds the files whose links the gates above reconcile",
+        ).toBeGreaterThan(0);
     });
 });
 

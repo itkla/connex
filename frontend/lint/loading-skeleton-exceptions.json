@@ -4,7 +4,7 @@
         {
             "route": "/account",
             "kind": "redirect-only",
-            "reason": "Renders nothing: redirects straight to /account/profile, which owns the skeleton the reader actually sees."
+            "reason": "Renders nothing: redirects straight to /settings/personal/profile, which owns the skeleton the reader actually sees."
         },
         {
             "route": "/account/connections",
@@ -14,7 +14,7 @@
         {
             "route": "/account/connections/reviews",
             "kind": "resolver-redirect",
-            "reason": "A stable address for the capture review queue. It resolves the reader's own connected provider and redirects into /account/connections, whose skeleton already stands in for the panel it lands on; its only non-redirect outcome is CapabilityUnavailablePage, a terminal explanation that no skeleton should promise."
+            "reason": "A stable address for the capture review queue. It resolves the reader's own connected provider and redirects into /settings/personal/connected-accounts, whose skeleton already stands in for the panel it lands on; its only non-redirect outcome is CapabilityUnavailablePage, a terminal explanation that no skeleton should promise."
         },
         {
             "route": "/account/invites",
@@ -44,7 +44,7 @@
         {
             "route": "/organization",
             "kind": "redirect-only",
-            "reason": "Renders nothing: redirects straight to /organization/overview, which owns the skeleton."
+            "reason": "Renders nothing: redirects straight to /settings/organization/general, which owns the skeleton."
         },
         {
             "route": "/organization/ai",
@@ -139,12 +139,12 @@
         {
             "route": "/settings/membership",
             "kind": "redirect-only",
-            "reason": "Renders nothing: redirects to /account/invites, the canonical destination for the membership job."
+            "reason": "Renders nothing: redirects to /settings/personal/workspaces, the canonical destination for the membership job."
         },
         {
             "route": "/settings/notifications",
             "kind": "redirect-only",
-            "reason": "Renders nothing: redirects to /account/notifications, the canonical destination for notification preferences."
+            "reason": "Renders nothing: redirects to /settings/personal/notifications, the canonical destination for notification preferences."
         },
         {
             "route": "/settings/qualification",
@@ -164,7 +164,7 @@
         {
             "route": "/settings/security",
             "kind": "redirect-only",
-            "reason": "Renders nothing: redirects to /account/security, the canonical destination for the security job."
+            "reason": "Renders nothing: redirects to /settings/personal/security, the canonical destination for the security job."
         },
         {
             "route": "/settings/sso",
