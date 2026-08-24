@@ -66,6 +66,7 @@ export function NavTrailProvider({
     const pathname = usePathname();
     const { activeWorkspace, activeWorkspaceId } = useWorkspace();
     const t = useTranslations("CommonBreadcrumb");
+    const tMessage = useTranslations();
     const scope = `${userId}:${activeWorkspaceId ?? "none"}`;
     const [registry, setRegistry] = useState<LabelRegistry>({
         scope,
@@ -124,6 +125,7 @@ export function NavTrailProvider({
         (key: BreadcrumbMessageKey) => t(key),
         [t],
     );
+    const translateMessage = useCallback((key: string) => tMessage(key), [tMessage]);
     const trail = useMemo(
         () => resolveBreadcrumbRoute(pathname, {
             workspaceName: activeWorkspace?.name ?? null,
@@ -132,8 +134,9 @@ export function NavTrailProvider({
             navAccess,
             dynamicLabels,
             translate,
+            translateMessage,
         }).crumbs,
-        [activeWorkspace, dynamicLabels, navAccess, pathname, translate],
+        [activeWorkspace, dynamicLabels, navAccess, pathname, translate, translateMessage],
     );
     const value = useMemo<NavTrailContextValue>(
         () => ({ scope, trail, registerLabel }),
