@@ -5135,7 +5135,6 @@ export type ProviderConnection = {
     providerAccountEmail?: string | null;
     grantedScopes?: string | null;
     hasCredential: boolean;
-    lastSyncAt?: string | null;
     errorCode?: string | null;
     createdAt: string;
     updatedAt: string;
@@ -5232,6 +5231,8 @@ export type ProviderCaptureOverview = {
     reviewCount: number;
     pendingApprovalCount: number;
     activationReady: boolean;
+    retainedData: boolean;
+    accountResetAvailable: boolean;
     disclosures: CaptureDisclosures;
     purge: CapturePurgeState;
 };

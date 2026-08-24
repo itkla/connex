@@ -315,9 +315,8 @@ export function providerGlanceState(
 /**
  * The most recent moment any of the provider's streams last succeeded, or null when none has.
  *
- * `ProviderConnection.lastSyncAt` is not this value: the column survives from an earlier connection
- * model and no write path sets it, so reading it would report "never" on a provider that is
- * syncing. Stream success is the only recorded truth about when capture last ran.
+ * Stream success is the recorded truth about when capture last ran. Connection metadata does not
+ * duplicate that timestamp, so cards and drawers derive it from the newest successful stream.
  */
 export function lastCaptureSuccessAt(capture: ProviderCaptureOverview | null): string | null {
     if (!capture) return null;

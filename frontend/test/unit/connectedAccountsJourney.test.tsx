@@ -4,7 +4,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import CaptureProviderCard from "@/app/components/account/connected-capture/CaptureProviderCard";
+import CaptureDisclosures from "@/app/components/account/connected-capture/CaptureDisclosures";
 import { NowProvider } from "@/app/hooks/useNow";
+import { canChangeCaptureLifecycleDialogOpen } from "@/app/lib/captureLifecycleDialog";
 import {
     CAPTURE_PANELS,
     providerCardAction,
@@ -35,7 +37,15 @@ function source(file: string): string {
     return readFileSync(path.join(process.cwd(), file), "utf8");
 }
 
-function messages(locale: "en" | "ja"): Record<string, Record<string, string>> {
+type AccountMessageCatalog = {
+    AccountConnections: Record<string, string>;
+    AccountCaptureProvider: Record<string, string>;
+    AccountCaptureLifecycle: Record<string, string>;
+    AccountManageConnection: Record<string, string>;
+    AccountCaptureDisclosure: { retention: Record<string, string> };
+};
+
+function messages(locale: "en" | "ja"): AccountMessageCatalog {
     return JSON.parse(source(path.join("messages", locale, "account.json")));
 }
 
@@ -110,6 +120,8 @@ function overview(streams: CaptureStreamState[]): ProviderCaptureOverview {
         reviewCount: 0,
         pendingApprovalCount: 0,
         activationReady: true,
+        retainedData: true,
+        accountResetAvailable: false,
         disclosures: {
             scopes: [],
             admittedFields: [],
@@ -298,11 +310,7 @@ describe("what a source reports at a glance", () => {
 });
 
 describe("last sync", () => {
-    /**
-     * `ProviderConnection.lastSyncAt` survives from an earlier connection model and no backend
-     * write path sets it, so reading it would report "never" on a provider that is syncing.
-     */
-    it("reads stream success rather than the connection's dead last-sync column", () => {
+    it("reads stream success rather than duplicating connection metadata", () => {
         const card = source("app/components/account/connected-capture/CaptureProviderCard.tsx");
         const drawer = source("app/components/account/connected-capture/ManageConnectionDrawer.tsx");
 
@@ -344,6 +352,8 @@ describe("a broken connection keeps a way back on the card", () => {
                     authorizationErrorCode={null}
                     busy={false}
                     onConnect={() => undefined}
+                    onPurge={() => undefined}
+                    onReset={() => undefined}
                     onManage={() => undefined}
                     onReviews={() => undefined}
                     onSync={() => undefined}
@@ -401,6 +411,8 @@ describe("two clicks to provider authorization", () => {
                     authorizationErrorCode={null}
                     busy={false}
                     onConnect={() => undefined}
+                    onPurge={() => undefined}
+                    onReset={() => undefined}
                     onManage={() => undefined}
                     onReviews={() => undefined}
                     onSync={() => undefined}
@@ -447,6 +459,94 @@ describe("two clicks to provider authorization", () => {
 
         expect(dialog).toContain("{ kind: 'intro' }");
         expect(dialog).toContain("beginManagedPairing(provider)");
+    });
+});
+
+describe("retained evidence after disconnect", () => {
+    it("keeps both scopes of erasure actionable on a disconnected card", () => {
+        const retained = overview([]);
+        retained.accountResetAvailable = true;
+        const markup = renderToStaticMarkup(
+            <NowProvider value={Date.parse("2026-08-19T12:00:00Z")}>
+                <CaptureProviderCard
+                    provider="google"
+                    providerIcon={null}
+                    state="disconnected"
+                    managedUnavailable={false}
+                    connection={null}
+                    connectionEnabled
+                    captureEnabled={false}
+                    capture={retained}
+                    captureLoading={false}
+                    captureLoadError={false}
+                    pendingReviews={0}
+                    authorizationErrorCode={null}
+                    busy={false}
+                    onConnect={() => undefined}
+                    onPurge={() => undefined}
+                    onReset={() => undefined}
+                    onManage={() => undefined}
+                    onReviews={() => undefined}
+                    onSync={() => undefined}
+                    onRetryCapture={() => undefined}
+                />
+            </NowProvider>,
+        );
+
+        expect(markup).toContain("AccountCaptureProvider.purge");
+        expect(markup).toContain("AccountConnections.retainedDataNote");
+        expect(markup).toContain("AccountConnections.resetProviderAccount");
+        expect(markup).toContain("AccountConnections.accountResetNote");
+    });
+
+    it("offers an explicit reset retry after a purge failure", () => {
+        const failed = overview([]);
+        failed.purge = { active: false, status: "purge_failed", errorCode: "purge_failed" };
+        const markup = renderToStaticMarkup(
+            <NowProvider value={Date.parse("2026-08-19T12:00:00Z")}>
+                <CaptureProviderCard
+                    provider="google"
+                    providerIcon={null}
+                    state="disconnecting"
+                    managedUnavailable={false}
+                    connection={connection({ status: "purge_failed" })}
+                    connectionEnabled
+                    captureEnabled={false}
+                    capture={failed}
+                    captureLoading={false}
+                    captureLoadError={false}
+                    pendingReviews={0}
+                    authorizationErrorCode={null}
+                    busy={false}
+                    onConnect={() => undefined}
+                    onPurge={() => undefined}
+                    onReset={() => undefined}
+                    onManage={() => undefined}
+                    onReviews={() => undefined}
+                    onSync={() => undefined}
+                    onRetryCapture={() => undefined}
+                />
+            </NowProvider>,
+        );
+
+        expect(markup).toContain("AccountConnections.retryReset");
+    });
+
+    it("discovers retained providers even when capture is disabled", () => {
+        const panel = source("app/components/account/ConnectionsPanel.tsx");
+
+        expect(panel).toContain("overviewOf(provider)?.retainedData === true");
+        expect(panel).toContain("overviewOf(provider)?.accountResetAvailable === true");
+        expect(panel).toContain("setCaptureReloadKey((current) => current + 1)");
+        expect(panel).toContain("setConnectionsReloadKey((current) => current + 1)");
+        expect(panel).not.toContain("if (!anyCaptureEnabled) return;");
+        expect(panel).not.toContain("error instanceof Error ? error.message");
+    });
+
+    it("keeps a destructive lifecycle dialog open while its request is running", () => {
+        expect(canChangeCaptureLifecycleDialogOpen(true, false)).toBe(false);
+        expect(canChangeCaptureLifecycleDialogOpen(true, true)).toBe(true);
+        expect(canChangeCaptureLifecycleDialogOpen(false, false)).toBe(true);
     });
 });
 
@@ -507,6 +607,17 @@ describe("authorization return path", () => {
         expect(card).toContain("role=\"alert\"");
     });
 
+    it("routes a retained-identity conflict to the destructive reset instead of retrying", () => {
+        const card = source("app/components/account/connected-capture/CaptureProviderCard.tsx");
+        const panel = source("app/components/account/ConnectionsPanel.tsx");
+
+        expect(card).toContain("retained_data_reset_required");
+        expect(card).toContain("onReset");
+        expect(card).toContain("eraseRetainedData");
+        expect(panel).toContain("resetRetainedProviderData(target.provider)");
+        expect(panel).toContain('mode: "reset"');
+    });
+
     it("returns to the connections route rather than another settings destination", () => {
         expect(captureConnectionsHref(new URLSearchParams(), { provider: "google" }))
             .toBe("/account/connections?provider=google");
@@ -514,7 +625,7 @@ describe("authorization return path", () => {
 });
 
 describe("disconnect is not erasure", () => {
-    const RETAINED = ["disconnectRetained", "purgeRetained"] as const;
+    const RETAINED = ["disconnectRetained", "purgeRetained", "resetRetained"] as const;
 
     it("states what survives a disconnect in both locales", () => {
         for (const locale of ["en", "ja"] as const) {
@@ -537,19 +648,24 @@ describe("disconnect is not erasure", () => {
         expect(dialog).toContain("purgeRetained");
     });
 
-    /**
-     * The server pages every workspace and purges before it revokes, and it never consults the
-     * instance's capture switch on the way. Gating the warning on that switch let an instance that
-     * turned capture off after data was captured promise that nothing is deleted while everything
-     * was, so the confirmation cannot read that switch at all.
-     */
-    it("warns and demands acknowledgement on every disconnect, whatever the capture switch", () => {
+    it("keeps ordinary disconnect non-destructive and acknowledgement-free", () => {
         const dialog = source("app/components/account/connected-capture/CapturePurgeDialog.tsx");
 
         expect(dialog).not.toContain("captureEnabled");
+        expect(dialog).toContain("disconnectRetentionTitle");
+        expect(dialog).toContain("disconnectRetentionDescription");
+        expect(dialog).toContain("const destructive = mode !== 'disconnect'");
+        expect(dialog).toContain("destructive ? (");
+    });
+
+    it("gives the all-workspace reset its own scope and acknowledgement", () => {
+        const dialog = source("app/components/account/connected-capture/CapturePurgeDialog.tsx");
+
         expect(dialog).toContain("allWorkspacesTitle");
         expect(dialog).toContain("allWorkspacesDescription");
-        expect(dialog).toContain("disabled={busy || !acknowledged}");
+        expect(dialog).toContain("resetAcknowledge");
+        expect(dialog).toContain("confirmReset");
+        expect(dialog).toContain("disabled={busy || (destructive && !acknowledged)}");
     });
 
     it("passes no capture switch into the confirmation from the panel", () => {
@@ -559,15 +675,11 @@ describe("disconnect is not erasure", () => {
         expect(lifecycle.slice(0, lifecycle.indexOf("/>"))).not.toContain("captureEnabled");
     });
 
-    /**
-     * The note a reader weighs while deciding must carry the same facts as the confirmation they
-     * reach afterwards; stating only what survives would read as a promise that nothing is lost.
-     */
-    it("states the erasure in the drawer note, not only in the confirmation", () => {
+    it("states retention in the drawer note before the disconnect confirmation", () => {
         for (const locale of ["en", "ja"] as const) {
             const note = messages(locale).AccountManageConnection.disconnectNote;
 
-            expect(note, `${locale}`).toMatch(locale === "en" ? /every workspace/ : /すべてのワークスペース/);
+            expect(note, `${locale}`).toMatch(locale === "en" ? /stays in Connex/ : /Connex に残ります/);
             expect(note).toMatch(locale === "en" ? /stay exactly as they are/ : /そのまま残ります/);
         }
     });
@@ -586,6 +698,38 @@ describe("disconnect is not erasure", () => {
             const catalog = messages(locale);
             expect(catalog.AccountConnections.disconnect)
                 .not.toBe(catalog.AccountCaptureProvider.purge);
+        }
+    });
+});
+
+describe("capture disclosure codes", () => {
+    it("maps the retained-data contract and safely falls back for future codes", () => {
+        const markup = renderToStaticMarkup(
+            <CaptureDisclosures disclosures={{
+                scopes: [],
+                admittedFields: ["future_field"],
+                materialExclusions: [],
+                visibility: [],
+                retention: [
+                    "retained_on_disconnect",
+                    "erased_on_request",
+                    "future_retention_rule",
+                ],
+            }} />,
+        );
+
+        expect(markup).toContain("AccountCaptureDisclosure.retention.retainedOnDisconnect");
+        expect(markup).toContain("AccountCaptureDisclosure.retention.erasedOnRequest");
+        expect(markup).toContain("AccountCaptureDisclosure.retention.unknown");
+        expect(markup).toContain("AccountCaptureDisclosure.admittedField.unknown");
+    });
+
+    it("defines every retained-data disclosure in both locale catalogs", () => {
+        for (const locale of ["en", "ja"] as const) {
+            const retention = messages(locale).AccountCaptureDisclosure.retention;
+            expect(retention.retainedOnDisconnect).toBeTruthy();
+            expect(retention.erasedOnRequest).toBeTruthy();
+            expect(retention.unknown).toBeTruthy();
         }
     });
 });
@@ -650,6 +794,23 @@ describe("manage drawer route state", () => {
         expect(href).toBe("/account/connections?provider=microsoft&panel=manage");
         expect(parseCaptureRouteState(new URLSearchParams("provider=microsoft&panel=manage")).panel)
             .toBe("manage");
+    });
+});
+
+describe("active lifecycle polling", () => {
+    it("reschedules from the reload generation and refreshes both lifecycle views", () => {
+        const panel = source("app/components/account/ConnectionsPanel.tsx");
+        const effect = panel.slice(
+            panel.indexOf("if (!activeCaptureOperation) return;"),
+            panel.indexOf(
+                "useEffect(() => {",
+                panel.indexOf("if (!activeCaptureOperation) return;") + 1,
+            ),
+        );
+
+        expect(effect).toContain("setCaptureReloadKey((current) => current + 1)");
+        expect(effect).toContain("setConnectionsReloadKey((current) => current + 1)");
+        expect(effect).toContain("[activeCaptureOperation, captureReloadKey]");
     });
 });
 

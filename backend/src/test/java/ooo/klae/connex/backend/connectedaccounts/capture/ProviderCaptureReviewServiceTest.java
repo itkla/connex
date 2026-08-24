@@ -25,7 +25,6 @@ import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.DuplicateDecisionLockService;
 import ooo.klae.connex.backend.services.MatchingService;
 import ooo.klae.connex.backend.services.PersonService;
-import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
@@ -128,8 +127,6 @@ class ProviderCaptureReviewServiceTest {
                 workspaceService,
                 policyService,
                 mock(ProviderCapturePagePersistence.class),
-                mock(ProviderCapturePurgeService.class),
-                mock(SessionSecurityService.class),
                 mock(AuditService.class),
                 transactionManager,
                 tenantWorkScope,

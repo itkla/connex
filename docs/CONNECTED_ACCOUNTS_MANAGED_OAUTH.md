@@ -102,8 +102,9 @@ Base path `/api/account/connections/native`.
 
 Failures answer with `{ "error": "<machine_code>" }`. The account screen renders each code as a
 specific sentence: `managed_identity_unavailable`, `invalid_redirect_uri`, `state`, `denied`,
-`exchange`, `no_offline_access`, `superseded`; anything else falls back to one honest "couldn't be
-completed" message rather than inventing a diagnosis.
+`exchange`, `no_offline_access`, `connection_conflict`, `retained_data_reset_required`,
+`superseded`; anything else falls back to one honest "couldn't be completed" message rather than
+inventing a diagnosis.
 
 ### Redirect URI validation
 
@@ -205,8 +206,9 @@ are not available here," not "we will proxy it for you."
   streams and body/metadata modes are permitted, backfill windows, exclusions, and the visibility of
   what is captured (see [CONNECTED_CAPTURE.md](CONNECTED_CAPTURE.md)). They never receive another
   user's tokens and never gain access to another user's mailbox through Connex.
-- Removing a user, or a user disconnecting, revokes and deletes that user's credential and purges
-  their captured content on the documented purge path.
+- A user disconnecting best-effort revokes and deletes that user's credential while retaining
+  captured content. Explicit current-workspace erasure and membership/account removal follow the
+  separate retention and erasure paths documented in [CONNECTED_CAPTURE.md](CONNECTED_CAPTURE.md).
 
 ## Google Workspace administrator steps
 
@@ -294,8 +296,10 @@ a data movement:
    `provider:issuer:subject` — derived from the provider's OpenID `iss`/`sub` claims, not from the
    OAuth client. The same mailbox reconnecting under a different client resolves to the same account
    identity, so the reconnect reattaches to the existing connection instead of creating a duplicate.
-6. A user who reconnects a **different** mailbox is a different account identity, and Connex treats
-   it as a new connection.
+6. A user who wants to reconnect a **different** mailbox must first confirm the all-workspace
+   retained-data reset. Connex erases the old mailbox's captured namespace and deletes its
+   credential-free tombstone before the different account identity can create a new connection;
+   it never combines two mailboxes in one retained namespace.
 
 The reverse direction (Custom → managed) works the same way once managed mode is available.
 

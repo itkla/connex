@@ -44,7 +44,7 @@ Those proofs and final locked rechecks are integrity/security boundaries, not op
 
 ## Connected capture
 
-`docs/CONNECTED_CAPTURE.md` is authoritative. Connection availability, global scheduling authorization, and provider ingestion authorization are separate fail-closed gates. Preserve fixed-host bounded transport, generation/lease-safe refresh, no provider I/O in database transactions, tenant-routed commits, inert backfill, immediate policy pause, and purge-before-credential-destruction ordering.
+`docs/CONNECTED_CAPTURE.md` is authoritative. Connection availability, global scheduling authorization, and provider ingestion authorization are separate fail-closed gates. Preserve fixed-host bounded transport, generation/lease-safe refresh, no provider I/O in database transactions, tenant-routed commits, inert backfill, immediate policy pause, disconnect-with-retention, and separately authenticated current-workspace erasure that remains available without an active connection or ingestion flag.
 
 ## Commercial-document signatures
 

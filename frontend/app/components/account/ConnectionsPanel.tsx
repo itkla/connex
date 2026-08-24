@@ -18,6 +18,7 @@ import ManageConnectionDrawer from "@/app/components/account/connected-capture/M
 import WorkspaceCapturePolicyDialog from "@/app/components/account/connected-capture/WorkspaceCapturePolicyDialog";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import SettingsAvailabilityNotice from "@/app/components/settings/SettingsAvailabilityNotice";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import {
     approveCapturedItem,
@@ -30,6 +31,7 @@ import {
     getProviderConnections,
     pauseProviderConnection,
     preflightPersonDuplicates,
+    resetRetainedProviderData,
     resumeProviderConnection,
     syncProviderCapture,
     updateProviderCapturePolicy,
@@ -52,7 +54,7 @@ import {
 } from "@/app/lib/managedConnect";
 import { checkPermission, type PermissionsStatus } from "@/app/lib/permissionState";
 import type { CapabilityAvailability } from "@/app/lib/capabilityAvailability";
-import { toastError, toastSuccess } from "@/app/lib/toast";
+import { toastSuccess } from "@/app/lib/toast";
 import type {
     CaptureOverview,
     CaptureReviewDecision,
@@ -168,6 +170,7 @@ export default function ConnectionsPanel({
     const router = useRouter();
     const searchParams = useSearchParams();
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
+    const showApiError = useApiErrorToast();
     const currentSearchParams = useMemo(
         () => new URLSearchParams(searchParams.toString()),
         [searchParams],
@@ -176,8 +179,6 @@ export default function ConnectionsPanel({
         () => parseCaptureRouteState(currentSearchParams),
         [currentSearchParams],
     );
-    const anyCaptureEnabled = PROVIDERS.some((provider) =>
-        providerCaptureEnabled(capabilities, provider));
     const workspacePolicyCheck = useMemo(
         () => checkPermission(permissionsStatus, new Set(effectivePermissions), "WORKSPACE_SETTINGS"),
         [effectivePermissions, permissionsStatus],
@@ -189,9 +190,9 @@ export default function ConnectionsPanel({
     const [connectionsError, setConnectionsError] = useState(false);
     const [connectionsReloadKey, setConnectionsReloadKey] = useState(0);
     const [captureOverview, setCaptureOverview] = useState<CaptureOverview | null>(
-        anyCaptureEnabled ? null : { providers: [] },
+        null,
     );
-    const [captureLoading, setCaptureLoading] = useState(anyCaptureEnabled);
+    const [captureLoading, setCaptureLoading] = useState(true);
     const [captureError, setCaptureError] = useState(false);
     const [captureReloadKey, setCaptureReloadKey] = useState(0);
     const [reviewPage, setReviewPage] = useState<CaptureReviewPage | null>(null);
@@ -233,7 +234,6 @@ export default function ConnectionsPanel({
     }, [connectionsReloadKey]);
 
     useEffect(() => {
-        if (!anyCaptureEnabled) return;
         let cancelled = false;
         const controller = new AbortController();
         getCaptureOverview({ signal: controller.signal })
@@ -253,7 +253,7 @@ export default function ConnectionsPanel({
             cancelled = true;
             controller.abort();
         };
-    }, [anyCaptureEnabled, captureReloadKey]);
+    }, [captureReloadKey]);
 
     const activeCaptureOperation = captureOverview?.providers.some(
         (provider) =>
@@ -262,13 +262,13 @@ export default function ConnectionsPanel({
     ) ?? false;
 
     useEffect(() => {
-        if (!anyCaptureEnabled || !activeCaptureOperation) return;
-        const timeout = window.setTimeout(
-            () => setCaptureReloadKey((current) => current + 1),
-            4000,
-        );
+        if (!activeCaptureOperation) return;
+        const timeout = window.setTimeout(() => {
+            setCaptureReloadKey((current) => current + 1);
+            setConnectionsReloadKey((current) => current + 1);
+        }, 4000);
         return () => window.clearTimeout(timeout);
-    }, [activeCaptureOperation, anyCaptureEnabled, captureOverview]);
+    }, [activeCaptureOperation, captureReloadKey]);
 
     useEffect(() => {
         const connected = searchParams.get("connected");
@@ -285,10 +285,16 @@ export default function ConnectionsPanel({
                     setCaptureReloadKey((current) => current + 1);
                 }
             } else if (callbackError) {
-                const known = ["state", "denied", "exchange", "no_offline_access"].includes(callbackError);
+                const known = [
+                    "state",
+                    "denied",
+                    "exchange",
+                    "no_offline_access",
+                    "retained_data_reset_required",
+                ].includes(callbackError);
                 const code = known ? callbackError : "exchange";
                 setAuthorizationError({ provider: handedOffTo, code });
-                toastError(t(`error_${code}`));
+                showApiError(new Error("Provider authorization failed"));
             }
             const resumed = connected === "google" || connected === "microsoft"
                 ? connected
@@ -304,7 +310,7 @@ export default function ConnectionsPanel({
             );
         }, 50);
         return () => window.clearTimeout(timeout);
-    }, [capabilities, currentSearchParams, router, searchParams, t]);
+    }, [capabilities, currentSearchParams, router, searchParams, showApiError, t]);
 
     /**
      * Discards a handoff record that no authorization return ever claimed.
@@ -389,7 +395,7 @@ export default function ConnectionsPanel({
             return true;
         } catch (error) {
             if (!handlePasskeyStepUpError(error)) {
-                toastError(error instanceof Error ? error.message : t("actionFailed"));
+                showApiError(error);
             }
             return false;
         } finally {
@@ -426,7 +432,7 @@ export default function ConnectionsPanel({
             window.location.assign(url);
         } catch (error) {
             if (!handlePasskeyStepUpError(error)) {
-                toastError(error instanceof Error ? error.message : t("actionFailed"));
+                showApiError(error);
             }
             setBusyProvider(null);
         }
@@ -512,17 +518,25 @@ export default function ConnectionsPanel({
                 tLifecycle("purgeStarted"),
             );
         }
+        if (target.mode === "reset") {
+            return runProviderMutation(
+                target.provider,
+                () => resetRetainedProviderData(target.provider),
+                () => {
+                    setAuthorizationError(null);
+                    setConnectionsReloadKey((current) => current + 1);
+                    setCaptureReloadKey((current) => current + 1);
+                },
+                tLifecycle("resetStarted"),
+            );
+        }
         return runProviderMutation(
             target.provider,
             () => disconnectProviderConnection(target.provider),
             () => {
                 setConnections((current) =>
                     current?.filter((entry) => entry.provider !== target.provider) ?? []);
-                setCaptureOverview((current) => ({
-                    providers: current?.providers.filter(
-                        (entry) => entry.provider !== target.provider,
-                    ) ?? [],
-                }));
+                setCaptureReloadKey((current) => current + 1);
                 replaceRouteState({
                     provider: null,
                     panel: null,
@@ -546,7 +560,9 @@ export default function ConnectionsPanel({
         (provider) =>
             providerJourneyEnabled(capabilities, provider)
             || connectedAccountMode(capabilities, provider) === "managed"
-            || connectionOf(provider) != null,
+            || connectionOf(provider) != null
+            || overviewOf(provider)?.retainedData === true
+            || overviewOf(provider)?.accountResetAvailable === true,
     );
     const manageProvider = routeState.panel === "manage" ? routeState.provider : null;
     const manageConnection = manageProvider ? connectionOf(manageProvider) : null;
@@ -621,6 +637,14 @@ export default function ConnectionsPanel({
                                 }
                                 busy={busyProvider === provider}
                                 onConnect={() => connect(provider)}
+                                onPurge={() => setLifecycleTarget({
+                                    provider,
+                                    mode: "purge",
+                                })}
+                                onReset={() => setLifecycleTarget({
+                                    provider,
+                                    mode: "reset",
+                                })}
                                 onManage={() => replaceRouteState({
                                     provider,
                                     panel: "manage",
@@ -785,6 +809,10 @@ export default function ConnectionsPanel({
                         if (!open) setManagedTarget(null);
                     }}
                     onConnected={handleManagedConnected}
+                    onResetRequired={() => {
+                        setManagedTarget(null);
+                        setLifecycleTarget({ provider: managedTarget, mode: "reset" });
+                    }}
                 />
             ) : null}
 

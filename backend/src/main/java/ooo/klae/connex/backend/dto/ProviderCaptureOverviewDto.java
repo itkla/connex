@@ -14,6 +14,8 @@ public record ProviderCaptureOverviewDto(
     long reviewCount,
     long pendingApprovalCount,
     boolean activationReady,
+    boolean retainedData,
+    boolean accountResetAvailable,
     Disclosures disclosures,
     PurgeState purge
 ) {

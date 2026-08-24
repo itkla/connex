@@ -42,8 +42,8 @@ const VISIBILITY_KEYS = {
 
 const RETENTION_KEYS = {
     until_purged: 'retention.untilPurged',
-    until_purged_or_disconnected: 'retention.untilPurgedOrDisconnected',
-    purged_on_disconnect: 'retention.purgedOnDisconnect',
+    retained_on_disconnect: 'retention.retainedOnDisconnect',
+    erased_on_request: 'retention.erasedOnRequest',
     purged_on_account_deletion: 'retention.purgedOnAccountDeletion',
 } as const;
 

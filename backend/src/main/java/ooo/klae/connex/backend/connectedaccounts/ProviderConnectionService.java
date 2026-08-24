@@ -72,6 +72,7 @@ public class ProviderConnectionService {
         int userId = workspaceService.getCurrentUserId();
         return tenantWorkScope.unrouted(
             () -> connectionMapper.getByUserId(userId).stream()
+                .filter(connection -> !"disconnected".equals(connection.getStatus()))
                 .map(ProviderConnectionDto::from)
                 .toList());
     }
@@ -86,8 +87,11 @@ public class ProviderConnectionService {
         int userId = workspaceService.getCurrentUserId();
         sessionSecurityService.requireRecentAuthentication(userId);
         String state = randomState();
+        ProviderConnectionExpectation expectation = tenantWorkScope.unrouted(
+            () -> credentialPersistence.authorizationExpectation(userId, provider));
         session(true).setAttribute(STATE_SESSION_ATTRIBUTE,
-            sha256(state) + "|" + provider + "|" + Instant.now().toEpochMilli());
+            sha256(state) + "|" + provider + "|" + Instant.now().toEpochMilli()
+                + "|" + encode(expectation));
         auditService.record("user.connection.request", "user", userId, provider,
             "Started connecting a " + provider + " account", null);
         return providers.authorizeUrl(provider, redirectUri(provider), state);
@@ -104,7 +108,8 @@ public class ProviderConnectionService {
     public String completeCallback(String provider, String code, String state, String providerError) {
         requireEnabled(provider);
         int userId = workspaceService.getCurrentUserId();
-        if (!consumePendingState(provider, state)) {
+        ProviderConnectionExpectation expectation = consumePendingState(provider, state);
+        if (expectation == null) {
             auditService.record("user.connection.connect_failed", "user", userId, provider,
                 "Rejected a provider callback with an invalid or expired state", null);
             return connectionsUrl("error", "state");
@@ -113,7 +118,11 @@ public class ProviderConnectionService {
             return connectionsUrl("error", "denied");
         }
         try {
-            return exchangeAndStore(provider, code, userId);
+            return exchangeAndStore(provider, code, userId, expectation);
+        } catch (ProviderRetainedDataResetRequiredException e) {
+            auditService.record("user.connection.connect_failed", "user", userId, provider,
+                "Retained provider data must be erased before connecting this account", null);
+            return connectionsUrl("error", "retained_data_reset_required");
         } catch (ProviderTokenException e) {
             log.warn("Token exchange with {} failed: {}", provider, e.getCode());
             auditService.record("user.connection.connect_failed", "user", userId, provider,
@@ -132,7 +141,16 @@ public class ProviderConnectionService {
      * {@code error=exchange} redirect by the caller — after the user consented at the provider,
      * a raw error page must never be the answer to a routine failure.
      */
-    private String exchangeAndStore(String provider, String code, int userId) {
+    private String exchangeAndStore(
+            String provider,
+            String code,
+            int userId,
+            ProviderConnectionExpectation expectation) {
+        tenantWorkScope.unrouted(() -> {
+            credentialPersistence.requireAuthorizationExpectation(
+                userId, provider, expectation);
+            return null;
+        });
         ProviderTokenResponse tokens =
             tokenClient.exchange(providers.tokenUri(provider), exchangeForm(provider, code));
         if (tokens.refreshToken() == null || tokens.refreshToken().isBlank()) {
@@ -141,22 +159,47 @@ public class ProviderConnectionService {
             return connectionsUrl("error", "no_offline_access");
         }
 
-        boolean created = tenantWorkScope.unrouted(
-            () -> {
-                ProviderAccountIdentity identity =
-                    accountIdentityResolver.resolve(provider, tokens.idToken());
-                return credentialPersistence.storeConnection(
-                    userId,
-                    provider,
-                    tokens,
-                    identity.accountId(),
-                    identity.email(),
-                    tokens.scope() == null ? providers.scopes(provider) : tokens.scope());
-            });
+        boolean created;
+        try {
+            created = tenantWorkScope.unrouted(
+                () -> {
+                    ProviderAccountIdentity identity =
+                        accountIdentityResolver.resolve(provider, tokens.idToken());
+                    return credentialPersistence.storeConnection(
+                        userId,
+                        provider,
+                        expectation,
+                        tokens,
+                        identity.accountId(),
+                        identity.email(),
+                        tokens.scope() == null ? providers.scopes(provider) : tokens.scope());
+                });
+        } catch (ConflictException exception) {
+            revokeSupersededAuthorization(provider, tokens);
+            throw exception;
+        }
         captureConnectionStateService.reconcile(userId, provider);
         auditService.record("user.connection.connect", "user", userId, provider,
             (created ? "Connected a " : "Reconnected a ") + provider + " account", null);
         return connectionsUrl("connected", provider);
+    }
+
+    private void revokeSupersededAuthorization(
+            String provider, ProviderTokenResponse tokens) {
+        String revokeUri = providers.revokeUri(provider);
+        if (revokeUri == null
+                || tokens.refreshToken() == null
+                || tokens.refreshToken().isBlank()) {
+            return;
+        }
+        try {
+            tokenClient.revoke(revokeUri, tokens.refreshToken());
+        } catch (RuntimeException exception) {
+            log.warn(
+                "Superseded {} authorization could not be revoked: {}",
+                provider.strip().replace('\r', ' ').replace('\n', ' ').replace('\t', ' '),
+                exception.getClass().getSimpleName());
+        }
     }
 
     /** Pauses an active connection; sync workstreams must skip paused connections. */
@@ -170,22 +213,59 @@ public class ProviderConnectionService {
     }
 
     /**
-     * Starts a durable disconnect that stops claims, purges every tenant catalog, attempts
-     * provider revocation, and only then destroys the generation-bound local credential.
-     * Step-up is required because this removes both retained content and durable access.
+     * Stops capture claims, attempts provider revocation, destroys the generation-bound local
+     * credential, and retains captured data plus a credential-free generation tombstone.
      */
     public void disconnect(String provider) {
         int userId = workspaceService.getCurrentUserId();
         sessionSecurityService.requireRecentAuthentication(userId);
         requireSupported(provider);
         ProviderConnection connection = tenantWorkScope.unrouted(
-            () -> connectionMutation.beginDisconnect(userId, provider));
-        if (!lifecycleService.process(connection)) {
+            () -> connectionMutation.beginRevocation(userId, provider));
+        if (!"disconnected".equals(connection.getStatus())) {
+            captureConnectionStateService.reconcile(userId, provider);
+        }
+        if (!"disconnected".equals(connection.getStatus())
+                && !lifecycleService.process(connection)) {
             throw new ConflictException(
-                "Provider disconnect cleanup is pending; retry after the current purge finishes");
+                "Provider disconnect is pending; retry after credential cleanup finishes");
         }
         auditService.record("user.connection.disconnect", "user", userId, provider,
-            "Started disconnect and purge for the " + provider + " account", null);
+            "Disconnected the " + provider + " account and retained captured data", null);
+    }
+
+    /**
+     * Starts the explicitly destructive all-workspace reset required before a different provider
+     * account can replace a retained-data tombstone.
+     */
+    public void eraseAllCapturedDataAndReset(String provider) {
+        int userId = workspaceService.getCurrentUserId();
+        sessionSecurityService.requireRecentAuthentication(userId);
+        requireSupported(provider);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int orgId = workspaceService.getOrgId(workspaceId);
+        tenantWorkScope.unrouted(() -> {
+            auditService.recordStrictIndependentScoped(
+                "user.connection.reset",
+                "user",
+                userId,
+                workspaceId,
+                orgId,
+                provider,
+                "Requested all-workspace provider data erasure and connection reset",
+                Map.of("provider", provider));
+            return null;
+        });
+        ProviderConnection connection = tenantWorkScope.unrouted(
+            () -> connectionMutation.beginDisconnect(userId, provider));
+        lifecycleService.process(connection);
+        auditService.record(
+            "user.connection.reset_started",
+            "user",
+            userId,
+            provider,
+            "Started all-workspace provider data erasure and connection reset",
+            null);
     }
 
     private ProviderConnectionDto transition(String provider, String from, String to,
@@ -210,31 +290,57 @@ public class ProviderConnectionService {
         return form;
     }
 
-    private boolean consumePendingState(String provider, String state) {
+    private ProviderConnectionExpectation consumePendingState(String provider, String state) {
         HttpSession session = session(false);
         if (session == null || state == null || state.isBlank()) {
-            return false;
+            return null;
         }
         Object attribute = session.getAttribute(STATE_SESSION_ATTRIBUTE);
         session.removeAttribute(STATE_SESSION_ATTRIBUTE);
         if (!(attribute instanceof String stored)) {
-            return false;
+            return null;
         }
-        String[] parts = stored.split("\\|", 3);
-        if (parts.length != 3 || !parts[1].equals(provider)) {
-            return false;
+        String[] parts = stored.split("\\|", 4);
+        if (parts.length != 4 || !parts[1].equals(provider)) {
+            return null;
         }
         long issuedAt;
         try {
             issuedAt = Long.parseLong(parts[2]);
         } catch (NumberFormatException e) {
-            return false;
+            return null;
         }
         if (Instant.now().toEpochMilli() - issuedAt > STATE_TTL_MILLIS) {
-            return false;
+            return null;
         }
-        return MessageDigest.isEqual(
-            parts[0].getBytes(StandardCharsets.UTF_8), sha256(state).getBytes(StandardCharsets.UTF_8));
+        if (!MessageDigest.isEqual(
+                parts[0].getBytes(StandardCharsets.UTF_8),
+                sha256(state).getBytes(StandardCharsets.UTF_8))) {
+            return null;
+        }
+        return decode(parts[3]);
+    }
+
+    private static String encode(ProviderConnectionExpectation expectation) {
+        return expectation.present()
+            ? expectation.connectionId() + ":" + expectation.credentialGeneration()
+            : "absent";
+    }
+
+    private static ProviderConnectionExpectation decode(String encoded) {
+        if ("absent".equals(encoded)) {
+            return ProviderConnectionExpectation.absent();
+        }
+        String[] parts = encoded.split(":", 2);
+        if (parts.length != 2) {
+            return null;
+        }
+        try {
+            return new ProviderConnectionExpectation(
+                true, Integer.parseInt(parts[0]), Long.parseLong(parts[1]));
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     private void requireSupported(String provider) {

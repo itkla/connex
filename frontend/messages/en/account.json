@@ -108,6 +108,7 @@
     "error_denied": "The connection was cancelled at the provider.",
     "error_exchange": "The provider rejected the connection. Please try again.",
     "error_no_offline_access": "The provider didn't grant ongoing access. Please try again and approve all requested permissions.",
+    "error_retained_data_reset_required": "This provider account doesn't match the account tied to retained capture. Erase the old provider data before connecting a different account.",
     "entityLabel": "connection",
     "managedUnavailableTitle": "Connex-managed connections aren't ready yet",
     "managedUnavailableBody": "This instance is set to use the Connex-managed {provider} application, which is still completing provider verification, so connecting is switched off. An administrator can supply custom (bring-your-own) credentials in the meantime.",
@@ -117,6 +118,11 @@
     "connectProvider": "Connect {provider}",
     "manage": "Manage",
     "tryAgain": "Try again",
+    "retryReset": "Retry account reset",
+    "eraseRetainedData": "Erase old provider data",
+    "retainedDataNote": "Captured relationship evidence remains in this workspace until you erase it.",
+    "resetProviderAccount": "Reset provider account",
+    "accountResetNote": "Connex keeps the previous provider account association so reconnecting the same account can reuse retained evidence. Reset it only before connecting a different account.",
     "stream": {
       "mail": "Mail",
       "calendar": "Calendar"
@@ -147,6 +153,7 @@
     "close": "Close",
     "done": "Done",
     "retry": "Start again",
+    "eraseRetainedData": "Erase old provider data",
     "stepCodeTitle": "1. Your pairing code",
     "stepCodeBody": "Keep this window open. The code expires in {time}.",
     "stepHelperTitle": "2. Run the helper on this computer",
@@ -175,6 +182,8 @@
       "denied": "The connection was cancelled at the provider.",
       "exchange": "The provider rejected the connection. Please start again.",
       "no_offline_access": "The provider didn't grant ongoing access. Start again and approve every requested permission.",
+      "connection_conflict": "The connection changed while authorization was in progress. Check its current state, then start again if needed.",
+      "retained_data_reset_required": "This provider account doesn't match the account tied to retained capture. Erase the old provider data before connecting a different account.",
       "superseded": "Another connect attempt replaced this one. Start again if you still want to connect.",
       "expired": "The pairing code expired before the helper finished. Start again to get a new code.",
       "unknown": "The connection couldn't be completed. Please start again."
@@ -387,8 +396,8 @@
     },
     "retention": {
       "untilPurged": "Kept until you erase this workspace's captured data",
-      "untilPurgedOrDisconnected": "Kept until you erase it or disconnect the provider",
-      "purgedOnDisconnect": "Erased when the provider account is disconnected",
+      "retainedOnDisconnect": "Kept when you disconnect the provider",
+      "erasedOnRequest": "Erased only when you request erasure",
       "purgedOnAccountDeletion": "Erased when the connected account's owner is deleted",
       "unknown": "Retention rule: {code}"
     },
@@ -426,20 +435,29 @@
     "purgeTitle": "Erase the data captured from {provider}?",
     "purgeDescription": "Delete captured content and derived relationship evidence from the active workspace.",
     "disconnectTitle": "Disconnect {provider}?",
-    "disconnectDescription": "Remove provider access from your Connex account.",
+    "disconnectDescription": "Stop future syncing and remove provider access from your Connex account.",
+    "resetTitle": "Erase all data captured from {provider} and reset the account?",
+    "resetDescription": "This is required before a different provider account can replace the account tied to retained capture.",
     "activeWorkspaceTitle": "This affects the active workspace",
     "activeWorkspaceDescription": "Captured content, participants, reviews, sync state, and derived activities are removed. Metadata-only audit records remain.",
-    "allWorkspacesTitle": "Captured data is erased before disconnect",
-    "allWorkspacesDescription": "Connex removes this provider's captured data from every workspace before deleting the credential. This cannot be undone.",
+    "disconnectRetentionTitle": "Captured data stays in Connex",
+    "disconnectRetentionDescription": "Captured provider content and relationship evidence remain available until you erase them separately.",
+    "allWorkspacesTitle": "This affects every workspace",
+    "allWorkspacesDescription": "Connex permanently removes this provider's captured content, participants, reviews, sync state, policy, and derived activities from every workspace. This cannot be undone.",
     "acknowledge": "I understand which captured data will be removed.",
+    "resetAcknowledge": "I understand that data captured from {provider} will be permanently erased from every workspace.",
     "cancel": "Cancel",
     "confirmPurge": "Erase captured data",
     "confirmDisconnect": "Disconnect account",
+    "confirmReset": "Erase data and reset account",
     "purging": "Erasing",
     "disconnecting": "Disconnecting",
+    "resetting": "Starting reset",
     "purgeStarted": "Erasing captured data",
+    "resetStarted": "Provider data erasure and account reset started",
     "disconnectRetained": "Your contacts, companies, deals, notes, and tasks stay exactly as they are.",
-    "purgeRetained": "The connection itself stays, and your contacts, companies, deals, notes, and tasks stay exactly as they are."
+    "purgeRetained": "The connection itself stays, and your contacts, companies, deals, notes, and tasks stay exactly as they are.",
+    "resetRetained": "Your contacts, companies, deals, notes, and tasks stay exactly as they are. The provider connection and its retained capture identity are removed."
   },
   "AccountChangeEmail": {
     "title": "Change your email",
@@ -574,7 +592,7 @@
     "notAllowed": "Not allowed",
     "days": "{count, plural, one {# day} other {# days}}",
     "advanced": "Advanced",
-    "disconnectNote": "Disconnecting stops future syncing and removes Connex's access. The mail and meeting activity captured from this provider is erased from every workspace, and cannot be recovered. Your contacts, companies, deals, notes, and tasks stay exactly as they are.",
+    "disconnectNote": "Disconnecting stops future syncing and removes Connex's access. Captured mail and meeting activity stays in Connex until you erase it separately. Your contacts, companies, deals, notes, and tasks stay exactly as they are.",
     "purgeNote": "Erasing removes the mail and meeting activity captured from this provider in this workspace, without touching the connection itself. This cannot be undone."
   }
 }

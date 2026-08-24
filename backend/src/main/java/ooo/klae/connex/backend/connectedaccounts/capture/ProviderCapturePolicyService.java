@@ -56,6 +56,7 @@ public class ProviderCapturePolicyService {
     private final PlatformTransactionManager transactionManager;
     private final TenantWorkScope tenantWorkScope;
     private final DuplicateDecisionLockService duplicateDecisionLockService;
+    private final ProviderCapturePurgeService purgeService;
 
     /** Returns every separately authorized provider for the current workspace user. */
     public ProviderCaptureOverviewResponse getCurrentOverview() {
@@ -65,9 +66,19 @@ public class ProviderCapturePolicyService {
         for (String provider : List.of(
                 ConnectedAccountProviders.GOOGLE,
                 ConnectedAccountProviders.MICROSOFT)) {
-            if (providers.isEnabled(provider)
-                    && properties.isCaptureEnabled(provider)) {
-                overviews.add(overview(workspaceId, userId, provider));
+            ProviderConnection connection = connection(userId, provider);
+            boolean retainedData = purgeService.hasResiduals(
+                workspaceId, userId, provider);
+            boolean lifecycleVisible = connection != null && switch (connection.getStatus()) {
+                case "revoking", "disconnecting", "purge_failed", "disconnected" -> true;
+                default -> false;
+            };
+            if ((providers.isEnabled(provider)
+                    && properties.isCaptureEnabled(provider))
+                    || retainedData
+                    || lifecycleVisible) {
+                overviews.add(overview(
+                    workspaceId, userId, provider, connection, retainedData));
             }
         }
         return new ProviderCaptureOverviewResponse(overviews);
@@ -321,6 +332,20 @@ public class ProviderCapturePolicyService {
     private ProviderCaptureOverviewDto overview(
             int workspaceId, int userId, String provider) {
         ProviderConnection connection = connection(userId, provider);
+        return overview(
+            workspaceId,
+            userId,
+            provider,
+            connection,
+            purgeService.hasResiduals(workspaceId, userId, provider));
+    }
+
+    private ProviderCaptureOverviewDto overview(
+            int workspaceId,
+            int userId,
+            String provider,
+            ProviderConnection connection,
+            boolean retainedData) {
         ProviderCaptureWorkspacePolicy workspacePolicy =
             workspacePolicy(workspaceId, provider);
         ProviderCaptureUserPolicy userPolicy =
@@ -352,6 +377,8 @@ public class ProviderCapturePolicyService {
             effective.enabled() && (effective.calendar()
                 || effective.mailInbox()
                 || effective.mailSent()),
+            retainedData,
+            connection != null && "disconnected".equals(connection.getStatus()),
             disclosures(provider, effective),
             purge(connection));
     }
@@ -422,7 +449,7 @@ public class ProviderCapturePolicyService {
             fields,
             exclusions,
             List.of("workspace_activity_evidence"),
-            List.of("purged_on_disconnect", "purged_on_account_deletion"));
+            List.of("retained_on_disconnect", "erased_on_request", "purged_on_account_deletion"));
     }
 
     private ProviderCaptureOverviewDto.PurgeState purge(
@@ -430,11 +457,19 @@ public class ProviderCapturePolicyService {
         if (connection == null) {
             return new ProviderCaptureOverviewDto.PurgeState(false, "idle", null);
         }
-        boolean active = "disconnecting".equals(connection.getStatus())
-            || "purge_failed".equals(connection.getStatus());
+        boolean revoking = "revoking".equals(connection.getStatus());
+        boolean active = revoking
+            || "disconnecting".equals(connection.getStatus());
+        boolean failed = "purge_failed".equals(connection.getStatus());
+        String status = "idle";
+        if (active) {
+            status = "disconnecting";
+        } else if (failed) {
+            status = "purge_failed";
+        }
         return new ProviderCaptureOverviewDto.PurgeState(
             active,
-            active ? connection.getStatus() : "idle",
+            status,
             connection.getErrorCode());
     }
 
@@ -613,7 +648,7 @@ public class ProviderCapturePolicyService {
         if (connection == null) {
             restrictions.add("not_connected");
         } else if (!"connected".equals(connection.getStatus())) {
-            restrictions.add("connection_" + connection.getStatus());
+            restrictions.add(connectionRestriction(connection.getStatus()));
         }
         if (!workspacePolicy.isBodyCaptureAllowed() && userPolicy.isIncludeBodies()) {
             restrictions.add("body_capture_disabled");
@@ -632,6 +667,17 @@ public class ProviderCapturePolicyService {
             restrictions.add("missing_scope_mail");
         }
         return restrictions;
+    }
+
+    static String connectionRestriction(String status) {
+        return switch (status) {
+            case "paused" -> "connection_paused";
+            case "error" -> "connection_error";
+            case "revoking", "disconnecting" -> "connection_disconnecting";
+            case "purge_failed" -> "connection_purge_failed";
+            case "revoked", "disconnected" -> "not_connected";
+            default -> "not_connected";
+        };
     }
 
     private List<String> normalizeDomains(List<String> values) {

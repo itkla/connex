@@ -14,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.NativeConnectSession;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.connectedaccounts.ProviderAccountIdentityResolver.ProviderAccountIdentity;
+import ooo.klae.connex.backend.connectedaccounts.ProviderConnectionExpectation;
 import ooo.klae.connex.backend.connectedaccounts.ProviderCredentialPersistence;
 import ooo.klae.connex.backend.connectedaccounts.ProviderTokenResponse;
 import ooo.klae.connex.backend.exceptions.ConflictException;
@@ -46,6 +47,8 @@ public class NativeConnectSessionPersistence {
             byte[] pairingCodeHash,
             LocalDateTime expiresAt) {
         requireUser(userId);
+        ProviderConnectionExpectation expectation =
+            credentialPersistence.authorizationExpectation(userId, provider);
         NativeConnectSession previous =
             sessionMapper.getLatestByUserAndProviderForUpdate(userId, provider);
         boolean superseded = sessionMapper.failActiveForUserAndProvider(
@@ -63,6 +66,10 @@ public class NativeConnectSessionPersistence {
         session.setProvider(provider);
         session.setStatus("pending");
         session.setPairingCodeHash(pairingCodeHash);
+        session.setExpectedConnectionId(
+            expectation.present() ? expectation.connectionId() : null);
+        session.setExpectedCredentialGeneration(
+            expectation.present() ? expectation.credentialGeneration() : null);
         session.setExpiresAt(expiresAt);
         sessionMapper.insert(session);
         return superseded;
@@ -171,6 +178,17 @@ public class NativeConnectSessionPersistence {
         return session;
     }
 
+    /** Rejects a claimed exchange when its connection boundary is already stale. */
+    @Transactional
+    public void requireConnectionExpectation(NativeConnectSession session) {
+        credentialPersistence.requireAuthorizationExpectation(
+            session.getUserId(),
+            session.getProvider(),
+            ProviderConnectionExpectation.persisted(
+                session.getExpectedConnectionId(),
+                session.getExpectedCredentialGeneration()));
+    }
+
     /** Stores the provider credential and consumes the claimed native session in one transaction. */
     @Transactional
     public boolean storeConnectionAndComplete(
@@ -181,6 +199,9 @@ public class NativeConnectSessionPersistence {
         boolean created = credentialPersistence.storeConnection(
             session.getUserId(),
             session.getProvider(),
+            ProviderConnectionExpectation.persisted(
+                session.getExpectedConnectionId(),
+                session.getExpectedCredentialGeneration()),
             tokens,
             identity.accountId(),
             identity.email(),

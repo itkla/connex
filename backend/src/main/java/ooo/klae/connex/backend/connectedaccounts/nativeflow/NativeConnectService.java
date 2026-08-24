@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountMode;
 import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountProviders;
 import ooo.klae.connex.backend.connectedaccounts.ProviderAccountIdentityResolver;
 import ooo.klae.connex.backend.connectedaccounts.ProviderAccountIdentityResolver.ProviderAccountIdentity;
+import ooo.klae.connex.backend.connectedaccounts.ProviderRetainedDataResetRequiredException;
 import ooo.klae.connex.backend.connectedaccounts.ProviderTokenClient;
 import ooo.klae.connex.backend.connectedaccounts.ProviderTokenException;
 import ooo.klae.connex.backend.connectedaccounts.ProviderTokenResponse;
@@ -190,6 +191,10 @@ public class NativeConnectService {
         }
         boolean created;
         try {
+            tenantWorkScope.unrouted(() -> {
+                sessionPersistence.requireConnectionExpectation(session);
+                return null;
+            });
             ProviderTokenResponse tokens = tokenClient.exchange(
                 providers.tokenUri(session.getProvider()),
                 exchangeForm(session, request.code(), verifier));
@@ -202,9 +207,10 @@ public class NativeConnectService {
             String grantedScopes = tokens.scope() == null
                 ? providers.scopes(session.getProvider())
                 : tokens.scope();
-            created = tenantWorkScope.unrouted(
-                () -> sessionPersistence.storeConnectionAndComplete(
-                    session, tokens, identity, grantedScopes));
+            created = storeConnectionAndComplete(
+                session, tokens, identity, grantedScopes);
+        } catch (ProviderRetainedDataResetRequiredException exception) {
+            throw failClaim(session, "retained_data_reset_required");
         } catch (ProviderTokenException exception) {
             throw failClaim(session, exception.getCode());
         } catch (ConflictException exception) {
@@ -220,6 +226,39 @@ public class NativeConnectService {
             (created ? "Connected a managed " : "Reconnected a managed ")
                 + session.getProvider() + " account");
         return new NativeCompleteResponse("connected");
+    }
+
+    private boolean storeConnectionAndComplete(
+            NativeConnectSession session,
+            ProviderTokenResponse tokens,
+            ProviderAccountIdentity identity,
+            String grantedScopes) {
+        try {
+            return tenantWorkScope.unrouted(
+                () -> sessionPersistence.storeConnectionAndComplete(
+                    session, tokens, identity, grantedScopes));
+        } catch (ConflictException exception) {
+            revokeSupersededAuthorization(session.getProvider(), tokens);
+            throw exception;
+        }
+    }
+
+    private void revokeSupersededAuthorization(
+            String provider, ProviderTokenResponse tokens) {
+        String revokeUri = providers.revokeUri(provider);
+        if (revokeUri == null
+                || tokens.refreshToken() == null
+                || tokens.refreshToken().isBlank()) {
+            return;
+        }
+        try {
+            tokenClient.revoke(revokeUri, tokens.refreshToken());
+        } catch (RuntimeException exception) {
+            log.warn(
+                "Superseded managed {} authorization could not be revoked: {}",
+                provider,
+                exception.getClass().getSimpleName());
+        }
     }
 
     /** Reads the bundled zero-dependency helper script served to authenticated users. */

@@ -144,6 +144,18 @@ Detailed storage behavior lives in `docs/backend/OBJECT_STORAGE.md`. Lock-order 
 - Cleanup/retry workers lock/revalidate exact queue/tombstone identities before provider I/O.
 - Preserve deletion-queue → quota → audit ordering, including business-card binary storage before company/person/audit writes.
 
+## Connected-provider credentials
+
+Provider credential transitions lock the owning `app_user` shared before the exact
+`provider_connection`. Revocation egress occurs only after that transaction commits. Final local
+credential destruction repeats the same user → connection order and generation-checks the exact
+`revoking` row before retaining its credential-free `disconnected` tombstone.
+
+Legacy account-deletion cleanup keeps the same root order and its separate
+`disconnecting`/`purge_failed` all-catalog erasure protocol. Current-workspace capture erasure locks
+the caller's exact active membership before deleting tenant-scoped capture rows and never acquires a
+provider-connection lock.
+
 ## Review checklist
 
 For any transaction/locking change:

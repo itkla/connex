@@ -1541,6 +1541,14 @@ export function disconnectProviderConnection(provider: Types.ConnectedAccountPro
     return deleteJson<void[]>(`/api/account/connections/${provider}`, init);
 }
 
+/** Erases retained capture across every workspace and removes the provider identity tombstone. */
+export function resetRetainedProviderData(
+    provider: Types.ConnectedAccountProvider,
+    init: RequestInit = {},
+) {
+    return deleteJson<void>(`/api/account/connections/${provider}/retained-data`, init);
+}
+
 /**
  * Issues a pairing handle for the Connex-managed connect flow. The authorization itself runs in a
  * helper process on the user's own machine, so the browser only ever holds the pairing code.
