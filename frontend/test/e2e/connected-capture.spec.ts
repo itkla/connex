@@ -355,7 +355,7 @@ for (const locale of ['en', 'ja'] as const) {
                 .replace('{provider}', providerName),
         })).toBeVisible();
         expect(resetCaptureFailures).toBe(1);
-        expect(resetPolls).toBeGreaterThanOrEqual(3);
+        await expect.poll(() => resetPolls).toBeGreaterThanOrEqual(3);
         expect(resetConnectionPolls).toBeGreaterThanOrEqual(2);
     });
 }
