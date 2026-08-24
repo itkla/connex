@@ -186,6 +186,34 @@ describe("people & access arrives at the section a deep link asked for", () => {
         ).toContain("scrolledForHash.current === hash");
     });
 
+    /**
+     * The regression that shipped and was caught in browser verification, pinned here.
+     *
+     * Sections spend the registrar as `ref={register(section)}`. A `register` that built a fresh
+     * closure per call handed React a new ref identity on every render, so React detached it with
+     * `null` and reattached it every time — and once the registrar also called `setAppearances`,
+     * that became a render loop that React ended with "Maximum update depth exceeded" (minified
+     * error #185). Every section on every consolidated page stopped rendering, which is how a
+     * deep-linked reader would have arrived at a blank destination.
+     *
+     * The fix is a per-slug cache, so the ref attaches once and the counter moves only on a real
+     * mount or unmount.
+     */
+    it("hands each section one stable registrar, so a ref does not re-attach every render", () => {
+        const hook = source(ARRIVAL_HOOK);
+
+        expect(hook, "the registrar cache is what keeps the ref identity stable")
+            .toContain("const registrars = useRef(new Map<string, (element: HTMLElement | null) => void>());");
+        expect(hook, "a slug already registered gets the same function back")
+            .toContain("const existing = registrars.current.get(slug);");
+        expect(hook).toContain("if (existing !== undefined) return existing;");
+        expect(hook).toContain("registrars.current.set(slug, registrar);");
+        expect(
+            hook.includes("(slug: string) => (element: HTMLElement | null) =>"),
+            "returning a fresh closure per call is the shape that caused the update loop",
+        ).toBe(false);
+    });
+
     it("holds the scroll while the sections above the target are still loading", () => {
         const hook = source(ARRIVAL_HOOK);
 
