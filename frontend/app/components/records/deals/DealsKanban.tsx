@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import type { UniqueIdentifier } from '@dnd-kit/core';
 import { ChevronDownIcon } from '@heroicons/react/24/outline';
@@ -118,6 +118,7 @@ export default function DealsKanban({
             ? selected
             : defaultPipelineId;
     const boardKey = selectedPipelineId == null ? null : `${selectedPipelineId}:${revision}`;
+    const loadedPipelineRef = useRef<number | null>(null);
     const [boardState, setBoardState] = useState<{
         key: string | null;
         pipelineId: number | null;
@@ -130,16 +131,19 @@ export default function DealsKanban({
         let cancelled = false;
         getDealBoard(selectedPipelineId)
             .then((loaded) => {
-                if (!cancelled) setBoardState({ key: boardKey, pipelineId: selectedPipelineId, deals: loaded, error: null });
+                if (cancelled) return;
+                loadedPipelineRef.current = selectedPipelineId;
+                setBoardState({ key: boardKey, pipelineId: selectedPipelineId, deals: loaded, error: null });
             })
             .catch((error: unknown) => {
                 if (cancelled) return;
-                setBoardState({
-                    key: boardKey,
-                    pipelineId: selectedPipelineId,
-                    deals: [],
-                    error: error instanceof Error ? error.message : t('loadFailed'),
-                });
+                const message = error instanceof Error ? error.message : t('loadFailed');
+                if (loadedPipelineRef.current === selectedPipelineId) {
+                    toastError(t('refreshFailed'));
+                    setBoardState((current) => ({ ...current, key: boardKey }));
+                    return;
+                }
+                setBoardState({ key: boardKey, pipelineId: selectedPipelineId, deals: [], error: message });
             });
         return () => {
             cancelled = true;
@@ -306,10 +310,10 @@ export default function DealsKanban({
                     : previousVisible
                       ? absoluteStageDeals.findIndex((deal) => deal.id === previousVisible.id) + 1
                       : absoluteStageDeals.length;
-                await moveDeal(dealId, stageId, absoluteIndex);
+                const moved = await moveDeal(dealId, stageId, absoluteIndex);
                 setBoardState((current) => current.pipelineId !== selectedPipelineId
                     ? current
-                    : { ...current, deals: withDealMoved(current.deals, dealId, stageId, absoluteIndex) });
+                    : { ...current, deals: withDealMoved(current.deals, moved, absoluteIndex) });
                 onMoved();
             } catch (err) {
                 toastError(err instanceof Error ? err.message : t('moveFailed'));
