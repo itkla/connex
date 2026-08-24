@@ -1,6 +1,5 @@
 package ooo.klae.connex.backend.dto;
 
-import java.util.ArrayList;
 import java.util.List;
 
 import jakarta.validation.Valid;
@@ -14,14 +13,23 @@ import ooo.klae.connex.backend.beans.Stage;
 
 /**
  * The complete stage set a pipeline should end up with, in the order it should be shown. Entries
- * carrying an {@code id} are existing stages to keep; entries without one are created. Any stage of
- * the pipeline absent from the list is removed.
+ * carrying an {@code id} are existing stages to keep; entries without one are created.
+ *
+ * <p>Both fields are required and are left null until deserialization, so a body that omits either
+ * fails validation rather than being read as "remove every stage".
  */
 @Data
 @NoArgsConstructor
 public class PipelineStagesDto {
+    /**
+     * The stage ids the editor had loaded when it built {@link #stages}. Only these may be removed,
+     * so a stage another editor added after the load survives instead of being silently deleted.
+     */
     @NotNull
-    private List<@Valid Entry> stages = new ArrayList<>();
+    private List<@NotNull Integer> knownStageIds;
+
+    @NotNull
+    private List<@NotNull @Valid Entry> stages;
 
     /**
      * One stage in the intended set. There is no position: order in {@link #stages} is the order, and

@@ -125,6 +125,7 @@ public class PipelineController {
      * id are kept and updated, entries without one are created, and any stage absent from the list
      * is removed; positions follow the order given. Validating the final set rather than each write
      * makes edits that are only valid as a whole — a name swap, or moving the Won flag — succeed.
+     * Only stages the editor had loaded, named in {@code knownStageIds}, are eligible for removal.
      * @param pipelineId
      * @param dto the complete stage set the pipeline should end up with
      * @return the pipeline's stages after the replacement, in order
@@ -132,7 +133,10 @@ public class PipelineController {
     @PutMapping("/{pipelineId}/stages")
     public List<StageDto> replaceStages(@PathVariable int pipelineId, @Valid @RequestBody PipelineStagesDto dto) {
         return pipelineService
-            .replaceStages(pipelineId, dto.getStages().stream().map(PipelineStagesDto.Entry::toBean).toList())
+            .replaceStages(
+                pipelineId,
+                dto.getKnownStageIds(),
+                dto.getStages().stream().map(PipelineStagesDto.Entry::toBean).toList())
             .stream().map(StageDto::from).toList();
     }
 

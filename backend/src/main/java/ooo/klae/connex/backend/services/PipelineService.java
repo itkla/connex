@@ -145,8 +145,8 @@ public class PipelineService {
 
     /**
      * Replaces a pipeline's stages with {@code requested} in one transaction: entries carrying an id
-     * are kept and updated, entries without one are created, and any stage of the pipeline absent
-     * from the list is removed. Positions are renumbered to the given order.
+     * are kept and updated, entries without one are created, and a stage the editor had loaded but
+     * left out is removed. Positions are renumbered to the given order.
      *
      * <p>Validation runs against the final set rather than each write, so an edit that is only ever
      * valid as a whole — swapping two stage names, or moving the Won flag from one stage to another —
@@ -154,16 +154,21 @@ public class PipelineService {
      * A removal that still holds deals is refused up front, in place of the foreign key violation the
      * per-stage delete surfaces.
      *
+     * <p>{@code knownStageIds} is what the editor had loaded. Only those may be removed, so a stage
+     * another editor added in the meantime is left alone and moved to the end rather than being
+     * silently deleted by a save that never knew about it.
+     *
      * <p>Renumbering happens in two passes because {@code (pipeline_id, position)} is unique: a stage
      * cannot move into a position another one still holds. Every surviving stage is first parked above
      * the range the final order occupies, then renumbered down into it.
      */
     @Transactional
     @RequirePermission(Permission.PIPELINE_MANAGE)
-    public List<Stage> replaceStages(int pipelineId, List<Stage> requested) {
+    public List<Stage> replaceStages(int pipelineId, List<Integer> knownStageIds, List<Stage> requested) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Pipeline pipeline = requireOwnedPipeline(workspaceId, pipelineId);
         List<Stage> incoming = requested == null ? List.of() : requested;
+        Set<Integer> known = new HashSet<>(knownStageIds == null ? List.of() : knownStageIds);
 
         assertNamesDistinct(incoming);
         assertAtMostOneTerminalPerType(incoming);
@@ -181,26 +186,35 @@ public class PipelineService {
                 throw new BadRequestException("Stage " + stage.getId() + " is listed more than once");
         }
 
+        List<Stage> removed = new ArrayList<>();
+        List<Stage> untouched = new ArrayList<>();
         for (Stage stage : existing) {
             if (keptIds.contains(stage.getId())) continue;
+            if (known.contains(stage.getId())) removed.add(stage);
+            else untouched.add(stage);
+        }
+
+        for (Stage stage : removed) {
             if (!dealMapper.getDealsByStageId(workspaceId, stage.getId()).isEmpty())
                 throw new BadRequestException(
                     "Move the deals out of " + stage.getName() + " before removing it");
         }
 
-        for (Stage stage : existing) {
-            if (keptIds.contains(stage.getId())) continue;
+        for (Stage stage : removed) {
             pipelineMapper.deleteStage(workspaceId, stage.getId());
             auditService.record("stage.delete", "stage", stage.getId(), stage.getName(),
                 "Deleted stage " + stage.getName(),
                 auditService.diff(stage, null, STAGE_AUDIT_FIELDS));
         }
 
-        int parked = incoming.size();
+        int parked = incoming.size() + untouched.size();
         for (Stage stage : existing) parked = Math.max(parked, stage.getPosition() + 1);
         for (Stage stage : incoming) {
             if (stage.getId() == 0) continue;
             pipelineMapper.updateStage(reposition(existingById.get(stage.getId()), pipeline, workspaceId, parked++));
+        }
+        for (Stage stage : untouched) {
+            pipelineMapper.updateStage(reposition(stage, pipeline, workspaceId, parked++));
         }
 
         List<Stage> result = new ArrayList<>();
@@ -217,13 +231,25 @@ public class PipelineService {
             } else {
                 Stage before = existingById.get(stage.getId());
                 pipelineMapper.updateStage(stage);
-                auditService.record("stage.update", "stage", stage.getId(), stage.getName(),
-                    "Updated stage " + stage.getName(),
-                    auditService.diff(before, stage, STAGE_AUDIT_FIELDS));
+                recordStageUpdate(before, stage);
             }
             result.add(stage);
         }
+        for (Stage stage : untouched) {
+            pipelineMapper.updateStage(reposition(stage, pipeline, workspaceId, position++));
+        }
         return result;
+    }
+
+    /**
+     * Records a stage update only when something the audit trail cares about actually changed, so a
+     * save that merely renumbered positions does not fill the trail with empty diffs.
+     */
+    private void recordStageUpdate(Stage before, Stage after) {
+        var changes = auditService.diff(before, after, STAGE_AUDIT_FIELDS);
+        if (changes == null || changes.isEmpty()) return;
+        auditService.record("stage.update", "stage", after.getId(), after.getName(),
+            "Updated stage " + after.getName(), changes);
     }
 
     /**

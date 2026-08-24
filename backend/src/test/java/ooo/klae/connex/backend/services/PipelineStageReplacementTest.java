@@ -23,6 +23,11 @@ class PipelineStageReplacementTest extends AbstractServiceTest {
 
     @Autowired PipelineService pipelineService;
 
+    /** The ids the editor would have loaded: every stage currently on the pipeline. */
+    private List<Integer> allStageIds(int pipelineId) {
+        return pipelineService.getStagesByPipelineId(pipelineId).stream().map(Stage::getId).toList();
+    }
+
     private Stage keep(Stage existing, String name) {
         Stage stage = new Stage();
         stage.setId(existing.getId());
@@ -52,7 +57,7 @@ class PipelineStageReplacementTest extends AbstractServiceTest {
         Stage beta = newStage(pipeline, 1);
 
         List<Stage> result = pipelineService.replaceStages(
-            pipeline.getId(),
+            pipeline.getId(), allStageIds(pipeline.getId()),
             List.of(keep(alpha, beta.getName()), keep(beta, alpha.getName())));
 
         assertEquals(2, result.size());
@@ -68,11 +73,11 @@ class PipelineStageReplacementTest extends AbstractServiceTest {
         Stage first = newStage(pipeline, 0);
         Stage second = newStage(pipeline, 1);
         pipelineService.replaceStages(
-            pipeline.getId(),
+            pipeline.getId(), allStageIds(pipeline.getId()),
             List.of(terminal(first, first.getName(), true, false), keep(second, second.getName())));
 
         List<Stage> result = pipelineService.replaceStages(
-            pipeline.getId(),
+            pipeline.getId(), allStageIds(pipeline.getId()),
             List.of(keep(first, first.getName()), terminal(second, second.getName(), true, false)));
 
         assertTrue(result.stream().noneMatch(stage -> stage.getId() == first.getId() && stage.isSuccess()));
@@ -86,7 +91,7 @@ class PipelineStageReplacementTest extends AbstractServiceTest {
         Stage second = newStage(pipeline, 7);
 
         List<Stage> result = pipelineService.replaceStages(
-            pipeline.getId(),
+            pipeline.getId(), allStageIds(pipeline.getId()),
             List.of(keep(second, second.getName()), keep(first, first.getName())));
 
         assertEquals(second.getId(), result.get(0).getId());
@@ -102,7 +107,7 @@ class PipelineStageReplacementTest extends AbstractServiceTest {
         Stage dropped = newStage(pipeline, 1);
 
         List<Stage> result = pipelineService.replaceStages(
-            pipeline.getId(),
+            pipeline.getId(), allStageIds(pipeline.getId()),
             List.of(keep(kept, kept.getName()), add("Brand new")));
 
         assertEquals(2, result.size());
@@ -116,7 +121,7 @@ class PipelineStageReplacementTest extends AbstractServiceTest {
         Pipeline pipeline = newPipeline();
         newStage(pipeline, 0);
 
-        assertEquals(List.of(), pipelineService.replaceStages(pipeline.getId(), List.of()));
+        assertEquals(List.of(), pipelineService.replaceStages(pipeline.getId(), allStageIds(pipeline.getId()), List.of()));
         assertEquals(0, pipelineService.getStagesByPipelineId(pipeline.getId()).size());
     }
 
@@ -127,7 +132,7 @@ class PipelineStageReplacementTest extends AbstractServiceTest {
         newDeal(pipeline, occupied, newCompany());
 
         assertThrows(BadRequestException.class,
-            () -> pipelineService.replaceStages(pipeline.getId(), List.of()));
+            () -> pipelineService.replaceStages(pipeline.getId(), allStageIds(pipeline.getId()), List.of()));
     }
 
     @Test
@@ -137,7 +142,7 @@ class PipelineStageReplacementTest extends AbstractServiceTest {
         Stage second = newStage(pipeline, 1);
 
         assertThrows(DuplicateResourceException.class, () -> pipelineService.replaceStages(
-            pipeline.getId(),
+            pipeline.getId(), allStageIds(pipeline.getId()),
             List.of(keep(first, "Review"), keep(second, "review"))));
     }
 
@@ -147,7 +152,7 @@ class PipelineStageReplacementTest extends AbstractServiceTest {
         Stage stage = newStage(pipeline, 0);
 
         assertThrows(BadRequestException.class, () -> pipelineService.replaceStages(
-            pipeline.getId(), List.of(keep(stage, "   "))));
+            pipeline.getId(), allStageIds(pipeline.getId()), List.of(keep(stage, "   "))));
     }
 
     @Test
@@ -157,7 +162,7 @@ class PipelineStageReplacementTest extends AbstractServiceTest {
         Stage second = newStage(pipeline, 1);
 
         assertThrows(DuplicateResourceException.class, () -> pipelineService.replaceStages(
-            pipeline.getId(),
+            pipeline.getId(), allStageIds(pipeline.getId()),
             List.of(terminal(first, first.getName(), true, false),
                     terminal(second, second.getName(), true, false))));
     }
@@ -170,7 +175,7 @@ class PipelineStageReplacementTest extends AbstractServiceTest {
         Stage third = newStage(pipeline, 2);
 
         List<Stage> result = pipelineService.replaceStages(
-            pipeline.getId(),
+            pipeline.getId(), allStageIds(pipeline.getId()),
             List.of(keep(third, third.getName()), keep(second, second.getName()), keep(first, first.getName())));
 
         assertEquals(List.of(third.getId(), second.getId(), first.getId()),
@@ -179,12 +184,57 @@ class PipelineStageReplacementTest extends AbstractServiceTest {
     }
 
     @Test
+    void leavesAStageAnotherEditorAddedAfterThisOneLoaded() {
+        Pipeline pipeline = newPipeline();
+        Stage loaded = newStage(pipeline, 0);
+        List<Integer> known = allStageIds(pipeline.getId());
+        Stage addedMeanwhile = newStage(pipeline, 1);
+
+        pipelineService.replaceStages(pipeline.getId(), known, List.of(keep(loaded, "Renamed")));
+
+        List<Stage> after = pipelineService.getStagesByPipelineId(pipeline.getId());
+        assertTrue(after.stream().anyMatch(stage -> stage.getId() == addedMeanwhile.getId()),
+            "a stage added after the editor loaded must survive a save that never knew about it");
+        assertEquals(2, after.size());
+    }
+
+    @Test
+    void movesAConcurrentlyAddedStageToTheEndWithoutCollidingOnPosition() {
+        Pipeline pipeline = newPipeline();
+        Stage first = newStage(pipeline, 0);
+        Stage second = newStage(pipeline, 1);
+        List<Integer> known = allStageIds(pipeline.getId());
+        Stage addedMeanwhile = newStage(pipeline, 2);
+
+        pipelineService.replaceStages(
+            pipeline.getId(), known,
+            List.of(keep(second, second.getName()), keep(first, first.getName())));
+
+        List<Stage> after = pipelineService.getStagesByPipelineId(pipeline.getId());
+        assertEquals(List.of(second.getId(), first.getId(), addedMeanwhile.getId()),
+            after.stream().map(Stage::getId).toList());
+        assertEquals(List.of(0, 1, 2), after.stream().map(Stage::getPosition).toList());
+    }
+
+    @Test
+    void treatsAnUnknownStageAsUntouchedRatherThanRemovable() {
+        Pipeline pipeline = newPipeline();
+        Stage kept = newStage(pipeline, 0);
+        Stage unknown = newStage(pipeline, 1);
+        newDeal(pipeline, unknown, newCompany());
+
+        pipelineService.replaceStages(pipeline.getId(), List.of(kept.getId()), List.of(keep(kept, "Only")));
+
+        assertEquals(2, pipelineService.getStagesByPipelineId(pipeline.getId()).size());
+    }
+
+    @Test
     void rejectsAStageThatIsBothWonAndLost() {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);
 
         assertThrows(BadRequestException.class, () -> pipelineService.replaceStages(
-            pipeline.getId(), List.of(terminal(stage, stage.getName(), true, true))));
+            pipeline.getId(), allStageIds(pipeline.getId()), List.of(terminal(stage, stage.getName(), true, true))));
     }
 
     @Test
@@ -194,7 +244,7 @@ class PipelineStageReplacementTest extends AbstractServiceTest {
         Stage second = newStage(pipeline, 1);
 
         assertThrows(DuplicateResourceException.class, () -> pipelineService.replaceStages(
-            pipeline.getId(),
+            pipeline.getId(), allStageIds(pipeline.getId()),
             List.of(terminal(first, first.getName(), false, true),
                     terminal(second, second.getName(), false, true))));
     }
@@ -205,7 +255,7 @@ class PipelineStageReplacementTest extends AbstractServiceTest {
         Stage stage = newStage(pipeline, 0);
 
         assertThrows(BadRequestException.class, () -> pipelineService.replaceStages(
-            pipeline.getId(), List.of(keep(stage, "One"), keep(stage, "Two"))));
+            pipeline.getId(), allStageIds(pipeline.getId()), List.of(keep(stage, "One"), keep(stage, "Two"))));
     }
 
     @Test
@@ -215,12 +265,12 @@ class PipelineStageReplacementTest extends AbstractServiceTest {
         Stage foreign = newStage(other, 0);
 
         assertThrows(ResourceNotFoundException.class, () -> pipelineService.replaceStages(
-            pipeline.getId(), List.of(keep(foreign, foreign.getName()))));
+            pipeline.getId(), allStageIds(pipeline.getId()), List.of(keep(foreign, foreign.getName()))));
     }
 
     @Test
     void refusesAPipelineOutsideTheWorkspace() {
         assertThrows(ResourceNotFoundException.class,
-            () -> pipelineService.replaceStages(-1, List.of()));
+            () -> pipelineService.replaceStages(-1, List.of(), List.of()));
     }
 }

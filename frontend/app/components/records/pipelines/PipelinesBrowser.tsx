@@ -338,7 +338,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                         await updatePipeline(p.id, payload);
                     }
 
-                    await replacePipelineStages(p.id, draft.stages.map((s) => ({
+                    await replacePipelineStages(p.id, (stagesByPipeline.get(p.id) ?? []).map((s) => s.id), draft.stages.map((s) => ({
                         id: s.id ?? undefined,
                         name: s.name.trim(),
                         success: s.success,

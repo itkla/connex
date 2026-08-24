@@ -118,7 +118,7 @@ export default function EditPipelineSheet({
                 await updatePipeline(pipeline.id, payload);
             }
 
-            const fresh = await replacePipelineStages(pipeline.id, draft.stages.map((s) => ({
+            const fresh = await replacePipelineStages(pipeline.id, stages.map((s) => s.id), draft.stages.map((s) => ({
                 id: s.id ?? undefined,
                 name: s.name.trim(),
                 success: s.success,
