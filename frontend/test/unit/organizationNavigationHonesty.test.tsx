@@ -1,5 +1,4 @@
 import {
-    act,
     createElement,
     isValidElement,
     type AnchorHTMLAttributes,
@@ -17,7 +16,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import OrganizationSettingsLayout from "@/app/(app)/settings/organization/layout";
 import OrganizationWorkspaceGuard from "@/app/components/organization/OrganizationWorkspaceGuard";
 import SettingsAvailabilityNotice from "@/app/components/settings/SettingsAvailabilityNotice";
-import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import type { MyWorkspaces, Workspace } from "@/app/lib/types";
 
 const {
@@ -170,53 +168,6 @@ const ORG_ADMIN_ROUTES = [
 
 function workspaceSnapshot(workspace: Workspace): MyWorkspaces {
     return { workspaces: [workspace], activeWorkspaceId: workspace.id };
-}
-
-function installMinimalDocument(): HTMLElement {
-    class HtmlIFrameElement {}
-
-    const documentTarget = {
-        nodeType: 9,
-        activeElement: null,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        createElement: vi.fn(() => containerTarget),
-    };
-    const windowTarget = {
-        document: documentTarget,
-        event: undefined,
-        HTMLIFrameElement: HtmlIFrameElement,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-    };
-    const containerTarget = {
-        nodeType: 1,
-        tagName: "DIV",
-        nodeName: "DIV",
-        namespaceURI: "http://www.w3.org/1999/xhtml",
-        ownerDocument: documentTarget,
-        firstChild: null,
-        lastChild: null,
-        parentNode: null,
-        textContent: "",
-        style: {},
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        appendChild: vi.fn(),
-        insertBefore: vi.fn(),
-        removeChild: vi.fn(),
-        setAttribute: vi.fn(),
-        removeAttribute: vi.fn(),
-    };
-    Object.assign(documentTarget, {
-        defaultView: windowTarget,
-        documentElement: containerTarget,
-        body: containerTarget,
-    });
-    vi.stubGlobal("window", windowTarget);
-    vi.stubGlobal("document", documentTarget);
-    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-    return document.createElement("div");
 }
 
 function hasChildren(value: unknown): value is { children?: ReactNode } {

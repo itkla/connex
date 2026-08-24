@@ -1,19 +1,15 @@
 import {
     act,
-    createElement,
     isValidElement,
     type AnchorHTMLAttributes,
     type ComponentProps,
     type PropsWithChildren,
-    type ReactElement,
-    type ReactNode,
 } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import LoginPage from "@/app/auth/login/page";
 import { AuthForm } from "@/app/components/AuthForm";
-import CapabilityUnavailablePage from "@/app/components/CapabilityUnavailablePage";
 import type { InstanceCapabilities } from "@/app/lib/types";
 import {
     installInteractiveDocument,
@@ -153,30 +149,6 @@ function stubCapabilities(capabilities: InstanceCapabilities | null) {
     }));
 }
 
-function hasChildren(value: unknown): value is { children?: ReactNode } {
-    return typeof value === "object" && value !== null && "children" in value;
-}
-
-function findByType(node: ReactNode, type: unknown): ReactElement | null {
-    if (Array.isArray(node)) {
-        for (const child of node) {
-            const found = findByType(child, type);
-            if (found !== null) return found;
-        }
-        return null;
-    }
-    if (!isValidElement(node)) return null;
-    if (node.type === type) return node;
-    return hasChildren(node.props) ? findByType(node.props.children, type) : null;
-}
-
-function containsText(node: ReactNode, text: string): boolean {
-    if (node === text) return true;
-    if (Array.isArray(node)) return node.some((child) => containsText(child, text));
-    if (!isValidElement(node) || !hasChildren(node.props)) return false;
-    return containsText(node.props.children, text);
-}
-
 function requiredElement(
     elements: readonly InteractiveElement[],
     predicate: (element: InteractiveElement) => boolean,
@@ -185,11 +157,6 @@ function requiredElement(
     const element = elements.find(predicate);
     if (!element) throw new Error(`${label} did not render`);
     return element;
-}
-
-function hasAvailabilityState(value: unknown): value is { state: string } {
-    return typeof value === "object" && value !== null && "state" in value
-        && typeof value.state === "string";
 }
 
 function hasSsoAvailability(value: unknown): value is {
@@ -201,17 +168,6 @@ function hasSsoAvailability(value: unknown): value is {
         && (value.ssoAvailability === "enabled"
             || value.ssoAvailability === "disabled"
             || value.ssoAvailability === "unavailable");
-}
-
-function hasMailManagementAvailability(value: unknown): value is {
-    mailManagementAvailability: "enabled" | "disabled" | "unavailable";
-} {
-    return typeof value === "object"
-        && value !== null
-        && "mailManagementAvailability" in value
-        && (value.mailManagementAvailability === "enabled"
-            || value.mailManagementAvailability === "disabled"
-            || value.mailManagementAvailability === "unavailable");
 }
 
 afterEach(() => {

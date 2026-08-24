@@ -1139,7 +1139,7 @@
         "description": "温度感のスコアリング、冷え込み予測、つながり、在籍履歴。Connex の核心。",
         "lead": "ここが Connex を際立たせる部分です。リレーションシップはスコア化され、冷え込みを監視され、つながりをたどれるマップとして描かれます。",
         "articles": {
-            "warmth-and-temperature": {
+            "warmth": {
                 "title": "温度感",
                 "description": "温度感をどのようにスコア化し、それぞれの温度帯が何を意味するかを解説します。",
                 "blocks": [
@@ -1385,7 +1385,7 @@
                             {
                                 "title": "温度感",
                                 "description": "AI の説明が土台としている、計算されたシグナル。",
-                                "href": "/docs/relationship-intelligence/warmth-and-temperature"
+                                "href": "/docs/relationship-intelligence/warmth"
                             },
                             {
                                 "title": "プライバシーと開示等の請求",
@@ -4731,7 +4731,7 @@
                             {
                                 "title": "温度感",
                                 "description": "各バンドの意味と、スコアがどのように最新に保たれるか。",
-                                "href": "/docs/relationship-intelligence/warmth-and-temperature"
+                                "href": "/docs/relationship-intelligence/warmth"
                             },
                             {
                                 "title": "アクティビティ",

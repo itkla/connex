@@ -160,6 +160,32 @@ describe("people & access arrives at the section a deep link asked for", () => {
         expect(hook).toContain("sections.includes(target) ? target : null");
     });
 
+    /**
+     * The arrival has to survive a section that mounts late, which #1340 PR 8 made load-bearing:
+     * every retired address now forwards carrying a fragment, so a destination that renders a
+     * skeleton before its regions exist would swallow the section the reader asked for. The
+     * organization's General destination is the one that gates its regions behind its own read.
+     *
+     * The effect returns without claiming the hash when the element is absent, so the fix is to
+     * give it something to re-run on: the ref callback counts the appearance of the section being
+     * waited for, and the effect depends on that count. The per-hash guard still holds the whole
+     * thing to one scroll.
+     */
+    it("arrives at a section that mounts after its page has finished loading", () => {
+        const hook = source(ARRIVAL_HOOK);
+
+        expect(hook, "the effect bails without claiming the hash when the element is not there yet")
+            .toContain("if (!element) return;");
+        expect(hook, "the ref callback knows which section is being waited for")
+            .toContain("if (slug === wanted.current) setAppearances((count) => count + 1);");
+        expect(hook, "and the effect re-runs when that section finally registers")
+            .toContain("}, [hash, section, reduceMotion, appearances]);");
+        expect(
+            hook,
+            "a late arrival must not re-scroll a reader who has already been moved once for this fragment",
+        ).toContain("scrolledForHash.current === hash");
+    });
+
     it("holds the scroll while the sections above the target are still loading", () => {
         const hook = source(ARRIVAL_HOOK);
 

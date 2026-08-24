@@ -1139,7 +1139,7 @@
         "description": "Warmth scoring, decay prediction, connections, and employment history: the heart of Connex.",
         "lead": "This is what sets Connex apart. Relationships are scored, watched for decay, and drawn into a map you can explore.",
         "articles": {
-            "warmth-and-temperature": {
+            "warmth": {
                 "title": "Warmth",
                 "description": "How warmth is scored and what the bands mean.",
                 "blocks": [
@@ -1385,7 +1385,7 @@
                             {
                                 "title": "Warmth",
                                 "description": "The computed signals the AI explanations sit on top of.",
-                                "href": "/docs/relationship-intelligence/warmth-and-temperature"
+                                "href": "/docs/relationship-intelligence/warmth"
                             },
                             {
                                 "title": "Privacy and data requests",
@@ -4731,7 +4731,7 @@
                             {
                                 "title": "Warmth",
                                 "description": "What each band means and how the score keeps itself current.",
-                                "href": "/docs/relationship-intelligence/warmth-and-temperature"
+                                "href": "/docs/relationship-intelligence/warmth"
                             },
                             {
                                 "title": "Activities",

@@ -51,7 +51,7 @@ const ROUTE_CASES = [
     ["/activity/notes", "shell"],
     ["/activity/tasks/1", "shell"],
     ["/activity/tasks", "shell"],
-    ["/admin/logs", "shell"],
+    ["/admin/logs", "redirect"],
     ["/ask-connex", "owned"],
     ["/ask-connex/1", "owned"],
     ["/dashboard", "shell"],
@@ -65,14 +65,14 @@ const ROUTE_CASES = [
     ["/me", "shell"],
     ["/notifications", "shell"],
     ["/organization", "redirect"],
-    ["/organization/ai", "shell"],
-    ["/organization/allowed-domains", "shell"],
-    ["/organization/audit", "shell"],
-    ["/organization/data-requests", "shell"],
-    ["/organization/diagnostics", "shell"],
-    ["/organization/members", "shell"],
-    ["/organization/overview", "shell"],
-    ["/organization/sso", "shell"],
+    ["/organization/ai", "redirect"],
+    ["/organization/allowed-domains", "redirect"],
+    ["/organization/audit", "redirect"],
+    ["/organization/data-requests", "redirect"],
+    ["/organization/diagnostics", "redirect"],
+    ["/organization/members", "redirect"],
+    ["/organization/overview", "redirect"],
+    ["/organization/sso", "redirect"],
     ["/overview/analytics", "shell"],
     ["/overview/calendar", "shell"],
     ["/overview/introductions", "shell"],
@@ -85,7 +85,7 @@ const ROUTE_CASES = [
     ["/overview/reports/new", "shell"],
     ["/overview/reports", "shell"],
     ["/radar", "shell"],
-    ["/records/approval-policies", "shell"],
+    ["/records/approval-policies", "redirect"],
     ["/records/companies/1", "shell"],
     ["/records/companies", "shell"],
     ["/records/contacts/1", "shell"],
@@ -96,18 +96,18 @@ const ROUTE_CASES = [
     ["/records/pipelines", "shell"],
     ["/records/products", "shell"],
     ["/search", "shell"],
-    ["/settings/custom-fields", "shell"],
+    ["/settings/custom-fields", "redirect"],
     ["/settings/data", "shell"],
-    ["/settings/delivery", "shell"],
-    ["/settings/diagnostics", "shell"],
-    ["/settings/email", "shell"],
+    ["/settings/delivery", "redirect"],
+    ["/settings/diagnostics", "redirect"],
+    ["/settings/email", "redirect"],
     ["/settings/general", "shell"],
-    ["/settings/members", "shell"],
+    ["/settings/members", "redirect"],
     ["/settings/membership", "redirect"],
     ["/settings/notifications", "redirect"],
     ["/settings", "shell"],
-    ["/settings/qualification", "shell"],
-    ["/settings/roles", "shell"],
+    ["/settings/qualification", "redirect"],
+    ["/settings/roles", "redirect"],
     ["/settings/rules", "redirect"],
     ["/settings/security", "redirect"],
     ["/settings/sso", "redirect"],
@@ -122,7 +122,7 @@ const ROUTE_CASES = [
     ["/settings/organization/data-requests", "shell"],
     ["/settings/organization/audit-diagnostics", "shell"],
     ["/users/1", "shell"],
-    ["/users", "shell"],
+    ["/users", "redirect"],
     ["/workflows/1", "owned"],
     ["/workflows/1/runs/canonical-1", "shell"],
     ["/workflows/new", "owned"],
@@ -198,10 +198,10 @@ describe("breadcrumb route registry", () => {
     });
 
     it("reads live workspace and organization identities on every resolution", () => {
-        const before = resolveBreadcrumbRoute("/settings/members", context()).crumbs;
-        const after = resolveBreadcrumbRoute("/settings/members", context({ workspaceName: "Voyager" })).crumbs;
+        const before = resolveBreadcrumbRoute("/settings/data", context()).crumbs;
+        const after = resolveBreadcrumbRoute("/settings/data", context({ workspaceName: "Voyager" })).crumbs;
         const organization = resolveBreadcrumbRoute(
-            "/organization/members",
+            "/settings/organization/identity",
             context({ organizationName: "Black Mesa" }),
         ).crumbs;
 
@@ -258,16 +258,32 @@ describe("breadcrumb route registry", () => {
 
     it.each([
         ["/overview/reports/goals", "goals"],
-        ["/admin/logs", "auditLog"],
         ["/marketing/campaigns", "campaigns"],
         ["/workflows", "workflows"],
-        ["/settings/diagnostics", "diagnostics"],
     ] as const)("fails closed for inaccessible route %s", (pathname, access) => {
         const navAccess: NavAccess = { ...ALL_ACCESS, [access]: false };
         expect(resolveBreadcrumbRoute(pathname, context({
             navAccess,
         }))).toEqual({ kind: "denied", crumbs: [] });
     });
+
+    /**
+     * The two audit and diagnostics addresses that used to be checked above are now forwards, and a
+     * forward is classified as one before access is consulted. That is not a loosening: what the
+     * gate protects is that an inaccessible route discloses no trail, and both classifications
+     * yield none. The reader never sees either, because the address redirects before it renders —
+     * and the destination it lands on refuses in place, which is where the refusal now belongs.
+     */
+    it.each(["/admin/logs", "/settings/diagnostics"])(
+        "discloses no trail for retired address %s, whatever the viewer may reach",
+        (pathname) => {
+            const navAccess: NavAccess = { ...ALL_ACCESS, auditLog: false, diagnostics: false };
+            const resolution = resolveBreadcrumbRoute(pathname, context({ navAccess }));
+
+            expect(resolution.crumbs).toEqual([]);
+            expect(resolution.kind).toBe("redirect");
+        },
+    );
 
     it.each([
         ["enabled", "shell"],
@@ -280,11 +296,14 @@ describe("breadcrumb route registry", () => {
         ).kind).toBe(kind);
     });
 
-    it("does not link organization routes for a non-administrator", () => {
-        expect(resolveBreadcrumbRoute(
+    it("does not link the retired organization routes for a non-administrator", () => {
+        const resolution = resolveBreadcrumbRoute(
             "/organization/members",
             context({ organizationAccessible: false }),
-        )).toEqual({ kind: "denied", crumbs: [] });
+        );
+
+        expect(resolution.crumbs, "a retired address discloses no trail either way").toEqual([]);
+        expect(resolution.kind).toBe("redirect");
     });
 
     it.each([
@@ -365,10 +384,13 @@ describe("breadcrumb route registry", () => {
     });
 
     it("fails closed when all gated navigation state is unavailable", () => {
-        expect(resolveBreadcrumbRoute(
-            "/admin/logs",
-            context({ navAccess: NO_NAV_ACCESS }),
-        )).toEqual({ kind: "denied", crumbs: [] });
+        expect(
+            resolveBreadcrumbRoute(
+                "/marketing/campaigns",
+                context({ navAccess: NO_NAV_ACCESS }),
+            ),
+            "the probe moved off /admin/logs, which is a forward now and answers as one before access is consulted. It has to be a route that still renders and is still gated, which campaigns is; the audit job's own destination is deliberately ungated here, because it absorbed two separately gated jobs and refuses each in place.",
+        ).toEqual({ kind: "denied", crumbs: [] });
     });
 
     it.each([

@@ -135,7 +135,7 @@ export const docsCategories: DocCategory[] = [
         namespace: "DocsRelationshipIntelligence",
         icon: FireIcon,
         articles: [
-            { slug: "warmth-and-temperature", icon: FireIcon },
+            { slug: "warmth", icon: FireIcon },
             { slug: "decay-and-signals", icon: ArrowTrendingDownIcon },
             { slug: "connections-and-employment", icon: ArrowsRightLeftIcon },
             { slug: "ai-insights", icon: SparklesIcon },
@@ -251,6 +251,33 @@ export type ResolvedArticle = {
 };
 
 /** Look up a category by its URL slug. */
+/**
+ * Article slugs that have been renamed, and what they were renamed to.
+ *
+ * A documentation slug is a route: it is bookmarked, linked from inside the product, and indexed.
+ * Renaming one without forwarding the old address breaks every one of those. #1339's warmth sweep
+ * retitled this article to "Warmth" and left its slug reading `warmth-and-temperature`, which
+ * #1340 flagged as a route seam rather than a copy one, because §7 gives a destination one name and
+ * the address is part of the name.
+ *
+ * Keyed by `{category}/{article}`, because a slug is only unique within its category.
+ */
+export const RETIRED_ARTICLE_SLUGS: Readonly<Record<string, string>> = {
+    "relationship-intelligence/warmth-and-temperature": "relationship-intelligence/warmth",
+};
+
+/**
+ * The current address of a renamed article, or null when the slug was never renamed.
+ *
+ * @param categorySlug - the category segment of the requested path
+ * @param articleSlug - the article segment of the requested path
+ * @returns the app-relative docs path to forward to, or null
+ */
+export function renamedArticlePath(categorySlug: string, articleSlug: string): string | null {
+    const successor = RETIRED_ARTICLE_SLUGS[`${categorySlug}/${articleSlug}`];
+    return successor === undefined ? null : `/docs/${successor}`;
+}
+
 export function getCategory(slug: string): DocCategory | undefined {
     return docsCategories.find((category) => category.slug === slug);
 }

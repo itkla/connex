@@ -47,9 +47,13 @@ export type MatrixRoute = {
      * lands on `/auth/login`, which is otherwise indistinguishable from a healthy render because the
      * login page answers 200 and carries its own `<h1>`.
      *
-     * Defaults to the route's own path. A capability no longer conditions where a settings route
-     * settles: #1340 retired the two forwards that used to send `/settings/email` and
-     * `/organization/sso` elsewhere, so each renders its own path and explains the capability there.
+     * Defaults to the route's own path. A capability never conditions where a settings route
+     * settles — #1340 retired the two forwards that did that, and each destination now explains its
+     * capability where it stands. What does condition it is consolidation: #1340 PR 8 retired every
+     * legacy settings, account, organization, users, admin-log and approval-policy address into a
+     * permanent forward, so those rows declare the canonical destination they land on. The fragment
+     * that carries the reader to the right section of it is not part of the pathname and so is not
+     * declared here; `settingsManifest.test.ts` owns that half of the address.
      */
     landsOn?: readonly string[];
 };
@@ -71,9 +75,9 @@ export const MATRIX_ROUTES: readonly MatrixRoute[] = [
     { id: 'tasks', path: '/activity/tasks', area: 'tasks', tier: 1, role: 'member' },
     { id: 'notifications', path: '/notifications', area: 'notifications', tier: 1, role: 'member' },
     { id: 'calendar', path: '/overview/calendar', area: 'calendar', tier: 1, role: 'member' },
-    { id: 'settings-diagnostics', path: '/settings/diagnostics', area: 'diagnostics', tier: 1, role: 'admin', deniesMember: true },
+    { id: 'settings-diagnostics', path: '/settings/diagnostics', area: 'diagnostics', tier: 1, role: 'admin', deniesMember: true, landsOn: ['/settings/workspace/audit-diagnostics'] },
 
-    { id: 'org-diagnostics', path: '/organization/diagnostics', area: 'diagnostics', tier: 2, role: 'owner', deniesMember: true },
+    { id: 'org-diagnostics', path: '/organization/diagnostics', area: 'diagnostics', tier: 2, role: 'owner', deniesMember: true, landsOn: ['/settings/organization/audit-diagnostics'] },
     { id: 'connections', path: '/account/connections', area: 'connections', tier: 2, role: 'member' },
     { id: 'connections-reviews', path: '/account/connections/reviews', area: 'import', tier: 2, role: 'member', landsOn: ['/account/connections'] },
     { id: 'workflows', path: '/workflows', area: 'workflows', tier: 2, role: 'admin', deniesMember: true },
@@ -81,16 +85,16 @@ export const MATRIX_ROUTES: readonly MatrixRoute[] = [
     { id: 'analytics', path: '/overview/analytics', area: 'other', tier: 2, role: 'member' },
     { id: 'introductions', path: '/overview/introductions', area: 'ai', tier: 2, role: 'member' },
     { id: 'settings-root', path: '/settings', area: 'settings', tier: 2, role: 'member' },
-    { id: 'settings-members', path: '/settings/members', area: 'settings', tier: 2, role: 'member' },
-    { id: 'settings-roles', path: '/settings/roles', area: 'settings', tier: 2, role: 'owner', deniesMember: true },
-    { id: 'admin-logs', path: '/admin/logs', area: 'settings', tier: 2, role: 'admin', deniesMember: true },
+    { id: 'settings-members', path: '/settings/members', area: 'settings', tier: 2, role: 'member', landsOn: ['/settings/workspace/people'] },
+    { id: 'settings-roles', path: '/settings/roles', area: 'settings', tier: 2, role: 'owner', landsOn: ['/settings/workspace/people'] },
+    { id: 'admin-logs', path: '/admin/logs', area: 'settings', tier: 2, role: 'admin', deniesMember: true, landsOn: ['/settings/workspace/audit-diagnostics'] },
     { id: 'products', path: '/records/products', area: 'deals', tier: 2, role: 'admin', deniesMember: true },
     { id: 'activity-all', path: '/activity/all', area: 'tasks', tier: 2, role: 'member' },
     { id: 'notes', path: '/activity/notes', area: 'tasks', tier: 2, role: 'member' },
     { id: 'files', path: '/library/files', area: 'other', tier: 2, role: 'member' },
     { id: 'campaigns', path: '/marketing/campaigns', area: 'other', tier: 2, role: 'member' },
     { id: 'me', path: '/me', area: 'tasks', tier: 2, role: 'member' },
-    { id: 'organization', path: '/organization', area: 'settings', tier: 2, role: 'owner', landsOn: ['/organization/members'] },
+    { id: 'organization', path: '/organization', area: 'settings', tier: 2, role: 'owner', landsOn: ['/settings/organization/general'] },
     { id: 'search', path: '/search', area: 'other', tier: 2, role: 'member' },
 
     { id: 'account', path: '/account', area: 'settings', tier: 3, role: 'member', landsOn: ['/account/profile'] },
@@ -102,22 +106,23 @@ export const MATRIX_ROUTES: readonly MatrixRoute[] = [
     { id: 'tags', path: '/library/tags', area: 'other', tier: 3, role: 'member' },
     { id: 'map', path: '/overview/map', area: 'other', tier: 3, role: 'member' },
     { id: 'goals', path: '/overview/reports/goals', area: 'other', tier: 3, role: 'member' },
-    { id: 'approval-policies', path: '/records/approval-policies', area: 'other', tier: 3, role: 'admin' },
-    { id: 'custom-fields', path: '/settings/custom-fields', area: 'settings', tier: 3, role: 'admin', deniesMember: true },
+    { id: 'approval-policies', path: '/records/approval-policies', area: 'other', tier: 3, role: 'admin', landsOn: ['/settings/workspace/crm'] },
+    { id: 'custom-fields', path: '/settings/custom-fields', area: 'settings', tier: 3, role: 'admin', landsOn: ['/settings/workspace/crm'] },
     { id: 'settings-data', path: '/settings/data', area: 'import', tier: 3, role: 'admin' },
-    { id: 'settings-email', path: '/settings/email', area: 'settings', tier: 3, role: 'admin', deniesMember: true },
-    { id: 'settings-delivery', path: '/settings/delivery', area: 'settings', tier: 3, role: 'admin', deniesMember: true },
+    { id: 'settings-email', path: '/settings/email', area: 'settings', tier: 3, role: 'admin', deniesMember: true, landsOn: ['/settings/workspace/communications'] },
+    { id: 'settings-delivery', path: '/settings/delivery', area: 'settings', tier: 3, role: 'admin', deniesMember: true, landsOn: ['/settings/workspace/communications'] },
     { id: 'settings-notifications', path: '/settings/notifications', area: 'settings', tier: 3, role: 'member', landsOn: ['/account/notifications'] },
     { id: 'settings-security', path: '/settings/security', area: 'settings', tier: 3, role: 'admin', landsOn: ['/account/security'] },
     { id: 'settings-membership', path: '/settings/membership', area: 'settings', tier: 3, role: 'member', landsOn: ['/account/invites'] },
     { id: 'settings-rules', path: '/settings/rules', area: 'workflows', tier: 3, role: 'admin', deniesMember: true, landsOn: ['/workflows'] },
-    { id: 'settings-sso', path: '/settings/sso', area: 'settings', tier: 3, role: 'admin', landsOn: ['/organization/sso'] },
-    { id: 'org-members', path: '/organization/members', area: 'settings', tier: 3, role: 'owner' },
-    { id: 'org-audit', path: '/organization/audit', area: 'settings', tier: 3, role: 'owner' },
-    { id: 'org-ai', path: '/organization/ai', area: 'ai', tier: 3, role: 'owner' },
-    { id: 'org-sso', path: '/organization/sso', area: 'settings', tier: 3, role: 'owner' },
-    { id: 'org-domains', path: '/organization/allowed-domains', area: 'settings', tier: 3, role: 'owner' },
-    { id: 'org-dsr', path: '/organization/data-requests', area: 'settings', tier: 3, role: 'owner' },
+    { id: 'settings-sso', path: '/settings/sso', area: 'settings', tier: 3, role: 'admin', landsOn: ['/settings/organization/identity'] },
+    { id: 'org-members', path: '/organization/members', area: 'settings', tier: 3, role: 'owner', landsOn: ['/settings/organization/identity'] },
+    { id: 'org-audit', path: '/organization/audit', area: 'settings', tier: 3, role: 'owner', landsOn: ['/settings/organization/audit-diagnostics'] },
+    { id: 'org-ai', path: '/organization/ai', area: 'ai', tier: 3, role: 'owner', landsOn: ['/settings/organization/ai-governance'] },
+    { id: 'org-sso', path: '/organization/sso', area: 'settings', tier: 3, role: 'owner', landsOn: ['/settings/organization/identity'] },
+    { id: 'org-domains', path: '/organization/allowed-domains', area: 'settings', tier: 3, role: 'owner', landsOn: ['/settings/organization/identity'] },
+    { id: 'org-dsr', path: '/organization/data-requests', area: 'settings', tier: 3, role: 'owner', landsOn: ['/settings/organization/data-requests'] },
+    { id: 'users', path: '/users', area: 'settings', tier: 3, role: 'member', landsOn: ['/settings/workspace/people'] },
 ];
 
 /** Routes at or above the given tier, ordered as declared. */
