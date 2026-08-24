@@ -153,8 +153,9 @@ import type { AppAction } from '@/app/lib/actions/types';
 import { AiGenerationError } from '@/app/lib/aiGeneration';
 import { createAiChatSocket } from '@/app/lib/realtime';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import { formatRelativeTime } from '@/app/lib/utils';
+import { formatDate, formatRelativeTime, formatUtcDateTime } from '@/app/lib/utils';
 import type {
+    AiAssistantCreatedRecordKind,
     AiChatCitation,
     AiChatAnswerBlockKind,
     AiChatAttachment,
@@ -175,6 +176,16 @@ import type {
 type OpenSource = 'standard' | 'keyboard';
 
 const ASK_CONNEX_MESSAGE_PAGE_SIZE = 50;
+/** The activity types this client has words for, so an unfamiliar one is left as the record has it. */
+const ASK_CONNEX_ACTIVITY_TYPES: readonly string[] = [
+    'call',
+    'email',
+    'meeting',
+    'note',
+    'other',
+];
+/** The note visibilities the assistant can write, which is a closed set the server enforces. */
+const ASK_CONNEX_NOTE_VISIBILITIES: readonly string[] = ['private', 'workspace'];
 const EMPTY_ASK_CONNEX_TOOL_CALL_IDS: ReadonlySet<number> = new Set();
 const EMPTY_ASK_CONNEX_PINS: readonly AskConnexAttachment[] = [];
 const noopCleanup = () => {};
@@ -1848,10 +1859,17 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         }
     }, [activeSession, newChat, showApiError, t, working]);
 
+    /**
+     * Runs one decision against one proposal, and says whether the workspace actually changed.
+     *
+     * The caller owns the page refresh so a reviewed batch can settle before asking the routed
+     * page behind the conversation to re-read itself once, instead of once per change.
+     */
     const performToolAction = useCallback(async (
         toolCallId: number,
         action: AskConnexToolAction,
-    ) => {
+        deferRefresh = false,
+    ): Promise<boolean> => {
         const session = activeSessionRef.current;
         const signal = identityControllerRef.current?.signal;
         const card = toolCalls.find((toolCall) => toolCall.id === toolCallId);
@@ -1861,9 +1879,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             || !card
             || !actionableToolCallIds.has(toolCallId)
             || toolActionsRef.current.has(toolCallId)) {
-            return;
+            return false;
         }
         const operationEpoch = sessionEpochRef.current;
+        let mutated = false;
         toolActionsRef.current.add(toolCallId);
         dispatchToolCalls({ type: 'actionStarted', toolCallId, action });
         try {
@@ -1874,17 +1893,18 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     : await undoAiAssistantToolCall(session.id, toolCallId, { signal });
             if (signal.aborted
                 || operationEpoch !== sessionEpochRef.current
-                || activeSessionRef.current?.id !== session.id) return;
+                || activeSessionRef.current?.id !== session.id) return mutated;
             dispatchToolCalls({ type: 'actionApplied', toolCallId, action, mutation });
             if ((action === 'approve' && mutation.status === 'executed')
                 || (action === 'undo' && mutation.status === 'undone')) {
-                router.refresh();
+                mutated = true;
+                if (!deferRefresh) router.refresh();
             }
             try {
                 const refreshed = await getAiAssistantToolCall(session.id, toolCallId, { signal });
                 if (signal.aborted
                     || operationEpoch !== sessionEpochRef.current
-                    || activeSessionRef.current?.id !== session.id) return;
+                    || activeSessionRef.current?.id !== session.id) return mutated;
                 dispatchToolCalls({ type: 'actionSettled', toolCall: refreshed });
             } catch {
                 if (!signal.aborted
@@ -1896,7 +1916,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         } catch (error) {
             if (signal.aborted
                 || operationEpoch !== sessionEpochRef.current
-                || activeSessionRef.current?.id !== session.id) return;
+                || activeSessionRef.current?.id !== session.id) return mutated;
             const failure = toolCardFailure(error, action);
             dispatchToolCalls({ type: 'actionFailed', toolCallId, action, failure });
             toastError(t(`toolCards.failures.${failure}`));
@@ -1916,7 +1936,28 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         } finally {
             toolActionsRef.current.delete(toolCallId);
         }
+        return mutated;
     }, [actionableToolCallIds, router, t, toolCalls]);
+
+    /**
+     * Applies one reviewed batch as the single decision the member made.
+     *
+     * Sequential on purpose. Each proposal is revalidated against locked record state at the moment
+     * it runs, so a batch fired all at once would have every row decided against the workspace as it
+     * stood before any of them landed — and two proposals touching the same record would race. Going
+     * one at a time is also what lets a half-successful batch say exactly which half, because each
+     * row settles into its own outcome before the next is attempted.
+     */
+    const performToolActions = useCallback(async (
+        toolCallIds: readonly number[],
+        action: AskConnexToolAction,
+    ) => {
+        let mutated = false;
+        for (const toolCallId of toolCallIds) {
+            if (await performToolAction(toolCallId, action, true)) mutated = true;
+        }
+        if (mutated) router.refresh();
+    }, [performToolAction, router]);
 
     /**
      * Sends one question, with everything it declares it covers.
@@ -2239,6 +2280,31 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     : t('citationKindDeal'),
         [t],
     );
+    /**
+     * States one value a completed action wrote, in the reader's own language and time zone.
+     *
+     * The server names the field and returns what the record actually stores: a UTC instant the way
+     * the database holds it, a calendar date, an enumeration's own token. None of those are things a
+     * member reads. An activity that starts at "2026-03-12 13:00:00" and a note whose visibility is
+     * "private" have to be written the way this reader writes them, or a Japanese card is quoting an
+     * English database back at them. A token this client has no word for is left as it stands rather
+     * than guessed at.
+     */
+    const outcomeValueText = useCallback((field: string, value: string): string => {
+        if (field === 'start') return formatUtcDateTime(value, locale, value);
+        if (field === 'dueDate') return formatDate(value, locale);
+        if (field === 'visibility') {
+            return ASK_CONNEX_NOTE_VISIBILITIES.includes(value)
+                ? t(`toolCards.outcomeValues.visibility.${value}`)
+                : value;
+        }
+        if (field === 'type') {
+            return ASK_CONNEX_ACTIVITY_TYPES.includes(value)
+                ? t(`toolCards.outcomeValues.type.${value}`)
+                : value;
+        }
+        return value;
+    }, [locale, t]);
     const labels = useMemo(() => ({
         answerDocument: {
             absoluteTime: (instant: string) => formatAnswerInstant(instant, locale),
@@ -2416,32 +2482,82 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         sessionRail: t('sessionRail'),
         sessionGroup: (key: AskConnexSessionGroupKey) => t(`sessionGroups.${key}`),
         relativeTime: (instant: string) => formatRelativeTime(instant, locale, now),
+        proposalReview: {
+            heading: (count: number) => t('proposalReview.heading', { count }),
+            applicable: (applicable: number, count: number) =>
+                t('proposalReview.applicable', { applicable, count }),
+            selected: (count: number) => t('proposalReview.selected', { count }),
+            applySelected: (count: number) => t('proposalReview.applySelected', { count }),
+            applying: t('proposalReview.applying'),
+            include: (target: string) => t('proposalReview.include', { target }),
+            openFullView: t('proposalReview.openFullView'),
+            noneApplicable: t('proposalReview.noneApplicable'),
+            applied: (count: number) => t('proposalReview.applied', { count }),
+            discarded: (count: number) => t('proposalReview.discarded', { count }),
+            failed: (count: number) => t('proposalReview.failed', { count }),
+        },
         toolCard: {
             actionFailed: t('toolCards.failures.actionFailed'),
-            approve: t('toolCards.actions.approve'),
-            approveAria: (target: string) => t('toolCards.actions.approveAria', { target }),
-            approving: t('toolCards.actions.approving'),
-            beforeApproval: t('toolCards.change.beforeApproval'),
+            apply: t('toolCards.actions.apply'),
+            applyAria: (target: string) => t('toolCards.actions.applyAria', { target }),
+            applying: t('toolCards.actions.applying'),
+            changeField: {
+                owner: t('toolCards.change.fieldOwner'),
+                stage: t('toolCards.change.fieldStage'),
+            },
+            changeNotSet: t('toolCards.change.notSet'),
+            changeCurrentUnresolved: {
+                owner: t('toolCards.change.currentUnresolvedOwner'),
+                stage: t('toolCards.change.currentUnresolvedStage'),
+            },
+            changeProposedUnresolved: t('toolCards.change.proposedUnresolved'),
+            changeState: {
+                unchanged: t('toolCards.change.stateUnchanged'),
+                recordChanged: t('toolCards.change.stateRecordChanged'),
+                permissionLost: t('toolCards.change.statePermissionLost'),
+                unresolved: t('toolCards.change.stateUnresolved'),
+            },
+            diffAfter: t('toolCards.change.after'),
+            diffBefore: t('toolCards.change.before'),
+            discard: t('toolCards.actions.discard'),
+            discardAria: (target: string) => t('toolCards.actions.discardAria', { target }),
+            discarding: t('toolCards.actions.discarding'),
+            editOnRecord: t('toolCards.actions.editOnRecord'),
+            editOnRecordAria: (target: string) => t('toolCards.actions.editOnRecordAria', { target }),
             executedDetail: t('toolCards.states.executedDetail'),
             executedStatus: t('toolCards.states.executed'),
             expiredDetail: t('toolCards.states.expiredDetail'),
             expiredStatus: t('toolCards.states.expired'),
             failedDetail: t('toolCards.states.failedDetail'),
             failedStatus: t('toolCards.states.failed'),
-            ifApproved: t('toolCards.change.ifApproved'),
-            noChangeYet: t('toolCards.change.noChangeYet'),
+            openCreatedRecord: (kind: AiAssistantCreatedRecordKind) =>
+                t(`toolCards.openCreated.${kind}`),
+            openCreatedRecordAria: (kind: AiAssistantCreatedRecordKind) =>
+                t(`toolCards.openCreatedAria.${kind}`),
             outcome: t('toolCards.outcome'),
+            outcomeField: {
+                type: t('toolCards.outcomeFields.type'),
+                subject: t('toolCards.outcomeFields.subject'),
+                start: t('toolCards.outcomeFields.start'),
+                description: t('toolCards.outcomeFields.description'),
+                dueDate: t('toolCards.outcomeFields.dueDate'),
+                title: t('toolCards.outcomeFields.title'),
+                visibility: t('toolCards.outcomeFields.visibility'),
+                tag: t('toolCards.outcomeFields.tag'),
+                stage: t('toolCards.outcomeFields.stage'),
+                owner: t('toolCards.outcomeFields.owner'),
+                other: t('toolCards.outcomeFields.other'),
+            },
+            outcomeValue: outcomeValueText,
             pendingDetail: t('toolCards.states.pendingDetail'),
             pendingStatus: t('toolCards.states.pending'),
             proposalChanged: t('toolCards.failures.proposalChanged'),
             proposalPermissionLost: t('toolCards.failures.proposalPermissionLost'),
             proposalUnavailable: t('toolCards.failures.proposalUnavailable'),
+            proposedChange: t('toolCards.change.proposedChange'),
             recordLink: (target: string) => t('toolCards.recordLink', { target }),
-            reject: t('toolCards.actions.reject'),
-            rejectAria: (target: string) => t('toolCards.actions.rejectAria', { target }),
             rejectedDetail: t('toolCards.states.rejectedDetail'),
             rejectedStatus: t('toolCards.states.rejected'),
-            rejecting: t('toolCards.actions.rejecting'),
             restrictedTarget: t('toolCards.restrictedTarget'),
             undo: t('toolCards.actions.undo'),
             undoAria: (target: string) => t('toolCards.actions.undoAria', { target }),
@@ -2449,6 +2565,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             undoneDetail: t('toolCards.states.undoneDetail'),
             undoneStatus: t('toolCards.states.undone'),
             undoing: t('toolCards.actions.undoing'),
+            undoWindow: (deadline: string, remaining: string) =>
+                t('toolCards.undoWindow', { deadline, remaining }),
             summaries: {
                 createActivity: t('toolCards.summaries.createActivity'),
                 createTask: t('toolCards.summaries.createTask'),
@@ -2474,7 +2592,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 requestCompleted: t('toolCards.summaries.requestCompleted'),
             },
         },
-    }), [citationKind, locale, now, scopeDeclaredSummary, scopeList, scopeSummary, t, tDisclosure, tWarmth]);
+    }), [citationKind, locale, now, outcomeValueText, scopeDeclaredSummary, scopeList, scopeSummary, t, tDisclosure, tWarmth]);
 
     const value = useMemo<AskConnexContextValue>(
         () => ({
@@ -2601,7 +2719,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 onSend={(content) => void send(content)}
                 onCancelTurn={() => void cancelTurn()}
                 onRetryTurn={retryTurn}
-                onToolAction={(toolCallId, action) => void performToolAction(toolCallId, action)}
+                onToolAction={async (toolCallId, action) => {
+                    await performToolAction(toolCallId, action);
+                }}
+                onToolActions={performToolActions}
             />
         </AskConnexContext.Provider>
     );

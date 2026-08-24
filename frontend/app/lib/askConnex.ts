@@ -2,6 +2,8 @@ import type { ActiveRecordRef, ActiveSelection, RecordType } from '@/app/lib/act
 import { AI_CHAT_PROGRESS_SOURCES } from '@/app/lib/types';
 import type {
     AiAssistantToolCall,
+    AiAssistantToolCallChange,
+    AiAssistantToolCallCreatedRecord,
     AiAssistantToolCallMutation,
     AiChatCitation,
     AiChatMessage,
@@ -374,7 +376,10 @@ function sameToolCallProjection(
     return current.status === incoming.status
         && current.updatedAt === incoming.updatedAt
         && current.undoAvailable === incoming.undoAvailable
-        && current.undoExpiresAt === incoming.undoExpiresAt;
+        && current.undoExpiresAt === incoming.undoExpiresAt
+        && current.change?.state === incoming.change?.state
+        && current.change?.currentValue === incoming.change?.currentValue
+        && current.change?.proposedValue === incoming.change?.proposedValue;
 }
 
 function compareToolCalls(
@@ -459,13 +464,8 @@ export function askConnexToolCardAffordances(
     now: number,
 ): AskConnexToolAction[] {
     if (card.tier === 'confirm' && card.status === 'proposed') {
-        if (card.failure === 'proposalChanged' || card.failure === 'proposalPermissionLost') {
-            return ['reject'];
-        }
-        if (card.failure === null || card.failure === 'actionFailed') {
-            return ['reject', 'approve'];
-        }
-        return [];
+        if (card.failure === 'proposalUnavailable' || card.failure === 'undoConflict') return [];
+        return askConnexProposalAppliable(card) ? ['reject', 'approve'] : ['reject'];
     }
     if (card.tier !== 'auto'
         || card.status !== 'executed'
@@ -488,12 +488,240 @@ export function askConnexToolCardStatus(
     return Number.isFinite(expiresAt) && now > expiresAt ? 'expired' : card.status;
 }
 
+/**
+ * Whether a proposal can still be applied as it was reviewed.
+ *
+ * Only a change the server established as applicable arms the apply control. A change that would
+ * do nothing, one whose proposed value no longer exists in this workspace, and one the viewer has
+ * lost the permission to make are all shown with their reason and without the control, so nobody
+ * presses a button whose only possible answer is a refusal. A record edited since the proposal was
+ * made stays applicable — the values on screen are the current ones — but says so first.
+ *
+ * A withheld change is not an applicable one. The server sends no change at all for a proposal
+ * this viewer did not raise or whose target it cannot currently show them, and arming apply on
+ * that absence would offer a control over a record the reader is not even allowed to see the
+ * before-value of — the one case where the answer is certainly a refusal.
+ */
+export function askConnexChangeApplicable(change: AiAssistantToolCallChange | null): boolean {
+    if (change === null) return false;
+    return change.state === 'ready' || change.state === 'recordChanged';
+}
+
+/**
+ * Whether one reviewed proposal can still be part of what a member applies.
+ *
+ * The single rule behind both the standalone card's apply control and the grouped review's
+ * selection, so a row cannot be counted into a batch that the card beside it would refuse to
+ * offer. A proposal whose last attempt was turned away on its own terms — the target moved, the
+ * permission went — is out until it is re-read; one that merely failed to reach the server stays
+ * in, because retrying it is the whole point.
+ */
+export function askConnexProposalAppliable(card: AskConnexToolCardState): boolean {
+    return (card.failure === null || card.failure === 'actionFailed')
+        && askConnexChangeApplicable(card.change);
+}
+
+/** How an executed action's undo window reads right now. */
+export type AskConnexUndoWindow =
+    | { state: 'none' }
+    | { state: 'open'; expiresAt: string; remainingMs: number }
+    | { state: 'closed'; expiresAt: string };
+
+/**
+ * The real remaining undo availability, from the server's own deadline.
+ *
+ * The deadline is an absolute instant the server wrote when it ran the action, so the window
+ * closes at the same moment for every client regardless of how long a transcript sat open. An
+ * unparseable or absent deadline is reported as no window rather than as an open one: a card that
+ * cannot state when undo stops being possible must not offer it.
+ *
+ * The window is also the sentence the card writes, so it is gated on the same capability the
+ * control is. A viewer watching a colleague's action, one who has lost the permission the inverse
+ * needs, one whose session has been archived, and one whose undo already failed against a changed
+ * record all have a deadline and no way to act on it; telling them they "can undo this until" a
+ * time when they cannot is the card lying about what it offers.
+ */
+export function askConnexUndoWindow(
+    card: AskConnexToolCardState,
+    now: number,
+): AskConnexUndoWindow {
+    if (card.tier !== 'auto'
+        || card.status !== 'executed'
+        || !card.undoAvailable
+        || card.undoBlocked
+        || card.undoExpiresAt === null) {
+        return { state: 'none' };
+    }
+    const expiresAt = Date.parse(card.undoExpiresAt);
+    if (!Number.isFinite(expiresAt)) return { state: 'none' };
+    if (now > expiresAt) return { state: 'closed', expiresAt: card.undoExpiresAt };
+    return { state: 'open', expiresAt: card.undoExpiresAt, remainingMs: expiresAt - now };
+}
+
+/**
+ * One answer's pending proposals, reviewed together.
+ *
+ * Grouping is by the answer that raised them, because that is the decision the member is actually
+ * making: "this reply wants to make three changes." Only proposals this member can act on join a
+ * group — a card they are watching rather than deciding is not part of their review.
+ *
+ * The counts cover the whole answer, not just what is still waiting: an answer whose batch half
+ * succeeded has to be able to say so, and a member who comes back to it later should read the same
+ * account of it that they were given at the time.
+ */
+export type AskConnexProposalGroup = {
+    turnId: number;
+    messageId: number | null;
+    cards: AskConnexToolCardState[];
+    /** Proposals whose change the server established as still applicable. */
+    applicable: number;
+    /** Proposals the member has kept in the batch, by tool-call id. */
+    included: ReadonlySet<number>;
+    /** Included proposals that can actually be applied, which is what the footer counts. */
+    selected: number;
+    /** Proposals from this answer the member has already applied. */
+    applied: number;
+    /** Proposals from this answer the member discarded. */
+    discarded: number;
+    /** Still-pending proposals whose last attempt did not go through. */
+    failed: number;
+};
+
+/**
+ * The number of proposals from one answer below which grouped review is not offered.
+ *
+ * Two changes are two single-record decisions, and single-record review is drawer work: a member
+ * who asked one question and got two proposals must be able to answer both where they are, without
+ * being sent to another surface first. Three is where an answer stops being a couple of decisions
+ * and becomes a batch to work through, which is what the review surface is for.
+ */
+export const ASK_CONNEX_GROUPED_REVIEW_MINIMUM = 3;
+
+/**
+ * Collects each answer's pending proposals into one reviewable group.
+ *
+ * Exclusions arrive from the surface rather than being held here so the same set survives a card
+ * refresh: a proposal the member took out of the batch must stay out while the transcript reloads
+ * around it. Anything not excluded is included, which keeps a newly arrived proposal in the batch
+ * by default and never silently drops one from the count.
+ *
+ * The membership of a group is deliberately not pinned when the review is first drawn. A proposal
+ * that arrives while the member is still reading — only possible from their own turn, still
+ * running, since a later turn forms its own group — joins the batch already selected. The
+ * alternative is worse: a batch that quietly leaves out a change the answer asked for, with a count
+ * the member reads as covering the whole answer. The new row is drawn above the control with its
+ * own values and its own reason, and nothing is written until apply is pressed.
+ */
+export function askConnexProposalGroups(
+    cards: readonly AskConnexToolCardState[],
+    actionableToolCallIds: ReadonlySet<number>,
+    excludedToolCallIds: ReadonlySet<number>,
+): AskConnexProposalGroup[] {
+    const byTurn = new Map<number, AskConnexToolCardState[]>();
+    const decidedByTurn = new Map<number, AskConnexToolCardState[]>();
+    for (const card of cards) {
+        if (card.tier !== 'confirm' || !actionableToolCallIds.has(card.id)) continue;
+        const bucket = card.status === 'proposed' ? byTurn : decidedByTurn;
+        bucket.set(card.turnId, [...(bucket.get(card.turnId) ?? []), card]);
+    }
+    const groups: AskConnexProposalGroup[] = [];
+    for (const [turnId, grouped] of byTurn) {
+        if (grouped.length < ASK_CONNEX_GROUPED_REVIEW_MINIMUM) continue;
+        const ordered = grouped.toSorted(compareToolCalls);
+        const included = new Set(
+            ordered.filter((card) => !excludedToolCallIds.has(card.id)).map((card) => card.id),
+        );
+        const decided = decidedByTurn.get(turnId) ?? [];
+        groups.push({
+            turnId,
+            messageId: ordered.find((card) => card.messageId !== null)?.messageId ?? null,
+            cards: ordered,
+            applicable: ordered.filter(askConnexProposalAppliable).length,
+            included,
+            selected: ordered.filter(
+                (card) => included.has(card.id) && askConnexProposalAppliable(card),
+            ).length,
+            applied: decided.filter((card) => card.status === 'executed').length,
+            discarded: decided.filter((card) => card.status === 'rejected').length,
+            failed: ordered.filter((card) => card.failure !== null).length,
+        });
+    }
+    return groups.toSorted((left, right) => left.turnId - right.turnId);
+}
+
+/** Tool-call ids that a grouped review is presenting, so their cards are not also rendered alone. */
+export function askConnexGroupedToolCallIds(
+    groups: readonly AskConnexProposalGroup[],
+): ReadonlySet<number> {
+    const grouped = new Set<number>();
+    for (const group of groups) {
+        for (const card of group.cards) grouped.add(card.id);
+    }
+    return grouped;
+}
+
+/** Adds or removes one proposal from the batch a grouped review would apply. */
+export function toggleAskConnexProposalExclusion(
+    excluded: ReadonlySet<number>,
+    toolCallId: number,
+): Set<number> {
+    const next = new Set(excluded);
+    if (!next.delete(toolCallId)) next.add(toolCallId);
+    return next;
+}
+
 /** Resolves a viewer-authorized assistant tool target to its record-detail route. */
 export function askConnexToolTargetHref(target: AiAssistantToolCall['target']): string | null {
     if (target.id === null) return null;
     if (target.kind === 'person') return `/records/contacts/${target.id}`;
     if (target.kind === 'company') return `/records/companies/${target.id}`;
     return `/records/deals/${target.id}`;
+}
+
+/**
+ * Resolves the record an assistant action created to its own detail route.
+ *
+ * A completed action's first offer should be the thing it made, not the record it hung it off:
+ * "open task" is what a member who just had a task created wants, and the contact it belongs to is
+ * one click further on from there. Every kind an action can create has a detail route, so this
+ * never has to fall back — a kind that ever loses one would return null and leave the related
+ * record as the card's link rather than fabricating a URL.
+ */
+export function askConnexCreatedRecordHref(
+    createdRecord: AiAssistantToolCallCreatedRecord | null,
+): string | null {
+    if (createdRecord === null) return null;
+    if (createdRecord.kind === 'activity') return `/activity/activities/${createdRecord.id}`;
+    if (createdRecord.kind === 'task') return `/activity/tasks/${createdRecord.id}`;
+    return `/activity/notes/${createdRecord.id}`;
+}
+
+/** The fields a completed assistant action reports values for, in the order they are shown. */
+export const ASK_CONNEX_OUTCOME_FIELDS = [
+    'type',
+    'subject',
+    'start',
+    'description',
+    'dueDate',
+    'title',
+    'visibility',
+    'tag',
+    'stage',
+    'owner',
+] as const;
+
+/** One field a completed assistant action reports a value for. */
+export type AskConnexOutcomeField = (typeof ASK_CONNEX_OUTCOME_FIELDS)[number];
+
+/**
+ * Narrows one reported field name to a field this client actually has words for.
+ *
+ * The server names outcome fields rather than pre-rendering them, which means a field it starts
+ * reporting before this client learns the word for it must read as something honest rather than as
+ * an English identifier dropped into a Japanese interface.
+ */
+export function isAskConnexOutcomeField(field: string): field is AskConnexOutcomeField {
+    return (ASK_CONNEX_OUTCOME_FIELDS as readonly string[]).includes(field);
 }
 
 function summaryValue(summary: string, prefix: string): string | null {

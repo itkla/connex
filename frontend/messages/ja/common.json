@@ -580,20 +580,32 @@
         "expiredDetail": "操作は完了しましたが、取り消し可能な期間は終了しました。"
       },
       "change": {
-        "beforeApproval": "承認前",
-        "noChangeYet": "変更なし",
-        "ifApproved": "承認した場合"
+        "proposedChange": "提案されている変更",
+        "before": "現在",
+        "after": "変更後",
+        "notSet": "未設定",
+        "fieldOwner": "担当者",
+        "fieldStage": "ステージ",
+        "currentUnresolvedOwner": "このワークスペースにいないメンバー",
+        "currentUnresolvedStage": "すでに存在しないステージ",
+        "proposedUnresolved": "すでに存在しません",
+        "stateUnchanged": "すでに同じ値のため、適用しても変わりません。",
+        "stateRecordChanged": "提案のあとにこのレコードが更新されています。上の値は最新の内容です。適用する前にご確認ください。",
+        "statePermissionLost": "この変更を行う権限がなくなりました。ワークスペース管理者にご相談ください。",
+        "stateUnresolved": "提案された値がこのワークスペースに見つからないため、この変更は行えません。"
       },
       "actions": {
-        "approve": "承認",
-        "approveAria": "{target}への提案された操作を承認",
-        "approving": "承認中…",
-        "reject": "却下",
-        "rejectAria": "{target}への提案された操作を却下",
-        "rejecting": "却下中…",
         "undo": "取り消す",
         "undoAria": "{target}へのアシスタント操作を取り消す",
-        "undoing": "取り消し中…"
+        "undoing": "取り消し中…",
+        "apply": "適用",
+        "applyAria": "{target}への変更を適用する",
+        "applying": "適用しています…",
+        "discard": "破棄",
+        "discardAria": "{target}への変更を破棄する",
+        "discarding": "破棄しています…",
+        "editOnRecord": "レコード上で変更する",
+        "editOnRecordAria": "{target}を開いてそこで変更する"
       },
       "failures": {
         "proposalChanged": "提案の表示後に対象が変更されました。この提案を却下して、新しい提案を依頼してください。",
@@ -625,7 +637,44 @@
         "ownerRemoved": "担当者を解除しました",
         "ownerAssigned": "担当者を割り当てました",
         "requestCompleted": "リクエストが完了しました"
-      }
+      },
+      "outcomeFields": {
+        "type": "種別",
+        "subject": "件名",
+        "start": "開始",
+        "description": "タスク",
+        "dueDate": "期限",
+        "title": "タイトル",
+        "visibility": "公開範囲",
+        "tag": "タグ",
+        "stage": "ステージ",
+        "owner": "担当者",
+        "other": "詳細"
+      },
+      "outcomeValues": {
+        "type": {
+          "call": "電話",
+          "email": "メール",
+          "meeting": "打ち合わせ",
+          "note": "メモ",
+          "other": "その他"
+        },
+        "visibility": {
+          "private": "非公開",
+          "workspace": "ワークスペース"
+        }
+      },
+      "openCreated": {
+        "activity": "活動を開く",
+        "task": "タスクを開く",
+        "note": "メモを開く"
+      },
+      "openCreatedAria": {
+        "activity": "この操作で作成された活動を開く",
+        "task": "この操作で作成されたタスクを開く",
+        "note": "この操作で作成されたメモを開く"
+      },
+      "undoWindow": "{deadline}まで取り消せます（{remaining}）。"
     },
     "upload": {
       "progress": "アップロード中 {progress}%",
@@ -874,6 +923,19 @@
         "label": "この紹介ルートを説明",
         "prompt": "レーダーは {subject} への紹介ルートを見つけました。誰に紹介してもらえるか、その根拠は何かを説明してください。"
       }
+    },
+    "proposalReview": {
+      "heading": "{count}件の変更を確認してください",
+      "applicable": "{count}件のうち{applicable}件をいま適用できます。",
+      "selected": "{count, plural, =0 {選択されていません} other {#件を選択中}}",
+      "applySelected": "{count}件を適用",
+      "applying": "適用しています…",
+      "include": "{target}への変更を対象に含める",
+      "openFullView": "全画面で確認する",
+      "noneApplicable": "いま適用できる変更はありません。それぞれを開いて理由をご確認ください。",
+      "applied": "{count}件を適用しました",
+      "discarded": "{count}件を破棄しました",
+      "failed": "{count}件は適用できませんでした"
     }
   },
   "SearchLayout": {

@@ -37,6 +37,7 @@ export type InteractiveElement = {
     setAttribute: (name: string, value: string) => void;
     removeAttribute: (name: string) => void;
     getAttribute: (name: string) => string | null;
+    contains: (node: InteractiveNode | null) => boolean;
     focus: () => void;
 };
 
@@ -152,6 +153,14 @@ export function installInteractiveDocument(cookie = "") {
                 if (name === "disabled") element.disabled = false;
             },
             getAttribute: (name) => attributes.get(name) ?? null,
+            contains: (node) => {
+                let current: InteractiveNode | null = node;
+                while (current !== null) {
+                    if (current === element) return true;
+                    current = current.parentNode;
+                }
+                return false;
+            },
             focus: () => {
                 documentTarget.activeElement = element;
             },
@@ -210,6 +219,11 @@ export function installInteractiveDocument(cookie = "") {
         removeEventListener: vi.fn(),
         setTimeout: vi.fn(() => 1),
         clearTimeout: vi.fn(),
+        requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+            callback(0);
+            return 1;
+        }),
+        cancelAnimationFrame: vi.fn(),
     };
     Object.assign(documentTarget, {
         defaultView: windowTarget,
