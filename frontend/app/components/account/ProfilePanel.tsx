@@ -285,11 +285,6 @@ function ProfileForm({
 
     return (
         <Rise className="space-y-3">
-            <div>
-                <SectionHeader title={t("title")} />
-                <p className="max-w-prose px-6 text-sm text-muted-foreground">{t("subtitle")}</p>
-            </div>
-
             <form onSubmit={onSubmit} className="overflow-hidden rounded-2xl border border-border bg-card">
                 <div className="space-y-6 p-6">
                     <ProfilePhotoField

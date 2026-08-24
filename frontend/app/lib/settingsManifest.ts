@@ -33,15 +33,20 @@ export type SettingsAvailabilityState =
 /**
  * Where a destination is registered in navigation today.
  *
- * `organization-tabs` is gone from this union, not merely unused: #1340 PR 8 redirected every
- * `/organization/*` address, which left `OrgTabs` with nothing to link, and the strip and its
- * layout were deleted. Keeping the variant would let an entry claim a surface that no longer
- * exists. The two remaining strips are held deliberately — see `TAB_STRIP_SOURCES` in
- * `settingsManifest.test.ts` for which routes keep each one alive.
+ * **No peer-tab strip appears here any more, and none exists.** `organization-tabs` went first:
+ * #1340 PR 8 redirected every `/organization/*` address, which left `OrgTabs` with nothing to link,
+ * and the strip and its layout were deleted. `account-tabs` and `settings-tabs` were held back by
+ * that PR for one reason — the five personal destinations and the two remaining workspace ones had
+ * no canonical route to be sent to, so retiring their strips would have stranded pages that still
+ * served. This PR ships those seven destinations, so both strips lost their last live link and were
+ * deleted with their variants. Keeping any of the three would let an entry claim a surface that no
+ * longer exists, which is the whole point of removing the variant rather than merely not using it.
+ *
+ * What replaces them is the scope-grouped navigation the epic requires: `sidebar`, `avatar-menu`,
+ * and `command-palette` register entries by id through `settingsEntryPoints.ts`, and the Settings
+ * home renders the manifest's groups directly rather than being registered against any of them.
  */
 export type SettingsEntryPoint =
-    | "account-tabs"
-    | "settings-tabs"
     | "sidebar"
     | "avatar-menu"
     | "command-palette"
@@ -451,7 +456,7 @@ export const SETTINGS_ENTRIES = [
         group: "personal.profile",
         canonicalRoute: "/settings/personal/profile",
         canonicalSection: null,
-        redirectsTo: "/account/profile",
+        redirectsTo: "/settings/personal/profile",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: "CommonSidebar.accountSettings",
@@ -462,12 +467,12 @@ export const SETTINGS_ENTRIES = [
     {
         id: "account.connections",
         currentRoute: "/account/connections",
-        kind: "destination",
+        kind: "redirect",
         group: "personal.connected-accounts",
         canonicalRoute: "/settings/personal/connected-accounts",
         canonicalSection: null,
-        redirectsTo: null,
-        redirectQuery: [],
+        redirectsTo: "/settings/personal/connected-accounts",
+        redirectQuery: ["provider", "panel", "review", "page", "connected", "error"],
         conditionalForward: null,
         titleKey: "AccountConnections.title",
         access: {
@@ -485,7 +490,7 @@ export const SETTINGS_ENTRIES = [
             orgWrite: null,
             states: ["not-enabled", "retry"],
         },
-        entryPoints: ["account-tabs", "contextual"],
+        entryPoints: ["contextual"],
         aliasKey: null,
     },
     {
@@ -495,7 +500,7 @@ export const SETTINGS_ENTRIES = [
         group: "personal.connected-accounts",
         canonicalRoute: "/settings/personal/connected-accounts",
         canonicalSection: "reviews",
-        redirectsTo: "/account/connections",
+        redirectsTo: "/settings/personal/connected-accounts#reviews",
         redirectQuery: ["provider", "panel"],
         conditionalForward: null,
         titleKey: "CommonSidebar.navCaptureReviews",
@@ -518,61 +523,61 @@ export const SETTINGS_ENTRIES = [
     {
         id: "account.invites",
         currentRoute: "/account/invites",
-        kind: "destination",
+        kind: "redirect",
         group: "personal.workspaces",
         canonicalRoute: "/settings/personal/workspaces",
         canonicalSection: null,
-        redirectsTo: null,
+        redirectsTo: "/settings/personal/workspaces",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: "Account.tabInvites",
         access: NO_ACCESS_REQUIREMENTS,
-        entryPoints: ["account-tabs"],
+        entryPoints: [],
         aliasKey: null,
     },
     {
         id: "account.notifications",
         currentRoute: "/account/notifications",
-        kind: "destination",
+        kind: "redirect",
         group: "personal.notifications",
         canonicalRoute: "/settings/personal/notifications",
         canonicalSection: null,
-        redirectsTo: null,
+        redirectsTo: "/settings/personal/notifications",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: "Account.tabNotifications",
         access: NO_ACCESS_REQUIREMENTS,
-        entryPoints: ["account-tabs"],
+        entryPoints: [],
         aliasKey: null,
     },
     {
         id: "account.profile",
         currentRoute: "/account/profile",
-        kind: "destination",
+        kind: "redirect",
         group: "personal.profile",
         canonicalRoute: "/settings/personal/profile",
         canonicalSection: null,
-        redirectsTo: null,
+        redirectsTo: "/settings/personal/profile",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: "Account.tabProfile",
         access: NO_ACCESS_REQUIREMENTS,
-        entryPoints: ["account-tabs"],
+        entryPoints: [],
         aliasKey: null,
     },
     {
         id: "account.security",
         currentRoute: "/account/security",
-        kind: "destination",
+        kind: "redirect",
         group: "personal.security",
         canonicalRoute: "/settings/personal/security",
         canonicalSection: null,
-        redirectsTo: null,
+        redirectsTo: "/settings/personal/security",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: "Account.tabSecurity",
         access: NO_ACCESS_REQUIREMENTS,
-        entryPoints: ["account-tabs"],
+        entryPoints: [],
         aliasKey: null,
     },
     {
@@ -903,11 +908,11 @@ export const SETTINGS_ENTRIES = [
     {
         id: "workspace.data",
         currentRoute: "/settings/data",
-        kind: "destination",
+        kind: "redirect",
         group: "workspace.data-privacy",
         canonicalRoute: "/settings/workspace/data-privacy",
         canonicalSection: null,
-        redirectsTo: null,
+        redirectsTo: "/settings/workspace/data-privacy",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: "WorkspaceSettings.tabData",
@@ -930,7 +935,7 @@ export const SETTINGS_ENTRIES = [
             orgWrite: null,
             states: [],
         },
-        entryPoints: ["settings-tabs"],
+        entryPoints: [],
         aliasKey: null,
     },
     {
@@ -1006,13 +1011,21 @@ export const SETTINGS_ENTRIES = [
         aliasKey: null,
     },
     {
-        id: "workspace.general",
+        /**
+         * Named for the job it does rather than for the group that now owns its route, exactly as
+         * `organization.data-subject-requests` was when the same collision arose there. The group is
+         * "General" and takes the `workspace.general` id with it, because every canonical entry in
+         * this manifest is named for the group it serves; this address is the workspace's identity —
+         * the name people see and the day boundary its reporting is measured against — which is what
+         * the panel behind it has always been called.
+         */
+        id: "workspace.identity",
         currentRoute: "/settings/general",
-        kind: "destination",
+        kind: "redirect",
         group: "workspace.general",
         canonicalRoute: "/settings/workspace/general",
         canonicalSection: null,
-        redirectsTo: null,
+        redirectsTo: "/settings/workspace/general",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: "WorkspaceSettings.tabGeneral",
@@ -1026,7 +1039,7 @@ export const SETTINGS_ENTRIES = [
             orgWrite: null,
             states: ["ask-admin", "retry"],
         },
-        entryPoints: ["settings-tabs"],
+        entryPoints: [],
         aliasKey: null,
     },
     {
@@ -1065,7 +1078,7 @@ export const SETTINGS_ENTRIES = [
         group: "personal.workspaces",
         canonicalRoute: "/settings/personal/workspaces",
         canonicalSection: null,
-        redirectsTo: "/account/invites",
+        redirectsTo: "/settings/personal/workspaces",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: null,
@@ -1080,7 +1093,7 @@ export const SETTINGS_ENTRIES = [
         group: "personal.notifications",
         canonicalRoute: "/settings/personal/notifications",
         canonicalSection: null,
-        redirectsTo: "/account/notifications",
+        redirectsTo: "/settings/personal/notifications",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: null,
@@ -1235,6 +1248,106 @@ export const SETTINGS_ENTRIES = [
         aliasKey: null,
     },
     {
+        id: "personal.connected-accounts",
+        currentRoute: "/settings/personal/connected-accounts",
+        kind: "destination",
+        group: "personal.connected-accounts",
+        canonicalRoute: "/settings/personal/connected-accounts",
+        canonicalSection: null,
+        redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
+        titleKey: "AccountConnections.title",
+        access: {
+            /**
+             * The capability requirements are the absorbed route's, unchanged: a deployment with no
+             * provider journey and no capture at all has nothing here to offer. `any` because one
+             * enabled provider is enough for the destination to exist, and the page says which of
+             * the four states it is where it stands rather than vanishing.
+             */
+            permissions: [],
+            permissionMatch: "all",
+            capabilities: [
+                { key: "connectedAccounts.google", expected: true },
+                { key: "connectedAccounts.microsoft", expected: true },
+                { key: "connectedCapture.google", expected: true },
+                { key: "connectedCapture.microsoft", expected: true },
+            ],
+            capabilityMatch: "any",
+            orgAdmin: false,
+            manage: ["WORKSPACE_SETTINGS"],
+            orgWrite: null,
+            states: ["not-enabled", "retry"],
+        },
+        entryPoints: [],
+        aliasKey: null,
+    },
+    {
+        id: "personal.notifications",
+        currentRoute: "/settings/personal/notifications",
+        kind: "destination",
+        group: "personal.notifications",
+        canonicalRoute: "/settings/personal/notifications",
+        canonicalSection: null,
+        redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
+        titleKey: "SettingsNav.groupNotificationPreferences",
+        access: NO_ACCESS_REQUIREMENTS,
+        entryPoints: [],
+        aliasKey: null,
+    },
+    {
+        id: "personal.profile",
+        currentRoute: "/settings/personal/profile",
+        kind: "destination",
+        group: "personal.profile",
+        canonicalRoute: "/settings/personal/profile",
+        canonicalSection: null,
+        redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
+        titleKey: "Account.tabProfile",
+        /**
+         * Ungated, as every personal destination is. What a reader may change about themselves is
+         * not a workspace permission, and the endpoints behind this page are scoped to the caller's
+         * own account rather than to a role.
+         */
+        access: NO_ACCESS_REQUIREMENTS,
+        entryPoints: [],
+        aliasKey: null,
+    },
+    {
+        id: "personal.security",
+        currentRoute: "/settings/personal/security",
+        kind: "destination",
+        group: "personal.security",
+        canonicalRoute: "/settings/personal/security",
+        canonicalSection: null,
+        redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
+        titleKey: "Account.tabSecurity",
+        access: NO_ACCESS_REQUIREMENTS,
+        entryPoints: [],
+        aliasKey: null,
+    },
+    {
+        id: "personal.workspaces",
+        currentRoute: "/settings/personal/workspaces",
+        kind: "destination",
+        group: "personal.workspaces",
+        canonicalRoute: "/settings/personal/workspaces",
+        canonicalSection: null,
+        redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
+        titleKey: "SettingsNav.groupWorkspacesInvitations",
+        access: NO_ACCESS_REQUIREMENTS,
+        entryPoints: [],
+        aliasKey: null,
+    },
+    {
         id: "workspace.qualification",
         currentRoute: "/settings/qualification",
         kind: "redirect",
@@ -1304,7 +1417,7 @@ export const SETTINGS_ENTRIES = [
         group: "personal.security",
         canonicalRoute: "/settings/personal/security",
         canonicalSection: null,
-        redirectsTo: "/account/security",
+        redirectsTo: "/settings/personal/security",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: null,
@@ -1426,6 +1539,75 @@ export const SETTINGS_ENTRIES = [
             manage: ["CUSTOM_FIELD_MANAGE", "DOCUMENT_MANAGE", "WORKSPACE_SETTINGS"],
             orgWrite: null,
             states: [],
+        },
+        entryPoints: [],
+        aliasKey: null,
+    },
+    {
+        id: "workspace.data-privacy",
+        currentRoute: "/settings/workspace/data-privacy",
+        kind: "destination",
+        group: "workspace.data-privacy",
+        canonicalRoute: "/settings/workspace/data-privacy",
+        canonicalSection: null,
+        redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
+        titleKey: "SettingsNav.groupDataPrivacy",
+        access: {
+            /**
+             * Ungated to read, and gated to import — the same split the absorbed route already had.
+             * The manage list is every permission the import writes behind, because an import that
+             * creates people, companies, deals, notes, activities and tags needs all of them; a
+             * member holding fewer is shown the destination and refused the operation.
+             */
+            permissions: [],
+            permissionMatch: "all",
+            capabilities: [],
+            capabilityMatch: "all",
+            orgAdmin: false,
+            manage: [
+                "ACTIVITY_CREATE",
+                "COMPANY_CREATE",
+                "CUSTOM_FIELD_MANAGE",
+                "DEAL_CREATE",
+                "NOTE_CREATE",
+                "PERSON_CREATE",
+                "TAG_MANAGE",
+                "TASK_CREATE",
+            ],
+            orgWrite: null,
+            states: [],
+        },
+        entryPoints: [],
+        aliasKey: null,
+    },
+    {
+        id: "workspace.general",
+        currentRoute: "/settings/workspace/general",
+        kind: "destination",
+        group: "workspace.general",
+        canonicalRoute: "/settings/workspace/general",
+        canonicalSection: null,
+        redirectsTo: null,
+        redirectQuery: [],
+        conditionalForward: null,
+        titleKey: "WorkspaceSettings.tabGeneral",
+        access: {
+            /**
+             * One permission, because the whole destination is the workspace's own record and the
+             * endpoint behind it enforces exactly this. A member without it would find a page made
+             * of one refusal, so the navigation declines to offer it rather than advertising a
+             * locked door; a reader who arrives by URL is still told which refusal it is.
+             */
+            permissions: ["WORKSPACE_SETTINGS"],
+            permissionMatch: "all",
+            capabilities: [],
+            capabilityMatch: "all",
+            orgAdmin: false,
+            manage: [],
+            orgWrite: null,
+            states: ["ask-admin", "retry"],
         },
         entryPoints: [],
         aliasKey: null,

@@ -1,22 +1,19 @@
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
+import { permanentRedirect } from "next/navigation";
 
-import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
-import { getCurrentUserResultFromCookie } from "@/app/lib/api";
-import ProfilePanel from "@/app/components/account/ProfilePanel";
+import { settingsRedirectTarget, type RouteSearchParams } from "@/app/lib/settingsRedirects";
 
-export default async function AccountProfilePage() {
-    const cookie = (await headers()).get("cookie");
-    const userResult = await getCurrentUserResultFromCookie(cookie);
-
-    if (!userResult.ok) {
-        return <WorkspaceUnavailablePage />;
-    }
-    const user = userResult.data;
-
-    if (!user) {
-        redirect("/auth/login");
-    }
-
-    return <ProfilePanel user={user} />;
+/**
+ * The retired address for the reader's own profile (#1340 WS4.6).
+ *
+ * The job now lives at its canonical destination under the unified Settings shell, and this path
+ * forwards there permanently rather than 404ing an address readers have bookmarked and linked. The
+ * target is the manifest's, not this file's, so a destination that moves again takes its redirect
+ * with it; the query string is the reader's and survives the hop whole.
+ */
+export default async function AccountProfilePage({
+    searchParams,
+}: {
+    searchParams: Promise<RouteSearchParams>;
+}) {
+    permanentRedirect(settingsRedirectTarget("account.profile", await searchParams));
 }

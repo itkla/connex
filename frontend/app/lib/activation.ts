@@ -273,7 +273,7 @@ export function buildActivationSteps(counts: ActivationCounts): ActivationStep[]
             required: false,
             actionId: null,
             href: counts.connectedAccountsAvailability === 'enabled'
-                ? '/account/connections'
+                ? settingsDestination('account.connections').href
                 : null,
             count: null,
             requireRelationshipTarget: false,

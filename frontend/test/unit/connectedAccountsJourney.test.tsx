@@ -620,7 +620,7 @@ describe("authorization return path", () => {
 
     it("returns to the connections route rather than another settings destination", () => {
         expect(captureConnectionsHref(new URLSearchParams(), { provider: "google" }))
-            .toBe("/account/connections?provider=google");
+            .toBe("/settings/personal/connected-accounts?provider=google");
     });
 });
 
@@ -747,7 +747,7 @@ describe("reviews absorbed into the journey", () => {
         expect(captureConnectionsHref(new URLSearchParams(), {
             provider: "google",
             panel: "reviews",
-        })).toBe("/account/connections?provider=google&panel=reviews");
+        })).toBe("/settings/personal/connected-accounts?provider=google&panel=reviews");
     });
 
     it("gives the queue a home in the drawer even when nothing is waiting", () => {
@@ -778,7 +778,7 @@ describe("manage drawer route state", () => {
     });
 
     it("keeps the provider when only the panel is unreachable", () => {
-        const page = source("app/(app)/account/connections/page.tsx");
+        const page = source("app/(app)/settings/personal/connected-accounts/page.tsx");
 
         expect(page).toContain("providerUnavailable");
         expect(page).toContain("panelUnavailable");
@@ -791,7 +791,7 @@ describe("manage drawer route state", () => {
             panel: "manage",
         });
 
-        expect(href).toBe("/account/connections?provider=microsoft&panel=manage");
+        expect(href).toBe("/settings/personal/connected-accounts?provider=microsoft&panel=manage");
         expect(parseCaptureRouteState(new URLSearchParams("provider=microsoft&panel=manage")).panel)
             .toBe("manage");
     });

@@ -1,16 +1,11 @@
 {
   "Account": {
-    "title": "アカウント",
-    "subtitle": "プロフィール、セキュリティ、Connex の動作を管理します。",
     "tabProfile": "プロフィール",
     "tabSecurity": "セキュリティ",
-    "tabConnections": "連携",
     "tabNotifications": "通知",
     "tabInvites": "招待"
   },
   "AccountProfile": {
-    "title": "プロフィール",
-    "subtitle": "あなたの個人情報です。すべてのワークスペースで、チームメンバーにこの情報が表示されます。",
     "photoHint": "正方形のJPEG・PNG・WebP画像がおすすめです。",
     "changePhoto": "写真を変更",
     "photoAlt": "あなたのプロフィール写真",
@@ -557,10 +552,6 @@
     "cancel": "キャンセル",
     "left": "ワークスペースを退出しました",
     "leaveFailed": "ワークスペースを退出できませんでした。"
-  },
-  "AccountLayout": {
-    "title": "アカウント設定",
-    "description": "プロフィール・セキュリティ・Connex の動作の管理"
   },
   "AccountConnectionConsent": {
     "title": "{provider} を連携",

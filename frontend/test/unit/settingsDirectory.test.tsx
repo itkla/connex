@@ -150,13 +150,14 @@ describe("the settings directory draws the navigation model", () => {
 
         expect(
             migrated.map((group) => group.id).sort(),
-            "every group whose canonical route is served",
+            "every group whose canonical route is served and that absorbed a named job",
         ).toEqual([
             "organization.ai-governance",
             "organization.audit-diagnostics",
             "organization.data-requests",
             "organization.general",
             "organization.identity",
+            "personal.connected-accounts",
             "workspace.audit-diagnostics",
             "workspace.communications",
             "workspace.crm",

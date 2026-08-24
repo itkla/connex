@@ -38,12 +38,12 @@ function context(overrides: Partial<BreadcrumbRouteContext> = {}): BreadcrumbRou
 
 const ROUTE_CASES = [
     ["/account", "redirect"],
-    ["/account/profile", "shell"],
-    ["/account/security", "shell"],
-    ["/account/connections", "shell"],
+    ["/account/profile", "redirect"],
+    ["/account/security", "redirect"],
+    ["/account/connections", "redirect"],
     ["/account/connections/reviews", "shell"],
-    ["/account/notifications", "shell"],
-    ["/account/invites", "shell"],
+    ["/account/notifications", "redirect"],
+    ["/account/invites", "redirect"],
     ["/activity/activities/1", "shell"],
     ["/activity/all", "shell"],
     ["/activity/notes/1", "shell"],
@@ -97,11 +97,11 @@ const ROUTE_CASES = [
     ["/records/products", "shell"],
     ["/search", "shell"],
     ["/settings/custom-fields", "redirect"],
-    ["/settings/data", "shell"],
+    ["/settings/data", "redirect"],
     ["/settings/delivery", "redirect"],
     ["/settings/diagnostics", "redirect"],
     ["/settings/email", "redirect"],
-    ["/settings/general", "shell"],
+    ["/settings/general", "redirect"],
     ["/settings/members", "redirect"],
     ["/settings/membership", "redirect"],
     ["/settings/notifications", "redirect"],
@@ -114,10 +114,17 @@ const ROUTE_CASES = [
     ["/settings/workflows/1", "redirect"],
     ["/settings/workspace/people", "shell"],
     ["/settings/workspace/communications", "shell"],
+    ["/settings/workspace/data-privacy", "shell"],
+    ["/settings/workspace/general", "shell"],
     ["/settings/workspace/crm", "shell"],
     ["/settings/workspace/audit-diagnostics", "shell"],
     ["/settings/organization/general", "shell"],
     ["/settings/organization/identity", "shell"],
+    ["/settings/personal/connected-accounts", "shell"],
+    ["/settings/personal/notifications", "shell"],
+    ["/settings/personal/profile", "shell"],
+    ["/settings/personal/security", "shell"],
+    ["/settings/personal/workspaces", "shell"],
     ["/settings/organization/ai-governance", "shell"],
     ["/settings/organization/data-requests", "shell"],
     ["/settings/organization/audit-diagnostics", "shell"],
@@ -198,8 +205,11 @@ describe("breadcrumb route registry", () => {
     });
 
     it("reads live workspace and organization identities on every resolution", () => {
-        const before = resolveBreadcrumbRoute("/settings/data", context()).crumbs;
-        const after = resolveBreadcrumbRoute("/settings/data", context({ workspaceName: "Voyager" })).crumbs;
+        const before = resolveBreadcrumbRoute("/settings/workspace/general", context()).crumbs;
+        const after = resolveBreadcrumbRoute(
+            "/settings/workspace/general",
+            context({ workspaceName: "Voyager" }),
+        ).crumbs;
         const organization = resolveBreadcrumbRoute(
             "/settings/organization/identity",
             context({ organizationName: "Black Mesa" }),
@@ -358,15 +368,28 @@ describe("breadcrumb route registry", () => {
         ]);
     });
 
-    it("leaves a canonical route no page serves to the legacy tables", () => {
+    /**
+     * Every scope group is served now, so this can no longer be shown against the manifest: the
+     * filter it used to iterate is empty, and an assertion over an empty list passes by saying
+     * nothing. The rule is the same one — a canonical route no page serves gets no trail, because
+     * `CANONICAL_SETTINGS_GROUPS` only indexes the routes `settingsRouteServed` confirms — so it is
+     * exercised here against an address shaped exactly like a scope-group route that nothing serves.
+     *
+     * That the manifest currently has no such group is itself worth asserting, and is the first
+     * expectation below: it is the finished state this epic was working towards, and a group added
+     * without a page would take it back.
+     */
+    it("leaves a canonical route no page serves without a trail", () => {
         const unserved = (SETTINGS_GROUPS as readonly SettingsGroup[]).filter(
             (group) => !settingsRouteServed(group.route),
         );
 
-        expect(unserved.length).toBeGreaterThan(0);
-        for (const group of unserved) {
-            expect(resolveBreadcrumbRoute(group.route, context()).kind).toBe("unknown");
-        }
+        expect(
+            unserved.map((group) => group.id),
+            "every scope group #1340 names now has a page behind it",
+        ).toEqual([]);
+        expect(settingsRouteServed("/settings/personal/unbuilt")).toBe(false);
+        expect(resolveBreadcrumbRoute("/settings/personal/unbuilt", context()).kind).toBe("unknown");
     });
 
     it.each([

@@ -15,6 +15,7 @@ import {
     SettingsSectionRegion,
 } from "@/app/components/settings/SettingsSectionRegion";
 import { usePermissionCheck } from "@/app/hooks/usePermissions";
+import { settingsDestination } from "@/app/lib/settingsEntryPoints";
 import { useSectionArrival } from "@/app/hooks/useSectionArrival";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { COMMUNICATIONS_SECTIONS } from "@/app/lib/communicationsSections";
@@ -122,7 +123,7 @@ export default function WorkspaceCommunications({
                             body={t("notificationDefaultsGapBody")}
                             action={
                                 <Button asChild variant="outline" size="inline">
-                                    <Link href="/account/notifications">
+                                    <Link href={settingsDestination("account.notifications").href}>
                                         {t("notificationDefaultsGapAction")}
                                     </Link>
                                 </Button>

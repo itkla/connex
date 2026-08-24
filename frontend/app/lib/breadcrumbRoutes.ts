@@ -1,3 +1,4 @@
+import { CONNECTED_ACCOUNTS_ROUTE } from "@/app/lib/connectedAccountsSections";
 import type { NavAccess } from "@/app/lib/navAccess";
 import type { RecordCollection } from "@/app/lib/recordReturnPath";
 import { settingsRouteServed } from "@/app/lib/settingsEntryPoints";
@@ -13,7 +14,6 @@ import { isWorkflowRecipeKey } from "@/app/lib/workflowOperations";
 const MANIFEST_GROUPS: readonly SettingsGroup[] = SETTINGS_GROUPS;
 
 export type BreadcrumbMessageKey =
-    | "account"
     | "activities"
     | "aiProvider"
     | "allowedDomains"
@@ -24,11 +24,9 @@ export type BreadcrumbMessageKey =
     | "campaigns"
     | "captureReviews"
     | "companies"
-    | "connections"
     | "contacts"
     | "customFields"
     | "dashboard"
-    | "data"
     | "dataRequests"
     | "deals"
     | "delivery"
@@ -37,10 +35,8 @@ export type BreadcrumbMessageKey =
     | "edit"
     | "email"
     | "files"
-    | "general"
     | "goals"
     | "introductions"
-    | "invites"
     | "map"
     | "members"
     | "newReport"
@@ -65,7 +61,6 @@ export type BreadcrumbMessageKey =
     | "roles"
     | "run"
     | "search"
-    | "security"
     | "settings"
     | "singleSignOn"
     | "snapshot"
@@ -145,12 +140,10 @@ const STATIC_WORKSPACE_ROUTES: Readonly<Record<string, StaticWorkspaceRoute>> = 
 };
 
 const SETTINGS_ROUTES: Readonly<Record<string, StaticWorkspaceRoute>> = {
-    "/settings/general": { key: "general", access: "diagnostics" },
     "/settings/members": { key: "members" },
     "/settings/roles": { key: "roles" },
     "/settings/custom-fields": { key: "customFields" },
     "/settings/qualification": { key: "qualification" },
-    "/settings/data": { key: "data" },
     "/settings/email": { key: "email" },
     "/settings/delivery": { key: "delivery" },
     "/settings/diagnostics": { key: "diagnostics", access: "diagnostics" },
@@ -174,14 +167,6 @@ const CANONICAL_SETTINGS_GROUPS: ReadonlyMap<string, SettingsGroup> = new Map(
         .map((group) => [group.route, group]),
 );
 
-const ACCOUNT_ROUTES: Readonly<Record<string, BreadcrumbMessageKey>> = {
-    "/account/profile": "profile",
-    "/account/security": "security",
-    "/account/connections": "connections",
-    "/account/notifications": "notifications",
-    "/account/invites": "invites",
-};
-
 const ORGANIZATION_ROUTES: Readonly<Record<string, BreadcrumbMessageKey>> = {
     "/organization/overview": "overview",
     "/organization/members": "members",
@@ -198,7 +183,6 @@ export const BREADCRUMB_STATIC_ROUTE_PATHS = [...new Set([
     ...Object.keys(STATIC_WORKSPACE_ROUTES),
     ...Object.keys(SETTINGS_ROUTES),
     ...CANONICAL_SETTINGS_GROUPS.keys(),
-    ...Object.keys(ACCOUNT_ROUTES),
     ...Object.keys(ORGANIZATION_ROUTES),
     "/account/connections/reviews",
     "/overview/reports/goals",
@@ -351,6 +335,24 @@ function shell(crumbs: BreadcrumbCrumb[]): BreadcrumbResolution {
 }
 
 /**
+ * The crumb for the Connected accounts destination, as a parent rather than as the current page.
+ *
+ * Its name is the manifest group's, resolved the way {@link canonicalSettingsTrail} resolves every
+ * other canonical destination's, rather than a `CommonBreadcrumb` string of its own. The
+ * capture-review resolver is the only address that needs this destination as a middle crumb, and a
+ * second copy of its name would be one more place for the two to drift.
+ */
+function connectedAccountsCrumb(context: BreadcrumbRouteContext): BreadcrumbCrumb {
+    const group = MANIFEST_GROUPS.find(
+        (candidate) => candidate.id === "personal.connected-accounts",
+    );
+    return literalCrumb(
+        group?.route ?? CONNECTED_ACCOUNTS_ROUTE,
+        context.translateMessage(group?.titleKey ?? ""),
+    );
+}
+
+/**
  * The trail for a canonical settings destination, or null when the reader may not be there.
  *
  * The scope decides the root, exhaustively: an organization destination is rooted in the
@@ -441,18 +443,11 @@ export function resolveBreadcrumbRoute(
         ]));
     }
 
-    const accountRoute = ACCOUNT_ROUTES[pathname];
-    if (accountRoute) {
-        return shell([
-            translatedCrumb("/account", "account", context),
-            translatedCrumb(pathname, accountRoute, context, true),
-        ]);
-    }
     if (pathname === "/account/connections/reviews") {
         if (context.navAccess.captureReviews === "disabled") return empty("denied");
         return shell([
-            translatedCrumb("/account", "account", context),
-            translatedCrumb("/account/connections", "connections", context),
+            translatedCrumb(SETTINGS_HOME_ROUTE, "settings", context),
+            connectedAccountsCrumb(context),
             translatedCrumb(pathname, "captureReviews", context, true),
         ]);
     }

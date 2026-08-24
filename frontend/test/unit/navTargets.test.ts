@@ -82,8 +82,6 @@ const recordDetailBases = uniqueSorted(
 describe("navigation targets resolve to real routes", () => {
     it("registers exactly the expected palette destinations", () => {
         expect(paletteTargets).toEqual([
-            "/account",
-            "/account/connections/reviews",
             "/activity/all",
             "/activity/notes",
             "/activity/tasks",
@@ -110,6 +108,8 @@ describe("navigation targets resolve to real routes", () => {
             "/search",
             "/settings",
             "/settings/organization/identity#administrators",
+            "/settings/personal/connected-accounts#reviews",
+            "/settings/personal/profile",
             "/settings/workspace/audit-diagnostics#audit",
             "/settings/workspace/audit-diagnostics#diagnostics",
             "/settings/workspace/crm#approval-policies",

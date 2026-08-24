@@ -18,6 +18,7 @@ import {
     type SettingsNavContext,
     type SettingsNavViewer,
 } from "@/app/lib/settingsNavigation";
+import { settingsRouteServed } from "@/app/lib/settingsEntryPoints";
 import type { InstanceCapabilities } from "@/app/lib/types";
 
 /**
@@ -337,7 +338,7 @@ describe("settings navigation gates on the manifest's visibility bucket", () => 
             sectionIds,
             "the roster's own job survives its consolidation; a viewer who cannot invite still reads the members",
         ).toContain("workspace.members");
-        expect(ids).toContain("workspace.data");
+        expect(ids).toContain("workspace.data-privacy");
         expect(
             ids,
             "CRM configuration absorbed the approval-policy browser, which is manage-gated the same way",
@@ -388,8 +389,8 @@ describe("settings navigation gates on the manifest's visibility bucket", () => 
         const model = resolveSettingsNavigation(context("en", { capabilities: noProviders }));
         const ids = model.flatMap((scope) => scope.groups.flatMap((group) => group.destinations.map((d) => d.id)));
 
-        expect(ids).toContain("account.connections");
-        expect(ids).toContain("account.profile");
+        expect(ids).toContain("personal.connected-accounts");
+        expect(ids).toContain("personal.profile");
     });
 
     it("keeps every destination the two retired teleports used to hide", () => {
@@ -634,21 +635,48 @@ describe("settings navigation resolves a landing for every group", () => {
         ]);
     });
 
+    /**
+     * The rule this guards is that `groupSections` yields nothing until a group's canonical route is
+     * served — otherwise settings search would advertise deep links into a page that does not exist.
+     * It used to be shown against the manifest's own unmigrated groups; there are none left, so an
+     * assertion over that filter would now pass by iterating an empty list.
+     *
+     * What replaces it is the pair of facts the rule rests on, neither of which is vacuous: that
+     * `settingsRouteServed` still answers no for an address nothing serves, which is the test the
+     * rule keys off; and that every section a group does offer is a fragment of that group's own
+     * canonical route, so no section can escape into an address its destination does not serve.
+     */
     it("gives an unmigrated group no sections, so the rule cannot pass by applying to everything", () => {
         const model = resolveSettingsNavigation(context("en"));
         const unmigrated = model
             .flatMap((scope) => scope.groups)
             .filter((group) => group.destinations[0]?.href !== groupRoute(group.id));
 
-        expect(unmigrated.length).toBeGreaterThan(0);
-        expect(unmigrated.flatMap((group) => group.sections)).toEqual([]);
+        expect(
+            unmigrated.map((group) => group.id),
+            "every group #1340 names is served by its canonical route now",
+        ).toEqual([]);
+        expect(
+            settingsRouteServed("/settings/personal/unbuilt"),
+            "the served-or-not test the rule keys off still answers, and answers no for an address nothing serves",
+        ).toBe(false);
+        expect(
+            model
+                .flatMap((scope) => scope.groups)
+                .flatMap((group) =>
+                    group.sections
+                        .filter((section) => !section.href.startsWith(`${groupRoute(group.id)}#`))
+                        .map((section) => `${group.id} -> ${section.href}`),
+                ),
+            "a section is a deep link into the destination that absorbed it, never into another",
+        ).toEqual([]);
     });
 
     it("puts a real destination first, so the home never lands the reader on Members", () => {
         const model = resolveSettingsNavigation(context("en"));
         const first = model[0]?.groups[0]?.destinations[0];
 
-        expect(first?.href).toBe("/account/profile");
+        expect(first?.href).toBe("/settings/personal/profile");
         expect(first?.href).not.toBe("/settings/members");
     });
 
@@ -700,7 +728,10 @@ describe("settings search finds destinations by every name they carry", () => {
     it("finds a destination by a command-palette alias the reader would type", () => {
         const model = resolveSettingsNavigation(context("en"));
 
-        expect(searchSettingsNavigation(model, "queue").map((result) => result.id)).toEqual([]);
+        expect(
+            searchSettingsNavigation(model, "queue").map((result) => result.id),
+            "the review queue's palette aliases follow it into the section that now holds it",
+        ).toEqual(["account.capture-reviews"]);
         expect(searchSettingsNavigation(model, "diagnostics").length).toBeGreaterThan(0);
     });
 

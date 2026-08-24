@@ -12,9 +12,10 @@ import type {
     ProviderCaptureOverview,
     ProviderConnection,
 } from "@/app/lib/types";
+import { CONNECTED_ACCOUNTS_ROUTE } from "@/app/lib/connectedAccountsSections";
 import { captureConnectionsHref, providerCaptureEnabled } from "@/app/lib/connectedCapture";
 
-const CONNECTIONS_HREF = "/account/connections";
+const CONNECTIONS_HREF = CONNECTED_ACCOUNTS_ROUTE;
 
 function pendingCount(provider: ProviderCaptureOverview): number {
     return provider.reviewCount + provider.pendingApprovalCount;
@@ -42,10 +43,23 @@ function providerWithMostPendingReviewsAmongUserConnections(
 }
 
 /**
- * Stable address for the connected-capture review queue. The queue itself is a panel of the
- * account-connections page, whose canonical URL needs a provider; this route resolves that provider
- * from the user's own connection state so the sidebar and command palette can link to one fixed
- * path, and never lands a user in a queue for a provider they have not connected.
+ * The retired address for the connected-capture review queue, which has to resolve a provider before
+ * it can forward (#1340 WS4.6).
+ *
+ * The queue is a panel of the Connected accounts destination and its canonical URL needs a provider,
+ * so this address cannot become an ordinary manifest-driven stub: it reads the reader's own
+ * connection state, picks the provider with the most pending items, and forwards to that queue. That
+ * is why it is one of the two exemptions from the redirect-stub shape, and it never lands a reader
+ * in a queue for a provider they have not connected.
+ *
+ * It forwards to `/settings/personal/connected-accounts` now rather than to `/account/connections`,
+ * because the destination moved; the route half is read from the section module so this file spells
+ * no address of its own. Nothing in the product links here any more — the sidebar and the palette
+ * both resolve `account.capture-reviews` through the manifest, which sends them to that
+ * destination's `reviews` section — but the address stays for the bookmarks that already exist.
+ *
+ * A deployment with no capture capability at all is the one case where this renders instead of
+ * forwarding, which is why the breadcrumb registry classifies it as a shell rather than a redirect.
  */
 export default async function CaptureReviewsPage() {
     const cookie = (await headers()).get("cookie");

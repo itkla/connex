@@ -73,16 +73,18 @@ const REGISTER_ENTRY =
 /**
  * Which entry points each navigation source that still spells routes can register.
  *
- * Two strips remain, and each survives because routes it links still render. `OrgTabs` does not:
- * #1340 PR 8 turned every `/organization/*` address into a redirect, which left the strip with
- * nothing to link and its layout with nothing to wrap, so both were deleted and the
- * `organization-tabs` entry point went with them.
+ * **None do, and the list is empty by design rather than by omission.** Three peer-tab strips used
+ * to spell settings routes by hand. `OrgTabs` went in #1340 PR 8, which turned every
+ * `/organization/*` address into a redirect and left the strip with nothing to link. `AccountTabs`
+ * and `SettingsTabs` were held back by that same PR for one reason — the five personal destinations
+ * and the two remaining workspace ones had no canonical route to be sent to, so retiring their
+ * strips would have stranded pages that still served. This PR ships those seven destinations, and
+ * both strips were deleted with them along with their entry-point variants.
  *
- * The other two are held rather than kept. `AccountTabs` links five personal destinations whose
- * canonical `/settings/personal/*` routes were never built, and `SettingsTabs` links the two
- * workspace destinations — General and Data & privacy — in the same position. Retiring either
- * strip before its destinations move would strand pages that still serve. What retires them is the
- * personal scope and the two remaining workspace groups shipping, not another pass over this list.
+ * The empty list is still load-bearing: it is what the gates below iterate, and a new hand-written
+ * navigation surface that spells settings routes has to be added here to be reconciled at all. What
+ * keeps that from being forgotten is the reverse direction — every settings href in a shell source
+ * is a link that has escaped the manifest, and the gate over `SHELL_SOURCES` fails on it.
  *
  * Every other surface names a manifest entry instead and is verified structurally below. The shell
  * files declare no entry point at all: they render from the manifest at request time, so a literal
@@ -92,10 +94,7 @@ const REGISTER_ENTRY =
 const TAB_STRIP_SOURCES: ReadonlyArray<{
     file: string;
     points: readonly Exclude<SettingsEntryPoint, "contextual">[];
-}> = [
-    { file: "app/components/account/AccountTabs.tsx", points: ["account-tabs"] },
-    { file: "app/components/settings/SettingsTabs.tsx", points: ["settings-tabs"] },
-];
+}> = [];
 
 /** The import that makes a file part of the settings shell. */
 const SHELL_IMPORT = "@/app/lib/settingsNavigation";
@@ -198,13 +197,6 @@ function declaredEntryIds(source: string): readonly string[] {
 /** The entries whose manifest declaration names a given entry point. */
 function declaringEntries(point: SettingsEntryPoint): readonly string[] {
     return entries.filter((entry) => entry.entryPoints.includes(point)).map((entry) => entry.id);
-}
-
-/** The sources that can register a given entry point through a literal route. */
-function sourcesRegistering(point: Exclude<SettingsEntryPoint, "contextual">): string[] {
-    return NAVIGATION_SOURCES.filter((source) => source.points.includes(point)).map(
-        (source) => source.file,
-    );
 }
 
 const HREF_PATTERN = /href[=:]\s*\{?["'](\/[^"'\s]*)["']/g;
@@ -776,14 +768,36 @@ describe("the redirect gates refuse a matrix that has drifted from the manifest"
         ).toBe(1);
     });
 
+    /**
+     * `offCanonicalRedirects` only judges an entry whose canonical destination is actually served —
+     * otherwise it would demand that a redirect point at a page that does not exist. Every canonical
+     * destination ships now, so the silence can no longer be shown against the manifest itself and
+     * is shown against a synthetic entry instead. Both branches are exercised: the same template
+     * with a served canonical is caught, so the silence is a rule and not an inability to fire.
+     */
     it("stays silent for a job whose canonical destination has not shipped", () => {
         if (!held) throw new Error("legacy.settings-security is the template for this probe");
+        const unshipped: SettingsEntry = {
+            ...held,
+            id: "test.unshipped",
+            canonicalRoute: "/settings/personal/unbuilt",
+        };
+        const drifted: SettingsEntry = {
+            ...held,
+            id: "test.drifted",
+            redirectsTo: "/account/security",
+        };
 
         expect(
             settingsRouteServed(held.canonicalRoute),
-            "this expectation is what makes the assertion below meaningful; it inverts when /settings/personal/security ships",
-        ).toBe(false);
-        expect(offCanonicalRedirects([held])).toEqual([]);
+            "the personal scope ships now, which is what makes the synthetic entry necessary",
+        ).toBe(true);
+        expect(settingsRouteServed(unshipped.canonicalRoute)).toBe(false);
+        expect(offCanonicalRedirects([unshipped])).toEqual([]);
+        expect(
+            offCanonicalRedirects([drifted]).length,
+            "and the same template with a served canonical is still caught, so the silence is a rule",
+        ).toBe(1);
     });
 
     it("catches a fragment the entry never claimed", () => {
@@ -938,9 +952,11 @@ describe("settings manifest owns each canonical destination once", () => {
      * inventory of exactly which addresses do, so an accidental collision has to be added here to
      * pass rather than disappearing into a set that was always going to be unique.
      *
-     * Each pair below is one canonical address reached by two legacy names. Five are the personal
-     * scope's `/settings/*` aliases for `/account/*`, which stay until the personal routes ship; the
-     * sixth is `/organization` and the group route it now forwards to.
+     * Each line below is one canonical address reached by more than one name. Seven of the nine are
+     * the personal and workspace groups whose canonical destinations shipped last: each is its own
+     * entry plus the one or two retired addresses that forward onto it, which is what a completed
+     * consolidation looks like in this table. The other two are `/organization` and the legacy
+     * `/settings/sso`, whose successors arrived earlier.
      */
     it("enumerates every canonical address that more than one entry resolves to", () => {
         const byLink = new Map<string, string[]>();
@@ -956,10 +972,13 @@ describe("settings manifest owns each canonical destination once", () => {
         expect(collapsed).toEqual([
             "/settings/organization/general# <- organization.general, organization.home",
             "/settings/organization/identity#sso <- legacy.settings-sso, organization.sso",
-            "/settings/personal/notifications# <- account.notifications, legacy.settings-notifications",
-            "/settings/personal/profile# <- account.home, account.profile",
-            "/settings/personal/security# <- account.security, legacy.settings-security",
-            "/settings/personal/workspaces# <- account.invites, legacy.settings-membership",
+            "/settings/personal/connected-accounts# <- account.connections, personal.connected-accounts",
+            "/settings/personal/notifications# <- account.notifications, legacy.settings-notifications, personal.notifications",
+            "/settings/personal/profile# <- account.home, account.profile, personal.profile",
+            "/settings/personal/security# <- account.security, legacy.settings-security, personal.security",
+            "/settings/personal/workspaces# <- account.invites, legacy.settings-membership, personal.workspaces",
+            "/settings/workspace/data-privacy# <- workspace.data, workspace.data-privacy",
+            "/settings/workspace/general# <- workspace.general, workspace.identity",
         ]);
     });
 });
@@ -990,24 +1009,23 @@ function unshippedDeclarations(
         .sort();
 }
 
+/**
+ * **The forward direction — "every declared entry point is really registered somewhere" — is not
+ * checked here any more, and its test was deleted rather than left passing.** It reconciled a
+ * manifest claim against a source file that spells routes by hand, and there is no such file left:
+ * the last two tab strips went with the destinations they existed for, so `TAB_STRIP_SOURCES` is
+ * empty and the filter that test opened with could never match. A test that cannot fail is worse
+ * than no test, because it reads like coverage.
+ *
+ * `GENERATED_SOURCES` owns that direction now, and owns it more strictly. The suite below
+ * ("settings manifest entry points are generated from the registrations that ship") reconciles both
+ * ways per surface — `undeclaredRegistrations` catches a registration the manifest does not declare,
+ * `unshippedDeclarations` catches a declaration nothing registers — and each has a mutation probe
+ * beside it proving it fires. What survives here is the reverse direction over the shell files,
+ * which is a different claim: a shell renders the navigation from the manifest at request time, so a
+ * literal settings href appearing in one is a hand-written link that has escaped it.
+ */
 describe("settings manifest agrees with the navigation that links into settings", () => {
-    it("finds every declared registry entry point in the source that registers it", () => {
-        const missing = entries.flatMap((entry) =>
-            entry.entryPoints
-                .filter((point): point is Exclude<SettingsEntryPoint, "contextual"> => point !== "contextual")
-                .filter((point) => sourcesRegistering(point).length > 0)
-                .filter(
-                    (point) =>
-                        !sourcesRegistering(point).some((file) =>
-                            linkedRoutes(file).includes(entry.currentRoute),
-                        ),
-                )
-                .map((point) => `${entry.id} claims ${point} but no such registration links ${entry.currentRoute}`),
-        );
-
-        expect(missing).toEqual([]);
-    });
-
     it("declares an entry point for every registered destination a navigation source links to", () => {
         const undeclared = NAVIGATION_SOURCES.flatMap((source) =>
             [...new Set(linkedRoutes(source.file))]
@@ -1038,22 +1056,41 @@ describe("settings manifest agrees with the navigation that links into settings"
     });
 
     /**
-     * A canary over the scan itself, not over the manifest: it fails if the reconciliation above
-     * ever runs against nothing and passes vacuously.
+     * A canary over the scans, not over the manifest: it fails if the reconciliation runs against
+     * nothing and starts passing vacuously.
      *
-     * Lowered from 20 in #1340 PR 8, and only because the surface it counts genuinely shrank. The
-     * organization tab strip was deleted and the workspace strip fell from nine links to two, which
-     * is the point of the PR — those destinations are now reached through the manifest-resolved
-     * navigation rather than spelled on a strip. The mark tracks the surface down; it must never be
-     * lowered to accommodate a scan that stopped finding files it should still be reading.
+     * **It counts per surface rather than in aggregate, and that changed here.** The old form summed
+     * every registration into one set and checked the total against a mark, which worked while a tab
+     * strip contributed most of the count. It does not work now: `linked` is zero, because the last
+     * two strips are deleted and the shell files spell no routes, so an aggregate mark would be met
+     * by the palette alone and one silently broken scrape — a renamed `useSections`, a `functionBody`
+     * that stops matching — would sail through it. Requiring every lane to report registrations is
+     * what makes a broken scrape fail rather than merely lower a number.
+     *
+     * The mark tracks the surface down; it must never be lowered to accommodate a scan that stopped
+     * finding files it should still be reading. `TAB_STRIP_SOURCES` is empty by decision rather than
+     * by a scan failing — the files it named are deleted, and their entry-point variants were removed
+     * from `SettingsEntryPoint`, so nothing can claim them. That the shell scan still finds its files
+     * is gated by the inventory below, which pins them by name.
      */
-    it("scans navigation sources that actually carry settings links", () => {
-        const linked = NAVIGATION_SOURCES.flatMap((source) => linkedRoutes(source.file)).filter(
-            underSettingsRoot,
-        );
-        const named = GENERATED_SOURCES.flatMap((source) => source.registered());
+    it("scans navigation sources that actually register settings destinations", () => {
+        const perSurface = GENERATED_SOURCES.map((source) => ({
+            describe: source.describe,
+            count: source.registered().length,
+        }));
 
-        expect(new Set([...linked, ...named]).size).toBeGreaterThan(12);
+        expect(
+            perSurface.filter((surface) => surface.count === 0),
+            "a generated surface reporting nothing means its scrape broke, not that it stopped registering",
+        ).toEqual([]);
+        expect(
+            new Set(GENERATED_SOURCES.flatMap((source) => source.registered())).size,
+            "the hand-registered settings surface that remains, counted once per destination",
+        ).toBeGreaterThan(7);
+        expect(
+            SHELL_SOURCES.length,
+            "and the shell scan still finds the files whose links the gates above reconcile",
+        ).toBeGreaterThan(0);
     });
 });
 
@@ -1124,17 +1161,37 @@ describe("an entry point resolves the canonical address once it is served", () =
         );
     });
 
+    /**
+     * The rule is that an entry point sits on the address that works: the canonical destination once
+     * some page serves it, and the entry's own route until then. Both halves were once visible in
+     * the manifest, because the personal scope had not shipped. It has, so the first half is
+     * asserted against the two jobs that moved and the second against a synthetic entry whose
+     * canonical route nothing serves — which is the only way left to show that the fallback is a
+     * rule rather than a branch that can no longer be reached.
+     */
     it("keeps a job whose canonical destination has not shipped on the address that works", () => {
         const account = entriesByRoute.get("/account");
         const reviews = entriesByRoute.get("/account/connections/reviews");
         if (!account || !reviews) throw new Error("the personal-scope jobs left the manifest");
+        const unshipped: SettingsEntry = {
+            ...account,
+            id: "test.unshipped",
+            canonicalRoute: "/settings/personal/unbuilt",
+        };
 
         expect(
             registeredRoutes.has(account.canonicalRoute),
-            "this expectation is what makes the two below meaningful; it inverts when /settings/personal/profile ships",
-        ).toBe(false);
-        expect(settingsDestinationHref(account)).toBe("/account");
-        expect(settingsDestinationHref(reviews)).toBe("/account/connections/reviews");
+            "the personal scope ships now, so both jobs resolve to their canonical destinations",
+        ).toBe(true);
+        expect(settingsDestinationHref(account)).toBe("/settings/personal/profile");
+        expect(settingsDestinationHref(reviews)).toBe(
+            "/settings/personal/connected-accounts#reviews",
+        );
+        expect(registeredRoutes.has(unshipped.canonicalRoute)).toBe(false);
+        expect(
+            settingsDestinationHref(unshipped),
+            "an unserved canonical leaves the entry point on the route that still renders",
+        ).toBe("/account");
     });
 
     it("addresses a destination that owns its canonical route without a fragment", () => {
