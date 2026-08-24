@@ -1,16 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
-import {
-    BoltIcon,
-    ClipboardDocumentListIcon,
-    Cog6ToothIcon,
-    FlagIcon,
-    InboxIcon,
-    MegaphoneIcon,
-} from "@heroicons/react/24/outline";
+import { BoltIcon, FlagIcon, MegaphoneIcon } from "@heroicons/react/24/outline";
 
 import { useRegisterActions } from "@/app/hooks/useActions";
+import { settingsNavigationActions } from "@/app/lib/actions/settingsNavigationActions";
 import type { AppAction } from "@/app/lib/actions/types";
 import type { NavAccess } from "@/app/lib/navAccess";
 
@@ -19,15 +13,29 @@ type Props = {
 };
 
 /**
- * Registers the navigation actions that are gated on an instance capability or an effective
- * permission. They live in a bridge rather than the seed registry because the registry context
- * carries only coarse role signals, which cannot answer for custom roles; these gates are resolved
- * from the viewer's effective permissions on the server and handed to the shell. Registering nothing
- * when access is absent keeps the palette free of destinations the backend would reject.
- * Renders nothing.
+ * Registers the navigation actions the seed registry cannot hold: the ones gated on an instance
+ * capability or an effective permission, and every settings destination the committed manifest
+ * declares a command-palette entry point for.
+ *
+ * The gated ones live here because the registry context carries only coarse role signals, which
+ * cannot answer for custom roles; these gates are resolved from the viewer's effective permissions
+ * on the server and handed to the shell. Registering nothing when access is absent keeps the palette
+ * free of destinations the backend would reject.
+ *
+ * The settings ones live here because #1340 makes the manifest their single source of truth — their
+ * ids, addresses, names, and aliases are generated in `settingsNavigationActions`, and several of
+ * them are gated on the same server-resolved access as the rest of this bridge. Renders nothing.
  */
 export default function NavActionsBridge({ navAccess }: Props): null {
     const actions = useMemo<readonly AppAction[]>(() => {
+        const access: NavAccess = {
+            goals: navAccess.goals,
+            auditLog: navAccess.auditLog,
+            captureReviews: navAccess.captureReviews,
+            campaigns: navAccess.campaigns,
+            workflows: navAccess.workflows,
+            diagnostics: navAccess.diagnostics,
+        };
         const gated: AppAction[] = [];
         if (navAccess.goals) {
             gated.push({
@@ -38,18 +46,6 @@ export default function NavActionsBridge({ navAccess }: Props): null {
                 order: 75,
                 execute: (_context, helpers) => {
                     helpers.router.push("/overview/reports/goals");
-                },
-            });
-        }
-        if (navAccess.diagnostics) {
-            gated.push({
-                id: "navigate.diagnostics",
-                group: "navigate",
-                labelKey: "navigate.diagnostics",
-                icon: Cog6ToothIcon,
-                order: 81,
-                execute: (_context, helpers) => {
-                    helpers.router.push("/settings/diagnostics");
                 },
             });
         }
@@ -65,19 +61,6 @@ export default function NavActionsBridge({ navAccess }: Props): null {
                 },
             });
         }
-        if (navAccess.captureReviews !== "disabled") {
-            gated.push({
-                id: "navigate.capture-reviews",
-                group: "navigate",
-                labelKey: "navigate.captureReviews",
-                icon: InboxIcon,
-                order: 155,
-                keywordsKey: "keywords.navigate.captureReviews",
-                execute: (_context, helpers) => {
-                    helpers.router.push("/account/connections/reviews");
-                },
-            });
-        }
         if (navAccess.workflows) {
             gated.push({
                 id: "navigate.workflows",
@@ -90,26 +73,14 @@ export default function NavActionsBridge({ navAccess }: Props): null {
                 },
             });
         }
-        if (navAccess.auditLog) {
-            gated.push({
-                id: "navigate.audit-log",
-                group: "navigate",
-                labelKey: "navigate.auditLog",
-                icon: ClipboardDocumentListIcon,
-                order: 170,
-                execute: (_context, helpers) => {
-                    helpers.router.push("/admin/logs");
-                },
-            });
-        }
-        return gated;
+        return [...gated, ...settingsNavigationActions(access)];
     }, [
         navAccess.goals,
-        navAccess.diagnostics,
-        navAccess.campaigns,
-        navAccess.captureReviews,
-        navAccess.workflows,
         navAccess.auditLog,
+        navAccess.captureReviews,
+        navAccess.campaigns,
+        navAccess.workflows,
+        navAccess.diagnostics,
     ]);
 
     useRegisterActions(actions);

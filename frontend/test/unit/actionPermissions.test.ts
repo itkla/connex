@@ -9,6 +9,16 @@ import type { OrgRole, Workspace, WorkspaceRole } from "@/app/lib/types";
 const PERMISSIONS = "app/lib/actions/permissions.ts";
 const TYPES = "app/lib/actions/types.ts";
 
+/**
+ * Every module that registers a global action and may gate one on a coarse capability. The settings
+ * destinations moved out of the seed registry into their generated module in #1340 PR 7, so the
+ * scan follows them rather than reading a file that no longer carries the only `can` call.
+ */
+const REGISTRIES = [
+    "app/lib/actions/seedActions.ts",
+    "app/lib/actions/settingsNavigationActions.ts",
+];
+
 function source(relativePath: string): string {
     return readFileSync(path.resolve(process.cwd(), relativePath), "utf8");
 }
@@ -112,8 +122,9 @@ describe("an action needing no capability says so by omission", () => {
     });
 
     it("gates every registered action on a key the table actually carries", () => {
-        const registry = source("app/lib/actions/seedActions.ts");
-        const keys = [...registry.matchAll(/context\.can\(["']([^"']+)["']\)/g)].map((match) => match[1]);
+        const keys = REGISTRIES.flatMap((registry) =>
+            [...source(registry).matchAll(/context\.can\(["']([^"']+)["']\)/g)].map((match) => match[1]),
+        );
 
         expect(keys.length).toBeGreaterThan(0);
         for (const key of keys) {
