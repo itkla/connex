@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import { useTranslations } from "next-intl";
 
 import Rise from "@/app/components/motion/Rise";
 import { PageHeader } from "@/app/components/PageHeader";
@@ -35,22 +36,18 @@ const OWN_CHROME_ROUTES = new Set<string>([
  * rather than as an icon on a strip. This whole component dissolves when those last two workspace
  * destinations move.
  *
- * @param title - the workspace-settings page title, resolved by the layout
- * @param description - the page description
+ * It resolves its own two strings rather than taking them as props, which is what lets the layout
+ * above it do no request-time work at all on a segment most of whose addresses exist only to
+ * forward.
  */
-export default function WorkspaceSettingsChrome({
-    title,
-    description,
-}: {
-    title: string;
-    description: string;
-}) {
+export default function WorkspaceSettingsChrome() {
     const pathname = usePathname() ?? "";
+    const t = useTranslations("WorkspaceSettings");
     if (OWN_CHROME_ROUTES.has(pathname)) return null;
     return (
         <>
             <Rise>
-                <PageHeader title={title} description={description} />
+                <PageHeader title={t("title")} description={t("subtitle")} />
             </Rise>
             <SettingsTabs />
         </>

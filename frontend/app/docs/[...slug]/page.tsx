@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { notFound, permanentRedirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { ArrowLeftIcon, ArrowRightIcon } from "@heroicons/react/24/outline";
 import {
@@ -16,7 +16,6 @@ import {
     docsCategories,
     getArticle,
     getCategory,
-    renamedArticlePath,
     type ResolvedArticle,
 } from "@/app/lib/docs/registry";
 import { readArticleBlocks, readCategoryBlocks } from "@/app/lib/docs/read";
@@ -156,11 +155,7 @@ async function renderCategory(categorySlug: string) {
 
 async function renderArticle(categorySlug: string, articleSlug: string) {
     const resolved = getArticle(categorySlug, articleSlug);
-    if (!resolved) {
-        const renamed = renamedArticlePath(categorySlug, articleSlug);
-        if (renamed !== null) permanentRedirect(renamed);
-        notFound();
-    }
+    if (!resolved) notFound();
 
     const { category, article } = resolved;
     const [meta, t, blocks] = await Promise.all([
