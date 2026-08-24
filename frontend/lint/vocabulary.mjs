@@ -959,7 +959,7 @@ export const AT_A_GLANCE_SURFACES = [
     "en/docs.json:DocsRecords.articles.deals-and-pipelines.blocks[5].text",
     "en/docs.json:DocsRecords.articles.deals-and-pipelines.blocks[6].items[1].description",
     "en/docs.json:DocsRecords.articles.table-and-grid.blocks[2].items[2].description",
-    "en/docs.json:DocsRelationshipIntelligence.articles.warmth-and-temperature.blocks[0].text",
+    "en/docs.json:DocsRelationshipIntelligence.articles.warmth.blocks[0].text",
     "en/docs.json:DocsSettings.articles.audit-logs.blocks[5].title",
     "en/docs.json:DocsTutorials.articles.add-your-first-company.blocks[1].caption",
     "en/docs.json:DocsTutorials.articles.build-your-pipeline.blocks[3].items[0].description",

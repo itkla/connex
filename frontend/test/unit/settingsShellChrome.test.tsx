@@ -39,11 +39,7 @@ vi.mock("next-intl", () => ({
 function chrome() {
     return renderToStaticMarkup(
         <PermissionsProvider permissions={["WORKSPACE_SETTINGS"]} status="resolved">
-            <WorkspaceSettingsChrome
-                title="Settings"
-                description="Manage this workspace."
-                mailManagementAvailability="disabled"
-            />
+            <WorkspaceSettingsChrome />
         </PermissionsProvider>,
     );
 }
@@ -62,9 +58,13 @@ describe("the settings home does not inherit the workspace tab strip", () => {
     it("still renders the header and the tab strip on a workspace settings destination", () => {
         const html = chrome();
 
-        expect(html).toContain("/settings/members");
-        expect(html).toContain("/settings/roles");
-        expect(html).toContain("Manage this workspace.");
+        expect(html).toContain("/settings/general");
+        expect(html).toContain("/settings/data");
+        expect(
+            html,
+            "the chrome resolves its own strings now, because the layout above it has to stay synchronous for the retired addresses to answer with a real 308",
+        ).toContain("<h1");
+        expect(html).toContain("subtitle");
     });
 
     it.each(SETTINGS_GROUPS.map((group) => group.route))(

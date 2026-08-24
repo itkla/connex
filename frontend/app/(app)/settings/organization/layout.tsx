@@ -23,10 +23,10 @@ import { getMyWorkspacesResultFromCookie } from "@/app/lib/api";
  * The check is nullish rather than an identity test against `null`, and that is the whole gate. The
  * workspace payload omits `orgRole` entirely for a member who holds none — the field is typed
  * `OrgRole | null` but arrives absent — so `=== null` reads `undefined` and admits exactly the
- * viewer it exists to refuse. The legacy organization layout still tests identity and is wrong in
- * the same way; it is left alone here because #1340 does not touch those routes, and it fails
- * closed twice over regardless: every organization panel refuses a 403 in place and every
- * organization endpoint requires the role. That does not make the entry point honest, which is why
+ * viewer it exists to refuse. The legacy organization layout that carried the same
+ * defect is deleted in the redirects PR — every legacy organization address now forwards here, so
+ * this nullish check is the single entry gate. Panels and endpoints still refuse independently,
+ * failing closed twice over. That alone would not make the entry point honest, which is why
  * this one is fixed.
  *
  * {@link OrganizationWorkspaceGuard} stays, for the same reason it exists on the legacy routes: the

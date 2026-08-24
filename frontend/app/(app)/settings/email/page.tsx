@@ -1,26 +1,19 @@
-import { headers } from "next/headers";
+import { permanentRedirect } from "next/navigation";
 
-import CapabilityUnavailablePage from "@/app/components/CapabilityUnavailablePage";
-import EmailPanel from "@/app/components/settings/EmailPanel";
-import SettingsAvailabilityNotice from "@/app/components/settings/SettingsAvailabilityNotice";
-import { getCapabilitiesResultFromCookie } from "@/app/lib/api";
+import { settingsRedirectTarget, type RouteSearchParams } from "@/app/lib/settingsRedirects";
 
 /**
- * Workspace email settings, or the reason there is nothing here to set.
+ * The retired address for workspace mail configuration (#1340 WS4.6).
  *
- * A managed-mail instance sends its own mail, so this page has no settings to offer — but it says
- * so where its own name is, rather than forwarding the reader to Members. #1340 forbids the
- * teleport: a reader who followed a link, a search result, or a bookmark to email settings gets an
- * answer about email settings.
+ * The job now lives at the `email` section of Communications, and this path forwards there permanently rather than 404ing an
+ * address readers have bookmarked and linked. The target is the manifest’s, not this file’s, so a
+ * destination that moves again takes its redirect with it; the query string is the reader’s and
+ * survives the hop whole.
  */
-export default async function EmailSettingsPage() {
-    const cookie = (await headers()).get("cookie");
-    const capabilitiesResult = await getCapabilitiesResultFromCookie(cookie);
-    if (!capabilitiesResult.ok) {
-        return <CapabilityUnavailablePage />;
-    }
-    if (capabilitiesResult.data.mailManaged) {
-        return <SettingsAvailabilityNotice state="managed" />;
-    }
-    return <EmailPanel />;
+export default async function EmailSettingsPage({
+    searchParams,
+}: {
+    searchParams: Promise<RouteSearchParams>;
+}) {
+    permanentRedirect(settingsRedirectTarget("workspace.email", await searchParams));
 }

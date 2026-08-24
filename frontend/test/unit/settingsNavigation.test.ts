@@ -161,6 +161,12 @@ function capabilitiesHold(entry: SettingsEntry, who: SettingsNavViewer): boolean
 /**
  * The section ids a served canonical destination offers: the jobs it absorbed, then the route gaps
  * its group declares. Derived from the manifest so the suite follows a group across its migration.
+ *
+ * An absorbed job counts whatever its old address does now. Before #1340 PR 8 those addresses still
+ * rendered; after it, most of them forward here — and a job does not stop being a section of this
+ * page because the route it arrived from became a redirect. Filtering on kind here would have made
+ * this expectation agree with a `groupSections` that had quietly emptied itself, which is the
+ * failure both were written to catch.
  */
 function expectedSectionIds(groupId: string, who: SettingsNavViewer = viewer()): string[] {
     const route = groupRoute(groupId);
@@ -172,7 +178,6 @@ function expectedSectionIds(groupId: string, who: SettingsNavViewer = viewer()):
         .filter(
             (entry) =>
                 entry.group === groupId
-                && entry.kind === "destination"
                 && entry.canonicalSection !== null
                 && entry.canonicalRoute === route
                 && entry.titleKey !== null

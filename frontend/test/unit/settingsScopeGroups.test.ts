@@ -154,11 +154,17 @@ describe("each scope destination owns the sections its manifest group promises",
         expect(crmSectionHref("workflows")).toBe(`${CRM_ROUTE}#workflows`);
         expect(auditDiagnosticsSectionHref("audit")).toBe(`${AUDIT_DIAGNOSTICS_ROUTE}#audit`);
 
-        const builders = new Set(
-            ["communicationsSections", "crmSections", "auditDiagnosticsSections"].map((module) =>
+        /**
+         * Origins rather than producers: the three builders every consumer asks for an href, and
+         * the manifest they read their slugs from — which since #1340 PR 8 also records each
+         * retired address’s redirect target, and that target is this same deep link.
+         */
+        const builders = new Set([
+            ...["communicationsSections", "crmSections", "auditDiagnosticsSections"].map((module) =>
                 path.join(APP, "lib", `${module}.ts`),
             ),
-        );
+            path.join(APP, "lib", "settingsManifest.ts"),
+        ]);
         const strays = appFiles(APP)
             .filter((file) => !builders.has(file))
             .filter((file) => {
@@ -434,17 +440,31 @@ describe("the scope destinations tell a failed read apart from an empty result",
     });
 });
 
-describe("the shipped panels still render in the home they had", () => {
+describe("the shipped panels render from the destination that absorbed them", () => {
     it.each([
-        { route: "/settings/email", contains: "<EmailPanel />" },
-        { route: "/settings/delivery", contains: "<DeliveryPanel />" },
-        { route: "/settings/custom-fields", contains: "<CustomFieldsPanel />" },
-        { route: "/settings/qualification", contains: "<QualificationCriteriaPanel />" },
-        { route: "/settings/diagnostics", contains: '<DiagnosticsPanel scope="workspace" />' },
-    ])("leaves $route rendering the panel it always rendered", ({ route, contains }) => {
-        expect(source(path.join(routeDir(route), "page.tsx"))).toContain(contains);
+        { route: "/settings/email", section: "email" },
+        { route: "/settings/delivery", section: "delivery" },
+        { route: "/settings/custom-fields", section: "custom-fields" },
+        { route: "/settings/qualification", section: "qualification" },
+        { route: "/settings/diagnostics", section: "diagnostics" },
+    ])("retires $route into a forward at its $section section", ({ route, section }) => {
+        const page = source(path.join(routeDir(route), "page.tsx"));
+        const entry = SETTINGS_ENTRIES.find((candidate) => candidate.currentRoute === route);
+
+        expect(page).toContain("permanentRedirect(settingsRedirectTarget(");
+        expect(
+            page,
+            "a stub renders nothing; a panel left here would be a second copy of the section",
+        ).not.toContain("Panel />");
+        expect(entry?.canonicalSection).toBe(section);
+        expect(entry?.redirectsTo).toBe(`${entry?.canonicalRoute}#${section}`);
     });
 
+    /**
+     * Retained rather than exercised — see the matching note in `organizationScopeGroups.test.ts`.
+     * The routes that passed `page` now forward, so the default is unreachable in the shipped app
+     * and the union is a tracked #1340 residual rather than something this diff collapses.
+     */
     it.each([
         { file: path.join(COMPONENTS, "EmailPanel.tsx"), marker: 'presentation = "page"' },
         { file: path.join(COMPONENTS, "DeliveryPanel.tsx"), marker: 'presentation = "page"' },
@@ -463,11 +483,11 @@ describe("the shipped panels still render in the home they had", () => {
             ),
             marker: "presentation = 'page'",
         },
-    ])("defaults every seam to the shipped route's presentation", ({ file, marker }) => {
+    ])("retains the unexercised page presentation on every seam", ({ file, marker }) => {
         expect(source(file)).toContain(marker);
     });
 
-    it("keeps the two browsers owning their own page shell on their own routes", () => {
+    it("keeps the two browsers' page shells intact behind the retained default", () => {
         const audit = source(path.join(APP, "components", "admin", "AuditLogBrowser.tsx"));
         const policies = source(
             path.join(APP, "components", "records", "approval-policies", "ApprovalPoliciesBrowser.tsx"),

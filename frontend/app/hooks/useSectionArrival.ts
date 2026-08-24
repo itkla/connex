@@ -67,22 +67,55 @@ export function useSectionArrival(sections: readonly string[]): SectionArrival {
     const hash = useSyncExternalStore(subscribeToHash, hashSnapshot, () => "");
     const elements = useRef(new Map<string, HTMLElement>());
     const scrolledForHash = useRef<string | null>(null);
+    const wanted = useRef<string | null>(null);
+    const registrars = useRef(new Map<string, (element: HTMLElement | null) => void>());
+    const [appearances, setAppearances] = useState(0);
     const [arrived, setArrived] = useState<string | null>(null);
 
     const target = hash.startsWith("#") ? hash.slice(1) : "";
     const section = sections.includes(target) ? target : null;
 
-    const register = useCallback(
-        (slug: string) => (element: HTMLElement | null) => {
-            if (element === null) elements.current.delete(slug);
-            else elements.current.set(slug, element);
-        },
-        [],
-    );
+    /**
+     * Registers a section's element, and wakes the arrival effect when the one being waited for
+     * appears.
+     *
+     * A page that renders its regions unconditionally has the target in hand before the effect
+     * below first runs, and this counter never moves. A page that gates them behind its own load
+     * does not: the organization's General destination renders a skeleton with no section ids in
+     * it, so the effect finds nothing and returns without claiming the hash. The ref callback that
+     * arrives when the read resolves would then change nothing the effect depends on, and a reader
+     * who deep-linked into the middle of the page would be left sitting at the top of it — which is
+     * precisely what a redirect that carries a section exists to prevent.
+     *
+     * **The registrar is memoized per slug, and that is required rather than tidy.** Callers spend
+     * this as `ref={register(section)}`, so returning a fresh closure each render would give React
+     * a new ref identity every time — it would detach with `null` and reattach on every render, and
+     * the `setAppearances` above would then fire on every render and loop the component until React
+     * gave up with "Maximum update depth exceeded". A stable identity per slug means the ref
+     * attaches once, so the counter moves only when a section genuinely mounts or unmounts.
+     */
+    const register = useCallback((slug: string) => {
+        const existing = registrars.current.get(slug);
+        if (existing !== undefined) return existing;
+        const registrar = (element: HTMLElement | null) => {
+            if (element === null) {
+                elements.current.delete(slug);
+                return;
+            }
+            elements.current.set(slug, element);
+            if (slug === wanted.current) setAppearances((count) => count + 1);
+        };
+        registrars.current.set(slug, registrar);
+        return registrar;
+    }, []);
 
     useEffect(() => {
         if (scrolledForHash.current !== hash) scrolledForHash.current = null;
     }, [hash]);
+
+    useEffect(() => {
+        wanted.current = section;
+    }, [section]);
 
     useEffect(() => {
         if (section === null || scrolledForHash.current === hash) return;
@@ -109,7 +142,7 @@ export function useSectionArrival(sections: readonly string[]): SectionArrival {
             window.clearTimeout(stop);
             observer?.disconnect();
         };
-    }, [hash, section, reduceMotion]);
+    }, [hash, section, reduceMotion, appearances]);
 
     useEffect(() => {
         if (arrived === null) return;

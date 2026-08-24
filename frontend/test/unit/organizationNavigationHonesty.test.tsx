@@ -1,5 +1,4 @@
 import {
-    act,
     createElement,
     isValidElement,
     type AnchorHTMLAttributes,
@@ -8,18 +7,15 @@ import {
     type ReactElement,
     type ReactNode,
 } from "react";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import OrganizationLayout from "@/app/(app)/organization/layout";
-import OrgSsoPage from "@/app/(app)/organization/sso/page";
-import CapabilityUnavailablePage from "@/app/components/CapabilityUnavailablePage";
-import { NoAccessCard } from "@/app/components/organization/OrgPrimitives";
-import OrgTabs from "@/app/components/organization/OrgTabs";
+import OrganizationSettingsLayout from "@/app/(app)/settings/organization/layout";
 import OrganizationWorkspaceGuard from "@/app/components/organization/OrganizationWorkspaceGuard";
 import SettingsAvailabilityNotice from "@/app/components/settings/SettingsAvailabilityNotice";
-import SsoPanel from "@/app/components/settings/SsoPanel";
-import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import type { MyWorkspaces, Workspace } from "@/app/lib/types";
 
 const {
@@ -174,53 +170,6 @@ function workspaceSnapshot(workspace: Workspace): MyWorkspaces {
     return { workspaces: [workspace], activeWorkspaceId: workspace.id };
 }
 
-function installMinimalDocument(): HTMLElement {
-    class HtmlIFrameElement {}
-
-    const documentTarget = {
-        nodeType: 9,
-        activeElement: null,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        createElement: vi.fn(() => containerTarget),
-    };
-    const windowTarget = {
-        document: documentTarget,
-        event: undefined,
-        HTMLIFrameElement: HtmlIFrameElement,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-    };
-    const containerTarget = {
-        nodeType: 1,
-        tagName: "DIV",
-        nodeName: "DIV",
-        namespaceURI: "http://www.w3.org/1999/xhtml",
-        ownerDocument: documentTarget,
-        firstChild: null,
-        lastChild: null,
-        parentNode: null,
-        textContent: "",
-        style: {},
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        appendChild: vi.fn(),
-        insertBefore: vi.fn(),
-        removeChild: vi.fn(),
-        setAttribute: vi.fn(),
-        removeAttribute: vi.fn(),
-    };
-    Object.assign(documentTarget, {
-        defaultView: windowTarget,
-        documentElement: containerTarget,
-        body: containerTarget,
-    });
-    vi.stubGlobal("window", windowTarget);
-    vi.stubGlobal("document", documentTarget);
-    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-    return document.createElement("div");
-}
-
 function hasChildren(value: unknown): value is { children?: ReactNode } {
     return typeof value === "object" && value !== null && "children" in value;
 }
@@ -250,20 +199,6 @@ function hasAvailabilityState(value: unknown): value is { state: string } {
         && typeof value.state === "string";
 }
 
-function isOrgTabsProps(value: unknown): value is {
-    isOrgAdmin: boolean;
-    ssoAvailability: "enabled" | "disabled" | "unavailable";
-} {
-    return typeof value === "object"
-        && value !== null
-        && "isOrgAdmin" in value
-        && typeof value.isOrgAdmin === "boolean"
-        && "ssoAvailability" in value
-        && (value.ssoAvailability === "enabled"
-            || value.ssoAvailability === "disabled"
-            || value.ssoAvailability === "unavailable");
-}
-
 beforeEach(() => {
     activeWorkspaceState.id = MEMBER_WORKSPACE.id;
     buttonActionState.onClick = () => undefined;
@@ -281,196 +216,44 @@ afterEach(() => {
     vi.unstubAllGlobals();
 });
 
-describe("organization navigation authority", () => {
-    it("renders no organization admin tab for a non-admin", () => {
-        const html = renderToStaticMarkup(createElement(OrgTabs, {
-            isOrgAdmin: false,
-            ssoAvailability: "enabled",
-        }));
-
-        for (const route of ORG_ADMIN_ROUTES) expect(html).not.toContain(route);
-    });
-
-    it("keeps organization navigation available to an administrator", () => {
-        const html = renderToStaticMarkup(createElement(OrgTabs, {
-            isOrgAdmin: true,
-            ssoAvailability: "enabled",
-        }));
-
-        for (const route of ORG_ADMIN_ROUTES) expect(html).toContain(route);
-    });
-
-    it("hides the SSO tab only after availability resolves as disabled", () => {
-        const html = renderToStaticMarkup(createElement(OrgTabs, {
-            isOrgAdmin: true,
-            ssoAvailability: "disabled",
-        }));
-
-        expect(html).not.toContain("/organization/sso");
-        expect(html).not.toContain("tabSsoAvailabilityUnknown");
-    });
-
-    it("gates the section on the server-provided active-workspace organization role", async () => {
+describe("the canonical organization shell refuses authority the active workspace does not carry", () => {
+    it("admits an organization administrator, so the refusals below mean something", async () => {
         workspaceResultMock.mockResolvedValue({
             ok: true,
-            data: workspaceSnapshot(MEMBER_WORKSPACE),
+            data: workspaceSnapshot({ ...MEMBER_WORKSPACE, orgRole: "admin" }),
         });
 
-        const rendered = await OrganizationLayout({ children: createElement("p", null, "admin content") });
-        const tabs = findByType(rendered, OrgTabs);
+        const rendered = await OrganizationSettingsLayout({
+            children: createElement("p", null, "admin content"),
+        });
 
-        expect(workspaceResultMock).toHaveBeenCalledWith("JSESSIONID=session; connex_workspace=7");
-        expect(capabilityResultMock).toHaveBeenCalledWith("JSESSIONID=session; connex_workspace=7");
-        expect(isValidElement(rendered) ? rendered.type : null).toBe(OrganizationWorkspaceGuard);
-        expect(findByType(rendered, NoAccessCard)).not.toBeNull();
-        expect(tabs !== null && isOrgTabsProps(tabs.props) ? tabs.props.isOrgAdmin : null).toBe(false);
-        expect(containsText(rendered, "admin content")).toBe(false);
-    });
-
-    it("starts capability resolution without waiting for the workspace lookup", async () => {
-        let resolveWorkspace: (result: { ok: true; data: MyWorkspaces }) => void = () => undefined;
-        workspaceResultMock.mockReturnValue(new Promise((resolve) => {
-            resolveWorkspace = resolve;
-        }));
-
-        const rendering = OrganizationLayout({ children: createElement("p", null, "admin content") });
-        await vi.waitFor(() => expect(capabilityResultMock).toHaveBeenCalledOnce());
-        resolveWorkspace({ ok: true, data: workspaceSnapshot(MEMBER_WORKSPACE) });
-
-        await rendering;
+        expect(findByType(rendered, OrganizationWorkspaceGuard)).not.toBeNull();
+        expect(findByType(rendered, SettingsAvailabilityNotice)).toBeNull();
+        expect(containsText(rendered, "admin content")).toBe(true);
     });
 
     it("refuses authority held only in a different organization", async () => {
         workspaceResultMock.mockResolvedValue({
             ok: true,
             data: {
-                workspaces: [OTHER_ORG_ADMIN_WORKSPACE, MEMBER_WORKSPACE],
+                workspaces: [MEMBER_WORKSPACE, OTHER_ORG_ADMIN_WORKSPACE],
                 activeWorkspaceId: MEMBER_WORKSPACE.id,
             },
         });
 
-        const rendered = await OrganizationLayout({ children: createElement("p", null, "admin content") });
-        const tabs = findByType(rendered, OrgTabs);
-
-        expect(findByType(rendered, NoAccessCard)).not.toBeNull();
-        expect(tabs !== null && isOrgTabsProps(tabs.props) ? tabs.props.isOrgAdmin : null).toBe(false);
-        expect(containsText(rendered, "admin content")).toBe(false);
-    });
-
-    it("renders an unavailable state when organization standing cannot be resolved", async () => {
-        workspaceResultMock.mockResolvedValue({ ok: false });
-
-        const rendered = await OrganizationLayout({ children: createElement("p", null, "admin content") });
-
-        expect(isValidElement(rendered) ? rendered.type : null).toBe(WorkspaceUnavailablePage);
-        expect(findByType(rendered, NoAccessCard)).toBeNull();
-    });
-
-    it.each([
-        { workspaces: [], activeWorkspaceId: null },
-        { workspaces: [MEMBER_WORKSPACE], activeWorkspaceId: 404 },
-    ] satisfies MyWorkspaces[])(
-        "renders unavailable when the workspace snapshot has no active membership: $activeWorkspaceId",
-        async (snapshot) => {
-            workspaceResultMock.mockResolvedValue({ ok: true, data: snapshot });
-
-            const rendered = await OrganizationLayout({ children: createElement("p", null, "admin content") });
-
-            expect(isValidElement(rendered) ? rendered.type : null).toBe(WorkspaceUnavailablePage);
-            expect(findByType(rendered, NoAccessCard)).toBeNull();
-        },
-    );
-
-    it("keeps organization routes available while marking unresolved SSO availability", async () => {
-        workspaceResultMock.mockResolvedValue({
-            ok: true,
-            data: workspaceSnapshot({ ...MEMBER_WORKSPACE, orgRole: "owner" }),
+        const rendered = await OrganizationSettingsLayout({
+            children: createElement("p", null, "administration content"),
         });
-        capabilityResultMock.mockResolvedValue({ ok: false });
+        const refusal = findByType(rendered, SettingsAvailabilityNotice);
 
-        const layout = await OrganizationLayout({ children: createElement("p", null, "admin content") });
-        const ssoPage = await OrgSsoPage();
-        const tabs = findByType(layout, OrgTabs);
-
-        expect(isValidElement(layout) ? layout.type : null).toBe(OrganizationWorkspaceGuard);
-        expect(containsText(layout, "admin content")).toBe(true);
-        expect(tabs !== null && isOrgTabsProps(tabs.props) ? tabs.props.ssoAvailability : null)
-            .toBe("unavailable");
-        if (tabs === null) throw new Error("Organization navigation did not render");
-        const tabHtml = renderToStaticMarkup(tabs);
-        expect(tabHtml).toContain("/organization/sso");
-        expect(tabHtml).toContain("tabSsoAvailabilityUnknown");
-        expect(isValidElement(ssoPage) ? ssoPage.type : null).toBe(CapabilityUnavailablePage);
-        expect(redirectMock).not.toHaveBeenCalled();
-
-        const unavailable = await CapabilityUnavailablePage();
-        const unavailableHtml = renderToStaticMarkup(unavailable);
-        expect(unavailableHtml).toContain(">title</h2>");
-        expect(unavailableHtml).toContain(">retry</button>");
-        const container = installMinimalDocument();
-        const { createRoot } = await import("react-dom/client");
-        const root = createRoot(container);
-        await act(async () => {
-            root.render(unavailable);
-        });
-        await act(async () => {
-            buttonActionState.onClick();
-        });
-        expect(routerRefreshMock).toHaveBeenCalledOnce();
-        await act(async () => root.unmount());
-    });
-
-    it("explains a disabled-capability result in place instead of forwarding to Administrators", async () => {
-        capabilityResultMock.mockResolvedValue({ ok: true, data: { sso: false } });
-
-        const rendered = await OrgSsoPage();
-
-        expect(isValidElement(rendered) ? rendered.type : null).toBe(SettingsAvailabilityNotice);
         expect(
-            isValidElement(rendered) && hasAvailabilityState(rendered.props) ? rendered.props.state : null,
-        ).toBe("not-enabled");
+            refusal,
+            "an organization role is authority over one organization; holding it elsewhere is not standing here",
+        ).not.toBeNull();
         expect(
-            redirectMock,
-            "#1340: an instance without single sign-on says so where single sign-on lives",
-        ).not.toHaveBeenCalled();
-        expect(renderToStaticMarkup(rendered)).toContain("notEnabledTitle");
-    });
-
-    it("renders SSO after a successful enabled-capability result without redirecting", async () => {
-        capabilityResultMock.mockResolvedValue({ ok: true, data: { sso: true } });
-
-        const rendered = await OrgSsoPage();
-
-        expect(isValidElement(rendered) ? rendered.type : null).toBe(SsoPanel);
-        expect(redirectMock).not.toHaveBeenCalled();
-    });
-
-    it("renders the section for a server-resolved organization administrator", async () => {
-        workspaceResultMock.mockResolvedValue({
-            ok: true,
-            data: workspaceSnapshot({ ...MEMBER_WORKSPACE, orgRole: "admin" }),
-        });
-
-        const rendered = await OrganizationLayout({ children: createElement("p", null, "admin content") });
-        const tabs = findByType(rendered, OrgTabs);
-
-        expect(tabs !== null && isOrgTabsProps(tabs.props) ? tabs.props.isOrgAdmin : null).toBe(true);
-        expect(findByType(rendered, NoAccessCard)).toBeNull();
-        expect(containsText(rendered, "admin content")).toBe(true);
-    });
-
-    it("admits an organization owner", async () => {
-        workspaceResultMock.mockResolvedValue({
-            ok: true,
-            data: workspaceSnapshot({ ...MEMBER_WORKSPACE, orgRole: "owner" }),
-        });
-
-        const rendered = await OrganizationLayout({ children: createElement("p", null, "owner content") });
-        const tabs = findByType(rendered, OrgTabs);
-
-        expect(tabs !== null && isOrgTabsProps(tabs.props) ? tabs.props.isOrgAdmin : null).toBe(true);
-        expect(findByType(rendered, NoAccessCard)).toBeNull();
-        expect(containsText(rendered, "owner content")).toBe(true);
+            refusal !== null && hasAvailabilityState(refusal.props) ? refusal.props.state : null,
+        ).toBe("ask-admin");
+        expect(containsText(rendered, "administration content")).toBe(false);
     });
 
     it("withholds a retained organization payload and reconciles it through provider recovery", async () => {
@@ -495,5 +278,38 @@ describe("organization navigation authority", () => {
         expect(retrySelectionRecoveryMock).toHaveBeenCalledOnce();
         expect(reconciledHtml).toContain("reconciled admin content");
         expect(reconciledHtml).not.toContain("workspace selection unavailable");
+    });
+});
+
+/**
+ * The legacy organization shell is gone, and this is what keeps it gone.
+ *
+ * Every `/organization/*` address now forwards to the canonical destination that absorbed it, which
+ * left the tab strip with nothing to link and the layout with nothing but redirect stubs to wrap.
+ * Deleting them is the point of #1340 WS4.6; re-adding either would rebuild the competing
+ * administration shell the epic exists to remove, and would do it quietly, because a second shell
+ * over redirect stubs renders nothing a test would otherwise notice.
+ */
+describe("the legacy organization shell stays retired", () => {
+    it("keeps no organization tab strip and no organization layout", () => {
+        const retired = [
+            "app/components/organization/OrgTabs.tsx",
+            "app/(app)/organization/layout.tsx",
+        ].filter((file) => existsSync(join(process.cwd(), file)));
+
+        expect(
+            retired,
+            "the organization routes redirect; a shell above them would wrap nothing and compete with /settings",
+        ).toEqual([]);
+    });
+
+    it("leaves every organization address forwarding rather than rendering", () => {
+        const rendering = ORG_ADMIN_ROUTES.filter(
+            (route) => !/permanentRedirect\(/.test(
+                readFileSync(join(process.cwd(), "app", "(app)", route, "page.tsx"), "utf8"),
+            ),
+        );
+
+        expect(rendering).toEqual([]);
     });
 });

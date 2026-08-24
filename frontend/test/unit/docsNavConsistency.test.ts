@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { getArticle } from "@/app/lib/docs/registry";
+
 const LOCALES = ["en", "ja"] as const;
 const DOCS_NAMESPACE = "DocsGettingStarted";
 const DOCS_ARTICLE_SLUG = "navigating-connex";
@@ -127,5 +129,65 @@ describe("in-app docs describe the real sidebar", () => {
         const counts = LOCALES.map((locale) => documentedAreas(locale).length);
 
         expect(new Set(counts).size).toBe(1);
+    });
+});
+
+/**
+ * The permanent forwards for renamed documentation slugs.
+ *
+ * A docs slug is a route: it is bookmarked, linked from inside the product, and indexed, so a
+ * rename that does not forward the old address breaks all three. Two renames have happened —
+ * Rules to Workflows, and the warmth article's slug in #1340 WS4.6 — and both are declared in
+ * `next.config.ts` beside each other. This reads that file as text rather than importing it,
+ * because the config pulls in the bundler's own types; what matters is the pairing, and the
+ * pairing is checkable either way.
+ */
+describe("renamed documentation slugs keep their old addresses working", () => {
+    const config = readFileSync(path.join(process.cwd(), "next.config.ts"), "utf8");
+    const pairs = [...config.matchAll(
+        /source:\s*"(\/docs\/[^"]+)",\s*\n\s*destination:\s*"(\/docs\/[^"]+)",/g,
+    )].map((match) => ({ source: match[1], destination: match[2] }));
+
+    function slugs(docsPath: string): [string, string] {
+        const [, , category, article] = docsPath.split("/");
+        return [category, article];
+    }
+
+    it("forwards permanently, because the old slug is retired rather than busy", () => {
+        expect(config).toContain("permanent: true");
+    });
+
+    it("declares every rename this suite knows about", () => {
+        expect(pairs.map((pair) => pair.source).sort()).toEqual([
+            "/docs/relationship-intelligence/warmth-and-temperature",
+            "/docs/settings/rules-and-automation",
+        ]);
+    });
+
+    it("forwards each retired slug to an article that exists", () => {
+        const broken = pairs.filter((pair) => {
+            const [category, article] = slugs(pair.destination);
+            return getArticle(category, article) === undefined;
+        });
+
+        expect(broken.map((pair) => pair.destination)).toEqual([]);
+    });
+
+    it("forwards only from slugs the registry no longer serves", () => {
+        const live = pairs.filter((pair) => {
+            const [category, article] = slugs(pair.source);
+            return getArticle(category, article) !== undefined;
+        });
+
+        expect(
+            live.map((pair) => pair.source),
+            "a redirect over a slug the registry still serves would shadow a real article",
+        ).toEqual([]);
+    });
+
+    it("never forwards an address onto itself or onto another forward", () => {
+        const sources = new Set(pairs.map((pair) => pair.source));
+
+        expect(pairs.filter((pair) => sources.has(pair.destination))).toEqual([]);
     });
 });

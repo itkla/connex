@@ -135,7 +135,7 @@ export const docsCategories: DocCategory[] = [
         namespace: "DocsRelationshipIntelligence",
         icon: FireIcon,
         articles: [
-            { slug: "warmth-and-temperature", icon: FireIcon },
+            { slug: "warmth", icon: FireIcon },
             { slug: "decay-and-signals", icon: ArrowTrendingDownIcon },
             { slug: "connections-and-employment", icon: ArrowsRightLeftIcon },
             { slug: "ai-insights", icon: SparklesIcon },

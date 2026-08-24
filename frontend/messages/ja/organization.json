@@ -2,16 +2,13 @@
   "Organization": {
     "title": "組織",
     "subtitle": "ワークスペースの上位にあるアカウント、組織を管理します。これらの設定は組織内のすべてのワークスペースに適用されます。",
-    "tabOverview": "概要",
     "tabMembers": "管理者",
     "tabDomains": "許可ドメイン",
     "tabSso": "シングルサインオン",
-    "tabSsoAvailabilityUnknown": "利用可否を確認できません",
     "tabAi": "AIプロバイダー",
     "tabAudit": "監査ログ",
     "noAccessTitle": "組織管理者のみ",
     "noAccessBody": "これらの設定を管理するには、組織のオーナーまたは管理者の権限が必要です。",
-    "tabDataRequests": "開示等請求",
     "tabDiagnostics": "診断"
   },
   "OrgOverview": {

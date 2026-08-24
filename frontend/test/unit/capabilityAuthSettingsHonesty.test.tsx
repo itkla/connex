@@ -1,24 +1,15 @@
 import {
     act,
-    createElement,
     isValidElement,
     type AnchorHTMLAttributes,
     type ComponentProps,
     type PropsWithChildren,
-    type ReactElement,
-    type ReactNode,
 } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import SettingsLayout from "@/app/(app)/settings/layout";
-import EmailSettingsPage from "@/app/(app)/settings/email/page";
 import LoginPage from "@/app/auth/login/page";
 import { AuthForm } from "@/app/components/AuthForm";
-import CapabilityUnavailablePage from "@/app/components/CapabilityUnavailablePage";
-import EmailPanel from "@/app/components/settings/EmailPanel";
-import SettingsAvailabilityNotice from "@/app/components/settings/SettingsAvailabilityNotice";
-import WorkspaceSettingsChrome from "@/app/components/settings/WorkspaceSettingsChrome";
 import type { InstanceCapabilities } from "@/app/lib/types";
 import {
     installInteractiveDocument,
@@ -158,30 +149,6 @@ function stubCapabilities(capabilities: InstanceCapabilities | null) {
     }));
 }
 
-function hasChildren(value: unknown): value is { children?: ReactNode } {
-    return typeof value === "object" && value !== null && "children" in value;
-}
-
-function findByType(node: ReactNode, type: unknown): ReactElement | null {
-    if (Array.isArray(node)) {
-        for (const child of node) {
-            const found = findByType(child, type);
-            if (found !== null) return found;
-        }
-        return null;
-    }
-    if (!isValidElement(node)) return null;
-    if (node.type === type) return node;
-    return hasChildren(node.props) ? findByType(node.props.children, type) : null;
-}
-
-function containsText(node: ReactNode, text: string): boolean {
-    if (node === text) return true;
-    if (Array.isArray(node)) return node.some((child) => containsText(child, text));
-    if (!isValidElement(node) || !hasChildren(node.props)) return false;
-    return containsText(node.props.children, text);
-}
-
 function requiredElement(
     elements: readonly InteractiveElement[],
     predicate: (element: InteractiveElement) => boolean,
@@ -190,11 +157,6 @@ function requiredElement(
     const element = elements.find(predicate);
     if (!element) throw new Error(`${label} did not render`);
     return element;
-}
-
-function hasAvailabilityState(value: unknown): value is { state: string } {
-    return typeof value === "object" && value !== null && "state" in value
-        && typeof value.state === "string";
 }
 
 function hasSsoAvailability(value: unknown): value is {
@@ -206,17 +168,6 @@ function hasSsoAvailability(value: unknown): value is {
         && (value.ssoAvailability === "enabled"
             || value.ssoAvailability === "disabled"
             || value.ssoAvailability === "unavailable");
-}
-
-function hasMailManagementAvailability(value: unknown): value is {
-    mailManagementAvailability: "enabled" | "disabled" | "unavailable";
-} {
-    return typeof value === "object"
-        && value !== null
-        && "mailManagementAvailability" in value
-        && (value.mailManagementAvailability === "enabled"
-            || value.mailManagementAvailability === "disabled"
-            || value.mailManagementAvailability === "unavailable");
 }
 
 afterEach(() => {
@@ -321,74 +272,5 @@ describe("login capability honesty", () => {
         expect(html).toContain("login-password");
         expect(html).not.toContain("CapabilityUnavailable.title");
         expect(html).not.toContain("AuthLogin.ssoButton");
-    });
-});
-
-describe("settings navigation capability honesty", () => {
-    it("keeps unrelated settings content and marks the email tab unavailable after lookup failure", async () => {
-        stubCapabilities(null);
-
-        const rendered = await SettingsLayout({ children: createElement("p", null, "settings content") });
-        const tabs = findByType(rendered, WorkspaceSettingsChrome);
-        if (tabs === null || !hasMailManagementAvailability(tabs.props)) {
-            throw new Error("Settings did not render the expected capability contract");
-        }
-        const html = renderToStaticMarkup(tabs);
-
-        expect(tabs.props.mailManagementAvailability).toBe("unavailable");
-        expect(containsText(rendered, "settings content")).toBe(true);
-        expect(html).toContain("/settings/email");
-        expect(html).toContain("CapabilityUnavailable.title");
-    });
-
-    it("shows the ordinary email tab without an unavailable marker when managed mail resolves false", async () => {
-        stubCapabilities(DISABLED_CAPABILITIES);
-
-        const rendered = await SettingsLayout({ children: createElement("p", null, "settings content") });
-        const tabs = findByType(rendered, WorkspaceSettingsChrome);
-        if (tabs === null || !hasMailManagementAvailability(tabs.props)) {
-            throw new Error("Settings did not render the expected capability contract");
-        }
-        const html = renderToStaticMarkup(tabs);
-
-        expect(tabs.props.mailManagementAvailability).toBe("disabled");
-        expect(html).toContain("/settings/email");
-        expect(html).not.toContain("CapabilityUnavailable.title");
-    });
-});
-
-describe("email settings route capability honesty", () => {
-    it("renders the retryable capability page when managed-mail availability cannot be checked", async () => {
-        stubCapabilities(null);
-
-        const rendered = await EmailSettingsPage();
-
-        expect(isValidElement(rendered) ? rendered.type : null).toBe(CapabilityUnavailablePage);
-        expect(redirectMock).not.toHaveBeenCalled();
-    });
-
-    it("renders self-managed email settings when managed mail resolves false", async () => {
-        stubCapabilities(DISABLED_CAPABILITIES);
-
-        const rendered = await EmailSettingsPage();
-
-        expect(isValidElement(rendered) ? rendered.type : null).toBe(EmailPanel);
-        expect(redirectMock).not.toHaveBeenCalled();
-    });
-
-    it("explains the managed state in place instead of forwarding to Members", async () => {
-        stubCapabilities({ ...DISABLED_CAPABILITIES, mailManaged: true });
-
-        const rendered = await EmailSettingsPage();
-
-        expect(isValidElement(rendered) ? rendered.type : null).toBe(SettingsAvailabilityNotice);
-        expect(
-            isValidElement(rendered) && hasAvailabilityState(rendered.props) ? rendered.props.state : null,
-        ).toBe("managed");
-        expect(
-            redirectMock,
-            "#1340: a capability-managed destination never teleports the reader somewhere unrelated",
-        ).not.toHaveBeenCalled();
-        expect(renderToStaticMarkup(rendered)).toContain("SettingsAvailability.managedTitle");
     });
 });

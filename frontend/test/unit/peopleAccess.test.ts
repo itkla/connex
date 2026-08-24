@@ -114,8 +114,20 @@ describe("people & access owns the sections the manifest promises", () => {
     it("builds every deep link from one place, so an anchor cannot be spelled two ways", () => {
         expect(peopleSectionHref("roles")).toBe("/settings/workspace/people#roles");
 
+        /**
+         * Two files may spell the fragment, and both are origins rather than producers.
+         * `peopleSections.ts` builds the href every consumer asks it for. The manifest is where the
+         * section slug is decided in the first place — that module reads it from there — and since
+         * #1340 PR 8 it also records the redirect target for each retired address, which is that
+         * same deep link. Excluding it keeps the rule aimed at what it was written for: a surface
+         * that hand-writes an anchor instead of asking for one.
+         */
+        const origins = [
+            path.join(process.cwd(), "app", "lib", "peopleSections.ts"),
+            path.join(process.cwd(), "app", "lib", "settingsManifest.ts"),
+        ];
         const strays = appFiles(path.join(process.cwd(), "app"))
-            .filter((file) => file !== path.join(process.cwd(), "app", "lib", "peopleSections.ts"))
+            .filter((file) => !origins.includes(file))
             .filter((file) => source(file).includes(`${PEOPLE_ROUTE}#`));
 
         expect(
@@ -146,6 +158,60 @@ describe("people & access arrives at the section a deep link asked for", () => {
         const hook = source(ARRIVAL_HOOK);
 
         expect(hook).toContain("sections.includes(target) ? target : null");
+    });
+
+    /**
+     * The arrival has to survive a section that mounts late, which #1340 PR 8 made load-bearing:
+     * every retired address now forwards carrying a fragment, so a destination that renders a
+     * skeleton before its regions exist would swallow the section the reader asked for. The
+     * organization's General destination is the one that gates its regions behind its own read.
+     *
+     * The effect returns without claiming the hash when the element is absent, so the fix is to
+     * give it something to re-run on: the ref callback counts the appearance of the section being
+     * waited for, and the effect depends on that count. The per-hash guard still holds the whole
+     * thing to one scroll.
+     */
+    it("arrives at a section that mounts after its page has finished loading", () => {
+        const hook = source(ARRIVAL_HOOK);
+
+        expect(hook, "the effect bails without claiming the hash when the element is not there yet")
+            .toContain("if (!element) return;");
+        expect(hook, "the ref callback knows which section is being waited for")
+            .toContain("if (slug === wanted.current) setAppearances((count) => count + 1);");
+        expect(hook, "and the effect re-runs when that section finally registers")
+            .toContain("}, [hash, section, reduceMotion, appearances]);");
+        expect(
+            hook,
+            "a late arrival must not re-scroll a reader who has already been moved once for this fragment",
+        ).toContain("scrolledForHash.current === hash");
+    });
+
+    /**
+     * The regression that shipped and was caught in browser verification, pinned here.
+     *
+     * Sections spend the registrar as `ref={register(section)}`. A `register` that built a fresh
+     * closure per call handed React a new ref identity on every render, so React detached it with
+     * `null` and reattached it every time — and once the registrar also called `setAppearances`,
+     * that became a render loop that React ended with "Maximum update depth exceeded" (minified
+     * error #185). Every section on every consolidated page stopped rendering, which is how a
+     * deep-linked reader would have arrived at a blank destination.
+     *
+     * The fix is a per-slug cache, so the ref attaches once and the counter moves only on a real
+     * mount or unmount.
+     */
+    it("hands each section one stable registrar, so a ref does not re-attach every render", () => {
+        const hook = source(ARRIVAL_HOOK);
+
+        expect(hook, "the registrar cache is what keeps the ref identity stable")
+            .toContain("const registrars = useRef(new Map<string, (element: HTMLElement | null) => void>());");
+        expect(hook, "a slug already registered gets the same function back")
+            .toContain("const existing = registrars.current.get(slug);");
+        expect(hook).toContain("if (existing !== undefined) return existing;");
+        expect(hook).toContain("registrars.current.set(slug, registrar);");
+        expect(
+            hook.includes("(slug: string) => (element: HTMLElement | null) =>"),
+            "returning a fresh closure per call is the shape that caused the update loop",
+        ).toBe(false);
     });
 
     it("holds the scroll while the sections above the target are still loading", () => {
@@ -291,14 +357,18 @@ describe("people & access gates its sections without hiding them", () => {
         ).toEqual(["MEMBER_MANAGE", "ROLE_MANAGE", "WORKSPACE_SETTINGS"]);
     });
 
-    it("leaves the manifest's section entries describing the routes they still serve", () => {
+    it("keeps a retired route describing the gate its section still answers for", () => {
         const roles = SETTINGS_ENTRIES.find((candidate) => candidate.id === "workspace.roles");
 
         expect(roles?.currentRoute).toBe("/settings/roles");
-        expect(roles?.kind).toBe("destination");
+        expect(
+            roles?.kind,
+            "#1340 PR 8 retired the address; the job is a section of People & access now",
+        ).toBe("redirect");
+        expect(roles?.redirectsTo).toBe("/settings/workspace/people#roles");
         expect(
             roles?.access.permissions,
-            "the legacy route still refuses the whole page; only the consolidated one refuses a section of it",
+            "the entry keeps naming ROLE_MANAGE after the redirect, because the permission did not move with the address: it is what the roles section refuses in place, and the navigation reads it to decide whether to name that section at all",
         ).toEqual(["ROLE_MANAGE"]);
     });
 
@@ -396,17 +466,32 @@ describe("the shipped panels still render in the home they had", () => {
         ).toBeGreaterThan(panel.indexOf(') : loadState === "error" ? ('));
     });
 
-    it("leaves the legacy pages pointing at the panels they always rendered", () => {
-        const members = source(path.join(process.cwd(), "app", "(app)", "settings", "members", "page.tsx"));
-        const roles = source(path.join(process.cwd(), "app", "(app)", "settings", "roles", "page.tsx"));
-        const users = source(path.join(process.cwd(), "app", "(app)", "users", "page.tsx"));
+    it("forwards the three legacy addresses to the sections that absorbed them", () => {
+        const routes = [
+            ["settings", "members"],
+            ["settings", "roles"],
+            ["users"],
+        ];
 
-        expect(members).toContain("<MembersPanel currentUserId={user?.id ?? null} />");
-        expect(members, "the legacy route takes the default presentation, so it is unchanged")
-            .not.toContain("presentation=");
-        expect(roles).toContain("<RolesPanel />");
-        expect(users).toContain("<UsersBrowser users={users} />");
-        expect(users).not.toContain("presentation=");
+        for (const segments of routes) {
+            const page = source(path.join(process.cwd(), "app", "(app)", ...segments, "page.tsx"));
+            expect(
+                page,
+                `/${segments.join("/")} still renders instead of forwarding`,
+            ).toContain("permanentRedirect(settingsRedirectTarget(");
+            expect(
+                page,
+                "a stub renders nothing; a panel left behind here would be a second copy of a section",
+            ).not.toContain("Panel");
+        }
+    });
+
+    it("renders each absorbed panel from the consolidated destination alone", () => {
+        const page = source(PEOPLE_ACCESS);
+
+        expect(page).toContain("<MembersPanel");
+        expect(page).toContain("<RolesPanel");
+        expect(page).toContain("<UsersBrowser");
     });
 });
 

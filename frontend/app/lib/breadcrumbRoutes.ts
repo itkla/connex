@@ -2,6 +2,7 @@ import type { NavAccess } from "@/app/lib/navAccess";
 import type { RecordCollection } from "@/app/lib/recordReturnPath";
 import { settingsRouteServed } from "@/app/lib/settingsEntryPoints";
 import {
+    SETTINGS_ENTRIES,
     SETTINGS_GROUPS,
     SETTINGS_HOME_ROUTE,
     type SettingsGroup,
@@ -206,15 +207,35 @@ export const BREADCRUMB_STATIC_ROUTE_PATHS = [...new Set([
     "/workflows/recipes",
 ])].sort();
 
-const REDIRECT_ROUTES = new Set([
-    "/account",
-    "/organization",
-    "/settings/membership",
-    "/settings/notifications",
-    "/settings/rules",
-    "/settings/security",
-    "/settings/sso",
-]);
+/**
+ * The one resolver redirect that can also render.
+ *
+ * `/account/connections/reviews` forwards in every ordinary case, but when the deployment has no
+ * capture capability at all it stops and explains that in place instead. A page that can render
+ * needs a trail, so this address stays classified as a shell rather than following the manifest
+ * into {@link REDIRECT_ROUTES}.
+ */
+const RENDERING_RESOLVER_REDIRECTS = new Set(["/account/connections/reviews"]);
+
+/**
+ * The addresses that forward instead of rendering, read from the settings manifest.
+ *
+ * Hand-listing these was workable while there were seven; #1340 PR 8 retired twenty more, and a
+ * list maintained beside the manifest would drift the first time a destination moved — leaving a
+ * redirecting address quietly claiming a breadcrumb trail nobody would ever see. The manifest
+ * already records which addresses forward, so this reads that rather than restating it.
+ *
+ * Parameterized routes are excluded because they are patterns rather than addresses;
+ * `/settings/workflows/[legacyRuleId]` is matched by {@link LEGACY_WORKFLOW_REDIRECT} instead.
+ */
+const REDIRECT_ROUTES = new Set<string>(
+    SETTINGS_ENTRIES.filter(
+        (entry) =>
+            entry.redirectsTo !== null
+            && !entry.currentRoute.includes("[")
+            && !RENDERING_RESOLVER_REDIRECTS.has(entry.currentRoute),
+    ).map((entry) => entry.currentRoute),
+);
 
 const OWNED_ROUTE_PATTERNS = [
     /^\/activity\/notes\/new$/,
