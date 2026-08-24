@@ -36,6 +36,21 @@ public final class AiChatScopeBounds {
     /** Cohort size at or above which a broad request is offered as an editable scope preview. */
     public static final int SCOPE_PREVIEW_RECORD_THRESHOLD = 10;
 
+    /** Maximum open commitments one bounded work brief returns. */
+    public static final int MAX_BRIEF_COMMITMENTS = 12;
+
+    /** Maximum forward-dated meeting-shaped activities one bounded work brief returns. */
+    public static final int MAX_BRIEF_MEETINGS = 8;
+
+    /** Maximum cooling relationships one bounded work brief returns per record kind. */
+    public static final int MAX_BRIEF_WARMTH_MOVES = 8;
+
+    /** Trailing window, in days, a daily work brief covers when none is declared. */
+    public static final int BRIEF_DAILY_PERIOD_DAYS = 1;
+
+    /** Trailing window, in days, a weekly work review covers. */
+    public static final int BRIEF_WEEKLY_PERIOD_DAYS = 7;
+
     private AiChatScopeBounds() {
     }
 }

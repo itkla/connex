@@ -797,7 +797,7 @@
       },
       "workspaceWorkBrief": {
         "label": "What should I do today?",
-        "prompt": "What relationship work is worth doing today?"
+        "prompt": "What should I focus on today?"
       },
       "workspacePipeline": {
         "label": "Which deals need attention?",
@@ -907,6 +907,88 @@
         "warmth_outside_declared_scope": "This question is about a warmth band your filters leave out. Add that band, or ask about one you kept.",
         "warmth_unsupported_for_deals": "Warmth describes relationships with people and companies, so it doesn't narrow a set of deals."
       }
+    },
+    "commandCenter": {
+      "briefsTitle": "Briefs",
+      "briefsBody": "A short summary of your commitments, meetings, cooling relationships, and deals needing attention, prepared on a schedule you set.",
+      "briefsUnavailable": "Briefs are not available in this workspace yet.",
+      "loadFailed": "Your briefs and watches couldn't be loaded just now.",
+      "loadRetry": "Try again",
+      "openLatestBrief": "Open the last one",
+      "dailyLabel": "Every day at",
+      "dailyHourLabel": "Daily brief hour",
+      "weeklyLabel": "Every week on",
+      "weeklyDayLabel": "Weekly review day",
+      "weeklyAt": "at",
+      "weeklyHourLabel": "Weekly review hour",
+      "hour": "{hour}:00",
+      "weekday": {
+        "1": "Monday",
+        "2": "Tuesday",
+        "3": "Wednesday",
+        "4": "Thursday",
+        "5": "Friday",
+        "6": "Saturday",
+        "7": "Sunday"
+      },
+      "scheduleZoneLabel": "Times are in",
+      "scheduleZoneEmpty": "No matching time zone",
+      "scheduleFailed": "Your brief schedule wasn't saved. Nothing changed — try again.",
+      "watchesTitle": "Watches",
+      "watchesEmpty": "You aren't watching anything yet. Open a contact, company, or deal and add a watch to be told when something specific changes.",
+      "watchesUnavailable": "Watches are switched off in this workspace.",
+      "watchesHint": "A watch tells you exactly what changed and which rule noticed it.",
+      "watchActions": "Watch actions",
+      "watchFailed": "That watch wasn't changed. Nothing was saved — try again.",
+      "watchesUsage": "Using {used} of {limit} watches.",
+      "cooldownEvery": "At most once every {days, plural, one {day} other {# days}}",
+      "expiresNever": "No end date",
+      "expiresOnDate": "Until {date}",
+      "pause": "Pause",
+      "resume": "Resume",
+      "delete": "Delete watch",
+      "deleteTitle": "Delete this watch?",
+      "deleteBody": "You'll stop being told when this condition is met. This can't be undone.",
+      "deleteBodyNamed": "You'll stop being told when: {trigger}. This can't be undone.",
+      "statusActive": "Active",
+      "statusPaused": "Paused",
+      "neverFired": "Not triggered yet",
+      "lastFired": "Last triggered {date}",
+      "subjectUnavailable": "This record is no longer available to you",
+      "band": {
+        "warm": "warm",
+        "cool": "cool",
+        "cold": "cold"
+      },
+      "level": {
+        "medium": "medium",
+        "high": "high"
+      },
+      "watchTrigger": {
+        "cooling": "Warmth reaches {band}",
+        "noInteraction": "No interaction for {days} days",
+        "commitmentOverdue": "A commitment on this record becomes overdue, whoever it's assigned to",
+        "dealRisk": "Deal risk reaches {level}",
+        "unknown": "This trigger can't be read in this version"
+      },
+      "watchTypeName": {
+        "relationship_cooling": "Warmth reaches a colder band",
+        "no_interaction": "No interaction for a while",
+        "commitment_overdue": "A commitment becomes overdue, whoever owns it",
+        "deal_risk_threshold": "Deal risk crosses a level"
+      },
+      "createMenuItem": "Watch this record",
+      "createTitle": "Add a watch",
+      "createDescription": "Be told when something specific changes about {record}.",
+      "createTypeLabel": "Tell me when",
+      "createBandLabel": "Warmth band",
+      "createDaysLabel": "Quiet for",
+      "createDaysOption": "{days} days",
+      "createLevelLabel": "Risk level",
+      "createPreviewLabel": "This watch will trigger when",
+      "createPreviewNote": "Connex checks this itself. You'll get one notification naming the rule and the evidence behind it. It can also notify you sooner than the interval above if the condition moves to a different state — warm to cold, for example.",
+      "createCancel": "Cancel",
+      "createApply": "Add watch"
     },
     "signals": {
       "relationship_decay": {

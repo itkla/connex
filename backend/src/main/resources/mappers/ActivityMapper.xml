@@ -355,6 +355,25 @@
       AND a.timestamp &lt;= DATE_ADD(NOW(), INTERVAL #{days} DAY)
   </select>
 
+  <!-- Scoped to the member's own logged activities. Connex has no attendee model, so "the member's
+       meetings" can only honestly mean the ones they logged; widening this to the workspace would
+       put other people's schedules into a personal brief. -->
+  <select id="getAiAssistantUpcomingMeetings"
+          resultType="ooo.klae.connex.backend.ai.assistant.AiAssistantUpcomingMeeting">
+    SELECT a.id, a.type, a.subject, a.timestamp,
+           a.person_id AS personId, a.deal_id AS dealId
+    FROM activity a
+    WHERE a.workspace_id = #{workspaceId}
+      AND a.created_by_id = #{createdById}
+      AND a.timestamp &gt; #{startUtc}
+      AND a.timestamp &lt;= #{endUtc}
+      AND LOWER(TRIM(a.type)) IN
+        <foreach item="activityType" collection="types" open="(" separator="," close=")">#{activityType}</foreach>
+      AND <include refid="assistantLinkedPeopleProcessable"/>
+    ORDER BY a.timestamp, a.id
+    LIMIT #{limit}
+  </select>
+
   <select id="getActivitiesByPersonId" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
     WHERE workspace_id = #{workspaceId} AND person_id = #{personId} ORDER BY timestamp DESC, id DESC

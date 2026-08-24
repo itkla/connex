@@ -21,10 +21,17 @@ class AiSkillDirectoryServiceTest {
     private static final int WORKSPACE_ID = 7;
     private static final int USER_ID = 11;
 
-    /** The executable keys, in the catalog's own declaration order. */
+    /**
+     * The executable keys, in the catalog's own declaration order.
+     *
+     * <p>The personal work brief sits between the activity digest and the relationship brief because
+     * the catalog declares it there deliberately: its triggers are strictly narrower than the
+     * relationship brief's, so it has to be matched — and therefore listed — before it.
+     */
     private static final List<String> EXECUTABLE_KEYS = List.of(
             "relationship_cooling_explanation_v1",
             "activity_digest_v1",
+            "daily_work_brief_v1",
             "relationship_brief_v1",
             "pipeline_attention_review_v1");
 

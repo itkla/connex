@@ -5610,3 +5610,100 @@ export type MailDiagnosticTest = {
     transport: MailDiagnosticTransport;
     dns: MailDnsAdvisory;
 };
+
+/** Which period a scheduled Ask Connex brief covers. */
+export type AiBriefKind = "daily" | "weekly";
+
+/**
+ * One member's Ask Connex brief schedule.
+ *
+ * Hours are local to `timeZone` and weekdays are ISO (1 = Monday). Every nullable field is an
+ * explicit null rather than an absent key, because "never delivered" and "delivery time unknown"
+ * are different facts the surface states differently.
+ */
+export type AiBriefSchedule = {
+    timeZone: string;
+    dailyEnabled: boolean;
+    dailyHour: number;
+    weeklyEnabled: boolean;
+    weeklyWeekday: number;
+    weeklyHour: number;
+    /** The period currently generating, or null when nothing is in flight. */
+    pendingKind: AiBriefKind | null;
+    lastDeliveredAt: string | null;
+    lastFailureAt: string | null;
+    lastFailureReason: string | null;
+};
+
+/** The complete schedule a member applies; a write always replaces every field. */
+export type AiBriefSchedulePayload = {
+    timeZone: string;
+    dailyEnabled: boolean;
+    dailyHour: number;
+    weeklyEnabled: boolean;
+    weeklyWeekday: number;
+    weeklyHour: number;
+};
+
+/** The watch types this build evaluates. */
+export type AiWatchType =
+    | "relationship_cooling"
+    | "no_interaction"
+    | "commitment_overdue"
+    | "deal_risk_threshold";
+
+/** Record kinds a watch can be created against. */
+export type AiWatchSubjectKind = "person" | "company" | "deal";
+
+/**
+ * One typed watch as its owner inspects it.
+ *
+ * Every field of the trigger travels so the surface can restate the exact condition rather than a
+ * summary of it. `subjectLabel` is null when the watched record is no longer readable, which is what
+ * the surface shows instead of a stale name.
+ */
+export type AiWatch = {
+    id: number;
+    watchType: AiWatchType;
+    subjectKind: AiWatchSubjectKind;
+    subjectId: number;
+    subjectLabel: string | null;
+    thresholdBand: string | null;
+    thresholdDays: number | null;
+    thresholdLevel: string | null;
+    status: "active" | "paused";
+    cooldownDays: number;
+    expiresOn: string | null;
+    lastEvaluatedAt: string | null;
+    lastFiredAt: string | null;
+    lastFiredState: string | null;
+};
+
+/** The complete typed trigger a member applies after reviewing it. */
+export type AiWatchPayload = {
+    watchType: AiWatchType;
+    subjectKind: AiWatchSubjectKind;
+    subjectId: number;
+    thresholdBand?: string | null;
+    thresholdDays?: number | null;
+    thresholdLevel?: string | null;
+    cooldownDays?: number | null;
+    expiresOn?: string | null;
+};
+
+/** Everything the Ask Connex command centre renders, in one authorized read. */
+export type AiCommandCenter = {
+    schedule: AiBriefSchedule;
+    latestBriefSessionId: number | null;
+    latestBriefKind: AiBriefKind | null;
+    latestBriefDeliveredAt: string | null;
+    briefSkillAvailable: boolean;
+    /**
+     * Whether watches may be used, provider aside. Deciding a watch fired invokes no model, so
+     * watches keep working in a workspace whose provider is unconfigured and briefs do not — the two
+     * flags are deliberately not the same fact.
+     */
+    watchesAvailable: boolean;
+    watches: AiWatch[];
+    watchLimit: number;
+};

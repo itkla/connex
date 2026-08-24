@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.mappers;
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.ai.assistant.AiAssistantScopeActivity;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantUpcomingMeeting;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.HistoryImportProvenance;
 import ooo.klae.connex.backend.beans.HistoryImportWrite;
@@ -58,6 +59,22 @@ public interface ActivityMapper {
         @Param("endUtc") LocalDateTime endUtc
     );
     long upcomingCount(@Param("workspaceId") int workspaceId, @Param("days") int days);
+
+    /**
+     * Reads the member's own forward-dated meeting-shaped activities inside one window. Connex has
+     * no meeting entity, so a "meeting" is an activity of a meeting-shaped type the member logged
+     * with a future timestamp; the caller must present it as a scheduled activity rather than as a
+     * meeting with a preparation state.
+     */
+    List<AiAssistantUpcomingMeeting> getAiAssistantUpcomingMeetings(
+        @Param("workspaceId") int workspaceId,
+        @Param("createdById") int createdById,
+        @Param("startUtc") LocalDateTime startUtc,
+        @Param("endUtc") LocalDateTime endUtc,
+        @Param("types") List<String> types,
+        @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
+        @Param("limit") int limit);
+
     List<Activity> getActivitiesByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
     List<Activity> getAiAssistantActivitiesByPersonId(
         @Param("workspaceId") int workspaceId,

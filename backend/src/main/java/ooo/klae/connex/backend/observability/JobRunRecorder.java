@@ -39,6 +39,8 @@ public class JobRunRecorder {
     public static final String APPROVAL_RECONCILIATION = "approval_reconciliation";
     public static final String DOCUMENT_DELIVERY_EXPIRY = "document_delivery_expiry";
     public static final String LEAD_RESPONSE_SLA = "lead_response_sla";
+    public static final String AI_BRIEF_DELIVERY = "ai_brief_delivery";
+    public static final String AI_WATCH_EVALUATION = "ai_watch_evaluation";
 
     private static final Logger log = LoggerFactory.getLogger(JobRunRecorder.class);
     /**

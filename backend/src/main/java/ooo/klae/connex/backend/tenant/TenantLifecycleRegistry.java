@@ -313,6 +313,8 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("attachment", 460));
         raw.add(direct("ai_chat_session", 465));
         raw.add(direct("ai_workspace_governance", 466));
+        raw.add(direct("ai_brief_schedule", 467));
+        raw.add(direct("ai_watch", 468));
         raw.add(direct("ai_output_cache", 470));
         raw.add(direct("approval_policy_step_approver", 476));
         raw.add(direct("approval_policy_step", 478));

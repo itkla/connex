@@ -183,8 +183,10 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import AskConnexCommandCenter from '@/app/components/ask-connex/AskConnexCommandCenter';
 
 type DrawerLoadState = 'loading' | 'ready' | 'error' | 'forbidden';
 
@@ -1811,7 +1813,12 @@ function ConversationSurface({
                                         tone="brand"
                                         className="border-0 bg-transparent px-4 py-12"
                                         action={(
-                                            <div className="flex w-full max-w-sm flex-col gap-1.5">
+                                            <div
+                                                className={cn(
+                                                    'flex w-full flex-col gap-1.5',
+                                                    workspace ? 'max-w-xl' : 'max-w-sm',
+                                                )}
+                                            >
                                                 {jobs.map((job) => (
                                                     <Button
                                                         key={job.id}
@@ -1826,6 +1833,12 @@ function ConversationSurface({
                                                 <p className="pt-3 text-xs leading-relaxed text-muted-foreground">
                                                     {labels.disclosureCreation}
                                                 </p>
+                                                {workspace ? (
+                                                    <>
+                                                        <Separator className="my-4" />
+                                                        <AskConnexCommandCenter />
+                                                    </>
+                                                ) : null}
                                             </div>
                                         )}
                                     />

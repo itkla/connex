@@ -6181,3 +6181,28 @@ export function deleteSuppression(id: number) {
 export function reportClientError(payload: Types.ClientErrorReportPayload) {
     return postJson<void>(`/api/client-errors`, payload);
 }
+
+/** Reads the member's own brief schedule, last delivered brief, and watches in one call. */
+export function getAiCommandCenter(init: RequestInit = {}) {
+    return getJson<Types.AiCommandCenter>(`/api/ai/assistant/command-center`, init);
+}
+
+/** Replaces the member's own brief schedule in full. */
+export function replaceAiBriefSchedule(payload: Types.AiBriefSchedulePayload) {
+    return putJson<Types.AiBriefSchedule>(`/api/ai/assistant/brief-schedule`, payload);
+}
+
+/** Creates one typed watch from a trigger the member has already reviewed. */
+export function createAiWatch(payload: Types.AiWatchPayload) {
+    return postJson<Types.AiWatch>(`/api/ai/assistant/watches`, payload);
+}
+
+/** Pauses or resumes one of the member's own watches. */
+export function setAiWatchActive(id: number, active: boolean) {
+    return patchJson<Types.AiWatch>(`/api/ai/assistant/watches/${id}`, { active });
+}
+
+/** Deletes one of the member's own watches. */
+export function deleteAiWatch(id: number) {
+    return deleteJson<void>(`/api/ai/assistant/watches/${id}`);
+}
