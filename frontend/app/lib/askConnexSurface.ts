@@ -304,9 +304,9 @@ const TERMINAL_KINDS: Readonly<Record<string, AskConnexTerminalKind>> = {
     tool_outside_skill_authority: { category: 'generic', message: 'toolAuthority' },
     attachment_auto_write_blocked: { category: 'generic', message: 'generic' },
     provider_error: { category: 'transient', message: 'provider' },
-    request_failed: { category: 'transient', message: 'provider' },
     internal_error: { category: 'transient', message: 'internal' },
     reconciliation_failed: { category: 'transient', message: 'internal' },
+    request_failed: { category: 'transient', message: 'internal' },
     malformed_output: { category: 'transient', message: 'unreadable' },
     schema_repair_failed: { category: 'transient', message: 'unreadable' },
     no_progress: { category: 'transient', message: 'stalled' },
@@ -324,6 +324,19 @@ const GENERIC_KIND: AskConnexTerminalKind = { category: 'generic', message: 'gen
 export function askConnexTerminalKind(reason: string | null): AskConnexTerminalKind {
     if (reason === null) return GENERIC_KIND;
     return TERMINAL_KINDS[reason] ?? GENERIC_KIND;
+}
+
+/**
+ * How a timed-out answer is stated.
+ *
+ * A turn that settles `timed_out` ran out of time by saying so, which is why an unrecognized or
+ * absent reason states the timeout here rather than falling back to the generic failure. On a
+ * `failed` turn the phase says nothing about the cause, so the generic fallback is the honest one;
+ * on this one it would replace something true with something vaguer.
+ */
+export function askConnexTimedOutMessage(reason: string | null): AskConnexFailureMessage {
+    const kind = reason === null ? undefined : TERMINAL_KINDS[reason];
+    return kind === undefined ? 'timeout' : kind.message;
 }
 
 /**

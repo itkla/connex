@@ -2429,6 +2429,33 @@ class AiChatAgentLoopServiceTest {
         verify(persistenceService, never()).proposeTool(eq(TURN), anyInt(), any(), any());
     }
 
+    /**
+     * The closing step does not launder a skill-boundary breach into a budget message.
+     *
+     * <p>A routed skill's synthesis budget is small, so its last permitted step is a closing step,
+     * and a closing step refuses every tool. Refusing it before classifying authority would record
+     * {@code skill_budget_exceeded} for a turn that actually reached outside its declaration, so
+     * the authority check runs first and the durable terminal reason keeps naming the boundary.
+     */
+    @Test
+    void aClosingStepNamesASkillBoundaryBreachRatherThanTheBudget() {
+        routedDigest();
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(toolStep("list_scope_activities", "{\"limit\":5}")))
+                .thenReturn(parsed(toolStep("list_scope_activities", "{\"limit\":6}")))
+                .thenReturn(parsed(toolStep(
+                        "search_records", "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}")));
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals("tool_outside_skill_authority", result.reason());
+        verify(persistenceService, never()).proposeTool(
+                eq(TURN), anyInt(), eq("search_records"), any());
+    }
+
     @Test
     void aReadAuthoritySkillCannotReachAWriteToolAfterItsPlanHasRun() {
         routedDigest();

@@ -95,7 +95,6 @@ const labels: AskConnexTurnLabels = {
     turnCancelled: "Response stopped",
     turnResolved: "Answer ready",
     turnStreaming: "Writing…",
-    turnTimedOut: "This answer timed out before it could finish.",
     turnWorking: "Checking trusted sources…",
 };
 

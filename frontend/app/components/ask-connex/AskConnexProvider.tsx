@@ -129,6 +129,7 @@ import {
     ASK_CONNEX_DEFAULT_WIDTH,
     askConnexActiveState,
     askConnexTerminalKind,
+    askConnexTimedOutMessage,
     askConnexWidthStorageKey,
     parseStoredAskConnexWidth,
     type AskConnexActiveState,
@@ -1228,7 +1229,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             if (durable.status === 'failed') {
                 deferredErrorToast(terminalToast(durable.terminalReason));
             }
-            if (durable.status === 'timed_out') deferredErrorToast(t('toast.turnTimedOut'));
+            if (durable.status === 'timed_out') {
+                deferredErrorToast(
+                    terminalMessages[askConnexTimedOutMessage(durable.terminalReason)]);
+            }
         } catch (error) {
             if (signal.aborted) return;
             if (error instanceof ApiError && error.status === 403) {
@@ -1239,7 +1243,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             dispatchTurn({ type: 'status', status: 'failed', reason: 'reconciliation_failed' });
             deferApiError(error, 'toast.requestFailed');
         }
-    }, [absorbTurnPartial, clearActiveSession, deferApiError, pollDurableTurn, refreshSessions, refreshTranscript, resetStream, t, terminalToast, turnKey]);
+    }, [absorbTurnPartial, clearActiveSession, deferApiError, pollDurableTurn, refreshSessions, refreshTranscript, resetStream, terminalMessages, terminalToast, turnKey]);
 
     const followDurableTurn = useCallback(async (
         initial: AiChatTurn,
@@ -1285,7 +1289,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             if (durable.status === 'failed') {
                 deferredErrorToast(terminalToast(durable.terminalReason));
             }
-            if (durable.status === 'timed_out') deferredErrorToast(t('toast.turnTimedOut'));
+            if (durable.status === 'timed_out') {
+                deferredErrorToast(
+                    terminalMessages[askConnexTimedOutMessage(durable.terminalReason)]);
+            }
         } catch (error) {
             if (signal.aborted) return;
             if (error instanceof ApiError && error.status === 403) {
@@ -1300,7 +1307,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 durableFollowerRef.current = null;
             }
         }
-    }, [absorbTurnPartial, clearActiveSession, deferApiError, pollDurableTurn, refreshSessions, refreshTranscript, resetStream, t, terminalToast, turnKey]);
+    }, [absorbTurnPartial, clearActiveSession, deferApiError, pollDurableTurn, refreshSessions, refreshTranscript, resetStream, terminalMessages, terminalToast, turnKey]);
 
     useEffect(() => {
         sessionEpochRef.current++;
@@ -2458,7 +2465,6 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         turnCancelled: t('turnCancelled'),
         turnResolved: t('turnResolved'),
         turnStreaming: t('turnStreaming'),
-        turnTimedOut: t('turnTimedOut'),
         turnWorking: t('turnWorking'),
         partialAnswer: t('partialAnswer'),
         continueFromPartial: t('continueFromPartial'),

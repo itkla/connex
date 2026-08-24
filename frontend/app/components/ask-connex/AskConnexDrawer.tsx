@@ -109,6 +109,7 @@ import {
     askConnexSessionActivity,
     askConnexSessionReaders,
     askConnexTerminalKind,
+    askConnexTimedOutMessage,
     askConnexWidthLength,
     filterAskConnexSessions,
     groupAskConnexSessions,
@@ -226,7 +227,6 @@ export type AskConnexTurnLabels = {
     turnCancelled: string;
     turnResolved: string;
     turnStreaming: string;
-    turnTimedOut: string;
     turnWorking: string;
 };
 
@@ -1002,7 +1002,7 @@ export function TurnActivity({
         return (
             <SettledTurnActivity
                 icon={<ClockIcon className="size-3.5" />}
-                message={labels.turnTimedOut}
+                message={labels.terminalMessage[askConnexTimedOutMessage(turn.reason)]}
                 progress={turn.progress}
                 labels={labels}
                 recovery={recovery}

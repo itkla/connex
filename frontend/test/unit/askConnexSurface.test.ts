@@ -9,6 +9,7 @@ import {
     askConnexSessionActivity,
     askConnexSessionReaders,
     askConnexTerminalKind,
+    askConnexTimedOutMessage,
     askConnexWidthLength,
     askConnexWidthStorageKey,
     boundedAnswerEntries,
@@ -360,6 +361,22 @@ describe("failed-answer recovery", () => {
         });
     });
 
+    it("states a timeout as a timeout, including one this build cannot classify", () => {
+        for (const reason of [
+            null,
+            "generation_timeout",
+            "turn_deadline_exceeded",
+            "provider_idle_timeout",
+            "a_timeout_from_a_later_release",
+        ]) {
+            expect(askConnexTimedOutMessage(reason)).toBe("timeout");
+        }
+    });
+
+    it("states a timed-out turn that named a non-timeout reason with that reason", () => {
+        expect(askConnexTimedOutMessage("budget_exhausted")).toBe("budget");
+    });
+
     it("offers the same question again on a timeout, which says nothing about breadth", () => {
         for (const reason of [
             null,
@@ -432,7 +449,7 @@ describe("the terminal reason vocabulary", () => {
             ["provider_idle_timeout", { category: "transient", message: "timeout" }],
             ["quota_exhausted", { category: "capacity", message: "capacity" }],
             ["reconciliation_failed", { category: "transient", message: "internal" }],
-            ["request_failed", { category: "transient", message: "provider" }],
+            ["request_failed", { category: "transient", message: "internal" }],
             ["restrictions_changed", { category: "authorization", message: "restrictionsChanged" }],
             ["schema_repair_failed", { category: "transient", message: "unreadable" }],
             ["skill_budget_exceeded", { category: "synthesis", message: "skillBudget" }],

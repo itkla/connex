@@ -435,10 +435,10 @@ public class AiChatAgentLoopService {
                 repair = null;
                 consumedSteps++;
                 if (step.tool() != null) {
+                    requireSkillAuthority(activeSkill, step.tool().name());
                     if (closing) {
                         return AiGenerationTaskResult.failed(closingReason);
                     }
-                    requireSkillAuthority(activeSkill, step.tool().name());
                     if (streamingObserver != null) {
                         streamingObserver.requireNoTerminalText();
                     }

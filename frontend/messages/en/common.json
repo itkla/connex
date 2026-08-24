@@ -457,7 +457,6 @@
     "workspaceDisabled": "Ask Connex is disabled for this workspace. A workspace administrator can enable it again.",
     "accessRevoked": "Your access to something this answer was reading changed while it was being written, so the answer was stopped and not kept.",
     "restrictionsChanged": "What this workspace allows AI to read changed while this answer was being written, so the answer was stopped and not kept.",
-    "turnTimedOut": "This answer timed out before it could finish.",
     "partialAnswer": "Unfinished answer — this is as far as the assistant got before it stopped.",
     "entryPoint": {
       "workspace": "Ask Connex about this workspace",
