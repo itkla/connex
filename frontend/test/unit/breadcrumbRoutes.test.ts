@@ -10,6 +10,8 @@ import {
     type BreadcrumbRouteContext,
 } from "@/app/lib/breadcrumbRoutes";
 import { DEFAULT_CAPABILITIES } from "@/app/lib/api";
+import { settingsRouteServed } from "@/app/lib/settingsEntryPoints";
+import { SETTINGS_GROUPS, type SettingsGroup } from "@/app/lib/settingsManifest";
 import { NO_NAV_ACCESS, resolveNavAccess, type NavAccess } from "@/app/lib/navAccess";
 
 const ALL_ACCESS: NavAccess = {
@@ -29,6 +31,7 @@ function context(overrides: Partial<BreadcrumbRouteContext> = {}): BreadcrumbRou
         navAccess: ALL_ACCESS,
         dynamicLabels: new Map(),
         translate: (key: BreadcrumbMessageKey) => key,
+        translateMessage: (key: string) => key,
         ...overrides,
     };
 }
@@ -305,6 +308,46 @@ describe("breadcrumb route registry", () => {
             "/settings",
             "/settings/organization/identity",
         ]);
+    });
+
+    it.each(
+        (SETTINGS_GROUPS as readonly SettingsGroup[]).filter((group) =>
+            settingsRouteServed(group.route),
+        ),
+    )(
+        "names the canonical destination $route with the manifest's own key for its group",
+        (group) => {
+            const trail = resolveBreadcrumbRoute(group.route, context());
+            const current = trail.crumbs.at(-1);
+
+            expect(trail.kind).toBe("shell");
+            expect(current?.pathname).toBe(group.route);
+            expect(
+                current?.label,
+                "a canonical destination's crumb is the group's manifest label, not a second name kept beside it",
+            ).toBe(group.titleKey);
+        },
+    );
+
+    it("roots a workspace settings trail at the workspace and passes through Settings", () => {
+        const trail = resolveBreadcrumbRoute("/settings/workspace/people", context());
+
+        expect(trail.crumbs.map((crumb) => crumb.pathname)).toEqual([
+            "/dashboard",
+            "/settings",
+            "/settings/workspace/people",
+        ]);
+    });
+
+    it("leaves a canonical route no page serves to the legacy tables", () => {
+        const unserved = (SETTINGS_GROUPS as readonly SettingsGroup[]).filter(
+            (group) => !settingsRouteServed(group.route),
+        );
+
+        expect(unserved.length).toBeGreaterThan(0);
+        for (const group of unserved) {
+            expect(resolveBreadcrumbRoute(group.route, context()).kind).toBe("unknown");
+        }
     });
 
     it.each([

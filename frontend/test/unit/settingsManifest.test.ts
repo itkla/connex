@@ -11,6 +11,8 @@ import {
     type SettingsEntryPoint,
     type SettingsGroup,
 } from "@/app/lib/settingsManifest";
+import { SETTINGS_PALETTE_REGISTRATIONS } from "@/app/lib/actions/settingsNavigationActions";
+import { settingsDestinationHref } from "@/app/lib/settingsEntryPoints";
 import { SHIPPED_APP_ROUTES } from "@/app/lib/routeManifest";
 
 /**
@@ -21,22 +23,26 @@ import { SHIPPED_APP_ROUTES } from "@/app/lib/routeManifest";
  * is a real backend constant, no two destinations claim the same canonical owner, and the navigation
  * surfaces that link into settings agree with the entry points it declares.
  *
- * Four blind spots, named rather than implied:
+ * Two blind spots remain, named rather than implied:
  *
  * - `contextual` entry points are not verified, because a contextual shortcut may be a computed href
- *   anywhere in the app. The registry surfaces are verified in both directions.
- * - The sidebar and the user menu live in one file, so this suite cannot tell them apart; an entry
- *   linked from either satisfies a claim to either.
+ *   anywhere in the app. Every registry surface is verified in both directions.
  * - Whether a permission belongs in `permissions` or in `manage` is not derivable from the manifest.
  *   Each was audited against the shipped panel and the backend service that serves it; only a
  *   self-contradiction (the same permission filed as both on one entry) is caught here.
  * - The group title-drift gate reads English only. A key whose Japanese has drifted from its English
  *   is not detectable, because the manifest records one name per group, not a translation pair.
- * - The settings navigation (#1340 WS4.1) reads every route it links from this manifest at render
- *   time, so it carries no literal href for the entry-point scan to find and is verified instead by
- *   the data-level equality suite in `settingsNavigation.test.ts`. The residual risk is a literal
- *   href added to the shell later: it would bypass both gates until the shell is registered as a
- *   navigation source, which is what PR 7 does when `entryPoints` becomes generated truth.
+ *
+ * Two that #1340 PR 7 closed:
+ *
+ * - The sidebar and the user menu live in one file, and the suite used to accept an entry linked
+ *   from either as satisfying a claim to either. It now reads each function's own body, so a claim
+ *   to `sidebar` is not satisfied by a user-menu registration or the reverse.
+ * - The settings shell reads every route it links from this manifest at render time, so it carried
+ *   no literal href for the scan to find and was verified only by the data-level suite in
+ *   `settingsNavigation.test.ts` — leaving a literal href added there to bypass both gates. The
+ *   shell files are now scanned as navigation sources that may declare no entry point at all, so a
+ *   hand-written settings link in one of them fails rather than passing unseen.
  */
 const APP_DIRECTORY = path.join(process.cwd(), "app", "(app)");
 
@@ -59,8 +65,13 @@ const REGISTER_ENTRY =
     "register it in SETTINGS_ENTRIES in app/lib/settingsManifest.ts, with its scope group, its gates, and its entry points";
 
 /**
- * Which entry points each navigation source can register. The sidebar and the user menu share a
- * file, so a route linked there satisfies a claim to either.
+ * Which entry points each navigation source that still spells routes can register.
+ *
+ * The three tab strips are the last surfaces that carry settings routes as literals; #1340 PR 8
+ * retires them. Every other surface names a manifest entry instead and is verified structurally
+ * below. The shell files declare no entry point at all: they render from the manifest at request
+ * time, so a literal settings href appearing in one of them is a hand-written link that has escaped
+ * the manifest, and the reverse-direction gate fails on it.
  */
 const NAVIGATION_SOURCES: ReadonlyArray<{
     file: string;
@@ -69,12 +80,74 @@ const NAVIGATION_SOURCES: ReadonlyArray<{
     { file: "app/components/account/AccountTabs.tsx", points: ["account-tabs"] },
     { file: "app/components/settings/SettingsTabs.tsx", points: ["settings-tabs"] },
     { file: "app/components/organization/OrgTabs.tsx", points: ["organization-tabs"] },
-    { file: "app/components/Sidebar.tsx", points: ["sidebar", "avatar-menu"] },
-    { file: "app/lib/actions/seedActions.ts", points: ["command-palette"] },
-    { file: "app/components/actions/NavActionsBridge.tsx", points: ["command-palette"] },
+    { file: "app/components/settings/SettingsHome.tsx", points: [] },
+    { file: "app/components/settings/SettingsDirectory.tsx", points: [] },
+    { file: "app/components/settings/SettingsDrillDown.tsx", points: [] },
+    { file: "app/components/settings/SettingsSearchResults.tsx", points: [] },
+    { file: "app/components/settings/SettingsScopeSpine.tsx", points: [] },
 ];
 
-/** The sources that can register a given entry point. */
+/**
+ * The surfaces that register a settings destination by naming its manifest entry, and the entry
+ * point each one satisfies.
+ *
+ * This is what makes `entryPoints` generated truth rather than an assertion: the sidebar rows, the
+ * user-menu items, and the palette actions all resolve their address and their name from
+ * `settingsEntryPoints.ts`, so what a surface registers is an entry id and nothing else. Reading
+ * those ids back and reconciling them with the manifest closes the loop in both directions — a
+ * declaration nobody ships and a registration nobody declared both fail.
+ *
+ * The sidebar and the user menu are read from their own function bodies rather than from the file
+ * they share, which is how a claim to one stops being satisfiable by the other.
+ */
+const GENERATED_SOURCES: ReadonlyArray<{
+    point: Exclude<SettingsEntryPoint, "contextual">;
+    describe: string;
+    registered: () => readonly string[];
+}> = [
+    {
+        point: "sidebar",
+        describe: "useSections in app/components/Sidebar.tsx",
+        registered: () => declaredEntryIds(functionBody(SIDEBAR_FILE, "function useSections(")),
+    },
+    {
+        point: "avatar-menu",
+        describe: "UserMenu in app/components/Sidebar.tsx",
+        registered: () => declaredEntryIds(functionBody(SIDEBAR_FILE, "function UserMenu(")),
+    },
+    {
+        point: "command-palette",
+        describe: "SETTINGS_PALETTE_REGISTRATIONS",
+        registered: () => SETTINGS_PALETTE_REGISTRATIONS.map((registration) => registration.entryId),
+    },
+];
+
+const SIDEBAR_FILE = "app/components/Sidebar.tsx";
+
+/** The manifest entry ids a source names through the shared resolver. */
+const ENTRY_ID_PATTERN = /settingsDestination\(\s*"([^"]+)"\s*\)/g;
+
+/** The body of one top-level function, so two surfaces sharing a file are read apart. */
+function functionBody(file: string, declaration: string): string {
+    const source = readSource(file);
+    const start = source.indexOf(declaration);
+    if (start < 0) throw new Error(`${file} no longer declares ${declaration}`);
+    const end = source.indexOf("\n}\n", start);
+    if (end < 0) throw new Error(`could not find the end of ${declaration} in ${file}`);
+    return source.slice(start, end);
+}
+
+/** Every manifest entry id named in a source fragment, deduplicated. */
+function declaredEntryIds(source: string): readonly string[] {
+    return [...new Set([...source.matchAll(ENTRY_ID_PATTERN)].map((match) => match[1]))];
+}
+
+/** The entries whose manifest declaration names a given entry point. */
+function declaringEntries(point: SettingsEntryPoint): readonly string[] {
+    return entries.filter((entry) => entry.entryPoints.includes(point)).map((entry) => entry.id);
+}
+
+/** The sources that can register a given entry point through a literal route. */
 function sourcesRegistering(point: Exclude<SettingsEntryPoint, "contextual">): string[] {
     return NAVIGATION_SOURCES.filter((source) => source.points.includes(point)).map(
         (source) => source.file,
@@ -555,11 +628,38 @@ describe("settings manifest owns each canonical destination once", () => {
     });
 });
 
+/** Entry points a source registers that the manifest does not declare there. */
+function undeclaredRegistrations(
+    point: SettingsEntryPoint,
+    registered: readonly string[],
+    candidates: readonly SettingsEntry[],
+): readonly string[] {
+    const declared = new Set(
+        candidates.filter((entry) => entry.entryPoints.includes(point)).map((entry) => entry.id),
+    );
+    return registered.filter((id) => !declared.has(id)).sort();
+}
+
+/** Entry points the manifest declares that no source registers. */
+function unshippedDeclarations(
+    point: SettingsEntryPoint,
+    registered: readonly string[],
+    candidates: readonly SettingsEntry[],
+): readonly string[] {
+    const shipped = new Set(registered);
+    return candidates
+        .filter((entry) => entry.entryPoints.includes(point))
+        .map((entry) => entry.id)
+        .filter((id) => !shipped.has(id))
+        .sort();
+}
+
 describe("settings manifest agrees with the navigation that links into settings", () => {
     it("finds every declared registry entry point in the source that registers it", () => {
         const missing = entries.flatMap((entry) =>
             entry.entryPoints
                 .filter((point): point is Exclude<SettingsEntryPoint, "contextual"> => point !== "contextual")
+                .filter((point) => sourcesRegistering(point).length > 0)
                 .filter(
                     (point) =>
                         !sourcesRegistering(point).some((file) =>
@@ -578,12 +678,12 @@ describe("settings manifest agrees with the navigation that links into settings"
                 .map((route) => entriesByRoute.get(route))
                 .filter((entry): entry is SettingsEntry => entry !== undefined)
                 .filter((entry) => !entry.entryPoints.some((point) => (source.points as readonly SettingsEntryPoint[]).includes(point)))
-                .map((entry) => `${source.file} links ${entry.currentRoute} but ${entry.id} declares none of ${source.points.join(", ")}`),
+                .map((entry) => `${source.file} links ${entry.currentRoute} but ${entry.id} declares none of ${source.points.join(", ") || "no entry point"}`),
         );
 
         expect(
             undeclared,
-            "a navigation surface links a registered destination the manifest does not say links there; add the entry point",
+            "a navigation surface links a registered destination the manifest does not say links there; add the entry point, or route the link through settingsDestination",
         ).toEqual([]);
     });
 
@@ -605,8 +705,143 @@ describe("settings manifest agrees with the navigation that links into settings"
         const linked = NAVIGATION_SOURCES.flatMap((source) => linkedRoutes(source.file)).filter(
             underSettingsRoot,
         );
+        const named = GENERATED_SOURCES.flatMap((source) => source.registered());
 
-        expect(new Set(linked).size).toBeGreaterThan(20);
+        expect(new Set([...linked, ...named]).size).toBeGreaterThan(20);
+    });
+});
+
+describe("settings manifest entry points are generated from the registrations that ship", () => {
+    it.each(GENERATED_SOURCES)(
+        "registers in $describe only what the manifest declares for $point",
+        (source) => {
+            expect(
+                undeclaredRegistrations(source.point, source.registered(), entries),
+                `${source.describe} registers a destination the manifest does not file under ${source.point}`,
+            ).toEqual([]);
+        },
+    );
+
+    it.each(GENERATED_SOURCES)(
+        "ships in $describe every entry point the manifest declares for $point",
+        (source) => {
+            expect(
+                unshippedDeclarations(source.point, source.registered(), entries),
+                `the manifest claims ${source.point} for a destination ${source.describe} does not register`,
+            ).toEqual([]);
+        },
+    );
+
+    it("names only labeled manifest entries, so every registration has something to render", () => {
+        const unlabeled = GENERATED_SOURCES.flatMap((source) =>
+            source
+                .registered()
+                .filter((id) => entries.find((entry) => entry.id === id)?.titleKey == null)
+                .map((id) => `${source.describe} registers ${id}, which names no label`),
+        );
+
+        expect(unlabeled).toEqual([]);
+    });
+
+    it("spells no settings route literally in a generated source", () => {
+        const literals = [...new Set(linkedRoutes(SIDEBAR_FILE))].filter(underSettingsRoot);
+
+        expect(
+            literals,
+            "a sidebar or user-menu row spells a settings route instead of naming its manifest entry",
+        ).toEqual([]);
+    });
+
+    it("registers each palette destination once, at the address the manifest resolves", () => {
+        const actionIds = SETTINGS_PALETTE_REGISTRATIONS.map((registration) => registration.actionId);
+        const drifted = SETTINGS_PALETTE_REGISTRATIONS.filter((registration) => {
+            const entry = entriesByRoute.get(
+                entries.find((candidate) => candidate.id === registration.entryId)?.currentRoute ?? "",
+            );
+            return entry === undefined || settingsDestinationHref(entry) !== registration.href;
+        });
+
+        expect(actionIds).toEqual([...new Set(actionIds)]);
+        expect(drifted.map((registration) => registration.entryId)).toEqual([]);
+    });
+});
+
+describe("an entry point resolves the canonical address once it is served", () => {
+    it("sends a job whose canonical destination ships to that destination's section", () => {
+        const directory = entriesByRoute.get("/users");
+        const auditLog = entriesByRoute.get("/admin/logs");
+        if (!directory || !auditLog) throw new Error("the consolidated jobs left the manifest");
+
+        expect(settingsDestinationHref(directory)).toBe("/settings/workspace/people#directory");
+        expect(settingsDestinationHref(auditLog)).toBe(
+            "/settings/workspace/audit-diagnostics#audit",
+        );
+    });
+
+    it("keeps a job whose canonical destination has not shipped on the address that works", () => {
+        const account = entriesByRoute.get("/account");
+        const reviews = entriesByRoute.get("/account/connections/reviews");
+        if (!account || !reviews) throw new Error("the personal-scope jobs left the manifest");
+
+        expect(
+            registeredRoutes.has(account.canonicalRoute),
+            "this expectation is what makes the two below meaningful; it inverts when /settings/personal/profile ships",
+        ).toBe(false);
+        expect(settingsDestinationHref(account)).toBe("/account");
+        expect(settingsDestinationHref(reviews)).toBe("/account/connections/reviews");
+    });
+
+    it("addresses a destination that owns its canonical route without a fragment", () => {
+        const home = entriesByRoute.get(SETTINGS_HOME_ROUTE);
+        const people = entriesByRoute.get("/settings/workspace/people");
+        if (!home || !people) throw new Error("a canonical destination left the manifest");
+
+        expect(settingsDestinationHref(home)).toBe(SETTINGS_HOME_ROUTE);
+        expect(settingsDestinationHref(people)).toBe("/settings/workspace/people");
+    });
+
+    it("resolves every registered entry point to a route the manifest knows", () => {
+        const stranded = GENERATED_SOURCES.flatMap((source) =>
+            source
+                .registered()
+                .map((id) => entries.find((entry) => entry.id === id))
+                .filter((entry): entry is SettingsEntry => entry !== undefined)
+                .map((entry) => settingsDestinationHref(entry))
+                .filter((href) => !registeredRoutes.has(href.split("#")[0]))
+                .map((href) => `${source.describe} resolves to ${href}`),
+        );
+
+        expect(stranded).toEqual([]);
+    });
+});
+
+describe("the entry-point gate refuses a registration the manifest has not declared", () => {
+    const point: SettingsEntryPoint = "sidebar";
+    const declared = declaringEntries(point);
+
+    it("catches a surface registering a destination the manifest files elsewhere", () => {
+        expect(undeclaredRegistrations(point, [...declared, "workspace.roles"], entries)).toEqual([
+            "workspace.roles",
+        ]);
+    });
+
+    it("catches a manifest claim no surface ships", () => {
+        expect(unshippedDeclarations(point, declared.slice(1), entries)).toEqual([declared[0]].sort());
+    });
+
+    it("holds at zero for the registrations that actually ship", () => {
+        expect(undeclaredRegistrations(point, declared, entries)).toEqual([]);
+        expect(unshippedDeclarations(point, declared, entries)).toEqual([]);
+    });
+
+    it("reads the sidebar and the user menu apart, so neither satisfies the other's claim", () => {
+        const sidebar = declaredEntryIds(functionBody(SIDEBAR_FILE, "function useSections("));
+        const avatar = declaredEntryIds(functionBody(SIDEBAR_FILE, "function UserMenu("));
+
+        expect(sidebar.length).toBeGreaterThan(0);
+        expect(avatar.length).toBeGreaterThan(0);
+        expect(sidebar.filter((id) => avatar.includes(id))).toEqual([]);
+        expect(undeclaredRegistrations("avatar-menu", sidebar, entries)).toEqual(sidebar.slice().sort());
     });
 });
 

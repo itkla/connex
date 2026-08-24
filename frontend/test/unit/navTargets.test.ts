@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { BREADCRUMB_STATIC_ROUTE_PATHS } from "@/app/lib/breadcrumbRoutes";
+import { SETTINGS_PALETTE_REGISTRATIONS } from "@/app/lib/actions/settingsNavigationActions";
+import { settingsEntryPointDestinations } from "@/app/lib/settingsEntryPoints";
 
 const APP_ROOT = join(process.cwd(), "app");
 const ROUTE_ROOTS = [join(APP_ROOT, "(app)"), APP_ROOT];
@@ -42,14 +44,36 @@ function matchAll(source: string, pattern: RegExp): string[] {
     return [...source.matchAll(pattern)].map((match) => match[1]);
 }
 
+/**
+ * The address part of a navigation target.
+ *
+ * A consolidated settings destination is addressed at the section that absorbed the job, so its
+ * target carries a fragment that no route on disk answers for. The fragment is the page's business;
+ * what this suite checks is that the page exists.
+ */
+function routePath(target: string): string {
+    return target.split("#")[0];
+}
+
+/**
+ * Every destination the command palette can push.
+ *
+ * The literal ones are still scraped from the two registries that spell a route; the settings ones
+ * come from the generated registrations, which resolve their address from the settings manifest and
+ * therefore have no literal to scrape (#1340 PR 7).
+ */
 const paletteTargets = uniqueSorted([
     ...matchAll(read("app/lib/actions/seedActions.ts"), /navigateAction\(\s*"[^"]+",\s*"[^"]+",\s*"([^"]+)"/g),
     ...matchAll(read("app/components/actions/NavActionsBridge.tsx"), /router\.push\("([^"]+)"\)/g),
+    ...SETTINGS_PALETTE_REGISTRATIONS.map((registration) => registration.href),
 ]);
 
-const sidebarTargets = uniqueSorted(
-    matchAll(read("app/components/Sidebar.tsx"), /href:\s*"(\/[^"]*)"/g),
-);
+/** Likewise for the sidebar and the user menu, whose settings rows name a manifest entry. */
+const sidebarTargets = uniqueSorted([
+    ...matchAll(read("app/components/Sidebar.tsx"), /href:\s*"(\/[^"]*)"/g),
+    ...settingsEntryPointDestinations("sidebar").map((destination) => destination.href),
+    ...settingsEntryPointDestinations("avatar-menu").map((destination) => destination.href),
+]);
 
 const recordDetailBases = uniqueSorted(
     matchAll(read("app/lib/actions/seedActions.ts"), /^\s{4}\w+:\s*"([^"]+)",$/gm),
@@ -63,7 +87,6 @@ describe("navigation targets resolve to real routes", () => {
             "/activity/all",
             "/activity/notes",
             "/activity/tasks",
-            "/admin/logs",
             "/dashboard",
             "/docs",
             "/library/documents",
@@ -72,7 +95,6 @@ describe("navigation targets resolve to real routes", () => {
             "/marketing/campaigns",
             "/me",
             "/notifications",
-            "/organization/members",
             "/overview/analytics",
             "/overview/calendar",
             "/overview/introductions",
@@ -80,16 +102,18 @@ describe("navigation targets resolve to real routes", () => {
             "/overview/reports",
             "/overview/reports/goals",
             "/radar",
-            "/records/approval-policies",
             "/records/companies",
             "/records/contacts",
             "/records/deals",
             "/records/pipelines",
             "/records/products",
             "/search",
-            "/settings/diagnostics",
-            "/settings/members",
-            "/users",
+            "/settings",
+            "/settings/organization/identity#administrators",
+            "/settings/workspace/audit-diagnostics#audit",
+            "/settings/workspace/audit-diagnostics#diagnostics",
+            "/settings/workspace/crm#approval-policies",
+            "/settings/workspace/people#directory",
             "/workflows",
         ]);
     });
@@ -100,11 +124,11 @@ describe("navigation targets resolve to real routes", () => {
     });
 
     it.each(paletteTargets)("palette destination %s exists", (target) => {
-        expect(routeExists(target)).toBe(true);
+        expect(routeExists(routePath(target))).toBe(true);
     });
 
     it.each(sidebarTargets)("sidebar destination %s exists", (target) => {
-        expect(routeExists(target)).toBe(true);
+        expect(routeExists(routePath(target))).toBe(true);
     });
 
     it.each(BREADCRUMB_STATIC_ROUTE_PATHS)("breadcrumb route %s exists", (target) => {
