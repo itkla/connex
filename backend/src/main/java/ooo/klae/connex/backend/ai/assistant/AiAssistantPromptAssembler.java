@@ -106,14 +106,25 @@ public class AiAssistantPromptAssembler {
      * @param evidence plan results, entering the prompt as untrusted CRM data
      * @param scopeDirective bounded server-authored instruction naming the reads the turn's declared
      *     query scope can be applied to, or null when the turn declares no scope
+     * @param closingDirective bounded server-authored instruction requiring the step to answer from
+     *     the evidence already gathered, or null on every step that may still investigate
      */
     public record SkillContext(
-            String directive, Map<String, Object> evidence, String scopeDirective) {
-        public static final SkillContext NONE = new SkillContext(null, Map.of(), null);
+            String directive,
+            Map<String, Object> evidence,
+            String scopeDirective,
+            String closingDirective) {
+        public static final SkillContext NONE = new SkillContext(null, Map.of(), null, null);
 
         /** Creates a contract for a turn that declares no query scope. */
         public SkillContext(String directive, Map<String, Object> evidence) {
-            this(directive, evidence, null);
+            this(directive, evidence, null, null);
+        }
+
+        /** Creates a contract for a step that may still investigate. */
+        public SkillContext(
+                String directive, Map<String, Object> evidence, String scopeDirective) {
+            this(directive, evidence, scopeDirective, null);
         }
 
         public SkillContext {
@@ -124,12 +135,19 @@ public class AiAssistantPromptAssembler {
         public boolean isEmpty() {
             return (directive == null || directive.isBlank())
                     && (scopeDirective == null || scopeDirective.isBlank())
+                    && (closingDirective == null || closingDirective.isBlank())
                     && evidence.isEmpty();
         }
 
         /** Returns this contract with the declared-scope instruction attached. */
         public SkillContext withScopeDirective(String declaredScopeDirective) {
-            return new SkillContext(directive, evidence, declaredScopeDirective);
+            return new SkillContext(
+                    directive, evidence, declaredScopeDirective, closingDirective);
+        }
+
+        /** Returns this contract with the answer-now instruction attached. */
+        public SkillContext withClosingDirective(String answerNowDirective) {
+            return new SkillContext(directive, evidence, scopeDirective, answerNowDirective);
         }
     }
 
@@ -399,6 +417,10 @@ public class AiAssistantPromptAssembler {
         if (!skill.evidence().isEmpty()) {
             prompt.userTurn(boundedSkillEvidence(
                     skill.evidence(), context, budget, budget.toolResultBytes()));
+        }
+        if (skill.closingDirective() != null && !skill.closingDirective().isBlank()
+                && budget.fits(skill.closingDirective(), AiSkillCatalog.maxDirectiveBytes())) {
+            prompt.userTurn(skill.closingDirective());
         }
     }
 
