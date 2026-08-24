@@ -309,6 +309,10 @@ jobs:
           CONNEX_DB_URL: jdbc:mysql://127.0.0.1:3306/connex_seed_e2e?sslMode=DISABLED
           CONNEX_DB_USERNAME: root
           CONNEX_DB_PASSWORD: ci-${{ github.run_id }}-e2e-root
+          # AI governance on with no provider configured: the provider-independent surfaces
+          # (watch CRUD, skill directory) are exercisable while every provider-egress path
+          # still refuses honestly, which is exactly the state the e2e specs assert.
+          CONNEX_AI_ENABLED: "true"
         run: |
           set -euo pipefail
           WAR=$(find build/libs -name '*.war' ! -name '*-plain.war' | head -1)
