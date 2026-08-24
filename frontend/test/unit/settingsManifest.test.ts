@@ -861,11 +861,22 @@ describe("every retired address forwards from the manifest rather than from a ro
         ).toEqual([]);
     });
 
+    /**
+     * Read out of the stubs rather than restated, so the exemption cannot be widened by editing the
+     * list. A stub that stops resolving its address from the manifest appears here whether or not
+     * anyone remembered to declare it, and the assertion fails until the exemption is argued.
+     */
     it("exempts only the forwards whose target has to be looked up first", () => {
+        const notManifestDriven = entries
+            .filter((entry) => entry.redirectsTo !== null)
+            .filter((entry) => !stubSource(entry).includes("settingsRedirectTarget("))
+            .map((entry) => entry.id)
+            .sort();
+
         expect(
-            [...computed].sort(),
-            "a forward whose target depends on a lookup cannot read a fixed address from the manifest; each one is enumerated here so the exemption stays a short, argued list rather than a habit",
-        ).toEqual(["account.capture-reviews", "legacy.settings-workflow"]);
+            notManifestDriven,
+            "a forward whose target depends on a lookup cannot read a fixed address from the manifest; every other one must, so that a destination which moves takes its redirects with it",
+        ).toEqual([...computed].sort());
     });
 
     it("holds each exempted forward to redirecting anyway", () => {
