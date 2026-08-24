@@ -33,6 +33,7 @@ import {
     type OverlayRequest,
     type RadarTaskInvocation,
 } from "@/app/lib/actions/types";
+import { actionNamesItself } from "@/app/lib/actions/actionLabels";
 import { devInvariant } from "@/app/lib/actions/devInvariant";
 import { normalizeShortcut, RESERVED_CHORDS } from "@/app/lib/actions/shortcut";
 import { resolveCan } from "@/app/lib/actions/permissions";
@@ -93,6 +94,11 @@ function acceptRegistration(
             someLiveAction(registrations, token, (existing) => existing.id === action.id);
         devInvariant(!idTaken, `Duplicate action id "${action.id}".`);
         if (idTaken) continue;
+
+        devInvariant(
+            actionNamesItself(action),
+            `Action "${action.id}" carries none of label, labelMessageKey, or labelKey.`,
+        );
 
         let shortcut = action.shortcut;
         if (shortcut) {

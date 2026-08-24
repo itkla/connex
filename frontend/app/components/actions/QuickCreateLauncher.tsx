@@ -20,6 +20,7 @@ import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { useActions, useAvailableActions } from '@/app/hooks/useActions';
+import { actionLabel } from '@/app/lib/actions/actionLabels';
 import { deriveCreateDefaults } from '@/app/lib/actions/createDefaults';
 import { getContacts, getDeals, getUsers } from '@/app/lib/api';
 import { easeOut, instant, springJiggle, springSmooth, springSnappy } from '@/app/lib/motion';
@@ -386,6 +387,7 @@ function TypeSelector({
     onSelect: (action: AppAction) => void;
 }) {
     const t = useTranslations('Actions');
+    const tMessage = useTranslations();
     const reduceMotion = useReducedMotion() ?? false;
     const listRef = useRef<HTMLDivElement>(null);
 
@@ -432,7 +434,7 @@ function TypeSelector({
                         <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground ring-1 ring-border transition-colors group-hover:bg-brand-light group-hover:text-brand-dark group-hover:ring-transparent group-focus-visible:bg-brand-light group-focus-visible:text-brand-dark">
                             {Icon ? <Icon className="size-4" /> : null}
                         </span>
-                        <span className="flex-1 text-sm font-medium text-foreground">{action.label ?? t(action.labelKey)}</span>
+                        <span className="flex-1 text-sm font-medium text-foreground">{actionLabel(action, t, tMessage)}</span>
                     </motion.button>
                 );
             })}
