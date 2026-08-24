@@ -175,6 +175,7 @@
         "moveFailed": "Couldn't move the deal",
         "loading": "Loading the complete pipeline…",
         "loadFailed": "Couldn't load the complete pipeline board",
+        "refreshFailed": "Couldn't refresh the board. It may be out of date until you reload.",
         "riskLoadFailed": "Couldn't load deal risk. Risk filters are unavailable until you retry.",
         "companyLoadFailed": "Couldn't load company labels for this pipeline.",
         "a11yInstructions": "To pick up a deal, press space or enter. Use the arrow keys to move it between stages and positions, then press space or enter again to drop it. Press escape to cancel.",
