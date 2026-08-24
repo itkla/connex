@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 import Rise from "@/app/components/motion/Rise";
 import { PageHeader } from "@/app/components/PageHeader";
 import SettingsTabs from "@/app/components/settings/SettingsTabs";
-import type { CapabilityAvailability } from "@/app/lib/capabilityAvailability";
 import { SETTINGS_GROUPS, SETTINGS_HOME_ROUTE } from "@/app/lib/settingsManifest";
 
 /**
@@ -27,21 +26,24 @@ const OWN_CHROME_ROUTES = new Set<string>([
  * and renders the scope-grouped navigation that replaces the strip, so the chrome steps aside for
  * it rather than stacking a second header and a tab dump above it. A migrated scope-group
  * destination is the same case one step further along: it is named for the job it owns rather than
- * for "Settings", and the strip it replaced must not reappear above it. This whole component
- * dissolves when the workspace destinations have all moved and the strip is retired.
+ * for "Settings", and the strip it replaced must not reappear above it.
+ *
+ * After #1340 PR 8 it stands over exactly two pages — `/settings/general` and `/settings/data` —
+ * because every other address under this segment now redirects. It stopped carrying the
+ * managed-mail availability in the same commit: that prop existed to mark the email tab, and the
+ * email tab moved to the Communications page, which explains the managed state where it stands
+ * rather than as an icon on a strip. This whole component dissolves when those last two workspace
+ * destinations move.
  *
  * @param title - the workspace-settings page title, resolved by the layout
  * @param description - the page description
- * @param mailManagementAvailability - whether managed mail is enabled, disabled, or unresolved
  */
 export default function WorkspaceSettingsChrome({
     title,
     description,
-    mailManagementAvailability,
 }: {
     title: string;
     description: string;
-    mailManagementAvailability: CapabilityAvailability;
 }) {
     const pathname = usePathname() ?? "";
     if (OWN_CHROME_ROUTES.has(pathname)) return null;
@@ -50,7 +52,7 @@ export default function WorkspaceSettingsChrome({
             <Rise>
                 <PageHeader title={title} description={description} />
             </Rise>
-            <SettingsTabs mailManagementAvailability={mailManagementAvailability} />
+            <SettingsTabs />
         </>
     );
 }

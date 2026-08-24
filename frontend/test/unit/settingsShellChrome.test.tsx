@@ -42,7 +42,7 @@ function chrome() {
             <WorkspaceSettingsChrome
                 title="Settings"
                 description="Manage this workspace."
-                mailManagementAvailability="disabled"
+
             />
         </PermissionsProvider>,
     );
@@ -62,8 +62,8 @@ describe("the settings home does not inherit the workspace tab strip", () => {
     it("still renders the header and the tab strip on a workspace settings destination", () => {
         const html = chrome();
 
-        expect(html).toContain("/settings/members");
-        expect(html).toContain("/settings/roles");
+        expect(html).toContain("/settings/general");
+        expect(html).toContain("/settings/data");
         expect(html).toContain("Manage this workspace.");
     });
 

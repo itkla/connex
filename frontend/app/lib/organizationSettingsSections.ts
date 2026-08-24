@@ -23,17 +23,23 @@ import {
 /** The manifest's groups at their declared type, so a group without gap sections is still one. */
 const MANIFEST_GROUPS: readonly SettingsGroup[] = SETTINGS_GROUPS;
 
-/** The sections the manifest files under a group: what it absorbed, then what it makes addressable. */
+/**
+ * The sections the manifest files under a group: what it absorbed, then what it makes addressable.
+ *
+ * Kind is deliberately not filtered. An absorbed job is a section of this destination whether its
+ * old address still renders or now forwards here, and after #1340 PR 8 most of them forward —
+ * filtering would drop five organization sections out of every page that derives its anchors from
+ * this list, in the same commit that finished consolidating them.
+ */
 function manifestSections(groupId: string, route: string): readonly string[] {
     const sections: string[] = [];
     for (const entry of SETTINGS_ENTRIES) {
         if (
             entry.group === groupId
-            && entry.kind === "destination"
             && entry.canonicalRoute === route
             && entry.canonicalSection !== null
         ) {
-            sections.push(entry.canonicalSection);
+            if (!sections.includes(entry.canonicalSection)) sections.push(entry.canonicalSection);
         }
     }
     const group = MANIFEST_GROUPS.find((candidate) => candidate.id === groupId);

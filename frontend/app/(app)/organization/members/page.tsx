@@ -1,15 +1,19 @@
-import { headers } from "next/headers";
+import { permanentRedirect } from "next/navigation";
 
-import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
-import { getCurrentUserResultFromCookie } from "@/app/lib/api";
-import OrgMembersPanel from "@/app/components/organization/OrgMembersPanel";
+import { settingsRedirectTarget, type RouteSearchParams } from "@/app/lib/settingsRedirects";
 
-export default async function OrgMembersPage() {
-    const cookie = (await headers()).get("cookie");
-    const userResult = await getCurrentUserResultFromCookie(cookie);
-    if (!userResult.ok) {
-        return <WorkspaceUnavailablePage />;
-    }
-    const user = userResult.data;
-    return <OrgMembersPanel currentUserId={user?.id ?? null} />;
+/**
+ * The retired address for the organization roster (#1340 WS4.6).
+ *
+ * The job now lives at the `administrators` section of Identity & administrators, and this path forwards there permanently rather than 404ing an
+ * address readers have bookmarked and linked. The target is the manifest’s, not this file’s, so a
+ * destination that moves again takes its redirect with it; the query string is the reader’s and
+ * survives the hop whole.
+ */
+export default async function OrganizationMembersPage({
+    searchParams,
+}: {
+    searchParams: Promise<RouteSearchParams>;
+}) {
+    permanentRedirect(settingsRedirectTarget("organization.administrators", await searchParams));
 }

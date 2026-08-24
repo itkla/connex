@@ -279,6 +279,14 @@ export function sectionVisible(entry: SettingsEntry, viewer: SettingsNavViewer):
  * A gap section carries no gates of its own. It exists only inside its destination, so the
  * destination's own visibility already governs whether the reader can reach it, and the page it
  * lives on explains any permission refusal in place.
+ *
+ * **Kind is deliberately not filtered here, and that changed in #1340 PR 8.** An absorbed job is a
+ * section of this destination whether its old address still renders or now forwards to it — and
+ * once the redirects landed, most of them forward. Keeping a `destination` filter would have
+ * emptied this list for every migrated group in the same commit that finished migrating them,
+ * silently dropping "Members", "Roles" and "Directory" out of settings search on the day their
+ * pages stopped rendering. That is precisely the lose-the-word-the-reader-knows failure the search
+ * exists to prevent. A section needs a name and an address; a redirected entry still has both.
  */
 function groupSections(
     group: SettingsGroup,
@@ -288,7 +296,6 @@ function groupSections(
     for (const entry of MANIFEST_ENTRIES) {
         if (
             entry.group === group.id
-            && entry.kind === "destination"
             && entry.canonicalSection !== null
             && entry.canonicalRoute === group.route
             && entry.titleKey !== null

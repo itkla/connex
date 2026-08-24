@@ -114,8 +114,20 @@ describe("people & access owns the sections the manifest promises", () => {
     it("builds every deep link from one place, so an anchor cannot be spelled two ways", () => {
         expect(peopleSectionHref("roles")).toBe("/settings/workspace/people#roles");
 
+        /**
+         * Two files may spell the fragment, and both are origins rather than producers.
+         * `peopleSections.ts` builds the href every consumer asks it for. The manifest is where the
+         * section slug is decided in the first place — that module reads it from there — and since
+         * #1340 PR 8 it also records the redirect target for each retired address, which is that
+         * same deep link. Excluding it keeps the rule aimed at what it was written for: a surface
+         * that hand-writes an anchor instead of asking for one.
+         */
+        const origins = [
+            path.join(process.cwd(), "app", "lib", "peopleSections.ts"),
+            path.join(process.cwd(), "app", "lib", "settingsManifest.ts"),
+        ];
         const strays = appFiles(path.join(process.cwd(), "app"))
-            .filter((file) => file !== path.join(process.cwd(), "app", "lib", "peopleSections.ts"))
+            .filter((file) => !origins.includes(file))
             .filter((file) => source(file).includes(`${PEOPLE_ROUTE}#`));
 
         expect(
@@ -291,14 +303,18 @@ describe("people & access gates its sections without hiding them", () => {
         ).toEqual(["MEMBER_MANAGE", "ROLE_MANAGE", "WORKSPACE_SETTINGS"]);
     });
 
-    it("leaves the manifest's section entries describing the routes they still serve", () => {
+    it("keeps a retired route describing the gate its section still answers for", () => {
         const roles = SETTINGS_ENTRIES.find((candidate) => candidate.id === "workspace.roles");
 
         expect(roles?.currentRoute).toBe("/settings/roles");
-        expect(roles?.kind).toBe("destination");
+        expect(
+            roles?.kind,
+            "#1340 PR 8 retired the address; the job is a section of People & access now",
+        ).toBe("redirect");
+        expect(roles?.redirectsTo).toBe("/settings/workspace/people#roles");
         expect(
             roles?.access.permissions,
-            "the legacy route still refuses the whole page; only the consolidated one refuses a section of it",
+            "the entry keeps naming ROLE_MANAGE after the redirect, because the permission did not move with the address: it is what the roles section refuses in place, and the navigation reads it to decide whether to name that section at all",
         ).toEqual(["ROLE_MANAGE"]);
     });
 
@@ -396,17 +412,32 @@ describe("the shipped panels still render in the home they had", () => {
         ).toBeGreaterThan(panel.indexOf(') : loadState === "error" ? ('));
     });
 
-    it("leaves the legacy pages pointing at the panels they always rendered", () => {
-        const members = source(path.join(process.cwd(), "app", "(app)", "settings", "members", "page.tsx"));
-        const roles = source(path.join(process.cwd(), "app", "(app)", "settings", "roles", "page.tsx"));
-        const users = source(path.join(process.cwd(), "app", "(app)", "users", "page.tsx"));
+    it("forwards the three legacy addresses to the sections that absorbed them", () => {
+        const routes = [
+            ["settings", "members"],
+            ["settings", "roles"],
+            ["users"],
+        ];
 
-        expect(members).toContain("<MembersPanel currentUserId={user?.id ?? null} />");
-        expect(members, "the legacy route takes the default presentation, so it is unchanged")
-            .not.toContain("presentation=");
-        expect(roles).toContain("<RolesPanel />");
-        expect(users).toContain("<UsersBrowser users={users} />");
-        expect(users).not.toContain("presentation=");
+        for (const segments of routes) {
+            const page = source(path.join(process.cwd(), "app", "(app)", ...segments, "page.tsx"));
+            expect(
+                page,
+                `/${segments.join("/")} still renders instead of forwarding`,
+            ).toContain("permanentRedirect(settingsRedirectTarget(");
+            expect(
+                page,
+                "a stub renders nothing; a panel left behind here would be a second copy of a section",
+            ).not.toContain("Panel");
+        }
+    });
+
+    it("renders each absorbed panel from the consolidated destination alone", () => {
+        const page = source(PEOPLE_ACCESS);
+
+        expect(page).toContain("<MembersPanel");
+        expect(page).toContain("<RolesPanel");
+        expect(page).toContain("<UsersBrowser");
     });
 });
 

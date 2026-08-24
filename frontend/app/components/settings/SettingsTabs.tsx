@@ -4,58 +4,44 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { motion, useReducedMotion } from "motion/react";
-import { QuestionMarkCircleIcon } from "@heroicons/react/24/outline";
 
 import { usePermission } from "@/app/hooks/usePermissions";
-import type { CapabilityAvailability } from "@/app/lib/capabilityAvailability";
 import { cn } from "@/lib/utils";
 
 const TABS = [
     { key: "tabGeneral", href: "/settings/general" },
-    { key: "tabMembers", href: "/settings/members" },
-    { key: "tabRoles", href: "/settings/roles" },
-    { key: "tabCustomFields", href: "/settings/custom-fields" },
-    { key: "tabQualification", href: "/settings/qualification" },
     { key: "tabData", href: "/settings/data" },
-    { key: "tabEmail", href: "/settings/email" },
-    { key: "tabDelivery", href: "/settings/delivery" },
-    { key: "tabDiagnostics", href: "/settings/diagnostics" },
 ] as const;
 
 /**
- * The workspace settings tab strip.
+ * The workspace settings tab strip, on its last two destinations (#1340 WS4.6).
  *
- * Diagnostics is gated on `WORKSPACE_SETTINGS`, the permission its endpoints enforce, so a member
+ * Seven of the nine tabs this strip carried are gone: their routes now forward to the canonical
+ * scope-group destinations that absorbed them, and a strip linking addresses that redirect is a
+ * navigation surface pointing at its own past. General and Data & privacy stay because they still
+ * render — the canonical `/settings/workspace/general` and `/settings/workspace/data-privacy`
+ * were never built — and two pages that serve need chrome and a way back to each other.
+ *
+ * This is a held remnant, not a design. What retires it is those two groups shipping, at which
+ * point the strip, {@link WorkspaceSettingsChrome}, and the layout that renders them go together.
+ *
+ * General is gated on `WORKSPACE_SETTINGS`, the permission its endpoints enforce, so a member
  * without it is not offered a tab that can only answer with a refusal. The gate reads the shell's
  * server-resolved effective permissions, which are fail-closed, and the panel keeps its own denial
  * state for the case where the permission is lost while the page is open.
- *
- * @param mailManagementAvailability whether managed mail is enabled, disabled, or unresolved
  */
-export default function SettingsTabs({
-    mailManagementAvailability = "disabled",
-}: {
-    mailManagementAvailability?: CapabilityAvailability;
-}) {
+export default function SettingsTabs() {
     const pathname = usePathname() ?? "";
     const t = useTranslations("WorkspaceSettings");
-    const tCapability = useTranslations("CapabilityUnavailable");
     const reduce = useReducedMotion() ?? false;
     const canManageSettings = usePermission("WORKSPACE_SETTINGS");
-    const tabs = TABS.filter((tab) => {
-        if (tab.key === "tabEmail") return mailManagementAvailability !== "enabled";
-        if (tab.key === "tabGeneral") return canManageSettings;
-        if (tab.key === "tabDiagnostics") return canManageSettings;
-        return true;
-    });
+    const tabs = TABS.filter((tab) => (tab.key === "tabGeneral" ? canManageSettings : true));
 
     return (
         <nav aria-label={t("title")} className="-mx-1 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <div className="inline-flex w-max items-center gap-0.5 rounded-full bg-muted p-0.5 ring-1 ring-border/60">
                 {tabs.map((tab) => {
                     const active = pathname === tab.href || pathname.startsWith(`${tab.href}/`);
-                    const availabilityUnavailable = tab.key === "tabEmail"
-                        && mailManagementAvailability === "unavailable";
                     return (
                         <Link
                             key={tab.href}
@@ -78,15 +64,6 @@ export default function SettingsTabs({
                             )}
                             <span className="relative z-10 inline-flex items-center gap-1.5">
                                 {t(tab.key)}
-                                {availabilityUnavailable ? (
-                                    <span
-                                        className="inline-flex text-muted-foreground"
-                                        title={tCapability("title")}
-                                    >
-                                        <QuestionMarkCircleIcon aria-hidden className="size-4" />
-                                        <span className="sr-only">{tCapability("title")}</span>
-                                    </span>
-                                ) : null}
                             </span>
                         </Link>
                     );

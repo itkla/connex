@@ -1,5 +1,19 @@
-import { redirect } from "next/navigation";
+import { permanentRedirect } from "next/navigation";
 
-export default function SecuritySettingsPage() {
-    redirect("/account/security");
+import { settingsRedirectTarget, type RouteSearchParams } from "@/app/lib/settingsRedirects";
+
+/**
+ * The retired address for personal security settings (#1340 WS4.6).
+ *
+ * Forwards permanently to the account security page. Still the legacy address, because the canonical personal Security destination has not shipped. It forwards to the page that works today and moves with the manifest when the personal scope lands.
+ *
+ * The target is read from the manifest rather than spelled here, so a destination that moves takes
+ * its redirects with it, and the reader’s query string survives the hop whole.
+ */
+export default async function SecuritySettingsPage({
+    searchParams,
+}: {
+    searchParams: Promise<RouteSearchParams>;
+}) {
+    permanentRedirect(settingsRedirectTarget("legacy.settings-security", await searchParams));
 }

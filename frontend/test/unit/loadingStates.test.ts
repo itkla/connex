@@ -173,7 +173,7 @@ const SHARED_SKELETONS: SharedSkeleton[] = [
         component: "app/components/organization/OrganizationOverviewSkeleton.tsx",
         consumers: [
             {
-                file: "app/(app)/organization/overview/loading.tsx",
+                file: "app/(app)/settings/organization/general/loading.tsx",
                 specifier: "@/app/components/organization/OrganizationOverviewSkeleton",
             },
             {
@@ -186,7 +186,7 @@ const SHARED_SKELETONS: SharedSkeleton[] = [
         component: "app/components/settings/QualificationCriteriaSkeleton.tsx",
         consumers: [
             {
-                file: "app/(app)/settings/qualification/loading.tsx",
+                file: "app/(app)/settings/workspace/crm/loading.tsx",
                 specifier: "@/app/components/settings/QualificationCriteriaSkeleton",
             },
             {
@@ -225,11 +225,11 @@ const SHARED_SKELETONS: SharedSkeleton[] = [
         component: "app/components/diagnostics/DiagnosticsPanelSkeleton.tsx",
         consumers: [
             {
-                file: "app/(app)/organization/diagnostics/loading.tsx",
+                file: "app/(app)/settings/organization/audit-diagnostics/loading.tsx",
                 specifier: "@/app/components/diagnostics/DiagnosticsPanelSkeleton",
             },
             {
-                file: "app/(app)/settings/diagnostics/loading.tsx",
+                file: "app/(app)/settings/workspace/audit-diagnostics/loading.tsx",
                 specifier: "@/app/components/diagnostics/DiagnosticsPanelSkeleton",
             },
             {

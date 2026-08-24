@@ -15,6 +15,7 @@ import { SETTINGS_PALETTE_REGISTRATIONS } from "@/app/lib/actions/settingsNaviga
 import {
     settingsDestinationHref,
     settingsEntryPointDestinations,
+    settingsRouteServed,
 } from "@/app/lib/settingsEntryPoints";
 import { SHIPPED_APP_ROUTES } from "@/app/lib/routeManifest";
 
@@ -72,11 +73,21 @@ const REGISTER_ENTRY =
 /**
  * Which entry points each navigation source that still spells routes can register.
  *
- * The three tab strips are the last surfaces that carry settings routes as literals; #1340 PR 8
- * retires them. Every other surface names a manifest entry instead and is verified structurally
- * below. The shell files declare no entry point at all: they render from the manifest at request
- * time, so a literal settings href appearing in one of them is a hand-written link that has escaped
- * the manifest, and the reverse-direction gate fails on it.
+ * Two strips remain, and each survives because routes it links still render. `OrgTabs` does not:
+ * #1340 PR 8 turned every `/organization/*` address into a redirect, which left the strip with
+ * nothing to link and its layout with nothing to wrap, so both were deleted and the
+ * `organization-tabs` entry point went with them.
+ *
+ * The other two are held rather than kept. `AccountTabs` links five personal destinations whose
+ * canonical `/settings/personal/*` routes were never built, and `SettingsTabs` links the two
+ * workspace destinations — General and Data & privacy — in the same position. Retiring either
+ * strip before its destinations move would strand pages that still serve. What retires them is the
+ * personal scope and the two remaining workspace groups shipping, not another pass over this list.
+ *
+ * Every other surface names a manifest entry instead and is verified structurally below. The shell
+ * files declare no entry point at all: they render from the manifest at request time, so a literal
+ * settings href appearing in one of them is a hand-written link that has escaped the manifest, and
+ * the reverse-direction gate fails on it.
  */
 const TAB_STRIP_SOURCES: ReadonlyArray<{
     file: string;
@@ -84,7 +95,6 @@ const TAB_STRIP_SOURCES: ReadonlyArray<{
 }> = [
     { file: "app/components/account/AccountTabs.tsx", points: ["account-tabs"] },
     { file: "app/components/settings/SettingsTabs.tsx", points: ["settings-tabs"] },
-    { file: "app/components/organization/OrgTabs.tsx", points: ["organization-tabs"] },
 ];
 
 /** The import that makes a file part of the settings shell. */
@@ -557,6 +567,87 @@ describe("the permission-match gate refuses a loosening it has not earned", () =
     });
 });
 
+/**
+ * The route half of a redirect target.
+ *
+ * A fragment addresses a section of a page, not a page; the router never sees it. Resolving the
+ * whole string against the shipped routes would fail every consolidated redirect the moment it
+ * started carrying the section that preserves the reader's intent, so the two halves are checked
+ * apart: the route against what the app serves, the fragment against the entry's own
+ * `canonicalSection` in {@link strayFragmentRedirects}.
+ */
+function targetRoute(target: string): string {
+    return target.split("#")[0];
+}
+
+/** Redirects naming a route the app does not serve. */
+function danglingRedirects(candidates: readonly SettingsEntry[]): readonly string[] {
+    return candidates
+        .filter((entry) => entry.redirectsTo !== null)
+        .filter((entry) => {
+            const route = targetRoute(entry.redirectsTo ?? "");
+            return (
+                !registeredRoutes.has(route)
+                && !(SHIPPED_APP_ROUTES as readonly string[]).includes(route)
+            );
+        })
+        .map((entry) => `${entry.id} -> ${entry.redirectsTo}`);
+}
+
+/**
+ * Redirects that forward somewhere other than their canonical destination, once that destination is
+ * served.
+ *
+ * This is what makes the redirect matrix the manifest's rather than a table someone maintains
+ * beside it. A job whose consolidated home has shipped must forward to exactly that home, at
+ * exactly the section that absorbed it — `settingsDestinationHref` composes that address for the
+ * navigation, and a redirect that resolved it differently would send a bookmark somewhere the
+ * sidebar does not.
+ *
+ * Silent where the canonical route has not shipped, which is the personal scope and the two
+ * workspace groups still waiting on one. Those entries forward to whatever address works today, and
+ * the only claim that can honestly be made about them is the dangling check above.
+ */
+function offCanonicalRedirects(candidates: readonly SettingsEntry[]): readonly string[] {
+    return candidates
+        .filter((entry) => entry.redirectsTo !== null)
+        .filter((entry) => settingsRouteServed(entry.canonicalRoute))
+        .filter((entry) => entry.redirectsTo !== settingsDestinationHref(entry))
+        .map(
+            (entry) =>
+                `${entry.id} -> ${entry.redirectsTo} (canonical ${settingsDestinationHref(entry) ?? "none"})`,
+        );
+}
+
+/**
+ * Redirects whose target is itself an address that redirects.
+ *
+ * A permanent redirect is a promise about where something lives, and a chain makes that promise
+ * twice — costing a round trip, and rotting the moment the middle hop is retired. `/settings/sso`
+ * is the case this was written for: it forwarded to `/organization/sso`, which #1340 PR 8 turned
+ * into a forward of its own, so it was retargeted at the section both of them mean.
+ */
+function chainedRedirects(candidates: readonly SettingsEntry[]): readonly string[] {
+    const forwarding = new Set(
+        candidates.filter((entry) => entry.redirectsTo !== null).map((entry) => entry.currentRoute),
+    );
+    return candidates
+        .filter((entry) => entry.redirectsTo !== null)
+        .filter((entry) => forwarding.has(targetRoute(entry.redirectsTo ?? "")))
+        .map((entry) => `${entry.id} -> ${entry.redirectsTo}`);
+}
+
+/** Redirects carrying a fragment that is not the entry's own canonical section. */
+function strayFragmentRedirects(candidates: readonly SettingsEntry[]): readonly string[] {
+    return candidates
+        .filter((entry) => entry.redirectsTo !== null)
+        .filter((entry) => {
+            const fragment = (entry.redirectsTo ?? "").split("#")[1];
+            return fragment !== undefined && fragment !== entry.canonicalSection;
+        })
+        .map((entry) => `${entry.id} -> ${entry.redirectsTo}`);
+}
+
 /** Forwards naming a route the app does not serve. */
 function danglingForwards(candidates: readonly SettingsEntry[]): readonly SettingsEntry[] {
     return candidates
@@ -602,16 +693,8 @@ describe("settings manifest forwards only to destinations that exist", () => {
     });
 
     it("resolves every redirect target to a registered route or a shipped route", () => {
-        const dangling = entries
-            .filter((entry) => entry.redirectsTo !== null)
-            .filter(
-                (entry) =>
-                    !registeredRoutes.has(entry.redirectsTo ?? "") &&
-                    !(SHIPPED_APP_ROUTES as readonly string[]).includes(entry.redirectsTo ?? ""),
-            );
-
         expect(
-            dangling.map((entry) => `${entry.id} -> ${entry.redirectsTo}`),
+            danglingRedirects(entries),
             "a redirect names a target the app does not serve",
         ).toEqual([]);
     });
@@ -628,6 +711,27 @@ describe("settings manifest forwards only to destinations that exist", () => {
         expect(
             unbacked.map((entry) => entry.id),
             "a forward names a capability the entry does not declare a requirement on",
+        ).toEqual([]);
+    });
+
+    it("forwards each retired address to its canonical destination and section", () => {
+        expect(
+            offCanonicalRedirects(entries),
+            "a job whose consolidated home has shipped forwards to that home at the section that absorbed it, which is the address the navigation resolves for the same entry",
+        ).toEqual([]);
+    });
+
+    it("resolves every redirect in one hop", () => {
+        expect(
+            chainedRedirects(entries),
+            "a redirect names a target that redirects again; point it at the final destination",
+        ).toEqual([]);
+    });
+
+    it("carries only a section its own entry claims", () => {
+        expect(
+            strayFragmentRedirects(entries),
+            "a redirect target's fragment must be the entry's canonicalSection, or the deep link and the manifest disagree about what the reader asked for",
         ).toEqual([]);
     });
 
@@ -651,6 +755,149 @@ describe("settings manifest forwards only to destinations that exist", () => {
     });
 });
 
+describe("the redirect gates refuse a matrix that has drifted from the manifest", () => {
+    const retired = SETTINGS_ENTRIES.find((entry) => entry.id === "workspace.members");
+    const held = SETTINGS_ENTRIES.find((entry) => entry.id === "legacy.settings-security");
+
+    function withRedirect(redirectsTo: string): readonly SettingsEntry[] {
+        if (!retired) throw new Error("workspace.members is the template for these probes");
+        return [{ ...retired, id: "test.redirect", redirectsTo }];
+    }
+
+    it("catches a redirect that stops at the page and drops the section it named", () => {
+        expect(offCanonicalRedirects(withRedirect("/settings/workspace/people"))).toEqual([
+            "test.redirect -> /settings/workspace/people (canonical /settings/workspace/people#members)",
+        ]);
+    });
+
+    it("catches a redirect aimed at a different served destination", () => {
+        expect(
+            offCanonicalRedirects(withRedirect("/settings/workspace/crm#custom-fields")).length,
+        ).toBe(1);
+    });
+
+    it("stays silent for a job whose canonical destination has not shipped", () => {
+        if (!held) throw new Error("legacy.settings-security is the template for this probe");
+
+        expect(
+            settingsRouteServed(held.canonicalRoute),
+            "this expectation is what makes the assertion below meaningful; it inverts when /settings/personal/security ships",
+        ).toBe(false);
+        expect(offCanonicalRedirects([held])).toEqual([]);
+    });
+
+    it("catches a fragment the entry never claimed", () => {
+        expect(strayFragmentRedirects(withRedirect("/settings/workspace/people#roles"))).toEqual([
+            "test.redirect -> /settings/workspace/people#roles",
+        ]);
+        expect(strayFragmentRedirects(withRedirect("/settings/workspace/people#members"))).toEqual([]);
+    });
+
+    it("catches a redirect onto an address that redirects again", () => {
+        if (!retired) throw new Error("workspace.members is the template for these probes");
+        const chained: SettingsEntry = { ...retired, id: "test.chained", redirectsTo: "/settings/roles" };
+
+        expect(chainedRedirects([...entries, chained])).toEqual([
+            "test.chained -> /settings/roles",
+        ]);
+    });
+
+    it("resolves a target's route without letting its fragment dangle it", () => {
+        expect(danglingRedirects(withRedirect("/settings/workspace/people#members"))).toEqual([]);
+        expect(danglingRedirects(withRedirect("/settings/workspace/nowhere#members"))).toEqual([
+            "test.redirect -> /settings/workspace/nowhere#members",
+        ]);
+    });
+});
+
+describe("every retired address forwards from the manifest rather than from a route in a stub", () => {
+    /**
+     * The forwards whose target is a fixed address the manifest can hand over.
+     *
+     * Two are not, and both are excluded here and enumerated below: one resolves a legacy
+     * automation id into a workflow id, and one resolves which provider's review queue the reader
+     * actually has. A target computed from a lookup cannot be read from a static field, so those
+     * stubs compose their own and are checked by their own suites instead.
+     */
+    const computed = new Set(["account.capture-reviews", "legacy.settings-workflow"]);
+    const stubs = entries.filter(
+        (entry) =>
+            entry.redirectsTo !== null
+            && !entry.currentRoute.includes("[")
+            && !computed.has(entry.id),
+    );
+
+    function stubSource(entry: SettingsEntry): string {
+        return readSource(path.join("app", "(app)", entry.currentRoute, "page.tsx"));
+    }
+
+    it("covers every retired address the manifest declares", () => {
+        expect(stubs.length).toBeGreaterThan(20);
+    });
+
+    it("names its manifest entry and redirects permanently", () => {
+        const wrong = stubs
+            .filter(
+                (entry) =>
+                    !stubSource(entry).includes(`settingsRedirectTarget("${entry.id}"`)
+                    || !stubSource(entry).includes("permanentRedirect("),
+            )
+            .map((entry) => entry.currentRoute);
+
+        expect(
+            wrong,
+            "a redirect stub resolves its target by naming its manifest entry, so a destination that moves takes its redirects with it; and it forwards permanently, because the address is retired rather than busy",
+        ).toEqual([]);
+    });
+
+    it("spells no destination route of its own", () => {
+        const literal = stubs
+            .filter((entry) => stubSource(entry).includes(targetRoute(entry.redirectsTo ?? "")))
+            .map((entry) => entry.currentRoute);
+
+        expect(
+            literal,
+            "a stub that spells its target is a second redirect matrix; the manifest is the only one",
+        ).toEqual([]);
+    });
+
+    it("exempts only the forwards whose target has to be looked up first", () => {
+        expect(
+            [...computed].sort(),
+            "a forward whose target depends on a lookup cannot read a fixed address from the manifest; each one is enumerated here so the exemption stays a short, argued list rather than a habit",
+        ).toEqual(["account.capture-reviews", "legacy.settings-workflow"]);
+    });
+
+    it("holds each exempted forward to redirecting anyway", () => {
+        const notRedirecting = [...computed]
+            .map((id) => entries.find((entry) => entry.id === id))
+            .filter((entry): entry is SettingsEntry => entry !== undefined)
+            .filter((entry) => !/\b(?:permanentRedirect|redirect)\(/.test(stubSource(entry)))
+            .map((entry) => entry.currentRoute);
+
+        expect(notRedirecting).toEqual([]);
+    });
+});
+
+describe("the member profile is held rather than redirected", () => {
+    it("keeps /users/[id] serving until member-detail can take an id", () => {
+        const detail = entriesByRoute.get("/users/[id]");
+        if (!detail) throw new Error("workspace.people-detail left the manifest");
+
+        expect(
+            [detail.kind, detail.redirectsTo],
+            "redirecting /users/42 at #member-detail would drop the 42: the section takes no id and sits on the directory list. Read the decision recorded on the entry before changing this.",
+        ).toEqual(["destination", null]);
+        expect(existsSync(path.join(APP_DIRECTORY, "users", "[id]", "page.tsx"))).toBe(true);
+    });
+
+    it("still redirects the directory the profile is reached from", () => {
+        const directory = entriesByRoute.get("/users");
+
+        expect(directory?.redirectsTo).toBe("/settings/workspace/people#directory");
+    });
+});
+
 describe("settings manifest owns each canonical destination once", () => {
     it("lets no two destinations own the same canonical route", () => {
         const owners = entries
@@ -668,6 +915,41 @@ describe("settings manifest owns each canonical destination once", () => {
             .map((entry) => `${entry.canonicalRoute}#${entry.canonicalSection ?? ""}`);
 
         expect(deepLinks).toEqual([...new Set(deepLinks)]);
+    });
+
+    /**
+     * The same property over every entry, not just the rendering ones.
+     *
+     * Restricting the check above to destinations was honest while the absorbed jobs still rendered;
+     * #1340 PR 8 turned most of them into redirects, which would have left it inspecting a handful
+     * of canonical pages and calling the manifest unambiguous. Widened, it stops being a uniqueness
+     * assertion — legacy aliases legitimately collapse onto the address they alias — and becomes an
+     * inventory of exactly which addresses do, so an accidental collision has to be added here to
+     * pass rather than disappearing into a set that was always going to be unique.
+     *
+     * Each pair below is one canonical address reached by two legacy names. Five are the personal
+     * scope's `/settings/*` aliases for `/account/*`, which stay until the personal routes ship; the
+     * sixth is `/organization` and the group route it now forwards to.
+     */
+    it("enumerates every canonical address that more than one entry resolves to", () => {
+        const byLink = new Map<string, string[]>();
+        for (const entry of entries) {
+            const link = `${entry.canonicalRoute}#${entry.canonicalSection ?? ""}`;
+            byLink.set(link, [...(byLink.get(link) ?? []), entry.id]);
+        }
+        const collapsed = [...byLink.entries()]
+            .filter(([, ids]) => ids.length > 1)
+            .map(([link, ids]) => `${link} <- ${ids.sort().join(", ")}`)
+            .sort();
+
+        expect(collapsed).toEqual([
+            "/settings/organization/general# <- organization.general, organization.home",
+            "/settings/organization/identity#sso <- legacy.settings-sso, organization.sso",
+            "/settings/personal/notifications# <- account.notifications, legacy.settings-notifications",
+            "/settings/personal/profile# <- account.home, account.profile",
+            "/settings/personal/security# <- account.security, legacy.settings-security",
+            "/settings/personal/workspaces# <- account.invites, legacy.settings-membership",
+        ]);
     });
 });
 
@@ -744,13 +1026,23 @@ describe("settings manifest agrees with the navigation that links into settings"
         ).toEqual([]);
     });
 
+    /**
+     * A canary over the scan itself, not over the manifest: it fails if the reconciliation above
+     * ever runs against nothing and passes vacuously.
+     *
+     * Lowered from 20 in #1340 PR 8, and only because the surface it counts genuinely shrank. The
+     * organization tab strip was deleted and the workspace strip fell from nine links to two, which
+     * is the point of the PR — those destinations are now reached through the manifest-resolved
+     * navigation rather than spelled on a strip. The mark tracks the surface down; it must never be
+     * lowered to accommodate a scan that stopped finding files it should still be reading.
+     */
     it("scans navigation sources that actually carry settings links", () => {
         const linked = NAVIGATION_SOURCES.flatMap((source) => linkedRoutes(source.file)).filter(
             underSettingsRoot,
         );
         const named = GENERATED_SOURCES.flatMap((source) => source.registered());
 
-        expect(new Set([...linked, ...named]).size).toBeGreaterThan(20);
+        expect(new Set([...linked, ...named]).size).toBeGreaterThan(12);
     });
 });
 

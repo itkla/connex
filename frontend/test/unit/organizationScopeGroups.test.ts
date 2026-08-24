@@ -313,9 +313,17 @@ describe("each organization destination owns the sections its manifest group pro
             `${ORGANIZATION_AUDIT_DIAGNOSTICS_ROUTE}#diagnostics`,
         );
 
-        const builder = path.join(APP, "lib", "organizationSettingsSections.ts");
+        /**
+         * Two origins, not producers: the builder every consumer asks for an href, and the manifest
+         * the builder reads its slugs from — which since #1340 PR 8 also records each retired
+         * address's redirect target, and that target is this same deep link.
+         */
+        const origins = [
+            path.join(APP, "lib", "organizationSettingsSections.ts"),
+            path.join(APP, "lib", "settingsManifest.ts"),
+        ];
         const strays = appFiles(APP)
-            .filter((file) => file !== builder)
+            .filter((file) => !origins.includes(file))
             .filter((file) => {
                 const text = source(file);
                 return GROUPS.some((group) => text.includes(`${group.route}#`));
@@ -357,7 +365,8 @@ describe("organization standing decides who reaches the organization destination
         const grouped: readonly SettingsEntry[] = SETTINGS_ENTRIES.filter(
             (entry) =>
                 entry.group?.startsWith("organization.") === true
-                && entry.kind === "destination",
+                && entry.canonicalSection !== null
+                && entry.titleKey !== null,
         );
 
         expect(grouped.length).toBeGreaterThan(5);
@@ -494,7 +503,7 @@ describe("the organization destinations keep the write boundaries their panels e
 });
 
 describe("the retired page name does not follow the content to its new home", () => {
-    it("leaves Organization.tabOverview on the legacy tab strip alone", () => {
+    it("retires Organization.tabOverview from the catalog along with the strip that rendered it", () => {
         /**
          * Widened on purpose. The manifest's `as const` narrows every title key to a union the
          * retired key has already left, so comparing against the literal is a type error rather
@@ -512,9 +521,18 @@ describe("the retired page name does not follow the content to its new home", ()
             "§7 retires Overview as a page name and the 2026-08-19 ruling names this group General, so nothing the settings navigation renders may resolve to it",
         ).toEqual([]);
         expect(
-            source(path.join(ORG_COMPONENTS, "OrgTabs.tsx")),
-            "the legacy tab strip still titles the route it still serves",
-        ).toContain("tabOverview");
+            existsSync(path.join(ORG_COMPONENTS, "OrgTabs.tsx")),
+            "the tab strip that was the key's last consumer is gone, and the key with it",
+        ).toBe(false);
+        for (const locale of ["en", "ja"]) {
+            const catalog = JSON.parse(
+                readFileSync(path.join(process.cwd(), "messages", locale, "organization.json"), "utf8"),
+            );
+            expect(
+                Object.keys(catalog.Organization),
+                `${locale} still carries the retired page name`,
+            ).not.toContain("tabOverview");
+        }
     });
 
     it("names each destination by the group name the epic gives it", () => {
@@ -566,7 +584,7 @@ describe("the organization destinations' copy resolves to finished sentences", (
     });
 });
 
-describe("the legacy organization routes keep rendering what they always did", () => {
+describe("the legacy organization routes forward to the destinations that absorbed them", () => {
     it.each([
         "/organization/overview",
         "/organization/members",
@@ -576,15 +594,36 @@ describe("the legacy organization routes keep rendering what they always did", (
         "/organization/data-requests",
         "/organization/audit",
         "/organization/diagnostics",
-    ])("still serves %s from the manifest and from disk", (route) => {
+    ])("retires %s into a permanent forward that keeps the address alive", (route) => {
         const entry = SETTINGS_ENTRIES.find((candidate) => candidate.currentRoute === route);
 
-        expect(entry?.kind, "the redirects are PR 8's work, not this one's").toBe("destination");
-        expect(entry?.redirectsTo).toBeNull();
-        expect(existsSync(path.join(routeDir(route), "page.tsx"))).toBe(true);
+        expect(entry?.kind, "#1340 PR 8 is where these addresses stopped rendering").toBe("redirect");
+        expect(entry?.redirectsTo).toBe(
+            entry?.canonicalSection === null
+                ? entry?.canonicalRoute
+                : `${entry?.canonicalRoute}#${entry?.canonicalSection}`,
+        );
+        expect(
+            existsSync(path.join(routeDir(route), "page.tsx")),
+            "the page survives as a stub; deleting it would 404 an address readers have bookmarked",
+        ).toBe(true);
+        expect(source(path.join(routeDir(route), "page.tsx"))).toContain("permanentRedirect(");
     });
 
-    it("defaults every shared panel to the presentation its own route ships", () => {
+    /**
+     * The `page` presentation is retained rather than exercised, and that is a deliberate hold.
+     *
+     * Each of these panels took its `page` default from the standalone organization route that
+     * rendered it; every one of those routes now forwards, so no caller passes `page` any more and
+     * the branch is unreachable in the shipped app. Collapsing six unions and the shells behind them
+     * is a mechanical refactor across the panels and their pinned assertions, and doing it in the
+     * same diff as the redirect matrix would mix a behavioural change with a structural one. It is
+     * tracked as a residual of #1340 rather than done quietly here.
+     *
+     * The assertion is kept, retitled, so the branch stays intact until it is removed on purpose —
+     * a half-collapsed union that still defaults to `page` would be worse than either end state.
+     */
+    it("retains the unexercised page presentation on every shared panel", () => {
         for (const panel of [
             "OrgMembersPanel.tsx",
             "OrgAllowedDomainsPanel.tsx",
@@ -594,7 +633,7 @@ describe("the legacy organization routes keep rendering what they always did", (
         ]) {
             expect(
                 source(path.join(ORG_COMPONENTS, panel)),
-                `${panel} must keep its legacy home unchanged unless a caller asks otherwise`,
+                `${panel} keeps its default until the presentation union is collapsed deliberately`,
             ).toContain('presentation = "page"');
         }
         expect(source(path.join(COMPONENTS, "SsoPanel.tsx"))).toContain('presentation = "page"');

@@ -30,11 +30,18 @@ export type SettingsAvailabilityState =
     /** "Temporarily unavailable — retry" — the capability or permission lookup failed. */
     | "retry";
 
-/** Where a destination is registered in navigation today. */
+/**
+ * Where a destination is registered in navigation today.
+ *
+ * `organization-tabs` is gone from this union, not merely unused: #1340 PR 8 redirected every
+ * `/organization/*` address, which left `OrgTabs` with nothing to link, and the strip and its
+ * layout were deleted. Keeping the variant would let an entry claim a surface that no longer
+ * exists. The two remaining strips are held deliberately — see `TAB_STRIP_SOURCES` in
+ * `settingsManifest.test.ts` for which routes keep each one alive.
+ */
 export type SettingsEntryPoint =
     | "account-tabs"
     | "settings-tabs"
-    | "organization-tabs"
     | "sidebar"
     | "avatar-menu"
     | "command-palette"
@@ -203,9 +210,27 @@ export type SettingsEntry = {
      * at `{canonicalRoute}#{canonicalSection}`; null when the entry owns the destination outright.
      */
     canonicalSection: string | null;
-    /** Where the server forwards the browser today; null when the entry renders. */
+    /**
+     * Where the server forwards the browser today; null when the entry renders.
+     *
+     * Carries a fragment once the job has become a section of a consolidated destination —
+     * `/settings/workspace/people#members` rather than a bare route — because the section is the
+     * part of the address that preserves what the reader asked for. The gates in
+     * `settingsManifest.test.ts` resolve the route half against the shipped surface and hold the
+     * fragment to the entry's own `canonicalSection`, so the two halves cannot drift.
+     *
+     * A forward is one hop. Where a legacy address used to point at another legacy address that has
+     * since started redirecting itself, this field names the final destination instead of the
+     * middle one; `no-chain` in the gate is what keeps it that way.
+     */
     redirectsTo: string | null;
-    /** Query keys the forward carries and a successor redirect must preserve. */
+    /**
+     * Query keys the forward carries and a successor redirect must preserve.
+     *
+     * Names the keys a shipped forward is known to depend on. The redirect stubs preserve the whole
+     * query string regardless — an unrecognized parameter is the reader's, not the route's, and
+     * dropping it silently is how a shared link stops meaning what it said.
+     */
     redirectQuery: readonly string[];
     /** A capability state under which a rendering destination forwards away instead; null when none. */
     conditionalForward: SettingsConditionalForward | null;
@@ -553,11 +578,11 @@ export const SETTINGS_ENTRIES = [
     {
         id: "workspace.audit-log",
         currentRoute: "/admin/logs",
-        kind: "destination",
+        kind: "redirect",
         group: "workspace.audit-diagnostics",
         canonicalRoute: "/settings/workspace/audit-diagnostics",
         canonicalSection: "audit",
-        redirectsTo: null,
+        redirectsTo: "/settings/workspace/audit-diagnostics#audit",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: "CommonSidebar.navAuditLog",
@@ -581,7 +606,7 @@ export const SETTINGS_ENTRIES = [
         group: "organization.general",
         canonicalRoute: "/settings/organization/general",
         canonicalSection: null,
-        redirectsTo: "/organization/overview",
+        redirectsTo: "/settings/organization/general",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: null,
@@ -601,11 +626,11 @@ export const SETTINGS_ENTRIES = [
     {
         id: "organization.ai",
         currentRoute: "/organization/ai",
-        kind: "destination",
+        kind: "redirect",
         group: "organization.ai-governance",
         canonicalRoute: "/settings/organization/ai-governance",
         canonicalSection: "ai-provider",
-        redirectsTo: null,
+        redirectsTo: "/settings/organization/ai-governance#ai-provider",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: "Organization.tabAi",
@@ -619,17 +644,17 @@ export const SETTINGS_ENTRIES = [
             orgWrite: "admin",
             states: ["ask-admin", "retry"],
         },
-        entryPoints: ["organization-tabs"],
+        entryPoints: [],
         aliasKey: null,
     },
     {
         id: "organization.allowed-domains",
         currentRoute: "/organization/allowed-domains",
-        kind: "destination",
+        kind: "redirect",
         group: "organization.identity",
         canonicalRoute: "/settings/organization/identity",
         canonicalSection: "allowed-domains",
-        redirectsTo: null,
+        redirectsTo: "/settings/organization/identity#allowed-domains",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: "Organization.tabDomains",
@@ -643,17 +668,17 @@ export const SETTINGS_ENTRIES = [
             orgWrite: "admin",
             states: ["ask-admin", "retry"],
         },
-        entryPoints: ["organization-tabs"],
+        entryPoints: [],
         aliasKey: null,
     },
     {
         id: "organization.audit",
         currentRoute: "/organization/audit",
-        kind: "destination",
+        kind: "redirect",
         group: "organization.audit-diagnostics",
         canonicalRoute: "/settings/organization/audit-diagnostics",
         canonicalSection: "audit",
-        redirectsTo: null,
+        redirectsTo: "/settings/organization/audit-diagnostics#audit",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: "Organization.tabAudit",
@@ -667,7 +692,7 @@ export const SETTINGS_ENTRIES = [
             orgWrite: null,
             states: ["ask-admin", "retry"],
         },
-        entryPoints: ["organization-tabs"],
+        entryPoints: [],
         aliasKey: null,
     },
     {
@@ -678,11 +703,11 @@ export const SETTINGS_ENTRIES = [
          */
         id: "organization.data-subject-requests",
         currentRoute: "/organization/data-requests",
-        kind: "destination",
+        kind: "redirect",
         group: "organization.data-requests",
         canonicalRoute: "/settings/organization/data-requests",
         canonicalSection: "requests",
-        redirectsTo: null,
+        redirectsTo: "/settings/organization/data-requests#requests",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: "OrgDataRequests.title",
@@ -696,17 +721,17 @@ export const SETTINGS_ENTRIES = [
             orgWrite: "admin",
             states: ["ask-admin", "retry"],
         },
-        entryPoints: ["organization-tabs"],
+        entryPoints: [],
         aliasKey: null,
     },
     {
         id: "organization.diagnostics",
         currentRoute: "/organization/diagnostics",
-        kind: "destination",
+        kind: "redirect",
         group: "organization.audit-diagnostics",
         canonicalRoute: "/settings/organization/audit-diagnostics",
         canonicalSection: "diagnostics",
-        redirectsTo: null,
+        redirectsTo: "/settings/organization/audit-diagnostics#diagnostics",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: "Organization.tabDiagnostics",
@@ -720,17 +745,17 @@ export const SETTINGS_ENTRIES = [
             orgWrite: null,
             states: ["ask-admin", "retry"],
         },
-        entryPoints: ["organization-tabs"],
+        entryPoints: [],
         aliasKey: null,
     },
     {
         id: "organization.administrators",
         currentRoute: "/organization/members",
-        kind: "destination",
+        kind: "redirect",
         group: "organization.identity",
         canonicalRoute: "/settings/organization/identity",
         canonicalSection: "administrators",
-        redirectsTo: null,
+        redirectsTo: "/settings/organization/identity#administrators",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: "Organization.tabMembers",
@@ -744,24 +769,29 @@ export const SETTINGS_ENTRIES = [
             orgWrite: "owner",
             states: ["ask-admin", "retry"],
         },
-        entryPoints: ["organization-tabs", "sidebar", "command-palette"],
+        entryPoints: ["sidebar", "command-palette"],
         aliasKey: null,
     },
     {
         id: "organization.overview",
         currentRoute: "/organization/overview",
-        kind: "destination",
+        kind: "redirect",
         group: "organization.general",
         canonicalRoute: "/settings/organization/general",
         canonicalSection: "identity",
-        redirectsTo: null,
+        redirectsTo: "/settings/organization/general#identity",
         redirectQuery: [],
         conditionalForward: null,
         /**
-         * The shipped `Organization.tabOverview` stays on the legacy tab strip and goes no further.
          * §7 retires "Overview" as a page name and the 2026-08-19 ruling names this group General,
          * so the job this entry becomes is named for what it does — the organization's identity —
          * rather than for the tab it arrived on.
+         *
+         * `Organization.tabOverview` was the last string in the product that still read "Overview"
+         * as a destination name. It survived only because the legacy tab strip still rendered it;
+         * #1340 PR 8 retired that strip along with the routes under it, and the key was deleted in
+         * the same commit. §7's "survives nowhere as a page name" is now literally true, and
+         * `organizationScopeGroups.test.ts` holds it there.
          */
         titleKey: "OrgOverview.identityTitle",
         access: {
@@ -774,17 +804,17 @@ export const SETTINGS_ENTRIES = [
             orgWrite: "admin",
             states: ["ask-admin", "retry"],
         },
-        entryPoints: ["organization-tabs"],
+        entryPoints: [],
         aliasKey: null,
     },
     {
         id: "organization.sso",
         currentRoute: "/organization/sso",
-        kind: "destination",
+        kind: "redirect",
         group: "organization.identity",
         canonicalRoute: "/settings/organization/identity",
         canonicalSection: "sso",
-        redirectsTo: null,
+        redirectsTo: "/settings/organization/identity#sso",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: "Organization.tabSso",
@@ -798,17 +828,17 @@ export const SETTINGS_ENTRIES = [
             orgWrite: "admin",
             states: ["not-enabled", "ask-admin", "retry"],
         },
-        entryPoints: ["organization-tabs"],
+        entryPoints: [],
         aliasKey: null,
     },
     {
         id: "workspace.approval-policies",
         currentRoute: "/records/approval-policies",
-        kind: "destination",
+        kind: "redirect",
         group: "workspace.crm",
         canonicalRoute: "/settings/workspace/crm",
         canonicalSection: "approval-policies",
-        redirectsTo: null,
+        redirectsTo: "/settings/workspace/crm#approval-policies",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: "CommonSidebar.navApprovalPolicies",
@@ -849,11 +879,11 @@ export const SETTINGS_ENTRIES = [
     {
         id: "workspace.custom-fields",
         currentRoute: "/settings/custom-fields",
-        kind: "destination",
+        kind: "redirect",
         group: "workspace.crm",
         canonicalRoute: "/settings/workspace/crm",
         canonicalSection: "custom-fields",
-        redirectsTo: null,
+        redirectsTo: "/settings/workspace/crm#custom-fields",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: "WorkspaceSettings.tabCustomFields",
@@ -867,7 +897,7 @@ export const SETTINGS_ENTRIES = [
             orgWrite: null,
             states: ["ask-admin", "retry"],
         },
-        entryPoints: ["settings-tabs"],
+        entryPoints: [],
         aliasKey: null,
     },
     {
@@ -906,11 +936,11 @@ export const SETTINGS_ENTRIES = [
     {
         id: "workspace.delivery",
         currentRoute: "/settings/delivery",
-        kind: "destination",
+        kind: "redirect",
         group: "workspace.communications",
         canonicalRoute: "/settings/workspace/communications",
         canonicalSection: "delivery",
-        redirectsTo: null,
+        redirectsTo: "/settings/workspace/communications#delivery",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: "WorkspaceSettings.tabDelivery",
@@ -924,17 +954,17 @@ export const SETTINGS_ENTRIES = [
             orgWrite: null,
             states: ["ask-admin", "retry"],
         },
-        entryPoints: ["settings-tabs"],
+        entryPoints: [],
         aliasKey: null,
     },
     {
         id: "workspace.diagnostics",
         currentRoute: "/settings/diagnostics",
-        kind: "destination",
+        kind: "redirect",
         group: "workspace.audit-diagnostics",
         canonicalRoute: "/settings/workspace/audit-diagnostics",
         canonicalSection: "diagnostics",
-        redirectsTo: null,
+        redirectsTo: "/settings/workspace/audit-diagnostics#diagnostics",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: "WorkspaceSettings.tabDiagnostics",
@@ -948,17 +978,17 @@ export const SETTINGS_ENTRIES = [
             orgWrite: null,
             states: ["ask-admin", "retry"],
         },
-        entryPoints: ["settings-tabs", "command-palette"],
+        entryPoints: ["command-palette"],
         aliasKey: null,
     },
     {
         id: "workspace.email",
         currentRoute: "/settings/email",
-        kind: "destination",
+        kind: "redirect",
         group: "workspace.communications",
         canonicalRoute: "/settings/workspace/communications",
         canonicalSection: "email",
-        redirectsTo: null,
+        redirectsTo: "/settings/workspace/communications#email",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: "WorkspaceSettings.tabEmail",
@@ -972,7 +1002,7 @@ export const SETTINGS_ENTRIES = [
             orgWrite: null,
             states: ["managed", "ask-admin", "retry"],
         },
-        entryPoints: ["settings-tabs"],
+        entryPoints: [],
         aliasKey: null,
     },
     {
@@ -1002,11 +1032,11 @@ export const SETTINGS_ENTRIES = [
     {
         id: "workspace.members",
         currentRoute: "/settings/members",
-        kind: "destination",
+        kind: "redirect",
         group: "workspace.people",
         canonicalRoute: "/settings/workspace/people",
         canonicalSection: "members",
-        redirectsTo: null,
+        redirectsTo: "/settings/workspace/people#members",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: "WorkspaceSettings.tabMembers",
@@ -1025,7 +1055,7 @@ export const SETTINGS_ENTRIES = [
          * `settings.home`, and the members roster is reached as a section of People & access rather
          * than as the thing the word "Settings" happens to open.
          */
-        entryPoints: ["settings-tabs", "contextual"],
+        entryPoints: ["contextual"],
         aliasKey: null,
     },
     {
@@ -1207,11 +1237,11 @@ export const SETTINGS_ENTRIES = [
     {
         id: "workspace.qualification",
         currentRoute: "/settings/qualification",
-        kind: "destination",
+        kind: "redirect",
         group: "workspace.crm",
         canonicalRoute: "/settings/workspace/crm",
         canonicalSection: "qualification",
-        redirectsTo: null,
+        redirectsTo: "/settings/workspace/crm#qualification",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: "WorkspaceSettings.tabQualification",
@@ -1225,17 +1255,17 @@ export const SETTINGS_ENTRIES = [
             orgWrite: null,
             states: ["ask-admin", "retry"],
         },
-        entryPoints: ["settings-tabs"],
+        entryPoints: [],
         aliasKey: null,
     },
     {
         id: "workspace.roles",
         currentRoute: "/settings/roles",
-        kind: "destination",
+        kind: "redirect",
         group: "workspace.people",
         canonicalRoute: "/settings/workspace/people",
         canonicalSection: "roles",
-        redirectsTo: null,
+        redirectsTo: "/settings/workspace/people#roles",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: "WorkspaceSettings.tabRoles",
@@ -1249,7 +1279,7 @@ export const SETTINGS_ENTRIES = [
             orgWrite: null,
             states: ["ask-admin", "retry"],
         },
-        entryPoints: ["settings-tabs"],
+        entryPoints: [],
         aliasKey: null,
     },
     {
@@ -1289,7 +1319,7 @@ export const SETTINGS_ENTRIES = [
         group: "organization.identity",
         canonicalRoute: "/settings/organization/identity",
         canonicalSection: "sso",
-        redirectsTo: "/organization/sso",
+        redirectsTo: "/settings/organization/identity#sso",
         redirectQuery: [],
         conditionalForward: null,
         titleKey: null,
@@ -1427,11 +1457,11 @@ export const SETTINGS_ENTRIES = [
     {
         id: "workspace.people-directory",
         currentRoute: "/users",
-        kind: "destination",
+        kind: "redirect",
         group: "workspace.people",
         canonicalRoute: "/settings/workspace/people",
         canonicalSection: "directory",
-        redirectsTo: null,
+        redirectsTo: "/settings/workspace/people#directory",
         redirectQuery: [],
         conditionalForward: null,
         /**
@@ -1458,6 +1488,29 @@ export const SETTINGS_ENTRIES = [
         aliasKey: "Actions.keywords.navigate.users",
     },
     {
+        /**
+         * **Deliberately not redirected by #1340 PR 8, and this is the record of that decision.**
+         *
+         * Every other absorbed job in this manifest became a redirect once its canonical destination
+         * shipped. This one did not, because its canonical section is a stub and the entry it would
+         * be redirected onto answers a different question than the address asks. `#member-detail` is
+         * a bare wrapper around the directory list — it takes no id, reads no query, and sits one
+         * heading below `#directory`, so `/users/42` would arrive at an unfiltered roster having
+         * silently dropped the 42. The profile it would drop is not a thin one: the member's
+         * identity, attachments, a ninety-day performance snapshot, and a merged activity timeline
+         * exist at `/users/[id]` and nowhere else in the settings tree.
+         *
+         * A permanent redirect that loses its subject is worse than no redirect. The epic's rule is
+         * that no old URL 404s, and this one does not — it still serves the page it always served.
+         * The rule it would otherwise break is the one directly above it in the same acceptance
+         * list: that a redirect preserves the reader's intended subsection.
+         *
+         * So the entry stays a destination and keeps `redirectsTo: null`. What retires it is a real
+         * member-detail surface under People & access that accepts an id; until then this route is
+         * the canonical owner of the job in fact, whatever the section slug promises.
+         * `settingsManifest.test.ts` pins this hold rather than leaving it to be noticed, so the
+         * redirect cannot be added without deleting the pin and reading this.
+         */
         id: "workspace.people-detail",
         currentRoute: "/users/[id]",
         kind: "destination",

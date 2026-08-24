@@ -2,16 +2,13 @@
   "Organization": {
     "title": "Organization",
     "subtitle": "Administer your organization — the account above your workspaces. These settings apply to every workspace in the organization.",
-    "tabOverview": "Overview",
     "tabMembers": "Administrators",
     "tabDomains": "Allowed domains",
     "tabSso": "Single sign-on",
-    "tabSsoAvailabilityUnknown": "Availability could not be confirmed",
     "tabAi": "AI provider",
     "tabAudit": "Audit log",
     "noAccessTitle": "Organization administrators only",
     "noAccessBody": "You need an organization owner or admin role to manage these settings.",
-    "tabDataRequests": "Data requests",
     "tabDiagnostics": "Diagnostics"
   },
   "OrgOverview": {
