@@ -13,7 +13,7 @@ class ProviderDisconnectRetentionMigrationArchTest {
     @Test
     void migrationAddsInternalStatesAndRemovesTheDeadSyncTimestamp() throws Exception {
         String migration = resource(
-            "db/migration/control/V187__provider_disconnect_retention.sql");
+            "db/migration/control/V188__provider_disconnect_retention.sql");
 
         assertTrue(migration.contains("'revoking'"));
         assertTrue(migration.contains("'disconnected'"));
