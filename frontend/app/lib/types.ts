@@ -1531,6 +1531,17 @@ export type UpdateStagePayload = {
     failure?: boolean;
 };
 
+/**
+ * One entry in a pipeline's intended stage set. An `id` marks an existing stage to keep; omitting it
+ * creates one. Order in the list is the stage order — the server renumbers positions to match.
+ */
+export type PipelineStageInput = {
+    id?: number;
+    name: string;
+    success: boolean;
+    failure: boolean;
+};
+
 export type UpdatePipelinePayload = {
     name?: string;
 };

@@ -3608,6 +3608,16 @@ export function updateStage(id: number, payload: Types.UpdateStagePayload) {
     return putJson<Types.Stage>(`/api/pipelines/stages/${id}`, payload);
 }
 
+/**
+ * Replaces a pipeline's whole stage set in one transactional request. Entries with an `id` are kept
+ * and updated, entries without one are created, and any stage absent from the list is removed;
+ * positions follow the order given. Validating the final set is what lets a name swap or a moved
+ * Won flag succeed, neither of which is expressible as a sequence of single-stage writes.
+ */
+export function replacePipelineStages(pipelineId: number, stages: Types.PipelineStageInput[]) {
+    return putJson<Types.Stage[]>(`/api/pipelines/${pipelineId}/stages`, { stages });
+}
+
 export function deleteStage(id: number, init: RequestInit = {}) {
     return deleteJson<void>(`/api/pipelines/stages/${id}`, init);
 }
