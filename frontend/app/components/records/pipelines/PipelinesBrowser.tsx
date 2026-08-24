@@ -35,7 +35,6 @@ import {
     createPipeline,
     createStage,
     deletePipeline,
-    deleteStage,
     getActivities,
     getDeals,
     getWorkspaceNotes,
@@ -43,8 +42,8 @@ import {
     getTasks,
     getUsers,
     isFieldError,
+    replacePipelineStages,
     updatePipeline,
-    updateStage,
 } from '@/app/lib/api';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 import { PIPELINE_EDIT_URL_KEY, writeOwnedParamsToUrl } from '@/app/hooks/listStateUrl';
@@ -333,41 +332,18 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                 changed.map(async (p) => {
                     const draft = drafts[p.id];
                     const original = toDraft(p, stagesByPipeline.get(p.id) ?? []);
-                    const originalStages = stagesByPipeline.get(p.id) ?? [];
 
                     if (original.name !== draft.name) {
                         const payload: UpdatePipelinePayload = { name: draft.name.trim() };
                         await updatePipeline(p.id, payload);
                     }
 
-                    const draftIds = new Set(
-                        draft.stages.filter((s) => s.id !== null).map((s) => s.id as number),
-                    );
-                    const toDelete = originalStages.filter((s) => !draftIds.has(s.id));
-                    const originalById = new Map(originalStages.map((s) => [s.id, s]));
-
-                    for (const stage of toDelete) {
-                        await deleteStage(stage.id);
-                    }
-
-                    const maxOriginalPosition = originalStages.reduce(
-                        (max, s) => Math.max(max, s.position),
-                        -1,
-                    );
-                    let nextNewPosition = maxOriginalPosition + 1;
-
-                    for (const s of draft.stages) {
-                        const name = s.name.trim();
-                        if (s.id !== null) {
-                            const orig = originalById.get(s.id);
-                            if (orig && (orig.name !== name || orig.success !== s.success || orig.failure !== s.failure)) {
-                                await updateStage(s.id, { name, position: orig.position, success: s.success, failure: s.failure });
-                            }
-                        } else {
-                            await createStage(p.id, { name, position: nextNewPosition, success: s.success, failure: s.failure });
-                            nextNewPosition++;
-                        }
-                    }
+                    await replacePipelineStages(p.id, (stagesByPipeline.get(p.id) ?? []).map((s) => s.id), draft.stages.map((s) => ({
+                        id: s.id ?? undefined,
+                        name: s.name.trim(),
+                        success: s.success,
+                        failure: s.failure,
+                    })));
                 }),
             );
             toastSuccess(

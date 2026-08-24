@@ -7,7 +7,7 @@ import { useTranslations } from 'next-intl';
 
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
-import { createStage, deleteStage, getStagesByPipelineId, updatePipeline, updateStage } from '@/app/lib/api';
+import { replacePipelineStages, updatePipeline } from '@/app/lib/api';
 import { Pipeline, Stage, UpdatePipelinePayload } from '@/app/lib/types';
 import QuickEditPipelineSheet, { type PipelineDraft, type StageKind } from '@/app/components/records/pipelines/QuickEditPipelineSheet';
 
@@ -118,34 +118,15 @@ export default function EditPipelineSheet({
                 await updatePipeline(pipeline.id, payload);
             }
 
-            const draftIds = new Set(draft.stages.filter((s) => s.id !== null).map((s) => s.id as number));
-            const toDelete = stages.filter((s) => !draftIds.has(s.id));
-            const originalById = new Map(stages.map((s) => [s.id, s]));
-
-            for (const stage of toDelete) {
-                await deleteStage(stage.id);
-            }
-
-            const maxOriginalPosition = stages.reduce((max, s) => Math.max(max, s.position), -1);
-            let nextNewPosition = maxOriginalPosition + 1;
-
-            for (const s of draft.stages) {
-                const name = s.name.trim();
-                if (s.id !== null) {
-                    const orig = originalById.get(s.id);
-                    if (orig && (orig.name !== name || orig.success !== s.success || orig.failure !== s.failure)) {
-                        await updateStage(s.id, { name, position: orig.position, success: s.success, failure: s.failure });
-                    }
-                } else {
-                    await createStage(pipeline.id, { name, position: nextNewPosition, success: s.success, failure: s.failure });
-                    nextNewPosition++;
-                }
-            }
+            const fresh = await replacePipelineStages(pipeline.id, stages.map((s) => s.id), draft.stages.map((s) => ({
+                id: s.id ?? undefined,
+                name: s.name.trim(),
+                success: s.success,
+                failure: s.failure,
+            })));
 
             toastSuccess(t('pipelineUpdated'));
             handleOpenChange(false);
-
-            const fresh = await getStagesByPipelineId(pipeline.id);
             setDraft(toDraft(pipeline, fresh));
             router.refresh();
         } catch (err) {
