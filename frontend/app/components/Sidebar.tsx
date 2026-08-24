@@ -72,6 +72,7 @@ import { useRecentRecords } from '@/app/hooks/useRecentRecords';
 import { savedViewHref, savedViewRecordIcon, savedViewRecordPath, savedViewToken } from '@/app/lib/savedViewLink';
 import { recentRecordHref } from '@/app/lib/recentRecords';
 import type { SidebarSectionId } from '@/app/lib/sidebarSections';
+import { CONNECTED_ACCOUNTS_ROUTE } from '@/app/lib/connectedAccountsSections';
 import { settingsDestination, type SettingsDestination } from '@/app/lib/settingsEntryPoints';
 import type { NavAccess } from '@/app/lib/navAccess';
 import { useSidebarSections } from '@/app/hooks/useSidebarSections';
@@ -129,7 +130,8 @@ function useSections(navAccess: NavAccess): NavSection[] {
     const sectionPathname = usePathname() ?? "";
     const sectionSearchParams = useSearchParams();
     const captureReviewsActive =
-        sectionPathname === "/account/connections" && sectionSearchParams.get("panel") === "reviews";
+        sectionPathname === CONNECTED_ACCOUNTS_ROUTE
+        && sectionSearchParams.get("panel") === "reviews";
     const workspaceItems: NavItem[] = [
         settingsNavItem(settingsDestination("workspace.people-directory"), UserGroupIcon, tManifest),
         ...(navAccess.workflows

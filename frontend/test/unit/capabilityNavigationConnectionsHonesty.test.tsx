@@ -10,10 +10,11 @@ import {
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import AccountConnectionsPage from "@/app/(app)/account/connections/page";
+import ConnectedAccountsPage from "@/app/(app)/settings/personal/connected-accounts/page";
 import CaptureReviewsPage from "@/app/(app)/account/connections/reviews/page";
 import AppLayout from "@/app/(app)/layout";
 import ConnectionsPanel from "@/app/components/account/ConnectionsPanel";
+import PersonalConnectedAccounts from "@/app/components/settings/PersonalConnectedAccounts";
 import CapabilityUnavailablePage from "@/app/components/CapabilityUnavailablePage";
 import ContentShell from "@/app/components/ContentShell";
 import Sidebar from "@/app/components/Sidebar";
@@ -316,15 +317,22 @@ function hasSidebarContract(value: unknown): value is { navAccess: NavAccess; us
         && "user" in value;
 }
 
-function hasConnectionsContract(value: unknown): value is {
-    capabilitiesAvailability: CapabilityAvailability;
-} {
+function hasConnectionsContract(
+    value: unknown,
+): value is ComponentProps<typeof ConnectionsPanel> {
     return typeof value === "object"
         && value !== null
         && "capabilitiesAvailability" in value
         && (value.capabilitiesAvailability === "enabled"
             || value.capabilitiesAvailability === "disabled"
-            || value.capabilitiesAvailability === "unavailable");
+            || value.capabilitiesAvailability === "unavailable")
+        && "capabilities" in value
+        && typeof value.capabilities === "object"
+        && value.capabilities !== null
+        && "effectivePermissions" in value
+        && Array.isArray(value.effectivePermissions)
+        && "permissionsStatus" in value
+        && (value.permissionsStatus === "resolved" || value.permissionsStatus === "unavailable");
 }
 
 function sidebarFromLayout(rendered: ReactNode): ReactElement {
@@ -408,43 +416,62 @@ describe("command navigation capability honesty", () => {
     });
 });
 
-describe("connections page capability honesty", () => {
+/**
+ * The capability contract the route hands down, and the panel built from it.
+ *
+ * #1340 WS4.2 moved this surface to `/settings/personal/connected-accounts`, where the route hands
+ * its four resolved values to the page component and that component passes them through to the
+ * shipped panel. The route's job is still exactly what it was — resolve the capabilities and the
+ * effective permissions honestly, and refuse to canonicalize a deep link on a lookup that did not
+ * answer — so the assertions are unchanged; what they read them from is one element further out.
+ *
+ * The panel is rendered from those same props rather than from the page component, because the
+ * page component is where the composition lives and the honesty being tested is the panel's.
+ */
+function connectedAccountsContract(
+    rendered: ReactNode,
+): ComponentProps<typeof ConnectionsPanel> {
+    const composed = findByType(rendered, PersonalConnectedAccounts);
+    if (composed === null || !hasConnectionsContract(composed.props)) {
+        throw new Error("Connected accounts page did not render the expected capability contract");
+    }
+    return composed.props;
+}
+
+describe("connected accounts page capability honesty", () => {
     it("preserves a provider deep link when the capability lookup fails", async () => {
         stubAppReads(null);
 
-        const rendered = await AccountConnectionsPage({
+        const rendered = await ConnectedAccountsPage({
             searchParams: Promise.resolve({ provider: "google" }),
         });
 
-        expect(findByType(rendered, ConnectionsPanel)).not.toBeNull();
+        expect(findByType(rendered, PersonalConnectedAccounts)).not.toBeNull();
         expect(redirectMock).not.toHaveBeenCalled();
     });
 
     it("preserves a workspace-policy deep link when the capability lookup fails", async () => {
         stubAppReads(null);
 
-        const rendered = await AccountConnectionsPage({
+        const rendered = await ConnectedAccountsPage({
             searchParams: Promise.resolve({
                 provider: "google",
                 panel: "workspace-policy",
             }),
         });
 
-        expect(findByType(rendered, ConnectionsPanel)).not.toBeNull();
+        expect(findByType(rendered, PersonalConnectedAccounts)).not.toBeNull();
         expect(redirectMock).not.toHaveBeenCalled();
     });
 
     it("keeps the connections page mounted and renders a retryable unavailable section after lookup failure", async () => {
         stubAppReads(null);
 
-        const rendered = await AccountConnectionsPage({ searchParams: Promise.resolve({}) });
-        const panel = findByType(rendered, ConnectionsPanel);
-        if (panel === null || !hasConnectionsContract(panel.props)) {
-            throw new Error("Connections page did not render the expected capability contract");
-        }
-        const html = renderToStaticMarkup(panel);
+        const rendered = await ConnectedAccountsPage({ searchParams: Promise.resolve({}) });
+        const composed = connectedAccountsContract(rendered);
+        const html = renderToStaticMarkup(<ConnectionsPanel {...composed} />);
 
-        expect(panel.props.capabilitiesAvailability).toBe("unavailable");
+        expect(composed.capabilitiesAvailability).toBe("unavailable");
         expect(html).toContain("AccountConnections.title");
         expect(html).toContain("CapabilityUnavailable.title");
         expect(html).toContain("CapabilityUnavailable.retry");
@@ -453,14 +480,11 @@ describe("connections page capability honesty", () => {
     it("keeps a resolved no-provider deployment distinct from lookup failure", async () => {
         stubAppReads(DISABLED_CAPABILITIES);
 
-        const rendered = await AccountConnectionsPage({ searchParams: Promise.resolve({}) });
-        const panel = findByType(rendered, ConnectionsPanel);
-        if (panel === null || !hasConnectionsContract(panel.props)) {
-            throw new Error("Connections page did not render the expected capability contract");
-        }
-        const html = renderToStaticMarkup(panel);
+        const rendered = await ConnectedAccountsPage({ searchParams: Promise.resolve({}) });
+        const composed = connectedAccountsContract(rendered);
+        const html = renderToStaticMarkup(<ConnectionsPanel {...composed} />);
 
-        expect(panel.props.capabilitiesAvailability).toBe("disabled");
+        expect(composed.capabilitiesAvailability).toBe("disabled");
         expect(html).toContain("AccountConnections.title");
         expect(html).not.toContain("CapabilityUnavailable.title");
     });

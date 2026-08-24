@@ -1,3 +1,4 @@
+import { CONNECTED_ACCOUNTS_ROUTE } from '@/app/lib/connectedAccountsSections';
 import type {
     Activity,
     CaptureHealthStatus,
@@ -65,7 +66,16 @@ export function parseCaptureRouteState(searchParams: URLSearchParams): CaptureRo
     return { provider, panel, reviewId, page };
 }
 
-/** Returns the canonical internal account URL while preserving unrelated validated callback state. */
+/**
+ * Returns the canonical internal Connected accounts URL while preserving unrelated validated
+ * callback state.
+ *
+ * The route half is the canonical destination's, read from the section module rather than spelled
+ * here. #1340 WS4.2 moved this surface to `/settings/personal/connected-accounts`, and the panel
+ * rewrites its own address through this builder as the reader opens and closes its drawers — so a
+ * route spelled here and left behind would bounce every one of those interactions back through the
+ * retired address's redirect.
+ */
 export function captureConnectionsHref(
     current: URLSearchParams,
     next: Partial<CaptureRouteState>,
@@ -89,7 +99,7 @@ export function captureConnectionsHref(
     }
 
     const query = params.toString();
-    return query ? `/account/connections?${query}` : '/account/connections';
+    return query ? `${CONNECTED_ACCOUNTS_ROUTE}?${query}` : CONNECTED_ACCOUNTS_ROUTE;
 }
 
 /** Removes only the OAuth callback fields and canonicalizes capture panel parameters. */

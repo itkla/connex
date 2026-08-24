@@ -73,16 +73,18 @@ const REGISTER_ENTRY =
 /**
  * Which entry points each navigation source that still spells routes can register.
  *
- * Two strips remain, and each survives because routes it links still render. `OrgTabs` does not:
- * #1340 PR 8 turned every `/organization/*` address into a redirect, which left the strip with
- * nothing to link and its layout with nothing to wrap, so both were deleted and the
- * `organization-tabs` entry point went with them.
+ * **None do, and the list is empty by design rather than by omission.** Three peer-tab strips used
+ * to spell settings routes by hand. `OrgTabs` went in #1340 PR 8, which turned every
+ * `/organization/*` address into a redirect and left the strip with nothing to link. `AccountTabs`
+ * and `SettingsTabs` were held back by that same PR for one reason — the five personal destinations
+ * and the two remaining workspace ones had no canonical route to be sent to, so retiring their
+ * strips would have stranded pages that still served. This PR ships those seven destinations, and
+ * both strips were deleted with them along with their entry-point variants.
  *
- * The other two are held rather than kept. `AccountTabs` links five personal destinations whose
- * canonical `/settings/personal/*` routes were never built, and `SettingsTabs` links the two
- * workspace destinations — General and Data & privacy — in the same position. Retiring either
- * strip before its destinations move would strand pages that still serve. What retires them is the
- * personal scope and the two remaining workspace groups shipping, not another pass over this list.
+ * The empty list is still load-bearing: it is what the gates below iterate, and a new hand-written
+ * navigation surface that spells settings routes has to be added here to be reconciled at all. What
+ * keeps that from being forgotten is the reverse direction — every settings href in a shell source
+ * is a link that has escaped the manifest, and the gate over `SHELL_SOURCES` fails on it.
  *
  * Every other surface names a manifest entry instead and is verified structurally below. The shell
  * files declare no entry point at all: they render from the manifest at request time, so a literal
@@ -92,10 +94,7 @@ const REGISTER_ENTRY =
 const TAB_STRIP_SOURCES: ReadonlyArray<{
     file: string;
     points: readonly Exclude<SettingsEntryPoint, "contextual">[];
-}> = [
-    { file: "app/components/account/AccountTabs.tsx", points: ["account-tabs"] },
-    { file: "app/components/settings/SettingsTabs.tsx", points: ["settings-tabs"] },
-];
+}> = [];
 
 /** The import that makes a file part of the settings shell. */
 const SHELL_IMPORT = "@/app/lib/settingsNavigation";

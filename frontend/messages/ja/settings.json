@@ -39,6 +39,30 @@
         "askAdminTitle": "ワークスペース管理者にご依頼ください",
         "askAdminBody": "お使いのロールにはこの設定を変更する権限が含まれていません。ワークスペース管理者に変更または権限の付与をご依頼ください。"
     },
+    "SettingsPersonalProfile": {
+        "description": "あなたの個人情報と、すべてのワークスペースで一緒に働くメンバーからどう見えるかを設定します。",
+        "metaDescription": "名前、写真、メールアドレス、タイムゾーン、言語を変更します。"
+    },
+    "SettingsPersonalSecurity": {
+        "description": "Connex へのログイン方法です。これらの設定はワークスペースではなく、あなたのアカウントに紐づきます。",
+        "metaDescription": "ログインに使うパスキーを管理します。"
+    },
+    "SettingsPersonalConnections": {
+        "metaDescription": "メールとカレンダーを連携し、Connex が取り込める内容を選び、保留された項目を確認します。",
+        "reviewsTitle": "取り込みの確認"
+    },
+    "SettingsPersonalNotifications": {
+        "description": "Connex が何を知らせ、どこに届け、どの時間帯は静かにしておくかを設定します。",
+        "metaDescription": "Connex 内とメールで受け取る通知を選び、サイレント時間を設定します。"
+    },
+    "SettingsPersonalWorkspaces": {
+        "description": "あなた宛ての招待と、すでに参加しているワークスペースを確認できます。",
+        "metaDescription": "ワークスペースの招待を承認・辞退し、不要になったワークスペースから退出します。"
+    },
+    "SettingsWorkspaceGeneral": {
+        "description": "{workspace} の名称と、共有レポートの基準となる日付境界を設定します。",
+        "metaDescription": "このワークスペースの名称と、共有レポートで使うタイムゾーンを設定します。"
+    },
     "SettingsPeople": {
         "accessCheckFailedBody": "権限の読み取りに失敗しただけで、権限が変更されたわけではありません。しばらくしてからもう一度お試しください。",
         "accessCheckFailedTitle": "アクセス権を確認できませんでした",
@@ -61,6 +85,10 @@
         "notificationDefaultsGapAction": "通知設定を開く",
         "notificationDefaultsGapBody": "ワークスペース単位で通知の初期設定を決めることはまだできません。通知はメンバーそれぞれが選ぶ設定に従い、ここから上書きされることはありません。ご自身の設定は通知設定から変更できます。",
         "notificationDefaultsTitle": "通知の初期設定"
+    },
+    "SettingsWorkspaceDataPrivacy": {
+        "description": "他所にすでにある関係履歴を、どのように {workspace} へ取り込むかを設定します。",
+        "metaDescription": "既存の関係履歴をこのワークスペースへ取り込みます。"
     },
     "SettingsCrm": {
         "accessCheckFailedBody": "権限の判定結果ではなく、権限の読み取りに失敗しています。しばらくしてからもう一度お試しください。",

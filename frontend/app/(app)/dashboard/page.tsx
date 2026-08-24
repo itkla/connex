@@ -53,6 +53,7 @@ import {
 } from '@/app/lib/api';
 import type {
     AttachmentFacets,
+    ConnectedAccountProvider,
     DashboardWidgetType,
     DealKpis,
     DealMetrics,
@@ -61,6 +62,7 @@ import type {
     TaskSummary as TaskSummaryCounts,
     WarmthSummary,
 } from '@/app/lib/types';
+import { captureConnectionsHref } from '@/app/lib/connectedCapture';
 import { resolveWorkspaceTimezone } from '@/app/lib/workspaceSnapshot';
 import {
     capabilityAvailability,
@@ -345,7 +347,7 @@ export default async function Dashboard() {
         ? contactsPageResult.data
         : { items: [], total: 0 };
     const captureAttention: Array<{
-        provider: string;
+        provider: ConnectedAccountProvider;
         reviews: number;
         interventions: number;
     }> = [];
@@ -665,7 +667,10 @@ export default async function Dashboard() {
                                     {captureAttention.map((provider) => (
                                         <Link
                                             key={provider.provider}
-                                            href={`/account/connections?provider=${provider.provider}&panel=${provider.reviews > 0 ? 'reviews' : 'policy'}`}
+                                            href={captureConnectionsHref(new URLSearchParams(), {
+                                                provider: provider.provider,
+                                                panel: provider.reviews > 0 ? 'reviews' : 'policy',
+                                            })}
                                             className="rounded-md border border-border bg-background px-3 py-2 text-xs font-medium text-foreground hover:bg-accent"
                                         >
                                             {t('captureAttention.action', {

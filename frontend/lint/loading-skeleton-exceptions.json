@@ -1,5 +1,5 @@
 {
-    "highWaterMark": 29,
+    "highWaterMark": 36,
     "exceptions": [
         {
             "route": "/account",
@@ -7,9 +7,34 @@
             "reason": "Renders nothing: redirects straight to /account/profile, which owns the skeleton the reader actually sees."
         },
         {
+            "route": "/account/connections",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the canonical Connected accounts destination. That destination owns the skeleton the reader actually waits on."
+        },
+        {
             "route": "/account/connections/reviews",
             "kind": "resolver-redirect",
             "reason": "A stable address for the capture review queue. It resolves the reader's own connected provider and redirects into /account/connections, whose skeleton already stands in for the panel it lands on; its only non-redirect outcome is CapabilityUnavailablePage, a terminal explanation that no skeleton should promise."
+        },
+        {
+            "route": "/account/invites",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the canonical Workspaces & invitations destination. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/account/notifications",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the canonical Notification preferences destination. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/account/profile",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the canonical personal Profile destination. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/account/security",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the canonical personal Security destination. That destination owns the skeleton the reader actually waits on."
         },
         {
             "route": "/admin/logs",
@@ -82,6 +107,11 @@
             "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the `custom-fields` section of CRM configuration. The consolidated destination owns the skeleton the reader actually waits on."
         },
         {
+            "route": "/settings/data",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the canonical Data & privacy destination. That destination owns the skeleton the reader actually waits on."
+        },
+        {
             "route": "/settings/delivery",
             "kind": "redirect-only",
             "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the `delivery` section of Communications. The consolidated destination owns the skeleton the reader actually waits on."
@@ -95,6 +125,11 @@
             "route": "/settings/email",
             "kind": "redirect-only",
             "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the `email` section of Communications. The consolidated destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/settings/general",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the canonical workspace General destination. That destination owns the skeleton the reader actually waits on."
         },
         {
             "route": "/settings/members",

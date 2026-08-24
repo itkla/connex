@@ -1,5 +1,19 @@
-import MembershipPanel from "@/app/components/account/MembershipPanel";
+import { permanentRedirect } from "next/navigation";
 
-export default function AccountInvitesPage() {
-    return <MembershipPanel />;
+import { settingsRedirectTarget, type RouteSearchParams } from "@/app/lib/settingsRedirects";
+
+/**
+ * The retired address for pending workspace invitations and leaving a workspace (#1340 WS4.6).
+ *
+ * The job now lives at its canonical destination under the unified Settings shell, and this path
+ * forwards there permanently rather than 404ing an address readers have bookmarked and linked. The
+ * target is the manifest's, not this file's, so a destination that moves again takes its redirect
+ * with it; the query string is the reader's and survives the hop whole.
+ */
+export default async function AccountInvitesPage({
+    searchParams,
+}: {
+    searchParams: Promise<RouteSearchParams>;
+}) {
+    permanentRedirect(settingsRedirectTarget("account.invites", await searchParams));
 }
