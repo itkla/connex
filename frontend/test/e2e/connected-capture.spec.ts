@@ -265,21 +265,30 @@ for (const locale of ['en', 'ja'] as const) {
         await manage.click();
         await expect(configure).toBeVisible();
         await configure.click();
-        await expect(page.getByRole('heading', {
+        const capturePolicyDialog = page.getByRole('dialog', {
             name: message(locale, 'account', 'AccountCapturePolicy.title'),
-        })).toBeVisible();
-        await page.getByLabel(
+        });
+        await expect(capturePolicyDialog).toBeVisible();
+        const enabledSwitch = capturePolicyDialog.getByLabel(
             message(locale, 'account', 'AccountCapturePolicy.enabled'),
-        ).click();
-        await page.getByLabel(
+        );
+        await enabledSwitch.scrollIntoViewIfNeeded();
+        await enabledSwitch.click();
+        const calendarSwitch = capturePolicyDialog.getByLabel(
             message(locale, 'account', 'AccountCapturePolicy.streams.calendar'),
-        ).click();
-        await page.getByLabel(
+        );
+        await calendarSwitch.scrollIntoViewIfNeeded();
+        await calendarSwitch.click();
+        const backfillInput = capturePolicyDialog.getByLabel(
             message(locale, 'account', 'AccountCapturePolicy.backfill.label'),
-        ).fill('30');
-        await page.getByRole('button', {
+        );
+        await backfillInput.scrollIntoViewIfNeeded();
+        await backfillInput.fill('30');
+        const savePolicy = capturePolicyDialog.getByRole('button', {
             name: message(locale, 'account', 'AccountCapturePolicy.save'),
-        }).click();
+        });
+        await savePolicy.scrollIntoViewIfNeeded();
+        await savePolicy.click();
         await expect(page.getByText(
             message(locale, 'account', 'AccountCapturePolicy.saved'),
         )).toBeVisible();
