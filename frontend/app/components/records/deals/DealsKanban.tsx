@@ -180,9 +180,10 @@ export default function DealsKanban({
     }, [boardCompanies, companyById]);
     const [boardRiskState, setBoardRiskState] = useState<{
         key: string | null;
+        pipelineId: number | null;
         risks: Map<number, DealRisk>;
         error: string | null;
-    }>({ key: null, risks: new Map(), error: null });
+    }>({ key: null, pipelineId: null, risks: new Map(), error: null });
 
     useEffect(() => {
         if (boardKey == null || boardState.key !== boardKey) return;
@@ -192,6 +193,7 @@ export default function DealsKanban({
                 if (!cancelled) {
                     setBoardRiskState({
                         key: boardKey,
+                        pipelineId: selectedPipelineId,
                         risks: new Map(risks.map((risk) => [risk.dealId, risk])),
                         error: null,
                     });
@@ -201,6 +203,7 @@ export default function DealsKanban({
                 if (!cancelled) {
                     setBoardRiskState({
                         key: boardKey,
+                        pipelineId: selectedPipelineId,
                         risks: new Map(),
                         error: error instanceof Error ? error.message : t('riskLoadFailed'),
                     });
@@ -209,16 +212,14 @@ export default function DealsKanban({
         return () => {
             cancelled = true;
         };
-    }, [boardKey, boardState.key, loadedBoardDeals, t]);
+    }, [boardKey, boardState.key, loadedBoardDeals, selectedPipelineId, t]);
 
     const boardRisks = useMemo(() => {
         const combined = new Map(riskByDealId);
         boardRiskState.risks.forEach((risk, dealId) => combined.set(dealId, risk));
         return combined;
     }, [boardRiskState, riskByDealId]);
-    const boardRiskLoading = Boolean(filters.risk?.length)
-        && boardRiskState.key !== boardKey
-        && boardRiskState.key === null;
+    const boardRiskLoading = Boolean(filters.risk?.length) && boardRiskState.pipelineId !== selectedPipelineId;
     const boardRiskError = boardRiskState.key === boardKey ? boardRiskState.error : null;
 
     const matchesBoardDeal = useCallback((deal: Deal) => {
