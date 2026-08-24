@@ -899,6 +899,22 @@ public class DealService {
             this.stage = stage;
             this.lockedDeals = List.copyOf(lockedDeals);
         }
+
+        /**
+         * When the deal this change targets was last written, as the locked row itself reports it.
+         *
+         * <p>Exposed so a caller holding this lock can decide whether the record moved since it
+         * prepared the change, without taking a second read of a row it already holds.
+         *
+         * @return the target deal's stored update timestamp, or null when the row does not carry one
+         */
+        public String targetUpdatedAt() {
+            return lockedDeals.stream()
+                .filter(deal -> deal.getId() == dealId)
+                .map(Deal::getUpdatedAt)
+                .findFirst()
+                .orElse(null);
+        }
     }
 
     /** Locks every board row implicated by a later stage change in ascending deal-id order. */

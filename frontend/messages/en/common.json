@@ -580,20 +580,32 @@
         "expiredDetail": "This action completed, but its undo window is closed."
       },
       "change": {
-        "beforeApproval": "Before approval",
-        "noChangeYet": "No change",
-        "ifApproved": "If approved"
+        "proposedChange": "Proposed change",
+        "before": "Now",
+        "after": "After",
+        "notSet": "Not set",
+        "fieldOwner": "Owner",
+        "fieldStage": "Stage",
+        "currentUnresolvedOwner": "Someone no longer in this workspace",
+        "currentUnresolvedStage": "A stage that no longer exists",
+        "proposedUnresolved": "No longer exists",
+        "stateUnchanged": "This is already the current value, so applying it would change nothing.",
+        "stateRecordChanged": "This record moved on after the assistant proposed this, so the change can't be applied as reviewed. Ask for it again to work from where the record is now.",
+        "statePermissionLost": "You no longer have permission to make this change. Ask a workspace admin.",
+        "stateUnresolved": "The proposed value no longer exists in this workspace, so this change can't be made."
       },
       "actions": {
-        "approve": "Approve",
-        "approveAria": "Approve the proposed action for {target}",
-        "approving": "Approving…",
-        "reject": "Reject",
-        "rejectAria": "Reject the proposed action for {target}",
-        "rejecting": "Rejecting…",
         "undo": "Undo",
         "undoAria": "Undo the assistant action for {target}",
-        "undoing": "Undoing…"
+        "undoing": "Undoing…",
+        "apply": "Apply",
+        "applyAria": "Apply the proposed change to {target}",
+        "applying": "Applying…",
+        "discard": "Discard",
+        "discardAria": "Discard the proposed change to {target}",
+        "discarding": "Discarding…",
+        "editOnRecord": "Change it on the record",
+        "editOnRecordAria": "Open {target} to make this change there"
       },
       "failures": {
         "proposalChanged": "The target changed after this proposal was shown. Reject it and ask for a new proposal.",
@@ -625,7 +637,44 @@
         "ownerRemoved": "Owner removed",
         "ownerAssigned": "Owner assigned",
         "requestCompleted": "Request completed"
-      }
+      },
+      "outcomeFields": {
+        "type": "Type",
+        "subject": "Subject",
+        "start": "Starts",
+        "description": "Task",
+        "dueDate": "Due",
+        "title": "Title",
+        "visibility": "Visibility",
+        "tag": "Tag",
+        "stage": "Stage",
+        "owner": "Owner",
+        "other": "Detail"
+      },
+      "outcomeValues": {
+        "type": {
+          "call": "Call",
+          "email": "Email",
+          "meeting": "Meeting",
+          "note": "Note",
+          "other": "Other"
+        },
+        "visibility": {
+          "private": "Private",
+          "workspace": "Workspace"
+        }
+      },
+      "openCreated": {
+        "activity": "Open activity",
+        "task": "Open task",
+        "note": "Open note"
+      },
+      "openCreatedAria": {
+        "activity": "Open the activity this action created",
+        "task": "Open the task this action created",
+        "note": "Open the note this action created"
+      },
+      "undoWindow": "You can undo this until {deadline} — {remaining}."
     },
     "upload": {
       "progress": "Uploading {progress}%",
@@ -874,6 +923,19 @@
         "label": "Explain this intro path",
         "prompt": "Radar found an intro path to {subject}. Explain who could introduce me and what that route is based on."
       }
+    },
+    "proposalReview": {
+      "heading": "{count, plural, one {# change needs your review} other {# changes need your review}}",
+      "applicable": "{applicable} of {count} can be applied now.",
+      "selected": "{count, plural, =0 {Nothing selected} one {# change selected} other {# changes selected}}",
+      "applySelected": "{count, plural, one {Apply # change} other {Apply # changes}}",
+      "applying": "Applying…",
+      "include": "Include the change to {target}",
+      "openFullView": "Open review in full view",
+      "noneApplicable": "None of these can be applied right now. Open each one to see why.",
+      "applied": "{count, plural, one {# applied} other {# applied}}",
+      "discarded": "{count, plural, one {# discarded} other {# discarded}}",
+      "failed": "{count, plural, one {# could not be applied} other {# could not be applied}}"
     }
   },
   "SearchLayout": {

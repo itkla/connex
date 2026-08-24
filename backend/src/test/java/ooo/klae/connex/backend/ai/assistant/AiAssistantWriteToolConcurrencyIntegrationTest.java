@@ -420,11 +420,22 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
         return toolCall;
     }
 
+    /**
+     * Seeds a company whose {@code updated_at} predates any proposal this test will create.
+     *
+     * The freshness guard refuses a target written in the proposal's own second, and a fixture
+     * inserted milliseconds before its proposal always trips that rule. Backdating keeps this
+     * test exercising what it exists for — lock ordering — rather than the staleness refusal,
+     * which {@code AiAssistantWriteToolServiceTest} covers on its own terms.
+     */
     private Company company(String name) {
         Company company = new Company();
         company.setWorkspaceId(workspace.getId());
         company.setName(name + " " + UUID.randomUUID().toString().substring(0, 8));
         companyMapper.insert(company);
+        jdbcTemplate.update(
+                "UPDATE company SET updated_at = updated_at - INTERVAL 5 SECOND WHERE id = ?",
+                company.getId());
         return company;
     }
 

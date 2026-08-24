@@ -67,6 +67,10 @@ import {
 } from '@/app/components/ask-connex/AskConnexContextCockpit';
 import AskConnexScopeEditor from '@/app/components/ask-connex/AskConnexScopeEditor';
 import AskConnexTab from '@/app/components/ask-connex/AskConnexTab';
+import AskConnexProposalReview, {
+    AskConnexProposalReviewSummary,
+    type AskConnexProposalReviewLabels,
+} from '@/app/components/ask-connex/AskConnexProposalReview';
 import AskConnexToolCard, {
     type AskConnexToolCardLabels,
 } from '@/app/components/ask-connex/AskConnexToolCard';
@@ -84,11 +88,14 @@ import {
     appendAskConnexPrompt,
     askConnexCitationHref,
     askConnexCitations,
+    askConnexGroupedToolCallIds,
     askConnexPromptFocusPending,
+    askConnexProposalGroups,
     askConnexTranscript,
     groupAskConnexMessages,
     hasPendingAskConnexFileOperation,
     latestAskConnexSuggestions,
+    toggleAskConnexProposalExclusion,
 } from '@/app/lib/askConnex';
 import type {
     AskConnexScopeChip,
@@ -333,6 +340,26 @@ type AskConnexDrawerLabels = AskConnexContextLabels & AskConnexTurnLabels & {
     sessionGroup: (key: AskConnexSessionGroupKey) => string;
     relativeTime: (instant: string) => string;
     toolCard: AskConnexToolCardLabels;
+    proposalReview: AskConnexProposalReviewLabels;
+};
+
+/**
+ * Everything the review surfaces need that is not the cards themselves.
+ *
+ * Carried as one value rather than as a handful of parallel props because the batch, the way it is
+ * changed, and the way it is committed are one contract: a surface that can show the grouped review
+ * can also change and apply it, and a surface that only summarises it can do neither.
+ */
+export type AskConnexToolReview = {
+    /** Whether this mount is the full workspace, which reviews the batch instead of announcing it. */
+    workspace: boolean;
+    excludedToolCallIds: ReadonlySet<number>;
+    labels: AskConnexProposalReviewLabels;
+    formatDeadline: (instant: string) => string;
+    formatRemaining: (instant: string) => string;
+    onToggleInclusion: (toolCallId: number) => void;
+    onApplySelected: (toolCallIds: number[]) => Promise<void>;
+    onOpenFullView: () => void;
 };
 
 type AskConnexDrawerProps = {
@@ -434,7 +461,18 @@ type AskConnexDrawerProps = {
     onSend: (content?: string) => void;
     onCancelTurn: () => void;
     onRetryTurn: () => void;
-    onToolAction: (toolCallId: number, action: AskConnexToolAction) => void;
+    onToolAction: (toolCallId: number, action: AskConnexToolAction) => Promise<void>;
+    /**
+     * Applies a reviewed batch as one decision.
+     *
+     * Held apart from the single-proposal path because a batch is not N independent presses: the
+     * requests are sequenced so each row reports its own outcome against settled state, and the
+     * page behind the conversation is refreshed once at the end rather than once per change.
+     */
+    onToolActions: (
+        toolCallIds: readonly number[],
+        action: AskConnexToolAction,
+    ) => Promise<void>;
 };
 
 type ConversationSurfaceProps = Omit<
@@ -627,6 +665,7 @@ function TranscriptMessage({
     actionableToolCallIds,
     bounds,
     labels,
+    review,
     onSend,
     onToolAction,
 }: {
@@ -639,6 +678,7 @@ function TranscriptMessage({
     actionableToolCallIds: ReadonlySet<number>;
     bounds: AskConnexAnswerBounds;
     labels: AskConnexDrawerLabels;
+    review: AskConnexToolReview;
     onSend: (content?: string) => void;
     onToolAction: (toolCallId: number, action: AskConnexToolAction) => void;
 }) {
@@ -707,6 +747,7 @@ function TranscriptMessage({
                         labels={labels.toolCard}
                         actionsDisabled={false}
                         actionableToolCallIds={actionableToolCallIds}
+                        review={review}
                         onAction={onToolAction}
                     />
                 ) : null}
@@ -727,29 +768,66 @@ function TranscriptMessage({
     );
 }
 
+/**
+ * One answer's write actions, as either a set of cards or one review of several changes.
+ *
+ * An answer that proposes a single change shows that change on its own card, where it belongs.
+ * An answer that proposes several is a different decision — one the member makes about all of
+ * them — so the cards give way to a review that counts them, and the drawer announces that review
+ * rather than trying to hold it. Everything already decided, and everything the member is only
+ * watching, keeps its own card either way.
+ */
 function ToolCallCards({
     cards,
     labels,
     actionsDisabled,
     actionableToolCallIds,
+    review,
     onAction,
 }: {
     cards: AskConnexToolCardState[];
     labels: AskConnexToolCardLabels;
     actionsDisabled: boolean;
     actionableToolCallIds: ReadonlySet<number>;
+    review: AskConnexToolReview;
     onAction: (toolCallId: number, action: AskConnexToolAction) => void;
 }) {
+    const groups = askConnexProposalGroups(
+        cards, actionableToolCallIds, review.excludedToolCallIds,
+    );
+    const grouped = askConnexGroupedToolCallIds(groups);
+    const ungrouped = cards.filter((card) => !grouped.has(card.id));
     if (cards.length === 0) return null;
     return (
         <div className="space-y-2">
-            {cards.map((card) => (
+            {groups.map((group) => (review.workspace ? (
+                <AskConnexProposalReview
+                    key={group.turnId}
+                    group={group}
+                    labels={review.labels}
+                    cardLabels={labels}
+                    actionsDisabled={actionsDisabled}
+                    onToggleInclusion={review.onToggleInclusion}
+                    onAction={onAction}
+                    onApplySelected={review.onApplySelected}
+                />
+            ) : (
+                <AskConnexProposalReviewSummary
+                    key={group.turnId}
+                    group={group}
+                    labels={review.labels}
+                    onOpenFullView={review.onOpenFullView}
+                />
+            )))}
+            {ungrouped.map((card) => (
                 <AskConnexToolCard
                     key={card.id}
                     card={card}
                     labels={labels}
                     actionsDisabled={actionsDisabled || !actionableToolCallIds.has(card.id)}
                     onAction={onAction}
+                    formatDeadline={review.formatDeadline}
+                    formatRemaining={review.formatRemaining}
                 />
             ))}
         </div>
@@ -1376,6 +1454,7 @@ function ConversationSurface({
     activeState,
     contextCount,
     participants,
+    now,
     unavailable,
     jobs,
     promptRequest,
@@ -1405,6 +1484,7 @@ function ConversationSurface({
     onCancelTurn,
     onRetryTurn,
     onToolAction,
+    onToolActions,
     onOpenWorkspace,
     open,
     workspace,
@@ -1442,6 +1522,47 @@ function ConversationSurface({
             : { cap: ASK_CONNEX_DRAWER_ROW_CAP, onOpenFullView: onOpenWorkspace },
         [onOpenWorkspace, workspace],
     );
+    /**
+     * Proposals the member has taken out of a grouped review.
+     *
+     * Held here, beside the transcript, rather than inside the review: the cards are re-read
+     * whenever the session refreshes, and a proposal the member deliberately took out of the batch
+     * must stay out while that happens rather than quietly rejoining it.
+     */
+    const [excludedProposals, setExcludedProposals] = useState<ReadonlySet<number>>(
+        () => new Set<number>(),
+    );
+    const surfaceFormat = useFormatter();
+    const toolReview = useMemo<AskConnexToolReview>(() => ({
+        workspace,
+        excludedToolCallIds: excludedProposals,
+        labels: labels.proposalReview,
+        formatDeadline: (instant: string) => {
+            const deadline = new Date(instant);
+            return Number.isNaN(deadline.getTime())
+                ? instant
+                : surfaceFormat.dateTime(deadline, { hour: 'numeric', minute: '2-digit' });
+        },
+        formatRemaining: (instant: string) => {
+            const deadline = new Date(instant);
+            return Number.isNaN(deadline.getTime())
+                ? instant
+                : surfaceFormat.relativeTime(deadline, now);
+        },
+        onToggleInclusion: (toolCallId: number) => setExcludedProposals(
+            (current) => toggleAskConnexProposalExclusion(current, toolCallId),
+        ),
+        onApplySelected: (toolCallIds: number[]) => onToolActions(toolCallIds, 'approve'),
+        onOpenFullView: onOpenWorkspace,
+    }), [
+        excludedProposals,
+        labels.proposalReview,
+        now,
+        onOpenWorkspace,
+        onToolActions,
+        surfaceFormat,
+        workspace,
+    ]);
     /**
      * Whether this answer left words behind when it stopped.
      *
@@ -1721,6 +1842,7 @@ function ConversationSurface({
                                             labels={labels.toolCard}
                                             actionsDisabled={activeSession === null}
                                             actionableToolCallIds={actionableToolCallIds}
+                                            review={toolReview}
                                             onAction={onToolAction}
                                         />
                                     </div>
@@ -1754,6 +1876,7 @@ function ConversationSurface({
                                                                 actionableToolCallIds={actionableToolCallIds}
                                                                 bounds={bounds}
                                                                 labels={labels}
+                                                                review={toolReview}
                                                                 onSend={requestSend}
                                                                 onToolAction={onToolAction}
                                                             />
@@ -1771,6 +1894,7 @@ function ConversationSurface({
                                                                 labels={labels.toolCard}
                                                                 actionsDisabled={activeSession === null}
                                                                 actionableToolCallIds={actionableToolCallIds}
+                                                                review={toolReview}
                                                                 onAction={onToolAction}
                                                             />
                                                         </div>
@@ -2344,6 +2468,7 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         onCancelTurn: props.onCancelTurn,
         onRetryTurn: props.onRetryTurn,
         onToolAction: props.onToolAction,
+        onToolActions: props.onToolActions,
         onOpenWorkspace: props.onOpenWorkspace,
         onCloseWorkspace: props.onCloseWorkspace,
     };

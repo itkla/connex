@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.controllers;
 
+import static org.hamcrest.Matchers.hasKey;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
@@ -273,6 +274,10 @@ class AiAssistantControllerTest {
                 new AiAssistantToolCallReadDto.Target("person", 31, "Ada Lovelace"),
                 "Assign an owner",
                 null,
+                new AiAssistantToolCallReadDto.Change(
+                        "owner", null, true, "Grace Hopper", "ready"),
+                List.of(new AiAssistantToolCallReadDto.OutcomeValue("owner", "Grace Hopper")),
+                new AiAssistantToolCallReadDto.CreatedRecord("task", 74),
                 82,
                 19,
                 null,
@@ -295,6 +300,18 @@ class AiAssistantControllerTest {
             .andExpect(jsonPath("$[0].target.id").value(31))
             .andExpect(jsonPath("$[0].target.label").value("Ada Lovelace"))
             .andExpect(jsonPath("$[0].requestSummary").value("Assign an owner"))
+            .andExpect(jsonPath("$[0].change.field").value("owner"))
+            .andExpect(jsonPath("$[0].change.currentValue").doesNotExist())
+            .andExpect(jsonPath("$[0].change").value(hasKey("currentValue")))
+            .andExpect(jsonPath("$[0].change.currentValueUnresolved").value(true))
+            .andExpect(jsonPath("$[0].change.proposedValue").value("Grace Hopper"))
+            .andExpect(jsonPath("$[0].change.state").value("ready"))
+            .andExpect(jsonPath("$[0].outcomeValues[0].field").value("owner"))
+            .andExpect(jsonPath("$[0].outcomeValues[0].value").value("Grace Hopper"))
+            .andExpect(jsonPath("$[0].createdRecord.kind").value("task"))
+            .andExpect(jsonPath("$[0].createdRecord.id").value(74))
+            .andExpect(jsonPath("$[0].outcomeSummary").doesNotExist())
+            .andExpect(jsonPath("$[0]").value(hasKey("outcomeSummary")))
             .andExpect(jsonPath("$[0].messageId").value(82))
             .andExpect(jsonPath("$[0].turnId").value(19))
             .andExpect(jsonPath("$[0].arguments").doesNotExist())

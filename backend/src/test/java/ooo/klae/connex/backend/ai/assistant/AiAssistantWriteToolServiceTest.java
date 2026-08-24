@@ -520,6 +520,102 @@ class AiAssistantWriteToolServiceTest {
     }
 
     @Test
+    void approvalRefusesWhenTheTargetWasWrittenAfterTheProposal() throws Exception {
+        User owner = new User();
+        owner.setId(21);
+        owner.setDisplayName("Grace Hopper");
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(owner));
+        AiAssistantPreparedWrite write = prepared(
+                "assign_owner",
+                "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}",
+                "person",
+                31);
+        stored(write, 29);
+        storedToolCall.setCreatedAt("2026-03-05 12:00:00.000000");
+        Person edited = person(31);
+        edited.setUpdatedAt("2026-03-05 12:00:30.000000");
+        when(personService.lockProcessablePersonForUpdate(31)).thenReturn(edited);
+
+        assertThrows(ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
+
+        verify(personService, never()).updateOwner(31, 21);
+        verify(chatMapper, never()).updateToolCall(
+                eq(TURN.workspaceId()), eq(TURN.userMessageId()), eq(29),
+                eq("executed"), any(), eq(TURN.userId()));
+    }
+
+    @Test
+    void approvalRefusesWhenTheTargetWasWrittenInTheProposalsOwnSecond() throws Exception {
+        User owner = new User();
+        owner.setId(21);
+        owner.setDisplayName("Grace Hopper");
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(owner));
+        AiAssistantPreparedWrite write = prepared(
+                "assign_owner",
+                "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}",
+                "person",
+                31);
+        stored(write, 29);
+        storedToolCall.setCreatedAt("2026-03-05 12:00:00.400000");
+        Person edited = person(31);
+        edited.setUpdatedAt("2026-03-05 12:00:00");
+        when(personService.lockProcessablePersonForUpdate(31)).thenReturn(edited);
+
+        assertThrows(ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
+
+        verify(personService, never()).updateOwner(31, 21);
+    }
+
+    @Test
+    void approvalStillAppliesToARecordLastWrittenTheSecondBeforeTheProposal() throws Exception {
+        User owner = new User();
+        owner.setId(21);
+        owner.setDisplayName("Grace Hopper");
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(owner));
+        AiAssistantPreparedWrite write = prepared(
+                "assign_owner",
+                "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}",
+                "person",
+                31);
+        stored(write, 29);
+        storedToolCall.setCreatedAt("2026-03-05 12:00:00.400000");
+        Person edited = person(31);
+        edited.setUpdatedAt("2026-03-05 11:59:59");
+        when(personService.lockProcessablePersonForUpdate(31)).thenReturn(edited);
+
+        assertEquals("executed", service.approve(TURN.sessionId(), 29).status());
+
+        verify(personService).updateOwner(31, 21);
+    }
+
+    @Test
+    void anAutoWriteIsNeverHeldBackByARecordWrittenAfterItsOwnStep() throws Exception {
+        doAnswer(invocation -> {
+            Task created = invocation.getArgument(0);
+            created.setId(74);
+            created.setStatus("todo");
+            return created;
+        }).when(taskService).create(any(Task.class));
+        AiAssistantPreparedWrite write = prepared(
+                "create_task",
+                "{\"handle\":\"r1\",\"description\":\"Send the renewal deck\"}",
+                "person",
+                31);
+        stored(write, 29);
+        storedToolCall.setCreatedAt("2026-03-05 12:00:00.000000");
+        Person edited = person(31);
+        edited.setUpdatedAt("2026-03-05 12:00:30.000000");
+        when(personService.lockProcessablePersonForUpdate(31)).thenReturn(edited);
+        when(personService.getPersonById(31)).thenReturn(edited);
+
+        assertEquals(
+                "executed",
+                service.executeAuto(TURN, 29, result -> { }).toolResult().data().get("status"));
+
+        verify(taskService).create(any(Task.class));
+    }
+
+    @Test
     void ownerAssignmentExecutesOnlyThroughTheNativeRecordServiceAfterApproval() throws Exception {
         User owner = new User();
         owner.setId(21);
@@ -531,6 +627,11 @@ class AiAssistantWriteToolServiceTest {
                 "company",
                 52);
         stored(write, 29);
+        storedToolCall.setCreatedAt("2026-03-05 12:00:00.000000");
+        Company unchanged = new Company();
+        unchanged.setId(52);
+        unchanged.setUpdatedAt("2026-03-05 11:59:00.000000");
+        when(companyService.lockOwnedCompanyForUpdate(52)).thenReturn(unchanged);
 
         assertEquals("executed", service.approve(TURN.sessionId(), 29).status());
 

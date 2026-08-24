@@ -80,6 +80,14 @@ const TOOL_SUMMARY_LABELS = {
     requestCompleted: '完了',
 };
 
+const PROPOSED_CHANGE: AiAssistantToolCall['change'] = {
+    field: 'owner',
+    currentValue: 'Ada Owner',
+    currentValueUnresolved: false,
+    proposedValue: 'Grace Hopper',
+    state: 'ready',
+};
+
 const TOOL_CALL: AiAssistantToolCall = {
     id: 31,
     toolName: 'create_task',
@@ -88,6 +96,9 @@ const TOOL_CALL: AiAssistantToolCall = {
     target: { kind: 'person', id: 7, label: 'Kenji Sato' },
     requestSummary: 'Create a task',
     outcomeSummary: 'Task created',
+    change: null,
+    outcomeValues: [],
+    createdRecord: null,
     messageId: 22,
     turnId: 9,
     undoExpiresAt: '2026-08-12T12:10:00Z',
@@ -439,6 +450,7 @@ describe('Ask Connex tool-call cards', () => {
             ...TOOL_CALL,
             tier: 'confirm' as const,
             status: 'proposed' as const,
+            change: PROPOSED_CHANGE,
             undoAvailable: false,
             undoExpiresAt: null,
         };
@@ -500,6 +512,7 @@ describe('Ask Connex tool-call cards', () => {
             ...TOOL_CALL,
             tier: 'confirm',
             status: 'proposed',
+            change: PROPOSED_CHANGE,
             undoAvailable: false,
             undoExpiresAt: null,
         };
@@ -533,6 +546,7 @@ describe('Ask Connex tool-call cards', () => {
             ...TOOL_CALL,
             tier: 'confirm',
             status: 'proposed',
+            change: PROPOSED_CHANGE,
             undoAvailable: false,
             undoExpiresAt: null,
         };
@@ -608,6 +622,7 @@ describe('Ask Connex tool-call cards', () => {
             ...TOOL_CALL,
             tier: 'confirm',
             status: 'proposed',
+            change: PROPOSED_CHANGE,
             undoAvailable: false,
             undoExpiresAt: null,
             outcomeSummary: null,

@@ -3212,6 +3212,63 @@ export type AiAssistantToolCallTarget = {
     label: string | null;
 };
 
+/** The field an assistant proposal would rewrite on an existing record. */
+export type AiAssistantToolCallChangeField = 'owner' | 'stage';
+
+/**
+ * Whether a reviewed change can still be applied as reviewed.
+ *
+ * Applying revalidates everything on the server and refuses on its own terms; this states the same
+ * conclusions early, so a lost permission, a change that would now do nothing, or a record edited
+ * since the proposal was made is read before pressing apply rather than after being turned away.
+ * Only `ready` can be applied — every other state is a refusal the card states instead of arming a
+ * control over it.
+ */
+export type AiAssistantToolCallChangeState =
+    | 'ready'
+    | 'unchanged'
+    | 'recordChanged'
+    | 'permissionLost'
+    | 'unresolved';
+
+/**
+ * The exact before and after values one pending proposal would write.
+ *
+ * Absent entirely for a viewer who did not ask for the proposal or cannot currently open its
+ * target, which is what keeps one record's field value out of a shared chat. Either value may be
+ * null in its own right: a record with no owner has no current value, and a proposal to clear an
+ * owner has no proposed one. `currentValueUnresolved` is the third case: the record does hold a
+ * value, and this workspace can no longer name who or what it is.
+ */
+export type AiAssistantToolCallChange = {
+    field: AiAssistantToolCallChangeField;
+    currentValue: string | null;
+    currentValueUnresolved: boolean;
+    proposedValue: string | null;
+    state: AiAssistantToolCallChangeState;
+};
+
+/** One value a completed assistant action wrote, named by field rather than pre-rendered. */
+export type AiAssistantToolCallOutcomeValue = {
+    field: string;
+    value: string;
+};
+
+/** The record kinds an assistant action can create, each of which has a detail route. */
+export type AiAssistantCreatedRecordKind = 'activity' | 'task' | 'note';
+
+/**
+ * The record a completed assistant action created.
+ *
+ * Carried under the same viewer authorization as the rest of a completed action's detail, and
+ * absent for an action that changed an existing record rather than creating one — or for one whose
+ * creation has since been undone.
+ */
+export type AiAssistantToolCallCreatedRecord = {
+    kind: AiAssistantCreatedRecordKind;
+    id: number;
+};
+
 /** Viewer-safe transcript projection for one assistant write-tool call. */
 export type AiAssistantToolCall = {
     id: number;
@@ -3221,6 +3278,9 @@ export type AiAssistantToolCall = {
     target: AiAssistantToolCallTarget;
     requestSummary: string;
     outcomeSummary: string | null;
+    change: AiAssistantToolCallChange | null;
+    outcomeValues: AiAssistantToolCallOutcomeValue[];
+    createdRecord: AiAssistantToolCallCreatedRecord | null;
     messageId: number | null;
     turnId: number;
     undoExpiresAt: string | null;

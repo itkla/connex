@@ -257,6 +257,7 @@ public class AiAssistantWriteToolService {
                 actor.workspaceId(), write.restrictionEpoch())) {
             throw new ConflictException("Assistant proposal restrictions changed");
         }
+        requireTargetUnchangedSinceProposal(toolCall, mutation);
         ExecutionOutcome outcome = execute(write, owner, mutation);
         Map<String, Object> approval = new LinkedHashMap<>();
         approval.put("status", "approved");
@@ -578,18 +579,53 @@ public class AiAssistantWriteToolService {
     private PreparedMutation lockMutationTarget(StoredWrite write) {
         if ("change_deal_stage".equals(write.toolName())) {
             Stage stage = resolveStage(write);
+            DealService.LockedStageChange stageChange = dealService.lockStageChangeRowsForUpdate(
+                    write.targetId(), stage.getId());
             return new PreparedMutation(
-                    dealService.lockStageChangeRowsForUpdate(
-                            write.targetId(), stage.getId()),
-                    stage);
+                    stageChange,
+                    stage,
+                    stageChange == null ? null : stageChange.targetUpdatedAt());
         }
-        switch (write.targetKind()) {
-            case "person" -> personService.lockProcessablePersonForUpdate(write.targetId());
-            case "company" -> companyService.lockOwnedCompanyForUpdate(write.targetId());
-            case "deal" -> dealService.lockDealForUpdate(write.targetId());
+        String updatedAt = switch (write.targetKind()) {
+            case "person" -> updatedAt(personService.lockProcessablePersonForUpdate(
+                    write.targetId()));
+            case "company" -> updatedAt(companyService.lockOwnedCompanyForUpdate(
+                    write.targetId()));
+            case "deal" -> updatedAt(dealService.lockDealForUpdate(write.targetId()));
             default -> throw new BadRequestException("Unsupported assistant record kind");
+        };
+        return new PreparedMutation(null, null, updatedAt);
+    }
+
+    private static String updatedAt(Person person) {
+        return person == null ? null : person.getUpdatedAt();
+    }
+
+    private static String updatedAt(Company company) {
+        return company == null ? null : company.getUpdatedAt();
+    }
+
+    private static String updatedAt(Deal deal) {
+        return deal == null ? null : deal.getUpdatedAt();
+    }
+
+    /**
+     * Refuses one approval whose record was written after the proposal it is applying.
+     *
+     * <p>Everything else approval revalidates is about the member: their membership, their
+     * permissions, the workspace's restrictions. This is about the record. A colleague who changed
+     * the same field between the proposal being shown and the member pressing apply would otherwise
+     * be silently overwritten by values the member read before that edit existed, so the write is
+     * refused and the card re-reads the record and states what it now says. The comparison is the
+     * one the card itself made, so a proposal shown as applicable is not refused on a rule the
+     * member never saw.
+     */
+    private static void requireTargetUnchangedSinceProposal(
+            AiChatToolCall toolCall, PreparedMutation mutation) {
+        if (AiAssistantProposalFreshness.changedSince(
+                mutation.targetUpdatedAt(), toolCall.getCreatedAt())) {
+            throw new ConflictException("Assistant proposal target changed");
         }
-        return new PreparedMutation(null, null);
     }
 
     private void requirePermissions(StoredWrite write) {
@@ -1116,7 +1152,8 @@ public class AiAssistantWriteToolService {
 
     private record PreparedMutation(
             DealService.LockedStageChange stageChange,
-            Stage stage) {
+            Stage stage,
+            String targetUpdatedAt) {
     }
 
     private record ExecutionOutcome(
