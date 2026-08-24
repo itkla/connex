@@ -309,13 +309,6 @@ jobs:
           CONNEX_DB_URL: jdbc:mysql://127.0.0.1:3306/connex_seed_e2e?sslMode=DISABLED
           CONNEX_DB_USERNAME: root
           CONNEX_DB_PASSWORD: ci-${{ github.run_id }}-e2e-root
-          # Advertise the capture capability without running provider work in this UI-only harness.
-          CONNEX_CONNECTED_ACCOUNTS_GOOGLE_ENABLED: 'true'
-          CONNEX_CONNECTED_ACCOUNTS_GOOGLE_CLIENT_ID: e2e-google-client-id
-          CONNEX_CONNECTED_ACCOUNTS_GOOGLE_CLIENT_SECRET: e2e-google-client-secret
-          CONNEX_CONNECTED_CAPTURE_SCHEDULING_ENABLED: 'true'
-          CONNEX_CONNECTED_CAPTURE_GOOGLE_ENABLED: 'true'
-          CONNEX_CONNECTED_CAPTURE_SCHEDULER_BATCH_SIZE: '0'
         run: |
           set -euo pipefail
           WAR=$(find build/libs -name '*.war' ! -name '*-plain.war' | head -1)

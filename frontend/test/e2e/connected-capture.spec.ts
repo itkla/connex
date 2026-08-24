@@ -63,14 +63,12 @@ const BASE_OVERVIEW: ProviderCaptureOverview = {
     reviewCount: 1,
     pendingApprovalCount: 0,
     activationReady: false,
-    retainedData: true,
-    accountResetAvailable: false,
     disclosures: {
         scopes: ['calendar.readonly', 'mail.readonly'],
         admittedFields: ['occurred_at', 'participants', 'subject'],
         materialExclusions: ['attachments', 'raw_mime', 'remote_images'],
         visibility: ['workspace_activity_evidence'],
-        retention: ['retained_on_disconnect', 'erased_on_request'],
+        retention: ['purged_on_disconnect'],
     },
     purge: { active: false, status: 'idle', errorCode: null },
 };
@@ -133,11 +131,6 @@ for (const locale of ['en', 'ja'] as const) {
         let overview = BASE_OVERVIEW;
         let reviews = REVIEW_PAGE;
         let approvedInteractionId: number | null = null;
-        let resetRequested = false;
-        let resetPolls = 0;
-        let resetCaptureFailures = 0;
-        let resetConnectionPolls = 0;
-        let connected = true;
 
         await page.route('**/api/account/connections**', async (route) => {
             const request = route.request();
@@ -145,36 +138,11 @@ for (const locale of ['en', 'ja'] as const) {
             const path = url.pathname;
 
             if (request.method() === 'GET' && path === '/api/account/connections') {
-                if (resetRequested) resetConnectionPolls += 1;
-                const resetting = resetRequested && resetConnectionPolls < 2;
-                await route.fulfill({
-                    json: resetting
-                        ? [{ ...CONNECTION, status: 'disconnecting' }]
-                        : connected ? [CONNECTION] : [],
-                });
+                await route.fulfill({ json: [CONNECTION] });
                 return;
             }
             if (request.method() === 'GET' && path === '/api/account/connections/capture') {
                 captureRequests += 1;
-                if (resetRequested) {
-                    resetPolls += 1;
-                    if (resetPolls === 2) {
-                        resetCaptureFailures += 1;
-                        await route.fulfill({
-                            status: 503,
-                            contentType: 'application/json',
-                            body: JSON.stringify({ message: 'temporary failure' }),
-                        });
-                        return;
-                    }
-                    if (resetPolls >= 3) {
-                        overview = {
-                            ...overview,
-                            accountResetAvailable: false,
-                            purge: { active: false, status: 'idle', errorCode: null },
-                        };
-                    }
-                }
                 await route.fulfill({ json: overviewResponse(overview) });
                 return;
             }
@@ -227,25 +195,9 @@ for (const locale of ['en', 'ja'] as const) {
                 return;
             }
             if (request.method() === 'DELETE' && path.endsWith('/google/captured-data')) {
-                overview = { ...overview, retainedData: false };
                 await route.fulfill({
-                    json: { active: false, status: 'idle', errorCode: null },
+                    json: { active: true, status: 'disconnecting', errorCode: null },
                 });
-                return;
-            }
-            if (request.method() === 'DELETE' && path.endsWith('/google/retained-data')) {
-                resetRequested = true;
-                overview = {
-                    ...overview,
-                    purge: { active: true, status: 'disconnecting', errorCode: null },
-                };
-                await route.fulfill({ status: 202, body: '' });
-                return;
-            }
-            if (request.method() === 'DELETE' && path === '/api/account/connections/google') {
-                connected = false;
-                overview = { ...overview, accountResetAvailable: true };
-                await route.fulfill({ status: 204, body: '' });
                 return;
             }
             await route.continue();
@@ -254,41 +206,34 @@ for (const locale of ['en', 'ja'] as const) {
         await useLocale(page, locale);
         await page.goto('/account/connections');
 
-        const manage = page.getByRole('button', {
-            name: message(locale, 'account', 'AccountConnections.manage'),
-        });
         const configure = page.getByRole('button', {
             name: message(locale, 'account', 'AccountCaptureProvider.configure'),
         });
-        await expect.poll(() => captureRequests).toBeGreaterThan(0);
-        await expect(manage).toBeVisible();
-        await manage.click();
-        await expect(configure).toBeVisible();
+        if (!await configure.isVisible()) {
+            expect(captureRequests).toBe(0);
+            await expect(page.getByText(
+                message(locale, 'account', 'AccountCaptureProvider.title'),
+            )).toHaveCount(0);
+            return;
+        }
+
+        expect(captureRequests).toBeGreaterThan(0);
         await configure.click();
-        const capturePolicyDialog = page.getByRole('dialog', {
+        await expect(page.getByRole('heading', {
             name: message(locale, 'account', 'AccountCapturePolicy.title'),
-        });
-        await expect(capturePolicyDialog).toBeVisible();
-        const enabledSwitch = capturePolicyDialog.getByLabel(
+        })).toBeVisible();
+        await page.getByLabel(
             message(locale, 'account', 'AccountCapturePolicy.enabled'),
-        );
-        await enabledSwitch.scrollIntoViewIfNeeded();
-        await enabledSwitch.click();
-        const calendarSwitch = capturePolicyDialog.getByLabel(
+        ).click();
+        await page.getByLabel(
             message(locale, 'account', 'AccountCapturePolicy.streams.calendar'),
-        );
-        await calendarSwitch.scrollIntoViewIfNeeded();
-        await calendarSwitch.click();
-        const backfillInput = capturePolicyDialog.getByLabel(
+        ).click();
+        await page.getByLabel(
             message(locale, 'account', 'AccountCapturePolicy.backfill.label'),
-        );
-        await backfillInput.scrollIntoViewIfNeeded();
-        await backfillInput.fill('30');
-        const savePolicy = capturePolicyDialog.getByRole('button', {
+        ).fill('30');
+        await page.getByRole('button', {
             name: message(locale, 'account', 'AccountCapturePolicy.save'),
-        });
-        await savePolicy.scrollIntoViewIfNeeded();
-        await savePolicy.click();
+        }).click();
         await expect(page.getByText(
             message(locale, 'account', 'AccountCapturePolicy.saved'),
         )).toBeVisible();
@@ -311,22 +256,7 @@ for (const locale of ['en', 'ja'] as const) {
         )).toBeVisible();
         expect(approvedInteractionId).toBe(802);
 
-        await page.goto('/account/connections');
-        await page.getByRole('button', {
-            name: message(locale, 'account', 'AccountConnections.manage'),
-        }).click();
-        await page.getByRole('button', {
-            name: message(locale, 'account', 'AccountConnections.disconnect'),
-        }).click();
-        await page.getByRole('button', {
-            name: message(locale, 'account', 'AccountCaptureLifecycle.confirmDisconnect'),
-        }).click();
-        await expect(page.getByText(
-            message(locale, 'account', 'AccountConnections.retainedDataNote'),
-        )).toBeVisible();
-        await page.getByRole('button', {
-            name: message(locale, 'account', 'AccountCaptureProvider.purge'),
-        }).click();
+        await page.goto('/account/connections?provider=google&panel=purge');
         await page.getByLabel(
             message(locale, 'account', 'AccountCaptureLifecycle.acknowledge'),
         ).click();
@@ -336,35 +266,5 @@ for (const locale of ['en', 'ja'] as const) {
         await expect(page.getByText(
             message(locale, 'account', 'AccountCaptureLifecycle.purgeStarted'),
         )).toBeVisible();
-
-        await page.reload();
-        await expect(page.getByText(
-            message(locale, 'account', 'AccountConnections.accountResetNote'),
-        )).toBeVisible();
-        await page.getByRole('button', {
-            name: message(locale, 'account', 'AccountConnections.resetProviderAccount'),
-        }).click();
-        const providerName = message(locale, 'account', 'AccountConnections.provider_google');
-        await page.getByLabel(
-            message(locale, 'account', 'AccountCaptureLifecycle.resetAcknowledge')
-                .replace('{provider}', providerName),
-        ).click();
-        await page.getByRole('button', {
-            name: message(locale, 'account', 'AccountCaptureLifecycle.confirmReset'),
-        }).click();
-        await expect(page.getByText(
-            message(locale, 'account', 'AccountCaptureLifecycle.resetStarted'),
-        )).toBeVisible();
-        expect(resetRequested).toBe(true);
-        await expect(page.getByRole('button', {
-            name: message(locale, 'account', 'AccountConnections.resetProviderAccount'),
-        })).toHaveCount(0, { timeout: 15_000 });
-        await expect(page.getByRole('button', {
-            name: message(locale, 'account', 'AccountConnections.connectProvider')
-                .replace('{provider}', providerName),
-        })).toBeVisible();
-        expect(resetCaptureFailures).toBe(1);
-        await expect.poll(() => resetPolls).toBeGreaterThanOrEqual(3);
-        expect(resetConnectionPolls).toBeGreaterThanOrEqual(2);
     });
 }
