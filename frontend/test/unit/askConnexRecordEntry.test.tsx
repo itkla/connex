@@ -91,6 +91,13 @@ vi.mock("@/app/hooks/useAskConnexSkills", () => ({
     useAskConnexSkills: () => [],
 }));
 
+/** The assistant permission the entry point reads, swapped per test. */
+const assistantPermission = vi.hoisted(() => ({ current: "granted" as string }));
+
+vi.mock("@/app/hooks/usePermissions", () => ({
+    usePermissionCheck: () => assistantPermission.current,
+}));
+
 vi.mock("@/app/hooks/useActions", () => ({
     useActions: () => ({
         context: { record: { id: "42", type: "person", label: "Aiko Tanaka" } },
@@ -131,6 +138,7 @@ function required(root: InteractiveElement, part: string): InteractiveElement {
 describe("the record entry point's watch dialog", () => {
     afterEach(() => {
         vi.unstubAllGlobals();
+        assistantPermission.current = "granted";
     });
 
     /**
@@ -171,6 +179,33 @@ describe("the record entry point's watch dialog", () => {
                 mounted(container, "watch-dialog"),
                 "The typed watch contract must still be mounted after the menu closes",
             ).not.toBeNull();
+
+            await act(async () => root.unmount());
+        });
+
+    /**
+     * The directory is already empty without `AI_USE`, so gating the watch on the record alone left
+     * a member the server will certainly refuse looking at an assistant menu whose only entry was a
+     * watch. The whole control is absent instead — and equally so while the lookup is unresolved,
+     * because an answer that has not arrived is not a grant.
+     */
+    it.each(["denied", "unavailable"])(
+        "renders no entry point at all when the assistant permission is %s",
+        async (permission) => {
+            assistantPermission.current = permission;
+            const interactive = installInteractiveDocument();
+            const { createRoot } = await import("react-dom/client");
+            const { default: AskConnexRecordEntry } = await import(
+                "@/app/components/ask-connex/AskConnexRecordEntry");
+            const root = createRoot(interactive.container);
+            const container = containerOf(interactive.elements);
+
+            await act(async () => {
+                root.render(<AskConnexRecordEntry kind="person" />);
+            });
+
+            expect(mounted(container, "menu-trigger")).toBeNull();
+            expect(mounted(container, "watch-dialog")).toBeNull();
 
             await act(async () => root.unmount());
         });

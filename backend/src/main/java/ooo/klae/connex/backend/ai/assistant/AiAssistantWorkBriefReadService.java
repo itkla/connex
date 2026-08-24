@@ -142,6 +142,11 @@ public class AiAssistantWorkBriefReadService {
      * never recomputes one. A brief that names a relationship as cooling is therefore repeating the
      * same figure the record page shows.
      *
+     * <p>Each kind is read one row past its cap so truncation is evidence rather than a guess. Asking
+     * for exactly the cap makes "returned the cap" and "there were more" indistinguishable, so a
+     * workspace with precisely the cap's worth of cooling contacts would be reported to the model as
+     * bounded when it had in fact been shown everything — exactly the hedge a brief must not state.
+     *
      * @param limit maximum records per kind, clamped to the declared cap
      * @param resources per-turn handle registry the returned records are registered in
      * @return bounded cooling contacts and companies with their authoritative warmth figures
@@ -149,10 +154,17 @@ public class AiAssistantWorkBriefReadService {
     public AiAssistantToolResult warmthMovement(int limit, AiChatResourceRegistry resources) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int bound = bound(limit, AiChatScopeBounds.MAX_BRIEF_WARMTH_MOVES);
-        List<RelationshipTemperatureDto> contacts =
-                scoringService.coolingContacts(workspaceId, bound);
-        List<RelationshipTemperatureDto> companies =
-                scoringService.coolingCompanies(workspaceId, bound);
+        List<RelationshipTemperatureDto> readContacts =
+                scoringService.coolingContacts(workspaceId, bound + 1);
+        List<RelationshipTemperatureDto> readCompanies =
+                scoringService.coolingCompanies(workspaceId, bound + 1);
+        boolean truncated = readContacts.size() > bound || readCompanies.size() > bound;
+        List<RelationshipTemperatureDto> contacts = readContacts.size() > bound
+                ? readContacts.subList(0, bound)
+                : readContacts;
+        List<RelationshipTemperatureDto> companies = readCompanies.size() > bound
+                ? readCompanies.subList(0, bound)
+                : readCompanies;
         RecordLabels labels = labelsFor(
                 workspaceId,
                 contacts.stream().map(RelationshipTemperatureDto::getId).toList(),
@@ -167,8 +179,7 @@ public class AiAssistantWorkBriefReadService {
         data.put("trend", "cooling");
         data.put("returnedRecords", rows.size());
         data.put("caps", Map.of("perKind", bound));
-        data.put("recordsTruncated",
-                contacts.size() >= bound || companies.size() >= bound);
+        data.put("recordsTruncated", truncated);
         data.put("sort", "days_since_touch_desc");
         data.put("asOf", nowUtc());
         data.put("records", List.copyOf(rows));

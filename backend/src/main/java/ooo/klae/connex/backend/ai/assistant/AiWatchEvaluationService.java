@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -15,6 +16,8 @@ import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.AiWatch;
@@ -53,10 +56,12 @@ import tools.jackson.databind.ObjectMapper;
  * state token per cooldown.
  *
  * <p>Although no model participates, a watch is an Ask Connex surface and is governed as one: the
- * same fail-closed feature gate that governs an interactive turn is consulted under the owner's
- * identity before anything is evaluated. An instance kill switch, a workspace whose organization has
- * disabled the assistant, or an owner who has lost {@code AI_USE} therefore stops the firing stream
- * entirely rather than leaving a deterministic side channel that keeps delivering.
+ * assistant's governance gate is consulted under the owner's identity before anything is evaluated.
+ * An instance kill switch, a workspace whose organization has disabled the assistant, or an owner who
+ * has lost {@code AI_USE} therefore stops the firing stream entirely rather than leaving a
+ * deterministic side channel that keeps delivering. Provider readiness is deliberately not part of
+ * that gate: no completion is ever requested here, so a workspace with no configured provider keeps
+ * evaluating rather than silently dropping conditions a provider has nothing to do with.
  */
 @Service
 @RequiredArgsConstructor
@@ -88,6 +93,7 @@ public class AiWatchEvaluationService {
     private final UserService userService;
     private final WorkspaceService workspaceService;
     private final ObjectMapper objectMapper;
+    private final PlatformTransactionManager transactionManager;
     private final Clock clock;
 
     /** What one watch evaluation did. */
@@ -114,25 +120,34 @@ public class AiWatchEvaluationService {
         return outcome[0];
     }
 
+    /**
+     * Evaluates one watch with the owner's identity, permissions, and calendar already installed.
+     *
+     * <p>Three of the four early exits deliberately record nothing. A workspace whose assistant is
+     * switched off, or a watch this build no longer evaluates, has not checked the condition, and
+     * claiming it did would misstate the watch's own inspectable history the moment the assistant is
+     * switched back on or the type returns. An expired watch is the same: it is past, not quiet. Only
+     * an unreadable subject records an evaluation, because the record being gone, archived, or no
+     * longer visible to its owner is itself a reconciled answer — the member keeps an inspectable
+     * watch whose subject they can see has become unreadable, rather than a silent alert stream.
+     *
+     * @param watch the durable watch
+     * @param owner the freshly resolved owner the watch runs as
+     * @return what the evaluation did
+     */
     private Outcome evaluateAsOwner(AiWatch watch, User owner) {
-        if (!featureGate.isAiUsable(AiFeature.ASSISTANT_CHAT)) {
-            // Nothing is recorded as evaluated either: a workspace whose assistant is switched off
-            // has not checked the condition, and claiming it did would misstate the watch's own
-            // inspectable history the moment the assistant is switched back on.
+        if (!featureGate.isFeatureGoverned(AiFeature.ASSISTANT_CHAT)) {
+            return Outcome.SKIPPED;
+        }
+        if (hasExpired(watch)) {
             return Outcome.SKIPPED;
         }
         AiWatchType type = AiWatchType.from(watch.getWatchType()).orElse(null);
         if (type == null || !type.subjectKinds().contains(watch.getSubjectKind())) {
-            // A stored pair the current build no longer evaluates — a retired type, or a subject
-            // kind this type never reads — evaluates to nothing rather than falling through to a
-            // branch that would silently read the wrong source.
             return Outcome.SKIPPED;
         }
         Optional<String> label = subjectReader.label(watch.getSubjectKind(), watch.getSubjectId());
         if (label.isEmpty()) {
-            // The record is gone, archived, or no longer processable. Recording the evaluation and
-            // firing nothing is the correct reconciliation: the member keeps an inspectable watch
-            // whose subject they can see has become unreadable, rather than a silent alert stream.
             watchMapper.recordEvaluated(watch.getWorkspaceId(), watch.getId(), nowUtc());
             return Outcome.SKIPPED;
         }
@@ -146,13 +161,63 @@ public class AiWatchEvaluationService {
         if (firing == null) {
             return Outcome.QUIET;
         }
-        if (watchMapper.claimFiring(
-                watch.getWorkspaceId(), watch.getId(), firing.state(),
-                cooldownCutoff(watch), nowUtc()) != 1) {
-            return Outcome.QUIET;
+        return claimAndNotify(watch, owner, label.get(), firing);
+    }
+
+    /**
+     * Whether the watch's declared expiry has passed in the calendar it was declared against.
+     *
+     * <p>The sweep's pre-filter can only compare {@code expires_on} against a UTC date, because it
+     * selects rows before any workspace or member identity is installed. That date is up to a day
+     * away from the workspace reporting calendar the expiry was validated in when the member typed
+     * it, so the filter is deliberately widened by a day and the authoritative comparison is made
+     * here, where the owner's calendar is resolvable. Without it a watch expiring on the 24th would
+     * stop evaluating at 17:00 local the previous day in America/Los_Angeles, and keep evaluating
+     * most of a day too long in Asia/Tokyo.
+     *
+     * @param watch the durable watch
+     * @return true when the watch's last effective day is already past
+     */
+    private boolean hasExpired(AiWatch watch) {
+        String expiresOn = watch.getExpiresOn();
+        if (expiresOn == null || expiresOn.isBlank()) {
+            return false;
         }
-        notify(watch, owner, label.get(), firing, today());
-        return Outcome.FIRED;
+        try {
+            return LocalDate.parse(expiresOn.trim()).isBefore(today());
+        } catch (DateTimeParseException exception) {
+            return false;
+        }
+    }
+
+    /**
+     * Claims the firing and writes its notification as one durable act.
+     *
+     * <p>The compare-and-set is what enforces "at most one notification per state token per
+     * cooldown", so it cannot simply be moved after delivery: notifying first would re-announce a
+     * standing condition on every sweep. But committing the claim before delivery is the mirror-image
+     * fault — a realtime publish or inbox write that throws would leave {@code last_fired_at}
+     * advanced with nothing delivered, and the cooldown would then suppress every retry for up to
+     * ninety days. Running both inside one transaction keeps the claim exactly as durable as the
+     * notification it authorized: a failed delivery rolls the claim back and the next sweep tries
+     * again.
+     *
+     * @return {@link Outcome#FIRED} when the claim was won, {@link Outcome#QUIET} when the cooldown
+     *     or a concurrent sweep declined it
+     */
+    private Outcome claimAndNotify(AiWatch watch, User owner, String label, Firing firing) {
+        LocalDate firedOn = today();
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        Boolean claimed = transaction.execute(status -> {
+            if (watchMapper.claimFiring(
+                    watch.getWorkspaceId(), watch.getId(), firing.state(),
+                    cooldownCutoff(watch), nowUtc()) != 1) {
+                return false;
+            }
+            notify(watch, owner, label, firing, firedOn);
+            return true;
+        });
+        return Boolean.TRUE.equals(claimed) ? Outcome.FIRED : Outcome.QUIET;
     }
 
     /**

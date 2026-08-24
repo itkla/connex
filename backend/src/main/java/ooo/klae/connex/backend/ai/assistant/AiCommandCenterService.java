@@ -19,12 +19,17 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
  * <p>It composes existing per-member reads rather than adding a projection of its own, so nothing the
  * surface shows can diverge from what the schedule and watch endpoints return individually.
  *
- * <p>Availability is the conjunction of the two facts that actually decide whether a scheduled brief
- * can ever run: the declared skill catalog answers "does this build implement a brief at all", and
- * the fail-closed feature gate answers "may this member, in this workspace, invoke the assistant
+ * <p>The two sections report availability separately because they depend on different facts, and
+ * collapsing them would misdescribe one of them. A brief is real provider egress, so its availability
+ * is the conjunction of the declared skill catalog — "does this build implement a brief at all" — and
+ * the full fail-closed gate, which answers "may this member, in this workspace, invoke the assistant
  * right now". Reporting only the first would render an enabled schedule switch in a workspace whose
- * scheduled runs are guaranteed to skip, which is the one thing a standing-work surface must not do:
- * it would promise a brief that silently never arrives.
+ * scheduled runs are guaranteed to skip, promising a brief that silently never arrives.
+ *
+ * <p>Watches reach no provider at all: every condition is decided by the warmth, task, and deal-risk
+ * models. Their availability is therefore the governance gate alone, so a workspace that has not
+ * configured a provider still gets working watches and is told so, while switching the assistant off
+ * still stops them.
  */
 @Service
 @RequiredArgsConstructor
@@ -48,6 +53,7 @@ public class AiCommandCenterService {
                 schedule == null ? null : schedule.getLastDeliveredAt(),
                 skillCatalog.isAvailable("daily_work_brief_v1")
                         && featureGate.isAiUsable(AiFeature.ASSISTANT_CHAT),
+                featureGate.isFeatureGoverned(AiFeature.ASSISTANT_CHAT),
                 watchService.list(),
                 AiWatchService.MAX_WATCHES_PER_MEMBER);
     }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import {
@@ -25,6 +25,14 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+import {
+    Combobox,
+    ComboboxContent,
+    ComboboxEmpty,
+    ComboboxInput,
+    ComboboxItem,
+    ComboboxList,
+} from '@/components/ui/combobox';
 import {
     ResponsiveDialog,
     ResponsiveDialogClose,
@@ -64,6 +72,26 @@ const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 const WEEKDAYS = [1, 2, 3, 4, 5, 6, 7];
 
 /**
+ * The zones a brief may be scheduled in, read from the platform's own zone database.
+ *
+ * The stored zone is included whether or not this runtime knows it, so a schedule saved elsewhere is
+ * still shown as itself rather than silently reading as blank and being overwritten on the next save.
+ *
+ * @param current - the zone the schedule is stored in
+ * @returns the selectable zones, current one first
+ */
+function supportedTimeZones(current: string): string[] {
+    const intl = Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] };
+    let supported: string[] = [];
+    try {
+        supported = intl.supportedValuesOf?.('timeZone') ?? [];
+    } catch {
+        supported = [];
+    }
+    return Array.from(new Set([current, 'UTC', ...supported].filter(Boolean)));
+}
+
+/**
  * The standing work Ask Connex is doing when nobody is asking it anything.
  *
  * <p>It is a view, not an owner. The brief schedule and the watch list are the only state it
@@ -78,16 +106,34 @@ const WEEKDAYS = [1, 2, 3, 4, 5, 6, 7];
  * Each watch row states its whole contract — the trigger, how often it may repeat, and when it
  * stops — because those terms bind whether or not they were chosen, and a member cannot decide to
  * keep a watch they can only half read. Deleting one is confirmed like any other destructive act.
+ *
+ * The two sections report availability separately because the server does: a brief needs a usable
+ * provider, a watch needs only that the assistant is switched on. A brief switch that is already on
+ * therefore stays switchable *off* even while generation is unavailable — disabling it outright would
+ * trap a member in a schedule they cannot cancel, and generation would silently resume the moment the
+ * provider returned.
+ *
+ * A read that fails says so and offers a retry rather than vanishing. This is standing context, not
+ * the reason the member opened Ask Connex, so the failure is a quiet line and a button rather than a
+ * blocking error — but a section that silently disappears would tell a member their schedules and
+ * watches do not exist.
+ *
+ * The zone is a control, not a caption. A brief schedule keeps whichever zone it was stored with, so
+ * showing it read-only left a member who had moved, or who works in a workspace on a different
+ * calendar, with briefs arriving at the wrong hour and no way to correct them.
  */
 export default function AskConnexCommandCenter() {
     const t = useTranslations('AskConnex.commandCenter');
     const locale = useLocale();
     const showApiError = useApiErrorToast('AskConnex.commandCenter');
     const [state, setState] = useState<AiCommandCenter | null>(null);
-    const [loadState, setLoadState] = useState<'loading' | 'ready' | 'unavailable'>('loading');
+    const [loadState, setLoadState] = useState<'loading' | 'ready' | 'failed'>('loading');
+    const [reloadToken, setReloadToken] = useState(0);
     const [savingSchedule, setSavingSchedule] = useState(false);
     const [busyWatchId, setBusyWatchId] = useState<number | null>(null);
     const [pendingDeletion, setPendingDeletion] = useState<AiWatch | null>(null);
+    const storedZone = state?.schedule.timeZone ?? 'UTC';
+    const timeZones = useMemo(() => supportedTimeZones(storedZone), [storedZone]);
 
     useEffect(() => {
         let live = true;
@@ -98,15 +144,12 @@ export default function AskConnexCommandCenter() {
                 setLoadState('ready');
             })
             .catch(() => {
-                // The command centre is standing context, not the reason the member opened Ask
-                // Connex. A failed read hides the section and leaves the composer entirely usable
-                // rather than putting an error where a prompt should be.
-                if (live) setLoadState('unavailable');
+                if (live) setLoadState('failed');
             });
         return () => {
             live = false;
         };
-    }, []);
+    }, [reloadToken]);
 
     const saveSchedule = useCallback(
         async (next: AiBriefSchedulePayload) => {
@@ -164,9 +207,28 @@ export default function AskConnexCommandCenter() {
         [showApiError],
     );
 
-    if (loadState === 'unavailable') return null;
+    if (loadState === 'failed' && state === null) {
+        return (
+            <section className="w-full max-w-xl space-y-2 text-left">
+                <p className="text-xs leading-relaxed text-muted-foreground" role="status">
+                    {t('loadFailed')}
+                </p>
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="inline"
+                    onClick={() => {
+                        setLoadState('loading');
+                        setReloadToken((token) => token + 1);
+                    }}
+                >
+                    {t('loadRetry')}
+                </Button>
+            </section>
+        );
+    }
 
-    if (loadState === 'loading' || state === null) {
+    if (state === null) {
         return (
             <section aria-busy className="w-full max-w-xl space-y-3 text-left">
                 <Skeleton className="h-4 w-28" />
@@ -208,7 +270,8 @@ export default function AskConnexCommandCenter() {
                         <Switch
                             id="ask-connex-daily-brief"
                             checked={schedule.dailyEnabled}
-                            disabled={savingSchedule || !state.briefSkillAvailable}
+                            disabled={savingSchedule
+                                || (!state.briefSkillAvailable && !schedule.dailyEnabled)}
                             onCheckedChange={(checked) => void saveSchedule({
                                 ...scheduleBase,
                                 dailyEnabled: checked === true,
@@ -250,7 +313,8 @@ export default function AskConnexCommandCenter() {
                         <Switch
                             id="ask-connex-weekly-brief"
                             checked={schedule.weeklyEnabled}
-                            disabled={savingSchedule || !state.briefSkillAvailable}
+                            disabled={savingSchedule
+                                || (!state.briefSkillAvailable && !schedule.weeklyEnabled)}
                             onCheckedChange={(checked) => void saveSchedule({
                                 ...scheduleBase,
                                 weeklyEnabled: checked === true,
@@ -263,41 +327,99 @@ export default function AskConnexCommandCenter() {
                             {t('weeklyLabel')}
                         </label>
                         {schedule.weeklyEnabled ? (
-                            <Select
-                                value={String(schedule.weeklyWeekday)}
-                                disabled={savingSchedule}
-                                onValueChange={(value) => void saveSchedule({
-                                    ...scheduleBase,
-                                    weeklyWeekday: Number(value),
-                                })}
-                            >
-                                <SelectTrigger
-                                    size="sm"
-                                    className="w-32"
-                                    aria-label={t('weeklyDayLabel')}
+                            <>
+                                <Select
+                                    value={String(schedule.weeklyWeekday)}
+                                    disabled={savingSchedule}
+                                    onValueChange={(value) => void saveSchedule({
+                                        ...scheduleBase,
+                                        weeklyWeekday: Number(value),
+                                    })}
                                 >
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {WEEKDAYS.map((weekday) => (
-                                        <SelectItem key={`weekday-${weekday}`} value={String(weekday)}>
-                                            {t(`weekday.${weekday}`)}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                                    <SelectTrigger
+                                        size="sm"
+                                        className="w-32"
+                                        aria-label={t('weeklyDayLabel')}
+                                    >
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {WEEKDAYS.map((weekday) => (
+                                            <SelectItem
+                                                key={`weekday-${weekday}`}
+                                                value={String(weekday)}
+                                            >
+                                                {t(`weekday.${weekday}`)}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <span className="text-sm text-foreground">{t('weeklyAt')}</span>
+                                <Select
+                                    value={String(schedule.weeklyHour)}
+                                    disabled={savingSchedule}
+                                    onValueChange={(value) => void saveSchedule({
+                                        ...scheduleBase,
+                                        weeklyHour: Number(value),
+                                    })}
+                                >
+                                    <SelectTrigger
+                                        size="sm"
+                                        className="w-28"
+                                        aria-label={t('weeklyHourLabel')}
+                                    >
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {HOURS.map((hour) => (
+                                            <SelectItem key={`weekly-hour-${hour}`} value={String(hour)}>
+                                                {t('hour', { hour })}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </>
                         ) : null}
                     </div>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                    {t('scheduleZone', { zone: schedule.timeZone })}
-                </p>
+                <div className="flex flex-wrap items-center gap-3">
+                    <span className="text-xs text-muted-foreground">{t('scheduleZoneLabel')}</span>
+                    <Combobox
+                        items={timeZones}
+                        value={schedule.timeZone}
+                        onValueChange={(value) => {
+                            if (typeof value === 'string' && value !== schedule.timeZone) {
+                                void saveSchedule({ ...scheduleBase, timeZone: value });
+                            }
+                        }}
+                        itemToStringLabel={(value: string) => value}
+                    >
+                        <ComboboxInput
+                            id="ask-connex-brief-zone"
+                            aria-label={t('scheduleZoneLabel')}
+                            disabled={savingSchedule}
+                        />
+                        <ComboboxContent className="pointer-events-auto">
+                            <ComboboxList>
+                                <ComboboxEmpty>{t('scheduleZoneEmpty')}</ComboboxEmpty>
+                                {timeZones.map((zone) => (
+                                    <ComboboxItem key={zone} value={zone}>{zone}</ComboboxItem>
+                                ))}
+                            </ComboboxList>
+                        </ComboboxContent>
+                    </Combobox>
+                </div>
             </div>
 
             <Separator />
 
             <div className="space-y-3">
                 <h3 className="text-sm font-medium text-foreground">{t('watchesTitle')}</h3>
+                {state.watchesAvailable ? null : (
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                        {t('watchesUnavailable')}
+                    </p>
+                )}
                 {watches.length === 0 ? (
                     <p className="text-xs leading-relaxed text-muted-foreground">
                         {t('watchesEmpty')}

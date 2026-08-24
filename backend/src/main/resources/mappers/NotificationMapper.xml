@@ -219,6 +219,26 @@
         WHERE source_deal.workspace_id = n.workspace_id
           AND source_deal.id = n.source_id
       ))
+      <!-- A scheduled brief notifies its owner about their own assistant session, so the session has
+           to be reachable by that recipient specifically: they created it, or they were added as a
+           participant. Without this branch the inbox persists the row but its own findById cannot
+           read it, which suppresses realtime and secondary delivery and filters the brief out of
+           every page and count query. A deleted session hides the stale pointer, as everywhere else
+           in this predicate. -->
+      OR (n.source_type = 'ai_chat_session' AND EXISTS (
+        SELECT 1 FROM ai_chat_session source_session
+        WHERE source_session.workspace_id = n.workspace_id
+          AND source_session.id = n.source_id
+          AND (
+            source_session.created_by_user_id = n.recipient_id
+            OR EXISTS (
+              SELECT 1 FROM ai_chat_session_participant source_session_participant
+              WHERE source_session_participant.workspace_id = n.workspace_id
+                AND source_session_participant.session_id = source_session.id
+                AND source_session_participant.user_id = n.recipient_id
+            )
+          )
+      ))
       OR (n.source_type = 'introduction' AND EXISTS (
         SELECT 1 FROM introduction source_introduction
         WHERE source_introduction.workspace_id = n.workspace_id

@@ -14,6 +14,8 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiFeature;
@@ -28,6 +30,8 @@ import ooo.klae.connex.backend.dto.AiChatSessionCreateRequest;
 import ooo.klae.connex.backend.dto.AiChatSessionDto;
 import ooo.klae.connex.backend.dto.AiChatTurnAcceptedDto;
 import ooo.klae.connex.backend.dto.AiChatTurnCreateRequest;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AiBriefScheduleMapper;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.services.AiAssistantService;
@@ -90,6 +94,7 @@ public class AiBriefRunService {
     private final NotificationDelivery notificationDelivery;
     private final UserService userService;
     private final ObjectMapper objectMapper;
+    private final PlatformTransactionManager transactionManager;
     private final Clock clock;
 
     /** The outcome of one scheduled brief pass, recorded for observability. */
@@ -111,14 +116,27 @@ public class AiBriefRunService {
     public Outcome start(AiBriefSchedule schedule, String kind, LocalDate claimOn) {
         User owner = userService.getActiveWorkspaceUser(
                 schedule.getWorkspaceId(), schedule.getUserId());
+        Locale locale = locale(owner);
         Outcome[] outcome = { Outcome.SKIPPED };
         contextRunner.run(
-                schedule.getWorkspaceId(), schedule.getUserId(), locale(owner),
-                () -> outcome[0] = startAsOwner(schedule, kind, claimOn));
+                schedule.getWorkspaceId(), schedule.getUserId(), locale,
+                () -> outcome[0] = startAsOwner(schedule, kind, claimOn, locale));
         return outcome[0];
     }
 
-    private Outcome startAsOwner(AiBriefSchedule schedule, String kind, LocalDate claimOn) {
+    /**
+     * Claims the period and starts the turn under the owner's installed identity and language.
+     *
+     * <p>A failure to start spends the claim rather than releasing it. A brief that could not start
+     * is not retried inside its own period and is never announced, because a member who asked for one
+     * useful summary a day is not asking to be told repeatedly that it failed.
+     *
+     * @param locale the owner's own language, which the durable session title and request are written
+     *     in so a scheduled run does not leave English, apparently member-authored text in a
+     *     Japanese workspace
+     */
+    private Outcome startAsOwner(
+            AiBriefSchedule schedule, String kind, LocalDate claimOn, Locale locale) {
         if (!featureGate.isAiUsable(AiFeature.ASSISTANT_CHAT)) {
             return Outcome.SKIPPED;
         }
@@ -128,17 +146,14 @@ public class AiBriefRunService {
         }
         try {
             AiChatSessionDto session = assistantService.create(
-                    sessionRequest(kind, claimOn));
+                    sessionRequest(kind, claimOn, locale));
             AiChatTurnAcceptedDto accepted = turnService.start(
-                    session.getId(), turnRequest(kind));
+                    session.getId(), turnRequest(kind, locale));
             scheduleMapper.attachPendingTurn(
                     schedule.getWorkspaceId(), schedule.getId(), kind,
                     session.getId(), accepted.turnId(), nowUtc());
             return Outcome.STARTED;
         } catch (RuntimeException exception) {
-            // The claim stays spent. A brief that could not start is not retried inside its own
-            // period and is never announced, because a member who asked for one useful summary a day
-            // is not asking to be told repeatedly that it failed.
             scheduleMapper.recordStartFailure(
                     schedule.getWorkspaceId(), schedule.getId(),
                     REASON_START_FAILED, nowUtc());
@@ -155,6 +170,12 @@ public class AiBriefRunService {
      * delivery are separated in time and the gate is the workspace's live answer rather than a fact
      * captured at start.
      *
+     * <p>Only a definitive answer about access drops the brief. A member who is no longer a member
+     * has genuinely lost it, and dropping is right; a database timeout or a routing failure has said
+     * nothing about access at all, and treating it the same way would discard a generated brief that
+     * a later sweep could still have delivered. Transient failures therefore propagate and leave the
+     * pending row exactly as it was.
+     *
      * @param schedule the schedule carrying a pending turn
      * @return what the pass did
      */
@@ -166,7 +187,7 @@ public class AiBriefRunService {
         try {
             owner = userService.getActiveWorkspaceUser(
                     schedule.getWorkspaceId(), schedule.getUserId());
-        } catch (RuntimeException exception) {
+        } catch (ResourceNotFoundException | ForbiddenException exception) {
             release(schedule, false, REASON_ACCESS_LOST);
             return Outcome.SKIPPED;
         }
@@ -177,12 +198,18 @@ public class AiBriefRunService {
         return outcome[0];
     }
 
+    /**
+     * Decides one in-flight brief's fate with the owner's identity already installed.
+     *
+     * <p>The gate can close between the start pass and this one — the kill switch flips, the
+     * organization disables AI, the member loses {@code AI_USE}. Announcing a brief generated under
+     * the old fact would deliver assistant output into a workspace that has since said no, so the
+     * pending row is dropped rather than released as delivered. Losing read access to one's own brief
+     * is the same kind of answer and is treated the same way; anything that is merely a failure to
+     * read propagates instead, leaving the row for the next sweep.
+     */
     private Outcome deliverAsOwner(AiBriefSchedule schedule, User owner) {
         if (!featureGate.isAiUsable(AiFeature.ASSISTANT_CHAT)) {
-            // The gate can close between the start pass and this one — the kill switch flips, the
-            // organization disables AI, the member loses AI_USE. Announcing a brief generated under
-            // the old fact would deliver assistant output into a workspace that has since said no,
-            // so the pending row is dropped rather than released as delivered.
             release(schedule, false, REASON_ACCESS_LOST);
             return Outcome.SKIPPED;
         }
@@ -190,20 +217,13 @@ public class AiBriefRunService {
         try {
             turn = persistenceService.readTurn(
                     schedule.getPendingSessionId(), schedule.getPendingTurnId());
-        } catch (RuntimeException exception) {
-            // Losing read access to one's own brief between generation and delivery is a permission
-            // outcome, not a failure to report: drop it rather than announce a session the member
-            // can no longer open.
+        } catch (ResourceNotFoundException | ForbiddenException exception) {
             release(schedule, false, REASON_ACCESS_LOST);
             return Outcome.SKIPPED;
         }
         String status = turn == null ? null : turn.getStatus();
         if ("resolved".equals(status)) {
-            if (!release(schedule, true, null)) {
-                return Outcome.SKIPPED;
-            }
-            notify(schedule, owner);
-            return Outcome.DELIVERED;
+            return releaseAndNotify(schedule, owner);
         }
         if ("failed".equals(status) || "timed_out".equals(status)) {
             release(schedule, false, REASON_GENERATION_FAILED);
@@ -243,11 +263,40 @@ public class AiBriefRunService {
     }
 
     /**
+     * Releases the pending brief as delivered and writes its notification as one durable act.
+     *
+     * <p>The release is the at-most-once claim, so it must precede delivery within the same
+     * transaction rather than follow it: releasing first but committing separately would mark a brief
+     * delivered whose notification then failed to persist, and because the release clears the pending
+     * fields no later sweep would have anything left to retry. Sharing one transaction keeps
+     * "delivered" true exactly when a notification exists — a failed write rolls the release back and
+     * the brief stays pending for the next pass.
+     *
+     * @return {@link Outcome#DELIVERED} when this pass released and announced the brief,
+     *     {@link Outcome#SKIPPED} when another pass had already released it
+     */
+    private Outcome releaseAndNotify(AiBriefSchedule schedule, User owner) {
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        Boolean delivered = transaction.execute(status -> {
+            if (!release(schedule, true, null)) {
+                return false;
+            }
+            notify(schedule, owner);
+            return true;
+        });
+        return Boolean.TRUE.equals(delivered) ? Outcome.DELIVERED : Outcome.SKIPPED;
+    }
+
+    /**
      * Writes the one notification a delivered brief produces.
      *
      * <p>Notifications own read, dismiss, and snooze state, so the brief itself carries none: this
      * row is a pointer to the session the member can open, and the session is where the evidence
      * lives. The dedupe key is the durable turn, so no pass can announce the same brief twice.
+     *
+     * <p>The stored title exists because the column requires one, not because it is displayed: the
+     * inbox renders this notification from its type and data so it reads in the member's own
+     * language whatever the snapshot says.
      */
     private void notify(AiBriefSchedule schedule, User owner) {
         Notification notification = new Notification();
@@ -257,8 +306,6 @@ public class AiBriefRunService {
         notification.setCategory(NOTIFICATION_CATEGORY);
         notification.setSeverity(NOTIFICATION_SEVERITY);
         notification.setTemplateVersion(1);
-        // A stored snapshot exists because the column requires one; the inbox renders this
-        // notification from its type and data so it reads in the member's own language.
         notification.setTitle(WEEKLY.equals(schedule.getPendingKind())
                 ? "Weekly review ready"
                 : "Daily brief ready");
@@ -276,16 +323,22 @@ public class AiBriefRunService {
     }
 
     /**
-     * The literal request a scheduled run sends.
+     * The literal request a scheduled run sends, in the owner's own language.
      *
      * <p>It is deliberately a sentence the deterministic skill router recognizes rather than a
      * private flag, so a scheduled brief and a member typing the same request take exactly the same
-     * path, select the same skill version, and can be compared against each other afterwards.
+     * path, select the same skill version, and can be compared against each other afterwards. That is
+     * also why it must be localized: the sentence is persisted as the member's own turn and shown in
+     * the transcript, so an English literal would put words a Japanese member never wrote into their
+     * own session. Each localized form is chosen to match the same work-brief patterns the catalog
+     * declares, so routing is identical in either language.
      */
-    private AiChatTurnCreateRequest turnRequest(String kind) {
+    private static AiChatTurnCreateRequest turnRequest(String kind, Locale locale) {
         boolean weekly = WEEKLY.equals(kind);
         return new AiChatTurnCreateRequest(
-                weekly ? "Give me my weekly review." : "Give me my daily brief.",
+                japanese(locale)
+                        ? (weekly ? "今週のブリーフをお願いします。" : "今日のブリーフをお願いします。")
+                        : (weekly ? "Give me my weekly review." : "Give me my daily brief."),
                 List.of(),
                 new AiChatQueryScopeRequest(
                         null, null,
@@ -296,9 +349,21 @@ public class AiBriefRunService {
                         List.of(), null));
     }
 
-    private static AiChatSessionCreateRequest sessionRequest(String kind, LocalDate claimOn) {
+    /**
+     * The durable session title, written in the owner's language.
+     *
+     * <p>The title is not incidental metadata: it is what the member sees in their own session list
+     * for as long as the brief is retained, so it answers to their locale exactly as the transcript
+     * does.
+     */
+    private static AiChatSessionCreateRequest sessionRequest(
+            String kind, LocalDate claimOn, Locale locale) {
+        boolean weekly = WEEKLY.equals(kind);
+        String prefix = japanese(locale)
+                ? (weekly ? "週次レビュー " : "デイリーブリーフ ")
+                : (weekly ? "Weekly review " : "Daily brief ");
         AiChatSessionCreateRequest request = new AiChatSessionCreateRequest();
-        request.setTitle((WEEKLY.equals(kind) ? "Weekly review " : "Daily brief ") + claimOn);
+        request.setTitle(prefix + claimOn);
         request.setAutoTitle(false);
         return request;
     }
@@ -308,6 +373,10 @@ public class AiBriefRunService {
         return declared != null && declared.toLowerCase(Locale.ROOT).startsWith("ja")
                 ? Locale.JAPANESE
                 : Locale.ENGLISH;
+    }
+
+    private static boolean japanese(Locale locale) {
+        return locale != null && Locale.JAPANESE.getLanguage().equals(locale.getLanguage());
     }
 
     private String nowUtc() {

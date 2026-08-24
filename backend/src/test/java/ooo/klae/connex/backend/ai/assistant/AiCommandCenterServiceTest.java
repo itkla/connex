@@ -52,4 +52,29 @@ class AiCommandCenterServiceTest {
 
         assertFalse(service.get().briefSkillAvailable());
     }
+
+    /**
+     * The two sections answer to different facts and the surface says so. A workspace that has not
+     * configured a provider cannot generate a brief, but its watches are decided entirely by the
+     * warmth, task, and deal-risk models and keep working — reporting one flag for both would hide a
+     * feature that is running perfectly well.
+     */
+    @Test
+    void aWorkspaceWithoutAProviderStillReportsWatchesAvailable() {
+        when(featureGate.isAiUsable(AiFeature.ASSISTANT_CHAT)).thenReturn(false);
+        when(featureGate.isFeatureGoverned(AiFeature.ASSISTANT_CHAT)).thenReturn(true);
+
+        assertFalse(service.get().briefSkillAvailable());
+        assertTrue(service.get().watchesAvailable());
+    }
+
+    /** Switching the assistant off stops both, because governance binds the deterministic half too. */
+    @Test
+    void aWorkspaceWhoseAssistantIsSwitchedOffReportsWatchesUnavailableToo() {
+        when(featureGate.isAiUsable(AiFeature.ASSISTANT_CHAT)).thenReturn(false);
+        when(featureGate.isFeatureGoverned(AiFeature.ASSISTANT_CHAT)).thenReturn(false);
+
+        assertFalse(service.get().briefSkillAvailable());
+        assertFalse(service.get().watchesAvailable());
+    }
 }

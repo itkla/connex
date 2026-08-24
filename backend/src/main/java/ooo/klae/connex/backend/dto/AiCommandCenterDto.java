@@ -29,7 +29,14 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * @param latestBriefSessionId session the last delivered brief lives in, or null
  * @param latestBriefKind period of the last delivered brief, or null
  * @param latestBriefDeliveredAt when the last brief was delivered, or null
+ * <p>The two availability flags are separate because the two sections depend on different facts. A
+ * brief performs real provider egress, so it needs a configured, usable provider; a watch performs
+ * none, so it needs only that the assistant has not been switched off for this member. Reporting one
+ * flag for both would either hide working watches from a workspace that has not configured a
+ * provider, or promise briefs it cannot generate.
+ *
  * @param briefSkillAvailable whether this build and workspace can actually run a brief
+ * @param watchesAvailable whether the assistant is switched on for this member, provider aside
  * @param watches the member's watches, newest first
  * @param watchLimit the most watches this member may hold in this workspace
  */
@@ -40,6 +47,7 @@ public record AiCommandCenterDto(
         String latestBriefKind,
         String latestBriefDeliveredAt,
         boolean briefSkillAvailable,
+        boolean watchesAvailable,
         List<AiWatchDto> watches,
         int watchLimit) {
 

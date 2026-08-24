@@ -8,6 +8,7 @@ import { useAskConnex } from '@/app/components/ask-connex/AskConnexProvider';
 import AskConnexWatchDialog from '@/app/components/ask-connex/AskConnexWatchDialog';
 import { useAskConnexSkills } from '@/app/hooks/useAskConnexSkills';
 import { useActions } from '@/app/hooks/useActions';
+import { usePermissionCheck } from '@/app/hooks/usePermissions';
 import { askConnexJobs } from '@/app/lib/askConnexEntryPoints';
 import type { AiChatPageContextKind } from '@/app/lib/types';
 import { Button } from '@/components/ui/button';
@@ -40,20 +41,25 @@ import {
  * nothing is saved until the member reads that contract and applies it. The contract dialog is
  * mounted as a sibling of the menu rather than inside it: menu content is portalled and unmounted on
  * close, so a dialog rendered within it would be torn down by the very selection that opened it.
+ *
+ * The watch affordance answers to the same permission the directory does, not merely to whether the
+ * page has a numeric record. Gating it on the record alone would leave a member without `AI_USE` — or
+ * one whose permissions have not resolved yet — looking at an assistant menu whose only entry is a
+ * watch the server is certain to refuse. The watched record itself is read from the same active-record
+ * context the assistant anchors to; a record whose id is not numeric simply offers no watch.
  */
 export default function AskConnexRecordEntry({ kind }: { kind: AiChatPageContextKind }) {
     const t = useTranslations('AskConnex');
     const { openWithPrompt } = useAskConnex();
     const { context } = useActions();
     const skills = useAskConnexSkills(kind);
+    const assistantPermission = usePermissionCheck('AI_USE');
     const jobs = askConnexJobs(skills, { kind, hasSubject: true });
     const [watchOpen, setWatchOpen] = useState(false);
-    // The watched record is the one the page is already about, read from the same active-record
-    // context the assistant itself anchors to; a numeric id is what the typed watch contract needs,
-    // so a record whose id is not numeric simply offers no watch.
     const record = context.record;
     const subjectId = record === null ? Number.NaN : Number(record.id);
-    const watchable = record !== null
+    const watchable = assistantPermission === 'granted'
+        && record !== null
         && record.type === kind
         && Number.isInteger(subjectId)
         && subjectId > 0;

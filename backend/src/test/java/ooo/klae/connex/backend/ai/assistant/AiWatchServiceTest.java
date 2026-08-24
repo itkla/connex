@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AiWatchMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 /**
@@ -38,12 +39,13 @@ class AiWatchServiceTest {
     private static final Instant NOW = Instant.parse("2026-08-24T07:00:00Z");
 
     private final AiWatchMapper watchMapper = mock(AiWatchMapper.class);
+    private final WorkspaceMapper workspaceMapper = mock(WorkspaceMapper.class);
     private final AiFeatureGate featureGate = mock(AiFeatureGate.class);
     private final AiWatchSubjectReader subjectReader = mock(AiWatchSubjectReader.class);
     private final WorkspaceService workspaceService = mock(WorkspaceService.class);
 
     private final AiWatchService service = new AiWatchService(
-            watchMapper, featureGate, subjectReader, workspaceService,
+            watchMapper, workspaceMapper, featureGate, subjectReader, workspaceService,
             Clock.fixed(NOW, ZoneOffset.UTC));
 
     @BeforeEach
@@ -141,14 +143,50 @@ class AiWatchServiceTest {
         verify(watchMapper).delete(eq(7), eq(11), eq(6));
     }
 
+    /**
+     * The kill switch still stops watches. Governance is the whole point of gating a surface that
+     * invokes no model: switching the assistant off must not leave a deterministic side channel that
+     * keeps creating standing subscriptions.
+     */
     @Test
     void aWorkspaceWhoseAssistantIsSwitchedOffCannotHaveNewWatchesCreatedInIt() {
         org.mockito.Mockito.doThrow(new ForbiddenException("AI features are not available"))
-                .when(featureGate).requireAiUsable(AiFeature.ASSISTANT_CHAT);
+                .when(featureGate).requireFeatureGoverned(AiFeature.ASSISTANT_CHAT);
 
         assertThrows(ForbiddenException.class, () -> service.create(cooling("cold")));
         verify(watchMapper, never()).insert(any());
         verify(subjectReader, never()).label(anyString(), anyInt());
+    }
+
+    /**
+     * The mirror-image fact: a watch reaches no provider, so a workspace that has not configured one
+     * must still be able to create it. Gating creation on readiness would refuse a deterministic
+     * subscription for a reason that has nothing to do with whether it can be evaluated.
+     */
+    @Test
+    void aWorkspaceWithNoUsableProviderCanStillCreateAWatch() {
+        when(featureGate.isAiUsable(AiFeature.ASSISTANT_CHAT)).thenReturn(false);
+
+        service.create(cooling("cold"));
+
+        verify(watchMapper).insert(any());
+        verify(featureGate).requireFeatureGoverned(AiFeature.ASSISTANT_CHAT);
+        verify(featureGate, never()).requireAiUsable(any());
+    }
+
+    /**
+     * The cap bounds a scheduled workload, so it has to hold under concurrency too: admission is
+     * serialized on the owner's own membership row before the count is read, because the unique key
+     * only rejects a duplicate condition on the same record.
+     */
+    @Test
+    void theWatchLimitIsCountedOnlyAfterAdmissionIsSerializedForThatOwner() {
+        service.create(cooling("cold"));
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(workspaceMapper, watchMapper);
+        order.verify(workspaceMapper).lockAuthorizationMembership(7, 11);
+        order.verify(watchMapper).countForOwner(7, 11);
+        order.verify(watchMapper).insert(any());
     }
 
     /**

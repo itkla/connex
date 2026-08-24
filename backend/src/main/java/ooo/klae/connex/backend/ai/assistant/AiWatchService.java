@@ -20,6 +20,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AiWatchMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -47,6 +48,11 @@ public class AiWatchService {
      * <p>Every active watch is re-evaluated on every sweep, so the cap is what keeps a member's own
      * watch list from becoming an unbounded scheduled workload — and what keeps their notification
      * inbox survivable.
+     *
+     * <p>Admission is serialized on the owner's own membership row rather than counted optimistically.
+     * The unique key only rejects a duplicate condition on the same record, so two concurrent creates
+     * of different conditions would otherwise both read the same count and both be admitted, and the
+     * cap that bounds every sweep would be a cap only under sequential use.
      */
     static final int MAX_WATCHES_PER_MEMBER = 50;
 
@@ -55,6 +61,7 @@ public class AiWatchService {
     private static final String PAUSED = "paused";
 
     private final AiWatchMapper watchMapper;
+    private final WorkspaceMapper workspaceMapper;
     private final AiFeatureGate featureGate;
     private final AiWatchSubjectReader subjectReader;
     private final WorkspaceService workspaceService;
@@ -79,10 +86,12 @@ public class AiWatchService {
     /**
      * Creates one typed watch for the calling member.
      *
-     * <p>The assistant feature gate is consulted here as well as at evaluation time. A watch created
-     * while the assistant is switched off would sit inert and then start firing the moment it was
-     * switched on, which is a standing subscription the member was never told they were unable to
-     * create; refusing at creation keeps the refusal where they can see it.
+     * <p>The assistant governance gate is consulted here as well as at evaluation time. A watch
+     * created while the assistant is switched off would sit inert and then start firing the moment it
+     * was switched on, which is a standing subscription the member was never told they were unable to
+     * create; refusing at creation keeps the refusal where they can see it. It is deliberately the
+     * governance gate rather than the full one: deciding whether a watch fired reaches no provider,
+     * so a workspace without a configured provider must still be able to create and run watches.
      *
      * @param request the complete typed trigger the member applied
      * @return the stored watch
@@ -95,7 +104,7 @@ public class AiWatchService {
         if (request == null) {
             throw new BadRequestException("Watch request is invalid");
         }
-        featureGate.requireAiUsable(AiFeature.ASSISTANT_CHAT);
+        featureGate.requireFeatureGoverned(AiFeature.ASSISTANT_CHAT);
         AiWatchType type = AiWatchType.from(request.watchType())
                 .orElseThrow(() -> new BadRequestException(
                         "Watch type is not evaluated by this build"));
@@ -107,6 +116,7 @@ public class AiWatchService {
                 .orElseThrow(() -> new ResourceNotFoundException("Watched record not found"));
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
+        workspaceMapper.lockAuthorizationMembership(workspaceId, userId);
         if (watchMapper.countForOwner(workspaceId, userId) >= MAX_WATCHES_PER_MEMBER) {
             throw new ConflictException("Watch limit reached for this workspace");
         }

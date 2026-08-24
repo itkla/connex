@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -23,6 +24,7 @@ import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.ai.AiFeatureGate;
@@ -65,6 +67,8 @@ class AiWatchEvaluationServiceTest {
     private final AiGenerationContextRunner contextRunner = mock(AiGenerationContextRunner.class);
     private final UserService userService = mock(UserService.class);
     private final WorkspaceService workspaceService = mock(WorkspaceService.class);
+    private final PlatformTransactionManager transactionManager =
+            mock(PlatformTransactionManager.class);
 
     private final AiWatchEvaluationService service = serviceAt(NOW);
 
@@ -73,7 +77,7 @@ class AiWatchEvaluationServiceTest {
         return new AiWatchEvaluationService(
                 watchMapper, featureGate, subjectReader, taskMapper, scoringService, dealRiskService,
                 workspaceScopeControlAccess, notificationDelivery, contextRunner, userService,
-                workspaceService, JsonMapper.builder().build(),
+                workspaceService, JsonMapper.builder().build(), transactionManager,
                 Clock.fixed(instant, ZoneOffset.UTC));
     }
 
@@ -84,7 +88,7 @@ class AiWatchEvaluationServiceTest {
         owner.setLocale("en");
         when(userService.getActiveWorkspaceUser(eq(7), eq(11))).thenReturn(owner);
         when(workspaceService.getCurrentAnalyticsTimezone()).thenReturn("UTC");
-        when(featureGate.isAiUsable(AiFeature.ASSISTANT_CHAT)).thenReturn(true);
+        when(featureGate.isFeatureGoverned(AiFeature.ASSISTANT_CHAT)).thenReturn(true);
         when(workspaceScopeControlAccess.getForWorkspace(7)).thenReturn(
                 new OrganizationWorkspaceScopeControlOperations.WorkspaceScope(1, List.of(7), "[7]"));
         doAnswer(invocation -> {
@@ -276,9 +280,14 @@ class AiWatchEvaluationServiceTest {
                 .claimFiring(eq(7), eq(5), eq("band:cold"), anyString(), anyString());
     }
 
+    /**
+     * The kill switch still stops watches. Deciding a firing invokes no model, but it is still an
+     * Ask Connex surface: switching the assistant off must stop the firing stream rather than leave a
+     * deterministic side channel delivering into an inbox.
+     */
     @Test
     void aWorkspaceWhoseAssistantIsSwitchedOffEvaluatesNothingAndFiresNothing() {
-        when(featureGate.isAiUsable(AiFeature.ASSISTANT_CHAT)).thenReturn(false);
+        when(featureGate.isFeatureGoverned(AiFeature.ASSISTANT_CHAT)).thenReturn(false);
         subjectIsReadable("Aiko Tanaka");
         AiWatch cooling = watch(AiWatchType.RELATIONSHIP_COOLING, "person", 42);
         cooling.setThresholdBand("cool");
@@ -292,6 +301,71 @@ class AiWatchEvaluationServiceTest {
                 anyInt(), anyInt(), anyString(), anyString(), anyString());
         verify(watchMapper, never()).recordEvaluated(anyInt(), anyInt(), anyString());
         verify(subjectReader, never()).label(anyString(), anyInt());
+    }
+
+    /**
+     * The mirror-image fact: no provider is ever called to decide a firing, so a workspace without a
+     * usable one keeps evaluating. Gating on readiness would silently drop conditions during exactly
+     * the window in which a member is least likely to notice they stopped being told.
+     */
+    @Test
+    void aWorkspaceWithNoUsableProviderStillEvaluatesAndFires() {
+        when(featureGate.isAiUsable(AiFeature.ASSISTANT_CHAT)).thenReturn(false);
+        subjectIsReadable("Aiko Tanaka");
+        AiWatch cooling = watch(AiWatchType.RELATIONSHIP_COOLING, "person", 42);
+        cooling.setThresholdBand("cold");
+        when(scoringService.scoreContacts(7, Set.of(42)))
+                .thenReturn(List.of(temperature(42, "cold", 90)));
+
+        assertEquals(AiWatchEvaluationService.Outcome.FIRED, service.evaluate(cooling));
+
+        verify(notificationDelivery).deliver(any());
+    }
+
+    /**
+     * The expiry the member declared is read in the calendar it was validated in, not the sweep's
+     * UTC pre-filter. The sweep deliberately selects a day wider than UTC so no zone is cut off
+     * early; this is the authoritative comparison that keeps the extra day from evaluating.
+     */
+    @Test
+    void aWatchPastItsDeclaredExpiryIsNotEvaluatedEvenWhenTheSweepStillSelectedIt() {
+        subjectIsReadable("Aiko Tanaka");
+        AiWatch cooling = watch(AiWatchType.RELATIONSHIP_COOLING, "person", 42);
+        cooling.setThresholdBand("cold");
+        cooling.setExpiresOn("2026-08-23");
+        when(scoringService.scoreContacts(7, Set.of(42)))
+                .thenReturn(List.of(temperature(42, "cold", 90)));
+
+        assertEquals(AiWatchEvaluationService.Outcome.SKIPPED, service.evaluate(cooling));
+
+        verify(watchMapper, never()).recordEvaluated(anyInt(), anyInt(), anyString());
+        verify(notificationDelivery, never()).deliver(any());
+
+        cooling.setExpiresOn("2026-08-24");
+        assertEquals(AiWatchEvaluationService.Outcome.FIRED, service.evaluate(cooling));
+    }
+
+    /**
+     * The cooldown compare-and-set is what stops a standing condition re-announcing itself, so it
+     * cannot outlive a delivery that failed: a claim that committed while its notification did not
+     * would suppress every retry until the cooldown elapsed. Claim and notification therefore share
+     * one transaction, and a failed delivery rolls the claim back for the next sweep.
+     */
+    @Test
+    void aFailedDeliveryRollsTheFiringClaimBackRatherThanSpendingTheCooldown() {
+        subjectIsReadable("Aiko Tanaka");
+        AiWatch cooling = watch(AiWatchType.RELATIONSHIP_COOLING, "person", 42);
+        cooling.setThresholdBand("cold");
+        when(scoringService.scoreContacts(7, Set.of(42)))
+                .thenReturn(List.of(temperature(42, "cold", 90)));
+        org.mockito.Mockito.doThrow(new IllegalStateException("inbox unavailable"))
+                .when(notificationDelivery).deliver(any());
+
+        assertThrows(IllegalStateException.class, () -> service.evaluate(cooling));
+
+        verify(watchMapper).claimFiring(eq(7), eq(5), eq("band:cold"), anyString(), anyString());
+        verify(transactionManager).rollback(any());
+        verify(transactionManager, never()).commit(any());
     }
 
     @Test

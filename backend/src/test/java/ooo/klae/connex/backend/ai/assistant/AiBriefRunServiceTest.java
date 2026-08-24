@@ -21,6 +21,7 @@ import java.time.ZoneOffset;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.ai.AiFeatureGate;
@@ -57,11 +58,13 @@ class AiBriefRunServiceTest {
             mock(AiChatTurnPersistenceService.class);
     private final NotificationDelivery notificationDelivery = mock(NotificationDelivery.class);
     private final UserService userService = mock(UserService.class);
+    private final PlatformTransactionManager transactionManager =
+            mock(PlatformTransactionManager.class);
 
     private final AiBriefRunService service = new AiBriefRunService(
             scheduleMapper, featureGate, contextRunner, assistantService, turnService,
             persistenceService, notificationDelivery, userService,
-            JsonMapper.builder().build(), Clock.fixed(NOW, ZoneOffset.UTC));
+            JsonMapper.builder().build(), transactionManager, Clock.fixed(NOW, ZoneOffset.UTC));
 
     @BeforeEach
     void installIdentity() {
@@ -256,6 +259,129 @@ class AiBriefRunServiceTest {
                 eq(7), eq(4), eq(9), eq(false),
                 eq(AiBriefRunService.REASON_ACCESS_LOST), anyString());
         verify(notificationDelivery, never()).deliver(any());
+    }
+
+    /**
+     * The release is the at-most-once claim, and it clears the pending fields, so a notification that
+     * failed after it committed would leave nothing for a later sweep to retry. Release and
+     * notification therefore share one transaction: a failed write rolls the release back and the
+     * brief stays pending.
+     */
+    @Test
+    void aFailedNotificationRollsTheReleaseBackSoTheBriefStaysPending() {
+        AiBriefSchedule pending = pending(AiBriefRunService.DAILY);
+        when(persistenceService.readTurn(3, 9)).thenReturn(turn("resolved"));
+        when(scheduleMapper.releasePendingTurn(
+                eq(7), eq(4), eq(9), eq(true), any(), anyString())).thenReturn(1);
+        org.mockito.Mockito.doThrow(new IllegalStateException("inbox unavailable"))
+                .when(notificationDelivery).deliver(any());
+
+        org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalStateException.class, () -> service.deliverPending(pending));
+
+        verify(transactionManager).rollback(any());
+        verify(transactionManager, never()).commit(any());
+    }
+
+    /**
+     * A membership read that timed out has said nothing about membership. Treating it as revocation
+     * would discard a brief that was generated successfully and could still have been delivered, so
+     * the transient failure propagates and the pending row is left exactly as it was.
+     */
+    @Test
+    void aTransientFailureReadingTheOwnerLeavesThePendingBriefForTheNextSweep() {
+        AiBriefSchedule pending = pending(AiBriefRunService.DAILY);
+        when(userService.getActiveWorkspaceUser(7, 11))
+                .thenThrow(new org.springframework.dao.QueryTimeoutException("timeout"));
+
+        org.junit.jupiter.api.Assertions.assertThrows(
+                org.springframework.dao.QueryTimeoutException.class,
+                () -> service.deliverPending(pending));
+
+        verify(scheduleMapper, never()).releasePendingTurn(
+                anyInt(), anyInt(), anyInt(), anyBoolean(), any(), anyString());
+        verify(notificationDelivery, never()).deliver(any());
+    }
+
+    /** The same is true of a turn read that failed for a reason other than access. */
+    @Test
+    void aTransientFailureReadingTheTurnLeavesThePendingBriefForTheNextSweep() {
+        AiBriefSchedule pending = pending(AiBriefRunService.DAILY);
+        when(persistenceService.readTurn(3, 9))
+                .thenThrow(new org.springframework.dao.QueryTimeoutException("timeout"));
+
+        org.junit.jupiter.api.Assertions.assertThrows(
+                org.springframework.dao.QueryTimeoutException.class,
+                () -> service.deliverPending(pending));
+
+        verify(scheduleMapper, never()).releasePendingTurn(
+                anyInt(), anyInt(), anyInt(), anyBoolean(), any(), anyString());
+        verify(notificationDelivery, never()).deliver(any());
+    }
+
+    /**
+     * The synthetic request is persisted as the member's own turn and the title heads their own
+     * session list, so both answer to their locale. Routing must be identical either way — a
+     * localized request that stopped selecting the work brief would silently change what a scheduled
+     * run produces.
+     */
+    @Test
+    void aJapaneseMembersScheduledBriefIsWrittenInJapaneseAndStillRoutesToTheWorkBrief() {
+        User owner = new User();
+        owner.setId(11);
+        owner.setLocale("ja-JP");
+        when(userService.getActiveWorkspaceUser(eq(7), eq(11))).thenReturn(owner);
+        when(scheduleMapper.claimPeriod(7, 4, AiBriefRunService.DAILY, "2026-08-24")).thenReturn(1);
+        AiChatSessionDto session = new AiChatSessionDto();
+        session.setId(3);
+        when(assistantService.create(any())).thenReturn(session);
+        when(turnService.start(eq(3), any()))
+                .thenReturn(new AiChatTurnAcceptedDto(9, 3, "handle", "accepted"));
+
+        assertEquals(AiBriefRunService.Outcome.STARTED,
+                service.start(schedule(), AiBriefRunService.DAILY, CLAIM_ON));
+
+        ArgumentCaptor<ooo.klae.connex.backend.dto.AiChatSessionCreateRequest> sessionRequest =
+                ArgumentCaptor.forClass(ooo.klae.connex.backend.dto.AiChatSessionCreateRequest.class);
+        verify(assistantService).create(sessionRequest.capture());
+        assertEquals("デイリーブリーフ 2026-08-24", sessionRequest.getValue().getTitle());
+
+        ArgumentCaptor<AiChatTurnCreateRequest> request =
+                ArgumentCaptor.forClass(AiChatTurnCreateRequest.class);
+        verify(turnService).start(eq(3), request.capture());
+        assertEquals("今日のブリーフをお願いします。", request.getValue().content());
+        AiSkillRouter router = new AiSkillRouter(new AiSkillCatalog(), permissive());
+        assertEquals("daily_work_brief_v1",
+                router.route(7, 11, request.getValue().content(),
+                        java.util.List.of(), AiChatQueryScope.none()).skill().key(),
+                "A localized scheduled run must select the same skill an English one does");
+    }
+
+    /** The weekly Japanese form has to route identically too, not merely translate. */
+    @Test
+    void aJapaneseWeeklyReviewRoutesToTheSameWorkBriefSkill() {
+        User owner = new User();
+        owner.setId(11);
+        owner.setLocale("ja");
+        when(userService.getActiveWorkspaceUser(eq(7), eq(11))).thenReturn(owner);
+        when(scheduleMapper.claimPeriod(7, 4, AiBriefRunService.WEEKLY, "2026-08-24")).thenReturn(1);
+        AiChatSessionDto session = new AiChatSessionDto();
+        session.setId(3);
+        when(assistantService.create(any())).thenReturn(session);
+        when(turnService.start(eq(3), any()))
+                .thenReturn(new AiChatTurnAcceptedDto(9, 3, "handle", "accepted"));
+
+        assertEquals(AiBriefRunService.Outcome.STARTED,
+                service.start(schedule(), AiBriefRunService.WEEKLY, CLAIM_ON));
+
+        ArgumentCaptor<AiChatTurnCreateRequest> request =
+                ArgumentCaptor.forClass(AiChatTurnCreateRequest.class);
+        verify(turnService).start(eq(3), request.capture());
+        assertEquals("今週のブリーフをお願いします。", request.getValue().content());
+        AiSkillRouter router = new AiSkillRouter(new AiSkillCatalog(), permissive());
+        assertEquals("daily_work_brief_v1",
+                router.route(7, 11, request.getValue().content(),
+                        java.util.List.of(), AiChatQueryScope.none()).skill().key());
     }
 
     @Test

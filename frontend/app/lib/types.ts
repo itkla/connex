@@ -5698,6 +5698,12 @@ export type AiCommandCenter = {
     latestBriefKind: AiBriefKind | null;
     latestBriefDeliveredAt: string | null;
     briefSkillAvailable: boolean;
+    /**
+     * Whether watches may be used, provider aside. Deciding a watch fired invokes no model, so
+     * watches keep working in a workspace whose provider is unconfigured and briefs do not — the two
+     * flags are deliberately not the same fact.
+     */
+    watchesAvailable: boolean;
     watches: AiWatch[];
     watchLimit: number;
 };

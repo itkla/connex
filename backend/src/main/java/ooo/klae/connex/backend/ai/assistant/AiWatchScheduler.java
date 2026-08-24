@@ -63,10 +63,19 @@ public class AiWatchScheduler {
         }
     }
 
-    /** Evaluates every active, unexpired watch in one workspace. */
+    /**
+     * Evaluates every active, possibly-unexpired watch in one workspace.
+     *
+     * <p>The expiry bound here is a pre-filter, not the decision. Selection happens before any
+     * workspace or member identity is installed, so the only date available is UTC's, while the
+     * member declared the expiry in the workspace's reporting calendar — up to a day either side.
+     * Selecting one day wider than UTC's own date covers every zone offset and leaves the
+     * authoritative comparison to {@link AiWatchEvaluationService}, which runs inside the owner's
+     * context and can read the calendar the expiry was validated against.
+     */
     void sweepWorkspace(int workspaceId) {
         JobRunDetail started = JobRunDetail.startedUtc();
-        String today = LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC).toString();
+        String today = LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC).minusDays(1).toString();
         int evaluated = 0;
         int fired = 0;
         int failed = 0;
