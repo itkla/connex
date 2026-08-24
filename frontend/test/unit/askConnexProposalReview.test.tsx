@@ -102,7 +102,7 @@ describe("assistant proposal review", () => {
 
     it("offers apply only for a change the server still holds applicable", () => {
         expect(askConnexChangeApplicable(change())).toBe(true);
-        expect(askConnexChangeApplicable(change({ state: "recordChanged" }))).toBe(true);
+        expect(askConnexChangeApplicable(change({ state: "recordChanged" }))).toBe(false);
         expect(askConnexChangeApplicable(change({ state: "unchanged" }))).toBe(false);
         expect(askConnexChangeApplicable(change({ state: "permissionLost" }))).toBe(false);
         expect(askConnexChangeApplicable(change({ state: "unresolved" }))).toBe(false);
@@ -113,6 +113,17 @@ describe("assistant proposal review", () => {
         expect(renderCard(blocked)).not.toContain("Apply the proposed change to Acme renewal");
         expect(askConnexToolCardAffordances(card({ change: change() }), NOW))
             .toEqual(["reject", "approve"]);
+    });
+
+    it("never arms apply over a record the server will always refuse as moved", () => {
+        const moved = card({ change: change({ state: "recordChanged" }) });
+        const markup = renderCard(moved);
+
+        expect(askConnexProposalAppliable(moved)).toBe(false);
+        expect(askConnexToolCardAffordances(moved, NOW)).toEqual(["reject"]);
+        expect(markup).not.toContain("Apply the proposed change to Acme renewal");
+        expect(markup).toContain("Discard the proposed change to Acme renewal");
+        expect(markup).toContain(cardLabels.changeState.recordChanged);
     });
 
     it("keeps a proposal whose last attempt was refused out of the applicable set", () => {
@@ -378,6 +389,28 @@ describe("grouped proposal review", () => {
         expect(group.applicable).toBe(2);
         expect(group.selected).toBe(1);
         expect([...toggleAskConnexProposalExclusion(excluded, 52)]).toEqual([]);
+    });
+
+    it("leaves a proposal whose record moved out of the batch the button commits to", () => {
+        const moved = { ...second, change: change({ field: "stage", state: "recordChanged" }) };
+        const [group] = askConnexProposalGroups([first, moved, blocked], actionable, new Set());
+        const markup = render(
+            <AskConnexProposalReview
+                group={group}
+                labels={reviewLabels}
+                cardLabels={cardLabels}
+                actionsDisabled={false}
+                onToggleInclusion={() => {}}
+                onAction={() => {}}
+                onApplySelected={() => {}}
+            />,
+        );
+
+        expect(group.applicable).toBe(1);
+        expect(group.selected).toBe(1);
+        expect(markup).toContain("1 of 3 can be applied now.");
+        expect(markup).toContain("Apply 1 changes");
+        expect(markup).toContain(cardLabels.changeState.recordChanged);
     });
 
     it("shows every record, value, and reason in the full review", () => {

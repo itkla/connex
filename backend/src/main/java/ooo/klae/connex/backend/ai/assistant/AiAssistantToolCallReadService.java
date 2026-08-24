@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -30,11 +31,14 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallReadDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
+import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -65,6 +69,9 @@ public class AiAssistantToolCallReadService {
     private final CompanyMapper companyMapper;
     private final DealMapper dealMapper;
     private final PipelineMapper pipelineMapper;
+    private final ActivityMapper activityMapper;
+    private final TaskMapper taskMapper;
+    private final NoteMapper noteMapper;
     private final AiAssistantSessionReadAudit sessionReadAudit;
     private final ObjectMapper objectMapper;
     private final Clock clock;
@@ -163,6 +170,8 @@ public class AiAssistantToolCallReadService {
                 : List.of();
         Map<Integer, Integer> assistantMessages = assistantMessages(
                 viewer.workspaceId(), session.getId(), stored);
+        Map<Integer, AiAssistantToolCallReadDto.CreatedRecord> createdRecords = liveCreatedRecords(
+                viewer, stored, visibleTargets);
         boolean undoAvailable = mutationsAvailable && ACTIVE.equals(session.getStatus());
         List<AiAssistantToolCallReadDto> projected = new ArrayList<>();
         for (StoredToolCall call : stored) {
@@ -200,8 +209,8 @@ public class AiAssistantToolCallReadService {
                     readable
                             ? outcomeValues(call, status)
                             : List.of(),
-                    readable
-                            ? createdRecord(call, status)
+                    readable && EXECUTED.equals(status)
+                            ? createdRecords.get(call.toolCall().getId())
                             : null,
                     messageId,
                     call.turnId(),
@@ -604,12 +613,14 @@ public class AiAssistantToolCallReadService {
     /**
      * Whether a reviewed change can still be applied as reviewed.
      *
-     * <p>Advisory only: approval revalidates permissions, membership, restrictions, and locked
-     * record state at execution time and refuses on its own terms. What this adds is the chance to
-     * see a lost permission, a change that would now do nothing, or a record edited since the
-     * proposal was made <em>before</em> pressing apply rather than after being refused. Timestamps
-     * that cannot be read are never reported as a change, because claiming a record moved when
-     * nothing established that would hold back a change that is perfectly applicable.
+     * <p>Approval revalidates permissions, membership, restrictions, and locked record state at
+     * execution time and refuses on its own terms; this states the same conclusions early, so a
+     * lost permission, a change that would now do nothing, or a record edited since the proposal
+     * was made is read <em>before</em> pressing apply rather than after being refused. A record
+     * that moved is a refusal, not a caution: approval will not re-baseline a proposal onto values
+     * it was never reviewed against, so the member asks for the change again. Timestamps that
+     * cannot be read are never reported as a change, because claiming a record moved when nothing
+     * established that would hold back a change that is perfectly applicable.
      *
      * @param unchanged whether the record already holds the proposed value, decided by the callers
      *     on the ids the record stores rather than on the names this workspace can print for them
@@ -722,7 +733,79 @@ public class AiAssistantToolCallReadService {
     }
 
     /**
-     * The record a completed action created, so the card can offer to open the thing it made.
+     * The records completed actions created and this workspace still holds, by tool-call id.
+     *
+     * <p>The durable inverse states what was created, but it is a record of the past: an activity,
+     * task, or note is deletable through its own controller long after the undo window closed, and
+     * the tool call stays {@code executed} either way. Offering "open the task" over a deleted task
+     * is a link to a not-found page, so the inverse is resolved against the workspace's live rows
+     * and a created record that is gone is reported as absent — the card then names the record the
+     * action was about instead, which is the link that still resolves.
+     *
+     * <p>Resolution is batched per kind, so a transcript's worth of cards costs one query per kind
+     * rather than one per card, and it is scoped to this viewer: a note they may not read is not a
+     * record this card offers to open.
+     */
+    private Map<Integer, AiAssistantToolCallReadDto.CreatedRecord> liveCreatedRecords(
+            Viewer viewer,
+            List<StoredToolCall> stored,
+            Map<RecordKey, VisibleTarget> visibleTargets) {
+        Map<Integer, AiAssistantToolCallReadDto.CreatedRecord> candidates = new LinkedHashMap<>();
+        for (StoredToolCall call : stored) {
+            if (!detailsReadable(call, viewer.userId(), visibleTargets)) {
+                continue;
+            }
+            AiAssistantToolCallReadDto.CreatedRecord candidate = createdRecord(
+                    call, publicStatus(call.toolCall()));
+            if (candidate != null) {
+                candidates.put(call.toolCall().getId(), candidate);
+            }
+        }
+        if (candidates.isEmpty()) {
+            return Map.of();
+        }
+        Set<RecordKey> live = liveCreatedRecordKeys(viewer, candidates.values());
+        candidates.values().removeIf(candidate ->
+                !live.contains(new RecordKey(candidate.kind(), candidate.id())));
+        return Map.copyOf(candidates);
+    }
+
+    private Set<RecordKey> liveCreatedRecordKeys(
+            Viewer viewer, Collection<AiAssistantToolCallReadDto.CreatedRecord> candidates) {
+        Set<RecordKey> live = new LinkedHashSet<>();
+        List<Integer> activityIds = createdIds(candidates, "activity");
+        List<Integer> taskIds = createdIds(candidates, "task");
+        List<Integer> noteIds = createdIds(candidates, "note");
+        if (!activityIds.isEmpty()) {
+            for (Integer id : activityMapper.getVisibleIdsIn(viewer.workspaceId(), activityIds)) {
+                live.add(new RecordKey("activity", id));
+            }
+        }
+        if (!taskIds.isEmpty()) {
+            for (Integer id : taskMapper.getVisibleIdsIn(viewer.workspaceId(), taskIds)) {
+                live.add(new RecordKey("task", id));
+            }
+        }
+        if (!noteIds.isEmpty()) {
+            for (Integer id : noteMapper.getVisibleNoteIdsIn(
+                    viewer.workspaceId(), noteIds, viewer.userId())) {
+                live.add(new RecordKey("note", id));
+            }
+        }
+        return live;
+    }
+
+    private static List<Integer> createdIds(
+            Collection<AiAssistantToolCallReadDto.CreatedRecord> candidates, String kind) {
+        return candidates.stream()
+                .filter(candidate -> kind.equals(candidate.kind()))
+                .map(AiAssistantToolCallReadDto.CreatedRecord::id)
+                .distinct()
+                .toList();
+    }
+
+    /**
+     * The record one completed action's own inverse says it created.
      *
      * <p>Taken from the durable inverse the action recorded for itself, which is the workspace's own
      * statement of what was created rather than anything the model said. Only the kinds that inverse

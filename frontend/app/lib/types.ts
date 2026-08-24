@@ -3218,9 +3218,11 @@ export type AiAssistantToolCallChangeField = 'owner' | 'stage';
 /**
  * Whether a reviewed change can still be applied as reviewed.
  *
- * Advisory: applying revalidates everything on the server and refuses on its own terms. What this
- * adds is the chance to see a lost permission, a change that would now do nothing, or a record
- * edited since the proposal was made before pressing apply rather than after being turned away.
+ * Applying revalidates everything on the server and refuses on its own terms; this states the same
+ * conclusions early, so a lost permission, a change that would now do nothing, or a record edited
+ * since the proposal was made is read before pressing apply rather than after being turned away.
+ * Only `ready` can be applied — every other state is a refusal the card states instead of arming a
+ * control over it.
  */
 export type AiAssistantToolCallChangeState =
     | 'ready'

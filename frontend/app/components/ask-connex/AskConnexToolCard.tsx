@@ -267,7 +267,15 @@ export function AskConnexChangeRow({
     );
 }
 
-/** Why a reviewed change cannot be applied as it stands, or what to check before applying it. */
+/**
+ * Why a reviewed change cannot be applied as it stands.
+ *
+ * A record written since the proposal was made reads here as a change that has to be asked for
+ * again, not as a caution to read before applying, and its card carries no apply control. That is
+ * the deliberate consequence of the server's fail-closed staleness rule: approval refuses any
+ * proposal whose target moved, permanently, so a proposal reviewed against a record that has since
+ * moved is re-asked rather than re-baselined against values nobody reviewed.
+ */
 export function AskConnexChangeNotice({
     state,
     labels,

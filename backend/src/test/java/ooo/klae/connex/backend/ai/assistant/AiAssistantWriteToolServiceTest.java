@@ -545,6 +545,50 @@ class AiAssistantWriteToolServiceTest {
     }
 
     @Test
+    void approvalRefusesWhenTheTargetWasWrittenInTheProposalsOwnSecond() throws Exception {
+        User owner = new User();
+        owner.setId(21);
+        owner.setDisplayName("Grace Hopper");
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(owner));
+        AiAssistantPreparedWrite write = prepared(
+                "assign_owner",
+                "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}",
+                "person",
+                31);
+        stored(write, 29);
+        storedToolCall.setCreatedAt("2026-03-05 12:00:00.400000");
+        Person edited = person(31);
+        edited.setUpdatedAt("2026-03-05 12:00:00");
+        when(personService.lockProcessablePersonForUpdate(31)).thenReturn(edited);
+
+        assertThrows(ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
+
+        verify(personService, never()).updateOwner(31, 21);
+    }
+
+    @Test
+    void approvalStillAppliesToARecordLastWrittenTheSecondBeforeTheProposal() throws Exception {
+        User owner = new User();
+        owner.setId(21);
+        owner.setDisplayName("Grace Hopper");
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(owner));
+        AiAssistantPreparedWrite write = prepared(
+                "assign_owner",
+                "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}",
+                "person",
+                31);
+        stored(write, 29);
+        storedToolCall.setCreatedAt("2026-03-05 12:00:00.400000");
+        Person edited = person(31);
+        edited.setUpdatedAt("2026-03-05 11:59:59");
+        when(personService.lockProcessablePersonForUpdate(31)).thenReturn(edited);
+
+        assertEquals("executed", service.approve(TURN.sessionId(), 29).status());
+
+        verify(personService).updateOwner(31, 21);
+    }
+
+    @Test
     void anAutoWriteIsNeverHeldBackByARecordWrittenAfterItsOwnStep() throws Exception {
         doAnswer(invocation -> {
             Task created = invocation.getArgument(0);

@@ -492,10 +492,10 @@ export function askConnexToolCardStatus(
  * Whether a proposal can still be applied as it was reviewed.
  *
  * Only a change the server established as applicable arms the apply control. A change that would
- * do nothing, one whose proposed value no longer exists in this workspace, and one the viewer has
- * lost the permission to make are all shown with their reason and without the control, so nobody
- * presses a button whose only possible answer is a refusal. A record edited since the proposal was
- * made stays applicable — the values on screen are the current ones — but says so first.
+ * do nothing, one whose proposed value no longer exists in this workspace, one the viewer has lost
+ * the permission to make, and one whose record has been written since the proposal was made are all
+ * shown with their reason and without the control, so nobody presses a button whose only possible
+ * answer is a refusal.
  *
  * A withheld change is not an applicable one. The server sends no change at all for a proposal
  * this viewer did not raise or whose target it cannot currently show them, and arming apply on
@@ -504,7 +504,7 @@ export function askConnexToolCardStatus(
  */
 export function askConnexChangeApplicable(change: AiAssistantToolCallChange | null): boolean {
     if (change === null) return false;
-    return change.state === 'ready' || change.state === 'recordChanged';
+    return change.state === 'ready';
 }
 
 /**
@@ -628,9 +628,10 @@ export function askConnexProposalGroups(
     for (const [turnId, grouped] of byTurn) {
         if (grouped.length < ASK_CONNEX_GROUPED_REVIEW_MINIMUM) continue;
         const ordered = grouped.toSorted(compareToolCalls);
-        const included = new Set(
-            ordered.filter((card) => !excludedToolCallIds.has(card.id)).map((card) => card.id),
-        );
+        const included = new Set<number>();
+        for (const card of ordered) {
+            if (!excludedToolCallIds.has(card.id)) included.add(card.id);
+        }
         const decided = decidedByTurn.get(turnId) ?? [];
         groups.push({
             turnId,

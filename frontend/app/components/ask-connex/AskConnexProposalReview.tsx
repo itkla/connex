@@ -144,9 +144,10 @@ export default function AskConnexProposalReview({
     onApplySelected,
 }: AskConnexProposalReviewProps) {
     const applying = group.cards.some((card) => card.pendingAction === 'approve');
-    const selectedIds = group.cards
-        .filter((card) => group.included.has(card.id) && askConnexProposalAppliable(card))
-        .map((card) => card.id);
+    const selectedIds = group.cards.reduce<number[]>((ids, card) => {
+        if (group.included.has(card.id) && askConnexProposalAppliable(card)) ids.push(card.id);
+        return ids;
+    }, []);
     const outcome = outcomeCounts(group, labels);
 
     return (

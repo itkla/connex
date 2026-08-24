@@ -62,7 +62,9 @@ public record AiAssistantToolCallReadDto(
      * <p>Read from the durable inverse the action recorded for itself, which is the only server-side
      * statement of what was created, and carried under the same viewer authorization as the rest of
      * a completed action's detail. Null for an action that changed an existing record rather than
-     * creating one, and for one whose creation has since been undone.
+     * creating one, for one whose creation has since been undone, and for one whose created record
+     * has since been deleted or is no longer one this viewer may read — the inverse is resolved
+     * against the live row so this never names a record the link would fail to open.
      */
     @JsonInclude(JsonInclude.Include.ALWAYS)
     public record CreatedRecord(

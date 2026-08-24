@@ -24,7 +24,7 @@ export const askConnexCardLabels: AskConnexToolCardLabels = {
     changeProposedUnresolved: "No longer exists",
     changeState: {
         unchanged: "This is already the current value.",
-        recordChanged: "This record changed after the assistant proposed it.",
+        recordChanged: "This record moved on, so ask for the change again.",
         permissionLost: "You no longer have permission to make this change.",
         unresolved: "The proposed value no longer exists in this workspace.",
     },

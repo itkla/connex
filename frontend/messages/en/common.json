@@ -590,7 +590,7 @@
         "currentUnresolvedStage": "A stage that no longer exists",
         "proposedUnresolved": "No longer exists",
         "stateUnchanged": "This is already the current value, so applying it would change nothing.",
-        "stateRecordChanged": "This record changed after the assistant proposed it. The values above are the current ones — check them before applying.",
+        "stateRecordChanged": "This record moved on after the assistant proposed this, so the change can't be applied as reviewed. Ask for it again to work from where the record is now.",
         "statePermissionLost": "You no longer have permission to make this change. Ask a workspace admin.",
         "stateUnresolved": "The proposed value no longer exists in this workspace, so this change can't be made."
       },

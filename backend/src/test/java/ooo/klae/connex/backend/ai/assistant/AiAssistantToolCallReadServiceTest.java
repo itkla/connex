@@ -29,11 +29,14 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallReadDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
+import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.databind.ObjectMapper;
@@ -51,6 +54,9 @@ class AiAssistantToolCallReadServiceTest {
     private PersonMapper personMapper;
     private DealMapper dealMapper;
     private PipelineMapper pipelineMapper;
+    private ActivityMapper activityMapper;
+    private TaskMapper taskMapper;
+    private NoteMapper noteMapper;
     private AiAssistantSessionReadAudit sessionReadAudit;
     private AiChatSession accessibleSession;
     private AiAssistantToolCallReadService service;
@@ -62,6 +68,9 @@ class AiAssistantToolCallReadServiceTest {
         personMapper = mock(PersonMapper.class);
         dealMapper = mock(DealMapper.class);
         pipelineMapper = mock(PipelineMapper.class);
+        activityMapper = mock(ActivityMapper.class);
+        taskMapper = mock(TaskMapper.class);
+        noteMapper = mock(NoteMapper.class);
         sessionReadAudit = mock(AiAssistantSessionReadAudit.class);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
         when(workspaceService.getCurrentUserId()).thenReturn(USER_ID);
@@ -91,6 +100,9 @@ class AiAssistantToolCallReadServiceTest {
                 mock(CompanyMapper.class),
                 dealMapper,
                 pipelineMapper,
+                activityMapper,
+                taskMapper,
+                noteMapper,
                 sessionReadAudit,
                 JsonMapper.builder().build(),
                 CLOCK);
@@ -567,6 +579,37 @@ class AiAssistantToolCallReadServiceTest {
     }
 
     @Test
+    void aSecondPrecisionEditInTheProposalsOwnSecondIsReportedAsChanged() {
+        when(workspaceService.getMembers(WORKSPACE_ID)).thenReturn(List.of(
+                user(USER_ID, "Ada Owner", "ada-owner"),
+                user(55, "Grace Hopper", "grace-hopper")));
+        AiChatToolCall toolCall = ownerProposal(57, 31, "Grace Hopper");
+        toolCall.setCreatedAt("2026-08-12 11:59:00.400000");
+        Person owned = person(31, "Ada Lovelace");
+        owned.setOwnerId(USER_ID);
+        owned.setUpdatedAt("2026-08-12 11:59:00");
+        stubPending(toolCall, 31, List.of(owned));
+
+        assertEquals("recordChanged", service.list(SESSION_ID, false)
+                .getFirst().change().state());
+    }
+
+    @Test
+    void aRecordLastEditedTheSecondBeforeTheProposalStaysApplicable() {
+        when(workspaceService.getMembers(WORKSPACE_ID)).thenReturn(List.of(
+                user(USER_ID, "Ada Owner", "ada-owner"),
+                user(55, "Grace Hopper", "grace-hopper")));
+        AiChatToolCall toolCall = ownerProposal(58, 31, "Grace Hopper");
+        toolCall.setCreatedAt("2026-08-12 11:59:00.400000");
+        Person owned = person(31, "Ada Lovelace");
+        owned.setOwnerId(USER_ID);
+        owned.setUpdatedAt("2026-08-12 11:58:59");
+        stubPending(toolCall, 31, List.of(owned));
+
+        assertEquals("ready", service.list(SESSION_ID, false).getFirst().change().state());
+    }
+
+    @Test
     void anUnreadableTimestampNeverInventsAChangedRecord() {
         when(workspaceService.getMembers(WORKSPACE_ID)).thenReturn(List.of(
                 user(USER_ID, "Ada Owner", "ada-owner"),
@@ -808,6 +851,7 @@ class AiAssistantToolCallReadServiceTest {
                 WORKSPACE_ID, SESSION_ID, List.of(66, 67, 68), 100)).thenReturn(List.of());
         when(personMapper.getByIds(WORKSPACE_ID, List.of(31)))
                 .thenReturn(List.of(person(31, "Ada Lovelace")));
+        when(taskMapper.getVisibleIdsIn(WORKSPACE_ID, List.of(74))).thenReturn(List.of(74));
 
         List<AiAssistantToolCallReadDto> result = service.list(SESSION_ID, false);
 
@@ -816,6 +860,46 @@ class AiAssistantToolCallReadServiceTest {
         assertNull(result.get(1).createdRecord());
         assertEquals("undone", result.get(2).status());
         assertNull(result.get(2).createdRecord());
+    }
+
+    @Test
+    void aCreatedRecordDeletedSinceTheActionIsNoLongerOfferedAsALink() {
+        AiChatToolCall deleted = createdActivityCall(69, 76);
+        AiChatToolCall live = createdActivityCall(70, 77);
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(deleted, live));
+        when(chatMapper.listAssistantMessagesBySessionAndTurnIds(
+                WORKSPACE_ID, SESSION_ID, List.of(69, 70), 100)).thenReturn(List.of());
+        when(personMapper.getByIds(WORKSPACE_ID, List.of(31)))
+                .thenReturn(List.of(person(31, "Ada Lovelace")));
+        when(activityMapper.getVisibleIdsIn(WORKSPACE_ID, List.of(76, 77)))
+                .thenReturn(List.of(77));
+
+        List<AiAssistantToolCallReadDto> result = service.list(SESSION_ID, false);
+
+        assertEquals("executed", result.getFirst().status());
+        assertNull(result.getFirst().createdRecord());
+        assertEquals("Ada Lovelace", result.getFirst().target().label());
+        assertEquals("activity", result.get(1).createdRecord().kind());
+        assertEquals(77, result.get(1).createdRecord().id());
+    }
+
+    private static AiChatToolCall createdActivityCall(int id, int activityId) {
+        return toolCall(
+                id,
+                USER_ID,
+                "create_activity",
+                "auto",
+                "executed",
+                "person",
+                31,
+                id,
+                "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\","
+                        + "\"subject\":\"Renewal call\"},"
+                        + "\"undo\":{\"status\":\"available\",\"entityKind\":\"activity\","
+                        + "\"entityId\":" + activityId + ","
+                        + "\"expiresAt\":\"2026-08-12T12:10:00Z\","
+                        + "\"fingerprint\":\"private fingerprint\"}}");
     }
 
     private void stubPending(AiChatToolCall toolCall, int personId, List<Person> people) {
