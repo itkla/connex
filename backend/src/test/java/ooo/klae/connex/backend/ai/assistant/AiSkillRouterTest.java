@@ -207,6 +207,41 @@ class AiSkillRouterTest {
         assertFalse(route(null, COMPANY_CONTEXT).routed());
     }
 
+    /**
+     * The personal work brief is matched before the relationship brief, which is only safe while its
+     * triggers stay strictly narrower. These pin that: the bare personal forms — including the two
+     * literal sentences a scheduled run sends — must reach it, and the same words followed by a
+     * record must not.
+     */
+    @Test
+    void theBarePersonalBriefPhrasingsRouteToTheWorkBriefInBothLocales() {
+        for (String request : List.of(
+                "Give me my daily brief.",
+                "Give me my weekly review.",
+                "What should I focus on today?",
+                "What's on my plate?",
+                "今日のブリーフ",
+                "今日のやることをまとめてください。",
+                "今週のまとめを教えてください。")) {
+            AiSkillRouter.Routing routing = route(request, List.of());
+            assertTrue(routing.routed(), request + " must route");
+            assertEquals("daily_work_brief_v1", routing.skill().key(), request);
+        }
+    }
+
+    @Test
+    void aRecordScopedPhrasingIsNeverSwallowedByTheSubjectlessWorkBrief() {
+        for (String request : List.of(
+                "Give me today's summary of Acme.",
+                "What should I focus on with my deals today?",
+                "今日のAcme社のまとめを教えてください。")) {
+            AiSkillRouter.Routing routing = route(request, COMPANY_CONTEXT);
+            assertFalse(
+                    routing.routed() && "daily_work_brief_v1".equals(routing.skill().key()),
+                    request + " names a record and must not become a subject-less day plan");
+        }
+    }
+
     private AiSkillRouter.Routing route(String text, List<AiChatPageContextDto> context) {
         return router.route(
                 WORKSPACE_ID, USER_ID, text, context, AiChatQueryScope.none());

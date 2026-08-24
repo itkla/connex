@@ -105,6 +105,59 @@
     LIMIT #{limit}
   </select>
 
+  <!-- Overdue first, then soonest due. The brief states counts and the first rows only, so the
+       ordering is what decides which commitments are named at all. -->
+  <select id="getAiAssistantWorkCommitments"
+          resultType="ooo.klae.connex.backend.ai.assistant.AiAssistantWorkCommitment">
+    SELECT t.id,
+           t.description,
+           t.due_date AS dueDate,
+           (t.due_date &lt; #{today}) AS overdue,
+           t.person_id AS personId,
+           t.deal_id AS dealId
+    FROM task t
+    WHERE t.workspace_id = #{workspaceId}
+      AND t.assigned_to_id = #{assignedToId}
+      AND t.completed = FALSE
+      AND t.due_date IS NOT NULL
+      AND t.due_date &lt;= #{dueThrough}
+      AND <include refid="assistantLinkedPeopleProcessable"/>
+    ORDER BY t.due_date, t.id
+    LIMIT #{limit}
+  </select>
+
+  <!-- One row always comes back, with a zero count when nothing is overdue: the watch evaluator
+       needs "checked, and the condition does not hold" to be distinguishable from "not checked".
+       The assistant processability guard is applied at statement level so it covers all three
+       subject branches at once: a task whose linked or mentioned person is suspended, has ceased
+       provision, or is archived must not raise a count under any of them. The count is deliberately
+       not scoped by assignee — a watch is about the record, and its stated trigger says so. -->
+  <select id="countOverdueForSubject"
+          resultType="ooo.klae.connex.backend.ai.assistant.AiWatchOverdueCommitments">
+    SELECT COUNT(*) AS overdueCount,
+           MIN(t.due_date) AS earliestDueDate
+    FROM task t
+    WHERE t.workspace_id = #{workspaceId}
+      AND t.completed = FALSE
+      AND t.due_date IS NOT NULL
+      AND t.due_date &lt; #{today}
+      AND <include refid="assistantLinkedPeopleProcessable"/>
+      <if test="personId != null">
+        AND t.person_id = #{personId}
+      </if>
+      <if test="dealId != null">
+        AND t.deal_id = #{dealId}
+      </if>
+      <if test="companyId != null">
+        AND (EXISTS (SELECT 1 FROM person p
+              WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id
+                AND p.company_id = #{companyId} AND p.archived_at IS NULL)
+          OR EXISTS (SELECT 1 FROM deal d
+              WHERE d.workspace_id = #{workspaceId} AND d.id = t.deal_id
+                AND d.company_id = #{companyId}))
+      </if>
+  </select>
+
   <select id="getTasksByAssignedToId" resultMap="TaskResult">
     SELECT <include refid="taskColumns"/>
     FROM task

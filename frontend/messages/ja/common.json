@@ -803,7 +803,7 @@
       },
       "workspaceWorkBrief": {
         "label": "今日は何をすべき？",
-        "prompt": "今日取り組む価値のある関係構築の仕事を教えてください。"
+        "prompt": "今日のやることをまとめてください。"
       },
       "workspacePipeline": {
         "label": "注意が必要な案件は？",
@@ -913,6 +913,82 @@
         "warmth_outside_declared_scope": "この質問は、フィルターで除外されている温度帯に関するものです。その温度帯を追加するか、残した温度帯について質問してください。",
         "warmth_unsupported_for_deals": "温度感は人や会社との関係を表すものなので、案件の絞り込みには使えません。"
       }
+    },
+    "commandCenter": {
+      "briefsTitle": "ブリーフ",
+      "briefsBody": "タスク、予定、温度感が下がっている関係、対応が必要な案件を、設定した時刻に短くまとめます。",
+      "briefsUnavailable": "このワークスペースではブリーフをまだご利用いただけません。",
+      "openLatestBrief": "前回の内容を開く",
+      "dailyLabel": "毎日",
+      "dailyHourLabel": "毎日のブリーフの時刻",
+      "weeklyLabel": "毎週",
+      "weeklyDayLabel": "週次まとめの曜日",
+      "hour": "{hour}時",
+      "weekday": {
+        "1": "月曜日",
+        "2": "火曜日",
+        "3": "水曜日",
+        "4": "木曜日",
+        "5": "金曜日",
+        "6": "土曜日",
+        "7": "日曜日"
+      },
+      "scheduleZone": "時刻は{zone}のタイムゾーンです。",
+      "scheduleFailed": "ブリーフの設定を保存できませんでした。内容は変更されていません。もう一度お試しください。",
+      "watchesTitle": "ウォッチ",
+      "watchesEmpty": "まだウォッチはありません。連絡先・会社・案件を開いてウォッチを追加すると、特定の変化があったときにお知らせします。",
+      "watchesHint": "ウォッチは、何が変わり、どのルールが検知したのかをそのままお知らせします。",
+      "watchActions": "ウォッチの操作",
+      "watchFailed": "ウォッチを変更できませんでした。内容は保存されていません。もう一度お試しください。",
+      "watchesUsage": "ウォッチは{limit}件中{used}件を使用中です。",
+      "cooldownEvery": "通知は最短{days}日に1回",
+      "expiresNever": "終了日なし",
+      "expiresOnDate": "{date}まで",
+      "pause": "一時停止",
+      "resume": "再開",
+      "delete": "ウォッチを削除",
+      "deleteTitle": "このウォッチを削除しますか？",
+      "deleteBody": "この条件を満たしてもお知らせしなくなります。この操作は元に戻せません。",
+      "deleteBodyNamed": "「{trigger}」でお知らせしなくなります。この操作は元に戻せません。",
+      "statusActive": "有効",
+      "statusPaused": "一時停止中",
+      "neverFired": "未通知",
+      "lastFired": "前回の通知：{date}",
+      "subjectUnavailable": "このレコードは現在ご覧いただけません",
+      "band": {
+        "warm": "ウォーム",
+        "cool": "クール",
+        "cold": "コールド"
+      },
+      "level": {
+        "medium": "中",
+        "high": "高"
+      },
+      "watchTrigger": {
+        "cooling": "温度帯が{band}になったとき",
+        "noInteraction": "{days}日間やり取りがないとき",
+        "commitmentOverdue": "担当者を問わず、このレコードのタスクの期限が過ぎたとき",
+        "dealRisk": "案件のリスクが{level}になったとき",
+        "unknown": "このバージョンでは条件を表示できません"
+      },
+      "watchTypeName": {
+        "relationship_cooling": "温度帯が下がったとき",
+        "no_interaction": "やり取りが途絶えたとき",
+        "commitment_overdue": "担当者を問わずタスクの期限が過ぎたとき",
+        "deal_risk_threshold": "案件のリスクが上がったとき"
+      },
+      "createMenuItem": "このレコードをウォッチ",
+      "createTitle": "ウォッチを追加",
+      "createDescription": "{record}に特定の変化があったときにお知らせします。",
+      "createTypeLabel": "通知する条件",
+      "createBandLabel": "温度帯",
+      "createDaysLabel": "やり取りがない期間",
+      "createDaysOption": "{days}日",
+      "createLevelLabel": "リスクの水準",
+      "createPreviewLabel": "この条件で通知します",
+      "createPreviewNote": "判定は Connex が行います。通知には、どのルールが検知したのかと、その根拠を明記します。",
+      "createCancel": "キャンセル",
+      "createApply": "ウォッチを追加"
     },
     "signals": {
       "relationship_decay": {

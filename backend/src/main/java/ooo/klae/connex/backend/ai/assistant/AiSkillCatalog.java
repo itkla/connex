@@ -47,7 +47,10 @@ public class AiSkillCatalog {
         LIST_TASKS("list_tasks"),
         RELATIONSHIP_METRICS("relationship_metrics"),
         SCOPE_ACTIVITIES("list_scope_activities"),
-        DEAL_ATTENTION("deal_attention");
+        DEAL_ATTENTION("deal_attention"),
+        WORK_COMMITMENTS("work_commitments"),
+        WARMTH_MOVEMENT("warmth_movement"),
+        UPCOMING_MEETINGS("upcoming_meetings");
 
         private final String toolName;
 
@@ -216,6 +219,7 @@ public class AiSkillCatalog {
     private static final String DIGEST = "activity_digest_v1";
     private static final String BRIEF = "relationship_brief_v1";
     private static final String PIPELINE = "pipeline_attention_review_v1";
+    private static final String WORK_BRIEF = "daily_work_brief_v1";
     private static final String NOT_YET_IMPLEMENTED = "skill_not_yet_implemented";
 
     private static final Map<String, SkillSpec> SKILLS = buildSkills();
@@ -250,6 +254,11 @@ public class AiSkillCatalog {
         Map<String, SkillSpec> skills = new LinkedHashMap<>();
         add(skills, coolingExplanation());
         add(skills, activityDigest());
+        // The personal work brief is recognized before the relationship brief because its triggers
+        // are strictly narrower: the Japanese relationship-brief trigger accepts the bare word
+        // "ブリーフ", which would otherwise swallow "今日のブリーフ" and answer a request about the
+        // member's own day by asking which record they meant.
+        add(skills, dailyWorkBrief());
         add(skills, relationshipBrief());
         add(skills, pipelineAttentionReview());
         declared(skills, "relationship_change_summary_v1");
@@ -260,7 +269,6 @@ public class AiSkillCatalog {
         declared(skills, "deal_risk_review_v1");
         declared(skills, "stakeholder_gap_analysis_v1");
         declared(skills, "company_review_v1");
-        declared(skills, "daily_work_brief_v1");
         declared(skills, "commitment_extraction_v1");
         declared(skills, "data_quality_review_v1");
         declared(skills, "natural_language_report_v1");
@@ -488,6 +496,112 @@ public class AiSkillCatalog {
                 codes in CRM_DATA come from the deterministic Connex risk model; never invent a \
                 risk or reorder the deals by your own judgement. Explain each flagged deal from its \
                 factor codes, cite it, and disclose when the review was bounded.""");
+    }
+
+    /**
+     * The member's own bounded work brief, assembled entirely from source-owned state.
+     *
+     * <p>Every section is a projection of a system that already owns it: commitments come from the
+     * task projection behind My Work, cooling relationships from the deterministic warmth model
+     * behind Radar, deal risk from the deterministic risk model, and scheduled activities from the
+     * member's own logged future-dated activities. The skill anchors to no record because the
+     * subject is the member; its period is carried by the turn's declared scope, so the same
+     * declaration produces a one-day brief or a seven-day review without a second contract.
+     *
+     * <p>The commitment step is the only required one. If the task projection cannot be read the
+     * brief has no spine and the generic loop is a better answer than a brief that silently omits
+     * the member's work; every other section degrades to a stated gap.
+     */
+    private static SkillSpec dailyWorkBrief() {
+        return new SkillSpec(
+                WORK_BRIEF,
+                "1.0.0",
+                Availability.AVAILABLE,
+                null,
+                "askConnex.skills.dailyWorkBrief.name",
+                "askConnex.skills.dailyWorkBrief.description",
+                Set.of(),
+                false,
+                Set.of(),
+                Set.of("period"),
+                List.of(
+                        new PlanStep(
+                                PlanStepKind.WORK_COMMITMENTS,
+                                AiChatScopeBounds.MAX_BRIEF_COMMITMENTS, 0, true),
+                        new PlanStep(
+                                PlanStepKind.UPCOMING_MEETINGS,
+                                AiChatScopeBounds.MAX_BRIEF_MEETINGS, 0, false),
+                        new PlanStep(
+                                PlanStepKind.WARMTH_MOVEMENT,
+                                AiChatScopeBounds.MAX_BRIEF_WARMTH_MOVES, 0, false),
+                        new PlanStep(
+                                PlanStepKind.DEAL_ATTENTION,
+                                AiChatScopeBounds.MAX_ATTENTION_DEALS, 0, false)),
+                Set.of("work_commitments", "upcoming_meetings",
+                        "warmth_movement", "deal_attention"),
+                Set.of("overdue_commitment_count", "warmth_band", "risk_level"),
+                Set.of("answer", "fact", "metric", "list", "inference",
+                        "recommendation", "limitation"),
+                Set.of("tasks", "activities", "metrics", "deals"),
+                true,
+                Set.of(Permission.AI_USE),
+                AiFeature.ASSISTANT_CHAT,
+                32_768,
+                Authority.READ,
+                new Bounds(
+                        AiChatScopeBounds.MAX_COHORT_RECORDS,
+                        AiChatScopeBounds.MAX_BRIEF_COMMITMENTS
+                                + AiChatScopeBounds.MAX_BRIEF_MEETINGS
+                                + (AiChatScopeBounds.MAX_BRIEF_WARMTH_MOVES * 2)
+                                + AiChatScopeBounds.MAX_ATTENTION_DEALS,
+                        AiChatScopeBounds.MAX_PERIOD_DAYS,
+                        16_384),
+                new Budgets(3, 90_000L, 14),
+                Integer.MAX_VALUE,
+                PartialBehavior.BOUNDED_PARTIAL,
+                new Evaluation(WORK_BRIEF, 1, Set.of("factuality", "tool_selection")),
+                // Recognition requires the request to be about the member's own period of work.
+                // "brief me on Acme" is a relationship brief and "which deals need attention" is a
+                // pipeline review; capturing either here would answer a record question with a
+                // personal day plan. "Catch me up" is deliberately absent: the relationship brief
+                // already claims it, and two skills competing for one phrase is worse than one.
+                //
+                // Because this skill is matched before the relationship brief, every pattern must
+                // end at the member's own period rather than run on into a record. That is what the
+                // trailing lookahead and the bare Japanese forms enforce: "today's summary of Acme"
+                // and 「今日のAcme社のまとめ」 name a record immediately after the period word, so
+                // they fall through to the record skill that can actually anchor them, while "my
+                // daily brief" and 「今日のブリーフ」 do not and are recognized here. "review" stays
+                // in the alternation because a scheduled weekly run sends the literal sentence
+                // "Give me my weekly review." and must take the same routed path a typed one does.
+                List.of(
+                        Pattern.compile(
+                                "\\b(?:daily|morning|weekly|today'?s|this\\s+week'?s)\\s+"
+                                        + "(?:brief|briefing|digest|summary|rundown|review)\\b"
+                                        + "(?!\\s+(?:of|on|for|about|with|regarding)\\b)",
+                                Pattern.CASE_INSENSITIVE),
+                        Pattern.compile(
+                                "\\bwhat\\s+(?:should|do)\\s+i\\s+"
+                                        + "(?:focus\\s+on|work\\s+on|prioriti[sz]e|do)\\s+"
+                                        + "(?:first\\s+)?(?:today|this\\s+week|now|first)\\b",
+                                Pattern.CASE_INSENSITIVE),
+                        Pattern.compile(
+                                "\\bwhat'?s\\s+on\\s+my\\s+plate\\b",
+                                Pattern.CASE_INSENSITIVE),
+                        Pattern.compile("(今日|本日|今週)の?"
+                                + "(ブリーフ|サマリー|サマリ|まとめ|やること|優先事項|予定とタスク)"),
+                        Pattern.compile("(私|自分)の?(今日|本日|今週)の?"
+                                + "(ブリーフ|やること|優先事項|状況)")),
+                """
+                Server-owned skill: personal work brief. Every figure in CRM_DATA is authoritative \
+                and already owned elsewhere — commitments by tasks, warmth by the Connex warmth \
+                model, deal risk by the Connex risk model. Never recompute, re-rank by your own \
+                judgement, or invent a section the plan did not return. Report the exact counts, \
+                keep facts, inferences, and recommendations separate, cite every record you name, \
+                and state which sections were unavailable, bounded, or empty. Meeting preparation \
+                state does not exist in Connex: describe scheduled activities as scheduled, never \
+                as prepared or unprepared. When the evidence is thin, say the day looks quiet \
+                rather than manufacturing significance from a handful of rows.""");
     }
 
     private static SkillSpec declaredOnly(String key) {

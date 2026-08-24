@@ -546,5 +546,49 @@
       }
     ],
     "expectedFallback": true
+  },
+  {
+    "id": "en-skill-routing-daily-work-brief",
+    "locale": "en",
+    "category": "skill_routing",
+    "skill": "daily_work_brief_v1",
+    "request": "What should I focus on today?",
+    "context": [
+      {
+        "kind": "company",
+        "id": 12
+      }
+    ],
+    "expectedSkill": "daily_work_brief_v1"
+  },
+  {
+    "id": "ja-skill-routing-daily-work-brief",
+    "locale": "ja",
+    "category": "skill_routing",
+    "skill": "daily_work_brief_v1",
+    "request": "\u4eca\u65e5\u306e\u3084\u308b\u3053\u3068\u3092\u307e\u3068\u3081\u3066\u304f\u3060\u3055\u3044\u3002",
+    "expectedSkill": "daily_work_brief_v1"
+  },
+  {
+    "id": "en-skill-routing-account-brief-not-work-brief",
+    "locale": "en",
+    "category": "skill_routing",
+    "skill": "relationship_brief_v1",
+    "request": "Give me a brief on this account.",
+    "context": [
+      {
+        "kind": "company",
+        "id": 12
+      }
+    ],
+    "expectedSkill": "relationship_brief_v1"
+  },
+  {
+    "id": "ja-skill-routing-weekly-review",
+    "locale": "ja",
+    "category": "skill_routing",
+    "skill": "daily_work_brief_v1",
+    "request": "\u4eca\u9031\u306e\u307e\u3068\u3081\u3092\u6559\u3048\u3066\u304f\u3060\u3055\u3044\u3002",
+    "expectedSkill": "daily_work_brief_v1"
   }
 ]

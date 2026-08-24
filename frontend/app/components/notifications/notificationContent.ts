@@ -137,6 +137,56 @@ export function notificationContent(notification: Notification, t: Translator, l
             body: t("dealMentionBody", { actor: notification.actorLabel ?? "" }),
         };
     }
+    if (notification.type === "ai.brief.ready") {
+        return {
+            title: t(data.kind === "weekly" ? "aiWeeklyReviewTitle" : "aiDailyBriefTitle"),
+            body: t(data.kind === "weekly" ? "aiWeeklyReviewBody" : "aiDailyBriefBody"),
+        };
+    }
+    if (notification.type === "ai.watch.fired") {
+        // The body names the rule and its threshold rather than saying something was noticed: a
+        // watch the reader cannot restate is a watch they cannot trust or turn off.
+        const record = text(notification.sourceLabel, "");
+        const watchType = typeof data.watchType === "string" ? data.watchType : "";
+        const evidence = isRecord(data.evidence) ? data.evidence : {};
+        if (watchType === "relationship_cooling") {
+            return {
+                title: t("aiWatchCoolingTitle"),
+                body: t("aiWatchCoolingBody", {
+                    record,
+                    band: t(`aiWatchBand_${text(evidence.band, "cool")}`),
+                }),
+            };
+        }
+        if (watchType === "no_interaction") {
+            return {
+                title: t("aiWatchQuietTitle"),
+                body: t("aiWatchQuietBody", {
+                    record,
+                    days: text(evidence.daysSinceTouch, ""),
+                }),
+            };
+        }
+        if (watchType === "commitment_overdue") {
+            return {
+                title: t("aiWatchOverdueTitle"),
+                body: t("aiWatchOverdueBody", {
+                    record,
+                    count: countOf(evidence.overdueCount),
+                }),
+            };
+        }
+        if (watchType === "deal_risk_threshold") {
+            return {
+                title: t("aiWatchRiskTitle"),
+                body: t("aiWatchRiskBody", {
+                    record,
+                    level: t(`aiWatchLevel_${text(evidence.level, "medium")}`),
+                }),
+            };
+        }
+        return { title: t("aiWatchTitle"), body: t("aiWatchBody", { record }) };
+    }
     if (notification.type === "document.approval_request") {
         const document = text(data.documentTitle, notification.sourceLabel ?? "");
         if (data.reason === "delegated") {
@@ -260,6 +310,27 @@ const SEVERITY_STYLES: Record<string, NotificationSeverityStyle> = {
 /** Severity-driven color classes shared by the inbox rows and the entity banner. */
 export function notificationSeverityStyle(severity: string): NotificationSeverityStyle {
     return SEVERITY_STYLES[severity] ?? SEVERITY_STYLES.info;
+}
+
+/** Narrows one nested `data` value to a plain object without an unchecked cast. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Narrows one evidence value to the number a plural rule needs.
+ *
+ * A count handed through as a string selects the "other" branch in every locale, which is how
+ * "1 overdue tasks" gets shipped; anything unreadable falls back to zero so the sentence still
+ * agrees with itself.
+ */
+function countOf(value: unknown): number {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim() !== "") {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
 }
 
 function text(value: unknown, fallback: string) {

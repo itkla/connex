@@ -58,6 +58,7 @@ class AiSkillPlanRunnerTest {
                 persistenceService,
                 mock(AiAssistantToolExecutor.class),
                 scopeReadService,
+                mock(AiAssistantWorkBriefReadService.class),
                 new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog()),
                 mock(AiChatRealtimeDispatcher.class),
                 workspaceService,
@@ -154,6 +155,7 @@ class AiSkillPlanRunnerTest {
                 .thenReturn(new AiAssistantToolResult(java.util.Map.of("handle", "r1"), List.of()));
         AiSkillPlanRunner subjectRunner = new AiSkillPlanRunner(
                 persistenceService, toolExecutor, scopeReadService,
+                mock(AiAssistantWorkBriefReadService.class),
                 new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog()),
                 mock(AiChatRealtimeDispatcher.class), workspaceService, objectMapper);
         AiChatResourceRegistry resources = new AiChatResourceRegistry();

@@ -71,7 +71,9 @@ class OffboardingIndexArchTest {
         new String[] {"record_comment", "deleted_by_user_id"},
         new String[] {"record_comment_reaction", "user_id"},
         new String[] {"record_comment_thread", "created_by_user_id"},
-        new String[] {"record_comment_thread", "resolved_by_user_id"});
+        new String[] {"record_comment_thread", "resolved_by_user_id"},
+        new String[] {"ai_brief_schedule", "user_id"},
+        new String[] {"ai_watch", "owner_user_id"});
 
     @Autowired private DataSource dataSource;
 

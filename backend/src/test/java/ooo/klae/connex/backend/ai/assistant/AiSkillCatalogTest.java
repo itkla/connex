@@ -46,7 +46,8 @@ class AiSkillCatalogTest {
             "relationship_cooling_explanation_v1",
             "activity_digest_v1",
             "relationship_brief_v1",
-            "pipeline_attention_review_v1");
+            "pipeline_attention_review_v1",
+            "daily_work_brief_v1");
 
     private final AiSkillCatalog catalog = new AiSkillCatalog();
 

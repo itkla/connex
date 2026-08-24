@@ -59,7 +59,9 @@ public class TenantScopeInterceptor implements Interceptor {
      */
     public static final Set<String> SCOPED_NAMESPACES = Set.of(
         MAPPERS + "AiAssistantIdentifierMapper",
+        MAPPERS + "AiBriefScheduleMapper",
         MAPPERS + "AiChatMapper",
+        MAPPERS + "AiWatchMapper",
         MAPPERS + "AiWorkspaceGovernanceMapper",
         MAPPERS + "CompanyMapper",
         MAPPERS + "IdentityCollisionMapper",
@@ -249,6 +251,10 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "NotificationMapper.deleteAllForRecipient",
         MAPPERS + "NotificationMapper.deleteAllForRecipientAnywhere",
         MAPPERS + "NotificationMapper.clearActorAnywhere",
+        MAPPERS + "AiBriefScheduleMapper.deleteForUser",
+        MAPPERS + "AiBriefScheduleMapper.deleteForUserAnywhere",
+        MAPPERS + "AiWatchMapper.deleteForUser",
+        MAPPERS + "AiWatchMapper.deleteForUserAnywhere",
         MAPPERS + "AiChatMapper.deleteParticipantsForUser",
         MAPPERS + "AiChatMapper.deleteParticipantsForUserAnywhere",
         MAPPERS + "AiChatMapper.clearSessionCreatorsAnywhere",

@@ -649,7 +649,7 @@ public class AiAssistantScopeReadService {
         return Math.min(value, maximum);
     }
 
-    private static void putBounded(
+    static void putBounded(
             Map<String, Object> data,
             String key,
             String value,
@@ -661,7 +661,7 @@ public class AiAssistantScopeReadService {
         put(data, key, MaskingEngine.screenFreeTextBeforeTruncation(value, maskingContext), budget);
     }
 
-    private static void putTemporal(
+    static void putTemporal(
             Map<String, Object> data,
             String key,
             String value,
@@ -722,10 +722,10 @@ public class AiAssistantScopeReadService {
     private record RecordLabel(String name) {
     }
 
-    private static final class TextBudget {
+    static final class TextBudget {
         private int remaining;
 
-        private TextBudget(int remaining) {
+        TextBudget(int remaining) {
             this.remaining = remaining;
         }
 

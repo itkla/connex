@@ -178,7 +178,12 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.ProviderCaptureMapper.deleteInteractionsAnywhere",
         "ooo.klae.connex.backend.mappers.ProviderCaptureMapper.deleteSyncStatesAnywhere",
         "ooo.klae.connex.backend.mappers.ProviderCaptureMapper.deleteUserPolicyAnywhere",
-        "ooo.klae.connex.backend.mappers.ProviderCaptureMapper.deleteDecisionsAnywhere"
+        "ooo.klae.connex.backend.mappers.ProviderCaptureMapper.deleteDecisionsAnywhere",
+        // Account erasure: an erased account's Ask Connex brief schedules and watches must die with
+        // it in every workspace at once, so these two are deliberately cross-workspace deletes keyed
+        // on the user alone, exactly like the saved-view and dashboard erasures above.
+        "ooo.klae.connex.backend.mappers.AiBriefScheduleMapper.deleteForUserAnywhere",
+        "ooo.klae.connex.backend.mappers.AiWatchMapper.deleteForUserAnywhere"
     );
 
     /**

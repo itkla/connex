@@ -43,6 +43,7 @@ public class AiSkillPlanRunner {
     private final AiChatTurnPersistenceService persistenceService;
     private final AiAssistantToolExecutor toolExecutor;
     private final AiAssistantScopeReadService scopeReadService;
+    private final AiAssistantWorkBriefReadService workBriefReadService;
     private final AiAssistantPromptAssembler promptAssembler;
     private final AiChatRealtimeDispatcher realtimeDispatcher;
     private final WorkspaceService workspaceService;
@@ -118,7 +119,7 @@ public class AiSkillPlanRunner {
             try {
                 AiAssistantToolResult result = execute(
                         step, routing, scope, resources, subjectHandle,
-                        evidenceByteBudget, turn.includePrivateNotes());
+                        evidenceByteBudget, turn.includePrivateNotes(), turn.userId());
                 persistenceService.finishTool(
                         turn, toolCallId, "executed",
                         promptAssembler.durableToolResult(result));
@@ -167,7 +168,8 @@ public class AiSkillPlanRunner {
             AiChatResourceRegistry resources,
             String subjectHandle,
             int evidenceByteBudget,
-            boolean includePrivateNotes) {
+            boolean includePrivateNotes,
+            int userId) {
         return switch (step.kind()) {
             case GET_RECORD -> toolExecutor.execute(
                     "get_record", handleArguments(subjectHandle, null),
@@ -194,7 +196,31 @@ public class AiSkillPlanRunner {
                     resources);
             case DEAL_ATTENTION -> scopeReadService.dealAttention(
                     scope, step.rowLimit(), resources);
+            // The three personal-brief reads are server-only by construction: they are absent from
+            // the model tool catalog, so declaring them costs nothing in the fixed prompt envelope
+            // and the model can never cause one to run outside a declared plan.
+            case WORK_COMMITMENTS -> workBriefReadService.workCommitments(
+                    userId, briefPeriodDays(scope), step.rowLimit(), resources);
+            case WARMTH_MOVEMENT -> workBriefReadService.warmthMovement(
+                    step.rowLimit(), resources);
+            case UPCOMING_MEETINGS -> workBriefReadService.upcomingMeetings(
+                    userId, briefPeriodDays(scope), step.rowLimit(), resources);
         };
+    }
+
+    /**
+     * The forward window a personal brief covers.
+     *
+     * <p>The turn's declared period is what separates a daily brief from a weekly review, so a
+     * scheduled weekly run and a member typing "weekly review" with a seven-day scope produce the
+     * same plan from one declaration. An undeclared period means the caller asked about today.
+     */
+    private static int briefPeriodDays(AiChatQueryScope scope) {
+        Integer declared = scope.periodDays();
+        if (declared == null || declared < 1) {
+            return AiChatScopeBounds.BRIEF_DAILY_PERIOD_DAYS;
+        }
+        return Math.min(declared, AiChatScopeBounds.MAX_PERIOD_DAYS);
     }
 
     /**
