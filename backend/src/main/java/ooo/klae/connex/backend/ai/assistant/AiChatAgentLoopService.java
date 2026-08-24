@@ -422,6 +422,7 @@ public class AiChatAgentLoopService {
                     if (closingAttempted) {
                         return AiGenerationTaskResult.failed("malformed_output");
                     }
+                    resetMalformedStream(streamingProgress, streamingObserver);
                     closingAttempted = true;
                     closingPending = true;
                     closingReason = "malformed_output";
