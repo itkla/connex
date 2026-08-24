@@ -1,7 +1,15 @@
 import type { NavAccess } from "@/app/lib/navAccess";
 import type { RecordCollection } from "@/app/lib/recordReturnPath";
-import { SETTINGS_HOME_ROUTE } from "@/app/lib/settingsManifest";
+import { settingsRouteServed } from "@/app/lib/settingsEntryPoints";
+import {
+    SETTINGS_GROUPS,
+    SETTINGS_HOME_ROUTE,
+    type SettingsGroup,
+} from "@/app/lib/settingsManifest";
 import { isWorkflowRecipeKey } from "@/app/lib/workflowOperations";
+
+/** The manifest's groups at their declared type, so a group without gap sections is still one. */
+const MANIFEST_GROUPS: readonly SettingsGroup[] = SETTINGS_GROUPS;
 
 export type BreadcrumbMessageKey =
     | "account"
@@ -85,6 +93,14 @@ export type BreadcrumbRouteContext = {
     navAccess: NavAccess;
     dynamicLabels: ReadonlyMap<string, string>;
     translate: (key: BreadcrumbMessageKey) => string;
+    /**
+     * Resolves an absolute message key, namespace included.
+     *
+     * The canonical settings destinations are named by the committed settings manifest rather than
+     * by this registry's own closed key union, so their crumbs are translated through here. Every
+     * other route keeps {@link translate}.
+     */
+    translateMessage: (key: string) => string;
 };
 
 export type BreadcrumbDisplayMode = "desktop" | "mobile";
@@ -137,11 +153,25 @@ const SETTINGS_ROUTES: Readonly<Record<string, StaticWorkspaceRoute>> = {
     "/settings/email": { key: "email" },
     "/settings/delivery": { key: "delivery" },
     "/settings/diagnostics": { key: "diagnostics", access: "diagnostics" },
-    "/settings/workspace/people": { key: "peopleAccess" },
-    "/settings/workspace/communications": { key: "communications" },
-    "/settings/workspace/crm": { key: "crmConfiguration" },
-    "/settings/workspace/audit-diagnostics": { key: "auditDiagnostics" },
 };
+
+/**
+ * The canonical settings destinations, indexed by the route each scope group owns (#1340 PR 7).
+ *
+ * Their trails are derived rather than tabulated: the group is the unit of canonical ownership, so
+ * the crumb a reader lands on is the group's own name from the manifest, and its scope decides
+ * whether the trail is rooted in the workspace or in the organization. A group whose route no page
+ * serves is skipped, which leaves the legacy tables below to answer for the addresses that still
+ * do — the same served-or-not fact the settings navigation and the entry points already read.
+ *
+ * The legacy `/settings/*` and `/organization/*` rows keep their shipped trails until their
+ * redirects land; nothing about them moves here.
+ */
+const CANONICAL_SETTINGS_GROUPS: ReadonlyMap<string, SettingsGroup> = new Map(
+    MANIFEST_GROUPS
+        .filter((group) => group.titleKey !== null && settingsRouteServed(group.route))
+        .map((group) => [group.route, group]),
+);
 
 const ACCOUNT_ROUTES: Readonly<Record<string, BreadcrumbMessageKey>> = {
     "/account/profile": "profile",
@@ -149,23 +179,6 @@ const ACCOUNT_ROUTES: Readonly<Record<string, BreadcrumbMessageKey>> = {
     "/account/connections": "connections",
     "/account/notifications": "notifications",
     "/account/invites": "invites",
-};
-
-/**
- * The organization scope's canonical settings destinations (#1340 PR 6).
- *
- * They live under `/settings` and are reached from the same navigation as every other settings job,
- * but the thing they administer is the organization, so their trail is rooted there rather than in
- * the active workspace. The organization gate applies exactly as it does to the legacy routes: a
- * viewer holding no organization role gets no trail, because the page they are on is one they may
- * not read.
- */
-const ORGANIZATION_SETTINGS_ROUTES: Readonly<Record<string, BreadcrumbMessageKey>> = {
-    "/settings/organization/general": "general",
-    "/settings/organization/identity": "identityAdministrators",
-    "/settings/organization/ai-governance": "aiDataGovernance",
-    "/settings/organization/data-requests": "dataRequests",
-    "/settings/organization/audit-diagnostics": "auditDiagnostics",
 };
 
 const ORGANIZATION_ROUTES: Readonly<Record<string, BreadcrumbMessageKey>> = {
@@ -183,8 +196,8 @@ const ORGANIZATION_ROUTES: Readonly<Record<string, BreadcrumbMessageKey>> = {
 export const BREADCRUMB_STATIC_ROUTE_PATHS = [...new Set([
     ...Object.keys(STATIC_WORKSPACE_ROUTES),
     ...Object.keys(SETTINGS_ROUTES),
+    ...CANONICAL_SETTINGS_GROUPS.keys(),
     ...Object.keys(ACCOUNT_ROUTES),
-    ...Object.keys(ORGANIZATION_SETTINGS_ROUTES),
     ...Object.keys(ORGANIZATION_ROUTES),
     "/account/connections/reviews",
     "/overview/reports/goals",
@@ -316,6 +329,37 @@ function shell(crumbs: BreadcrumbCrumb[]): BreadcrumbResolution {
     return { kind: "shell", crumbs };
 }
 
+/**
+ * The trail for a canonical settings destination, or null when the reader may not be there.
+ *
+ * The scope decides the root, exhaustively: an organization destination is rooted in the
+ * organization and refuses a reader holding no role there, exactly as the legacy organization
+ * routes do; a workspace destination is rooted in the active workspace; a personal one is rooted in
+ * Settings alone, because nothing about it belongs to the workspace the reader happens to be in.
+ */
+function canonicalSettingsTrail(
+    pathname: string,
+    group: SettingsGroup,
+    context: BreadcrumbRouteContext,
+): BreadcrumbResolution | null {
+    const current = literalCrumb(pathname, context.translateMessage(group.titleKey ?? ""), true);
+    const settings = translatedCrumb(SETTINGS_HOME_ROUTE, "settings", context);
+    switch (group.scope) {
+        case "organization":
+            return context.organizationAccessible
+                ? shell([organizationRoot(context), settings, current])
+                : null;
+        case "workspace":
+            return shell(withWorkspace(context, [settings, current]));
+        case "personal":
+            return shell([settings, current]);
+        default: {
+            const unreachable: never = group.scope;
+            return unreachable;
+        }
+    }
+}
+
 function empty(kind: Exclude<BreadcrumbResolution["kind"], "shell">): BreadcrumbResolution {
     return { kind, crumbs: [] };
 }
@@ -360,14 +404,11 @@ export function resolveBreadcrumbRoute(
         ]));
     }
 
-    const organizationSettingsRoute = ORGANIZATION_SETTINGS_ROUTES[pathname];
-    if (organizationSettingsRoute) {
-        if (!context.organizationAccessible) return empty("denied");
-        return shell([
-            organizationRoot(context),
-            translatedCrumb(SETTINGS_HOME_ROUTE, "settings", context),
-            translatedCrumb(pathname, organizationSettingsRoute, context, true),
-        ]);
+    const canonicalGroup = CANONICAL_SETTINGS_GROUPS.get(pathname);
+    if (canonicalGroup) {
+        const trail = canonicalSettingsTrail(pathname, canonicalGroup, context);
+        if (trail !== null) return trail;
+        return empty("denied");
     }
 
     const settingsRoute = SETTINGS_ROUTES[pathname];

@@ -6,7 +6,7 @@ import { DEFAULT_CAPABILITIES } from "@/app/lib/api";
 import { NO_NAV_ACCESS, resolveNavAccess } from "@/app/lib/navAccess";
 
 const PANEL = "app/components/diagnostics/DiagnosticsPanel.tsx";
-const NAV_BRIDGE = "app/components/actions/NavActionsBridge.tsx";
+const SETTINGS_ACTIONS = "app/lib/actions/settingsNavigationActions.ts";
 const SEED_ACTIONS = "app/lib/actions/seedActions.ts";
 const SETTINGS_TABS = "app/components/settings/SettingsTabs.tsx";
 
@@ -110,7 +110,7 @@ describe("diagnostics is offered exactly where its permission holds", () => {
     });
 
     it("gates the palette entry and the settings tab on that same resolved access", () => {
-        expect(source(NAV_BRIDGE)).toContain("if (navAccess.diagnostics) {");
+        expect(source(SETTINGS_ACTIONS)).toContain("reachable: (navAccess) => navAccess.diagnostics");
         expect(source(SEED_ACTIONS)).not.toContain("/settings/diagnostics");
         expect(source(SETTINGS_TABS)).toContain('usePermission("WORKSPACE_SETTINGS")');
     });

@@ -14,6 +14,7 @@ import { useActions, useAvailableActions } from '@/app/hooks/useActions';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { useShortcutPlatform } from '@/app/hooks/useShortcutPlatform';
 import { ACTION_GROUPS, type ActionGroup, type AppAction } from '@/app/lib/actions/types';
+import { actionLabel, actionSearchText, type MessageResolver } from '@/app/lib/actions/actionLabels';
 import { formatShortcut } from '@/app/lib/actions/shortcut';
 import { search as searchApi } from '@/app/lib/api';
 import { buildSearchGroups, openResult, type ResultGroup } from '@/app/lib/search/resultGroups';
@@ -59,20 +60,13 @@ const PILL_INPUT =
 
 type Mode = 'inline' | 'palette';
 
-function actionLabel(action: AppAction, t: (key: string) => string): string {
-    return action.label ?? t(action.labelKey);
-}
-
-function actionSearchText(action: AppAction, t: (key: string) => string): string {
-    const parts = [actionLabel(action, t)];
-    if (action.descriptionKey) parts.push(t(action.descriptionKey));
-    if (action.keywords) parts.push(...action.keywords);
-    if (action.keywordsKey) parts.push(t(action.keywordsKey));
-    return parts.join(' ').toLowerCase();
-}
-
-function rankAction(action: AppAction, lowerQuery: string, t: (key: string) => string): number {
-    return actionLabel(action, t).toLowerCase().startsWith(lowerQuery) ? 0 : 1;
+function rankAction(
+    action: AppAction,
+    lowerQuery: string,
+    t: MessageResolver,
+    tMessage: MessageResolver,
+): number {
+    return actionLabel(action, t, tMessage).toLowerCase().startsWith(lowerQuery) ? 0 : 1;
 }
 
 function subscribeToViewport(onChange: () => void): () => void {
@@ -102,6 +96,7 @@ function viewportSnapshot(): string {
 export default function GlobalSearch() {
     const tSearch = useTranslations('CommonSearchBar');
     const tActions = useTranslations('Actions');
+    const tMessage = useTranslations();
     const router = useRouter();
     const searchParams = useSearchParams();
     const urlQuery = searchParams.get('query') ?? '';
@@ -190,15 +185,21 @@ export default function GlobalSearch() {
         const groupsToScan = lowerQuery ? ACTION_GROUPS : EMPTY_GROUP_ORDER;
         return groupsToScan.flatMap((group) => {
             const actions = available.filter(
-                (action) => action.group === group && (!lowerQuery || actionSearchText(action, tActions).includes(lowerQuery)),
+                (action) => action.group === group
+                    && (!lowerQuery || actionSearchText(action, tActions, tMessage).includes(lowerQuery)),
             );
-            if (lowerQuery) actions.sort((a, b) => rankAction(a, lowerQuery, tActions) - rankAction(b, lowerQuery, tActions));
+            if (lowerQuery) {
+                actions.sort(
+                    (a, b) => rankAction(a, lowerQuery, tActions, tMessage)
+                        - rankAction(b, lowerQuery, tActions, tMessage),
+                );
+            }
             const visible = lowerQuery
                 ? actions
                 : limitSeededActionsKeepingUserContext(actions, SEEDED_ACTION_LIMITS_WHEN_QUERY_EMPTY[group]);
             return visible.length > 0 ? [{ group, actions: visible }] : [];
         });
-    }, [available, lowerQuery, tActions]);
+    }, [available, lowerQuery, tActions, tMessage]);
 
     const closePalette = useCallback(() => {
         setMode('inline');
@@ -543,7 +544,7 @@ export default function GlobalSearch() {
                                                                 <Icon className="size-4 text-muted-foreground" />
                                                             ) : null}
                                                             <span className="min-w-0 flex-1">
-                                                                <span className="block truncate">{action.label ?? tActions(action.labelKey)}</span>
+                                                                <span className="block truncate">{actionLabel(action, tActions, tMessage)}</span>
                                                                 {action.descriptionKey ? (
                                                                     <span className="block truncate text-xs text-muted-foreground">
                                                                         {tActions(action.descriptionKey)}

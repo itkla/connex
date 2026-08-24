@@ -837,7 +837,13 @@ export const SETTINGS_ENTRIES = [
         conditionalForward: null,
         titleKey: "SettingsHome.title",
         access: NO_ACCESS_REQUIREMENTS,
-        entryPoints: [],
+        /**
+         * The settings home is what "Settings" means now, on both surfaces that used the word.
+         * Until #1340 PR 7 the sidebar item and the palette action named Settings both landed on
+         * `/settings/members` — the arbitrary tab the epic names as the failure it is replacing —
+         * while `/settings` itself was reachable from nowhere in the product.
+         */
+        entryPoints: ["sidebar", "command-palette"],
         aliasKey: null,
     },
     {
@@ -1014,7 +1020,12 @@ export const SETTINGS_ENTRIES = [
             orgWrite: null,
             states: [],
         },
-        entryPoints: ["settings-tabs", "sidebar", "command-palette", "contextual"],
+        /**
+         * No longer the sidebar's or the palette's Settings destination: both now name
+         * `settings.home`, and the members roster is reached as a section of People & access rather
+         * than as the thing the word "Settings" happens to open.
+         */
+        entryPoints: ["settings-tabs", "contextual"],
         aliasKey: null,
     },
     {
@@ -1424,12 +1435,13 @@ export const SETTINGS_ENTRIES = [
         redirectQuery: [],
         conditionalForward: null,
         /**
-         * The consolidated name, not the shipped one. `CommonSidebar.navUsers` renders "Users" /
-         * 「ユーザー」, which PRODUCT.md §4 bans for a person in a workspace, and the banned-terms gate
-         * cannot catch it there because `user` is unclassifiable in the general case. This key is
-         * what the navigation and settings search show, and both now lead to the section of People &
-         * access that owns this job, which is named for members. The standalone `/users` page keeps
-         * its shipped label until its redirect lands.
+         * The consolidated name, not the one the sidebar used to carry. `CommonSidebar.navUsers`
+         * rendered "Users" / 「ユーザー」, which PRODUCT.md §4 bans for a person in a workspace and the
+         * banned-terms gate cannot catch, because `user` is unclassifiable in the general case; the
+         * key was deleted in #1340 PR 7 once every navigation surface read this one instead. The
+         * navigation and settings search now show this name and lead to the section of People &
+         * access that owns the job. The standalone `/users` page keeps its own heading until its
+         * redirect lands.
          */
         titleKey: "SettingsPeople.directoryTitle",
         access: {

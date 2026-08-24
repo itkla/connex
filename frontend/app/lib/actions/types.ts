@@ -193,20 +193,44 @@ export type AppAction = {
     id: ActionId;
     /** Functional grouping used for ordering and section headings. */
     group: ActionGroup;
-    /** Key within the `Actions` next-intl namespace that resolves the display label. */
-    labelKey: string;
+    /**
+     * Key within the `Actions` next-intl namespace that resolves the display label.
+     *
+     * Optional because an action's name is not always the `Actions` catalog's to give: a settings
+     * destination is named by the committed settings manifest ({@link labelMessageKey}), and a
+     * pinned saved view is named by the reader's own data ({@link label}). Exactly one of the three
+     * is present on every registration, which the registry checks rather than assumes.
+     */
+    labelKey?: string;
+    /**
+     * An absolute message key — namespace included — resolving the display label, for an action
+     * whose name is owned by a committed manifest rather than by the `Actions` catalog. Takes
+     * precedence over {@link labelKey}.
+     *
+     * A settings destination is named once, in `settingsManifest.ts`, and every surface offering it
+     * renders that one name. Resolving a key rather than a string keeps the label reactive to the
+     * reader's locale, and keeps the action a fixed destination rather than the reader's own
+     * context, which is what {@link label} would quietly reclassify it as.
+     */
+    labelMessageKey?: string;
     /** Key within the `Actions` namespace resolving supporting text shown on richer action surfaces. */
     descriptionKey?: string;
     /**
-     * A resolved display label used verbatim when present, taking precedence over {@link labelKey}.
+     * A resolved display label used verbatim when present, taking precedence over both key forms.
      * For dynamic actions whose label is data (e.g. a pinned saved view's name) and so cannot be a
-     * translation key; static actions omit it and are localized via {@link labelKey}.
+     * translation key; static actions omit it and are localized via one of the key forms.
      */
     label?: string;
     /** Locale-neutral search aliases (e.g. `csv`, `kanban`). */
     keywords?: readonly string[];
     /** Key within the `Actions` namespace resolving a comma-separated, per-locale alias list. */
     keywordsKey?: string;
+    /**
+     * An absolute message key resolving a comma-separated, per-locale alias list, for an action
+     * whose aliases the settings manifest owns. Read in addition to {@link keywordsKey}, not
+     * instead of it, because the two name different catalogs rather than the same one twice.
+     */
+    keywordsMessageKey?: string;
     /**
      * A single canonical chord (e.g. `mod+alt+t`). Metadata only for now — normalized and checked for
      * conflicts at registration, but not yet dispatched; the shortcut dispatcher lands with the palette.

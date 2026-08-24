@@ -38,6 +38,7 @@ import { useCommentIndicators } from '@/app/hooks/useCommentIndicators';
 import CommentIndicatorChip from '@/app/components/records/comments/CommentIndicatorChip';
 import { useRecentRecords } from '@/app/hooks/useRecentRecords';
 import type { PeekTarget, PeekType } from '@/app/hooks/useRecordPeek';
+import { actionLabel } from '@/app/lib/actions/actionLabels';
 import type { ActionId } from '@/app/lib/actions/types';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { ApiError, getCompanyById, getCompanyEngagement, getContactById, getActivitiesForDeal, getDealById, getDealRisk, getDealSummary, getTasksForDeal } from '@/app/lib/api';
@@ -97,6 +98,7 @@ function RecordPeekDrawer({
 }: Props) {
     const t = useTranslations('RecordPeek');
     const actionsT = useTranslations('Actions');
+    const messageT = useTranslations();
     const locale = useLocale();
     const router = useRouter();
     const { run, getAction, isAvailableForRecord } = useActions();
@@ -280,7 +282,7 @@ function RecordPeekDrawer({
                                     {canLogActivity && logActivityAction && (
                                         <DropdownMenuItem onSelect={() => runRecordAction('create.activity')}>
                                             {LogActivityIcon && <LogActivityIcon className="size-4" />}
-                                            {logActivityAction.label ?? actionsT(logActivityAction.labelKey)}
+                                            {actionLabel(logActivityAction, actionsT, messageT)}
                                         </DropdownMenuItem>
                                     )}
                                     {canAddNote && (

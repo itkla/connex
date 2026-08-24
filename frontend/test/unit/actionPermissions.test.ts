@@ -2,12 +2,29 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { actionNamesItself } from "@/app/lib/actions/actionLabels";
 import { grantedCapabilities, resolveCan } from "@/app/lib/actions/permissions";
+import { SEED_ACTIONS } from "@/app/lib/actions/seedActions";
+import {
+    settingsNavigationActions,
+    SETTINGS_PALETTE_REGISTRATIONS,
+} from "@/app/lib/actions/settingsNavigationActions";
 import { WORKSPACE_CAPABILITIES } from "@/app/lib/actions/types";
+import type { NavAccess } from "@/app/lib/navAccess";
 import type { OrgRole, Workspace, WorkspaceRole } from "@/app/lib/types";
 
 const PERMISSIONS = "app/lib/actions/permissions.ts";
 const TYPES = "app/lib/actions/types.ts";
+
+/**
+ * Every module that registers a global action and may gate one on a coarse capability. The settings
+ * destinations moved out of the seed registry into their generated module in #1340 PR 7, so the
+ * scan follows them rather than reading a file that no longer carries the only `can` call.
+ */
+const REGISTRIES = [
+    "app/lib/actions/seedActions.ts",
+    "app/lib/actions/settingsNavigationActions.ts",
+];
 
 function source(relativePath: string): string {
     return readFileSync(path.resolve(process.cwd(), relativePath), "utf8");
@@ -112,12 +129,60 @@ describe("an action needing no capability says so by omission", () => {
     });
 
     it("gates every registered action on a key the table actually carries", () => {
-        const registry = source("app/lib/actions/seedActions.ts");
-        const keys = [...registry.matchAll(/context\.can\(["']([^"']+)["']\)/g)].map((match) => match[1]);
+        const keys = REGISTRIES.flatMap((registry) =>
+            [...source(registry).matchAll(/context\.can\(["']([^"']+)["']\)/g)].map((match) => match[1]),
+        );
 
         expect(keys.length).toBeGreaterThan(0);
         for (const key of keys) {
             expect(WORKSPACE_CAPABILITIES).toContain(key);
         }
+    });
+});
+
+/**
+ * `AppAction.labelKey` became optional in #1340 PR 7, so a registration can now name itself in three
+ * ways — or, by mistake, in none. The registry's `devInvariant` catches that loudly in development
+ * and degrades to a `console.error` in production, which means a label-less registration would ship
+ * a blank row rather than being stopped. This is the gate that stops it: every action the app
+ * registers without a bridge is checked here, so the invariant is a second line rather than the only
+ * one.
+ */
+describe("every registered action names itself", () => {
+    const ALL_NAV_ACCESS: NavAccess = {
+        goals: true,
+        auditLog: true,
+        captureReviews: "enabled",
+        campaigns: true,
+        workflows: true,
+        diagnostics: true,
+    };
+
+    it("recognises each of the three ways an action may be named, and no fourth", () => {
+        const base = { id: "test", group: "navigate", execute: () => undefined } as const;
+
+        expect(actionNamesItself({ ...base, labelKey: "navigate.dashboard" })).toBe(true);
+        expect(actionNamesItself({ ...base, labelMessageKey: "SettingsHome.title" })).toBe(true);
+        expect(actionNamesItself({ ...base, label: "Northstar" })).toBe(true);
+        expect(actionNamesItself({ ...base })).toBe(false);
+    });
+
+    it("leaves no seeded action unnamed", () => {
+        const unnamed = SEED_ACTIONS.filter((action) => !actionNamesItself(action)).map(
+            (action) => action.id,
+        );
+
+        expect(SEED_ACTIONS.length).toBeGreaterThan(20);
+        expect(unnamed).toEqual([]);
+    });
+
+    it("leaves no generated settings destination unnamed", () => {
+        const generated = settingsNavigationActions(ALL_NAV_ACCESS);
+        const unnamed = generated.filter((action) => !actionNamesItself(action)).map(
+            (action) => action.id,
+        );
+
+        expect(generated.length).toBe(SETTINGS_PALETTE_REGISTRATIONS.length);
+        expect(unnamed).toEqual([]);
     });
 });

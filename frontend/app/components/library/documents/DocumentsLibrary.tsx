@@ -13,6 +13,7 @@ import { PageShell } from '@/app/components/PageShell';
 import { useOwnedUrlParams } from '@/app/hooks/useOwnedUrlParams';
 import DocumentTemplatesBrowser from '@/app/components/library/documents/DocumentTemplatesBrowser';
 import GeneratedDocumentsBrowser from '@/app/components/library/documents/GeneratedDocumentsBrowser';
+import { settingsDestination } from '@/app/lib/settingsEntryPoints';
 import type { DocumentTemplate, User } from '@/app/lib/types';
 
 /** Which of the library's two document surfaces is showing. */
@@ -48,6 +49,7 @@ export default function DocumentsLibrary({
     owners: User[];
 }) {
     const t = useTranslations('DocumentsLibrary');
+    const approvalPolicies = settingsDestination('workspace.approval-policies');
     const router = useRouter();
     const searchParams = useSearchParams();
     const [view, setView] = useState<DocumentsView>(() => normalizeView(searchParams.get(VIEW_URL_KEY)));
@@ -63,7 +65,7 @@ export default function DocumentsLibrary({
                     actions={
                         view === 'templates' ? (
                             <>
-                                <Button variant="outline" onClick={() => router.push('/records/approval-policies')}>
+                                <Button variant="outline" onClick={() => router.push(approvalPolicies.href)}>
                                     <ShieldCheckIcon className="size-4" />
                                     {t('approvalPoliciesLink')}
                                 </Button>
