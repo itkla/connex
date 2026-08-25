@@ -126,6 +126,45 @@ class AiAssistantPromptEnvelopeTest {
                 refused.terminalReason());
     }
 
+    /**
+     * Measures the same real envelope against a million-token window.
+     *
+     * <p>The envelope is a fixed cost, so widening the declared window must show up entirely as
+     * variable input budget: the answer allocation is unchanged (it is still the operator ceiling)
+     * while history and tool-result budgets grow by roughly the ratio of the windows. This is the
+     * payoff of the catalog stated as an assertion — and it fails if a future derivation quietly
+     * clamps a large window back toward the floor's allocations.
+     */
+    @Test
+    void theSameFixedEnvelopeScalesIntoAMillionTokenWindow() {
+        int reactEnvelope = reactEnvelopeBytes();
+        AiAssistantPromptBudget atFloor = budget(reactEnvelope);
+        AiAssistantPromptBudget atMillion = AiAssistantPromptBudget.from(
+                new AiProviderCapabilities(
+                        AiStructuredOutputEnforcement.JSON_SCHEMA,
+                        AiReasoningMode.TAGGED,
+                        1_000_000,
+                        128_000),
+                CONFIGURED_MAX_OUTPUT_TOKENS,
+                reactEnvelope);
+
+        System.out.println("[envelope] 1M react fixed=" + reactEnvelope
+                + " outputTokens=" + atMillion.maxOutputTokens()
+                + " historyBytes=" + atMillion.historyBytes()
+                + " toolResultBytes=" + atMillion.toolResultBytes()
+                + " compactionSourceBytes=" + atMillion.compactionSourceBytes());
+        assertEquals(CONFIGURED_MAX_OUTPUT_TOKENS, atMillion.maxOutputTokens());
+        assertTrue(atMillion.historyBytes() > 10 * atFloor.historyBytes(),
+                "a 15x wider window must fund a materially larger history budget");
+        assertTrue(atMillion.toolResultBytes() > 10 * atFloor.toolResultBytes(),
+                "a 15x wider window must fund a materially larger tool-result budget");
+        assertTrue(atMillion.compactionSourceBytes() > 0);
+        assertEquals(
+                atMillion.compactionSourceBytes(),
+                atMillion.historyBytes() + atMillion.attachmentContextBytes()
+                        + atMillion.pageContextBytes() + atMillion.toolResultBytes());
+    }
+
     private static AiAssistantPromptBudget budget(int fixedEnvelopeBytes) {
         return AiAssistantPromptBudget.from(
                 capabilities(PROVIDER_MAX_OUTPUT_TOKENS),

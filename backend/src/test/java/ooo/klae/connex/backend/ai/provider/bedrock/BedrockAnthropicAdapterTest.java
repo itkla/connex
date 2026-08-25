@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.provider.bedrock;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -27,6 +28,7 @@ import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
+import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
@@ -41,13 +43,15 @@ class BedrockAnthropicAdapterTest {
     @Mock private BedrockClient bedrockClient;
 
     private ObjectMapper objectMapper;
+    private AiProperties aiProperties;
     private BedrockAnthropicAdapter adapter;
 
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
+        aiProperties = new AiProperties();
         adapter = new BedrockAnthropicAdapter(
-                bedrockClient, objectMapper, new AiProperties());
+                bedrockClient, objectMapper, aiProperties);
     }
 
     @Test
@@ -91,31 +95,109 @@ class BedrockAnthropicAdapterTest {
 
     @Test
     void contextWindowUsesSafeDefaultForUnknownModelFamilies() {
-        assertEquals(200_000, adapter.contextWindowTokens(new AiProviderTarget(
-                "bedrock", "us-east-1", "anthropic.claude-3-sonnet-v1:0",
-                null, null, null, null, false)));
-        assertEquals(4_096, adapter.contextWindowTokens(new AiProviderTarget(
-                "bedrock", "us-east-1", "third-party.unknown-model",
-                null, null, null, null, false)));
+        assertEquals(200_000, adapter.contextWindowTokens(
+                bedrockTarget("anthropic.claude-3-sonnet-v1:0")));
+        assertEquals(4_096, adapter.contextWindowTokens(
+                bedrockTarget("third-party.unknown-model")));
+        assertEquals(4_096, adapter.contextWindowTokens(null));
     }
 
     @Test
     void outputCapacityUsesDocumentedClaudeFamilyLimits() {
-        assertEquals(4_096, adapter.maxOutputTokens(new AiProviderTarget(
-                "bedrock", "us-east-1", "anthropic.claude-3-sonnet-v1:0",
-                null, null, null, null, false)));
-        assertEquals(8_192, adapter.maxOutputTokens(new AiProviderTarget(
-                "bedrock", "us-east-1", "anthropic.claude-3-5-haiku-20241022-v1:0",
-                null, null, null, null, false)));
-        assertEquals(65_536, adapter.maxOutputTokens(new AiProviderTarget(
-                "bedrock", "us-east-1", "anthropic.claude-sonnet-4-20250514-v1:0",
-                null, null, null, null, false)));
-        assertEquals(131_072, adapter.maxOutputTokens(new AiProviderTarget(
-                "bedrock", "us-east-1", "anthropic.claude-opus-4-6-v1",
-                null, null, null, null, false)));
-        assertEquals(4_096, adapter.maxOutputTokens(new AiProviderTarget(
-                "bedrock", "us-east-1", "third-party.unknown-model",
-                null, null, null, null, false)));
+        assertEquals(4_096, adapter.maxOutputTokens(
+                bedrockTarget("anthropic.claude-3-sonnet-v1:0")));
+        assertEquals(8_192, adapter.maxOutputTokens(
+                bedrockTarget("anthropic.claude-3-5-haiku-20241022-v1:0")));
+        assertEquals(65_536, adapter.maxOutputTokens(
+                bedrockTarget("anthropic.claude-sonnet-4-20250514-v1:0")));
+        assertEquals(4_096, adapter.maxOutputTokens(
+                bedrockTarget("third-party.unknown-model")));
+        assertEquals(4_096, adapter.maxOutputTokens(null));
+    }
+
+    /**
+     * Pins the widening that motivated the catalog: current Claude models are million-token
+     * models, and this adapter previously reported 200,000 tokens for every one of them.
+     */
+    @Test
+    void currentClaudeModelsReportTheirDocumentedMillionTokenWindow() {
+        for (String modelId : List.of(
+                "anthropic.claude-opus-5",
+                "us.anthropic.claude-opus-5",
+                "global.anthropic.claude-sonnet-5",
+                "anthropic.claude-opus-4-6-v1",
+                "anthropic.claude-opus-4-7",
+                "anthropic.claude-opus-4-8")) {
+            assertEquals(1_000_000, adapter.contextWindowTokens(bedrockTarget(modelId)), modelId);
+            assertEquals(128_000, adapter.maxOutputTokens(bedrockTarget(modelId)), modelId);
+        }
+    }
+
+    /**
+     * Bedrock publishes a 64K output ceiling for Claude Sonnet 4.6 where the first-party API
+     * publishes 128K, so the partner number is the one this adapter must send.
+     */
+    @Test
+    void bedrockSonnetFourSixKeepsThePartnerOutputCeiling() {
+        AiProviderTarget target = bedrockTarget("anthropic.claude-sonnet-4-6");
+
+        assertEquals(1_000_000, adapter.contextWindowTokens(target));
+        assertEquals(64_000, adapter.maxOutputTokens(target));
+    }
+
+    @Test
+    void haikuFourFiveKeepsItsTwoHundredThousandTokenWindow() {
+        AiProviderTarget target = bedrockTarget("anthropic.claude-haiku-4-5-20251001-v1:0");
+
+        assertEquals(200_000, adapter.contextWindowTokens(target));
+        assertEquals(64_000, adapter.maxOutputTokens(target));
+    }
+
+    /**
+     * Every resolved pair has to satisfy {@link AiProviderCapabilities}, which refuses an output
+     * ceiling larger than its window. Before the catalog, {@code anthropic.claude-opus-5} resolved
+     * to a 4,096-token window with a 131,072-token ceiling and threw here rather than at
+     * declaration time.
+     */
+    @Test
+    void resolvedCapabilitiesAlwaysFitTheirOwnContextWindow() {
+        for (String modelId : List.of(
+                "anthropic.claude-opus-5",
+                "anthropic.claude-sonnet-5",
+                "anthropic.claude-haiku-5",
+                "anthropic.claude-sonnet-4-6",
+                "anthropic.claude-3-sonnet-v1:0",
+                "third-party.unknown-model")) {
+            AiProviderTarget target = bedrockTarget(modelId);
+
+            AiProviderCapabilities capabilities = new AiProviderCapabilities(
+                    AiStructuredOutputEnforcement.PROMPT_ONLY,
+                    AiReasoningMode.TAGGED,
+                    adapter.contextWindowTokens(target),
+                    adapter.maxOutputTokens(target));
+
+            assertTrue(capabilities.maxOutputTokens() <= capabilities.contextWindowTokens(),
+                    modelId);
+        }
+    }
+
+    @Test
+    void anOperatorOverrideCorrectsADeclaredBedrockWindow() {
+        AiProperties.ModelOverride override = new AiProperties.ModelOverride();
+        override.setProvider("bedrock");
+        override.setModelId("anthropic.claude-opus-5");
+        override.setContextWindowTokens(200_000);
+        aiProperties.setModelOverrides(List.of(override));
+
+        AiProviderTarget target = bedrockTarget("anthropic.claude-opus-5");
+
+        assertEquals(200_000, adapter.contextWindowTokens(target));
+        assertEquals(128_000, adapter.maxOutputTokens(target));
+    }
+
+    private static AiProviderTarget bedrockTarget(String modelId) {
+        return new AiProviderTarget(
+                "bedrock", "us-east-1", modelId, null, null, null, null, false);
     }
 
     @Test

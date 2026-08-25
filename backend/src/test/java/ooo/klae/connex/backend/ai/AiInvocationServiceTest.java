@@ -605,6 +605,33 @@ class AiInvocationServiceTest {
         verify(aiProvider).complete(any());
     }
 
+    /**
+     * The pre-egress admission ceiling is the last gate before a prompt leaves the process, and it
+     * is computed from the adapter's declared context window. A million-token model must widen that
+     * gate proportionally and must not saturate it: an admission ceiling pinned at
+     * {@link Integer#MAX_VALUE} would silently stop being a ceiling at all.
+     */
+    @Test
+    void completeAdmitsAtTheConservativeBoundaryOfAMillionTokenWindow() {
+        AiInvocation invocation = invocation("\u95a2\u4fc2\u6027\u3092\u8981\u7d04\u3057\u3066\u304f\u3060\u3055\u3044\u3002".repeat(256));
+        int serializedBytes = service.serializedPromptBytes(
+                invocation.prompt(), null, AiReasoningMode.NONE);
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(1_000_000);
+        providerReturns(new AiCompletionResult(
+                "{{P1}} is ready for follow-up.", 12, 7, "end_turn"));
+
+        AiCompletionOutcome outcome = service.complete(invocation);
+
+        int ceiling = AiProviderCapabilities.conservativeInputByteCeiling(
+                1_000_000, invocation.maxTokens());
+        assertEquals(1_000_000 - invocation.maxTokens(), ceiling);
+        assertTrue(ceiling > serializedBytes);
+        assertTrue(ceiling < Integer.MAX_VALUE,
+                "a million-token window must not saturate the admission ceiling");
+        assertEquals("Mina Patel is ready for follow-up.", outcome.text());
+        verify(aiProvider).complete(any());
+    }
+
     @Test
     void completeRejectsJapaneseDenseInputOneByteBeyondTheConservativeBoundary() {
         AiInvocation invocation = invocation("関係性を要約してください。".repeat(256));

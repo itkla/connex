@@ -4,8 +4,6 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
-import java.util.Locale;
-import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
 
@@ -16,6 +14,7 @@ import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
+import ooo.klae.connex.backend.ai.provider.AiModelCatalog;
 import ooo.klae.connex.backend.ai.provider.AiNativeToolRequest;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
@@ -45,33 +44,6 @@ import tools.jackson.databind.node.ObjectNode;
 public class OpenAiCompatibleAdapter implements AiProvider {
     private static final String PROVIDER_OPENAI_COMPATIBLE = "openai_compatible";
     private static final String COMPLETIONS_PATH = "/chat/completions";
-    private static final int CONSERVATIVE_TOKEN_FALLBACK = 4_096;
-    private static final Pattern GEMINI_TEXT_MODEL = Pattern.compile(
-            "^gemini-(?:2\\.5|3(?:\\.\\d+)?)-(?:flash|pro)(?:[-.@].*)?$");
-    private static final Pattern GEMINI_LEGACY_PRO_MODEL = Pattern.compile(
-            "^gemini-1\\.5-pro(?:[-.@].*)?$");
-    private static final Pattern GEMINI_LEGACY_FLASH_MODEL = Pattern.compile(
-            "^gemini-(?:1\\.5|2\\.0)-flash(?:-(?:8b|lite))?(?:[-.@].*)?$");
-    private static final Pattern OPENAI_REASONING_MODEL = Pattern.compile(
-            "^o[134](?:-(?:mini|pro))?(?:-\\d{4}-\\d{2}-\\d{2})?$");
-    private static final Pattern GPT_FOUR_FIVE_MODEL = Pattern.compile(
-            "^gpt-4\\.5(?:-preview)?(?:-\\d{4}-\\d{2}-\\d{2})?$");
-    private static final Pattern NON_TEXT_MODEL_VARIANT = Pattern.compile(
-            ".*-(?:image|live|tts|audio|native-audio|embedding|exp-image)(?:[-.@].*)?$");
-    private static final Pattern GPT_FOUR_O_TEXT_MODEL = Pattern.compile(
-            "^gpt-4o(?:-mini)?(?:-\\d{4}-\\d{2}-\\d{2})?$");
-    private static final Pattern GPT_FOUR_ONE_TEXT_MODEL = Pattern.compile(
-            "^gpt-4\\.1(?:-(?:mini|nano))?(?:-\\d{4}-\\d{2}-\\d{2})?$");
-    private static final Pattern GPT_FIVE_CHAT_MODEL = Pattern.compile(
-            "^gpt-5(?:\\.[123])?-chat-latest$");
-    private static final Pattern GPT_FIVE_400K_MODEL = Pattern.compile(
-            "^gpt-5(?:\\.(?:1|2))?(?:-(?:mini|nano|pro))?"
-                    + "(?:-\\d{4}-\\d{2}-\\d{2})?$"
-                    + "|^gpt-5\\.4-(?:mini|nano)(?:-\\d{4}-\\d{2}-\\d{2})?$");
-    private static final Pattern GPT_FIVE_MILLION_MODEL = Pattern.compile(
-            "^gpt-5\\.(?:4|5)(?:-pro)?(?:-\\d{4}-\\d{2}-\\d{2})?$"
-                    + "|^gpt-5\\.6(?:-(?:sol|terra|luna))?$");
-
     private final OpenAiCompatibleClient openAiCompatibleClient;
     private final ObjectMapper objectMapper;
     private final AiProperties aiProperties;
@@ -97,120 +69,28 @@ public class OpenAiCompatibleAdapter implements AiProvider {
     }
 
     /**
-     * Resolves documented context windows only for recognizable vendor model families.
-     * @see <a href="https://ai.google.dev/gemini-api/docs/models/gemini-2.5-pro">Gemini 2.5 limits</a>
-     * @see <a href="https://ai.google.dev/gemini-api/docs/gemini-3">Gemini 3 limits</a>
-     * @see <a href="https://developers.openai.com/api/docs/models/gpt-5">GPT-5 limits</a>
-     * @see <a href="https://developers.openai.com/api/docs/models/gpt-5-chat-latest">GPT-5 Chat limits</a>
-     * @see <a href="https://developers.openai.com/api/docs/models/gpt-5.4">GPT-5.4 limits</a>
-     * @see <a href="https://developers.openai.com/api/docs/models/gpt-4.1">GPT-4.1 limits</a>
-     * @see <a href="https://developers.openai.com/api/docs/models/gpt-4o">GPT-4o limits</a>
-     * @see <a href="https://developers.openai.com/api/docs/models/o3">OpenAI o-series limits</a>
-     * @see <a href="https://ai.google.dev/gemini-api/docs/models">Gemini 1.5/2.0 limits</a>
-     * @see <a href="https://platform.claude.com/docs/en/about-claude/models/overview">Claude model limits</a>
+     * Resolves the declared context window for the configured OpenAI-compatible model.
+     *
+     * <p>An OpenAI-compatible endpoint may serve any model under any name, so an unrecognized id
+     * keeps the conservative fallback and {@code connex.ai.model-overrides} is the way an operator
+     * declares a self-hosted model's real limits.
+     *
+     * @see AiModelCatalog
      */
     @Override
     public int contextWindowTokens(AiProviderTarget target) {
-        String modelId = normalizedModelId(target);
-        if (modelId == null || NON_TEXT_MODEL_VARIANT.matcher(modelId).matches()) {
-            return CONSERVATIVE_TOKEN_FALLBACK;
-        }
-        if (GEMINI_TEXT_MODEL.matcher(modelId).matches()) {
-            return 1_048_576;
-        }
-        if (GEMINI_LEGACY_PRO_MODEL.matcher(modelId).matches()) {
-            return 2_097_152;
-        }
-        if (GEMINI_LEGACY_FLASH_MODEL.matcher(modelId).matches()) {
-            return 1_048_576;
-        }
-        if (OPENAI_REASONING_MODEL.matcher(modelId).matches()) {
-            return 200_000;
-        }
-        if (GPT_FOUR_FIVE_MODEL.matcher(modelId).matches()) {
-            return 128_000;
-        }
-        if (GPT_FOUR_ONE_TEXT_MODEL.matcher(modelId).matches()) {
-            return 1_047_576;
-        }
-        if (GPT_FIVE_CHAT_MODEL.matcher(modelId).matches()) {
-            return 128_000;
-        }
-        if (GPT_FIVE_400K_MODEL.matcher(modelId).matches()) {
-            return 400_000;
-        }
-        if (GPT_FIVE_MILLION_MODEL.matcher(modelId).matches()) {
-            return 1_050_000;
-        }
-        if (GPT_FOUR_O_TEXT_MODEL.matcher(modelId).matches()) {
-            return 128_000;
-        }
-        if (isMillionTokenClaude(modelId)) {
-            return 1_000_000;
-        }
-        if (isRecognizedClaude(modelId)) {
-            return 200_000;
-        }
-        if (modelId.startsWith("gemma-4") || isLargeGemmaThree(modelId)) {
-            return 128_000;
-        }
-        if (modelId.startsWith("gemma-3")) {
-            return 32_768;
-        }
-        return CONSERVATIVE_TOKEN_FALLBACK;
+        return AiModelCatalog.contextWindowTokens(
+                AiModelCatalog.Family.OPENAI_COMPATIBLE, target, aiProperties.getModelOverrides());
     }
 
     /**
-     * Resolves documented output ceilings only for recognizable vendor model families.
-     * @see <a href="https://ai.google.dev/gemini-api/docs/models/gemini-2.5-pro">Gemini 2.5 limits</a>
-     * @see <a href="https://ai.google.dev/gemini-api/docs/gemini-3">Gemini 3 limits</a>
-     * @see <a href="https://developers.openai.com/api/docs/models/gpt-5">GPT-5 limits</a>
-     * @see <a href="https://developers.openai.com/api/docs/models/gpt-5-chat-latest">GPT-5 Chat limits</a>
-     * @see <a href="https://developers.openai.com/api/docs/models/gpt-5.4">GPT-5.4 limits</a>
-     * @see <a href="https://developers.openai.com/api/docs/models/gpt-4.1">GPT-4.1 limits</a>
-     * @see <a href="https://developers.openai.com/api/docs/models/gpt-4o">GPT-4o limits</a>
-     * @see <a href="https://platform.claude.com/docs/en/about-claude/models/overview">Claude model limits</a>
-     * @see <a href="https://ai.google.dev/gemma/docs/core/model_card_3">Gemma 3 model limits</a>
-     * @see <a href="https://ai.google.dev/gemma/docs/core/model_card_4">Gemma 4 model limits</a>
+     * Resolves the declared output ceiling for the configured OpenAI-compatible model.
+     * @see AiModelCatalog
      */
     @Override
     public int maxOutputTokens(AiProviderTarget target) {
-        String modelId = normalizedModelId(target);
-        if (modelId == null || NON_TEXT_MODEL_VARIANT.matcher(modelId).matches()) {
-            return CONSERVATIVE_TOKEN_FALLBACK;
-        }
-        if (GEMINI_TEXT_MODEL.matcher(modelId).matches()) {
-            return 65_536;
-        }
-        if (GEMINI_LEGACY_PRO_MODEL.matcher(modelId).matches()
-                || GEMINI_LEGACY_FLASH_MODEL.matcher(modelId).matches()) {
-            return 8_192;
-        }
-        if (OPENAI_REASONING_MODEL.matcher(modelId).matches()) {
-            return 100_000;
-        }
-        if (GPT_FOUR_FIVE_MODEL.matcher(modelId).matches()) {
-            return 16_384;
-        }
-        if (GPT_FIVE_CHAT_MODEL.matcher(modelId).matches()) {
-            return 16_384;
-        }
-        if (GPT_FIVE_400K_MODEL.matcher(modelId).matches()
-                || GPT_FIVE_MILLION_MODEL.matcher(modelId).matches()) {
-            return 128_000;
-        }
-        if (GPT_FOUR_ONE_TEXT_MODEL.matcher(modelId).matches()) {
-            return 32_768;
-        }
-        if (GPT_FOUR_O_TEXT_MODEL.matcher(modelId).matches()) {
-            return 16_384;
-        }
-        if (isRecognizedClaude(modelId)) {
-            return claudeMaxOutputTokens(modelId);
-        }
-        return modelId.startsWith("gemma-3") || modelId.startsWith("gemma-4")
-                ? contextWindowTokens(target)
-                : CONSERVATIVE_TOKEN_FALLBACK;
+        return AiModelCatalog.maxOutputTokens(
+                AiModelCatalog.Family.OPENAI_COMPATIBLE, target, aiProperties.getModelOverrides());
     }
 
     @Override
@@ -221,69 +101,6 @@ public class OpenAiCompatibleAdapter implements AiProvider {
     @Override
     public boolean supportsStreaming(AiProviderTarget target) {
         return true;
-    }
-
-    private static boolean isLargeGemmaThree(String modelId) {
-        return modelId.matches("^gemma-3-(4b|12b|27b)(?:[-.@].*)?$");
-    }
-
-    private static boolean isMillionTokenClaude(String modelId) {
-        return modelId.startsWith("claude-fable-5")
-                || modelId.startsWith("claude-mythos-5")
-                || modelId.startsWith("claude-opus-5")
-                || modelId.startsWith("claude-sonnet-5")
-                || modelId.startsWith("claude-mythos-preview")
-                || modelId.startsWith("claude-opus-4-6")
-                || modelId.startsWith("claude-opus-4-7")
-                || modelId.startsWith("claude-opus-4-8")
-                || modelId.startsWith("claude-sonnet-4-6");
-    }
-
-    private static boolean isRecognizedClaude(String modelId) {
-        return modelId.startsWith("claude-3")
-                || modelId.startsWith("claude-opus-")
-                || modelId.startsWith("claude-sonnet-")
-                || modelId.startsWith("claude-haiku-")
-                || modelId.startsWith("claude-mythos")
-                || modelId.startsWith("claude-fable");
-    }
-
-    private static int claudeMaxOutputTokens(String modelId) {
-        if (modelId.startsWith("claude-fable-5")
-                || modelId.startsWith("claude-mythos-5")
-                || modelId.startsWith("claude-opus-5")
-                || modelId.startsWith("claude-sonnet-5")
-                || modelId.startsWith("claude-opus-4-6")
-                || modelId.startsWith("claude-opus-4-7")
-                || modelId.startsWith("claude-opus-4-8")) {
-            return 131_072;
-        }
-        if (modelId.startsWith("claude-mythos-preview")
-                || modelId.startsWith("claude-sonnet-4")
-                || modelId.startsWith("claude-haiku-4")
-                || modelId.startsWith("claude-opus-4-5")
-                || modelId.startsWith("claude-3-7")) {
-            return 65_536;
-        }
-        if (modelId.startsWith("claude-opus-4")) {
-            return 32_768;
-        }
-        if (modelId.startsWith("claude-3-5")) {
-            return 8_192;
-        }
-        return CONSERVATIVE_TOKEN_FALLBACK;
-    }
-
-    private static String normalizedModelId(AiProviderTarget target) {
-        if (target == null || target.modelId() == null || target.modelId().isBlank()) {
-            return null;
-        }
-        return unqualifiedModelId(target.modelId().trim().toLowerCase(Locale.ROOT));
-    }
-
-    private static String unqualifiedModelId(String modelId) {
-        int separator = modelId.lastIndexOf('/');
-        return separator < 0 ? modelId : modelId.substring(separator + 1);
     }
 
     @Override

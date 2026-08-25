@@ -1,10 +1,17 @@
 package ooo.klae.connex.backend.ai;
 
+import java.math.BigDecimal;
 import java.time.Duration;
+import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
@@ -151,6 +158,80 @@ public class AiProperties {
 
     /** Recommended client poll cadence and abandoned-handle cleanup cadence. */
     private Duration generationPollInterval = Duration.ofSeconds(2);
+
+    /**
+     * Deployment patches applied over {@link ooo.klae.connex.backend.ai.provider.AiModelCatalog}
+     * declarations. Vendor limits and prices drift between Connex releases and an
+     * OpenAI-compatible endpoint may serve an arbitrary model, so an operator can correct a
+     * capability without waiting for a redeploy of the declared corpus.
+     */
+    @Valid
+    private List<ModelOverride> modelOverrides = new ArrayList<>();
+
+    /**
+     * One operator-declared capability patch for an exact provider and model id.
+     *
+     * <p>Only the fields the operator sets are applied; every other capability keeps its declared
+     * value. Matching is an exact, case-insensitive comparison against the model id as the owning
+     * provider family normalizes it, because a substring override would silently capture models the
+     * operator never named.
+     */
+    @Data
+    public static class ModelOverride {
+
+        /** Provider id this override applies to, matching the configured provider. */
+        @NotBlank
+        private String provider;
+
+        /** Exact model id this override applies to. */
+        @NotBlank
+        private String modelId;
+
+        /** Replacement context window in tokens. */
+        @Min(1)
+        private Integer contextWindowTokens;
+
+        /** Replacement maximum generated output in tokens. */
+        @Min(1)
+        private Integer maxOutputTokens;
+
+        /** Replacement text-input modality declaration. */
+        private Boolean textInput;
+
+        /** Replacement image-input modality declaration. */
+        private Boolean imageInput;
+
+        /** Replacement PDF-document-input modality declaration. */
+        private Boolean pdfInput;
+
+        /** Replacement price per million input tokens. */
+        private BigDecimal inputPricePerMTok;
+
+        /** Replacement price per million output tokens. */
+        private BigDecimal outputPricePerMTok;
+
+        /** ISO 4217 currency for the replacement prices; defaults to the declared currency. */
+        private String currency;
+
+        /** Date the operator read the replacement rate card. */
+        private LocalDate pricingAsOf;
+
+        /**
+         * Returns whether this override applies to a normalized model id on a provider.
+         *
+         * @param candidateProvider configured provider id
+         * @param normalizedModelId model id normalized by the owning provider family
+         * @return true when both the provider and the model id match exactly
+         */
+        public boolean matches(String candidateProvider, String normalizedModelId) {
+            if (provider == null || modelId == null
+                    || candidateProvider == null || normalizedModelId == null) {
+                return false;
+            }
+            return provider.trim().equalsIgnoreCase(candidateProvider)
+                    && modelId.trim().toLowerCase(Locale.ROOT).equals(normalizedModelId);
+        }
+    }
 
     /**
      * Returns whether the master switch and the selected feature switch permit the feature.

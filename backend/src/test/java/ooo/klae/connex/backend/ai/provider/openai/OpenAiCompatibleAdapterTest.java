@@ -133,8 +133,39 @@ class OpenAiCompatibleAdapterTest {
         assertTokenLimits("gpt-5.4-mini-2026-03-17", 400_000, 128_000);
         assertTokenLimits("gpt-5.6-terra", 1_050_000, 128_000);
         assertTokenLimits("anthropic/claude-3-5-sonnet-20241022", 200_000, 8_192);
-        assertTokenLimits("claude-sonnet-4-6", 1_000_000, 65_536);
-        assertTokenLimits("claude-opus-5", 1_000_000, 131_072);
+    }
+
+    /**
+     * Claude's published output ceiling is 128,000 tokens; the adapter previously asked for
+     * 131,072, which is 2,072 tokens past what the API accepts, and reported 65,536 for Sonnet 4.6
+     * where the first-party API also publishes 128,000.
+     */
+    @Test
+    void currentClaudeModelsUseTheirPublishedOutputCeiling() {
+        assertTokenLimits("claude-opus-5", 1_000_000, 128_000);
+        assertTokenLimits("claude-fable-5", 1_000_000, 128_000);
+        assertTokenLimits("claude-mythos-5", 1_000_000, 128_000);
+        assertTokenLimits("claude-sonnet-5", 1_000_000, 128_000);
+        assertTokenLimits("claude-sonnet-4-6", 1_000_000, 128_000);
+        assertTokenLimits("claude-opus-4-8", 1_000_000, 128_000);
+        assertTokenLimits("claude-opus-4-7", 1_000_000, 128_000);
+        assertTokenLimits("claude-opus-4-6", 1_000_000, 128_000);
+        assertTokenLimits("claude-haiku-4-5", 200_000, 64_000);
+        assertTokenLimits("claude-opus-4-5", 200_000, 65_536);
+        assertTokenLimits("claude-sonnet-4-5-20250929", 200_000, 65_536);
+    }
+
+    @Test
+    void anOperatorOverrideDeclaresASelfHostedModelsRealLimits() {
+        AiProperties.ModelOverride override = new AiProperties.ModelOverride();
+        override.setProvider("openai_compatible");
+        override.setModelId("llama3.3:70b");
+        override.setContextWindowTokens(131_072);
+        override.setMaxOutputTokens(8_192);
+        aiProperties.setModelOverrides(List.of(override));
+
+        assertTokenLimits("llama3.3:70b", 131_072, 8_192);
+        assertTokenLimits("mistral-large-latest", 4_096, 4_096);
     }
 
     @Test
