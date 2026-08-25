@@ -51,6 +51,29 @@ function suppressedMatches(
     return found;
 }
 
+/**
+ * Runs the production scanner over the real catalogs with a synthetic model, so a probe asserts
+ * what {@link scanMessageCatalogs} and {@link baselineEntries} actually do rather than what the
+ * committed baseline happens to contain — a baseline burned to zero can no longer supply examples.
+ * Every named term matches the same everyday word, so one string flags once per term.
+ * @param names the term names to scan under
+ * @returns the baseline entries the scan produces
+ */
+function probeEntries(names: string[]): string[] {
+    const terms = names.map((term) => ({
+        id: `en:${term}`,
+        term,
+        locale: "en" as const,
+        scope: "global" as const,
+        allowFiles: [],
+        canonicalExceptions: [],
+        narrowed: false,
+        pattern: { source: "\\bthe\\b", flags: "iu" },
+        sources: ["probe"],
+    }));
+    return baselineEntries(scanMessageCatalogs({ terms, skipped: [] }));
+}
+
 describe("message catalogue vocabulary", () => {
     it("reports no banned term outside the committed baseline", () => {
         const known = new Set(baseline);
@@ -86,21 +109,18 @@ describe("message catalogue vocabulary", () => {
     });
 
     it("scans the strings inside arrays, not only the object leaves", () => {
-        const entries = messageEntries();
-        const inArrays = entries.filter((entry) => entry.keyPath.includes("["));
+        const inArrays = messageEntries().filter((entry) => entry.keyPath.includes("["));
 
         expect(inArrays.length).toBeGreaterThan(1000);
 
-        const nested = inArrays.find((entry) => !isSearchAlias(entry.file, entry.keyPath));
-        if (!nested) throw new Error("no array-indexed message entry is in scope for the scan");
+        const nested = probeEntries(["nested"]).filter((entry) => entry.includes("["));
 
-        const flagged = `${nested.locale}/${nested.file}:${nested.keyPath}#tenant`;
-        const parsed = parseBaselineEntry(flagged);
+        expect(nested.length).toBeGreaterThan(0);
 
-        expect(parsed.locale).toBe(nested.locale);
-        expect(parsed.file).toBe(nested.file);
-        expect(parsed.keyPath).toBe(nested.keyPath);
-        expect(parsed.term).toBe("tenant");
+        const parsed = parseBaselineEntry(nested[0]);
+
+        expect(parsed.keyPath).toContain("[");
+        expect(parsed.term).toBe("nested");
     });
 
     it("lets the phrase §4 restricts to one surface only shrink", () => {
@@ -209,15 +229,16 @@ describe("message catalogue vocabulary", () => {
     });
 
     it("baselines each banned term separately, so a second term on a flagged string still fails", () => {
-        const first = "en/contacts.json:ContactsCard.title#tenant";
-        const second = "en/contacts.json:ContactsCard.title#purge";
-        const one = parseBaselineEntry(first);
-        const other = parseBaselineEntry(second);
+        const entries = probeEntries(["first", "second"]);
+        const terms = new Map<string, Set<string>>();
+        for (const entry of entries.map(parseBaselineEntry)) {
+            const key = `${entry.locale}/${entry.file}:${entry.keyPath}`;
+            terms.set(key, (terms.get(key) ?? new Set()).add(entry.term));
+        }
+        const carryingBoth = [...terms.values()].filter((flagged) => flagged.size > 1);
 
-        expect(`${one.locale}/${one.file}:${one.keyPath}`).toBe(`${other.locale}/${other.file}:${other.keyPath}`);
-        expect(one.term).toBe("tenant");
-        expect(other.term).toBe("purge");
-        expect(new Set([first]).has(second)).toBe(false);
+        expect(entries.every((entry) => entry.includes("#"))).toBe(true);
+        expect(carryingBoth.length, "one string matching two terms must yield two baseline entries").toBeGreaterThan(0);
         expect(baseline.every((entry) => entry.includes("#"))).toBe(true);
     });
 

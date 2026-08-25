@@ -10,6 +10,17 @@ const LOCALES = ["en", "ja"] as const;
 
 type Fallback = { file: string; namespace: string | null; key: string };
 
+/**
+ * The call sites that hand their reporter a computed fallback key rather than a literal, which the
+ * derivation below cannot follow. Held as an exact list so the blind spot cannot widen unnoticed:
+ * a new indirected site fails this suite until it is either made literal or admitted here with its
+ * keys checked by hand.
+ */
+const INDIRECT_FALLBACK_SITES = [
+    "app/components/ask-connex/AskConnexProvider.tsx",
+    "app/components/records/deals/DealDocuments.tsx",
+];
+
 function sourceFiles(dir: string): string[] {
     const found: string[] = [];
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -34,8 +45,9 @@ function literalKeys(expression: ts.Expression): string[] {
  * binding qualifies it against. Derived from source so a new call site joins the gate by existing,
  * rather than by being remembered.
  */
-function declaredFallbacks(): Fallback[] {
+function declaredFallbacks(): { literal: Fallback[]; indirect: string[] } {
     const found: Fallback[] = [];
+    const indirect = new Set<string>();
     for (const path of sourceFiles(APP_ROOT)) {
         const source = readFileSync(path, "utf8");
         if (!source.includes("useApiErrorToast")) continue;
@@ -66,7 +78,9 @@ function declaredFallbacks(): Fallback[] {
             if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && reporters.has(node.expression.text)) {
                 const fallback = node.arguments[1];
                 if (fallback) {
-                    for (const key of literalKeys(fallback)) {
+                    const keys = literalKeys(fallback);
+                    if (keys.length === 0) indirect.add(file);
+                    for (const key of keys) {
                         found.push({ file, namespace: reporters.get(node.expression.text) ?? null, key });
                     }
                 }
@@ -75,7 +89,7 @@ function declaredFallbacks(): Fallback[] {
         };
         collectCalls(sourceFile);
     }
-    return found;
+    return { literal: found, indirect: [...indirect].sort() };
 }
 
 /** Which catalog file holds each top-level message namespace. Namespaces are unique across files. */
@@ -100,13 +114,17 @@ function resolve(locale: string, catalog: string, path: string): string | null {
     return typeof current === "string" ? current : null;
 }
 
-const fallbacks = declaredFallbacks();
+const { literal: fallbacks, indirect } = declaredFallbacks();
 const catalogs = namespaceIndex();
 
 describe("API error fallback coverage", () => {
     it("derives a fallback title from every migrated surface", () => {
         expect(fallbacks.length).toBeGreaterThan(100);
         expect(new Set(fallbacks.map((fallback) => fallback.file)).size).toBeGreaterThan(60);
+    });
+
+    it("holds the sites whose fallback key it cannot follow at a known list", () => {
+        expect(indirect).toEqual(INDIRECT_FALLBACK_SITES);
     });
 
     it("resolves every declared fallback title in both locales", () => {
