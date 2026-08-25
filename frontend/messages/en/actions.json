@@ -44,7 +44,7 @@
             "tags": "Tags",
             "files": "Files",
             "workflows": "Workflows",
-            "me": "Profile",
+            "me": "My Work",
             "search": "Search",
             "docs": "Documentation",
             "savedView": "Saved view",
@@ -120,7 +120,8 @@
             "navigate": {
                 "contacts": "contacts, people, persons",
                 "captureReviews": "capture, reviews, queue, matching, inbox, mail, calendar",
-                "users": "users, members, people"
+                "users": "users, members, people",
+                "me": "my work, me, profile, tasks, follow-ups"
             },
             "create": {
                 "company": "company, org, organization, account",

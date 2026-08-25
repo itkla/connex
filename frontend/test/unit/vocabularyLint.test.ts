@@ -90,7 +90,17 @@ describe("message catalogue vocabulary", () => {
         const inArrays = entries.filter((entry) => entry.keyPath.includes("["));
 
         expect(inArrays.length).toBeGreaterThan(1000);
-        expect(baseline.some((entry) => entry.includes("["))).toBe(true);
+
+        const nested = inArrays.find((entry) => !isSearchAlias(entry.file, entry.keyPath));
+        if (!nested) throw new Error("no array-indexed message entry is in scope for the scan");
+
+        const flagged = `${nested.locale}/${nested.file}:${nested.keyPath}#tenant`;
+        const parsed = parseBaselineEntry(flagged);
+
+        expect(parsed.locale).toBe(nested.locale);
+        expect(parsed.file).toBe(nested.file);
+        expect(parsed.keyPath).toBe(nested.keyPath);
+        expect(parsed.term).toBe("tenant");
     });
 
     it("lets the phrase §4 restricts to one surface only shrink", () => {
@@ -128,7 +138,16 @@ describe("message catalogue vocabulary", () => {
         expect(ALLOWED_SURFACES).toEqual(["legal.json", "organization.json#OrgDataRequests"]);
         expect(carveOuts.size).toBeGreaterThan(0);
         expect(onComplianceSurfaces.filter((entry) => carveOuts.has(entry.term)).map((entry) => entry.term)).toEqual([]);
-        expect(onComplianceSurfaces.some((entry) => entry.term === "取引先")).toBe(true);
+
+        const noted = model.terms.find((term) => term.term === "取引先");
+        const unnoted = model.terms.find((term) => term.term === "suppression");
+        if (!noted || !unnoted) throw new Error("docs/PRODUCT.md §4 no longer bans 取引先 and suppression");
+
+        expect(noted.allowFiles).toEqual(["legal.json"]);
+        expect(unnoted.allowFiles).toEqual([]);
+        expect(termApplies(noted, { locale: "ja", file: "legal.json", namespace: "Legal" })).toBe(false);
+        expect(termApplies(noted, { locale: "ja", file: "companies.json", namespace: "CompaniesCard" })).toBe(true);
+        expect(termApplies(unnoted, { locale: "en", file: "legal.json", namespace: "Legal" })).toBe(true);
     });
 
     it("allows the multi-tenancy vocabulary of the contracts on the legal pages only", () => {
@@ -190,13 +209,15 @@ describe("message catalogue vocabulary", () => {
     });
 
     it("baselines each banned term separately, so a second term on a flagged string still fails", () => {
-        const perKey = new Map<string, number>();
-        for (const entry of baseline.map(parseBaselineEntry)) {
-            const key = `${entry.locale}/${entry.file}:${entry.keyPath}`;
-            perKey.set(key, (perKey.get(key) ?? 0) + 1);
-        }
+        const first = "en/contacts.json:ContactsCard.title#tenant";
+        const second = "en/contacts.json:ContactsCard.title#purge";
+        const one = parseBaselineEntry(first);
+        const other = parseBaselineEntry(second);
 
-        expect([...perKey.values()].some((count) => count > 1)).toBe(true);
+        expect(`${one.locale}/${one.file}:${one.keyPath}`).toBe(`${other.locale}/${other.file}:${other.keyPath}`);
+        expect(one.term).toBe("tenant");
+        expect(other.term).toBe("purge");
+        expect(new Set([first]).has(second)).toBe(false);
         expect(baseline.every((entry) => entry.includes("#"))).toBe(true);
     });
 

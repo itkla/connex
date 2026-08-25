@@ -516,38 +516,6 @@
             ]
         },
         {
-            "id": "en:projected",
-            "term": "projected",
-            "locale": "en",
-            "scope": "global",
-            "allowFiles": [],
-            "canonicalExceptions": [],
-            "narrowed": false,
-            "pattern": {
-                "source": "\\b(?:projecting|projected|projects)\\b",
-                "flags": "iu"
-            },
-            "sources": [
-                "§4 banned-on-all-product-surfaces list"
-            ]
-        },
-        {
-            "id": "en:projection",
-            "term": "projection",
-            "locale": "en",
-            "scope": "global",
-            "allowFiles": [],
-            "canonicalExceptions": [],
-            "narrowed": false,
-            "pattern": {
-                "source": "\\b(?:projections|projecting|projection|projected|projectes)\\b",
-                "flags": "iu"
-            },
-            "sources": [
-                "§4 banned-on-all-product-surfaces list"
-            ]
-        },
-        {
             "id": "en:provider egress",
             "term": "provider egress",
             "locale": "en",
@@ -1076,7 +1044,9 @@
             "term": "取引先",
             "locale": "ja",
             "scope": "global",
-            "allowFiles": [],
+            "allowFiles": [
+                "legal.json"
+            ],
             "canonicalExceptions": [],
             "narrowed": false,
             "pattern": {
@@ -1354,6 +1324,24 @@
             "reason": "Organization is canonical on organization-admin surfaces and in prose stating a genuinely organization-scoped fact.",
             "sources": [
                 "§4 glossary row \"Where records live and are shared\""
+            ]
+        },
+        {
+            "id": "en:projected",
+            "term": "projected",
+            "locale": "en",
+            "reason": "banned only as data provenance — copy that says an activity was projected from provider data. §4's deal-forecast row makes Projected value and Projected revenue canonical, and a value-level scan cannot tell the two senses apart.",
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:projection",
+            "term": "projection",
+            "locale": "en",
+            "reason": "the noun of the same provenance sense; §4 sanctions the deal forecast it otherwise collides with, so the sense is decided in review rather than by a pattern.",
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
             ]
         },
         {

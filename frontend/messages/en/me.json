@@ -109,7 +109,7 @@
         }
     },
     "MeLayout": {
-        "title": "Me",
-        "description": "Your relationships and work at a glance"
+        "title": "My Work",
+        "description": "Your tasks, your relationships, and your follow-ups"
     }
 }

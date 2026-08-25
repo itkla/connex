@@ -100,7 +100,7 @@ describe("vocabulary generator", () => {
 
         expect(undecided).toEqual([]);
         expect([...new Set(annotated)].sort()).toEqual(
-            ["cease of use", "data subject", "tenant", "third-party provision", "テナント"],
+            ["cease of use", "data subject", "tenant", "third-party provision", "テナント", "取引先"],
         );
     });
 

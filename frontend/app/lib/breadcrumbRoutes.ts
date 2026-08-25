@@ -53,7 +53,7 @@ export type BreadcrumbMessageKey =
     | "aiDataGovernance"
     | "pipelines"
     | "products"
-    | "profile"
+    | "myWork"
     | "qualification"
     | "radar"
     | "recipes"
@@ -133,7 +133,7 @@ const STATIC_WORKSPACE_ROUTES: Readonly<Record<string, StaticWorkspaceRoute>> = 
     "/library/files": { key: "files" },
     "/notifications": { key: "notifications" },
     "/search": { key: "search" },
-    "/me": { key: "profile" },
+    "/me": { key: "myWork" },
     "/users": { key: "users" },
     "/workflows": { key: "workflows", access: "workflows" },
     "/admin/logs": { key: "auditLog", access: "auditLog" },
