@@ -31,6 +31,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.ai.AiGenerationTaskResult;
 import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService;
@@ -125,6 +126,12 @@ class AiChatAgentLoopServiceTest {
         skillPlanRunner = mock(AiSkillPlanRunner.class);
         when(skillRouter.route(anyInt(), anyInt(), any(), any(), any()))
                 .thenReturn(AiSkillRouter.Routing.fallback("no_matching_skill"));
+        when(invocationService.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
+                .thenReturn(new AiProviderCapabilities(
+                        AiStructuredOutputEnforcement.JSON_SCHEMA,
+                        AiReasoningMode.TAGGED,
+                        AiAssistantPromptBudget.ASSISTANT_MIN_CONTEXT_TOKENS,
+                        8_192));
         var catalog = new AiAssistantToolCatalog();
         var promptAssembler = new AiAssistantPromptAssembler(objectMapper, catalog);
         service = new AiChatAgentLoopService(
@@ -2054,6 +2061,31 @@ class AiChatAgentLoopServiceTest {
                 any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class),
                 any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class));
         verify(toolExecutor, never()).execute(any(), any(), any(), any(Boolean.class), any());
+    }
+
+    @Test
+    void aProviderSwitchedToASmallerModelMidTurnRefusesBeforeTheNextStepEgresses() {
+        AiChatMessage userMessage = message(
+                TURN.userMessageId(), "Which relationships are cooling?");
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class))).thenReturn(
+                new AiChatMemory(
+                        List.of(userMessage),
+                        new AiAssistantPromptBudget(
+                                64, 64_000, 16_000, 16_000, 16_000, 112_000),
+                        0,
+                        0));
+        when(invocationService.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
+                .thenReturn(new AiProviderCapabilities(
+                        AiStructuredOutputEnforcement.JSON_SCHEMA,
+                        AiReasoningMode.TAGGED,
+                        32_768,
+                        8_192));
+
+        assertTerminal(AiAssistantTerminalReasons.CONTEXT_WINDOW_TOO_SMALL);
+
+        verify(invocationService, never()).completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class));
     }
 
     @Test

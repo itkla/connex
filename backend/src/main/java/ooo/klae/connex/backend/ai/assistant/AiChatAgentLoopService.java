@@ -258,6 +258,9 @@ public class AiChatAgentLoopService {
                         ? skillContext.withClosingDirective(CLOSING_DIRECTIVE)
                         : skillContext;
                 requireWorkspaceEnabled(turn);
+                AiAssistantPromptBudget.requireAssistantContextFloor(
+                        invocationService.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT)
+                                .contextWindowTokens());
                 if (deadlineReached(deadline)) {
                     return AiGenerationTaskResult.timedOut("turn_deadline_exceeded");
                 }
