@@ -15,6 +15,7 @@ import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiImageInputSupport;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
+import ooo.klae.connex.backend.ai.provider.AiModelCatalog;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
@@ -79,55 +80,24 @@ public class VertexAdapter implements AiProvider {
                 : AiReasoningMode.TAGGED;
     }
 
+    /**
+     * Resolves the declared Vertex context window for the configured publisher model.
+     * @see AiModelCatalog
+     */
     @Override
     public int contextWindowTokens(AiProviderTarget target) {
-        if (target == null || target.modelId() == null) {
-            return 4_096;
-        }
-        String normalized = target.modelId().toLowerCase(java.util.Locale.ROOT);
-        if (normalized.startsWith("gemini-2.5-flash-image")) {
-            return 32_768;
-        }
-        if (normalized.startsWith("gemini-3-pro-image")) {
-            return 65_536;
-        }
-        if (isSupportedGeminiTextModel(normalized)) {
-            return 128_000;
-        }
-        return normalized.contains("claude-3")
-                || normalized.contains("claude-sonnet-4")
-                || normalized.contains("claude-opus-4")
-                || normalized.contains("claude-haiku-4")
-                || normalized.contains("claude-mythos")
-                || normalized.contains("claude-fable")
-                ? 200_000
-                : 4_096;
+        return AiModelCatalog.contextWindowTokens(
+                AiModelCatalog.Family.VERTEX, target, aiProperties.getModelOverrides());
     }
 
     /**
-     * Resolves documented Vertex output ceilings for Gemini and Claude publisher models.
-     * @see <a href="https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-5-pro">Gemini 2.5 Pro limits</a>
-     * @see <a href="https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/3-flash">Gemini 3 Flash limits</a>
-     * @see <a href="https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/claude/sonnet-4">Claude Sonnet 4 limits</a>
-     * @see <a href="https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/claude/opus-4">Claude Opus 4 limits</a>
+     * Resolves the declared Vertex output ceiling for the configured publisher model.
+     * @see AiModelCatalog
      */
     @Override
     public int maxOutputTokens(AiProviderTarget target) {
-        if (target == null || target.modelId() == null) {
-            return 4_096;
-        }
-        String normalized = target.modelId().toLowerCase(java.util.Locale.ROOT);
-        if (normalized.startsWith("gemini-2.5-flash-image")
-                || normalized.startsWith("gemini-3-pro-image")) {
-            return 32_768;
-        }
-        if (isSupportedGeminiTextModel(normalized)) {
-            return normalized.startsWith("gemini-1.5-")
-                    || normalized.startsWith("gemini-2.0-")
-                    ? 8_192
-                    : 65_536;
-        }
-        return anthropicMaxOutputTokens(normalized);
+        return AiModelCatalog.maxOutputTokens(
+                AiModelCatalog.Family.VERTEX, target, aiProperties.getModelOverrides());
     }
 
     @Override
@@ -536,33 +506,6 @@ public class VertexAdapter implements AiProvider {
     private static boolean isGeminiImageModel(String modelId) {
         return modelId.startsWith("gemini-2.5-flash-image")
                 || modelId.startsWith("gemini-3-pro-image");
-    }
-
-    private static int anthropicMaxOutputTokens(String normalizedModelId) {
-        if (normalizedModelId.contains("claude-mythos")
-                || normalizedModelId.contains("claude-fable")
-                || normalizedModelId.contains("claude-sonnet-5")
-                || normalizedModelId.contains("claude-opus-5")
-                || normalizedModelId.contains("claude-haiku-5")
-                || normalizedModelId.contains("claude-opus-4-6")
-                || normalizedModelId.contains("claude-opus-4-7")
-                || normalizedModelId.contains("claude-opus-4-8")
-                || normalizedModelId.contains("claude-sonnet-4-6")) {
-            return 131_072;
-        }
-        if (normalizedModelId.contains("claude-3-7")
-                || normalizedModelId.contains("claude-sonnet-4")
-                || normalizedModelId.contains("claude-haiku-4")
-                || normalizedModelId.contains("claude-opus-4-5")) {
-            return 65_536;
-        }
-        if (normalizedModelId.contains("claude-opus-4")) {
-            return 32_768;
-        }
-        if (normalizedModelId.contains("claude-3-5")) {
-            return 8_192;
-        }
-        return 4_096;
     }
 
     private static void addClaudeNativeReasoning(

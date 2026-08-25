@@ -51,12 +51,14 @@ class AzureOpenAiAdapterTest {
     @Mock private AzureOpenAiClient azureOpenAiClient;
 
     private ObjectMapper objectMapper;
+    private AiProperties aiProperties;
     private AzureOpenAiAdapter adapter;
 
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
-        adapter = new AzureOpenAiAdapter(azureOpenAiClient, objectMapper, new AiProperties());
+        aiProperties = new AiProperties();
+        adapter = new AzureOpenAiAdapter(azureOpenAiClient, objectMapper, aiProperties);
     }
 
     @Test
@@ -214,6 +216,65 @@ class AzureOpenAiAdapterTest {
         assertEquals(32_768, adapter.maxOutputTokens(target("gpt-4.1")));
         assertEquals(16_384, adapter.maxOutputTokens(target("gpt-4o")));
         assertEquals(4_096, adapter.maxOutputTokens(target("custom-deployment")));
+        assertEquals(4_096, adapter.maxOutputTokens(null));
+    }
+
+    /**
+     * The adapter previously capped every recognized Azure deployment at a 128,000-token window,
+     * which is the chat-tier limit rather than the reasoning-tier limit those deployments serve.
+     */
+    @Test
+    void contextWindowUsesDocumentedAzureModelFamilyLimits() {
+        assertEquals(400_000, adapter.contextWindowTokens(target("gpt-5")));
+        assertEquals(400_000, adapter.contextWindowTokens(target("gpt-5.2")));
+        assertEquals(400_000, adapter.contextWindowTokens(target("gpt-5.4-mini")));
+        assertEquals(1_050_000, adapter.contextWindowTokens(target("gpt-5.4")));
+        assertEquals(1_050_000, adapter.contextWindowTokens(target("gpt-5.5")));
+        assertEquals(1_050_000, adapter.contextWindowTokens(target("gpt-5.6-sol")));
+        assertEquals(200_000, adapter.contextWindowTokens(target("o4-mini")));
+        assertEquals(300_000, adapter.contextWindowTokens(target("gpt-4.1")));
+        assertEquals(128_000, adapter.contextWindowTokens(target("gpt-4o")));
+    }
+
+    /**
+     * A chat-tier deployment keeps the smaller window even though its name also contains the
+     * reasoning-tier family name, because the catalog matches most specific first.
+     */
+    @Test
+    void chatTierDeploymentsKeepTheirSmallerWindow() {
+        for (String deployment : List.of(
+                "gpt-5-chat", "gpt-5.1-chat", "gpt-5.2-chat", "gpt-5.3-chat")) {
+            assertEquals(128_000, adapter.contextWindowTokens(target(deployment)), deployment);
+            assertEquals(16_384, adapter.maxOutputTokens(target(deployment)), deployment);
+        }
+    }
+
+    @Test
+    void unrecognizedDeploymentNamesKeepTheConservativeFallback() {
+        for (String deployment : List.of(
+                "custom-deployment", "prod-chat", "team-model-a", "llama-local")) {
+            assertEquals(4_096, adapter.contextWindowTokens(target(deployment)), deployment);
+            assertEquals(4_096, adapter.maxOutputTokens(target(deployment)), deployment);
+        }
+        assertEquals(4_096, adapter.contextWindowTokens(null));
+    }
+
+    /**
+     * An Azure deployment name is operator-chosen, so an override is the only way to declare the
+     * real limits of a deployment whose name does not carry its model family.
+     */
+    @Test
+    void anOperatorOverrideDeclaresAnOpaqueDeploymentsRealLimits() {
+        AiProperties.ModelOverride override = new AiProperties.ModelOverride();
+        override.setProvider("azure_openai");
+        override.setModelId("team-model-a");
+        override.setContextWindowTokens(400_000);
+        override.setMaxOutputTokens(128_000);
+        aiProperties.setModelOverrides(List.of(override));
+
+        assertEquals(400_000, adapter.contextWindowTokens(target("team-model-a")));
+        assertEquals(128_000, adapter.maxOutputTokens(target("team-model-a")));
+        assertEquals(4_096, adapter.contextWindowTokens(target("team-model-b")));
     }
 
     @Test

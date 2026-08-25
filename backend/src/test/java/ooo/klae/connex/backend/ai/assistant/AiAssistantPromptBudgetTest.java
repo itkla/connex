@@ -180,6 +180,126 @@ class AiAssistantPromptBudgetTest {
         assertTrue(budget.outputTokensClamped());
     }
 
+    /**
+     * The allocation arithmetic was written when every adapter reported 200,000 tokens or fewer.
+     * A million-token window multiplies the byte ceiling by five, and the derivation multiplies
+     * that ceiling again by the masked-serialization expansion factor, so this pins that the
+     * intermediate products stay inside {@code int} and that every allocation is still positive
+     * and still sums to the compaction source budget.
+     */
+    @Test
+    void aMillionTokenWindowProducesPositiveNonOverflowingAllocations() {
+        AiAssistantPromptBudget budget = AiAssistantPromptBudget.from(
+                new AiProviderCapabilities(
+                        AiStructuredOutputEnforcement.PROMPT_ONLY,
+                        AiReasoningMode.TAGGED,
+                        1_000_000,
+                        128_000),
+                16_384,
+                16_962);
+
+        assertEquals(16_384, budget.maxOutputTokens());
+        assertFalse(budget.outputTokensClamped());
+        assertTrue(budget.historyBytes() > 0);
+        assertTrue(budget.attachmentContextBytes() > 0);
+        assertTrue(budget.pageContextBytes() > 0);
+        assertTrue(budget.toolResultBytes() > 0);
+        assertTrue(budget.compactionSourceBytes() > 0);
+        assertEquals(
+                budget.compactionSourceBytes(),
+                budget.historyBytes() + budget.attachmentContextBytes()
+                        + budget.pageContextBytes() + budget.toolResultBytes());
+        assertTrue(budget.historyBytes() > 100_000,
+                "a million-token model must fund far more history than a 64k model");
+        assertTrue(budget.compactionSourceBytes() * 12
+                + budget.repairEnvelopeBytes() + 16_962
+                <= AiProviderCapabilities.estimatedInputByteCeiling(
+                        1_000_000, budget.maxOutputTokens()));
+        assertTrue(budget.compactionSourceBytes()
+                + budget.repairEnvelopeBytes() + 16_962
+                <= AiProviderCapabilities.conservativeInputByteCeiling(
+                        1_000_000, budget.maxOutputTokens()));
+    }
+
+    /**
+     * The percentage arithmetic in {@link AiChatMemoryService} multiplies {@code historyBytes} by
+     * 80 and by 60 before dividing, so the derived history allocation has to leave headroom for
+     * those products. This asserts the headroom directly rather than trusting that a million is
+     * "obviously small enough".
+     */
+    @Test
+    void derivedHistoryAllocationsLeaveHeadroomForPercentageArithmetic() {
+        for (int contextTokens : new int[] {65_536, 200_000, 1_000_000, 1_050_000, 2_097_152}) {
+            AiAssistantPromptBudget budget = AiAssistantPromptBudget.from(
+                    new AiProviderCapabilities(
+                            AiStructuredOutputEnforcement.PROMPT_ONLY,
+                            AiReasoningMode.TAGGED,
+                            contextTokens,
+                            8_192),
+                    16_384,
+                    16_962);
+
+            assertTrue(budget.historyBytes() > 0, "history at " + contextTokens);
+            assertTrue(budget.historyBytes() <= Integer.MAX_VALUE / 80,
+                    "history*80 must not overflow at " + contextTokens);
+            assertTrue(budget.compactionSourceBytes() <= Integer.MAX_VALUE / 12,
+                    "compaction*12 must not overflow at " + contextTokens);
+            assertTrue(budget.historyBytes() * 80 / 100 > 0, "at " + contextTokens);
+            assertTrue(budget.historyBytes() * 60 / 100 > 0, "at " + contextTokens);
+        }
+    }
+
+    /**
+     * A million-token model still has a 128,000-token output ceiling, so an operator who raises
+     * {@code connex.ai.assistant-max-output-tokens} above it must be clamped to the provider's
+     * number and told the clamp happened.
+     */
+    @Test
+    void theProviderOutputCeilingStillClampsAtAMillionTokenWindow() {
+        AiAssistantPromptBudget clamped = AiAssistantPromptBudget.from(
+                new AiProviderCapabilities(
+                        AiStructuredOutputEnforcement.PROMPT_ONLY,
+                        AiReasoningMode.TAGGED,
+                        1_000_000,
+                        128_000),
+                200_000,
+                16_962);
+        AiAssistantPromptBudget partnerCeiling = AiAssistantPromptBudget.from(
+                new AiProviderCapabilities(
+                        AiStructuredOutputEnforcement.PROMPT_ONLY,
+                        AiReasoningMode.TAGGED,
+                        1_000_000,
+                        64_000),
+                200_000,
+                16_962);
+
+        assertEquals(128_000, clamped.maxOutputTokens());
+        assertTrue(clamped.outputTokensClamped());
+        assertTrue(clamped.toolResultBytes() > 0);
+        assertEquals(64_000, partnerCeiling.maxOutputTokens());
+        assertTrue(partnerCeiling.outputTokensClamped());
+        assertTrue(partnerCeiling.compactionSourceBytes() > clamped.compactionSourceBytes(),
+                "reserving fewer output tokens must leave more input budget");
+    }
+
+    /**
+     * A million-token window is nowhere near the point at which the shared byte estimate
+     * saturates, so the estimate must remain exact rather than pinned at {@link Integer#MAX_VALUE}.
+     */
+    @Test
+    void byteCeilingsRemainExactRatherThanSaturatingAtAMillionTokens() {
+        assertEquals(3_488_000,
+                AiProviderCapabilities.estimatedInputByteCeiling(1_000_000, 128_000));
+        assertEquals(872_000,
+                AiProviderCapabilities.conservativeInputByteCeiling(1_000_000, 128_000));
+        assertEquals(8_355_840,
+                AiProviderCapabilities.estimatedInputByteCeiling(2_097_152, 8_192));
+        assertEquals(2_088_960,
+                AiProviderCapabilities.conservativeInputByteCeiling(2_097_152, 8_192));
+        assertEquals(Integer.MAX_VALUE,
+                AiProviderCapabilities.estimatedInputByteCeiling(Integer.MAX_VALUE, 128_000));
+    }
+
     @Test
     void toolFloorAndUtf8TruncationStayInsideTheBudgetBoundary() {
         AiAssistantPromptBudget budget = new AiAssistantPromptBudget(

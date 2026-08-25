@@ -338,6 +338,75 @@ class AiChatMemoryServiceTest {
         assertEquals("INITIATING_MESSAGE_BEGIN_AND_END", bounded.getFirst().getContent());
     }
 
+    /**
+     * The compaction trigger and the verbatim reservation both multiply {@code historyBytes} by a
+     * percentage before dividing, and that history allocation is derived from the provider's
+     * context window. A million-token model produces a history budget more than an order of
+     * magnitude larger than the floor's, so this pins that a message which would have forced
+     * compaction on a small window is now carried verbatim, without overflowing that arithmetic.
+     */
+    @Test
+    void aMillionTokenWindowFundsHistoryWithoutTrippingCompaction() {
+        AiInvocationService invocationService = mock(AiInvocationService.class);
+        AiChatTurnPersistenceService persistenceService = mock(AiChatTurnPersistenceService.class);
+        AiProperties properties = new AiProperties();
+        properties.setAssistantMaxOutputTokens(16_384);
+        var objectMapper = JsonMapper.builder().build();
+        var catalog = new AiAssistantToolCatalog();
+        var assembler = new AiAssistantPromptAssembler(objectMapper, catalog);
+        var stepSchema = new AiAssistantStepSchema(objectMapper, catalog);
+        Instant now = Instant.parse("2026-08-12T00:00:00Z");
+        AiChatMemoryService service = new AiChatMemoryService(
+                invocationService,
+                mock(AiInvocationAdmissionService.class),
+                properties,
+                assembler,
+                emptyToolExecutor(),
+                new AiAssistantSummaryGuard(),
+                new AiAssistantSummarySchema(objectMapper),
+                stepSchema,
+                persistenceService,
+                mock(AiWorkspaceGovernanceService.class),
+                objectMapper,
+                Clock.fixed(now, ZoneOffset.UTC));
+        AiChatQueuedTurn turn = new AiChatQueuedTurn(
+                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of());
+        String content = "a".repeat(60_000);
+        AiChatMessage initiating = message(104, 4, "user", content);
+        when(invocationService.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
+                .thenReturn(new AiProviderCapabilities(
+                        AiStructuredOutputEnforcement.JSON_SCHEMA,
+                        AiReasoningMode.TAGGED,
+                        1_000_000,
+                        128_000));
+        when(invocationService.serializedPromptBytes(
+                any(MaskedPrompt.class), same(stepSchema.responseSchema()),
+                eq(AiReasoningMode.TAGGED)))
+                .thenReturn(16_962);
+        when(persistenceService.loadHistory(turn, 100)).thenReturn(List.of(initiating));
+        when(persistenceService.loadHistorySummary(turn)).thenReturn(null);
+
+        AiChatMemory memory = service.prepare(
+                turn, new MaskingContext(), now.plusSeconds(70));
+
+        assertEquals(1, memory.history().size());
+        assertEquals(content, memory.history().getFirst().getContent());
+        assertEquals(16_384, memory.budget().maxOutputTokens());
+        assertFalse(memory.budget().outputTokensClamped());
+        assertTrue(memory.budget().historyBytes() > 60_000,
+                "history budget at a million tokens: " + memory.budget().historyBytes());
+        assertTrue(memory.budget().historyBytes() <= Integer.MAX_VALUE / 80);
+        assertTrue(memory.budget().historyBytes() * 80 / 100 > 60_000);
+        assertTrue(memory.budget().toolResultBytes() > 0);
+        verify(invocationService, never()).completeStructuredRepairable(
+                any(AiInvocation.class),
+                eq(AiAssistantSummary.class),
+                any(),
+                any(),
+                any(),
+                any(Runnable.class));
+    }
+
     @Test
     void maximumLengthInitiatingMessageUsesAnEphemeralProviderOmission() {
         AiInvocationService invocationService = mock(AiInvocationService.class);
