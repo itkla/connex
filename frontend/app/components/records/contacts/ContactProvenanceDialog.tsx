@@ -32,7 +32,8 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { updateContactProvenance } from '@/app/lib/api';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { toastSuccess } from '@/app/lib/toast';
 import { LEAD_SOURCES, REFERRER_SOURCES, asLeadSource } from '@/app/lib/contactProvenance';
 import { useContactTargetSearch } from '@/app/hooks/useRecordTargetSearch';
 import { filterByNameQuery } from '@/app/lib/filterByNameQuery';
@@ -69,6 +70,7 @@ export default function ContactProvenanceDialog({
     onOpenChange,
 }: Props) {
     const t = useTranslations('ContactProvenance');
+    const showApiError = useApiErrorToast('ContactProvenance');
     const router = useRouter();
 
     const [saving, setSaving] = useState(false);
@@ -119,7 +121,7 @@ export default function ContactProvenanceDialog({
             onOpenChange(false);
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastFailed'));
+            showApiError(err, 'toastFailed');
         } finally {
             setSaving(false);
         }

@@ -12,6 +12,7 @@ import {
     getPendingWorkspaces,
     leaveWorkspace,
 } from "@/app/lib/api";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -31,6 +32,7 @@ import SectionHeader from "@/app/components/dashboard/SectionHeader";
 
 export default function MembershipPanel() {
     const t = useTranslations("AccountInvites");
+    const showApiError = useApiErrorToast("AccountInvites");
     const router = useRouter();
     const { activeWorkspaceId, activeWorkspace, runSelectionChange, switching } = useWorkspace();
 
@@ -70,7 +72,7 @@ export default function MembershipPanel() {
                 router.refresh();
             });
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("acceptFailed"));
+            showApiError(err, "acceptFailed");
         } finally {
             setBusyId(null);
         }
@@ -83,7 +85,7 @@ export default function MembershipPanel() {
             setPending((prev) => prev.filter((w) => w.id !== workspace.id));
             toastSuccess(t("declined"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("declineFailed"));
+            showApiError(err, "declineFailed");
         } finally {
             setBusyId(null);
         }
@@ -101,7 +103,7 @@ export default function MembershipPanel() {
                 router.refresh();
             });
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("leaveFailed"));
+            showApiError(err, "leaveFailed");
             setLeaving(false);
             setLeaveOpen(false);
         }

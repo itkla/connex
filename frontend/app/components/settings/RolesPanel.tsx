@@ -24,6 +24,7 @@ import {
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -111,6 +112,7 @@ export type RolesPresentation = "page" | "section";
 
 export default function RolesPanel({ presentation = "page" }: { presentation?: RolesPresentation } = {}) {
     const t = useTranslations("WorkspaceRoles");
+    const showApiError = useApiErrorToast("WorkspaceRoles");
     const headingLevel = presentation === "section" ? 3 : 2;
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const router = useRouter();
@@ -187,7 +189,7 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
             router.refresh();
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("saveFailed"));
+                showApiError(err, "saveFailed");
             }
             throw err;
         }
@@ -204,7 +206,7 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
             setRemoveTarget(null);
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("deleteFailed"));
+                showApiError(err, "deleteFailed");
             }
         } finally {
             setIsRemoving(false);

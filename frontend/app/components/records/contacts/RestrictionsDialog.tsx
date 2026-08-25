@@ -19,7 +19,8 @@ import { Switch } from "@/components/ui/switch";
 import { DialogStatusCover, resolveDialogStatus } from "@/components/ui/dialog-status-cover";
 import type { Contact } from "@/app/lib/types";
 import { updateContactRestrictions } from "@/app/lib/api";
-import { toastError, toastSuccess } from "@/app/lib/toast";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
+import { toastSuccess } from "@/app/lib/toast";
 
 type Props = {
     open: boolean;
@@ -34,6 +35,7 @@ type Props = {
  */
 export default function RestrictionsDialog({ open, onOpenChange, contact }: Props) {
     const t = useTranslations("ContactRestrictions");
+    const showApiError = useApiErrorToast("ContactRestrictions");
     const router = useRouter();
 
     const [suspended, setSuspended] = useState(Boolean(contact.suspendedAt));
@@ -69,7 +71,7 @@ export default function RestrictionsDialog({ open, onOpenChange, contact }: Prop
             }, 900);
         } catch (err) {
             setIsSaving(false);
-            toastError(err instanceof Error ? err.message : t("toastFailed"));
+            showApiError(err, "toastFailed");
         }
     };
 

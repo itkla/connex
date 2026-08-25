@@ -19,6 +19,7 @@ import type {
     CustomFieldType,
 } from "@/app/lib/types";
 import { deleteCustomField, getCustomFields } from "@/app/lib/api";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { usePermissionCheck, usePermissionsRefresh } from "@/app/hooks/usePermissions";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { toastError, toastSuccess } from "@/app/lib/toast";
@@ -57,6 +58,7 @@ export default function CustomFieldsPanel({
     presentation = "page",
 }: { presentation?: CustomFieldsPresentation } = {}) {
     const t = useTranslations("WorkspaceCustomFields");
+    const showApiError = useApiErrorToast("WorkspaceCustomFields");
     const headingLevel = presentation === "section" ? 3 : 2;
     const { activeWorkspaceId } = useWorkspace();
     const workspaceId = activeWorkspaceId;
@@ -169,7 +171,7 @@ export default function CustomFieldsPanel({
             toastSuccess(t("deleted"));
             setRemoveTarget(null);
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("deleteFailed"));
+            showApiError(err, "deleteFailed");
         } finally {
             setIsRemoving(false);
         }

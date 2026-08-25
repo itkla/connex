@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { LoaderCircle } from 'lucide-react';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { toastSuccess } from '@/app/lib/toast';
 import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PlusIcon, ChatBubbleLeftRightIcon, DocumentTextIcon, CheckCircleIcon, PaperClipIcon } from '@heroicons/react/24/outline';
 import { BuildingOffice2Icon, NoSymbolIcon, ArchiveBoxIcon, ArchiveBoxArrowDownIcon, ShareIcon, ShieldExclamationIcon, UserCircleIcon } from '@heroicons/react/24/outline';
 
@@ -54,6 +55,7 @@ export default function ContactActionsMenu({
 }) {
     const router = useRouter();
     const t = useTranslations('ContactsActionsMenu');
+    const showApiError = useApiErrorToast('ContactsActionsMenu');
     const { inputRef: attachmentInputRef, uploading: attachmentsUploading, openPicker: openAttachmentPicker, onFilesSelected: onAttachmentFilesSelected } = useAttachmentUploader('person', contact.id);
     const [changeOpen, setChangeOpen] = useState(false);
     const [archiveOpen, setArchiveOpen] = useState(false);
@@ -94,7 +96,7 @@ export default function ContactActionsMenu({
             toastSuccess(t('toastRemovedFromCompany', { contactName: contact.name, companyName: contact.company.name }));
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastFailedRemoveFromCompany'));
+            showApiError(err, 'toastFailedRemoveFromCompany');
         } finally {
             setRemovingCompany(false);
         }
@@ -117,7 +119,7 @@ export default function ContactActionsMenu({
                 router.refresh();
             }
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t(archived ? 'toastFailedRestore' : 'toastFailedArchive'));
+            showApiError(err, archived ? 'toastFailedRestore' : 'toastFailedArchive');
         } finally {
             setIsArchiving(false);
         }

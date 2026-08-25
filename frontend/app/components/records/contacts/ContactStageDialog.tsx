@@ -24,7 +24,8 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { updateContactLifecycle, withdrawContactLifecycle } from '@/app/lib/api';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { toastSuccess } from '@/app/lib/toast';
 import { DISQUALIFICATION_REASONS } from '@/app/lib/contactLifecycle';
 import type {
     ContactDisqualificationReason,
@@ -58,6 +59,7 @@ export default function ContactStageDialog({
     onOpenChange,
 }: Props) {
     const t = useTranslations('ContactLifecycle');
+    const showApiError = useApiErrorToast('ContactLifecycle');
     const router = useRouter();
     const currentStage = lifecycle.stage ?? null;
     const currentReason = lifecycle.disqualifiedReason ?? null;
@@ -113,7 +115,7 @@ export default function ContactStageDialog({
             onOpenChange(false);
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastFailed'));
+            showApiError(err, 'toastFailed');
         } finally {
             setSaving(false);
         }

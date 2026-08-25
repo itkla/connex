@@ -53,7 +53,10 @@
       "actions": "Actions for {name}",
       "entityLabel": "report",
       "deleteDetails": "Its frozen snapshots go with it.",
-      "deleted": "Deleted {name}"
+      "deleted": "Deleted {name}",
+      "createFailed": "Couldn't create the report",
+      "deleteFailed": "Couldn't delete the report",
+      "duplicateFailed": "Couldn't duplicate the report"
     },
     "composer": {
       "eyebrow": "Ask Connex",
@@ -95,7 +98,9 @@
         "rate_limited": "The AI generation limit has been reached. Try again later, or build the report yourself.",
         "invalid_definition": "Connex could not map this request to a valid report definition. Rephrase it or use the builder.",
         "provider_error": "The provider could not draft a definition. Try again, or build the report yourself instead."
-      }
+      },
+      "previewFailed": "Couldn't preview the report definition",
+      "saveFailed": "Couldn't save the report"
     },
     "templates": {
       "sales-performance": {
@@ -193,7 +198,8 @@
       "dragLifted": "Picked up {name}",
       "dragOver": "{name} is over {target}",
       "dragDropped": "Placed {name} before {target}",
-      "dragCancelled": "Cancelled moving {name}"
+      "dragCancelled": "Cancelled moving {name}",
+      "saveFailed": "Couldn't save the report"
     },
     "document": {
       "run": "Run report",
@@ -267,7 +273,11 @@
         "wonRevenue": "Won revenue · closed in period · current owner · workspace deals only · archived company names retained",
         "openPipeline": "Open pipeline · expected to close in period · current owner · workspace deals only · archived company names retained",
         "forecastWeighted": "Weighted forecast · expected to close in period · all-history stage rates · current owner · workspace deals only"
-      }
+      },
+      "csvFailed": "Couldn't export the CSV",
+      "snapshotDeleteFailed": "Couldn't delete the snapshot",
+      "snapshotFailed": "Couldn't create the snapshot",
+      "snapshotOpenFailed": "Couldn't open the snapshot"
     },
     "cadence": {
       "weekly": "Weekly",
@@ -438,7 +448,9 @@
         "recipientAccess": "Every recipient must be an active workspace member with all permissions required to view this report.",
         "timezone": "Choose a valid IANA time zone.",
         "hour": "Choose a delivery hour from 0 through 23."
-      }
+      },
+      "deleteFailed": "Couldn't delete the delivery schedule",
+      "saveFailed": "Couldn't save the delivery schedule"
     },
     "goals": {
       "backToReports": "Back to reports",
@@ -486,7 +498,9 @@
         "quarter": "Quarterly goals must start in January, April, July, or October.",
         "target": "Enter a non-negative target with no more than 13 whole digits and 2 decimal places.",
         "currency": "Currency must contain 3 to 8 letters."
-      }
+      },
+      "deleteFailed": "Couldn't delete the goal",
+      "saveFailed": "Couldn't save the goal"
     }
   }
 }

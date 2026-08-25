@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastSuccess } from '@/app/lib/toast';
 import { useTranslations } from 'next-intl';
 import { LoaderCircle } from 'lucide-react';
 import {
@@ -42,6 +42,7 @@ import {
     type RecordComposerAnchor,
 } from '@/app/components/records/RecordComposers';
 import NoteDialog from '@/app/components/activity/notes/NoteDialog';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import {
     useContactTargetSearch,
     useDealTargetSearch,
@@ -74,6 +75,7 @@ export default function DealActionsMenu({
 }) {
     const router = useRouter();
     const t = useTranslations('DealsActionsMenu');
+    const showApiError = useApiErrorToast('DealsActionsMenu');
     const { inputRef: attachmentInputRef, uploading: attachmentsUploading, openPicker: openAttachmentPicker, onFilesSelected: onAttachmentFilesSelected } = useAttachmentUploader('deal', deal.id);
     const [editOpen, setEditOpen] = useState(false);
     const [teamOpen, setTeamOpen] = useState(false);
@@ -103,7 +105,7 @@ export default function DealActionsMenu({
             toastSuccess(won === null ? t('dealReopened') : t('dealClosed'));
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('failedToUpdateStatus'));
+            showApiError(err, 'failedToUpdateStatus');
         } finally {
             setIsUpdatingStatus(false);
         }
@@ -117,7 +119,7 @@ export default function DealActionsMenu({
             router.push('/records/deals');
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('failedToDelete'));
+            showApiError(err, 'failedToDelete');
             setIsDeleting(false);
         }
     };

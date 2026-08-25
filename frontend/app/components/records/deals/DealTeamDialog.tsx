@@ -13,6 +13,7 @@ import { Combobox, ComboboxItem, ComboboxList, ComboboxContent, ComboboxEmpty, C
 import { InputGroupAddon } from '@/components/ui/input-group';
 import { DialogStatusCover, resolveDialogStatus } from '@/components/ui/dialog-status-cover';
 import UserAvatar from '@/app/components/records/users/UserAvatar';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import {
     getActiveWorkspaceMembers,
     replaceDealCollaborators,
@@ -20,7 +21,7 @@ import {
 } from '@/app/lib/api';
 import { pendingDealTeamWrites } from '@/app/lib/dealTeam';
 import { type User, type WorkspaceMember } from '@/app/lib/types';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastSuccess } from '@/app/lib/toast';
 import { cn } from '@/lib/utils';
 
 const comboInputClass =
@@ -56,6 +57,7 @@ export default function DealTeamDialog({
     initialCollaborators: User[];
 }) {
     const t = useTranslations('Notifications');
+    const showApiError = useApiErrorToast('Notifications');
     const router = useRouter();
     const [ownerId, setOwnerId] = useState<number | null>(initialOwnerId ?? null);
     const [collaboratorIds, setCollaboratorIds] = useState(() => initialCollaborators.map((user) => user.id));
@@ -137,7 +139,7 @@ export default function DealTeamDialog({
             window.setTimeout(() => onOpenChange(false), 900);
         } catch (error) {
             setSaving(false);
-            toastError(error instanceof Error ? error.message : t('dealTeamError'));
+            showApiError(error, 'dealTeamError');
         }
     }
 

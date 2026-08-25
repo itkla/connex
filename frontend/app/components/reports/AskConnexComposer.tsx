@@ -11,8 +11,9 @@ import {
     SparklesIcon,
 } from '@heroicons/react/24/outline';
 
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { ApiError, createReport, previewReportComposer } from '@/app/lib/api';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastSuccess } from '@/app/lib/toast';
 import type { ReportComposerPreview } from '@/app/lib/types';
 import PixelCard from '@/components/PixelCard';
 import { Badge } from '@/components/ui/badge';
@@ -25,6 +26,7 @@ const COMPOSER_PIXEL_COLORS = '#e5f9d8,#a3e635,#73d200';
 export default function AskConnexComposer() {
     const t = useTranslations('Reports.composer');
     const reportsT = useTranslations('Reports');
+    const showApiError = useApiErrorToast('Reports.composer');
     const format = useFormatter();
     const router = useRouter();
     const [prompt, setPrompt] = useState('');
@@ -70,7 +72,7 @@ export default function AskConnexComposer() {
                 setUnavailableReason('provider_error');
                 return;
             }
-            toastError(error instanceof Error ? error.message : reportsT('common.requestFailed'));
+            showApiError(error, 'previewFailed');
         } finally {
             setGenerating(false);
         }
@@ -84,7 +86,7 @@ export default function AskConnexComposer() {
             toastSuccess(t('created'));
             router.push(`/overview/reports/${created.id}`);
         } catch (error) {
-            toastError(error instanceof Error ? error.message : reportsT('common.requestFailed'));
+            showApiError(error, 'saveFailed');
         } finally {
             setSaving(false);
         }

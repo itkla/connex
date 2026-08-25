@@ -16,7 +16,7 @@ import {
     ComboboxList,
 } from '@/components/ui/combobox';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
-import { toastError } from '@/app/lib/toast';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { formatCurrency } from '@/app/lib/utils';
 import {
     getProducts,
@@ -44,6 +44,7 @@ const EMPTY_TOTALS = (currency: string): DealLineItemTotals => ({
 export default function DealLineItems({ dealId, dealCurrency, initial }: Props) {
     const router = useRouter();
     const t = useTranslations('DealsLineItems');
+    const showApiError = useApiErrorToast('DealsLineItems');
     const locale = useLocale();
     const [items, setItems] = useState<DealLineItem[]>(initial.items);
     const [totals, setTotals] = useState<DealLineItemTotals>(initial.totals ?? EMPTY_TOTALS(dealCurrency));
@@ -68,7 +69,7 @@ export default function DealLineItems({ dealId, dealCurrency, initial }: Props) 
             apply(await op());
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('saveFailed'));
+            showApiError(err, 'saveFailed');
         } finally {
             setBusy(false);
         }

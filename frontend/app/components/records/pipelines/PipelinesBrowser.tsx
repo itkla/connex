@@ -22,6 +22,7 @@ import Rise from '@/app/components/motion/Rise';
 import { SearchField, FilterBar, type FilterChipData } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import ShareDialog from '@/app/components/records/ShareDialog';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { type ColumnDef } from '@/app/components/records/types';
@@ -91,6 +92,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
     const pathname = usePathname();
     const searchParams = useSearchParams();
     const t = useTranslations('PipelinesBrowser');
+    const showApiError = useApiErrorToast('PipelinesBrowser');
     const tf = useTranslations('Filters');
     const reduce = useReducedMotion() ?? false;
     const {
@@ -354,7 +356,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
             setStagesByPipeline(new Map());
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('failedToSave'));
+            showApiError(err, 'failedToSave');
         } finally {
             setIsSaving(false);
         }
@@ -402,7 +404,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
             setDeleteDialogOpen(false);
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('failedToDelete'));
+            showApiError(err, 'failedToDelete');
         } finally {
             setIsDeleting(false);
         }

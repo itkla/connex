@@ -22,7 +22,8 @@ import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import { SettingsSection } from '@/app/components/settings/SettingsSection';
 import { deleteApprovalPolicy } from '@/app/lib/api';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { toastSuccess } from '@/app/lib/toast';
 import { formatCurrency } from '@/app/lib/utils';
 import type { ApprovalPolicy, DocumentType } from '@/app/lib/types';
 
@@ -73,6 +74,7 @@ export default function ApprovalPoliciesBrowser({
     presentation?: ApprovalPoliciesPresentation;
 }) {
     const t = useTranslations('ApprovalPoliciesBrowser');
+    const showApiError = useApiErrorToast('ApprovalPoliciesBrowser');
     const tf = useTranslations('Filters');
     const locale = useLocale();
     const router = useRouter();
@@ -115,7 +117,7 @@ export default function ApprovalPoliciesBrowser({
             toastSuccess(t('deleted'));
             setRemoveTarget(null);
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('deleteFailed'));
+            showApiError(err, 'deleteFailed');
         } finally {
             setIsRemoving(false);
         }

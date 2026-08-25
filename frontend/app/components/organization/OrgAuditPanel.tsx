@@ -6,7 +6,7 @@ import { Loader2Icon } from "lucide-react";
 
 import type { AuditLogEntry } from "@/app/lib/types";
 import { ApiError, getOrgAudit } from "@/app/lib/api";
-import { toastError } from "@/app/lib/toast";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { useLiveNow } from "@/app/hooks/useNow";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { orgAuditActionKey, titleCaseAction } from "@/app/lib/orgAuditActionLabel";
@@ -47,6 +47,7 @@ export default function OrgAuditPanel({
     presentation?: SettingsPanelPresentation;
 } = {}) {
     const t = useTranslations("OrgAudit");
+    const showApiError = useApiErrorToast("OrgAudit");
     const messages = useMessages();
     const locale = useLocale();
     const now = useLiveNow();
@@ -102,7 +103,7 @@ export default function OrgAuditPanel({
             setEntries((prev) => [...prev, ...page]);
             setHasMore(page.length === PAGE_SIZE);
         } catch (err) {
-            toastError(err instanceof Error ? err.message : String(err));
+            showApiError(err, "loadMoreFailed");
         } finally {
             setLoadingMore(false);
         }

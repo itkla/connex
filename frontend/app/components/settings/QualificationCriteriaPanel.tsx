@@ -35,6 +35,7 @@ import {
     restoreQualificationCriterion,
     updateQualificationCriterion,
 } from "@/app/lib/api";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { usePermissionCheck, usePermissionsRefresh } from "@/app/hooks/usePermissions";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { apportionShares } from "@/app/lib/qualificationShares";
@@ -86,6 +87,7 @@ type Draft = {
  */
 export default function QualificationCriteriaPanel() {
     const t = useTranslations("WorkspaceQualification");
+    const showApiError = useApiErrorToast("WorkspaceQualification");
     const { activeWorkspaceId } = useWorkspace();
     const manageCheck = usePermissionCheck("WORKSPACE_SETTINGS");
     const canManage = manageCheck === "granted";
@@ -204,7 +206,7 @@ export default function QualificationCriteriaPanel() {
             window.setTimeout(() => setSettled(null), 900);
             toastSuccess(t("saved"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("saveFailed"));
+            showApiError(err, "saveFailed");
         } finally {
             setSaving(false);
         }
@@ -216,7 +218,7 @@ export default function QualificationCriteriaPanel() {
             await load();
             toastSuccess(t("archived"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("saveFailed"));
+            showApiError(err, "archiveFailed");
         }
     };
 
@@ -226,7 +228,7 @@ export default function QualificationCriteriaPanel() {
             await load();
             toastSuccess(t("restored"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("saveFailed"));
+            showApiError(err, "restoreFailed");
         }
     };
 

@@ -40,6 +40,7 @@ import {
     type CampaignSend,
 } from "@/app/lib/types";
 import { canCreateSend, type CampaignAccess } from "@/app/lib/campaignAccess";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { formatDate } from "@/app/lib/utils";
 import type { CapabilityAvailability } from "@/app/lib/capabilityAvailability";
@@ -82,6 +83,8 @@ export default function CampaignDelivery({
     const t = useTranslations("CampaignMessages");
     const st = useTranslations("CampaignSends");
     const tCapability = useTranslations("CapabilityUnavailable");
+    const showMessageApiError = useApiErrorToast("CampaignMessages");
+    const showSendApiError = useApiErrorToast("CampaignSends");
     const locale = useLocale();
 
     const [messages, setMessages] = useState<CampaignMessage[]>(initialMessages);
@@ -159,7 +162,7 @@ export default function CampaignDelivery({
         } catch (err) {
             setIsCreatingMessage(false);
             if (isFieldError(err)) throw err;
-            toastError(err instanceof Error ? err.message : String(err));
+            showMessageApiError(err, "createFailed");
             return;
         }
         setIsCreatingMessage(false);
@@ -192,7 +195,7 @@ export default function CampaignDelivery({
             setRevision((prev) => ({ ...EMPTY_REVISION_DRAFT, locale: prev.locale }));
             toastSuccess(t("revisionSaved"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : String(err));
+            showMessageApiError(err, "revisionSaveFailed");
         } finally {
             setIsSavingRevision(false);
         }
@@ -223,7 +226,7 @@ export default function CampaignDelivery({
             setSendPurpose("");
             toastSuccess(st("created"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : String(err));
+            showSendApiError(err, "createFailed");
         } finally {
             setIsCreatingSend(false);
         }
@@ -242,7 +245,7 @@ export default function CampaignDelivery({
                 setDeliveryRefused(true);
                 toastError(st("deliveryUnavailable"));
             } else {
-                toastError(err instanceof Error ? err.message : String(err));
+                showSendApiError(err, "queueFailed");
             }
         } finally {
             setActionSendId(null);
@@ -255,7 +258,7 @@ export default function CampaignDelivery({
             applySend(await pauseCampaignSend(campaignId, send.id));
             toastSuccess(st("paused"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : String(err));
+            showSendApiError(err, "pauseFailed");
         } finally {
             setActionSendId(null);
         }
@@ -267,7 +270,7 @@ export default function CampaignDelivery({
             applySend(await cancelCampaignSend(campaignId, send.id));
             toastSuccess(st("cancelled"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : String(err));
+            showSendApiError(err, "cancelFailed");
         } finally {
             setActionSendId(null);
         }

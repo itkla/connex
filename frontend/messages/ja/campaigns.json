@@ -90,7 +90,9 @@
         "audienceType": "対象",
         "snapshotCount": "スナップショット数",
         "latestSnapshot": "最新スナップショット",
-        "recipientsReached": "到達数"
+        "recipientsReached": "到達数",
+        "deleteFailed": "キャンペーンを削除できませんでした",
+        "saveFailed": "キャンペーンを保存できませんでした"
     },
     "CampaignAudience": {
         "title": "対象者",
@@ -130,7 +132,10 @@
         "snapshotsDeniedBody": "このスナップショットには連絡先とその配信設定が含まれるため、表示には閲覧権限が必要です。必要な場合はワークスペース管理者にご依頼ください。",
         "version": "v{version}",
         "snapshotIncluded": "{count}件が対象",
-        "snapshotExcluded": "{count}件を除外"
+        "snapshotExcluded": "{count}件を除外",
+        "estimateFailed": "対象者を試算できませんでした",
+        "freezeFailed": "スナップショットを確定できませんでした",
+        "saveFailed": "対象者を保存できませんでした"
     },
     "CampaignMessages": {
         "title": "メッセージ",
@@ -178,7 +183,9 @@
         "revisionSaved": "リビジョンを保存しました",
         "revisions": "リビジョン",
         "noRevisions": "リビジョンはまだありません",
-        "version": "v{version}"
+        "version": "v{version}",
+        "createFailed": "メッセージを作成できませんでした",
+        "revisionSaveFailed": "リビジョンを保存できませんでした"
     },
     "CampaignSends": {
         "title": "配信",
@@ -223,7 +230,11 @@
         "paused": "配信を一時停止しました",
         "cancelled": "配信をキャンセルしました",
         "deliveryUnavailable": "このインスタンスではキャンペーン配信が有効になっていません。",
-        "unknownMessage": "メッセージ"
+        "unknownMessage": "メッセージ",
+        "cancelFailed": "配信をキャンセルできませんでした",
+        "createFailed": "配信を作成できませんでした",
+        "pauseFailed": "配信を一時停止できませんでした",
+        "queueFailed": "配信をキューに追加できませんでした"
     },
     "CampaignEngagement": {
         "drillThrough": "{counter}の対象となった{count}件の連絡先を表示",
@@ -290,7 +301,8 @@
         "total": "合計",
         "pushed": "送信済み",
         "failed": "失敗",
-        "exportUnavailable": "このインスタンスではキャンペーン配信が有効になっていません。"
+        "exportUnavailable": "このインスタンスではキャンペーン配信が有効になっていません。",
+        "createFailed": "エクスポートを作成できませんでした"
     },
     "CampaignRecipients": {
         "descriptionRecipients": "このキャンペーンの配信対象{count}件です。到達したかどうかは問いません。",

@@ -39,7 +39,8 @@ import type {
     DataSubjectRequestType,
 } from "@/app/lib/types";
 import { createDataSubjectRequest, getContactsPage, updateDataSubjectRequest } from "@/app/lib/api";
-import { toastError, toastSuccess } from "@/app/lib/toast";
+import { toastSuccess } from "@/app/lib/toast";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 
@@ -144,6 +145,7 @@ function RequestForm({
     onSubmit: (body: DataSubjectRequestBody) => Promise<void>;
 }) {
     const t = useTranslations("OrgDataRequests");
+    const showApiError = useApiErrorToast("OrgDataRequests");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
 
     const [requestType, setRequestType] = useState<DataSubjectRequestType>(editing?.requestType ?? "disclosure");
@@ -213,7 +215,7 @@ function RequestForm({
             toastSuccess(editing ? t("toastUpdated") : t("toastCreated"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("toastSaveFailed"));
+                showApiError(err, "toastSaveFailed");
             }
         }
     };

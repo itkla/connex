@@ -465,7 +465,7 @@
     "successTitle": "Check your inbox",
     "successBody": "We sent a confirmation link to {email}. Open it to finish changing your email. Your current email stays active until then.",
     "close": "Close",
-    "genericError": "Something went wrong"
+    "genericError": "Couldn't send the confirmation link"
   },
   "PasskeyStepUp": {
     "canceled": "Passkey verification was canceled.",
@@ -540,10 +540,10 @@
     "accept": "Accept",
     "decline": "Decline",
     "accepted": "Joined {workspace}",
-    "acceptFailed": "Could not accept the invitation.",
+    "acceptFailed": "Couldn't accept the invitation",
     "declined": "Invitation declined",
-    "declineFailed": "Could not decline the invitation.",
-    "loadFailed": "Could not load invitations.",
+    "declineFailed": "Couldn't decline the invitation",
+    "loadFailed": "Couldn't load your invitations",
     "leaveTitle": "Leave workspace",
     "leaveSubtitle": "Leave {workspace} and lose access to its data.",
     "leave": "Leave workspace",
@@ -551,7 +551,7 @@
     "leaveConfirmBody": "You'll lose access to this workspace. Your assigned tasks become unassigned and deals you own lose their owner.",
     "cancel": "Cancel",
     "left": "You left the workspace",
-    "leaveFailed": "Could not leave the workspace."
+    "leaveFailed": "Couldn't leave the workspace"
   },
   "AccountConnectionConsent": {
     "title": "Connect {provider}",

@@ -11,8 +11,8 @@
   },
   "SmartSegments": {
     "title": "Smart segments",
-    "evaluateFailed": "Could not evaluate segments.",
-    "fieldsFailed": "Could not load segment options.",
+    "evaluateFailed": "Couldn't apply the smart segment filter",
+    "fieldsFailed": "Couldn't load the segment options",
     "builderTitle": "Build a segment",
     "builderDescription": "Combine relationship signals and field conditions to find exactly the companies you want.",
     "matchPrefix": "Match",
@@ -110,7 +110,7 @@
     "pickOwner": "Choose an owner",
     "pickCompany": "Choose a company",
     "pickStage": "Choose a stage",
-    "catalogFailed": "Could not load the segment builder.",
+    "catalogFailed": "Couldn't load the segment builder",
     "loading": "Loading…",
     "has_open_task": {
       "label": "Has an open task",
@@ -238,7 +238,7 @@
     "madeShared": "Shared with the workspace",
     "madePrivate": "View is now private",
     "copyLink": "Copy link",
-    "copyLinkFailed": "Could not copy the link.",
+    "copyLinkFailed": "Couldn't copy the link",
     "linkCopied": "Link copied to clipboard",
     "viewUnavailable": "That view is no longer available.",
     "actionFailed": "Couldn't update the view",
@@ -262,7 +262,7 @@
     "configureColumn": "Configure",
     "deleteColumn": "Delete field",
     "columnDeleted": "Field deleted",
-    "deleteFailed": "Could not delete the field.",
+    "deleteFailed": "Couldn't delete the field",
     "fieldLabel": "custom field"
   },
   "ShareDialog": {
@@ -288,7 +288,7 @@
     "selectAllAria": "Select all {entityLabel}s",
     "selectItemAria": "Select {name}",
     "copiedToast": "{label} copied",
-    "copyFailedToast": "Failed to copy {label}",
+    "copyFailedToast": "Couldn't copy the {label}",
     "editFieldAria": "Edit {field} for {name}",
     "selectedLabel": "selected",
     "clearSelection": "Clear selection",

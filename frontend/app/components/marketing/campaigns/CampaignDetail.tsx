@@ -59,7 +59,8 @@ import {
     type CampaignAccess,
 } from "@/app/lib/campaignAccess";
 import AccessDenied from "@/app/components/AccessDenied";
-import { toastError, toastSuccess } from "@/app/lib/toast";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
+import { toastSuccess } from "@/app/lib/toast";
 import { formatCurrency, formatDate } from "@/app/lib/utils";
 import type { CapabilityAvailability } from "@/app/lib/capabilityAvailability";
 
@@ -145,6 +146,8 @@ export default function CampaignDetail({
 }) {
     const t = useTranslations("CampaignDetail");
     const at = useTranslations("CampaignAudience");
+    const showApiError = useApiErrorToast("CampaignDetail");
+    const showAudienceApiError = useApiErrorToast("CampaignAudience");
     const locale = useLocale();
     const router = useRouter();
 
@@ -213,7 +216,7 @@ export default function CampaignDetail({
             setAudienceSaved(true);
             toastSuccess(at("saved"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : String(err));
+            showAudienceApiError(err, "saveFailed");
         } finally {
             setIsSaving(false);
         }
@@ -224,7 +227,7 @@ export default function CampaignDetail({
         try {
             setEstimate(await estimateCampaignAudience(current.id));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : String(err));
+            showAudienceApiError(err, "estimateFailed");
         } finally {
             setIsEstimating(false);
         }
@@ -237,7 +240,7 @@ export default function CampaignDetail({
             setSnapshots((prev) => [snapshot, ...prev]);
             toastSuccess(at("frozen"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : String(err));
+            showAudienceApiError(err, "freezeFailed");
         } finally {
             setIsFreezing(false);
         }
@@ -265,7 +268,7 @@ export default function CampaignDetail({
         } catch (err) {
             setIsSavingCampaign(false);
             if (isFieldError(err)) throw err;
-            toastError(err instanceof Error ? err.message : String(err));
+            showApiError(err, "saveFailed");
         }
     };
 
@@ -276,7 +279,7 @@ export default function CampaignDetail({
             router.push("/marketing/campaigns");
         } catch (err) {
             setIsDeleting(false);
-            toastError(err instanceof Error ? err.message : String(err));
+            showApiError(err, "deleteFailed");
         }
     };
 

@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 import { deleteTag } from '@/app/lib/api';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { compareByColor, copyToClipboard, readableTextColor } from '@/app/lib/utils';
 import type { Tag } from '@/app/lib/types';
@@ -60,6 +61,7 @@ function tilePresence(reduce: boolean) {
 export default function TagsBrowser({ tags: initialTags }: Props) {
     const t = useTranslations('ActivityLibraryTags');
     const tf = useTranslations('Filters');
+    const showApiError = useApiErrorToast('ActivityLibraryTags');
     const reduce = useReducedMotion() ?? false;
 
     const [tags, setTags] = useState<Tag[]>(initialTags);
@@ -106,7 +108,7 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
             toastSuccess(t('toastDeleted', { name: deletingTag.name }));
             setDeletingTag(null);
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastFailedDelete'));
+            showApiError(err, 'toastFailedDelete');
         } finally {
             setDeleting(false);
         }

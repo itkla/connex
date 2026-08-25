@@ -38,7 +38,8 @@ import NoteDialog from '@/app/components/activity/notes/NoteDialog';
 import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import { deleteNote, getNotesPage } from '@/app/lib/api';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { toastSuccess } from '@/app/lib/toast';
 import { formatDate } from '@/app/lib/utils';
 import { deriveNoteTitle, noteSnippet } from '@/app/lib/noteText';
 import { recordDetailNavigationPath } from '@/app/lib/recordReturnPath';
@@ -75,6 +76,7 @@ export default function NotesBrowser({ persons, deals, users, currentUserId }: P
     const router = useRouter();
     const t = useTranslations('ActivityNotes');
     const tf = useTranslations('Filters');
+    const showApiError = useApiErrorToast('ActivityNotes');
     const locale = useLocale();
 
     const [groupBy, setGroupBy] = useState<GroupBy>('record');
@@ -150,7 +152,7 @@ export default function NotesBrowser({ persons, deals, users, currentUserId }: P
             setDeleteTarget(null);
             reload();
         } catch (error) {
-            toastError(error instanceof Error ? error.message : t('toastFailedDelete'));
+            showApiError(error, 'toastFailedDelete');
         } finally {
             setIsDeleting(false);
         }

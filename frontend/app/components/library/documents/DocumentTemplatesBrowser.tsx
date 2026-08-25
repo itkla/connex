@@ -18,7 +18,8 @@ import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import { SearchField } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { deleteDocumentTemplate } from '@/app/lib/api';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { toastSuccess } from '@/app/lib/toast';
 import type { DocumentTemplate, DocumentType } from '@/app/lib/types';
 
 const TYPE_KEY: Record<DocumentType, string> = {
@@ -36,6 +37,7 @@ const TYPE_KEY: Record<DocumentType, string> = {
 export default function DocumentTemplatesBrowser({ templates: initial }: { templates: DocumentTemplate[] }) {
     const t = useTranslations('DocumentTemplatesBrowser');
     const tf = useTranslations('Filters');
+    const showApiError = useApiErrorToast('DocumentTemplatesBrowser');
     const router = useRouter();
     const [templates, setTemplates] = useState(initial);
     const [query, setQuery] = useState('');
@@ -61,7 +63,7 @@ export default function DocumentTemplatesBrowser({ templates: initial }: { templ
             toastSuccess(t('deleted'));
             setRemoveTarget(null);
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('deleteFailed'));
+            showApiError(err, 'deleteFailed');
         } finally {
             setIsRemoving(false);
         }

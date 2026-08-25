@@ -9,6 +9,7 @@ import KanbanBoard, { type KanbanColumnDef } from '@/app/components/kanban/Kanba
 import { kanbanAccessibility } from '@/app/components/kanban/kanbanAccessibility';
 import DealKanbanCard from '@/app/components/records/deals/DealKanbanCard';
 import { classifyStage } from './dealOutcome';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { getCompaniesByIds, getDealBoard, getDealRisks, moveDeal } from '@/app/lib/api';
 import { withDealMoved } from '@/app/lib/dealBoard';
 import { toastError } from '@/app/lib/toast';
@@ -90,6 +91,7 @@ export default function DealsKanban({
     returnSelection,
 }: DealsKanbanProps) {
     const t = useTranslations('DealsKanban');
+    const showApiError = useApiErrorToast('DealsKanban');
 
     const pipelineOptions = useMemo(
         () => pipelines.filter((pipeline) =>
@@ -135,15 +137,14 @@ export default function DealsKanban({
                 loadedPipelineRef.current = selectedPipelineId;
                 setBoardState({ key: boardKey, pipelineId: selectedPipelineId, deals: loaded, error: null });
             })
-            .catch((error: unknown) => {
+            .catch(() => {
                 if (cancelled) return;
-                const message = error instanceof Error ? error.message : t('loadFailed');
                 if (loadedPipelineRef.current === selectedPipelineId) {
                     toastError(t('refreshFailed'));
                     setBoardState((current) => ({ ...current, key: boardKey }));
                     return;
                 }
-                setBoardState({ key: boardKey, pipelineId: selectedPipelineId, deals: [], error: message });
+                setBoardState({ key: boardKey, pipelineId: selectedPipelineId, deals: [], error: t('loadFailed') });
             });
         return () => {
             cancelled = true;
@@ -203,13 +204,13 @@ export default function DealsKanban({
                     });
                 }
             })
-            .catch((error: unknown) => {
+            .catch(() => {
                 if (!cancelled) {
                     setBoardRiskState({
                         key: boardKey,
                         pipelineId: selectedPipelineId,
                         risks: new Map(),
-                        error: error instanceof Error ? error.message : t('riskLoadFailed'),
+                        error: t('riskLoadFailed'),
                     });
                 }
             });
@@ -316,11 +317,11 @@ export default function DealsKanban({
                     : { ...current, deals: withDealMoved(current.deals, moved, absoluteIndex) });
                 onMoved();
             } catch (err) {
-                toastError(err instanceof Error ? err.message : t('moveFailed'));
+                showApiError(err, 'moveFailed');
                 throw err;
             }
         },
-        [loadedBoardDeals, matchesBoardDeal, onMoved, selectedPipelineId, t],
+        [loadedBoardDeals, matchesBoardDeal, onMoved, selectedPipelineId, showApiError],
     );
 
     const dealName = useCallback((id: UniqueIdentifier) => dealsById.get(Number(id))?.name ?? '', [dealsById]);

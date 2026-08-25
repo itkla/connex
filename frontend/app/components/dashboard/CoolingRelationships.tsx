@@ -9,8 +9,9 @@ import type { Contact, RelationshipTemperature } from '@/app/lib/types';
 import ContactAvatar from '@/app/components/records/contacts/ContactAvatar';
 import WarmthPill from '@/app/components/records/WarmthPill';
 import { createTask } from '@/app/lib/api';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { followUpDueDate } from '@/app/lib/followUp';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastSuccess } from '@/app/lib/toast';
 
 export type CoolingItem = { contact: Contact; temp: RelationshipTemperature };
 
@@ -26,6 +27,7 @@ export default function CoolingRelationships({
     currentUserId: number;
 }) {
     const t = useTranslations('CoolingRelationships');
+    const showApiError = useApiErrorToast('CoolingRelationships');
     const [scheduled, setScheduled] = useState<Set<number>>(new Set());
     const [busyId, setBusyId] = useState<number | null>(null);
 
@@ -42,7 +44,7 @@ export default function CoolingRelationships({
             setScheduled((prev) => new Set(prev).add(item.contact.id));
             toastSuccess(t('scheduled'));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('scheduleFailed'));
+            showApiError(err, 'scheduleFailed');
         } finally {
             setBusyId(null);
         }

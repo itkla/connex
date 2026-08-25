@@ -9,6 +9,7 @@ import AccessDenied from "@/app/components/AccessDenied";
 import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
 import Rise from "@/app/components/motion/Rise";
 import { SettingsSection } from "@/app/components/settings/SettingsSection";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { usePermissionCheck, usePermissionsRefresh } from "@/app/hooks/usePermissions";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
@@ -40,6 +41,7 @@ function supportedTimezones(current: string | null): string[] {
 
 function WorkspaceIdentityForm({ workspace }: { workspace: Workspace }) {
     const t = useTranslations("WorkspaceIdentity");
+    const showApiError = useApiErrorToast("WorkspaceIdentity");
     const router = useRouter();
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { publishWorkspaceIdentity, restoreWorkspaceIdentity } = useWorkspace();
@@ -91,7 +93,7 @@ function WorkspaceIdentityForm({ workspace }: { workspace: Workspace }) {
             } else if (error instanceof ApiError && error.status === 409) {
                 toastError(t("stale"));
             } else if (!handlePasskeyStepUpError(error)) {
-                toastError(error instanceof Error ? error.message : t("saveFailed"));
+                showApiError(error, "saveFailed");
             }
         } finally {
             setSaving(false);

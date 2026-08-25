@@ -24,6 +24,7 @@ import {
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { copyToClipboard } from "@/app/lib/utils";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -101,6 +102,7 @@ export default function DeliveryPanel({
     presentation = "page",
 }: { presentation?: DeliveryPresentation } = {}) {
     const t = useTranslations("WorkspaceDelivery");
+    const showApiError = useApiErrorToast("WorkspaceDelivery");
     const headingLevel = presentation === "section" ? 3 : 2;
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { activeWorkspaceId } = useWorkspace();
@@ -198,7 +200,7 @@ export default function DeliveryPanel({
             toastSuccess(t("saved"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("saveFailed"));
+                showApiError(err, "saveFailed");
             }
         } finally {
             setSaving(false);
@@ -215,7 +217,7 @@ export default function DeliveryPanel({
             toastSuccess(t("tokenIssued"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("tokenFailed"));
+                showApiError(err, "tokenFailed");
             }
         } finally {
             setGenerating(false);
@@ -237,7 +239,7 @@ export default function DeliveryPanel({
             toastSuccess(t("removed"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("saveFailed"));
+                showApiError(err, "removeFailed");
             }
         } finally {
             setSaving(false);
@@ -501,6 +503,7 @@ function toSmsForm(config: DeliveryProviderConfig): SmsFormState {
  */
 function SmsSection({ headingLevel }: { headingLevel: 2 | 3 }) {
     const t = useTranslations("WorkspaceDelivery");
+    const showApiError = useApiErrorToast("WorkspaceDelivery");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { activeWorkspaceId } = useWorkspace();
 
@@ -583,7 +586,7 @@ function SmsSection({ headingLevel }: { headingLevel: 2 | 3 }) {
             toastSuccess(t("saved"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("saveFailed"));
+                showApiError(err, "saveFailed");
             }
         } finally {
             setSaving(false);
@@ -602,7 +605,7 @@ function SmsSection({ headingLevel }: { headingLevel: 2 | 3 }) {
             toastSuccess(t("removed"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("saveFailed"));
+                showApiError(err, "removeFailed");
             }
         } finally {
             setSaving(false);
@@ -766,6 +769,7 @@ function toConnectorForm(config: ConnectorConfig): ConnectorFormState {
  */
 function ConnectorsSection({ headingLevel }: { headingLevel: 2 | 3 }) {
     const t = useTranslations("WorkspaceDelivery");
+    const showApiError = useApiErrorToast("WorkspaceDelivery");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { activeWorkspaceId } = useWorkspace();
 
@@ -846,7 +850,7 @@ function ConnectorsSection({ headingLevel }: { headingLevel: 2 | 3 }) {
             toastSuccess(t("saved"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("saveFailed"));
+                showApiError(err, "saveFailed");
             }
         } finally {
             setSaving(false);
@@ -865,7 +869,7 @@ function ConnectorsSection({ headingLevel }: { headingLevel: 2 | 3 }) {
             toastSuccess(t("removed"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("saveFailed"));
+                showApiError(err, "removeFailed");
             }
         } finally {
             setSaving(false);

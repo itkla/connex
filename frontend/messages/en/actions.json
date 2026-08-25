@@ -114,7 +114,10 @@
             "companyContactsPartial": "Added {succeeded} of {total} contacts.",
             "taskCreated": "Task created",
             "noteCreated": "Note created",
-            "activityCreated": "Activity logged"
+            "activityCreated": "Activity logged",
+            "companyCreateFailed": "Couldn't create the company",
+            "dealCreateFailed": "Couldn't create the deal",
+            "personCreateFailed": "Couldn't create the contact"
         },
         "keywords": {
             "navigate": {

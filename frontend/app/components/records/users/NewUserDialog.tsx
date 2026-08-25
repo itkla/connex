@@ -33,8 +33,9 @@ import {
 } from "@/components/ui/dialog-status-cover";
 import { cn } from "@/lib/utils";
 import { ApiError, createUser } from "@/app/lib/api";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
-import { toastError, toastSuccess } from "@/app/lib/toast";
+import { toastSuccess } from "@/app/lib/toast";
 import { type RegisterPayload } from "@/app/lib/types";
 
 const EMPTY: RegisterPayload = { displayName: "", username: "", email: "", password: "" };
@@ -92,6 +93,7 @@ function Field({
 
 export default function NewUserDialog() {
     const t = useTranslations("UsersNewUserDialog");
+    const showApiError = useApiErrorToast("UsersNewUserDialog");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const router = useRouter();
     const [open, setOpen] = useState(false);
@@ -142,7 +144,7 @@ export default function NewUserDialog() {
                 const k = Object.keys(fieldErrors)[0];
                 if (k) requestAnimationFrame(() => document.getElementById(k)?.focus());
             } else {
-                toastError(err instanceof Error ? err.message : t("toastFailed"));
+                showApiError(err, "toastFailed");
             }
         } finally {
             setIsCreating(false);

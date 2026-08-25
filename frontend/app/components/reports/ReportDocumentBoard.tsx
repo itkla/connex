@@ -34,6 +34,7 @@ import {
     resolveAcceptedAiGeneration,
     subscribeClientRequestIdentityInvalidation,
 } from '@/app/lib/api';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { AiGenerationError } from '@/app/lib/aiGeneration';
 import { canDeleteOwnedRecord } from '@/app/lib/deletionPolicy';
@@ -167,6 +168,7 @@ export default function ReportDocumentBoard({
     defaultTimezone: string;
 }) {
     const t = useTranslations('Reports');
+    const showApiError = useApiErrorToast('Reports');
     const locale = useLocale();
     const snapshotDateFormatter = useMemo(() => new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }), [locale]);
     const { activeWorkspace } = useWorkspace();
@@ -356,7 +358,7 @@ export default function ReportDocumentBoard({
             syncSnapshotUrl(snapshot.id);
             toastSuccess(t('document.snapshotCreated'));
         } catch (error) {
-            toastError(error instanceof Error ? error.message : t('common.requestFailed'));
+            showApiError(error, 'document.snapshotFailed');
         } finally {
             setSnapshotting(false);
         }
@@ -378,7 +380,7 @@ export default function ReportDocumentBoard({
             toastSuccess(t('document.snapshotDeleted'));
             setSnapshotPendingDelete(null);
         } catch (error) {
-            toastError(error instanceof Error ? error.message : t('common.requestFailed'));
+            showApiError(error, 'document.snapshotDeleteFailed');
         } finally {
             setDeletingSnapshotId(null);
         }
@@ -401,7 +403,7 @@ export default function ReportDocumentBoard({
         } catch (error) {
             if (snapshotRequestRef.current === requestId) {
                 fallbackToLive();
-                toastError(error instanceof Error ? error.message : t('common.requestFailed'));
+                showApiError(error, 'document.snapshotOpenFailed');
             }
         }
     };
@@ -417,7 +419,7 @@ export default function ReportDocumentBoard({
                 await exportReportCsv(definition.id, input ?? {}, `${definition.name}.csv`);
             }
         } catch (error) {
-            toastError(error instanceof Error ? error.message : t('common.requestFailed'));
+            showApiError(error, 'document.csvFailed');
         } finally {
             setExporting(false);
         }

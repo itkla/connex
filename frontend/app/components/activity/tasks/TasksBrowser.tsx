@@ -61,7 +61,8 @@ import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { useScopedViewPreference } from '@/app/hooks/useScopedViewPreference';
 import { effectiveListView } from '@/app/hooks/viewPreference';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { toastSuccess } from '@/app/lib/toast';
 import { noteSnippet } from '@/app/lib/noteText';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
@@ -185,6 +186,7 @@ export default function TasksBrowser({
 }: Props) {
     const t = useTranslations('ActivityTasks');
     const tf = useTranslations('Filters');
+    const showApiError = useApiErrorToast('ActivityTasks');
     const locale = useLocale();
     const router = useRouter();
     const pathname = usePathname() ?? '';
@@ -604,7 +606,7 @@ export default function TasksBrowser({
                 optimisticTimerId = null;
             }
             timerSettled = true;
-            toastError(err instanceof Error ? err.message : t('toastFailedUpdate'));
+            showApiError(err, 'toastFailedUpdate');
             setTaskCompleted(task.id, !next);
             setCompleting((prev) => {
                 const n = new Set(prev);
@@ -659,7 +661,7 @@ export default function TasksBrowser({
             router.refresh();
         } catch (error) {
             if (controller.signal.aborted || !scopeCurrent()) return;
-            toastError(error instanceof Error ? error.message : t('toastFailedDelete'));
+            showApiError(error, 'toastFailedDelete');
         } finally {
             if (deleteControllerRef.current === controller) {
                 deleteControllerRef.current = null;

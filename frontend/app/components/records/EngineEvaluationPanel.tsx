@@ -7,7 +7,7 @@ import { useTranslations } from 'next-intl';
 import { Switch } from '@/components/ui/switch';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import { updateContactEvaluation, updateDealEvaluation } from '@/app/lib/api';
-import { toastError } from '@/app/lib/toast';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { cn } from '@/lib/utils';
 
 type PanelSurface = {
@@ -32,6 +32,7 @@ type PanelProps =
  */
 export default function EngineEvaluationPanel(props: PanelProps) {
     const t = useTranslations('EngineEvaluation');
+    const showApiError = useApiErrorToast('EngineEvaluation');
     const router = useRouter();
     const [riskIncluded, setRiskIncluded] = useState(!props.riskExcluded);
     const [introIncluded, setIntroIncluded] = useState(
@@ -54,7 +55,7 @@ export default function EngineEvaluationPanel(props: PanelProps) {
             router.refresh();
         } catch (err) {
             apply(!included);
-            toastError(err instanceof Error ? err.message : t('updateFailed'));
+            showApiError(err, 'updateFailed');
         } finally {
             setSaving(false);
         }

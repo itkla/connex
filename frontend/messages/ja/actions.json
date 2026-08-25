@@ -114,7 +114,10 @@
             "companyContactsPartial": "{total} 件中 {succeeded} 件の連絡先を追加しました。",
             "taskCreated": "タスクを作成しました",
             "noteCreated": "メモを作成しました",
-            "activityCreated": "アクティビティを記録しました"
+            "activityCreated": "アクティビティを記録しました",
+            "companyCreateFailed": "会社を作成できませんでした",
+            "dealCreateFailed": "案件を作成できませんでした",
+            "personCreateFailed": "連絡先を作成できませんでした"
         },
         "keywords": {
             "navigate": {

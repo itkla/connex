@@ -94,7 +94,7 @@
         "taskDeleted": "タスクを削除しました",
         "activityDeleted": "アクティビティを削除しました",
         "noteDeleted": "メモを削除しました",
-        "deleteFailed": "削除できませんでした",
+        "deleteFailed": "この項目を削除できませんでした",
         "linkedItemOutsideWindow": "リンク先の項目は、ここに表示されている履歴より前のものです。",
         "linkedItemUnavailable": "リンク先の項目は、この履歴では確認できません。",
         "openLinked": {

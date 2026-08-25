@@ -11,8 +11,8 @@
   },
   "SmartSegments": {
     "title": "スマートセグメント",
-    "evaluateFailed": "セグメントを評価できませんでした。",
-    "fieldsFailed": "セグメントの選択肢を読み込めませんでした。",
+    "evaluateFailed": "スマートセグメントで絞り込めませんでした",
+    "fieldsFailed": "セグメントの選択肢を読み込めませんでした",
     "builderTitle": "セグメントを作成",
     "builderDescription": "関係シグナルとフィールド条件を組み合わせて、目的の会社を正確に絞り込みます。",
     "matchPrefix": "次の条件の",
@@ -110,7 +110,7 @@
     "pickOwner": "担当者を選択",
     "pickCompany": "会社を選択",
     "pickStage": "ステージを選択",
-    "catalogFailed": "セグメントビルダーを読み込めませんでした。",
+    "catalogFailed": "セグメントビルダーを読み込めませんでした",
     "loading": "読み込み中…",
     "has_open_task": {
       "label": "未完了タスクあり",
@@ -238,7 +238,7 @@
     "madeShared": "ワークスペースで共有しました",
     "madePrivate": "ビューを非公開にしました",
     "copyLink": "リンクをコピー",
-    "copyLinkFailed": "リンクをコピーできませんでした。",
+    "copyLinkFailed": "リンクをコピーできませんでした",
     "linkCopied": "リンクをクリップボードにコピーしました",
     "viewUnavailable": "そのビューは利用できなくなりました。",
     "actionFailed": "ビューを更新できませんでした",
@@ -262,7 +262,7 @@
     "configureColumn": "設定",
     "deleteColumn": "フィールドを削除",
     "columnDeleted": "フィールドを削除しました",
-    "deleteFailed": "フィールドを削除できませんでした。",
+    "deleteFailed": "フィールドを削除できませんでした",
     "fieldLabel": "カスタムフィールド"
   },
   "ShareDialog": {
@@ -288,7 +288,7 @@
     "selectAllAria": "すべての {entityLabel} を選択",
     "selectItemAria": "{name} を選択",
     "copiedToast": "{label} をコピーしました",
-    "copyFailedToast": "{label} のコピーに失敗しました",
+    "copyFailedToast": "{label} をコピーできませんでした",
     "editFieldAria": "{name} の{field}を編集",
     "selectedLabel": "選択中",
     "clearSelection": "選択を解除",

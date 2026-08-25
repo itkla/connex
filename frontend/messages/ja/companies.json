@@ -119,14 +119,14 @@
     "restore": "復元",
     "toastCompanyArchived": "会社をアーカイブしました",
     "toastCompanyRestored": "会社を復元しました",
-    "toastArchiveFailed": "アーカイブできませんでした",
-    "toastRestoreFailed": "復元できませんでした",
+    "toastArchiveFailed": "会社をアーカイブできませんでした",
+    "toastRestoreFailed": "会社を復元できませんでした",
     "entityLabelPlural": "会社"
   },
   "CompaniesCard": {
     "openCompanyAriaLabel": "会社ページを開く",
     "loadingMetrics": "指標を読み込み中...",
-    "metricsLoadFailed": "指標を読み込めませんでした。",
+    "metricsLoadFailed": "指標を読み込めませんでした",
     "retry": "再試行",
     "employees": "連絡先",
     "relations": "関係者",

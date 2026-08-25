@@ -61,7 +61,7 @@
     "scheduleFollowUp": "冷め込む前にフォローアップを予約",
     "followUpWith": "{name} にフォローアップ",
     "scheduled": "フォローアップを予約しました",
-    "scheduleFailed": "フォローアップを予約できませんでした。"
+    "scheduleFailed": "フォローアップタスクを作成できませんでした"
   },
   "RecentMoves": {
     "empty": "ワークスペースの連絡先に最近の転職はありません。",

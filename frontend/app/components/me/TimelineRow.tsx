@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname, type ReadonlyURLSearchParams, useRouter, useSearchParams } from 'next/navigation';
 import { useReducedMotion } from 'motion/react';
 import { useLocale, useTranslations } from 'next-intl';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastSuccess } from '@/app/lib/toast';
 import { CheckIcon, EllipsisVerticalIcon, PencilIcon, TrashIcon, UserIcon } from '@heroicons/react/24/outline';
 
 import { type Contact, type ContactLifecycleStage, type Deal, type UserReference } from '@/app/lib/types';
@@ -16,6 +16,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { deleteActivity, deleteNote, deleteTask } from '@/app/lib/api';
 import { ACTIVITY_URL_KEY, COMMENT_URL_KEY, NOTE_URL_KEY, TASK_URL_KEY } from '@/app/hooks/listStateUrl';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { type TimelineEntry } from '@/app/components/me/timelineEntries';
 import EditTaskSheet from '@/app/components/activity/tasks/EditTaskSheet';
 import EditActivitySheet from '@/app/components/activity/activities/EditActivitySheet';
@@ -134,6 +135,7 @@ export default function TimelineRow({
 }) {
     const t = useTranslations('MeTimeline');
     const tl = useTranslations('ContactLifecycle');
+    const showApiError = useApiErrorToast('MeTimeline');
     const locale = useLocale();
     const router = useRouter();
     const pathname = usePathname();
@@ -177,7 +179,7 @@ export default function TimelineRow({
             }
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('deleteFailed'));
+            showApiError(err, 'deleteFailed');
         }
     };
 

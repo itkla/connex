@@ -44,8 +44,8 @@
         "searchFailed": "Couldn't search contacts",
         "add": "Add connection",
         "remove": "Remove connection",
-        "addFailed": "Couldn't add connection.",
-        "removeFailed": "Couldn't remove connection.",
+        "addFailed": "Couldn't add the connection",
+        "removeFailed": "Couldn't remove the connection",
         "typeKnows": "Knows",
         "typeColleague": "Colleague",
         "typeFormer": "Former colleague",
@@ -87,7 +87,7 @@
         "entityLabel": "contact",
         "toastContactCreated": "Contact created",
         "toastCardAttached": "Business card attached",
-        "toastFailedCreate": "Failed to create contact",
+        "toastFailedCreate": "Couldn't create the contact",
         "toastNoChangesToSave": "No changes to save",
         "toastNameRequiredForX": "Name is required for \"{name}\"",
         "toastContactUpdated": "Contact updated",
@@ -124,12 +124,12 @@
         "toastContactsArchived": "{count} contacts archived",
         "toastContactsArchivedPartial": "Archived {succeeded} of {total} contacts",
         "toastContactsArchiveFailed": "Couldn't archive {failed} contacts",
-        "toastFailedArchive": "Failed to archive",
+        "toastFailedArchive": "Couldn't archive the selected contacts",
         "toastContactRestored": "Contact restored",
         "toastContactsRestored": "{count} contacts restored",
         "toastContactsRestoredPartial": "Restored {succeeded} of {total} contacts",
         "toastContactsRestoreFailed": "Couldn't restore {failed} contacts",
-        "toastFailedRestore": "Failed to restore",
+        "toastFailedRestore": "Couldn't restore the selected contacts",
         "entityLabelPlural": "contacts"
     },
     "ContactsCard": {
@@ -146,9 +146,9 @@
         "toastPartiallySaved": "Contact details were saved, but the photo upload failed. Review the current values and try again.",
         "toastFailedSave": "Couldn't save the contact",
         "toastEmailCopied": "Email copied",
-        "toastFailedCopyEmail": "Failed to copy email",
+        "toastFailedCopyEmail": "Couldn't copy the email address",
         "toastPhoneCopied": "Phone copied",
-        "toastFailedCopyPhone": "Failed to copy phone",
+        "toastFailedCopyPhone": "Couldn't copy the phone number",
         "toastCompanyChanged": "Company changed",
         "ownerLabel": "Owner: {name}",
         "archive": "Archive",
@@ -178,8 +178,8 @@
         "restore": "Restore",
         "toastContactArchived": "Contact archived",
         "toastContactRestored": "Contact restored",
-        "toastFailedArchive": "Failed to archive",
-        "toastFailedRestore": "Failed to restore",
+        "toastFailedArchive": "Couldn't archive the contact",
+        "toastFailedRestore": "Couldn't restore the contact",
         "entityLabelPlural": "contacts"
     },
     "ContactsStatCard": {
@@ -321,8 +321,8 @@
         "removeAria": "Remove {name}",
         "addTagAria": "Add tag",
         "tag": "Tag",
-        "toastFailedAdd": "Failed to add tag",
-        "toastFailedRemove": "Failed to remove tag"
+        "toastFailedAdd": "Couldn't add the tag",
+        "toastFailedRemove": "Couldn't remove the tag"
     },
     "ContactRestrictions": {
         "title": "Privacy hold",
@@ -359,7 +359,7 @@
         "cancel": "Cancel",
         "save": "Save",
         "toastSaved": "Lifecycle updated.",
-        "toastFailed": "Couldn't update the lifecycle.",
+        "toastFailed": "Couldn't update the lifecycle",
         "stage": {
             "none": "No stage",
             "NEW": "New",
@@ -403,7 +403,7 @@
         "loadFailed": "Couldn't load this contact's qualification. Refresh to try again.",
         "dialogDescription": "Answer the workspace\u0027s qualification criteria for this contact.",
         "done": "Done",
-        "toastFailed": "Couldn't record that answer.",
+        "toastFailed": "Couldn't record that answer",
         "dimension": {
             "FIT": "Fit",
             "ENGAGEMENT": "Engagement"
@@ -446,7 +446,7 @@
         "cancel": "Cancel",
         "save": "Save",
         "toastSaved": "Source updated.",
-        "toastFailed": "Couldn't update the source.",
+        "toastFailed": "Couldn't update the source",
         "source": {
             "none": "Not recorded",
             "REFERRAL": "Referral",

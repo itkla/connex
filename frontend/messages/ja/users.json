@@ -60,7 +60,7 @@
     "cancel": "キャンセル",
     "create": "作成",
     "toastCreated": "ユーザーを作成しました",
-    "toastFailed": "ユーザーの作成に失敗しました"
+    "toastFailed": "ユーザーを作成できませんでした"
   },
   "UsersLayout": {
     "title": "ユーザー",

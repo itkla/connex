@@ -162,7 +162,7 @@
     "saving": "Saving...",
     "saveTeam": "Save team",
     "dealTeamUpdated": "Deal team updated",
-    "dealTeamError": "Failed to update deal team",
+    "dealTeamError": "Couldn't update the deal team",
     "emptyHint": "New tasks, deal reminders, and relationship nudges show up here.",
     "noUsers": "No users found",
     "noCollaborators": "No teammates available",

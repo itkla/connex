@@ -30,7 +30,8 @@ import {
     previewApprovalPolicyImpact,
     updateApprovalPolicy,
 } from '@/app/lib/api';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { toastSuccess } from '@/app/lib/toast';
 import type {
     ApprovalChainMode,
     ApprovalPolicy,
@@ -122,6 +123,7 @@ const toStepPayload = (step: ChainStepDraft): ApprovalPolicyStep => ({
  */
 export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSaved }: Props) {
     const t = useTranslations('ApprovalPolicyDialog');
+    const showApiError = useApiErrorToast('ApprovalPolicyDialog');
     const [draft, setDraft] = useState<Draft>(() => toDraft(policy));
     const [saving, setSaving] = useState(false);
     const [wasOpen, setWasOpen] = useState(open);
@@ -191,7 +193,7 @@ export default function ApprovalPolicyDialog({ open, onOpenChange, policy, onSav
             onSaved(saved, policy === null);
             onOpenChange(false);
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('saveFailed'));
+            showApiError(err, 'saveFailed');
         } finally {
             setSaving(false);
         }

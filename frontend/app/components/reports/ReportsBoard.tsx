@@ -32,10 +32,11 @@ import {
     groupReportTemplates,
     reportTemplateMeasures,
 } from '@/app/components/reports/reportConfig';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { createReport, deleteReport } from '@/app/lib/api';
 import { canDeleteOwnedRecord } from '@/app/lib/deletionPolicy';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastSuccess } from '@/app/lib/toast';
 import type { ReportDefinition, ReportTemplate } from '@/app/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -78,6 +79,7 @@ export default function ReportsBoard({
     composerAvailable: boolean;
 }) {
     const t = useTranslations('Reports');
+    const showApiError = useApiErrorToast('Reports');
     const locale = useLocale();
     const router = useRouter();
     const { activeWorkspace } = useWorkspace();
@@ -115,7 +117,7 @@ export default function ReportsBoard({
             });
             router.push(`/overview/reports/${created.id}`);
         } catch (error) {
-            toastError(error instanceof Error ? error.message : t('common.requestFailed'));
+            showApiError(error, 'landing.createFailed');
             setCreatingKey(null);
         }
     };
@@ -136,7 +138,7 @@ export default function ReportsBoard({
             toastSuccess(t('landing.duplicated', { name: report.name }));
             router.refresh();
         } catch (error) {
-            toastError(error instanceof Error ? error.message : t('common.requestFailed'));
+            showApiError(error, 'landing.duplicateFailed');
         } finally {
             setDuplicatingId(null);
         }
@@ -152,7 +154,7 @@ export default function ReportsBoard({
             setDeleting(null);
             router.refresh();
         } catch (error) {
-            toastError(error instanceof Error ? error.message : t('common.requestFailed'));
+            showApiError(error, 'landing.deleteFailed');
         } finally {
             setBusy(false);
         }
