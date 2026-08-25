@@ -519,8 +519,31 @@ public final class AiModelCatalog {
                 continue;
             }
             patched = patch(patched, override);
+            requireCoherent(patched, override, normalizedModelId);
         }
         return patched;
+    }
+
+    /**
+     * Refuses an override whose merged result the provider layer would reject later anyway.
+     *
+     * {@link AiProviderCapabilities} requires the output ceiling to fit inside the context
+     * window; an override that breaks that pairing would otherwise let the application start
+     * and then fail opaquely on the first turn. Failing here, naming the override, turns a
+     * delayed runtime mystery into an immediate configuration error.
+     */
+    private static void requireCoherent(
+            ModelCapabilities merged,
+            AiProperties.ModelOverride override,
+            String normalizedModelId) {
+        if (merged.maxOutputTokens() > merged.contextWindowTokens()) {
+            throw new IllegalStateException(
+                    "connex.ai.model-overrides entry for provider '" + override.getProvider()
+                            + "' model '" + normalizedModelId
+                            + "' yields max-output-tokens " + merged.maxOutputTokens()
+                            + " above context-window-tokens " + merged.contextWindowTokens()
+                            + "; the output ceiling must fit inside the context window");
+        }
     }
 
     private static ModelCapabilities patch(

@@ -199,6 +199,36 @@ class AiModelCatalogTest {
     }
 
     @Test
+    void anOverrideWhoseMergedOutputExceedsItsContextWindowIsRefusedAtResolution() {
+        AiProperties.ModelOverride override = new AiProperties.ModelOverride();
+        override.setProvider("openai_compatible");
+        override.setModelId("llama3.3:70b");
+        override.setContextWindowTokens(2_048);
+
+        IllegalStateException refused = assertThrows(IllegalStateException.class,
+                () -> AiModelCatalog.resolve(
+                        Family.OPENAI_COMPATIBLE, "llama3.3:70b", List.of(override)));
+
+        assertTrue(refused.getMessage().contains("llama3.3:70b"));
+        assertTrue(refused.getMessage().contains("context-window-tokens"));
+    }
+
+    @Test
+    void anOverrideWhoseMergedPairStaysCoherentResolvesNormally() {
+        AiProperties.ModelOverride override = new AiProperties.ModelOverride();
+        override.setProvider("openai_compatible");
+        override.setModelId("llama3.3:70b");
+        override.setContextWindowTokens(2_048);
+        override.setMaxOutputTokens(2_048);
+
+        ModelCapabilities patched = AiModelCatalog.resolve(
+                Family.OPENAI_COMPATIBLE, "llama3.3:70b", List.of(override));
+
+        assertEquals(2_048, patched.contextWindowTokens());
+        assertEquals(2_048, patched.maxOutputTokens());
+    }
+
+    @Test
     void anOperatorOverrideWinsOverADeclaredEntryAndItsPricing() {
         AiProperties.ModelOverride override = new AiProperties.ModelOverride();
         override.setProvider("bedrock");

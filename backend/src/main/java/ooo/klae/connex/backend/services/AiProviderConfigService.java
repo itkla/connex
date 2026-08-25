@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiGenerationProfile;
 import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.provider.AiModelCatalog;
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.AiProviderReadiness;
 import ooo.klae.connex.backend.ai.AiProviderSecretCipher;
@@ -368,9 +369,36 @@ public class AiProviderConfigService implements AiProviderReadiness {
         };
     }
 
-    private static boolean supportsImageInput(AiProviderConfig config) {
-        return config != null && AiImageInputSupport.supports(
-                config.getProvider(), config.getModelId(), config.getRegion());
+    /**
+     * Whether the configured model accepts image input for this deployment.
+     *
+     * The region-aware {@link AiImageInputSupport} allowlist remains the authority for what a
+     * provider destination can accept; a {@code connex.ai.model-overrides} modality declaration
+     * may only narrow it. An operator can therefore switch image input off for a model the
+     * allowlist permits, but can never enable it where the fail-closed egress gate forbids it.
+     */
+    private boolean supportsImageInput(AiProviderConfig config) {
+        if (config == null || !AiImageInputSupport.supports(
+                config.getProvider(), config.getModelId(), config.getRegion())) {
+            return false;
+        }
+        return AiModelCatalog.Family.fromProviderId(config.getProvider())
+                .map(family -> !operatorDisabledImageInput(family, config.getModelId()))
+                .orElse(true);
+    }
+
+    /**
+     * Whether an operator override explicitly switched image input off for this model.
+     *
+     * Compared against the declaration rather than read absolutely, so a model the catalog does
+     * not know (declared text-only by fallback) is never narrowed by catalog ignorance — only a
+     * deliberate {@code image-input: false} override narrows the allowlist's answer.
+     */
+    private boolean operatorDisabledImageInput(AiModelCatalog.Family family, String modelId) {
+        boolean declared = AiModelCatalog.modalities(family, modelId, null).imageIn();
+        boolean effective = AiModelCatalog.modalities(
+                family, modelId, aiProperties.getModelOverrides()).imageIn();
+        return declared && !effective;
     }
 
     private AiCredentials decryptCredentials(int orgId, String credentialRef) {

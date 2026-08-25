@@ -151,9 +151,11 @@ deployments need a shared coordinator for cluster-wide enforcement.
 Model context windows, output ceilings, input modalities, and prices are declared once in
 `AiModelCatalog` from dated vendor documentation. A model the catalog does not recognize keeps a
 conservative 4,096-token fallback rather than a guessed limit, so Ask Connex under-uses an unlisted
-model instead of over-filling it. Two cases need operator input: an Azure deployment whose
-operator-chosen name does not carry its model family, and an OpenAI-compatible endpoint serving an
-arbitrary self-hosted model.
+model instead of over-filling it. Two cases need operator input: an Azure provider configuration
+whose configured model id does not carry its model family, and an OpenAI-compatible endpoint
+serving an arbitrary self-hosted model. Overrides key on the configured **model id** only — the
+Azure deployment name is a separate field the capability lookup never reads, so an override keyed
+by a deployment name matches nothing.
 
 Set `connex.ai.model-overrides[N]` to patch a declared entry without waiting for a release. Matching
 is exact and case-insensitive against the model id as configured (for `openai_compatible`, after any
@@ -165,7 +167,7 @@ connex:
   ai:
     model-overrides:
       - provider: azure_openai          # bedrock | azure_openai | vertex | openai_compatible
-        model-id: team-model-a          # exact configured model id or Azure deployment name
+        model-id: team-model-a          # the exact configured model id (never the Azure deployment name)
         context-window-tokens: 400000
         max-output-tokens: 128000
       - provider: openai_compatible
