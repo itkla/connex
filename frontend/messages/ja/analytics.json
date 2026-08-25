@@ -44,7 +44,7 @@
     "agingTitle": "進行中の案件の経過",
     "topDealsTitle": "主要な案件",
     "infoAria": "計算方法",
-    "revenueInfo": "受注済みの売上（実績）と、全案件の予定額（予想売上）を月別に比較します。",
+    "revenueInfo": "受注済みの売上（実績）と、全案件の予測金額を月別に比較します。",
     "stageInfo": "選択中のパイプラインの進行中案件をステージ別に表示。バー＝予定額、数値＝件数。",
     "winRateInfo": "今期間にクローズした案件の受注・失注。中央は成約率（受注 ÷（受注＋失注））。",
     "activityInfo": "今期間の活動を種類別・タイムスタンプ順に表示します。",
@@ -94,14 +94,14 @@
     "activityTooltip": "選択期間に記録された電話、メール、打ち合わせ、メモ、その他のやり取り。"
   },
   "AnalyticsRevenue": {
-    "subtitle": "実績と予想の推移",
+    "subtitle": "実績と予測の推移",
     "openPipeline": "進行中のパイプライン",
     "actual": "受注",
-    "projected": "予想",
+    "projected": "予測",
     "today": "今日",
     "empty": "表示できる売上データがまだありません",
     "actualAmount": "受注 · {amount}",
-    "projectedAmount": "予想 · {amount}"
+    "projectedAmount": "予測 · {amount}"
   },
   "AnalyticsStageFunnel": {
     "selectPipeline": "パイプラインを選択",

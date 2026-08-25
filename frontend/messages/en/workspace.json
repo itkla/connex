@@ -823,7 +823,8 @@
         "removed": "Email settings removed.",
         "loadFailed": "Your email settings couldn't be loaded.",
         "retry": "Try again",
-        "removeFailed": "Couldn't remove the email settings"
+        "removeFailed": "Couldn't remove the email settings",
+        "testFailedBody": "The server didn't accept the message. Check the sending address, host, port, and credentials, then try again."
     },
     "WorkspaceDelivery": {
         "title": "Delivery",

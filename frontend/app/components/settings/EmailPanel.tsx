@@ -167,7 +167,7 @@ export default function EmailPanel({
             if (result.success) {
                 toastSuccess(t("testSent"));
             } else {
-                toastError(result.error ?? t("testFailed"));
+                toastError(t("testFailed"), { description: t("testFailedBody") });
             }
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
