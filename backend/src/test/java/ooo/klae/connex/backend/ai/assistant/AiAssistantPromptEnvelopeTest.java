@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
@@ -16,28 +18,38 @@ import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Pins the cost of the fixed Ask Connex envelope on the smallest supported context window.
+ * Pins the cost of the fixed Ask Connex envelope against the declared minimum context window.
  *
  * <p>The declared tool catalog is serialized twice into every model step: once as the prompt
- * vocabulary inside the system instructions and once as the strict step response schema. On a 32k
- * model {@link AiAssistantPromptBudget} spends the envelope directly out of the output-token
- * allocation, so each added byte removes roughly one token the model has left to write its answer
- * with, until the allocation reaches zero and the turn cannot start at all.
+ * vocabulary inside the system instructions and once as the strict step response schema.
+ * {@link AiAssistantPromptBudget} spends that envelope directly out of the output-token allocation,
+ * whose conservative term reduces to {@code contextTokens - fixedEnvelopeBytes - 14,848}. On a 32k
+ * window that is {@code 17,920 - fixedEnvelopeBytes}, which is why 32k is refused rather than
+ * quietly starved: today's JSON-ReAct envelope would leave it 958 output tokens.
  *
- * <p>{@code AiInvocationServiceTest} proves the real first-tool-result prompt is still admitted.
- * This test guards the margin behind that admission so a new tool or a new sentence of policy fails
- * here, with the numbers printed, rather than silently starving the answer budget.
+ * <p>This test guards the relationship at the floor instead. At
+ * {@link AiAssistantPromptBudget#ASSISTANT_MIN_CONTEXT_TOKENS} the envelope must still leave at
+ * least twice the operator-configured output ceiling — {@value #MINIMUM_FLOOR_OUTPUT_TOKENS} tokens
+ * — so the answer budget is funded with room rather than exactly. A new tool or a new sentence of
+ * policy that eats that margin fails here, with the numbers printed, rather than silently reducing
+ * what the floor was raised to protect.
  */
 class AiAssistantPromptEnvelopeTest {
 
-    private static final int SMALLEST_SUPPORTED_CONTEXT_TOKENS = 32_768;
+    private static final int FLOOR_CONTEXT_TOKENS =
+            AiAssistantPromptBudget.ASSISTANT_MIN_CONTEXT_TOKENS;
     private static final int CONFIGURED_MAX_OUTPUT_TOKENS = 16_384;
+    private static final int PROVIDER_MAX_OUTPUT_TOKENS = 8_192;
 
     /**
-     * The minimum output-token allocation a 32k model must retain after the fixed envelope is paid.
-     * Below this the assistant cannot reliably emit a complete answer document.
+     * The floor-preserving output allocation the fixed envelope must leave at the declared floor.
+     *
+     * <p>Twice {@link #CONFIGURED_MAX_OUTPUT_TOKENS}: the floor exists so the envelope is absorbed
+     * without competing with the answer, so it may consume at most half of what the window grants
+     * beyond the configured ceiling. The JSON-ReAct envelope currently leaves 33,726 tokens, a
+     * margin of 958 — the same figure that was a 32k model's entire answer budget.
      */
-    private static final int MINIMUM_RETAINED_OUTPUT_TOKENS = 512;
+    private static final int MINIMUM_FLOOR_OUTPUT_TOKENS = 2 * CONFIGURED_MAX_OUTPUT_TOKENS;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final AiAssistantToolCatalog toolCatalog = new AiAssistantToolCatalog();
@@ -47,36 +59,97 @@ class AiAssistantPromptEnvelopeTest {
             new AiAssistantStepSchema(objectMapper, toolCatalog);
 
     @Test
-    void theFixedEnvelopeLeavesAUsableOutputBudgetOnTheSmallestSupportedContextWindow() {
+    void theFixedEnvelopeLeavesRoomToSpareAtTheDeclaredMinimumContextWindow() {
         int reactEnvelope = reactEnvelopeBytes();
         int nativeEnvelope = nativeEnvelopeBytes();
+        int reactFloorOutputTokens = unclampedFloorOutputTokens(reactEnvelope);
+        int nativeFloorOutputTokens = unclampedFloorOutputTokens(nativeEnvelope);
         AiAssistantPromptBudget reactBudget = budget(reactEnvelope);
         AiAssistantPromptBudget nativeBudget = budget(nativeEnvelope);
+        System.out.println("[envelope] floor=" + FLOOR_CONTEXT_TOKENS
+                + " minimumFloorOutputTokens=" + MINIMUM_FLOOR_OUTPUT_TOKENS);
         System.out.println("[envelope] react fixed=" + reactEnvelope
+                + " floorOutputTokens=" + reactFloorOutputTokens
                 + " outputTokens=" + reactBudget.maxOutputTokens()
-                + " toolResultBytes=" + reactBudget.toolResultBytes());
+                + " toolResultBytes=" + reactBudget.toolResultBytes()
+                + " thirtyTwoKOutputTokens=" + (17_920 - reactEnvelope));
         System.out.println("[envelope] native fixed=" + nativeEnvelope
+                + " floorOutputTokens=" + nativeFloorOutputTokens
                 + " outputTokens=" + nativeBudget.maxOutputTokens()
-                + " toolResultBytes=" + nativeBudget.toolResultBytes());
-        assertTrue(reactBudget.maxOutputTokens() >= MINIMUM_RETAINED_OUTPUT_TOKENS,
+                + " toolResultBytes=" + nativeBudget.toolResultBytes()
+                + " thirtyTwoKOutputTokens=" + (17_920 - nativeEnvelope));
+        assertTrue(reactFloorOutputTokens >= MINIMUM_FLOOR_OUTPUT_TOKENS,
                 "The fixed JSON-ReAct envelope of " + reactEnvelope
-                        + " bytes leaves only " + reactBudget.maxOutputTokens()
-                        + " output tokens on a 32k model");
-        assertTrue(nativeBudget.maxOutputTokens() >= MINIMUM_RETAINED_OUTPUT_TOKENS,
+                        + " bytes leaves only " + reactFloorOutputTokens
+                        + " output tokens at the " + FLOOR_CONTEXT_TOKENS + "-token floor");
+        assertTrue(nativeFloorOutputTokens >= MINIMUM_FLOOR_OUTPUT_TOKENS,
                 "The fixed native-tool envelope of " + nativeEnvelope
-                        + " bytes leaves only " + nativeBudget.maxOutputTokens()
-                        + " output tokens on a 32k model");
+                        + " bytes leaves only " + nativeFloorOutputTokens
+                        + " output tokens at the " + FLOOR_CONTEXT_TOKENS + "-token floor");
+        assertEquals(PROVIDER_MAX_OUTPUT_TOKENS, reactBudget.maxOutputTokens(),
+                "The fixed JSON-ReAct envelope reduced the answer budget at the floor");
+        assertEquals(PROVIDER_MAX_OUTPUT_TOKENS, nativeBudget.maxOutputTokens(),
+                "The fixed native-tool envelope reduced the answer budget at the floor");
+    }
+
+    /**
+     * States the measurement the floor was raised over: the real envelope on a real 32k model.
+     *
+     * <p>The refusal is the product decision, so the number behind it stays measured rather than
+     * remembered. If a future envelope change moves it, this test says so instead of leaving the
+     * declared rationale quietly stale.
+     */
+    @Test
+    void theSameEnvelopeIsRefusedOnAThirtyTwoThousandTokenModel() {
+        int reactEnvelope = reactEnvelopeBytes();
+        int thirtyTwoKOutputTokens = 17_920 - reactEnvelope;
+        System.out.println("[envelope] 32k react fixed=" + reactEnvelope
+                + " outputTokens=" + thirtyTwoKOutputTokens
+                + " cliffBytes=17919");
+        assertTrue(thirtyTwoKOutputTokens > 0 && thirtyTwoKOutputTokens < 2_048,
+                "A 32k model would retain " + thirtyTwoKOutputTokens
+                        + " output tokens, which is no longer the starved budget the floor"
+                        + " was raised over");
+
+        AiAssistantLoopException refused = assertThrows(
+                AiAssistantLoopException.class,
+                () -> AiAssistantPromptBudget.from(
+                        new AiProviderCapabilities(
+                                AiStructuredOutputEnforcement.JSON_SCHEMA,
+                                AiReasoningMode.TAGGED,
+                                32_768,
+                                PROVIDER_MAX_OUTPUT_TOKENS),
+                        CONFIGURED_MAX_OUTPUT_TOKENS,
+                        reactEnvelope));
+
+        assertEquals(AiAssistantTerminalReasons.CONTEXT_WINDOW_TOO_SMALL,
+                refused.terminalReason());
     }
 
     private static AiAssistantPromptBudget budget(int fixedEnvelopeBytes) {
         return AiAssistantPromptBudget.from(
-                new AiProviderCapabilities(
-                        AiStructuredOutputEnforcement.JSON_SCHEMA,
-                        AiReasoningMode.TAGGED,
-                        SMALLEST_SUPPORTED_CONTEXT_TOKENS,
-                        8_192),
+                capabilities(PROVIDER_MAX_OUTPUT_TOKENS),
                 CONFIGURED_MAX_OUTPUT_TOKENS,
                 fixedEnvelopeBytes);
+    }
+
+    /**
+     * Returns the floor-preserving output allocation before any provider or operator ceiling clamps
+     * it, by asking for more output than either ceiling would ever grant.
+     */
+    private static int unclampedFloorOutputTokens(int fixedEnvelopeBytes) {
+        return AiAssistantPromptBudget.from(
+                capabilities(FLOOR_CONTEXT_TOKENS - 1),
+                FLOOR_CONTEXT_TOKENS - 1,
+                fixedEnvelopeBytes).maxOutputTokens();
+    }
+
+    private static AiProviderCapabilities capabilities(int maxOutputTokens) {
+        return new AiProviderCapabilities(
+                AiStructuredOutputEnforcement.JSON_SCHEMA,
+                AiReasoningMode.TAGGED,
+                FLOOR_CONTEXT_TOKENS,
+                maxOutputTokens);
     }
 
     private int reactEnvelopeBytes() {

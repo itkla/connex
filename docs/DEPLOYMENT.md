@@ -123,6 +123,10 @@ report narratives, or provider-backed business-card extraction with
 `CONNEX_AI_FEATURES_INTRO_RATIONALE=false`, `CONNEX_AI_FEATURES_REPORT_NARRATIVE=false`, or
 `CONNEX_AI_FEATURES_BUSINESS_CARD_EXTRACTION=false`. An absent per-feature setting defaults on, but
 the master switch, `AI_USE`, and organization-provider readiness remain mandatory.
+The Ask Connex assistant requires a model with a context window of at least 65,536 tokens; an
+organization configured with a smaller model gets a per-turn "model too small" refusal for the
+assistant only, while deal briefs, risk rationales, and report narratives keep working. Choose
+assistant models accordingly when provisioning provider configurations.
 Unmasked AI disclosure remains independently disabled unless
 `CONNEX_AI_UNMASKED_MODE_ENABLED=true`. Even with that deployment flag, an organization stays in
 masked mode until an org admin completes recent-authentication step-up and attests that its exact

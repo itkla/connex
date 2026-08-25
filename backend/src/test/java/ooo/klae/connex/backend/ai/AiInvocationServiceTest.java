@@ -41,6 +41,7 @@ import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.ai.assistant.AiAssistantLoopException;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptBudget;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantStep;
@@ -95,6 +96,8 @@ class AiInvocationServiceTest {
     private static final int ORG_ID = 22;
     private static final int ACTOR_ID = 33;
     private static final AiFeature FEATURE = AiFeature.DEAL_BRIEF;
+    private static final int ASSISTANT_FLOOR =
+            AiAssistantPromptBudget.ASSISTANT_MIN_CONTEXT_TOKENS;
     private static final Instant NOW = Instant.parse("2026-08-12T00:00:00Z");
 
     @Mock private AiFeatureGate aiFeatureGate;
@@ -619,8 +622,43 @@ class AiInvocationServiceTest {
         verify(aiProvider, never()).complete(any());
     }
 
+    /**
+     * The assistant floor refuses a 32k model before anything is assembled or sent.
+     *
+     * <p>An unknown OpenAI-compatible model falls back to a conservative 32k context declaration,
+     * which is exactly the configuration this refusal exists for: the prompt would have fitted, so
+     * no later guard would have objected, and the answer would have been truncated instead.
+     */
     @Test
-    void unknownOpenAiCompatible32kContextAcceptsTheRealFirstToolResultPrompt() {
+    void unknownOpenAiCompatible32kContextIsRefusedBeforeTheAssistantPromptIsAssembled() {
+        var catalog = new AiAssistantToolCatalog();
+        var promptAssembler = new AiAssistantPromptAssembler(new ObjectMapper(), catalog);
+        var stepSchema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
+        int fixedEnvelopeBytes = service.serializedPromptBytes(
+                promptAssembler.fixedPrompt(),
+                stepSchema.responseSchema(),
+                AiReasoningMode.TAGGED);
+
+        AiAssistantLoopException refused = assertThrows(
+                AiAssistantLoopException.class,
+                () -> AiAssistantPromptBudget.from(
+                        new AiProviderCapabilities(
+                                AiStructuredOutputEnforcement.JSON_SCHEMA,
+                                AiReasoningMode.TAGGED,
+                                32_768,
+                                8_192),
+                        16_384,
+                        fixedEnvelopeBytes));
+
+        assertEquals("context_window_too_small", refused.terminalReason());
+        assertTrue(fixedEnvelopeBytes < AiProviderCapabilities.conservativeInputByteCeiling(
+                32_768, 8_192),
+                "The 32k refusal must be the floor, not a prompt that no longer fits");
+        verify(aiProvider, never()).complete(any());
+    }
+
+    @Test
+    void unknownOpenAiCompatible64kContextAcceptsTheRealFirstToolResultPrompt() {
         ResolvedAiProvider openAiCompatible = new ResolvedAiProvider(
                 "openai_compatible",
                 null,
@@ -635,7 +673,7 @@ class AiInvocationServiceTest {
         when(aiProviderConfigService.resolveForOrg(ORG_ID, ACTOR_ID))
                 .thenReturn(openAiCompatible);
         when(aiProviderRouter.adapterFor("openai_compatible")).thenReturn(aiProvider);
-        when(aiProvider.contextWindowTokens(openAiCompatible.target())).thenReturn(32_768);
+        when(aiProvider.contextWindowTokens(openAiCompatible.target())).thenReturn(ASSISTANT_FLOOR);
         var catalog = new AiAssistantToolCatalog();
         var promptAssembler = new AiAssistantPromptAssembler(new ObjectMapper(), catalog);
         var stepSchema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
@@ -647,7 +685,7 @@ class AiInvocationServiceTest {
                 new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
                         AiReasoningMode.TAGGED,
-                        32_768,
+                        ASSISTANT_FLOOR,
                         8_192),
                 16_384,
                 fixedEnvelopeBytes);
@@ -706,13 +744,15 @@ class AiInvocationServiceTest {
         assertInstanceOf(AiStructuredOutcome.Parsed.class, attempt.outcome());
         assertTrue(service.serializedPromptBytes(
                 prompt, stepSchema.responseSchema(), AiReasoningMode.TAGGED)
-                <= AiProviderCapabilities.estimatedInputByteCeiling(
-                        32_768, budget.maxOutputTokens()));
+                <= AiProviderCapabilities.conservativeInputByteCeiling(
+                        ASSISTANT_FLOOR, budget.maxOutputTokens()),
+                "The floor must admit the real first-tool-result prompt with dense-input room,"
+                        + " not merely under the optimistic four-bytes-per-token estimate");
         verify(aiProvider).complete(any());
     }
 
     @Test
-    void nativeDefinitionsAndFirstToolResultFitTheConservative32kBudget() {
+    void nativeDefinitionsAndFirstToolResultFitTheConservativeFloorBudget() {
         ObjectMapper objectMapper = new ObjectMapper();
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
         AiAssistantPromptAssembler promptAssembler =
@@ -721,7 +761,7 @@ class AiInvocationServiceTest {
         AiProviderCapabilities capabilities = new AiProviderCapabilities(
                 AiStructuredOutputEnforcement.JSON_SCHEMA,
                 AiReasoningMode.TAGGED,
-                32_768,
+                ASSISTANT_FLOOR,
                 8_192,
                 AiToolCallingMode.NATIVE_FUNCTIONS,
                 AiReasoningMode.NATIVE);

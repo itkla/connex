@@ -449,6 +449,7 @@
     "skillBudgetExceeded": "This answer found what it needed but ran out of room to write it up. Ask it again, or ask a more specific question.",
     "toolOutsideSkillAuthority": "Ask Connex couldn't complete this request.",
     "workspaceDisabled": "Ask Connex is disabled for this workspace. A workspace administrator can enable it again.",
+    "contextWindowTooSmall": "The AI model this organization uses can't take in enough at once for Ask Connex to work well. An organization administrator can switch to a more capable model.",
     "accessRevoked": "Your access to something this answer was reading changed while it was being written, so the answer was stopped and not kept.",
     "restrictionsChanged": "What this workspace allows AI to read changed while this answer was being written, so the answer was stopped and not kept.",
     "partialAnswer": "Unfinished answer — this is as far as the assistant got before it stopped.",

@@ -380,6 +380,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         budget: t('budgetExhausted'),
         capacity: t('capacityExhausted'),
         workspaceDisabled: t('workspaceDisabled'),
+        contextWindowTooSmall: t('contextWindowTooSmall'),
         accessRevoked: t('accessRevoked'),
         restrictionsChanged: t('restrictionsChanged'),
         imageUnsupported: t('turnImageUnsupported'),

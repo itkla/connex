@@ -232,8 +232,8 @@ export type AskConnexRecovery = {
  * - `capacity` — an allowance or a provider ran out. Nothing about this request changes that, so
  *   the only real route is the same question later, and an immediate retry control would be a
  *   button that can only fail.
- * - `availability` — the feature is switched off here. Nothing the member does in this panel
- *   changes it.
+ * - `availability` — the feature is switched off here, or the model it is configured with cannot
+ *   run it. Nothing the member does in this panel changes it.
  * - `authorization` — the member's authority to read what the turn produced was withdrawn while it
  *   ran. The server purges the durable partial for these, so this client must not keep offering
  *   routes that build on text it is no longer entitled to.
@@ -264,6 +264,7 @@ export type AskConnexFailureMessage =
     | 'budget'
     | 'capacity'
     | 'workspaceDisabled'
+    | 'contextWindowTooSmall'
     | 'accessRevoked'
     | 'restrictionsChanged'
     | 'imageUnsupported'
@@ -298,6 +299,7 @@ const TERMINAL_KINDS: Readonly<Record<string, AskConnexTerminalKind>> = {
     invocation_capacity_exhausted: { category: 'capacity', message: 'capacity' },
     generation_capacity: { category: 'capacity', message: 'capacity' },
     workspace_disabled: { category: 'availability', message: 'workspaceDisabled' },
+    context_window_too_small: { category: 'availability', message: 'contextWindowTooSmall' },
     access_revoked: { category: 'authorization', message: 'accessRevoked' },
     restrictions_changed: { category: 'authorization', message: 'restrictionsChanged' },
     image_input_unsupported: { category: 'unsupportedInput', message: 'imageUnsupported' },

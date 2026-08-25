@@ -101,6 +101,7 @@ class AiChatTurnTerminalCoordinatorTest {
                 "agent_backstop_exceeded",
                 "step_cap_exceeded",
                 "workspace_disabled",
+                AiAssistantTerminalReasons.CONTEXT_WINDOW_TOO_SMALL,
                 "internal_error")) {
             coordinator.listener(TURN).onTerminal(
                     AiGenerationTaskResult.Outcome.FAILED, reason);

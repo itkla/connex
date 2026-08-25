@@ -13,13 +13,15 @@ import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 
 class AiAssistantPromptBudgetTest {
 
+    private static final int FLOOR = AiAssistantPromptBudget.ASSISTANT_MIN_CONTEXT_TOKENS;
+
     @Test
     void safeDefaultContextProducesIndependentConservativeBudgets() {
         AiAssistantPromptBudget budget = AiAssistantPromptBudget.from(
                 new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.PROMPT_ONLY,
                         AiReasoningMode.TAGGED,
-                        32_768,
+                        FLOOR,
                         8_192),
                 16_384,
                 8_192);
@@ -34,24 +36,34 @@ class AiAssistantPromptBudgetTest {
                 budget.compactionSourceBytes(),
                 budget.historyBytes() + budget.attachmentContextBytes()
                         + budget.pageContextBytes() + budget.toolResultBytes());
-        assertEquals(98_304, AiProviderCapabilities.estimatedInputByteCeiling(
-                32_768, budget.maxOutputTokens()));
-        assertEquals(24_576, AiProviderCapabilities.conservativeInputByteCeiling(
-                32_768, budget.maxOutputTokens()));
+        assertEquals(229_376, AiProviderCapabilities.estimatedInputByteCeiling(
+                FLOOR, budget.maxOutputTokens()));
+        assertEquals(57_344, AiProviderCapabilities.conservativeInputByteCeiling(
+                FLOOR, budget.maxOutputTokens()));
         assertTrue(budget.compactionSourceBytes() * 12
                 + budget.repairEnvelopeBytes() + 8_192
                 <= AiProviderCapabilities.estimatedInputByteCeiling(
-                        32_768, budget.maxOutputTokens()));
+                        FLOOR, budget.maxOutputTokens()));
         assertTrue(budget.compactionSourceBytes()
                 + budget.repairEnvelopeBytes() + 8_192
                 <= AiProviderCapabilities.conservativeInputByteCeiling(
-                        32_768, budget.maxOutputTokens()));
+                        FLOOR, budget.maxOutputTokens()));
     }
 
+    /**
+     * Pins the floor itself and the honest refusal below it.
+     *
+     * <p>A 32k model is the case the floor exists for: it still admits the fixed envelope, so
+     * nothing further down the pipeline would object, and the turn would run to a truncated answer.
+     * The refusal has to happen here, where the context size first becomes known and before any
+     * prompt is assembled or sent.
+     */
     @Test
-    void undersizedProviderIsRejectedBeforePromptAssembly() {
-        assertThrows(
-                ooo.klae.connex.backend.ai.provider.AiProviderException.class,
+    void aContextWindowBelowTheAssistantFloorIsRefusedBeforePromptAssembly() {
+        assertEquals(65_536, AiAssistantPromptBudget.ASSISTANT_MIN_CONTEXT_TOKENS);
+
+        AiAssistantLoopException undersized = assertThrows(
+                AiAssistantLoopException.class,
                 () -> AiAssistantPromptBudget.from(
                         new AiProviderCapabilities(
                                 AiStructuredOutputEnforcement.PROMPT_ONLY,
@@ -59,6 +71,51 @@ class AiAssistantPromptBudgetTest {
                                 4_096,
                                 1_024),
                         1_024));
+        AiAssistantLoopException thirtyTwoK = assertThrows(
+                AiAssistantLoopException.class,
+                () -> AiAssistantPromptBudget.from(
+                        new AiProviderCapabilities(
+                                AiStructuredOutputEnforcement.PROMPT_ONLY,
+                                AiReasoningMode.TAGGED,
+                                32_768,
+                                8_192),
+                        16_384,
+                        16_962));
+        AiAssistantLoopException oneBelowTheFloor = assertThrows(
+                AiAssistantLoopException.class,
+                () -> AiAssistantPromptBudget.from(
+                        new AiProviderCapabilities(
+                                AiStructuredOutputEnforcement.PROMPT_ONLY,
+                                AiReasoningMode.TAGGED,
+                                FLOOR - 1,
+                                8_192),
+                        16_384,
+                        16_962));
+
+        assertEquals(AiAssistantTerminalReasons.CONTEXT_WINDOW_TOO_SMALL,
+                undersized.terminalReason());
+        assertEquals(AiAssistantTerminalReasons.CONTEXT_WINDOW_TOO_SMALL,
+                thirtyTwoK.terminalReason());
+        assertEquals(AiAssistantTerminalReasons.CONTEXT_WINDOW_TOO_SMALL,
+                thirtyTwoK.detailReason());
+        assertEquals(AiAssistantTerminalReasons.CONTEXT_WINDOW_TOO_SMALL,
+                oneBelowTheFloor.terminalReason());
+    }
+
+    @Test
+    void exactlyTheFloorStillFundsTheConfiguredOutputBudget() {
+        AiAssistantPromptBudget budget = AiAssistantPromptBudget.from(
+                new AiProviderCapabilities(
+                        AiStructuredOutputEnforcement.PROMPT_ONLY,
+                        AiReasoningMode.TAGGED,
+                        FLOOR,
+                        8_192),
+                16_384,
+                16_962);
+
+        assertEquals(8_192, budget.maxOutputTokens());
+        assertTrue(budget.historyBytes() >= 4_096);
+        assertTrue(budget.toolResultBytes() >= 2_048);
     }
 
     @Test
@@ -67,10 +124,10 @@ class AiAssistantPromptBudgetTest {
                 new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.PROMPT_ONLY,
                         AiReasoningMode.TAGGED,
-                        32_768,
+                        FLOOR,
                         8_192),
                 8_192,
-                15_000);
+                50_000);
 
         assertTrue(budget.maxOutputTokens() < 8_192);
         assertFalse(budget.outputTokensClamped());
@@ -79,9 +136,9 @@ class AiAssistantPromptBudgetTest {
         assertTrue(budget.pageContextBytes() >= 256);
         assertTrue(budget.attachmentContextBytes() >= 256);
         assertTrue(budget.compactionSourceBytes()
-                + budget.repairEnvelopeBytes() + 15_000
+                + budget.repairEnvelopeBytes() + 50_000
                 <= AiProviderCapabilities.conservativeInputByteCeiling(
-                        32_768, budget.maxOutputTokens()));
+                        FLOOR, budget.maxOutputTokens()));
     }
 
     @Test
@@ -92,17 +149,17 @@ class AiAssistantPromptBudgetTest {
                         new AiProviderCapabilities(
                                 AiStructuredOutputEnforcement.PROMPT_ONLY,
                                 AiReasoningMode.TAGGED,
-                                32_768,
+                                FLOOR,
                                 8_192),
                         8_192,
-                        30_000));
+                        51_000));
         assertThrows(
                 ooo.klae.connex.backend.ai.provider.AiProviderException.class,
                 () -> AiAssistantPromptBudget.from(
                         new AiProviderCapabilities(
                                 AiStructuredOutputEnforcement.PROMPT_ONLY,
                                 AiReasoningMode.TAGGED,
-                                32_768,
+                                FLOOR,
                                 8_192),
                         8_192,
                         Integer.MAX_VALUE));

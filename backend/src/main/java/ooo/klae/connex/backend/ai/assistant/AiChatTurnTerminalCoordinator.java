@@ -34,6 +34,7 @@ public class AiChatTurnTerminalCoordinator {
             "tool_outside_skill_authority",
             "workspace_disabled",
             "generation_capacity",
+            AiAssistantTerminalReasons.CONTEXT_WINDOW_TOO_SMALL,
             AiAssistantTerminalReasons.RESTRICTIONS_CHANGED,
             AiAssistantTerminalReasons.ACCESS_REVOKED,
             INTERNAL_ERROR);
