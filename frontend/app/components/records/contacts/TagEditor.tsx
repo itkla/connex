@@ -3,7 +3,7 @@
 import { startTransition, useOptimistic } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { toastError } from '@/app/lib/toast';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { PlusIcon, XMarkIcon } from '@heroicons/react/24/outline';
 
 import { Badge } from '@/components/ui/badge';
@@ -46,6 +46,7 @@ export default function TagEditor({
 }: Props) {
     const router = useRouter();
     const t = useTranslations('ContactsTagEditor');
+    const showApiError = useApiErrorToast('ContactsTagEditor');
     const [optimisticTags, applyOptimistic] = useOptimistic<Tag[], TagAction>(
         currentTags,
         (state, action) => {
@@ -80,7 +81,7 @@ export default function TagEditor({
                 router.refresh();
                 onChange?.();
             } catch (err) {
-                toastError(err instanceof Error ? err.message : t('toastFailedAdd'));
+                showApiError(err, 'toastFailedAdd');
             }
         });
     };
@@ -93,7 +94,7 @@ export default function TagEditor({
                 router.refresh();
                 onChange?.();
             } catch (err) {
-                toastError(err instanceof Error ? err.message : t('toastFailedRemove'));
+                showApiError(err, 'toastFailedRemove');
             }
         });
     };

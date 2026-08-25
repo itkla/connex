@@ -60,7 +60,7 @@
     "cancel": "Cancel",
     "create": "Create",
     "toastCreated": "User created",
-    "toastFailed": "Failed to create user"
+    "toastFailed": "Couldn't create the user"
   },
   "UsersLayout": {
     "title": "Users",

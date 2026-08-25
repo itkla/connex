@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
 
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { ApiError, updateOrganizationIdentity } from "@/app/lib/api";
@@ -25,6 +26,7 @@ export default function OrganizationIdentityForm({
 }) {
     const t = useTranslations("OrgOverview");
     const router = useRouter();
+    const showApiError = useApiErrorToast("OrgOverview");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { publishOrganizationIdentity, restoreOrganizationIdentity } = useWorkspace();
     const [name, setName] = useState(organization.name);
@@ -70,7 +72,7 @@ export default function OrganizationIdentityForm({
                 toastError(t("stale"));
                 reconcile = true;
             } else if (!handlePasskeyStepUpError(error)) {
-                toastError(error instanceof Error ? error.message : t("saveFailed"));
+                showApiError(error, "saveFailed");
                 reconcile = true;
             }
             if (reconcile) {

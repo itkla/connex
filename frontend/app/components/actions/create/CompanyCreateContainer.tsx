@@ -14,6 +14,7 @@ import {
     uploadCompanyLogo,
     uploadContactPicture,
 } from '@/app/lib/api';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type { Company, CreateCompanyPayload } from '@/app/lib/types';
 
@@ -52,6 +53,7 @@ export default function CompanyCreateContainer({
 }) {
     const router = useRouter();
     const t = useTranslations('Actions');
+    const showApiError = useApiErrorToast('Actions');
 
     const [loaded, setLoaded] = useState(false);
     const [existingCompanies, setExistingCompanies] = useState<Company[]>([]);
@@ -193,7 +195,7 @@ export default function CompanyCreateContainer({
             if (requestInit?.signal?.aborted) return;
             setCreating(false);
             if (isFieldError(err)) throw err;
-            toastError(err instanceof Error ? err.message : t('feedback.createFailed'));
+            showApiError(err, 'feedback.companyCreateFailed');
         }
     };
 

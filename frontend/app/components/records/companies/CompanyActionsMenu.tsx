@@ -28,6 +28,7 @@ import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
 
 import { archiveCompany, restoreCompany, createContact, createDeal, getActiveWorkspaceMembers, getPipelines, getStagesByPipelineId, importBusinessCard, isFieldError, updateCompanyOwner, uploadContactPicture } from '@/app/lib/api';
 import { type BusinessCardImportDraft, CreateContactPayload, type Company, type CreateDealPayload, type Pipeline, type Stage, type WorkspaceMember } from '@/app/lib/types';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 
 function emptyContactPayload(companyId: number): CreateContactPayload {
@@ -60,6 +61,7 @@ export default function CompanyActionsMenu({
 }) {
     const router = useRouter();
     const t = useTranslations('CompaniesActionsMenu');
+    const showApiError = useApiErrorToast('CompaniesActionsMenu');
     const { activeWorkspaceId } = useWorkspace();
     const owned = company.workspaceId == null || company.workspaceId === activeWorkspaceId;
     const { inputRef: attachmentInputRef, uploading: attachmentsUploading, openPicker: openAttachmentPicker, onFilesSelected: onAttachmentFilesSelected } = useAttachmentUploader('company', company.id);
@@ -169,7 +171,7 @@ export default function CompanyActionsMenu({
                 router.refresh();
             }
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t(archived ? 'toastRestoreFailed' : 'toastArchiveFailed'));
+            showApiError(err, archived ? 'toastRestoreFailed' : 'toastArchiveFailed');
         } finally {
             setIsArchiving(false);
         }
@@ -262,7 +264,7 @@ export default function CompanyActionsMenu({
             if (isFieldError(err)) {
                 throw err;
             }
-            toastError(err instanceof Error ? err.message : t('toastCreateDealFailed'));
+            showApiError(err, 'toastCreateDealFailed');
         } finally {
             setIsCreatingDeal(false);
         }

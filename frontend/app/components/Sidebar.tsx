@@ -599,7 +599,7 @@ function UserMenu({ user, onLogout, rail }: { user: User; onLogout: () => void; 
                             className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-brand-light data-[highlighted]:text-brand-dark"
                         >
                             <UserCircleIcon className="size-4" />
-                            {t("profile")}
+                            {t("myWork")}
                         </Link>
                     </DropdownMenu.Item>
                     <DropdownMenu.Item asChild>

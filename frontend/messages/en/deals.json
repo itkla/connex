@@ -108,11 +108,11 @@
         "delete": "Delete",
         "entityLabel": "deal",
         "dealDeleted": "Deal deleted",
-        "failedToDelete": "Failed to delete",
+        "failedToDelete": "Couldn't delete the deal",
         "cannotChangeStatus": "Cannot change status: deal is missing pipeline or stage",
         "dealClosed": "Deal closed",
         "dealReopened": "Deal reopened",
-        "failedToUpdateStatus": "Failed to update status"
+        "failedToUpdateStatus": "Couldn't update the deal status"
     },
     "DealsActivityBreakdown": {
         "activityMix": "Activity mix",
@@ -148,9 +148,9 @@
     },
     "DealsTaskList": {
         "taskDeleted": "Task deleted",
-        "failedToDeleteTask": "Failed to delete task",
+        "failedToDeleteTask": "Couldn't delete the task",
         "taskMarkedAsComplete": "Task marked as complete",
-        "failedToMarkTaskAsComplete": "Failed to mark task as complete",
+        "failedToMarkTaskAsComplete": "Couldn't complete the task",
         "openTasksHeading": "Open tasks · {count}",
         "openTasks": "Open tasks",
         "openTasksTooltip": "A list of tasks that are associated with this deal.",
@@ -499,6 +499,14 @@
         "outcome_policy_invalidated": "Ended because the policy was tightened",
         "outcome_unsatisfiable": "Ended because no approver could complete it",
         "outcome_expired": "Ended because an approval deadline passed",
-        "outcome_cancelled_legacy": "Cancelled"
+        "outcome_cancelled_legacy": "Cancelled",
+        "approveFailed": "Couldn't approve the document",
+        "cancelRequestFailed": "Couldn't cancel the approval request",
+        "delegateFailed": "Couldn't delegate the approval",
+        "deleteFailed": "Couldn't delete the document",
+        "generateFailed": "Couldn't generate the document",
+        "rejectFailed": "Couldn't reject the document",
+        "requestFailed": "Couldn't request approval",
+        "statusFailed": "Couldn't update the document status"
     }
 }

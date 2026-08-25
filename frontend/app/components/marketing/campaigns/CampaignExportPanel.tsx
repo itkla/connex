@@ -24,6 +24,7 @@ import {
     type CampaignAudienceSnapshotSummary,
 } from "@/app/lib/types";
 import { canCreateExport, type CampaignAccess } from "@/app/lib/campaignAccess";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { formatDate } from "@/app/lib/utils";
 import type { CapabilityAvailability } from "@/app/lib/capabilityAvailability";
@@ -54,6 +55,7 @@ export default function CampaignExportPanel({
 }) {
     const t = useTranslations("CampaignExports");
     const tCapability = useTranslations("CapabilityUnavailable");
+    const showApiError = useApiErrorToast("CampaignExports");
     const locale = useLocale();
 
     const [exports, setExports] = useState<CampaignAudienceExport[]>(initialExports);
@@ -92,7 +94,7 @@ export default function CampaignExportPanel({
                 setExportRefused(true);
                 toastError(t("exportUnavailable"));
             } else {
-                toastError(err instanceof Error ? err.message : String(err));
+                showApiError(err, "createFailed");
             }
         } finally {
             setIsCreatingExport(false);

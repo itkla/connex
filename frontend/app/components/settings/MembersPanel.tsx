@@ -39,6 +39,7 @@ import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { useGrantedPermissions, usePermission } from "@/app/hooks/usePermissions";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { useFieldErrors } from "@/app/hooks/useFieldErrors";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -182,6 +183,7 @@ function MembersWorkspacePanel({
     presentation: MembersPresentation;
 }) {
     const t = useTranslations("WorkspaceMembers");
+    const showApiError = useApiErrorToast("WorkspaceMembers");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const router = useRouter();
     const { activeWorkspace } = useWorkspace();
@@ -301,7 +303,7 @@ function MembersWorkspacePanel({
             toastSuccess(t("roleChanged"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("roleChangeFailed"));
+                showApiError(err, "roleChangeFailed");
             }
         } finally {
             setBusyMemberId(null);
@@ -318,7 +320,7 @@ function MembersWorkspacePanel({
             toastSuccess(t("roleChanged"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("roleChangeFailed"));
+                showApiError(err, "roleChangeFailed");
             }
         } finally {
             setBusyMemberId(null);
@@ -335,7 +337,7 @@ function MembersWorkspacePanel({
             setRemoveTarget(null);
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("removeFailed"));
+                showApiError(err, "removeFailed");
             }
         } finally {
             setIsRemoving(false);
@@ -378,7 +380,7 @@ function MembersWorkspacePanel({
             }
         } catch (err) {
             if (!handlePasskeyStepUpError(err) && !captureFieldErrors(err)) {
-                toastError(err instanceof Error ? err.message : t("inviteFailed"));
+                showApiError(err, "inviteFailed");
             }
         } finally {
             setSending(false);
@@ -394,7 +396,7 @@ function MembersWorkspacePanel({
             toastSuccess(t("revoked"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("revokeFailed"));
+                showApiError(err, "revokeFailed");
             }
         } finally {
             setBusyInviteId(null);
@@ -436,7 +438,7 @@ function MembersWorkspacePanel({
             toastSuccess(t("linkCreated"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("linkCreateFailed"));
+                showApiError(err, "linkCreateFailed");
             }
         } finally {
             setCreatingLink(false);
@@ -452,7 +454,7 @@ function MembersWorkspacePanel({
             toastSuccess(t("linkRevoked"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("linkRevokeFailed"));
+                showApiError(err, "linkRevokeFailed");
             }
         } finally {
             setBusyLinkId(null);

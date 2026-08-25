@@ -12,6 +12,7 @@ import {
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -79,6 +80,7 @@ export default function EmailPanel({
     presentation = "page",
 }: { presentation?: EmailPresentation } = {}) {
     const t = useTranslations("WorkspaceEmail");
+    const showApiError = useApiErrorToast("WorkspaceEmail");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { activeWorkspaceId } = useWorkspace();
 
@@ -150,7 +152,7 @@ export default function EmailPanel({
             toastSuccess(t("saved"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("saveFailed"));
+                showApiError(err, "saveFailed");
             }
         } finally {
             setSaving(false);
@@ -165,11 +167,11 @@ export default function EmailPanel({
             if (result.success) {
                 toastSuccess(t("testSent"));
             } else {
-                toastError(result.error ?? t("testFailed"));
+                toastError(t("testFailed"), { description: t("testFailedBody") });
             }
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("testFailed"));
+                showApiError(err, "testFailed");
             }
         } finally {
             setTesting(false);
@@ -188,7 +190,7 @@ export default function EmailPanel({
             toastSuccess(t("removed"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("saveFailed"));
+                showApiError(err, "removeFailed");
             }
         } finally {
             setSaving(false);

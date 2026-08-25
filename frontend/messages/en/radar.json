@@ -209,8 +209,8 @@
       "snoozed": "Snoozed {subject}.",
       "dismissed": "Dismissed {subject}.",
       "taskCreated": "Created a task for {subject}.",
-      "actionFailed": "Could not update {subject}. Try again.",
-      "contextFailed": "Could not open the current context for {subject}."
+      "actionFailed": "Couldn't update {subject}. Try again.",
+      "contextFailed": "Couldn't open the record for {subject}. Try again."
     },
     "empty": {
       "title": "Radar is clear",

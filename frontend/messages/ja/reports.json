@@ -53,7 +53,10 @@
       "actions": "{name} の操作",
       "entityLabel": "レポート",
       "deleteDetails": "確定スナップショットも一緒に削除されます。",
-      "deleted": "{name} を削除しました"
+      "deleted": "{name} を削除しました",
+      "createFailed": "レポートを作成できませんでした",
+      "deleteFailed": "レポートを削除できませんでした",
+      "duplicateFailed": "レポートを複製できませんでした"
     },
     "composer": {
       "eyebrow": "Ask Connex",
@@ -95,7 +98,9 @@
         "rate_limited": "AI 生成の上限に達しました。しばらくしてからもう一度お試しいただくか、ご自身でレポートを作成してください。",
         "invalid_definition": "この依頼を有効なレポート定義に変換できませんでした。言い換えるか、ビルダーを使用してください。",
         "provider_error": "プロバイダーが定義を生成できませんでした。もう一度お試しいただくか、ご自身でレポートを作成してください。"
-      }
+      },
+      "previewFailed": "レポート定義をプレビューできませんでした",
+      "saveFailed": "レポートを保存できませんでした"
     },
     "templates": {
       "sales-performance": {
@@ -193,7 +198,8 @@
       "dragLifted": "{name} を持ち上げました",
       "dragOver": "{name} は {target} の上にあります",
       "dragDropped": "{name} を {target} の前に配置しました",
-      "dragCancelled": "{name} の移動をキャンセルしました"
+      "dragCancelled": "{name} の移動をキャンセルしました",
+      "saveFailed": "レポートを保存できませんでした"
     },
     "document": {
       "run": "レポートを実行",
@@ -267,7 +273,11 @@
         "wonRevenue": "受注売上・期間内に成約・現在の担当者・ワークスペースの案件のみ・アーカイブ済みの会社名を保持",
         "openPipeline": "オープンパイプライン・期間内に決着予定・現在の担当者・ワークスペースの案件のみ・アーカイブ済みの会社名を保持",
         "forecastWeighted": "加重フォーキャスト・期間内に決着予定・全履歴のステージ率・現在の担当者・ワークスペースの案件のみ"
-      }
+      },
+      "csvFailed": "CSVをエクスポートできませんでした",
+      "snapshotDeleteFailed": "スナップショットを削除できませんでした",
+      "snapshotFailed": "スナップショットを作成できませんでした",
+      "snapshotOpenFailed": "スナップショットを開けませんでした"
     },
     "cadence": {
       "weekly": "週次",
@@ -438,7 +448,9 @@
         "recipientAccess": "すべての受信者は有効なワークスペースメンバーで、このレポートの閲覧に必要なすべての権限を持っている必要があります。",
         "timezone": "有効なIANAタイムゾーンを選択してください。",
         "hour": "0時から23時までの配信時刻を選択してください。"
-      }
+      },
+      "deleteFailed": "配信スケジュールを削除できませんでした",
+      "saveFailed": "配信スケジュールを保存できませんでした"
     },
     "goals": {
       "backToReports": "レポートに戻る",
@@ -486,7 +498,9 @@
         "quarter": "四半期目標は1月、4月、7月、10月に開始する必要があります。",
         "target": "整数部13桁、小数部2桁以内の0以上の目標を入力してください。",
         "currency": "通貨は3〜8文字の英字で入力してください。"
-      }
+      },
+      "deleteFailed": "目標を削除できませんでした",
+      "saveFailed": "目標を保存できませんでした"
     }
   }
 }

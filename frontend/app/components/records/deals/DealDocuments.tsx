@@ -47,9 +47,10 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { canDeleteOwnedRecord } from '@/app/lib/deletionPolicy';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastSuccess } from '@/app/lib/toast';
 import { formatCurrency, formatDateTime } from '@/app/lib/utils';
 import {
     getDocumentTemplates,
@@ -99,11 +100,14 @@ type Props = {
 
 type ApprovalAction = 'request' | 'approve' | 'reject' | 'delegate';
 
-const APPROVAL_DIALOG_KEYS: Record<ApprovalAction, { title: string; body: string; confirm: string }> = {
-    request: { title: 'requestDialogTitle', body: 'requestDialogBody', confirm: 'requestConfirm' },
-    approve: { title: 'approveDialogTitle', body: 'approveDialogBody', confirm: 'approveConfirm' },
-    reject: { title: 'rejectDialogTitle', body: 'rejectDialogBody', confirm: 'rejectConfirm' },
-    delegate: { title: 'delegateDialogTitle', body: 'delegateDialogBody', confirm: 'delegateConfirm' },
+const APPROVAL_DIALOG_KEYS: Record<
+    ApprovalAction,
+    { title: string; body: string; confirm: string; failure: string }
+> = {
+    request: { title: 'requestDialogTitle', body: 'requestDialogBody', confirm: 'requestConfirm', failure: 'requestFailed' },
+    approve: { title: 'approveDialogTitle', body: 'approveDialogBody', confirm: 'approveConfirm', failure: 'approveFailed' },
+    reject: { title: 'rejectDialogTitle', body: 'rejectDialogBody', confirm: 'rejectConfirm', failure: 'rejectFailed' },
+    delegate: { title: 'delegateDialogTitle', body: 'delegateDialogBody', confirm: 'delegateConfirm', failure: 'delegateFailed' },
 };
 
 const TYPE_KEY: Record<DocumentType, string> = {
@@ -149,6 +153,7 @@ export default function DealDocuments({
     currentUserId,
 }: Props) {
     const t = useTranslations('DealsDocuments');
+    const showApiError = useApiErrorToast('DealsDocuments');
     const locale = useLocale();
     const router = useRouter();
     const reduceMotion = useReducedMotion() ?? false;
@@ -215,12 +220,12 @@ export default function DealDocuments({
         };
     }, [approvalDialog, approvalDialogOpen, dealId]);
 
-    const run = async (op: () => Promise<void>) => {
+    const run = async (op: () => Promise<void>, fallbackKey: string) => {
         setBusy(true);
         try {
             await op();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('actionFailed'));
+            showApiError(err, fallbackKey);
         } finally {
             setBusy(false);
         }
@@ -235,18 +240,18 @@ export default function DealDocuments({
         const created = await generateDealDocument(dealId, template.id);
         setDocuments((prev) => [created, ...prev]);
         toastSuccess(t('generated'));
-    });
+    }, 'generateFailed');
 
     const changeStatus = (doc: DealDocument, status: DocumentClientStatus) => run(async () => {
         const updated = await updateDealDocumentStatus(dealId, doc.id, status);
         setDocuments((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
-    });
+    }, 'statusFailed');
 
     const remove = (doc: DealDocument) => run(async () => {
         await deleteDealDocument(dealId, doc.id);
         setDocuments((prev) => prev.filter((d) => d.id !== doc.id));
         toastSuccess(t('deleted'));
-    });
+    }, 'deleteFailed');
 
     const cancelRequest = (doc: DealDocument) => run(async () => {
         try {
@@ -255,7 +260,7 @@ export default function DealDocuments({
         } finally {
             await refreshDocument(doc.id).catch(() => undefined);
         }
-    });
+    }, 'cancelRequestFailed');
 
     const submitApprovalAction = () => {
         if (!approvalDialog) return;
@@ -290,7 +295,7 @@ export default function DealDocuments({
                 await refreshDocument(doc.id).catch(() => undefined);
             }
             setApprovalDialogOpen(false);
-        });
+        }, APPROVAL_DIALOG_KEYS[action].failure);
     };
 
     const openApprovalDialog = (doc: DealDocument, action: ApprovalAction, stepId: number | null = null) => {

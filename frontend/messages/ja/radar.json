@@ -210,7 +210,7 @@
       "dismissed": "{subject} を非表示にしました。",
       "taskCreated": "{subject} のタスクを作成しました。",
       "actionFailed": "{subject} を更新できませんでした。もう一度お試しください。",
-      "contextFailed": "{subject} の現在の関連レコードを開けませんでした。"
+      "contextFailed": "{subject} のレコードを開けませんでした。もう一度お試しください。"
     },
     "empty": {
       "title": "現在、対応が必要なシグナルはありません",

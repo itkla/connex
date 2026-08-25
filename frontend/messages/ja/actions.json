@@ -44,7 +44,7 @@
             "tags": "タグ",
             "files": "ファイル",
             "workflows": "ワークフロー",
-            "me": "プロフィール",
+            "me": "マイワーク",
             "search": "検索",
             "docs": "ヘルプドキュメント",
             "savedView": "保存済みビュー",
@@ -114,13 +114,17 @@
             "companyContactsPartial": "{total} 件中 {succeeded} 件の連絡先を追加しました。",
             "taskCreated": "タスクを作成しました",
             "noteCreated": "メモを作成しました",
-            "activityCreated": "アクティビティを記録しました"
+            "activityCreated": "アクティビティを記録しました",
+            "companyCreateFailed": "会社を作成できませんでした",
+            "dealCreateFailed": "案件を作成できませんでした",
+            "personCreateFailed": "連絡先を作成できませんでした"
         },
         "keywords": {
             "navigate": {
                 "contacts": "連絡先, 人, 担当者, コンタクト",
                 "captureReviews": "取り込みの確認, 取り込み, 照合, 受信トレイ, メール, カレンダー",
-                "users": "ユーザー, メンバー, 人"
+                "users": "ユーザー, メンバー, 人",
+                "me": "マイワーク, マイページ, プロフィール, タスク, フォローアップ"
             },
             "create": {
                 "company": "会社, 企業, 組織, 取引先, アカウント",

@@ -25,6 +25,7 @@ import {
     reflowReportLayout,
     sampleReportWidgetData,
 } from '@/app/components/reports/reportConfig';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { createReport, updateReport } from '@/app/lib/api';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import type {
@@ -95,6 +96,7 @@ export default function ReportBuilderBoard({
     canReadGoals: boolean;
 }) {
     const t = useTranslations('Reports');
+    const showApiError = useApiErrorToast('Reports');
     const router = useRouter();
     const reduceMotion = useReducedMotion() ?? false;
     const initialConfig = initialReport
@@ -278,7 +280,7 @@ export default function ReportBuilderBoard({
             router.push(`/overview/reports/${saved.id}`);
             router.refresh();
         } catch (error) {
-            toastError(error instanceof Error ? error.message : t('common.requestFailed'));
+            showApiError(error, 'builder.saveFailed');
         } finally {
             setSaving(false);
         }

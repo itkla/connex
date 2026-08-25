@@ -344,6 +344,14 @@ export const CURATED_DECISIONS = {
         decision: "skip",
         reason: "banned only as a noun for a list; register is the legitimate auth verb on sign-up and passkey surfaces.",
     },
+    "projected": {
+        decision: "skip",
+        reason: "banned only as data provenance — copy that says an activity was projected from provider data. §4's deal-forecast row makes Projected value and Projected revenue canonical, and a value-level scan cannot tell the two senses apart.",
+    },
+    "projection": {
+        decision: "skip",
+        reason: "the noun of the same provenance sense; §4 sanctions the deal forecast it otherwise collides with, so the sense is decided in review rather than by a pattern.",
+    },
     "correlation ID": {
         decision: "ban",
         reason: "§4 replaces it with Reference on every surface.",
@@ -927,7 +935,7 @@ export function loadBaseline() {
  * them**, never on its own. Lower it whenever a tranche lands: slack between the mark and
  * today's baseline is room for a regression to hide in.
  */
-export const BASELINE_HIGH_WATER_MARK = 52;
+export const BASELINE_HIGH_WATER_MARK = 0;
 
 /**
  * The surfaces that still say "at a glance". §4 allows the phrase on one surface only,
@@ -964,7 +972,6 @@ export const AT_A_GLANCE_SURFACES = [
     "en/docs.json:DocsTutorials.articles.add-your-first-company.blocks[1].caption",
     "en/docs.json:DocsTutorials.articles.build-your-pipeline.blocks[3].items[0].description",
     "en/docs.json:DocsTutorials.articles.request-a-warm-intro.blocks[2].text",
-    "en/me.json:MeLayout.description",
 ];
 
 /**

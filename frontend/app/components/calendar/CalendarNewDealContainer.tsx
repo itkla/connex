@@ -6,7 +6,8 @@ import { useTranslations } from 'next-intl';
 
 import NewDealDialog, { isDealPayloadDirty } from '@/app/components/records/deals/NewDealDialog';
 import { createDeal, getPipelines, getStagesByPipelineId } from '@/app/lib/api';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { toastSuccess } from '@/app/lib/toast';
 import type { CreateDealPayload, Pipeline, Stage } from '@/app/lib/types';
 
 const EMPTY_DRAFT: CreateDealPayload = {
@@ -37,6 +38,7 @@ export default function CalendarNewDealContainer({
 }) {
     const router = useRouter();
     const t = useTranslations('Calendar');
+    const showApiError = useApiErrorToast('Calendar');
 
     const [loaded, setLoaded] = useState(false);
     const [pipelines, setPipelines] = useState<Pipeline[]>([]);
@@ -108,7 +110,7 @@ export default function CalendarNewDealContainer({
             }, 900);
         } catch (err) {
             setCreating(false);
-            toastError(err instanceof Error ? err.message : t('createFailed'));
+            showApiError(err, 'createFailed');
         }
     };
 

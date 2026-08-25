@@ -48,7 +48,8 @@ import { recordDetailNavigationPath } from '@/app/lib/recordReturnPath';
 import { useRecordReturnScroll } from '@/app/hooks/useRecordReturnSelection';
 import { useScopedViewPreference } from '@/app/hooks/useScopedViewPreference';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { toastSuccess } from '@/app/lib/toast';
 import { noteContentToPlainText } from '@/app/lib/references';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
@@ -130,6 +131,7 @@ export default function ActivitiesBrowser({
     const { activeWorkspaceId } = useWorkspace();
     const t = useTranslations('ActivityPage');
     const tf = useTranslations('Filters');
+    const showApiError = useApiErrorToast('ActivityPage');
     const locale = useLocale();
     const reduce = useReducedMotion() ?? false;
     const now = useNow();
@@ -325,7 +327,7 @@ export default function ActivitiesBrowser({
             setDeleting(null);
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastFailedDelete'));
+            showApiError(err, 'toastFailedDelete');
         } finally {
             setIsDeleting(false);
         }

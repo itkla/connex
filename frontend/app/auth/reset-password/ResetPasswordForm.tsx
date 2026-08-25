@@ -21,7 +21,8 @@ import {
     validateResetToken,
 } from "@/app/lib/api";
 import { takeOneTimeLinkToken } from "@/app/lib/oneTimeLink";
-import { toastError, toastSuccess } from "@/app/lib/toast";
+import { toastSuccess } from "@/app/lib/toast";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { useFieldErrors } from "@/app/hooks/useFieldErrors";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
 
@@ -32,6 +33,7 @@ export function ResetPasswordForm() {
     const router = useRouter();
     const tForm = useTranslations("AuthForm");
     const t = useTranslations("AuthResetPassword");
+    const showApiError = useApiErrorToast("AuthResetPassword");
 
     const [status, setStatus] = useState<Status>("validating");
     const [password, setPassword] = useState("");
@@ -86,16 +88,15 @@ export function ResetPasswordForm() {
         } catch (err) {
             if (err instanceof ApiError) {
                 const captured = captureFieldErrors(err);
-                if (err.status === 400 && !captured) {
+                if (captured) {
+                    return;
+                }
+                if (err.status === 400) {
                     setStatus("invalid");
                     return;
                 }
-                if (!captured) {
-                    toastError(err.message);
-                }
-            } else {
-                toastError(t("genericError"));
             }
+            showApiError(err, "genericError");
         } finally {
             setSubmitting(false);
         }

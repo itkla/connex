@@ -22,7 +22,7 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { answerContactQualification } from '@/app/lib/api';
-import { toastError } from '@/app/lib/toast';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import type {
     ContactQualification,
     QualificationAnswer,
@@ -62,6 +62,7 @@ export default function ContactQualificationDialog({
     canEdit,
 }: Props) {
     const t = useTranslations('ContactQualification');
+    const showApiError = useApiErrorToast('ContactQualification');
     const router = useRouter();
     const [saving, setSaving] = useState<number | null>(null);
 
@@ -76,7 +77,7 @@ export default function ContactQualificationDialog({
             });
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastFailed'));
+            showApiError(err, 'toastFailed');
         } finally {
             setSaving(null);
         }

@@ -27,7 +27,7 @@
     "delete": "Delete",
     "actionsAria": "Activity actions",
     "toastDeleted": "Activity deleted",
-    "toastFailedDelete": "Failed to delete activity"
+    "toastFailedDelete": "Couldn't delete the activity"
   },
   "ActivityCreateDialog": {
     "titleCreate": "Log activity",
@@ -111,10 +111,10 @@
     "toastContentRequired": "Content is required",
     "toastNoteUpdated": "Note updated",
     "toastNotesUpdated": "{count} notes updated",
-    "toastFailedSave": "Failed to save note",
+    "toastFailedSave": "Couldn't save the note",
     "toastNoteDeleted": "Note deleted",
     "toastNotesDeleted": "{count} notes deleted",
-    "toastFailedDelete": "Failed to delete note",
+    "toastFailedDelete": "Couldn't delete the note",
     "groupRecord": "By record",
     "sortBy": "Sort",
     "sortByAria": "Sort notes",
@@ -157,7 +157,7 @@
     "private": "Private",
     "unknownAuthor": "Unknown author",
     "toastContentCopied": "Note copied",
-    "toastFailedCopy": "Failed to copy note"
+    "toastFailedCopy": "Couldn't copy the note"
   },
   "ActivityNotesDialog": {
     "titleCreate": "New note",
@@ -186,8 +186,8 @@
     "toastContentRequired": "Content is required",
     "toastCreated": "Note created",
     "toastUpdated": "Note updated",
-    "toastFailedCreate": "Failed to create note",
-    "toastFailedSave": "Failed to save note"
+    "toastFailedCreate": "Couldn't create the note",
+    "toastFailedSave": "Couldn't save the note"
   },
   "ActivityTasks": {
     "title": "Tasks",
@@ -247,9 +247,9 @@
     "dueYesterday": "Yesterday",
     "ariaCompleteTask": "Mark task complete",
     "ariaOpenTask": "Open task: {name}",
-    "toastFailedUpdate": "Failed to update task",
+    "toastFailedUpdate": "Couldn't update the task",
     "toastDeleted": "Task deleted",
-    "toastFailedDelete": "Failed to delete task",
+    "toastFailedDelete": "Couldn't delete the task",
     "taskUpdatedSuccess": "Task updated successfully",
     "taskMarkedAsCompleteSuccess": "Task marked as complete",
     "taskMarkedAsIncompleteSuccess": "Task marked as incomplete"
@@ -356,7 +356,7 @@
     "toastHexCopied": "Copied {hex}",
     "toastHexCopyFailed": "Couldn't copy color",
     "toastDeleted": "Deleted tag {name}",
-    "toastFailedDelete": "Failed to delete tag",
+    "toastFailedDelete": "Couldn't delete the tag",
     "entityLabel": "tag",
     "deleteDetails": "It also comes off every contact, company, and deal it is on."
   },

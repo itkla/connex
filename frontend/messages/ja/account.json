@@ -465,7 +465,7 @@
     "successTitle": "受信トレイをご確認ください",
     "successBody": "{email} 宛てに確認リンクを送信しました。リンクを開いてメールアドレスの変更を完了してください。それまでは現在のメールアドレスが引き続き有効です。",
     "close": "閉じる",
-    "genericError": "エラーが発生しました"
+    "genericError": "確認リンクを送信できませんでした"
   },
   "PasskeyStepUp": {
     "canceled": "パスキーによる本人確認をキャンセルしました。",
@@ -540,10 +540,10 @@
     "accept": "承認",
     "decline": "辞退",
     "accepted": "{workspace} に参加しました",
-    "acceptFailed": "招待を承認できませんでした。",
+    "acceptFailed": "招待を承認できませんでした",
     "declined": "招待を辞退しました",
-    "declineFailed": "招待を辞退できませんでした。",
-    "loadFailed": "招待を読み込めませんでした。",
+    "declineFailed": "招待を辞退できませんでした",
+    "loadFailed": "招待を読み込めませんでした",
     "leaveTitle": "ワークスペースを退出",
     "leaveSubtitle": "{workspace} を退出し、データへのアクセスを失います。",
     "leave": "ワークスペースを退出",
@@ -551,7 +551,7 @@
     "leaveConfirmBody": "このワークスペースへのアクセスを失います。割り当てられたタスクは未割り当てになり、所有する案件は所有者を失います。",
     "cancel": "キャンセル",
     "left": "ワークスペースを退出しました",
-    "leaveFailed": "ワークスペースを退出できませんでした。"
+    "leaveFailed": "ワークスペースを退出できませんでした"
   },
   "AccountConnectionConsent": {
     "title": "{provider} を連携",

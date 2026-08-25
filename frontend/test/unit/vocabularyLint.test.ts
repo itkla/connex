@@ -51,6 +51,29 @@ function suppressedMatches(
     return found;
 }
 
+/**
+ * Runs the production scanner over the real catalogs with a synthetic model, so a probe asserts
+ * what {@link scanMessageCatalogs} and {@link baselineEntries} actually do rather than what the
+ * committed baseline happens to contain — a baseline burned to zero can no longer supply examples.
+ * Every named term matches the same everyday word, so one string flags once per term.
+ * @param names the term names to scan under
+ * @returns the baseline entries the scan produces
+ */
+function probeEntries(names: string[]): string[] {
+    const terms = names.map((term) => ({
+        id: `en:${term}`,
+        term,
+        locale: "en" as const,
+        scope: "global" as const,
+        allowFiles: [],
+        canonicalExceptions: [],
+        narrowed: false,
+        pattern: { source: "\\bthe\\b", flags: "iu" },
+        sources: ["probe"],
+    }));
+    return baselineEntries(scanMessageCatalogs({ terms, skipped: [] }));
+}
+
 describe("message catalogue vocabulary", () => {
     it("reports no banned term outside the committed baseline", () => {
         const known = new Set(baseline);
@@ -86,11 +109,18 @@ describe("message catalogue vocabulary", () => {
     });
 
     it("scans the strings inside arrays, not only the object leaves", () => {
-        const entries = messageEntries();
-        const inArrays = entries.filter((entry) => entry.keyPath.includes("["));
+        const inArrays = messageEntries().filter((entry) => entry.keyPath.includes("["));
 
         expect(inArrays.length).toBeGreaterThan(1000);
-        expect(baseline.some((entry) => entry.includes("["))).toBe(true);
+
+        const nested = probeEntries(["nested"]).filter((entry) => entry.includes("["));
+
+        expect(nested.length).toBeGreaterThan(0);
+
+        const parsed = parseBaselineEntry(nested[0]);
+
+        expect(parsed.keyPath).toContain("[");
+        expect(parsed.term).toBe("nested");
     });
 
     it("lets the phrase §4 restricts to one surface only shrink", () => {
@@ -128,7 +158,16 @@ describe("message catalogue vocabulary", () => {
         expect(ALLOWED_SURFACES).toEqual(["legal.json", "organization.json#OrgDataRequests"]);
         expect(carveOuts.size).toBeGreaterThan(0);
         expect(onComplianceSurfaces.filter((entry) => carveOuts.has(entry.term)).map((entry) => entry.term)).toEqual([]);
-        expect(onComplianceSurfaces.some((entry) => entry.term === "取引先")).toBe(true);
+
+        const noted = model.terms.find((term) => term.term === "取引先");
+        const unnoted = model.terms.find((term) => term.term === "suppression");
+        if (!noted || !unnoted) throw new Error("docs/PRODUCT.md §4 no longer bans 取引先 and suppression");
+
+        expect(noted.allowFiles).toEqual(["legal.json"]);
+        expect(unnoted.allowFiles).toEqual([]);
+        expect(termApplies(noted, { locale: "ja", file: "legal.json", namespace: "Legal" })).toBe(false);
+        expect(termApplies(noted, { locale: "ja", file: "companies.json", namespace: "CompaniesCard" })).toBe(true);
+        expect(termApplies(unnoted, { locale: "en", file: "legal.json", namespace: "Legal" })).toBe(true);
     });
 
     it("allows the multi-tenancy vocabulary of the contracts on the legal pages only", () => {
@@ -190,13 +229,16 @@ describe("message catalogue vocabulary", () => {
     });
 
     it("baselines each banned term separately, so a second term on a flagged string still fails", () => {
-        const perKey = new Map<string, number>();
-        for (const entry of baseline.map(parseBaselineEntry)) {
+        const entries = probeEntries(["first", "second"]);
+        const terms = new Map<string, Set<string>>();
+        for (const entry of entries.map(parseBaselineEntry)) {
             const key = `${entry.locale}/${entry.file}:${entry.keyPath}`;
-            perKey.set(key, (perKey.get(key) ?? 0) + 1);
+            terms.set(key, (terms.get(key) ?? new Set()).add(entry.term));
         }
+        const carryingBoth = [...terms.values()].filter((flagged) => flagged.size > 1);
 
-        expect([...perKey.values()].some((count) => count > 1)).toBe(true);
+        expect(entries.every((entry) => entry.includes("#"))).toBe(true);
+        expect(carryingBoth.length, "one string matching two terms must yield two baseline entries").toBeGreaterThan(0);
         expect(baseline.every((entry) => entry.includes("#"))).toBe(true);
     });
 

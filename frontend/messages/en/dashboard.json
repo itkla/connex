@@ -61,7 +61,7 @@
     "scheduleFollowUp": "Schedule a follow-up before it goes cold",
     "followUpWith": "Follow up with {name}",
     "scheduled": "Follow-up scheduled",
-    "scheduleFailed": "Couldn't schedule the follow-up."
+    "scheduleFailed": "Couldn't schedule the follow-up"
   },
   "RecentMoves": {
     "empty": "No recent job changes among workspace contacts.",

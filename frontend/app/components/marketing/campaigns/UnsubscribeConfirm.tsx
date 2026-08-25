@@ -32,8 +32,8 @@ export default function UnsubscribeConfirm({
         try {
             await confirmUnsubscribe(token);
             setDone(true);
-        } catch (err) {
-            toastError(err instanceof Error ? err.message : t("error"));
+        } catch {
+            toastError(t("errorTitle"), { description: t("errorBody") });
         } finally {
             setIsSubmitting(false);
         }

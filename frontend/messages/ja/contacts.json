@@ -44,8 +44,8 @@
         "searchFailed": "連絡先を検索できませんでした",
         "add": "つながりを追加",
         "remove": "つながりを削除",
-        "addFailed": "つながりを追加できませんでした。",
-        "removeFailed": "つながりを削除できませんでした。",
+        "addFailed": "つながりを追加できませんでした",
+        "removeFailed": "つながりを削除できませんでした",
         "typeKnows": "知人",
         "typeColleague": "同僚",
         "typeFormer": "元同僚",
@@ -124,12 +124,12 @@
         "toastContactsArchived": "{count} 件の連絡先をアーカイブしました",
         "toastContactsArchivedPartial": "{total}件中{succeeded}件の連絡先をアーカイブしました",
         "toastContactsArchiveFailed": "{failed}件の連絡先をアーカイブできませんでした",
-        "toastFailedArchive": "アーカイブできませんでした",
+        "toastFailedArchive": "選択した連絡先をアーカイブできませんでした",
         "toastContactRestored": "連絡先を復元しました",
         "toastContactsRestored": "{count} 件の連絡先を復元しました",
         "toastContactsRestoredPartial": "{total}件中{succeeded}件の連絡先を復元しました",
         "toastContactsRestoreFailed": "{failed}件の連絡先を復元できませんでした",
-        "toastFailedRestore": "復元できませんでした",
+        "toastFailedRestore": "選択した連絡先を復元できませんでした",
         "entityLabelPlural": "連絡先"
     },
     "ContactsCard": {
@@ -146,7 +146,7 @@
         "toastPartiallySaved": "連絡先の詳細は保存されましたが、写真のアップロードに失敗しました。現在の内容を確認して、もう一度お試しください。",
         "toastFailedSave": "連絡先を保存できませんでした",
         "toastEmailCopied": "メールをコピーしました",
-        "toastFailedCopyEmail": "メールをコピーできませんでした",
+        "toastFailedCopyEmail": "メールアドレスをコピーできませんでした",
         "toastPhoneCopied": "電話番号をコピーしました",
         "toastFailedCopyPhone": "電話番号をコピーできませんでした",
         "toastCompanyChanged": "会社を変更しました",
@@ -178,8 +178,8 @@
         "restore": "復元",
         "toastContactArchived": "連絡先をアーカイブしました",
         "toastContactRestored": "連絡先を復元しました",
-        "toastFailedArchive": "アーカイブできませんでした",
-        "toastFailedRestore": "復元できませんでした",
+        "toastFailedArchive": "連絡先をアーカイブできませんでした",
+        "toastFailedRestore": "連絡先を復元できませんでした",
         "entityLabelPlural": "連絡先"
     },
     "ContactsStatCard": {
@@ -359,7 +359,7 @@
         "cancel": "キャンセル",
         "save": "保存",
         "toastSaved": "ライフサイクルを更新しました。",
-        "toastFailed": "ライフサイクルを更新できませんでした。",
+        "toastFailed": "ライフサイクルを更新できませんでした",
         "stage": {
             "none": "段階なし",
             "NEW": "新規",
@@ -403,7 +403,7 @@
         "loadFailed": "この連絡先の評価を読み込めませんでした。再読み込みしてください。",
         "dialogDescription": "この連絡先について、ワークスペースの評価基準に回答します。",
         "done": "完了",
-        "toastFailed": "回答を記録できませんでした。",
+        "toastFailed": "回答を記録できませんでした",
         "dimension": {
             "FIT": "適合度",
             "ENGAGEMENT": "関与度"
@@ -446,7 +446,7 @@
         "cancel": "キャンセル",
         "save": "保存",
         "toastSaved": "獲得元を更新しました。",
-        "toastFailed": "獲得元を更新できませんでした。",
+        "toastFailed": "獲得元を更新できませんでした",
         "source": {
             "none": "未記録",
             "REFERRAL": "紹介",

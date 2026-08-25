@@ -21,6 +21,7 @@ import {
     saveAiWorkspaceGovernance,
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Button } from "@/components/ui/button";
@@ -166,6 +167,7 @@ export default function OrgAiProviderPanel({
     presentation?: SettingsPanelPresentation;
 } = {}) {
     const t = useTranslations("OrgAi");
+    const showApiError = useApiErrorToast("OrgAi");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { activeWorkspaceId } = useWorkspace();
 
@@ -249,7 +251,7 @@ export default function OrgAiProviderPanel({
             if (err instanceof ApiError && err.status === 403) {
                 toastError(t("stepUpRequired"));
             } else {
-                toastError(err instanceof Error ? err.message : t("saveFailed"));
+                showApiError(err, "saveFailed");
             }
         } finally {
             setSaving(false);
@@ -267,7 +269,7 @@ export default function OrgAiProviderPanel({
             setGovernance(saved);
             toastSuccess(t("governanceSaved"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("governanceSaveFailed"));
+            showApiError(err, "governanceSaveFailed");
         } finally {
             setSavingGovernance(false);
         }
@@ -284,7 +286,7 @@ export default function OrgAiProviderPanel({
             setBudget(saved);
             toastSuccess(t("budgetSaved"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("budgetSaveFailed"));
+            showApiError(err, "budgetSaveFailed");
         } finally {
             setSavingBudget(false);
         }
@@ -307,7 +309,7 @@ export default function OrgAiProviderPanel({
             if (err instanceof ApiError && err.status === 403) {
                 toastError(t("stepUpRequired"));
             } else {
-                toastError(err instanceof Error ? err.message : t("saveFailed"));
+                showApiError(err, "revokeFailed");
             }
         } finally {
             setSaving(false);

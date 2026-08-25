@@ -16,7 +16,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { toastError } from '@/app/lib/toast';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import {
     addContactConnection,
     getContactConnections,
@@ -52,6 +52,7 @@ export default function ContactConnections({
     initialIntroPath: IntroPath;
 }) {
     const t = useTranslations('ContactConnections');
+    const showApiError = useApiErrorToast('ContactConnections');
     const tIntro = useTranslations('Introductions');
     const [connections, setConnections] = useState(initialConnections);
     const [introPath, setIntroPath] = useState(initialIntroPath);
@@ -90,7 +91,7 @@ export default function ContactConnections({
             setType('knows');
             await refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('addFailed'));
+            showApiError(err, 'addFailed');
         } finally {
             setBusy(false);
         }
@@ -103,7 +104,7 @@ export default function ContactConnections({
             await removeContactConnection(contactId, targetId);
             await refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('removeFailed'));
+            showApiError(err, 'removeFailed');
         } finally {
             setBusy(false);
         }

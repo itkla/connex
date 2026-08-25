@@ -90,7 +90,9 @@
         "audienceType": "Audience",
         "snapshotCount": "Snapshots",
         "latestSnapshot": "Latest snapshot",
-        "recipientsReached": "Recipients reached"
+        "recipientsReached": "Recipients reached",
+        "deleteFailed": "Couldn't delete the campaign",
+        "saveFailed": "Couldn't save the campaign"
     },
     "CampaignAudience": {
         "title": "Audience",
@@ -130,7 +132,10 @@
         "snapshotsDeniedBody": "These snapshots list contacts and their marketing preferences, so viewing them needs that access. Ask a workspace admin if you need it.",
         "version": "v{version}",
         "snapshotIncluded": "{count} included",
-        "snapshotExcluded": "{count} excluded"
+        "snapshotExcluded": "{count} excluded",
+        "estimateFailed": "Couldn't estimate the audience",
+        "freezeFailed": "Couldn't freeze the snapshot",
+        "saveFailed": "Couldn't save the audience"
     },
     "CampaignMessages": {
         "title": "Messages",
@@ -178,7 +183,9 @@
         "revisionSaved": "Revision saved",
         "revisions": "Revisions",
         "noRevisions": "No revisions yet",
-        "version": "v{version}"
+        "version": "v{version}",
+        "createFailed": "Couldn't create the message",
+        "revisionSaveFailed": "Couldn't save the revision"
     },
     "CampaignSends": {
         "title": "Sends",
@@ -223,7 +230,11 @@
         "paused": "Send paused",
         "cancelled": "Send cancelled",
         "deliveryUnavailable": "Campaign delivery is not enabled on this instance.",
-        "unknownMessage": "Message"
+        "unknownMessage": "Message",
+        "cancelFailed": "Couldn't cancel the send",
+        "createFailed": "Couldn't create the send",
+        "pauseFailed": "Couldn't pause the send",
+        "queueFailed": "Couldn't queue the send"
     },
     "CampaignEngagement": {
         "drillThrough": "Show the {count} contacts behind {counter}",
@@ -290,7 +301,8 @@
         "total": "Total",
         "pushed": "Pushed",
         "failed": "Failed",
-        "exportUnavailable": "Campaign delivery is not enabled on this instance."
+        "exportUnavailable": "Campaign delivery is not enabled on this instance.",
+        "createFailed": "Couldn't create the export"
     },
     "CampaignRecipients": {
         "descriptionRecipients": "{count, plural, one {# contact} other {# contacts}} this campaign was prepared for, whether or not it reached them.",

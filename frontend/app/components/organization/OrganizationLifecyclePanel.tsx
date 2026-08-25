@@ -10,6 +10,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { Loader2Icon } from "lucide-react";
 
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import {
     ApiError,
@@ -18,7 +19,7 @@ import {
     teardownOrganizationWorkspace,
 } from "@/app/lib/api";
 import { organizationLifecycleAccess } from "@/app/lib/organizationLifecycleAccess";
-import { toastError, toastSuccess } from "@/app/lib/toast";
+import { toastSuccess } from "@/app/lib/toast";
 import type {
     OrganizationIdentity,
     OrganizationLayoutWorkspace,
@@ -376,6 +377,7 @@ export default function OrganizationLifecyclePanel({
     onLoadMore: () => void;
 }) {
     const t = useTranslations("OrgDataLifecycle");
+    const showApiError = useApiErrorToast("OrgDataLifecycle");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const access = organizationLifecycleAccess(orgRole);
     const [exportingWorkspaceId, setExportingWorkspaceId] = useState<number | null>(null);
@@ -401,7 +403,7 @@ export default function OrganizationLifecyclePanel({
             });
         } catch (error) {
             if (!handlePasskeyStepUpError(error)) {
-                toastError(error instanceof Error ? error.message : t("exportFailed"));
+                showApiError(error, "exportFailed");
             }
         } finally {
             setExportingWorkspaceId(null);

@@ -108,11 +108,11 @@
         "delete": "削除",
         "entityLabel": "案件",
         "dealDeleted": "案件を削除しました",
-        "failedToDelete": "削除できませんでした",
+        "failedToDelete": "案件を削除できませんでした",
         "cannotChangeStatus": "ステータスを変更できません: パイプラインまたはステージが未設定です",
         "dealClosed": "案件を決着にしました",
         "dealReopened": "案件を進行中に戻しました",
-        "failedToUpdateStatus": "ステータスを更新できませんでした"
+        "failedToUpdateStatus": "案件のステータスを更新できませんでした"
     },
     "DealsActivityBreakdown": {
         "activityMix": "アクティビティ構成",
@@ -499,6 +499,14 @@
         "outcome_policy_invalidated": "ポリシーの厳格化により終了",
         "outcome_unsatisfiable": "承認可能な担当者がいないため終了",
         "outcome_expired": "承認期限を過ぎたため終了",
-        "outcome_cancelled_legacy": "取り消し"
+        "outcome_cancelled_legacy": "取り消し",
+        "approveFailed": "ドキュメントを承認できませんでした",
+        "cancelRequestFailed": "承認依頼を取り消せませんでした",
+        "delegateFailed": "承認を委任できませんでした",
+        "deleteFailed": "ドキュメントを削除できませんでした",
+        "generateFailed": "ドキュメントを生成できませんでした",
+        "rejectFailed": "ドキュメントを却下できませんでした",
+        "requestFailed": "承認を依頼できませんでした",
+        "statusFailed": "ドキュメントのステータスを更新できませんでした"
     }
 }

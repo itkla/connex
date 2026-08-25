@@ -24,7 +24,7 @@
     "saving": "保存中",
     "saved": "組織設定を更新しました。",
     "stale": "編集中に組織情報が変更されました。再読み込みして、もう一度お試しください。",
-    "saveFailed": "組織を更新できませんでした。",
+    "saveFailed": "組織の変更を保存できませんでした",
     "layoutTitle": "組織レイアウト",
     "layoutDescription": "組織権限、ワークスペース、閲覧を許可されたメンバーシップの関係を確認できます。",
     "lifecycleTitle": "エクスポートと削除",
@@ -55,13 +55,13 @@
     "pendingMembership": "保留中",
     "loadMore": "さらに読み込む",
     "loadingMore": "読み込み中",
-    "loadFailed": "組織レイアウトを読み込めませんでした。",
-    "loadMoreFailed": "組織レイアウトの続きを読み込めませんでした。",
+    "loadFailed": "組織レイアウトを読み込めませんでした",
+    "loadMoreFailed": "組織レイアウトの続きを読み込めませんでした",
     "loadFailedTitle": "組織レイアウトを利用できません",
     "loadFailedBody": "組織構造を読み込めませんでした。権限やメンバーシップを推測して表示することはありません。",
     "retry": "再試行",
     "switchInProgress": "別のワークスペース操作を実行中です。",
-    "navigationFailed": "ワークスペースまたはメンバーを開けませんでした。"
+    "navigationFailed": "ワークスペースまたはメンバーを開けませんでした"
   },
   "OrgDataLifecycle": {
     "authorityTitle": "組織権限",
@@ -78,7 +78,7 @@
     "preparingExport": "準備中",
     "downloadExport": "ZIPをダウンロード",
     "renewExportGrant": "ダウンロードを再準備",
-    "exportFailed": "ワークスペースのエクスポートを開始できませんでした。",
+    "exportFailed": "ワークスペースのエクスポートを開始できませんでした",
     "deleteWorkspace": "ワークスペースを削除",
     "organizationTeardownTitle": "この組織を完全に削除",
     "organizationTeardownDescription": "組織内のすべてのワークスペース、メンバーシップ、設定、管理対象ファイル、および組織そのものを削除します。",
@@ -113,7 +113,7 @@
     "assistantMaxStepsDescription": "Ask Connexの各回答を1〜12回のモデルまたはツールステップに制限します。",
     "saveWorkspaceControls": "ワークスペース設定を保存",
     "governanceSaved": "ワークスペースのAI設定を保存しました。",
-    "governanceSaveFailed": "ワークスペースのAI設定を保存できませんでした。",
+    "governanceSaveFailed": "ワークスペースのAI設定を保存できませんでした",
     "dailyBudgetTitle": "組織の1日あたりのAI利用上限",
     "dailyBudgetDescription": "この組織のすべてのワークスペースで共有する上限です。毎日UTCの0時にリセットされます。",
     "dailyTokenLimit": "1日あたりの上限",
@@ -125,7 +125,7 @@
     "todayUsage": "本日のメンバー・機能別使用量",
     "saveBudget": "上限を保存",
     "budgetSaved": "1日あたりのAI利用上限を保存しました。",
-    "budgetSaveFailed": "1日あたりのAI利用上限を保存できませんでした。",
+    "budgetSaveFailed": "1日あたりのAI利用上限を保存できませんでした",
     "enableTitle": "AI機能を有効にする",
     "enableDescription": "AI権限を持つメンバーが、この組織のワークスペースでAI機能を利用できるようにします。",
     "enableRequiresAttestation": "有効化には下記の学習不使用の確認が必要です。",
@@ -164,12 +164,13 @@
     "save": "保存",
     "saving": "保存中…",
     "saved": "AIプロバイダー設定を保存しました。",
-    "saveFailed": "AIプロバイダー設定を保存できませんでした。",
+    "saveFailed": "AIプロバイダー設定を保存できませんでした",
     "stepUpRequired": "再認証が必要です。設定 → セキュリティで本人確認のうえ、もう一度お試しください。",
-    "loadFailed": "AIプロバイダー設定を読み込めませんでした。",
+    "loadFailed": "AIプロバイダーの設定を読み込めませんでした",
     "retry": "再試行",
     "revoke": "取り消す",
-    "revoked": "AIプロバイダー設定を取り消しました。"
+    "revoked": "AIプロバイダー設定を取り消しました。",
+    "revokeFailed": "AIプロバイダー設定を取り消せませんでした"
   },
   "OrgMembers": {
     "title": "管理者",
@@ -206,7 +207,9 @@
     "empty": "ドメイン制限はありません。任意のメールドメインからメンバーを招待できます。ドメインを追加すると、この組織のワークスペースに参加できる相手を制限できます。",
     "loadError": "許可ドメインを読み込めませんでした。再読み込みしてください。",
     "addedToast": "ドメインを追加しました",
-    "removedToast": "ドメインを削除しました"
+    "removedToast": "ドメインを削除しました",
+    "addFailed": "ドメインを追加できませんでした",
+    "removeFailed": "ドメインを削除できませんでした"
   },
   "OrgAudit": {
     "title": "監査ログ",
@@ -291,7 +294,8 @@
           "teardown": "ワークスペースを削除しました"
         }
       }
-    }
+    },
+    "loadMoreFailed": "監査ログの続きを読み込めませんでした"
   },
   "OrgDataRequests": {
     "title": "開示等請求",
@@ -312,7 +316,7 @@
     "downloadDisclosure": "開示データをダウンロード",
     "downloading": "準備中",
     "disclosureDownloaded": "開示データをダウンロードしました。本人へ提供する前に法定の非開示部分を除いてください。",
-    "disclosureFailed": "開示データを作成できませんでした。",
+    "disclosureFailed": "開示データを作成できませんでした",
     "status_received": "受付済み",
     "status_verifying": "本人確認中",
     "status_in_progress": "対応中",
@@ -362,6 +366,7 @@
     "subjectRequired": "本人の氏名は必須です。",
     "toastCreated": "請求を記録しました。",
     "toastUpdated": "請求を更新しました。",
-    "toastSaveFailed": "請求を保存できませんでした。"
+    "toastSaveFailed": "請求を保存できませんでした",
+    "loadMoreFailed": "請求の続きを読み込めませんでした"
   }
 }

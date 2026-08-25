@@ -2,15 +2,17 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
-import { toastError, toastSuccess } from "@/app/lib/toast";
+import { toastSuccess } from "@/app/lib/toast";
 import { LoaderCircle } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { logout } from "@/app/lib/api";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 
 export default function LogoutPage() {
     const router = useRouter();
     const t = useTranslations("AuthLogout");
+    const showApiError = useApiErrorToast("AuthLogout");
     const hasLoggedOut = useRef(false);
 
     useEffect(() => {
@@ -25,8 +27,7 @@ export default function LogoutPage() {
                 await logout();
                 toastSuccess(t("successMessage"));
             } catch (err) {
-                const message = err instanceof Error ? err.message : t("errorFallback");
-                toastError(message);
+                showApiError(err, "errorFallback");
             } finally {
                 router.replace("/");
                 router.refresh();
@@ -34,7 +35,7 @@ export default function LogoutPage() {
         }
 
         void signOut();
-    }, [router, t]);
+    }, [router, showApiError, t]);
 
     return (
         // <div className="flex min-h-screen items-center justify-center bg-white px-6">

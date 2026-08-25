@@ -94,7 +94,7 @@
         "taskDeleted": "Task deleted",
         "activityDeleted": "Activity deleted",
         "noteDeleted": "Note deleted",
-        "deleteFailed": "Failed to delete",
+        "deleteFailed": "Couldn't delete this item",
         "linkedItemOutsideWindow": "This linked item is older than the history shown here.",
         "linkedItemUnavailable": "This linked item isn't available in this history.",
         "openLinked": {
@@ -109,7 +109,7 @@
         }
     },
     "MeLayout": {
-        "title": "Me",
-        "description": "Your relationships and work at a glance"
+        "title": "My Work",
+        "description": "Your tasks, your relationships, and your follow-ups"
     }
 }

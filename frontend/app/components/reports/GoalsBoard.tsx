@@ -11,8 +11,9 @@ import {
 } from '@heroicons/react/24/outline';
 
 import GoalDialog from '@/app/components/reports/GoalDialog';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { createGoal, deleteGoal, updateGoal } from '@/app/lib/api';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastSuccess } from '@/app/lib/toast';
 import type { ReportGoal, ReportGoalInput, WorkspaceMember } from '@/app/lib/types';
 import { Button } from '@/components/ui/button';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
@@ -34,6 +35,7 @@ export default function GoalsBoard({
     ownersFailed,
 }: GoalsBoardProps) {
     const t = useTranslations('Reports');
+    const showApiError = useApiErrorToast('Reports');
     const locale = useLocale();
     const router = useRouter();
     const [goals, setGoals] = useState(initialGoals);
@@ -66,7 +68,7 @@ export default function GoalsBoard({
             }
             router.refresh();
         } catch (error) {
-            toastError(error instanceof Error ? error.message : t('common.requestFailed'));
+            showApiError(error, 'goals.saveFailed');
             throw error;
         }
     };
@@ -81,7 +83,7 @@ export default function GoalsBoard({
             setDeleting(null);
             router.refresh();
         } catch (error) {
-            toastError(error instanceof Error ? error.message : t('common.requestFailed'));
+            showApiError(error, 'goals.deleteFailed');
         } finally {
             setDeleteBusy(false);
         }

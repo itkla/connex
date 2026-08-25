@@ -14,6 +14,7 @@ import SectionBoundary from "@/app/components/SectionBoundary";
 import SectionUnavailable from "@/app/components/SectionUnavailable";
 import { SettingsSection } from "@/app/components/settings/SettingsSection";
 import { SettingsSectionRegion } from "@/app/components/settings/SettingsSectionRegion";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import type { SectionArrival } from "@/app/hooks/useSectionArrival";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { ApiError, getOrganizationLayout } from "@/app/lib/api";
@@ -64,6 +65,7 @@ export default function OrganizationOverviewPanel({
     sections?: SectionArrival;
 } = {}) {
     const t = useTranslations("OrgOverview");
+    const showApiError = useApiErrorToast("OrgOverview");
     const router = useRouter();
     const {
         activeWorkspace,
@@ -150,7 +152,7 @@ export default function OrganizationOverviewPanel({
             });
             if (!completed) toastError(t("switchInProgress"));
         } catch (error) {
-            toastError(error instanceof Error ? error.message : t("navigationFailed"));
+            showApiError(error, "navigationFailed");
         }
     }
 

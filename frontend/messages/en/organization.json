@@ -24,7 +24,7 @@
     "saving": "Saving",
     "saved": "Organization settings updated.",
     "stale": "The organization changed while you were editing. Refresh and try again.",
-    "saveFailed": "Could not update the organization.",
+    "saveFailed": "Couldn't save the organization changes",
     "layoutTitle": "Organization layout",
     "layoutDescription": "See how organization authority, workspaces, and the memberships you may access fit together.",
     "lifecycleTitle": "Export and delete",
@@ -55,13 +55,13 @@
     "pendingMembership": "Pending",
     "loadMore": "Load more",
     "loadingMore": "Loading",
-    "loadFailed": "Could not load the organization layout.",
-    "loadMoreFailed": "Could not load more of the organization layout.",
+    "loadFailed": "Couldn't load the organization layout",
+    "loadMoreFailed": "Couldn't load more of the organization layout",
     "loadFailedTitle": "Organization layout unavailable",
     "loadFailedBody": "The organization structure could not be loaded. Your permissions and membership data have not been inferred.",
     "retry": "Retry",
     "switchInProgress": "Another workspace operation is already in progress.",
-    "navigationFailed": "Could not open that workspace or member."
+    "navigationFailed": "Couldn't open that workspace or member"
   },
   "OrgDataLifecycle": {
     "authorityTitle": "Organization authority",
@@ -78,7 +78,7 @@
     "preparingExport": "Preparing",
     "downloadExport": "Download ZIP",
     "renewExportGrant": "Renew download",
-    "exportFailed": "The workspace export could not be started.",
+    "exportFailed": "Couldn't start the workspace export",
     "deleteWorkspace": "Delete workspace",
     "organizationTeardownTitle": "Permanently delete this organization",
     "organizationTeardownDescription": "This deletes every workspace, membership, setting, and managed file in the organization, and the organization itself.",
@@ -113,7 +113,7 @@
     "assistantMaxStepsDescription": "Limit each Ask Connex answer to 1-12 model or tool steps.",
     "saveWorkspaceControls": "Save workspace controls",
     "governanceSaved": "Workspace AI controls saved.",
-    "governanceSaveFailed": "Couldn't save the workspace AI controls.",
+    "governanceSaveFailed": "Couldn't save the workspace AI controls",
     "dailyBudgetTitle": "Daily AI limit for the organization",
     "dailyBudgetDescription": "One shared limit for every workspace in this organization. It resets at midnight UTC.",
     "dailyTokenLimit": "Daily limit",
@@ -125,7 +125,7 @@
     "todayUsage": "Today by member and feature",
     "saveBudget": "Save limit",
     "budgetSaved": "Daily AI limit saved.",
-    "budgetSaveFailed": "Couldn't save the daily AI limit.",
+    "budgetSaveFailed": "Couldn't save the daily AI limit",
     "enableTitle": "Enable AI features",
     "enableDescription": "Let members who hold the AI permission use AI features in this organization's workspaces.",
     "enableRequiresAttestation": "Requires the no-training attestation below.",
@@ -164,12 +164,13 @@
     "save": "Save",
     "saving": "Saving…",
     "saved": "AI provider settings saved.",
-    "saveFailed": "Could not save the AI provider settings.",
+    "saveFailed": "Couldn't save the AI provider settings",
     "stepUpRequired": "Recent sign-in required. Verify your identity in Settings → Security, then try again.",
-    "loadFailed": "Could not load the AI provider settings.",
+    "loadFailed": "Couldn't load the AI provider settings",
     "retry": "Retry",
     "revoke": "Revoke",
-    "revoked": "AI provider configuration revoked."
+    "revoked": "AI provider configuration revoked.",
+    "revokeFailed": "Couldn't revoke the AI provider settings"
   },
   "OrgMembers": {
     "title": "Administrators",
@@ -206,7 +207,9 @@
     "empty": "No domain restrictions — members can be invited from any email domain. Add a domain to restrict who can join workspaces in this organization.",
     "loadError": "Couldn't load allowed domains. Refresh to try again.",
     "addedToast": "Domain added",
-    "removedToast": "Domain removed"
+    "removedToast": "Domain removed",
+    "addFailed": "Couldn't add the domain",
+    "removeFailed": "Couldn't remove the domain"
   },
   "OrgAudit": {
     "title": "Audit log",
@@ -291,7 +294,8 @@
           "teardown": "Workspace deleted"
         }
       }
-    }
+    },
+    "loadMoreFailed": "Couldn't load more audit events"
   },
   "OrgDataRequests": {
     "title": "Data-subject requests",
@@ -312,7 +316,7 @@
     "downloadDisclosure": "Download disclosure",
     "downloading": "Preparing",
     "disclosureDownloaded": "Disclosure export downloaded. Apply statutory redactions before sharing it with the subject.",
-    "disclosureFailed": "The disclosure could not be assembled.",
+    "disclosureFailed": "Couldn't prepare the disclosure",
     "status_received": "Received",
     "status_verifying": "Verifying identity",
     "status_in_progress": "In progress",
@@ -362,6 +366,7 @@
     "subjectRequired": "Data-subject name is required.",
     "toastCreated": "Request logged.",
     "toastUpdated": "Request updated.",
-    "toastSaveFailed": "The request could not be saved."
+    "toastSaveFailed": "Couldn't save the request",
+    "loadMoreFailed": "Couldn't load more requests"
   }
 }

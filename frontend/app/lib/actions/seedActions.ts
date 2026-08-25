@@ -131,7 +131,9 @@ export const SEED_ACTIONS: readonly AppAction[] = [
     navigateAction("navigate.documents", "navigate.documents", "/library/documents", DocumentDuplicateIcon, 135),
     navigateAction("navigate.tags", "navigate.tags", "/library/tags", TagIcon, 140),
     navigateAction("navigate.files", "navigate.files", "/library/files", FolderIcon, 145),
-    navigateAction("navigate.me", "navigate.me", "/me", UserCircleIcon, 175),
+    navigateAction("navigate.me", "navigate.me", "/me", UserCircleIcon, 175, {
+        keywordsKey: "keywords.navigate.me",
+    }),
     navigateAction("navigate.search", "navigate.search", "/search", MagnifyingGlassIcon, 185),
     navigateAction("navigate.docs", "navigate.docs", "/docs", BookOpenIcon, 190),
 

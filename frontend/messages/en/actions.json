@@ -44,7 +44,7 @@
             "tags": "Tags",
             "files": "Files",
             "workflows": "Workflows",
-            "me": "Profile",
+            "me": "My Work",
             "search": "Search",
             "docs": "Documentation",
             "savedView": "Saved view",
@@ -114,13 +114,17 @@
             "companyContactsPartial": "Added {succeeded} of {total} contacts.",
             "taskCreated": "Task created",
             "noteCreated": "Note created",
-            "activityCreated": "Activity logged"
+            "activityCreated": "Activity logged",
+            "companyCreateFailed": "Couldn't create the company",
+            "dealCreateFailed": "Couldn't create the deal",
+            "personCreateFailed": "Couldn't create the contact"
         },
         "keywords": {
             "navigate": {
                 "contacts": "contacts, people, persons",
                 "captureReviews": "capture, reviews, queue, matching, inbox, mail, calendar",
-                "users": "users, members, people"
+                "users": "users, members, people",
+                "me": "my work, me, profile, tasks, follow-ups"
             },
             "create": {
                 "company": "company, org, organization, account",

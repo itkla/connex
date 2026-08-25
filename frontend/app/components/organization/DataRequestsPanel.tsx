@@ -6,7 +6,8 @@ import { EllipsisVerticalIcon, ArrowDownTrayIcon, PencilSquareIcon, PlusIcon } f
 
 import type { DataSubjectRequest, DataSubjectRequestStatus } from "@/app/lib/types";
 import { ApiError, getDataSubjectRequests, getDataSubjectDisclosure } from "@/app/lib/api";
-import { toastError, toastSuccess } from "@/app/lib/toast";
+import { toastSuccess } from "@/app/lib/toast";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -81,6 +82,7 @@ export default function DataRequestsPanel({
     presentation?: SettingsPanelPresentation;
 } = {}) {
     const t = useTranslations("OrgDataRequests");
+    const showApiError = useApiErrorToast("OrgDataRequests");
     const locale = useLocale();
     const { activeWorkspace } = useWorkspace();
     const orgId = activeWorkspace?.orgId ?? null;
@@ -136,7 +138,7 @@ export default function DataRequestsPanel({
             setRequests((prev) => [...prev, ...page]);
             setHasMore(page.length === PAGE_SIZE);
         } catch (err) {
-            toastError(err instanceof Error ? err.message : String(err));
+            showApiError(err, "loadMoreFailed");
         } finally {
             setLoadingMore(false);
         }
@@ -156,7 +158,7 @@ export default function DataRequestsPanel({
             setTimeout(() => URL.revokeObjectURL(url), 0);
             toastSuccess(t("disclosureDownloaded"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t("disclosureFailed"));
+            showApiError(err, "disclosureFailed");
         } finally {
             setDownloadingId(null);
         }

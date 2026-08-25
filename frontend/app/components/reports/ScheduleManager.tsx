@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { CalendarDaysIcon } from '@heroicons/react/24/outline';
 
 import ScheduleDialog from '@/app/components/reports/ScheduleDialog';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import {
     ApiError,
     deleteReportSchedule,
@@ -37,6 +38,7 @@ export default function ScheduleManager({
     defaultTimezone: string;
 }) {
     const t = useTranslations('Reports');
+    const showApiError = useApiErrorToast('Reports');
     const router = useRouter();
     const [open, setOpen] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -94,10 +96,10 @@ export default function ScheduleManager({
                 toastError(t('schedule.conflict'));
                 await load();
                 router.refresh();
+            } else if (error instanceof ApiError && error.status === 400) {
+                toastError(t('schedule.validation.recipientAccess'));
             } else {
-                toastError(error instanceof ApiError && error.status === 400
-                    ? t('schedule.validation.recipientAccess')
-                    : error instanceof Error ? error.message : t('common.requestFailed'));
+                showApiError(error, 'schedule.saveFailed');
             }
             throw error;
         }
@@ -128,7 +130,7 @@ export default function ScheduleManager({
                 await load();
                 router.refresh();
             } else {
-                toastError(error instanceof Error ? error.message : t('common.requestFailed'));
+                showApiError(error, 'schedule.deleteFailed');
             }
         } finally {
             setDeleting(false);

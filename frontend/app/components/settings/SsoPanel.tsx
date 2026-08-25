@@ -8,6 +8,7 @@ import type { SsoConnectionDto, SsoConnectionRequest, SsoProtocol } from "@/app/
 import { getSsoConfig, saveSsoConfig } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -83,6 +84,7 @@ export default function SsoPanel({
     presentation?: SettingsPanelPresentation;
 } = {}) {
     const t = useTranslations("WorkspaceSso");
+    const showApiError = useApiErrorToast("WorkspaceSso");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { activeWorkspaceId } = useWorkspace();
 
@@ -162,7 +164,7 @@ export default function SsoPanel({
             toastSuccess(t("saved"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("saveFailed"));
+                showApiError(err, "saveFailed");
             }
         } finally {
             setSaving(false);

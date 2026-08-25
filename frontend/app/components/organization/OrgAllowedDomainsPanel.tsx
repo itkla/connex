@@ -9,8 +9,9 @@ import { addOrgAllowedDomain, getOrgAllowedDomains, removeOrgAllowedDomain } fro
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { useFieldErrors } from "@/app/hooks/useFieldErrors";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { ApiError } from "@/app/lib/api";
-import { toastError, toastSuccess } from "@/app/lib/toast";
+import { toastSuccess } from "@/app/lib/toast";
 import { Button } from "@/components/ui/button";
 import {
     DropdownMenu,
@@ -41,6 +42,7 @@ export default function OrgAllowedDomainsPanel({
     presentation?: SettingsPanelPresentation;
 } = {}) {
     const t = useTranslations("OrgDomains");
+    const showApiError = useApiErrorToast("OrgDomains");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { activeWorkspace } = useWorkspace();
     const orgId = activeWorkspace?.orgId ?? null;
@@ -86,7 +88,7 @@ export default function OrgAllowedDomainsPanel({
             toastSuccess(t("addedToast"));
         } catch (err) {
             if (err instanceof ApiError && err.fieldErrors) setFieldErrors(err.fieldErrors);
-            else if (!handlePasskeyStepUpError(err)) toastError(err instanceof Error ? err.message : String(err));
+            else if (!handlePasskeyStepUpError(err)) showApiError(err, "addFailed");
         } finally {
             setAdding(false);
         }
@@ -101,7 +103,7 @@ export default function OrgAllowedDomainsPanel({
             toastSuccess(t("removedToast"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : String(err));
+                showApiError(err, "removeFailed");
             }
         } finally {
             setBusy(null);

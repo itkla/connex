@@ -13,8 +13,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatDate } from "@/app/lib/utils";
 import { durationMicro, easeOut } from "@/app/lib/motion";
-import { toastError, toastSuccess } from "@/app/lib/toast";
+import { toastSuccess } from "@/app/lib/toast";
 import { deleteTask, updateTask } from "@/app/lib/api";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import EditTaskSheet from "@/app/components/activity/tasks/EditTaskSheet";
 import NoteContent from "@/app/components/activity/notes/NoteContent";
 
@@ -25,6 +26,7 @@ import NoteContent from "@/app/components/activity/notes/NoteContent";
  */
 export default function DealTaskList({ dealId, companyId, tasks, deals }: { dealId: number, companyId?: number | null, tasks: Task[], deals: Deal[] }) {
     const t = useTranslations('DealsTaskList');
+    const showApiError = useApiErrorToast('DealsTaskList');
     const locale = useLocale();
     const router = useRouter();
     const reduce = useReducedMotion() ?? false;
@@ -45,7 +47,7 @@ export default function DealTaskList({ dealId, companyId, tasks, deals }: { deal
                 toastSuccess(t('taskDeleted'));
                 router.refresh();
             } catch (err) {
-                toastError(err instanceof Error ? err.message : t('failedToDeleteTask'));
+                showApiError(err, 'failedToDeleteTask');
             }
         });
     };
@@ -66,7 +68,7 @@ export default function DealTaskList({ dealId, companyId, tasks, deals }: { deal
                 toastSuccess(t('taskMarkedAsComplete'));
                 router.refresh();
             } catch (err) {
-                toastError(err instanceof Error ? err.message : t('failedToMarkTaskAsComplete'));
+                showApiError(err, 'failedToMarkTaskAsComplete');
             }
         });
     };
