@@ -8,6 +8,14 @@ public final class AiAssistantTerminalReasons {
     public static final String ACCESS_REVOKED = "access_revoked";
     /** The workspace processing-restriction epoch advanced while the turn was still running. */
     public static final String RESTRICTIONS_CHANGED = "restrictions_changed";
+    /**
+     * The organization's configured model declares a context window below
+     * {@link AiAssistantPromptBudget#ASSISTANT_MIN_CONTEXT_TOKENS}.
+     *
+     * <p>Refused before provider egress and decided per turn, so an administrator who configures a
+     * larger model fixes it without restarting anything. Asking the same question again cannot help.
+     */
+    public static final String CONTEXT_WINDOW_TOO_SMALL = "context_window_too_small";
 
     /**
      * The terminal reasons that withdraw the requester's authorization to read what the turn

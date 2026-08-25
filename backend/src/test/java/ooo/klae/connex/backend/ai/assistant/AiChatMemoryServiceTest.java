@@ -14,6 +14,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.Clock;
@@ -241,7 +242,7 @@ class AiChatMemoryServiceTest {
                 .thenReturn(new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
                         AiReasoningMode.TAGGED,
-                        32_768,
+                        AiAssistantPromptBudget.ASSISTANT_MIN_CONTEXT_TOKENS,
                         8_192,
                         AiToolCallingMode.NATIVE_FUNCTIONS,
                         AiReasoningMode.NATIVE));
@@ -269,6 +270,56 @@ class AiChatMemoryServiceTest {
         verify(invocationService, never()).serializedPromptBytes(
                 any(MaskedPrompt.class), same(stepSchema.responseSchema()),
                 eq(AiReasoningMode.TAGGED));
+    }
+
+    /**
+     * The floor is checked at the seam where the configured context size first becomes known.
+     *
+     * <p>Preparation reads capabilities before it loads any history, so a workspace configured with
+     * a 32k model fails this turn without touching the transcript, assembling a prompt, or reaching
+     * a provider — and an administrator who configures a larger model fixes the next turn with no
+     * restart.
+     */
+    @Test
+    void aContextWindowBelowTheAssistantFloorRefusesPreparationBeforeAnyHistoryIsRead() {
+        AiInvocationService invocationService = mock(AiInvocationService.class);
+        AiChatTurnPersistenceService persistenceService = mock(AiChatTurnPersistenceService.class);
+        AiProperties properties = new AiProperties();
+        properties.setAssistantMaxOutputTokens(8_192);
+        var objectMapper = JsonMapper.builder().build();
+        var catalog = new AiAssistantToolCatalog();
+        var assembler = new AiAssistantPromptAssembler(objectMapper, catalog);
+        var stepSchema = new AiAssistantStepSchema(objectMapper, catalog);
+        Instant now = Instant.parse("2026-08-12T00:00:00Z");
+        AiChatMemoryService service = new AiChatMemoryService(
+                invocationService,
+                mock(AiInvocationAdmissionService.class),
+                properties,
+                assembler,
+                emptyToolExecutor(),
+                new AiAssistantSummaryGuard(),
+                new AiAssistantSummarySchema(objectMapper),
+                stepSchema,
+                persistenceService,
+                mock(AiWorkspaceGovernanceService.class),
+                objectMapper,
+                Clock.fixed(now, ZoneOffset.UTC));
+        AiChatQueuedTurn turn = new AiChatQueuedTurn(
+                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of());
+        when(invocationService.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
+                .thenReturn(new AiProviderCapabilities(
+                        AiStructuredOutputEnforcement.JSON_SCHEMA,
+                        AiReasoningMode.TAGGED,
+                        32_768,
+                        8_192));
+
+        AiAssistantLoopException refused = assertThrows(
+                AiAssistantLoopException.class,
+                () -> service.prepare(turn, new MaskingContext(), now.plusSeconds(70)));
+
+        assertEquals(AiAssistantTerminalReasons.CONTEXT_WINDOW_TOO_SMALL,
+                refused.terminalReason());
+        verifyNoInteractions(persistenceService);
     }
 
     @Test
@@ -319,7 +370,7 @@ class AiChatMemoryServiceTest {
                 .thenReturn(new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
                         AiReasoningMode.TAGGED,
-                        32_768,
+                        AiAssistantPromptBudget.ASSISTANT_MIN_CONTEXT_TOKENS,
                         8_192));
         when(invocationService.serializedPromptBytes(
                 any(MaskedPrompt.class), same(stepSchema.responseSchema()),
@@ -474,7 +525,7 @@ class AiChatMemoryServiceTest {
                 Clock.fixed(now, ZoneOffset.UTC));
         AiChatQueuedTurn turn = new AiChatQueuedTurn(
                 3, 12, 5, 7, 102, 2, 9L, false, List.of(), List.of());
-        String oversizedContent = "OVERSIZED_PRIVATE_HISTORY_" + "x".repeat(15_000);
+        String oversizedContent = "OVERSIZED_PRIVATE_HISTORY_" + "x".repeat(25_000);
         AiChatMessage oversized = message(101, 1, "user", oversizedContent);
         AiChatMessage initiating = message(102, 2, "user", "Continue");
         AiChatMessage storedSummary = message(
@@ -486,7 +537,7 @@ class AiChatMemoryServiceTest {
                 .thenReturn(new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
                         AiReasoningMode.TAGGED,
-                        32_768,
+                        AiAssistantPromptBudget.ASSISTANT_MIN_CONTEXT_TOKENS,
                         8_192));
         when(invocationService.serializedPromptBytes(
                 any(MaskedPrompt.class), same(stepSchema.responseSchema()),
@@ -510,7 +561,7 @@ class AiChatMemoryServiceTest {
                 .thenReturn(
                         new AiStructuredRepairAttempt<>(
                                 new AiStructuredOutcome.Parsed<>(
-                                new AiAssistantSummary("界".repeat(3_000)),
+                                new AiAssistantSummary("界".repeat(4_000)),
                                         0, 7, 3, "end_turn"),
                                 Optional.empty()),
                         new AiStructuredRepairAttempt<>(

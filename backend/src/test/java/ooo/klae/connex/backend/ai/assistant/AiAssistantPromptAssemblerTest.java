@@ -431,18 +431,18 @@ class AiAssistantPromptAssemblerTest {
         ToolTurn first = nativeBudgetTurn(1, "A");
         ToolTurn second = nativeBudgetTurn(2, "B");
         ToolTurn prospective = nativeBudgetTurn(3, "C");
-        String firstSignature = "first-/+=" + "S".repeat(1_191);
-        String secondSignature = "second-日本語-" + "T".repeat(1_182);
+        String firstSignature = "first-/+=" + "S".repeat(2_391);
+        String secondSignature = "second-日本語-" + "T".repeat(2_382);
         Map<Integer, AiToolCall> calls = Map.of(
                 first.seq(), nativeBudgetCall(first, "A", firstSignature),
                 second.seq(), nativeBudgetCall(second, "B", secondSignature),
                 prospective.seq(), nativeBudgetCall(
-                        prospective, "C", "prospective-" + "U".repeat(1_188)));
+                        prospective, "C", "prospective-" + "U".repeat(2_388)));
         AiAssistantPromptBudget budget = AiAssistantPromptBudget.from(
                 new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
                         AiReasoningMode.NATIVE,
-                        32_768,
+                        AiAssistantPromptBudget.ASSISTANT_MIN_CONTEXT_TOKENS,
                         4_096),
                 4_096);
 
@@ -455,6 +455,13 @@ class AiAssistantPromptAssemblerTest {
                         budget);
         AiAssistantPromptAssembler.NativeReplay replay = assembler.nativeReplay(
                 List.of(first, second), calls, new MaskingContext(), budget, null);
+        long contentBytes = replay.exchanges().stream()
+                .mapToLong(exchange -> budget.utf8Bytes(exchange.call().arguments())
+                        + budget.utf8Bytes(exchange.maskedResult()))
+                .sum();
+        long signatureBytes = replay.exchanges().stream()
+                .mapToLong(exchange -> budget.utf8Bytes(exchange.call().thoughtSignature()))
+                .sum();
 
         assertEquals(AiAssistantPromptAssembler.ToolBudgetAudit.NONE, admission);
         assertEquals(firstSignature,
@@ -462,6 +469,10 @@ class AiAssistantPromptAssemblerTest {
         assertEquals(secondSignature,
                 replay.exchanges().getLast().call().thoughtSignature());
         assertEquals(AiAssistantPromptAssembler.ToolBudgetAudit.NONE, replay.audit());
+        assertTrue(contentBytes <= budget.toolResultBytes());
+        assertTrue(contentBytes + signatureBytes > budget.toolResultBytes(),
+                "The signatures no longer exceed the tool allocation, so this test would pass"
+                        + " even if they were counted against it");
     }
 
     @Test

@@ -2034,13 +2034,35 @@ class AiChatAgentLoopServiceTest {
         verify(persistenceService).markTerminal(TURN, "failed", "budget_exhausted");
     }
 
+    /**
+     * A model below the assistant context floor settles this turn and only this turn.
+     *
+     * <p>The refusal is raised where the budget is derived, before any prompt is assembled or sent,
+     * so it must reach the durable terminal as its own reason rather than as a provider error the
+     * reader would be told to retry.
+     */
+    @Test
+    void aContextWindowBelowTheAssistantFloorFailsTheTurnWithoutProviderEgress() {
+        doThrow(new AiAssistantLoopException(
+                AiAssistantTerminalReasons.CONTEXT_WINDOW_TOO_SMALL,
+                AiAssistantTerminalReasons.CONTEXT_WINDOW_TOO_SMALL))
+                .when(memoryService).prepare(eq(TURN), any(), any(Instant.class));
+
+        assertTerminal(AiAssistantTerminalReasons.CONTEXT_WINDOW_TOO_SMALL);
+
+        verify(invocationService, never()).completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class));
+        verify(toolExecutor, never()).execute(any(), any(), any(), any(Boolean.class), any());
+    }
+
     @Test
     void freshConservativeOpenAiCompatibleContextPermitsAFirstTurnToolStep() throws Exception {
         AiAssistantPromptBudget budget = AiAssistantPromptBudget.from(
                 new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
                         AiReasoningMode.TAGGED,
-                        32_768,
+                        AiAssistantPromptBudget.ASSISTANT_MIN_CONTEXT_TOKENS,
                         8_192),
                 16_384,
                 8_192);

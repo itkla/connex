@@ -82,6 +82,7 @@ const labels: AskConnexTurnLabels = {
         budget: "Daily AI limit reached.",
         capacity: "No AI capacity left right now.",
         workspaceDisabled: "Ask Connex is turned off for this workspace.",
+        contextWindowTooSmall: "The configured AI model has too small a context window.",
         accessRevoked: "Your access to something this answer was reading changed.",
         restrictionsChanged: "The AI processing restrictions for this workspace changed.",
         imageUnsupported: "This assistant model cannot read images.",

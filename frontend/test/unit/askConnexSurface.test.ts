@@ -333,7 +333,11 @@ describe("failed-answer recovery", () => {
     });
 
     it("offers nothing when the feature is switched off or the input cannot be read", () => {
-        for (const reason of ["workspace_disabled", "image_input_unsupported"]) {
+        for (const reason of [
+            "workspace_disabled",
+            "context_window_too_small",
+            "image_input_unsupported",
+        ]) {
             expect(askConnexRecovery("failed", reason, true, true)).toEqual({
                 retry: false,
                 continueFromPartial: false,
@@ -404,6 +408,7 @@ describe("the terminal reason vocabulary", () => {
         "agent_backstop_exceeded",
         "attachment_auto_write_blocked",
         "budget_exhausted",
+        "context_window_too_small",
         "generation_capacity",
         "generation_timeout",
         "image_input_unsupported",
@@ -437,6 +442,8 @@ describe("the terminal reason vocabulary", () => {
             ["agent_backstop_exceeded", { category: "breadth", message: "breadthSteps" }],
             ["attachment_auto_write_blocked", { category: "generic", message: "generic" }],
             ["budget_exhausted", { category: "capacity", message: "budget" }],
+            ["context_window_too_small",
+                { category: "availability", message: "contextWindowTooSmall" }],
             ["generation_capacity", { category: "capacity", message: "capacity" }],
             ["generation_timeout", { category: "transient", message: "timeout" }],
             ["image_input_unsupported", { category: "unsupportedInput", message: "imageUnsupported" }],
