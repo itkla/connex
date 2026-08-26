@@ -16,6 +16,14 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 /**
  * Business logic for the workspace-scoped product/service catalog. Every read/write is scoped to
  * the active workspace; mutations require {@link Permission#PRODUCT_MANAGE}.
+ *
+ * <p>The SKU is canonicalized on every write: surrounding whitespace is removed and a blank SKU
+ * becomes null. It is the catalog's conflict key — {@code uq_product_workspace_sku}, CSV import
+ * classification, and line-item lookups all compare it — and CSV cells cannot carry surrounding
+ * whitespace, so a stored {@code " A-1"} would export as {@code "A-1"} and reimport as a second
+ * product. Canonicalizing here rather than preserving the whitespace also keeps the unique index
+ * meaningful: it is NULL-tolerant but not blank-tolerant, and trailing spaces are significant
+ * under {@code NO PAD} collations and ignored under {@code PAD SPACE} ones.
  */
 @Service
 @RequiredArgsConstructor
@@ -42,6 +50,7 @@ public class ProductService {
     @RequirePermission(Permission.PRODUCT_MANAGE)
     public Product create(Product product) {
         product.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
+        product.setSku(canonicalSku(product.getSku()));
         productMapper.insert(product);
         Product saved = requireProduct(product.getWorkspaceId(), product.getId());
         auditService.record("product.create", "product", saved.getId(), saved.getName(),
@@ -57,6 +66,7 @@ public class ProductService {
         Product before = requireProduct(workspaceId, id);
         product.setId(id);
         product.setWorkspaceId(workspaceId);
+        product.setSku(canonicalSku(product.getSku()));
         productMapper.update(product);
         Product after = requireProduct(workspaceId, id);
         auditService.record("product.update", "product", id, after.getName(),
@@ -74,6 +84,13 @@ public class ProductService {
         auditService.record("product.delete", "product", id, before.getName(),
             "Deleted product " + before.getName(),
             auditService.diff(before, null, AUDIT_FIELDS));
+    }
+
+    /** Trims the catalog conflict key and treats a blank SKU as absent. */
+    private static String canonicalSku(String sku) {
+        if (sku == null) return null;
+        String trimmed = sku.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     /** Loads a product that must exist in the given workspace, else 404. */

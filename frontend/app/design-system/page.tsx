@@ -3,7 +3,18 @@
 import * as React from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { useTheme } from "next-themes";
-import { MoonIcon, SunIcon } from "@heroicons/react/24/outline";
+import {
+  ArrowDownTrayIcon,
+  ArrowUpTrayIcon,
+  Bars2Icon,
+  Bars3Icon,
+  EllipsisVerticalIcon,
+  MoonIcon,
+  PlusIcon,
+  SunIcon,
+  Squares2X2Icon,
+  TableCellsIcon,
+} from "@heroicons/react/24/outline";
 
 import { cn } from "@/lib/utils";
 import { PageShell } from "@/app/components/PageShell";
@@ -16,6 +27,9 @@ import {
   springSnappy,
 } from "@/app/lib/motion";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { SplitButton } from "@/components/ui/split-button";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -146,11 +160,11 @@ const RADII: { label: string; className: string; use: string }[] = [
   { label: "rounded-full", className: "rounded-full", use: "Buttons & pills" },
 ];
 
-const WIDTH_TIERS: { name: string; className: string; maxWidth: string; use: string }[] = [
-  { name: "wide", className: "max-w-[100rem]", maxWidth: "100rem", use: "Lists, dashboards, overview, settings" },
-  { name: "reading", className: "max-w-5xl", maxWidth: "64rem", use: "Record detail, long reads" },
-  { name: "form", className: "max-w-3xl", maxWidth: "48rem", use: "Focused single-column forms" },
-  { name: "full", className: "—", maxWidth: "100%", use: "Relationship map only" },
+const WIDTH_RULES: { name: string; className: string; maxWidth: string; use: string }[] = [
+  { name: "Page", className: "no cap", maxWidth: "100%", use: "Every routed surface, at every screen size" },
+  { name: "Editor body", className: "max-w-3xl", maxWidth: "48rem", use: "The note and document measure, inside a spanning page" },
+  { name: "Generated prose", className: "max-w-[70ch]", maxWidth: "70ch", use: "Briefs, rationales, and other long text blocks" },
+  { name: "Record rail", className: "minmax(16rem,20rem)", maxWidth: "20rem", use: "The record-detail left rail; the main column takes the rest" },
 ];
 
 const RHYTHM: { label: string; token: string; size: string }[] = [
@@ -164,9 +178,18 @@ const RHYTHM: { label: string; token: string; size: string }[] = [
 const NAV = [
   { id: "foundations", label: "Foundations" },
   { id: "layout", label: "Layout" },
+  { id: "buttons", label: "Buttons" },
   { id: "overlays", label: "Overlays" },
   { id: "motion", label: "Motion" },
 ];
+
+/** The D4 context height scale, read off the live reference pages. */
+const BUTTON_CONTEXTS = [
+  { size: "page", height: "h-9", use: "Page-header action cluster" },
+  { size: "dialog", height: "h-9", use: "Dialog and drawer footers" },
+  { size: "toolbar", height: "h-8", use: "Browser toolbars and filter rows" },
+  { size: "inline", height: "h-6", use: "Inside a row, cell, or card" },
+] as const;
 
 function useMounted(): boolean {
   return React.useSyncExternalStore(
@@ -288,6 +311,8 @@ function CssMotionDemo({ label, spec, style }: { label: string; spec: string; st
 
 export default function DesignSystemPage() {
   const [paletteOpen, setPaletteOpen] = React.useState(false);
+  const [demoView, setDemoView] = React.useState<"grid" | "table">("grid");
+  const [demoDensity, setDemoDensity] = React.useState<"comfortable" | "compact">("comfortable");
   const shortcutPlatform = useShortcutPlatform();
 
   React.useEffect(() => {
@@ -302,7 +327,7 @@ export default function DesignSystemPage() {
   }, []);
 
   return (
-    <PageShell tier="wide">
+    <PageShell>
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="flex flex-col gap-2">
           <Badge variant="secondary" className="font-mono">
@@ -435,22 +460,22 @@ export default function DesignSystemPage() {
           <Section
             id="layout"
             title="Layout"
-            description="Three width tiers, one page rhythm, one primitive. Every routed surface renders inside <PageShell>."
+            description="No page-width cap, one page rhythm, one primitive. Every routed surface renders inside <PageShell> and spans the full content area."
           >
             <div className="flex flex-col gap-3">
-              <SubHeading>Width tiers</SubHeading>
+              <SubHeading>Where width is capped</SubHeading>
               <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6">
-                {WIDTH_TIERS.map((tier) => (
-                  <div key={tier.name} className="flex flex-col gap-1.5">
+                {WIDTH_RULES.map((rule) => (
+                  <div key={rule.name} className="flex flex-col gap-1.5">
                     <div className="flex items-baseline justify-between">
-                      <span className="text-sm font-medium text-foreground">{tier.name}</span>
-                      <span className="font-mono text-xs text-muted-foreground">{tier.className}</span>
+                      <span className="text-sm font-medium text-foreground">{rule.name}</span>
+                      <span className="font-mono text-xs text-muted-foreground">{rule.className}</span>
                     </div>
                     <div
                       className="h-8 rounded-lg bg-brand/15 ring-1 ring-inset ring-brand/30"
-                      style={{ maxWidth: tier.maxWidth, width: "100%" }}
+                      style={{ maxWidth: rule.maxWidth, width: "100%" }}
                     />
-                    <span className="text-xs text-muted-foreground">{tier.use}</span>
+                    <span className="text-xs text-muted-foreground">{rule.use}</span>
                   </div>
                 ))}
               </div>
@@ -459,13 +484,129 @@ export default function DesignSystemPage() {
             <div className="flex flex-col gap-3">
               <SubHeading>PageShell</SubHeading>
               <p className="max-w-prose text-sm text-muted-foreground">
-                <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
-                  &lt;PageShell tier=&quot;wide|reading|form&quot;&gt;
-                </code>{" "}
-                encodes the outer gutter, vertical padding, the centered max-width column, and the standard{" "}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">&lt;PageShell&gt;</code>{" "}
+                encodes the responsive gutter, vertical padding, and the standard{" "}
                 <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">gap-10</code> between
-                sections. This very page is wrapped in one.
+                sections. It takes no width prop: the column is uncapped, so a page never leaves a dead
+                gutter. A surface that needs a readable measure puts it on the text block, never on the
+                page. This very page is wrapped in one.
               </p>
+            </div>
+          </Section>
+
+          <Section
+            id="buttons"
+            title="Buttons"
+            description="Pill-shaped, one height per context, chevroned menu triggers, circular tooltipped icon buttons, one capsule for a split, a segmented control for mode switching, and exactly one primary action per region. Everything here is a variant of the same primitive."
+          >
+            <div className="flex flex-col gap-3">
+              <SubHeading>Context height scale</SubHeading>
+              <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6">
+                {BUTTON_CONTEXTS.map((context) => (
+                  <div key={context.size} className="flex flex-wrap items-center gap-4">
+                    <Button variant="outline" size={context.size}>
+                      {context.size}
+                    </Button>
+                    <span className="font-mono text-xs text-muted-foreground">{context.height}</span>
+                    <span className="text-xs text-muted-foreground">{context.use}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <SubHeading>Menu triggers &amp; icon buttons</SubHeading>
+              <div className="flex flex-wrap items-center gap-3">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="toolbar" menu>
+                      Columns
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    <DropdownMenuItem>Name</DropdownMenuItem>
+                    <DropdownMenuItem>Owner</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <IconButton variant="outline" size="icon-toolbar" label="More actions">
+                      <EllipsisVerticalIcon className="size-4" />
+                    </IconButton>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem>Assign owner</DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem variant="destructive">Delete</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <span className="text-xs text-muted-foreground">
+                  <code className="rounded bg-muted px-1 py-0.5 font-mono">menu</code> draws the chevron ·
+                  IconButton makes the tooltip mandatory
+                </span>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <SubHeading>Split button</SubHeading>
+              <div className="flex flex-wrap items-center gap-3">
+                <SplitButton
+                  label="New contact"
+                  icon={<PlusIcon className="size-4" />}
+                  onClick={() => {}}
+                  menuLabel="More actions"
+                >
+                  <DropdownMenuItem>
+                    <ArrowUpTrayIcon className="size-4" />
+                    Import
+                  </DropdownMenuItem>
+                  <DropdownMenuItem>
+                    <ArrowDownTrayIcon className="size-4" />
+                    Export current view
+                  </DropdownMenuItem>
+                </SplitButton>
+                <SplitButton
+                  variant="outline"
+                  size="toolbar"
+                  label="Save"
+                  onClick={() => {}}
+                  menuLabel="More save options"
+                >
+                  <DropdownMenuItem>Save as new view</DropdownMenuItem>
+                </SplitButton>
+                <span className="text-xs text-muted-foreground">
+                  One capsule: pill caps outside, a straight seam inside, an inset hairline divider, and a
+                  press dip that moves the whole shape.
+                </span>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <SubHeading>Segmented control</SubHeading>
+              <div className="flex flex-wrap items-center gap-3">
+                <SegmentedControl
+                  ariaLabel="View"
+                  value={demoView}
+                  onChange={setDemoView}
+                  options={[
+                    { value: "grid", icon: <Squares2X2Icon className="size-4" />, ariaLabel: "Grid view" },
+                    { value: "table", icon: <TableCellsIcon className="size-4" />, ariaLabel: "Table view" },
+                  ]}
+                />
+                <SegmentedControl
+                  ariaLabel="Density"
+                  value={demoDensity}
+                  onChange={setDemoDensity}
+                  options={[
+                    { value: "comfortable", label: "Comfortable", icon: <Bars2Icon className="size-4" /> },
+                    { value: "compact", label: "Compact", icon: <Bars3Icon className="size-4" /> },
+                  ]}
+                />
+                <span className="text-xs text-muted-foreground">
+                  One travelling thumb on <code className="rounded bg-muted px-1 py-0.5 font-mono">springSnappy</code>{" "}
+                  · arrow keys move the selection
+                </span>
+              </div>
             </div>
           </Section>
 
@@ -590,7 +731,7 @@ export default function DesignSystemPage() {
           <Section
             id="motion"
             title="Motion"
-            description="One source of truth in app/lib/motion.ts. Springs give physics; the --ease-* CSS tokens give consistent curves. Everything falls back to instant under prefers-reduced-motion. Click any tile."
+            description="Three speeds and two characters, defined once in app/globals.css and mirrored in app/lib/motion.ts. Springs give physics; the easing tokens give consistent curves. Everything falls back to instant under prefers-reduced-motion. Click any tile."
           >
             <div className="flex flex-col gap-3">
               <SubHeading>Springs</SubHeading>
@@ -605,30 +746,41 @@ export default function DesignSystemPage() {
               <SubHeading>Easings</SubHeading>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <CssMotionDemo
+                  label="--motion-ease-hand"
+                  spec="ease-hand · press, pop-in"
+                  style={{ transition: "transform 600ms var(--motion-ease-hand)" }}
+                />
+                <CssMotionDemo
+                  label="--motion-ease-calm"
+                  spec="ease-calm · state changes"
+                  style={{ transition: "transform 600ms var(--motion-ease-calm)" }}
+                />
+                <CssMotionDemo
                   label="--ease-out"
                   spec="enter / exit"
                   style={{ transition: "transform 600ms var(--ease-out)" }}
-                />
-                <CssMotionDemo
-                  label="--ease-in-out"
-                  spec="on-screen movement"
-                  style={{ transition: "transform 600ms var(--ease-in-out)" }}
-                />
-                <CssMotionDemo
-                  label="--ease-drawer"
-                  spec="sheet slides"
-                  style={{ transition: "transform 600ms var(--ease-drawer)" }}
                 />
               </div>
             </div>
 
             <div className="flex flex-col gap-3">
-              <SubHeading>Durations</SubHeading>
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                <CssMotionDemo label="durationFast" spec="150ms · tooltips" style={{ transition: "transform 150ms var(--ease-out)" }} />
-                <CssMotionDemo label="durationBase" spec="200ms · dropdowns" style={{ transition: "transform 200ms var(--ease-out)" }} />
-                <CssMotionDemo label="durationSlow" spec="300ms · modals" style={{ transition: "transform 300ms var(--ease-out)" }} />
-                <CssMotionDemo label="durationReveal" spec="450ms · reveals" style={{ transition: "transform 450ms var(--ease-out)" }} />
+              <SubHeading>Speeds</SubHeading>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <CssMotionDemo
+                  label="--motion-micro"
+                  spec="150ms · hover, toggle, press, menus"
+                  style={{ transition: "transform var(--motion-micro) var(--motion-ease-hand)" }}
+                />
+                <CssMotionDemo
+                  label="--motion-standard"
+                  spec="250ms · overlays, entrances"
+                  style={{ transition: "transform var(--motion-standard) var(--motion-ease-calm)" }}
+                />
+                <CssMotionDemo
+                  label="--motion-expressive"
+                  spec="400ms · rare, memorable"
+                  style={{ transition: "transform var(--motion-expressive) var(--ease-out)" }}
+                />
               </div>
             </div>
           </Section>

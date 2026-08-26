@@ -38,6 +38,7 @@ import { useCommentIndicators } from '@/app/hooks/useCommentIndicators';
 import CommentIndicatorChip from '@/app/components/records/comments/CommentIndicatorChip';
 import { useRecentRecords } from '@/app/hooks/useRecentRecords';
 import type { PeekTarget, PeekType } from '@/app/hooks/useRecordPeek';
+import { actionLabel } from '@/app/lib/actions/actionLabels';
 import type { ActionId } from '@/app/lib/actions/types';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { ApiError, getCompanyById, getCompanyEngagement, getContactById, getActivitiesForDeal, getDealById, getDealRisk, getDealSummary, getTasksForDeal } from '@/app/lib/api';
@@ -97,6 +98,7 @@ function RecordPeekDrawer({
 }: Props) {
     const t = useTranslations('RecordPeek');
     const actionsT = useTranslations('Actions');
+    const messageT = useTranslations();
     const locale = useLocale();
     const router = useRouter();
     const { run, getAction, isAvailableForRecord } = useActions();
@@ -202,14 +204,14 @@ function RecordPeekDrawer({
                                     {position.index} / {position.total}
                                 </span>
                             )}
-                            <Button variant="ghost" size="icon-xs" aria-label={t('previous')} disabled={!hasPrev} onClick={onPrev}>
+                            <Button variant="ghost" size="icon-inline" aria-label={t('previous')} disabled={!hasPrev} onClick={onPrev}>
                                 <ChevronUpIcon className="size-4" />
                             </Button>
-                            <Button variant="ghost" size="icon-xs" aria-label={t('next')} disabled={!hasNext} onClick={onNext}>
+                            <Button variant="ghost" size="icon-inline" aria-label={t('next')} disabled={!hasNext} onClick={onNext}>
                                 <ChevronDownIcon className="size-4" />
                             </Button>
                             <DrawerClose
-                                render={<Button variant="ghost" size="icon-xs" aria-label={t('close')} />}
+                                render={<Button variant="ghost" size="icon-inline" aria-label={t('close')} />}
                             >
                                 <XMarkIcon className="size-4" />
                             </DrawerClose>
@@ -245,7 +247,7 @@ function RecordPeekDrawer({
                         <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border px-4 py-10 text-center">
                             <p className="text-sm text-muted-foreground">{t(`error_${error}`)}</p>
                             {error !== 'forbidden' && (hasNext || hasPrev) && (
-                                <Button variant="outline" size="sm" onClick={hasNext ? onNext : onPrev}>
+                                <Button variant="outline" size="toolbar" onClick={hasNext ? onNext : onPrev}>
                                     {t('goToNext')}
                                 </Button>
                             )}
@@ -262,7 +264,7 @@ function RecordPeekDrawer({
                     >
                         <Button
                             variant="brand"
-                            size="sm"
+                            size="toolbar"
                             onClick={openFull}
                             className="flex-1"
                         >
@@ -272,7 +274,7 @@ function RecordPeekDrawer({
                         {(canLogActivity || canAddNote || canCreateTask || canCopyLink) && (
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                    <Button variant="outline" size="icon-sm" aria-label={t('moreActions')}>
+                                    <Button variant="outline" size="icon-toolbar" aria-label={t('moreActions')}>
                                         <EllipsisHorizontalIcon className="size-4" />
                                     </Button>
                                 </DropdownMenuTrigger>
@@ -280,7 +282,7 @@ function RecordPeekDrawer({
                                     {canLogActivity && logActivityAction && (
                                         <DropdownMenuItem onSelect={() => runRecordAction('create.activity')}>
                                             {LogActivityIcon && <LogActivityIcon className="size-4" />}
-                                            {logActivityAction.label ?? actionsT(logActivityAction.labelKey)}
+                                            {actionLabel(logActivityAction, actionsT, messageT)}
                                         </DropdownMenuItem>
                                     )}
                                     {canAddNote && (

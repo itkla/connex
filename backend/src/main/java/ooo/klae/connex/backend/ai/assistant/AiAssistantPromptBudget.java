@@ -13,14 +13,37 @@ public record AiAssistantPromptBudget(
         int attachmentContextBytes,
         int pageContextBytes,
         int toolResultBytes,
+        int repairEnvelopeBytes,
         int compactionSourceBytes,
         boolean outputTokensClamped) {
 
-    private static final int MIN_CONTEXT_TOKENS = 32_768;
+    /**
+     * The smallest provider context window Ask Connex will run a turn on.
+     *
+     * <p>The fixed prompt envelope — the tool vocabulary in the system instructions plus the same
+     * catalog again as the strict step response schema — is paid out of the output allocation, and
+     * the conservative term reduces to {@code outputTokens = 17,920 - fixedEnvelopeBytes} on a 32k
+     * window. The measured cliff is therefore {@code 17,919} bytes, where the turn retains a single
+     * output token and cannot start. Today's JSON-ReAct envelope measures {@code 16,962} bytes,
+     * which leaves a 32k model {@code 958} output tokens: enough to begin an answer document and
+     * not enough to finish one, so the model stops mid-sentence and the reader is shown a truncated
+     * answer that looks complete.
+     *
+     * <p>The settled choice (issue #1420) is to raise the floor rather than split the tool
+     * vocabulary into a smaller 32k dialect. A second vocabulary would mean two prompt contracts,
+     * two schemas, and two sets of answer-quality expectations for the same product surface, and
+     * the smaller one would still be the dialect that quietly truncates. An organization whose
+     * configured model is below this floor gets an honest per-turn refusal
+     * ({@link AiAssistantTerminalReasons#CONTEXT_WINDOW_TOO_SMALL}) instead. Only ASSISTANT_CHAT is
+     * held to this floor; deal briefs, risk rationales, and report narratives assemble a far
+     * smaller envelope and keep serving 32k models unchanged.
+     */
+    public static final int ASSISTANT_MIN_CONTEXT_TOKENS = 65_536;
     private static final int MIN_HISTORY_BYTES = 4_096;
     private static final int MIN_ATTACHMENT_CONTEXT_BYTES = 256;
     private static final int MIN_PAGE_CONTEXT_BYTES = 256;
     private static final int MIN_TOOL_RESULT_BYTES = 2_048;
+    private static final int DEFAULT_REPAIR_ENVELOPE_BYTES = 8_192;
     private static final int MIN_VARIABLE_INPUT_BYTES = MIN_HISTORY_BYTES
             + MIN_ATTACHMENT_CONTEXT_BYTES + MIN_PAGE_CONTEXT_BYTES
             + MIN_TOOL_RESULT_BYTES;
@@ -34,13 +57,39 @@ public record AiAssistantPromptBudget(
             int toolResultBytes,
             int compactionSourceBytes) {
         this(maxOutputTokens, historyBytes, attachmentContextBytes, pageContextBytes,
-                toolResultBytes, compactionSourceBytes, false);
+                toolResultBytes, DEFAULT_REPAIR_ENVELOPE_BYTES, compactionSourceBytes, false);
+    }
+
+    public AiAssistantPromptBudget(
+            int maxOutputTokens,
+            int historyBytes,
+            int attachmentContextBytes,
+            int pageContextBytes,
+            int toolResultBytes,
+            int compactionSourceBytes,
+            boolean outputTokensClamped) {
+        this(maxOutputTokens, historyBytes, attachmentContextBytes, pageContextBytes,
+                toolResultBytes, DEFAULT_REPAIR_ENVELOPE_BYTES, compactionSourceBytes,
+                outputTokensClamped);
+    }
+
+    public AiAssistantPromptBudget(
+            int maxOutputTokens,
+            int historyBytes,
+            int attachmentContextBytes,
+            int pageContextBytes,
+            int toolResultBytes,
+            int repairEnvelopeBytes,
+            int compactionSourceBytes) {
+        this(maxOutputTokens, historyBytes, attachmentContextBytes, pageContextBytes,
+                toolResultBytes, repairEnvelopeBytes, compactionSourceBytes, false);
     }
 
     public AiAssistantPromptBudget {
         if (maxOutputTokens < 1 || historyBytes < 1 || attachmentContextBytes < 1
                 || pageContextBytes < 1
-                || toolResultBytes < 1 || compactionSourceBytes < 1) {
+                || toolResultBytes < 1 || repairEnvelopeBytes < 1
+                || compactionSourceBytes < 1) {
             throw new IllegalArgumentException("Assistant prompt budgets must be positive");
         }
     }
@@ -80,7 +129,8 @@ public record AiAssistantPromptBudget(
      * Derives conservative input allocations from the configured adapter context window.
      * @param capabilities exact configured provider capabilities
      * @param configuredMaxOutputTokens operator-configured output ceiling
-     * @return separate history, attachment, page-context, tool-result, and compaction allocations
+     * @return separate history, attachment, page-context, tool-result, repair, and compaction
+     * allocations
      */
     public static AiAssistantPromptBudget from(
             AiProviderCapabilities capabilities,
@@ -93,8 +143,31 @@ public record AiAssistantPromptBudget(
      * @param capabilities exact configured provider capabilities
      * @param configuredMaxOutputTokens operator-configured output ceiling
      * @param fixedEnvelopeBytes exact serialized system, schema, and reasoning envelope bytes
-     * @return separate history, attachment, page-context, tool-result, and compaction allocations
+     * @return separate history, attachment, page-context, tool-result, repair, and compaction
+     * allocations
+     * @throws AiAssistantLoopException when the configured context window is below
+     * {@link #ASSISTANT_MIN_CONTEXT_TOKENS}, refusing the turn before any provider egress
      */
+    /**
+     * Refuses an assistant turn whose provider context window is below the declared floor.
+     *
+     * Called once at budget derivation and again by the agent loop before every model step,
+     * because the provider configuration is re-resolved per call: an organization administrator
+     * who switches to a smaller model mid-turn must produce the same honest
+     * {@link AiAssistantTerminalReasons#CONTEXT_WINDOW_TOO_SMALL} refusal as one configured
+     * before the turn began, never a generic provider error after egress was attempted.
+     *
+     * @param contextWindowTokens the resolved provider's context window
+     * @throws AiAssistantLoopException when the window is below the assistant floor
+     */
+    public static void requireAssistantContextFloor(int contextWindowTokens) {
+        if (contextWindowTokens < ASSISTANT_MIN_CONTEXT_TOKENS) {
+            throw new AiAssistantLoopException(
+                    AiAssistantTerminalReasons.CONTEXT_WINDOW_TOO_SMALL,
+                    AiAssistantTerminalReasons.CONTEXT_WINDOW_TOO_SMALL);
+        }
+    }
+
     public static AiAssistantPromptBudget from(
             AiProviderCapabilities capabilities,
             int configuredMaxOutputTokens,
@@ -109,19 +182,22 @@ public record AiAssistantPromptBudget(
             throw new IllegalArgumentException("Fixed prompt envelope cannot be negative");
         }
         int contextTokens = capabilities.contextWindowTokens();
-        if (contextTokens < MIN_CONTEXT_TOKENS) {
-            throw new AiProviderException(
-                    "Ask Connex requires a model context window of at least 32768 tokens");
-        }
+        requireAssistantContextFloor(contextTokens);
         int maxOutputTokens = Math.min(
                 configuredMaxOutputTokens, capabilities.maxOutputTokens());
         boolean outputTokensClamped = configuredMaxOutputTokens > capabilities.maxOutputTokens();
-        int minimumSerializedInputBytes = saturatedAdd(
-                fixedEnvelopeBytes,
+        int minimumExpandedInputBytes = saturatedAdd(
+                saturatedAdd(fixedEnvelopeBytes, DEFAULT_REPAIR_ENVELOPE_BYTES),
                 saturatedMultiply(
                         MIN_VARIABLE_INPUT_BYTES, MAX_MASKED_SERIALIZATION_EXPANSION));
-        int floorPreservingOutputTokens = contextTokens
-                - AiProviderCapabilities.estimatedTokensForBytes(minimumSerializedInputBytes);
+        int minimumConservativeInputBytes = saturatedAdd(
+                saturatedAdd(fixedEnvelopeBytes, DEFAULT_REPAIR_ENVELOPE_BYTES),
+                MIN_VARIABLE_INPUT_BYTES);
+        int floorPreservingOutputTokens = Math.min(
+                contextTokens
+                        - AiProviderCapabilities.estimatedTokensForBytes(
+                                minimumExpandedInputBytes),
+                contextTokens - minimumConservativeInputBytes);
         if (floorPreservingOutputTokens < 1) {
             throw new AiProviderException(
                     "Ask Connex fixed prompt leaves no usable model input budget");
@@ -129,16 +205,24 @@ public record AiAssistantPromptBudget(
         maxOutputTokens = Math.min(maxOutputTokens, floorPreservingOutputTokens);
         int providerInputBytes = AiProviderCapabilities.estimatedInputByteCeiling(
                 contextTokens, maxOutputTokens);
-        int variableEnvelopeBytes = providerInputBytes - fixedEnvelopeBytes;
+        long variableEnvelopeBytes = (long) providerInputBytes
+                - fixedEnvelopeBytes - DEFAULT_REPAIR_ENVELOPE_BYTES;
         if (variableEnvelopeBytes < MIN_VARIABLE_INPUT_BYTES) {
             throw new AiProviderException(
                     "Ask Connex fixed prompt exceeds the configured model context window");
         }
-        int inputBytes = variableEnvelopeBytes / MAX_MASKED_SERIALIZATION_EXPANSION;
-        if (inputBytes < MIN_VARIABLE_INPUT_BYTES) {
+        long conservativeVariableEnvelopeBytes = (long)
+                AiProviderCapabilities.conservativeInputByteCeiling(
+                        contextTokens, maxOutputTokens)
+                - fixedEnvelopeBytes - DEFAULT_REPAIR_ENVELOPE_BYTES;
+        long boundedInputBytes = Math.min(
+                variableEnvelopeBytes / MAX_MASKED_SERIALIZATION_EXPANSION,
+                conservativeVariableEnvelopeBytes);
+        if (boundedInputBytes < MIN_VARIABLE_INPUT_BYTES) {
             throw new AiProviderException(
                     "Ask Connex fixed prompt leaves no usable variable input budget");
         }
+        int inputBytes = (int) boundedInputBytes;
         int distributableBytes = inputBytes - MIN_VARIABLE_INPUT_BYTES;
         int historyBytes = MIN_HISTORY_BYTES + distributableBytes / 2;
         int attachmentContextBytes = MIN_ATTACHMENT_CONTEXT_BYTES
@@ -152,6 +236,7 @@ public record AiAssistantPromptBudget(
                 attachmentContextBytes,
                 pageContextBytes,
                 toolResultBytes,
+                DEFAULT_REPAIR_ENVELOPE_BYTES,
                 inputBytes,
                 outputTokensClamped);
     }

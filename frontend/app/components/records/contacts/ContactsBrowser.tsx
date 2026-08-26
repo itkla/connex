@@ -6,8 +6,7 @@ import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import RecordsActions from '@/app/components/import/RecordsActions';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { toast } from 'sonner';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastError, toastInfo, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
 import { BuildingOffice2Icon, NoSymbolIcon, TagIcon, UserCircleIcon, ArchiveBoxIcon, ArchiveBoxArrowDownIcon, UsersIcon } from '@heroicons/react/24/outline';
@@ -18,7 +17,9 @@ import {
 import { useReducedMotion } from 'motion/react';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import { EmptyState } from '@/app/components/EmptyState';
 import DensityToggle from '@/app/components/records/DensityToggle';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useRecordDensity } from '@/app/hooks/useRecordDensity';
 import { useInlineEdit } from '@/app/hooks/useInlineEdit';
 import ColumnVisibilityMenu from '@/app/components/records/ColumnVisibilityMenu';
@@ -30,13 +31,18 @@ import { useCustomFieldColumns } from '@/app/components/records/CustomFieldColum
 import RecordsSortMenu from '@/app/components/records/RecordsSortMenu';
 import RecordsFilterPills from '@/app/components/records/RecordsFilterPills';
 import RecordsFilterSheet from '@/app/components/records/RecordsFilterSheet';
-import { SearchField, FilterBar, SegmentedToggle, MemberScopeFilter, interpretMemberScope, MEMBER_SCOPE_ME, type FilterChipData } from '@/app/components/filters';
+import { SearchField, FilterBar, MemberScopeFilter, interpretMemberScope, MEMBER_SCOPE_ME, type FilterChipData } from '@/app/components/filters';
+import { SegmentedControl } from '@/components/ui/segmented-control';
+import { IconButton } from '@/components/ui/icon-button';
 import ArchiveRecordDialog from '@/app/components/records/ArchiveRecordDialog';
 import BulkTagDialog from '@/app/components/records/BulkTagDialog';
 import { notifyBulkResult } from '@/app/lib/bulkToast';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { useRecordReturnSelection } from '@/app/hooks/useRecordReturnSelection';
-import { useActionSelection } from '@/app/hooks/useActions';
+import { useActionSelection, useActions } from '@/app/hooks/useActions';
+import { usePermission } from '@/app/hooks/usePermissions';
+import FirstRunDoors from '@/app/components/FirstRunDoors';
+import { firstRunDoors } from '@/app/lib/firstRunJourney';
 import { useSavedViewScope } from '@/app/hooks/useSavedViewScope';
 import { useServerRecords } from '@/app/hooks/useServerRecords';
 import SavedViewsBar from '@/app/components/records/SavedViewsBar';
@@ -50,13 +56,27 @@ import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompany
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
 import { updateContact, createContact, importBusinessCard, getContactsPage, getContactTemperatures, getPersonFacets, getTags, bulkAddTagToContacts, bulkRemoveTagFromContacts, bulkArchiveContacts, bulkRestoreContacts, bulkAssignPersonOwner, getActiveWorkspaceMembers, getContactIds, exportContactsCsv, isFieldError, uploadContactPicture } from '@/app/lib/api';
 import BulkAssignOwnerDialog from '@/app/components/records/BulkAssignOwnerDialog';
-import { type BusinessCardImportDraft, type Contact, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag, type WorkspaceMember } from '@/app/lib/types';
-import TemperaturePill from '@/app/components/records/TemperaturePill';
+import { type BusinessCardImportDraft, type Contact, type ContactFirstResponseState, type ContactLeadSource, type ContactLifecycleStage, type UpdateContactPayload, type CreateContactPayload, type ContactsPageParams, type PersonFacets, type RelationshipTemperature, type Tag, type WarmthFilterParams, type WorkspaceMember } from '@/app/lib/types';
+import WarmthPill from '@/app/components/records/WarmthPill';
 import CommentIndicatorChip from '@/app/components/records/comments/CommentIndicatorChip';
 import { useCommentIndicators } from '@/app/hooks/useCommentIndicators';
 import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import { subscribeToRecordMutations } from '@/app/lib/record-mutation-events';
+import {
+    WARMTH_HORIZON_FILTER_KEY,
+    WARMTH_FILTER_KEY,
+    WARMTH_SORT_KEY,
+    hasWarmthFilter,
+    parseWarmthHorizon,
+    warmthFacetOptions,
+    warmthRequestParams,
+    withValidWarmthHorizon,
+    withoutWarmthHorizon,
+} from '@/app/components/records/warmthFilters';
+import { LIFECYCLE_NONE_KEY, LIFECYCLE_STAGES, asLifecycleStage } from '@/app/lib/contactLifecycle';
+import { LEAD_SOURCE_NONE_KEY, LEAD_SOURCES, asLeadSource } from '@/app/lib/contactProvenance';
+import { FIRST_RESPONSE_NONE_KEY, FIRST_RESPONSE_STATES, asFirstResponseState } from '@/app/lib/contactSla';
 import {
     recordDetailNavigationPath,
     recordDetailPath,
@@ -72,6 +92,22 @@ function withoutArchived(state: FilterState): FilterState {
         Object.entries(state).filter(([key]) => key !== ARCHIVED_FILTER_KEY),
     );
 }
+/** Every server filter the browser derives from its filter state, shared by the page, ids, and export reads. */
+type ContactFilterParams = WarmthFilterParams & {
+    companies?: string[];
+    titles?: string[];
+    noCompany?: boolean;
+    scope?: 'me' | 'members' | 'unassigned';
+    memberIds?: number[];
+    lifecycleStages?: ContactLifecycleStage[];
+    noLifecycle?: boolean;
+    leadSources?: ContactLeadSource[];
+    noLeadSource?: boolean;
+    firstResponseStates?: ContactFirstResponseState[];
+    noFirstResponse?: boolean;
+    archived?: boolean;
+};
+
 const searchFields = (c: Contact) => [c.name, c.email, c.phone, c.title];
 const EMPTY_CONTACT_DRAFT: CreateContactPayload = { name: '', email: '', phone: '', title: '' };
 
@@ -93,40 +129,61 @@ function diffDraft(original: ContactDraft, draft: ContactDraft): boolean {
     );
 }
 
+const IMPORT_CONTACTS_ACTION = 'utility.import-contacts';
+
 export default function ContactsBrowser({ savedViews, defaultView, savedViewsUnavailable }: { savedViews: SavedView[]; defaultView: SavedView | null; savedViewsUnavailable?: boolean }) {
     const router = useRouter();
     const t = useTranslations('ContactsBrowser');
+    const showApiError = useApiErrorToast('ContactsBrowser');
     const tf = useTranslations('Filters');
     const ts = useTranslations('MemberScope');
+    const tl = useTranslations('ContactLifecycle');
+    const tp = useTranslations('ContactProvenance');
+    const tsla = useTranslations('ContactResponseSla');
+    const tActions = useTranslations('Actions');
+    const ttemp = useTranslations('Temperature');
     const reduce = useReducedMotion() ?? false;
     const {
         displayMode,
         effectiveDisplayMode,
         setDisplayMode,
-        filterState,
+        filterState: urlFilterState,
         setFilterState,
         selectedIds,
         setSelectedIds,
         deleteDialogOpen,
         setDeleteDialogOpen,
     } = useRecordsBrowser<Contact>({ items: NO_ITEMS, storageKey: 'contacts:view', searchFields });
+    const filterState = useMemo(() => withValidWarmthHorizon(urlFilterState), [urlFilterState]);
     const showArchived = filterState[ARCHIVED_FILTER_KEY]?.[0] === ARCHIVED_FILTER_VALUE;
-    const setShowArchived = useCallback((next: boolean) => {
-        setFilterState((current) => {
-            const rest = withoutArchived(current);
-            return next ? { ...rest, [ARCHIVED_FILTER_KEY]: [ARCHIVED_FILTER_VALUE] } : rest;
-        });
-    }, [setFilterState]);
 
     const ownerScope = useMemo(() => interpretMemberScope(filterState.owner), [filterState.owner]);
     const filterParams = useMemo(() => {
         const company = filterState.company ?? [];
         const titles = filterState.title ?? [];
+        const lifecycle = filterState.lifecycle ?? [];
+        const leadSource = filterState.leadSource ?? [];
         const companies = company.filter((k) => k !== FILTER_EMPTY);
-        const params: { companies?: string[]; titles?: string[]; noCompany?: boolean; scope?: 'me' | 'members' | 'unassigned'; memberIds?: number[]; archived?: boolean } = {};
+        const stages = lifecycle
+            .map((key) => asLifecycleStage(key))
+            .filter((stage): stage is ContactLifecycleStage => stage !== null);
+        const sources = leadSource
+            .map((key) => asLeadSource(key))
+            .filter((src): src is ContactLeadSource => src !== null);
+        const firstResponse = filterState.firstResponse ?? [];
+        const slaStates = firstResponse
+            .map((key) => asFirstResponseState(key))
+            .filter((state): state is ContactFirstResponseState => state !== null);
+        const params: ContactFilterParams = { ...warmthRequestParams(filterState) };
         if (companies.length) params.companies = companies;
         if (titles.length) params.titles = titles;
         if (company.includes(FILTER_EMPTY)) params.noCompany = true;
+        if (stages.length) params.lifecycleStages = stages;
+        if (lifecycle.includes(FILTER_EMPTY)) params.noLifecycle = true;
+        if (sources.length) params.leadSources = sources;
+        if (leadSource.includes(FILTER_EMPTY)) params.noLeadSource = true;
+        if (slaStates.length) params.firstResponseStates = slaStates;
+        if (firstResponse.includes(FILTER_EMPTY)) params.noFirstResponse = true;
         if (ownerScope.mode !== 'all') params.scope = ownerScope.mode;
         if (ownerScope.mode === 'members') params.memberIds = ownerScope.memberIds;
         if (showArchived) params.archived = true;
@@ -185,6 +242,11 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         clearSelection();
         applyServerSort(key, direction);
     }, [clearSelection, applyServerSort]);
+    const setShowArchived = useCallback((next: boolean) => {
+        const rest = withoutArchived(filterState);
+        setFilterState(next ? { ...rest, [ARCHIVED_FILTER_KEY]: [ARCHIVED_FILTER_VALUE] } : rest);
+        if (next && sortKey === WARMTH_SORT_KEY) applySort(null, 'asc');
+    }, [applySort, filterState, setFilterState, sortKey]);
     const handleSelectedIdsChange = useCallback((ids: Set<SelectionId>) => {
         selectAllRequestRef.current += 1;
         setMatchedSignature(null);
@@ -200,7 +262,10 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
 
     const [personFacets, setPersonFacets] = useState<PersonFacets | null>(null);
     const loadFacets = useCallback(() => {
-        getPersonFacets().then(setPersonFacets).catch(() => setPersonFacets(null));
+        getPersonFacets({ warmth: true })
+            .catch(() => getPersonFacets())
+            .then(setPersonFacets)
+            .catch(() => setPersonFacets(null));
     }, []);
     useEffect(() => { loadFacets(); }, [loadFacets]);
 
@@ -231,8 +296,56 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         if (companyOptions.length) out.push({ key: 'company', label: t('columnCompany'), options: companyOptions });
         const titleOptions = personFacets.titles.map((ti) => ({ key: ti, label: ti }));
         if (titleOptions.length) out.push({ key: 'title', label: t('columnTitle'), options: titleOptions });
+        const lifecycleCounts = new Map(
+            (personFacets.lifecycleStages ?? []).map((facet) => [facet.key, facet.count]),
+        );
+        const selectedLifecycle = new Set(filterState.lifecycle ?? []);
+        const lifecycleOptions = LIFECYCLE_STAGES
+            .filter((stage) => (lifecycleCounts.get(stage) ?? 0) > 0 || selectedLifecycle.has(stage))
+            .map((stage) => ({ key: stage as string, label: tl(`stage.${stage}`) }));
+        if ((lifecycleCounts.get(LIFECYCLE_NONE_KEY) ?? 0) > 0 || selectedLifecycle.has(FILTER_EMPTY)) {
+            lifecycleOptions.push({ key: FILTER_EMPTY, label: tl('stage.none') });
+        }
+        if (lifecycleOptions.length) {
+            out.push({ key: 'lifecycle', label: tl('title'), options: lifecycleOptions });
+        }
+        const sourceCounts = new Map(
+            (personFacets.leadSources ?? []).map((facet) => [facet.key, facet.count]),
+        );
+        const selectedSources = new Set(filterState.leadSource ?? []);
+        const sourceOptions = LEAD_SOURCES
+            .filter((src) => (sourceCounts.get(src) ?? 0) > 0 || selectedSources.has(src))
+            .map((src) => ({ key: src as string, label: tp(`source.${src}`) }));
+        if ((sourceCounts.get(LEAD_SOURCE_NONE_KEY) ?? 0) > 0 || selectedSources.has(FILTER_EMPTY)) {
+            sourceOptions.push({ key: FILTER_EMPTY, label: tp('source.none') });
+        }
+        if (sourceOptions.length) {
+            out.push({ key: 'leadSource', label: tp('title'), options: sourceOptions });
+        }
+        const slaCounts = new Map(
+            (personFacets.firstResponseStates ?? []).map((facet) => [facet.key, facet.count]),
+        );
+        const selectedSla = new Set(filterState.firstResponse ?? []);
+        const slaOptions = FIRST_RESPONSE_STATES
+            .filter((state) => (slaCounts.get(state) ?? 0) > 0 || selectedSla.has(state))
+            .map((state) => ({ key: state as string, label: tsla(`state.${state}`) }));
+        if ((slaCounts.get(FIRST_RESPONSE_NONE_KEY) ?? 0) > 0 || selectedSla.has(FILTER_EMPTY)) {
+            slaOptions.push({ key: FILTER_EMPTY, label: tsla('state.none') });
+        }
+        if (slaOptions.length) {
+            out.push({ key: 'firstResponse', label: tsla('title'), options: slaOptions });
+        }
+        const warmthOptions = warmthFacetOptions(
+            personFacets.warmthBands,
+            filterState[WARMTH_FILTER_KEY],
+            (band) => ttemp(band),
+            ttemp('noHistory'),
+        );
+        if (warmthOptions.length) {
+            out.push({ key: WARMTH_FILTER_KEY, label: t('columnWarmth'), options: warmthOptions });
+        }
         return out;
-    }, [personFacets, t]);
+    }, [personFacets, filterState, t, tl, tp, tsla, ttemp]);
 
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
     useEffect(() => { getActiveWorkspaceMembers().then(setMembers).catch(() => setMembers([])); }, []);
@@ -257,6 +370,18 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         setQuery('');
         setFilterState({});
     }, [setQuery, setFilterState]);
+    const canCreateContacts = usePermission('PERSON_CREATE');
+    const { run: runAction, actions, pendingIds } = useActions();
+    const importPending = pendingIds.has(IMPORT_CONTACTS_ACTION);
+    const firstRunEntryDoors = useMemo(
+        () => firstRunDoors(canCreateContacts)
+            .filter((door) => door !== 'import'
+                || actions.some((action) => action.id === IMPORT_CONTACTS_ACTION)),
+        [actions, canCreateContacts],
+    );
+    const runContactImport = useCallback(() => {
+        void runAction(IMPORT_CONTACTS_ACTION, { source: 'empty-state' });
+    }, [runAction]);
     const effectiveOwnerValues = ownerScope.mode === 'me'
         ? [MEMBER_SCOPE_ME]
         : ownerScope.mode === 'unassigned'
@@ -274,9 +399,16 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
             onRemove: () => changeOwnerScope(effectiveOwnerValues.filter((other) => other !== value)),
         };
     });
+    const horizonDays = parseWarmthHorizon(filterState[WARMTH_HORIZON_FILTER_KEY]);
+    const horizonChips: FilterChipData[] = horizonDays === undefined ? [] : [{
+        id: WARMTH_HORIZON_FILTER_KEY,
+        label: t('chipGoesColdWithin', { days: horizonDays }),
+        onRemove: () => setFilterState(withoutWarmthHorizon(filterState)),
+    }];
     const chips: FilterChipData[] = [
         ...(query.trim() ? [{ id: 'q', label: tf('chipSearch', { query: query.trim() }), onRemove: () => setQuery('') }] : []),
         ...ownerChips,
+        ...horizonChips,
         ...facetChips(facets, filterState, setFilterState),
     ];
 
@@ -305,12 +437,12 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
             setMatchedSignature(requestSignature);
         } catch (err) {
             if (requestId === selectAllRequestRef.current) {
-                toastError(err instanceof Error ? err.message : t('toastSelectAllFailed'));
+                showApiError(err, 'toastSelectAllFailed');
             }
         } finally {
             if (requestId === selectAllRequestRef.current) setSelectingAll(false);
         }
-    }, [filterParams, query, filterSignature, setSelectedIds, t]);
+    }, [filterParams, filterSignature, query, setSelectedIds, showApiError]);
 
     const [tempByContactId, setTempByContactId] = useState<Map<number, RelationshipTemperature>>(new Map());
     useEffect(() => {
@@ -434,14 +566,14 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         });
 
         if (changed.length === 0) {
-            toast.info(t('toastNoChangesToSave'));
+            toastInfo(t('toastNoChangesToSave'));
             setEditSheetOpen(false);
             return;
         }
 
         const invalid = changed.find((c) => !drafts[c.id].name.trim());
         if (invalid) {
-            toast.error(t('toastNameRequiredForX', { name: invalid.name }));
+            toastError(t('toastNameRequiredForX', { name: invalid.name }));
             return;
         }
 
@@ -466,7 +598,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
             setEditSheetOpen(false);
             refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastFailedSave'));
+            showApiError(err, 'toastFailedSave');
         } finally {
             setIsSaving(false);
         }
@@ -475,7 +607,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
     const bulkRemoveFromCompany = async () => {
         const affected = selectedContacts.filter((c) => c.companyId || c.company);
         if (affected.length === 0) {
-            toast.info(t('toastNoneHaveCompany'));
+            toastInfo(t('toastNoneHaveCompany'));
             return;
         }
         setIsClearingCompany(true);
@@ -494,7 +626,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
             );
             refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastFailedRemoveFromCompany'));
+            showApiError(err, 'toastFailedRemoveFromCompany');
         } finally {
             setIsClearingCompany(false);
         }
@@ -533,7 +665,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                 refresh();
             }
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t(showArchived ? 'toastFailedRestore' : 'toastFailedArchive'));
+            showApiError(err, showArchived ? 'toastFailedRestore' : 'toastFailedArchive');
         } finally {
             setIsDeleting(false);
         }
@@ -591,11 +723,11 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
             ),
         },
         {
-            key: 'warmth',
+            key: WARMTH_SORT_KEY,
             label: t('columnWarmth'),
             getSortValue: (c) => showArchived ? null : tempByContactId.get(c.id)?.score ?? null,
-            sortable: false,
-            render: (c) => <TemperaturePill temp={showArchived ? undefined : tempByContactId.get(c.id)} />,
+            sortable: !showArchived,
+            render: (c) => <WarmthPill temp={showArchived ? undefined : tempByContactId.get(c.id)} />,
         },
         {
             key: 'email',
@@ -645,7 +777,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
     const { columns: customColumns, addColumnSlot } = useCustomFieldColumns('person', contacts);
 
     const selectionActions = showArchived ? (
-        <Button variant="outline" size="sm" onClick={() => setDeleteDialogOpen(true)}>
+        <Button variant="outline" size="toolbar" onClick={() => setDeleteDialogOpen(true)}>
             <ArchiveBoxIcon className="size-4" />
             {t('restore')}
         </Button>
@@ -653,11 +785,11 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         <ButtonGroup className="rounded-full bg-muted">
             {!allMatchingActive && (
                 <>
-                    <Button variant="outline" size="sm" onClick={viewSelected}>
+                    <Button variant="outline" size="toolbar" onClick={viewSelected}>
                         <EyeIcon className="size-4" />
                         {t('view')}
                     </Button>
-                    <Button variant="outline" size="sm" onClick={openEditSheet}>
+                    <Button variant="outline" size="toolbar" onClick={openEditSheet}>
                         <PencilIcon className="size-4" />
                         {t('quickEdit')}
                     </Button>
@@ -665,9 +797,9 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
             )}
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm">
+                    <IconButton variant="outline" size="icon-toolbar" label={t('moreActions')}>
                         <EllipsisVerticalIcon className="size-4" />
-                    </Button>
+                    </IconButton>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
                     <DropdownMenuItem onSelect={(e) => { e.preventDefault(); setBulkTag({ open: true, mode: 'add' }); }}>
@@ -709,7 +841,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
     );
 
     const currentConfig: SavedViewConfig = useMemo(
-        () => ({ filters: filterState, query, sortKey: sortKey === 'warmth' ? null : sortKey, sortDirection }),
+        () => ({ filters: filterState, query, sortKey, sortDirection }),
         [filterState, query, sortKey, sortDirection],
     );
     const { activeSavedViewId, setActiveSavedView } = useSavedViewScope(savedViews, currentConfig);
@@ -717,16 +849,18 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
         (config: SavedViewConfig, savedViewId: number | null) => {
             setFilterState(config.filters ?? {});
             applyQuery(config.query ?? '');
-            applySort(config.sortKey === 'warmth' ? null : config.sortKey ?? null, config.sortDirection ?? 'asc');
+            applySort(config.sortKey ?? null, config.sortDirection ?? 'asc');
             setActiveSavedView(config, savedViewId);
         },
         [setFilterState, applyQuery, applySort, setActiveSavedView],
     );
     const workflowSelection = useMemo(() => {
         if (selectedIds.size === 0) return null;
-        const scope = allMatchingActive && activeSavedViewId !== null
+        const warmthNarrowed = hasWarmthFilter(filterState);
+        const canResolveFilter = allMatchingActive && !showArchived && !warmthNarrowed;
+        const scope = allMatchingActive && activeSavedViewId !== null && !warmthNarrowed
             ? { kind: 'saved_view' as const, savedViewId: activeSavedViewId }
-            : allMatchingActive && !showArchived
+            : canResolveFilter
             ? {
                 kind: 'filter_match' as const,
                 filter: {
@@ -738,14 +872,14 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                     memberIds: filterParams.memberIds,
                 },
             }
-            : { kind: 'page_selection' as const, recordIds: selectedContactIds };
+            : { kind: 'explicit_selection' as const, recordIds: selectedContactIds };
         return {
             type: 'person' as const,
             ids: selectedIds,
             sourceSurface: activeSavedViewId !== null ? 'saved_view' as const : 'record_list' as const,
             scope,
         };
-    }, [activeSavedViewId, allMatchingActive, filterParams, query, selectedContactIds, selectedIds, showArchived]);
+    }, [activeSavedViewId, allMatchingActive, filterParams, filterState, query, selectedContactIds, selectedIds, showArchived]);
     useActionSelection(workflowSelection);
 
     const { density, setDensity } = useRecordDensity();
@@ -764,7 +898,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
     );
 
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <Rise>
                     <PageHeader
                         title={t('heading')}
@@ -831,7 +965,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                                 }}
                                 mobileControls={
                                     (showArchived || (personFacets?.archivedCount ?? 0) > 0) ? (
-                                        <SegmentedToggle
+                                        <SegmentedControl
                                             ariaLabel={t('archivedScopeAria')}
                                             value={showArchived ? 'archived' : 'active'}
                                             onChange={(next) => setShowArchived(next === 'archived')}
@@ -857,7 +991,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                                         onSortChange={onSortChange}
                                     />
                                 )}
-                                <SegmentedToggle
+                                <SegmentedControl
                                     ariaLabel={t('displayModeAria')}
                                     value={displayMode}
                                     onChange={setDisplayMode}
@@ -880,7 +1014,7 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                         }
                     >
                         {(showArchived || (personFacets?.archivedCount ?? 0) > 0) && (
-                            <SegmentedToggle
+                            <SegmentedControl
                                 ariaLabel={t('archivedScopeAria')}
                                 value={showArchived ? 'archived' : 'active'}
                                 onChange={(next) => setShowArchived(next === 'archived')}
@@ -979,6 +1113,24 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                         entityLabel="contact"
                         selectionActions={selectionActions}
                         loading={loading}
+                        emptyState={
+                            <EmptyState
+                                icon={UsersIcon}
+                                title={t('emptyTitle')}
+                                body={canCreateContacts ? t('emptyJourneyBody') : t('emptyReadOnlyBody')}
+                                action={
+                                    <FirstRunDoors
+                                        doors={firstRunEntryDoors}
+                                        size="page"
+                                        importLabel={tActions('utility.importContacts')}
+                                        createLabel={t('emptyCta')}
+                                        importPending={importPending}
+                                        onImport={runContactImport}
+                                        onCreate={openNewContactDialog}
+                                    />
+                                }
+                            />
+                        }
                         filtersActive={hasActiveFiltersOrScope}
                         onClearFilters={clearFiltersAndScope}
                         pagination={{ page, pageSize: size, total, onPageChange: setPage, onPageSizeChange: setSize }}

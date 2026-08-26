@@ -7,12 +7,22 @@ import { useTranslations } from 'next-intl';
 import { Switch } from '@/components/ui/switch';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import { updateContactEvaluation, updateDealEvaluation } from '@/app/lib/api';
-import { toastError } from '@/app/lib/toast';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { cn } from '@/lib/utils';
 
+type PanelSurface = {
+    className?: string;
+    /**
+     * Renders the switch rows alone, without the section heading, card chrome, or separator, so a
+     * surrounding block (the record Signals block) can own them as its own last rows and label them
+     * in its own voice.
+     */
+    embedded?: boolean;
+};
+
 type PanelProps =
-    | { kind: 'contact'; id: number; riskExcluded: boolean; introExcluded: boolean; className?: string }
-    | { kind: 'deal'; id: number; riskExcluded: boolean; className?: string };
+    | ({ kind: 'contact'; id: number; riskExcluded: boolean; introExcluded: boolean } & PanelSurface)
+    | ({ kind: 'deal'; id: number; riskExcluded: boolean } & PanelSurface);
 
 /**
  * Per-record engine-evaluation opt-outs (issue #358): switches that include or exclude the record
@@ -22,6 +32,7 @@ type PanelProps =
  */
 export default function EngineEvaluationPanel(props: PanelProps) {
     const t = useTranslations('EngineEvaluation');
+    const showApiError = useApiErrorToast('EngineEvaluation');
     const router = useRouter();
     const [riskIncluded, setRiskIncluded] = useState(!props.riskExcluded);
     const [introIncluded, setIntroIncluded] = useState(
@@ -44,7 +55,7 @@ export default function EngineEvaluationPanel(props: PanelProps) {
             router.refresh();
         } catch (err) {
             apply(!included);
-            toastError(err instanceof Error ? err.message : t('updateFailed'));
+            showApiError(err, 'updateFailed');
         } finally {
             setSaving(false);
         }
@@ -75,10 +86,17 @@ export default function EngineEvaluationPanel(props: PanelProps) {
                   },
               ];
 
+    const embedded = props.embedded ?? false;
+
     return (
-        <div className={cn('mt-6', props.className)}>
-            <SectionHeader title={t('title')} />
-            <div className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
+        <div className={cn(!embedded && 'mt-6', props.className)}>
+            {embedded ? null : <SectionHeader title={t('title')} />}
+            <div
+                className={cn(
+                    'divide-y divide-border',
+                    !embedded && 'overflow-hidden rounded-2xl border border-border bg-card',
+                )}
+            >
                 {rows.map((row) => (
                     <div key={row.key} className="flex items-center justify-between gap-4 px-6 py-4">
                         <div className="min-w-0">

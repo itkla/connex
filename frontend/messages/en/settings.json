@@ -1,0 +1,138 @@
+{
+    "SettingsHome": {
+        "title": "Settings",
+        "description": "Everything you can configure, grouped by what it applies to.",
+        "navLabel": "Settings",
+        "sectionsLabel": "Settings sections",
+        "searchLabel": "Search settings",
+        "searchPlaceholder": "Search settings",
+        "searchClear": "Clear search",
+        "searchResultsLabel": "Search results",
+        "noResultsTitle": "No settings match “{query}”",
+        "noResultsBody": "Try a shorter word, or clear the search to see everything again.",
+        "emptyTitle": "Nothing here you can change",
+        "emptyBody": "Settings you can change appear here. Ask a workspace administrator if you need one.",
+        "backTo": "Back to {name}",
+        "resultCount": "{count, plural, =0 {No settings match} one {# setting matches} other {# settings match}}"
+    },
+    "SettingsNav": {
+        "scopePersonal": "Personal",
+        "scopeWorkspace": "Workspace",
+        "scopeOrganization": "Organization",
+        "groupNotificationPreferences": "Notification preferences",
+        "groupWorkspacesInvitations": "Workspaces & invitations",
+        "groupPeopleAccess": "People & access",
+        "groupCrmConfiguration": "CRM configuration",
+        "groupCommunications": "Communications",
+        "groupDataPrivacy": "Data & privacy",
+        "groupDataRequests": "Data requests",
+        "groupAuditDiagnostics": "Audit & diagnostics",
+        "groupOrganizationGeneral": "General",
+        "groupIdentityAdministrators": "Identity & administrators",
+        "groupAiDataGovernance": "AI & data governance"
+    },
+    "SettingsAvailability": {
+        "managedTitle": "Managed by your Connex instance",
+        "managedBody": "This is set up once for everyone on this instance, so there's nothing to change here. Ask your administrator if it needs to be different.",
+        "notEnabledTitle": "Not enabled for this deployment",
+        "notEnabledBody": "This Connex instance doesn't have this switched on, so there's nothing to set up yet. Ask your administrator if you need it.",
+        "askAdminTitle": "Ask a workspace administrator",
+        "askAdminBody": "Your role doesn't include this setting. A workspace admin can change it for you, or give you access to it."
+    },
+    "SettingsPersonalProfile": {
+        "description": "Your personal details, and how you appear to the people you work with in every workspace.",
+        "metaDescription": "Update your name, photo, email address, time zone, and language."
+    },
+    "SettingsPersonalSecurity": {
+        "description": "How you sign in to Connex. These settings follow your account, not this workspace.",
+        "metaDescription": "Manage the passkeys you sign in with."
+    },
+    "SettingsPersonalConnections": {
+        "metaDescription": "Connect your mailbox and calendar, choose what Connex may capture, and review what it held back.",
+        "reviewsTitle": "Capture reviews"
+    },
+    "SettingsPersonalNotifications": {
+        "description": "What Connex tells you about, where it reaches you, and the hours it should stay quiet.",
+        "metaDescription": "Choose which notifications reach you in Connex and by email, and set your quiet hours."
+    },
+    "SettingsPersonalWorkspaces": {
+        "description": "The invitations waiting for you, and the workspaces you have already joined.",
+        "metaDescription": "Accept or decline workspace invitations, and leave a workspace you no longer need."
+    },
+    "SettingsWorkspaceGeneral": {
+        "description": "What {workspace} is called, and the time boundary its shared reporting is measured against.",
+        "metaDescription": "Rename this workspace and set the time zone its shared reporting uses."
+    },
+    "SettingsPeople": {
+        "accessCheckFailedBody": "This is a problem reading your permissions, not a decision about them. Try again in a moment.",
+        "accessCheckFailedTitle": "Couldn't check your access",
+        "description": "Who belongs to {workspace}, what each role can do, and who may join without an invite.",
+        "directoryDescription": "Look someone up, then open their page to see their work. Only members who have accepted their invitation appear here; anyone still pending is listed under Members, above.",
+        "directoryFailedBody": "Nobody's access changed. The list itself didn't load, so try again in a moment.",
+        "directoryFailedTitle": "Couldn't load the member directory",
+        "directoryTitle": "Member directory",
+        "metaDescription": "Manage members, roles, allowed domains, and the member directory for this workspace."
+    },
+    "SettingsGap": {
+        "title": "Not available here"
+    },
+    "SettingsCommunications": {
+        "accessCheckFailedBody": "This is a problem reading your permissions, not a decision about them. Try again in a moment.",
+        "accessCheckFailedTitle": "Couldn't check your access",
+        "description": "How {workspace} sends mail: the server behind its own messages, the service behind its campaigns, and what it decides on its members' behalf.",
+        "metaDescription": "Set up this workspace's mail server, campaign delivery, and notification defaults.",
+        "notificationDefaultsDescription": "The notification settings this workspace would choose for its members before they change their own.",
+        "notificationDefaultsGapAction": "Notification preferences",
+        "notificationDefaultsGapBody": "A workspace can't set notification defaults for its members yet — everyone chooses their own, and nothing here overrides them. Yours are on your notification preferences.",
+        "notificationDefaultsTitle": "Notification defaults"
+    },
+    "SettingsWorkspaceDataPrivacy": {
+        "description": "How relationship history that already exists elsewhere gets into {workspace}.",
+        "metaDescription": "Import existing relationship history into this workspace."
+    },
+    "SettingsCrm": {
+        "accessCheckFailedBody": "This is a problem reading your permissions, not a decision about them. Try again in a moment.",
+        "accessCheckFailedTitle": "Couldn't check your access",
+        "approvalPoliciesFailedBody": "No policy changed. The list itself didn't load, so try again in a moment.",
+        "approvalPoliciesFailedTitle": "Couldn't load approval policies",
+        "customFieldsDescription": "Extra details this workspace records on its companies, contacts, and deals, beyond the fields Connex ships with.",
+        "description": "How {workspace} shapes its records: the details they carry, how a contact is judged, what needs approval, and what runs on its own.",
+        "metaDescription": "Set up custom fields, qualification criteria, approval policies, and automation for this workspace.",
+        "workflowsDescription": "The automation that acts on these records when something changes or on a schedule.",
+        "workflowsGapAction": "Go to Workflows",
+        "workflowsGapBody": "Workflows are built and turned on from their own surface, not from settings. There is nothing to configure here yet.",
+        "workflowsTitle": "Workflow configuration"
+    },
+    "SettingsAuditDiagnostics": {
+        "accessCheckFailedBody": "This is a problem reading your permissions, not a decision about them. Try again in a moment.",
+        "accessCheckFailedTitle": "Couldn't check your access",
+        "auditFailedBody": "Nothing was hidden from you and nothing was lost. The log itself didn't load, so try again in a moment.",
+        "auditFailedTitle": "Couldn't load the audit log",
+        "description": "What has happened in {workspace}, and whether the services it depends on are healthy.",
+        "diagnosticsDescription": "The state of this workspace's mail, background jobs, and stored credentials, with the deployment settings behind them.",
+        "metaDescription": "Review this workspace's audit log and check the health of the services behind it."
+    },
+    "SettingsOrgGeneral": {
+        "description": "What {organization} is called, the workspaces beneath it, and how either of them ends.",
+        "metaDescription": "Rename your organization, see the workspaces under it, and export or delete them."
+    },
+    "SettingsOrgIdentity": {
+        "description": "Who administers {organization}, who may be invited into its workspaces, and how they sign in.",
+        "metaDescription": "Manage organization administrators, allowed email domains, and single sign-on.",
+        "ssoCheckFailedTitle": "Couldn't check single sign-on",
+        "ssoCheckFailedBody": "Nothing changed and nothing is switched off. We couldn't read whether this instance has single sign-on, so try again in a moment."
+    },
+    "SettingsOrgAi": {
+        "description": "The AI provider {organization} brings, what its workspaces may do with it, and how much it may spend in a day.",
+        "metaDescription": "Configure your organization's AI provider, workspace controls, and daily limit."
+    },
+    "SettingsOrgDataRequests": {
+        "description": "Requests from the people in {organization}'s records to see, correct, or stop the use of their own data.",
+        "metaDescription": "Track requests to see, correct, or stop the use of personal data, and assemble disclosure exports."
+    },
+    "SettingsOrgAuditDiagnostics": {
+        "description": "What has happened above {organization}'s workspaces, and whether the services behind them are healthy.",
+        "metaDescription": "Review the organization audit log and check the health of the services behind it.",
+        "diagnosticsDescription": "The state of this organization's background jobs, stored credentials, and provider readiness, with the deployment settings behind them."
+    }
+}

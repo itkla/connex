@@ -54,12 +54,14 @@ class VertexAdapterTest {
     @Mock private GoogleAccessTokenClient googleAccessTokenClient;
 
     private ObjectMapper objectMapper;
+    private AiProperties aiProperties;
     private VertexAdapter adapter;
 
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
-        adapter = new VertexAdapter(vertexClient, googleAccessTokenClient, objectMapper, new AiProperties());
+        aiProperties = new AiProperties();
+        adapter = new VertexAdapter(vertexClient, googleAccessTokenClient, objectMapper, aiProperties);
     }
 
     @Test
@@ -86,26 +88,71 @@ class VertexAdapterTest {
 
     @Test
     void contextWindowUsesSafeDefaultForUnknownModelFamilies() {
-        assertEquals(128_000, adapter.contextWindowTokens(target("gemini-2.5-flash")));
         assertEquals(32_768, adapter.contextWindowTokens(target("gemini-2.5-flash-image")));
         assertEquals(65_536, adapter.contextWindowTokens(target("gemini-3-pro-image")));
-        assertEquals(128_000, adapter.contextWindowTokens(target("gemini-3.6-flash")));
-        assertEquals(128_000, adapter.contextWindowTokens(target("gemini-3.1-pro-preview")));
         assertEquals(4_096, adapter.contextWindowTokens(target("gemini-unknown")));
         assertEquals(4_096, adapter.contextWindowTokens(target("gemini-3.6-ultra")));
+        assertEquals(4_096, adapter.contextWindowTokens(null));
         assertEquals(AiStructuredOutputEnforcement.PROMPT_ONLY,
                 adapter.structuredOutputCapability(target("gemini-3-pro-image")));
+    }
+
+    /**
+     * Gemini text models have been million-token models since 2.5; the adapter previously reported
+     * the 128,000-token window that predated them.
+     */
+    @Test
+    void geminiTextModelsReportTheirDocumentedMillionTokenWindow() {
+        for (String modelId : List.of(
+                "gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.6-flash",
+                "gemini-3.1-pro-preview")) {
+            assertEquals(1_048_576, adapter.contextWindowTokens(target(modelId)), modelId);
+            assertEquals(65_536, adapter.maxOutputTokens(target(modelId)), modelId);
+        }
     }
 
     @Test
     void outputCapacityUsesDocumentedPublisherFamilyLimits() {
         assertEquals(8_192, adapter.maxOutputTokens(target("gemini-1.5-pro")));
-        assertEquals(65_536, adapter.maxOutputTokens(target("gemini-3.6-flash")));
-        assertEquals(65_536, adapter.maxOutputTokens(target("gemini-3.1-pro-preview")));
+        assertEquals(128_000, adapter.contextWindowTokens(target("gemini-1.5-pro")));
         assertEquals(32_768, adapter.maxOutputTokens(target("gemini-3-pro-image")));
         assertEquals(4_096, adapter.maxOutputTokens(target("gemini-3.6-ultra")));
         assertEquals(4_096, adapter.maxOutputTokens(target("claude-3-haiku@20240307")));
         assertEquals(65_536, adapter.maxOutputTokens(target("claude-sonnet-4@20250514")));
+        assertEquals(4_096, adapter.maxOutputTokens(null));
+    }
+
+    /**
+     * Google publishes no partner-model limit page this catalog could cite for Claude on Vertex,
+     * so those entries stay at the values the adapter has always returned rather than inheriting
+     * the first-party numbers the Bedrock model cards independently confirm.
+     */
+    @Test
+    void unverifiedVertexPartnerClaudeModelsKeepTheirPreviousLimits() {
+        assertEquals(200_000, adapter.contextWindowTokens(target("claude-opus-4-6")));
+        assertEquals(131_072, adapter.maxOutputTokens(target("claude-opus-4-6")));
+        assertEquals(200_000, adapter.contextWindowTokens(target("claude-sonnet-4-6")));
+        assertEquals(131_072, adapter.maxOutputTokens(target("claude-sonnet-4-6")));
+        assertEquals(200_000, adapter.contextWindowTokens(target("claude-opus-4-5@20251101")));
+        assertEquals(65_536, adapter.maxOutputTokens(target("claude-opus-4-5@20251101")));
+        assertEquals(200_000, adapter.contextWindowTokens(target("claude-opus-4@20250514")));
+        assertEquals(32_768, adapter.maxOutputTokens(target("claude-opus-4@20250514")));
+        assertEquals(200_000, adapter.contextWindowTokens(target("claude-3-5-sonnet@20241022")));
+        assertEquals(8_192, adapter.maxOutputTokens(target("claude-3-5-sonnet@20241022")));
+    }
+
+    @Test
+    void anOperatorOverrideCorrectsAnUnverifiedVertexPartnerModel() {
+        AiProperties.ModelOverride override = new AiProperties.ModelOverride();
+        override.setProvider("vertex");
+        override.setModelId("claude-opus-4-6");
+        override.setContextWindowTokens(1_000_000);
+        override.setMaxOutputTokens(128_000);
+        aiProperties.setModelOverrides(List.of(override));
+
+        assertEquals(1_000_000, adapter.contextWindowTokens(target("claude-opus-4-6")));
+        assertEquals(128_000, adapter.maxOutputTokens(target("claude-opus-4-6")));
+        assertEquals(200_000, adapter.contextWindowTokens(target("claude-sonnet-4-6")));
     }
 
     @Test

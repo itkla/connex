@@ -89,7 +89,7 @@ class IntroductionLineageHydrationTest {
         when(referenceService.referencesBySource(
                 5, ReferenceService.SOURCE_INTRODUCTION, List.of(1, 2, 3, 4)))
             .thenReturn(Map.of());
-        when(referenceService.redactInvisibleNoteTargets(anyInt(), any()))
+        when(referenceService.redactInvisibleTargets(anyInt(), any()))
             .thenAnswer(invocation -> invocation.getArgument(1));
 
         PageResponse<IntroductionDto> page = service.getLineage(1, 25);

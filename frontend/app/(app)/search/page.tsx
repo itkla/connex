@@ -7,7 +7,7 @@ import SearchResultsView from "@/app/components/SearchResultsView";
 export default async function SearchPage({
     searchParams,
 }: {
-    searchParams: Promise<{ query?: string }>;
+    searchParams: Promise<{ query?: string | string[] }>;
 }) {
     const cookie = (await headers()).get("cookie");
     const userResult = await getCurrentUserResultFromCookie(cookie);
@@ -20,7 +20,8 @@ export default async function SearchPage({
         redirect("/auth/login");
     }
 
-    const { query = "" } = await searchParams;
+    const { query: rawQuery } = await searchParams;
+    const query = Array.isArray(rawQuery) ? rawQuery[0] ?? "" : rawQuery ?? "";
     const results = await searchFromCookie(cookie, query);
 
     return <SearchResultsView query={query} results={results} />;

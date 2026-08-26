@@ -39,9 +39,68 @@
     ORDER BY name, id
   </select>
 
+  <!-- Global-search slice. Unlike getFiltered it is not binary-collated, so it matches under the
+       column's own accent- and kana-insensitive collation, as every other search group does; the
+       products browser stays exact. It also matches name and SKU only, not description, because a
+       search row shows neither. -->
+  <select id="search" resultType="ooo.klae.connex.backend.dto.ProductSummaryDto">
+    SELECT id, name, sku, active FROM product
+    WHERE workspace_id = #{workspaceId}
+      AND (name LIKE #{query} OR sku LIKE #{query})
+    ORDER BY name, id
+    LIMIT 10
+  </select>
+
   <select id="getById" resultMap="ProductResult">
     SELECT <include refid="cols"/> FROM product
     WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <!-- Catalog-import SKU lookup. Deliberately NOT binary-collated (unlike getFiltered): the
+       classification must agree with uq_product_workspace_sku, or a preview would report "new"
+       for a SKU the unique index then rejects on insert. -->
+  <select id="findBySkus" resultMap="ProductResult">
+    SELECT <include refid="cols"/> FROM product
+    WHERE workspace_id = #{workspaceId}
+      AND sku IN
+      <foreach collection="skus" item="sku" open="(" separator="," close=")">#{sku}</foreach>
+    ORDER BY id
+  </select>
+
+  <!-- Product-import collation authority. The candidate list is typed by a zero-row branch that
+       selects product.sku itself, so MySQL aggregates the bound candidates onto the column's own
+       collation: within-file duplicate detection, insert ordering, and the existence join then
+       agree with uq_product_workspace_sku on every deployment. Naming a literal collation here
+       would silently disagree with the index (or fail with errno 1267) on any catalog whose
+       product.sku was not created as utf8mb4_0900_ai_ci — V102 declares no explicit collation, so
+       the column follows whatever the server's utf8mb4 default was when it ran. The statement stays
+       bounded by the 5,000-row import cap. Requires a non-empty candidate list. -->
+  <select id="resolveImportSkus"
+          resultType="ooo.klae.connex.backend.beans.ProductSkuResolution">
+    WITH candidates (candidate_index, sku) AS (
+      SELECT 0, product.sku FROM product WHERE workspace_id = #{workspaceId} AND 1 = 0
+      UNION ALL
+      VALUES
+      <foreach collection="skus" item="sku" index="candidateIndex" separator=",">
+        ROW(#{candidateIndex}, #{sku})
+      </foreach>
+    )
+    SELECT candidates.candidate_index,
+           COUNT(*) OVER (PARTITION BY candidates.sku) AS equivalent_count,
+           DENSE_RANK() OVER (ORDER BY candidates.sku) AS collation_order,
+           product.id AS product_id,
+           product.name AS product_name
+    FROM candidates
+    LEFT JOIN product
+      ON product.workspace_id = #{workspaceId}
+      AND product.sku = candidates.sku
+    ORDER BY candidates.candidate_index
+  </select>
+
+  <select id="getByIdForUpdate" resultMap="ProductResult">
+    SELECT <include refid="cols"/> FROM product
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
   </select>
 
   <select id="exists" resultType="boolean">
@@ -56,6 +115,20 @@
       #{workspaceId}, #{sku}, #{name}, #{description}, #{active}, #{unit}, #{unitPrice}, #{currency},
       #{taxRate}, #{billingFrequency}, #{effectiveStart}, #{effectiveEnd}
     )
+  </insert>
+
+  <!-- Explicit jdbcType on every nullable column: MyBatis cannot infer a type for a null bound
+       inside a <foreach>, so an all-null batch column would otherwise fail at bind time. -->
+  <insert id="insertBatch" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO product (
+      workspace_id, sku, name, description, active, unit, unit_price, currency,
+      tax_rate, billing_frequency, effective_start, effective_end
+    ) VALUES
+    <foreach collection="list" item="p" separator=",">
+      (#{p.workspaceId}, #{p.sku}, #{p.name}, #{p.description,jdbcType=VARCHAR}, #{p.active},
+       #{p.unit,jdbcType=VARCHAR}, #{p.unitPrice}, #{p.currency}, #{p.taxRate,jdbcType=DECIMAL},
+       #{p.billingFrequency}, #{p.effectiveStart,jdbcType=DATE}, #{p.effectiveEnd,jdbcType=DATE})
+    </foreach>
   </insert>
 
   <update id="update">

@@ -20,7 +20,11 @@ public class DocumentApproval {
     private int dealId;
     private int documentId;
     private Integer policyId;
+    private Integer policyIdSnapshot;
+    private String policyBinding;
     private String status;
+    private String outcomeReason;
+    private String outcomeDetail;
     private String mode;
     private String separationOfDuties;
     private Integer requestedBy;

@@ -70,7 +70,7 @@ public class SuppressionService {
         }
         String address = normalizeAddress(channel, request.address());
         if (request.personId() != null && !personMapper.existsOwned(workspaceId, request.personId())) {
-            throw new ResourceNotFoundException("Person not found with id: " + request.personId());
+            throw new ResourceNotFoundException("Contact not found");
         }
         SuppressionEntry entry = new SuppressionEntry();
         entry.setWorkspaceId(workspaceId);

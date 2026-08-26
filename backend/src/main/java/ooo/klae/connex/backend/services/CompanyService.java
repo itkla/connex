@@ -29,6 +29,7 @@ import ooo.klae.connex.backend.dto.CompanyEngagementWeekDto;
 import ooo.klae.connex.backend.dto.CompanyRevenueCurrencyDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -149,7 +150,7 @@ public class CompanyService {
     public CompanyEngagementDto getCompanyEngagement(int companyId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (!companyMapper.exists(workspaceId, companyId)) {
-            throw new ResourceNotFoundException("Company not found with id: " + companyId);
+            throw new ResourceNotFoundException("Company not found");
         }
         CompanyEngagementCountsDto counts = companyMapper.getCompanyEngagementCounts(workspaceId, companyId);
         List<CompanyEngagementUserDto> users = companyMapper.getCompanyEngagementUsers(
@@ -203,7 +204,7 @@ public class CompanyService {
     public CompanyTimelineData getCompanyTimeline(int companyId, int limit) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (!companyMapper.exists(workspaceId, companyId)) {
-            throw new ResourceNotFoundException("Company not found with id: " + companyId);
+            throw new ResourceNotFoundException("Company not found");
         }
         int currentUserId = workspaceService.getCurrentUserId();
         List<Task> tasks = referenceService.hydrateTasks(
@@ -230,15 +231,27 @@ public class CompanyService {
      */
     public List<Company> getCompaniesPage(String query, String sort, String dir, List<String> industry,
             boolean noIndustry, List<Integer> ids, MemberScope memberScope, boolean archived,
-            int limit, int offset) {
+            WarmthFilter warmth, int limit, int offset) {
         return companyMapper.getCompaniesPage(workspaceService.getCurrentWorkspaceId(), query, sort, dir,
-            industry, noIndustry, ids, memberScope, archived, limit, offset);
+            industry, noIndustry, ids, memberScope, archived, warmth, limit, offset);
     }
 
     public long countCompanies(String query, List<String> industry, boolean noIndustry, List<Integer> ids,
-            MemberScope memberScope, boolean archived) {
+            MemberScope memberScope, boolean archived, WarmthFilter warmth) {
         return companyMapper.countCompanies(workspaceService.getCurrentWorkspaceId(),
-            query, industry, noIndustry, ids, memberScope, archived);
+            query, industry, noIndustry, ids, memberScope, archived, warmth);
+    }
+
+    /**
+     * How many visible companies sit in each relationship-warmth band, plus those with no history.
+     * This scans the workspace's whole interaction history, so callers request it deliberately.
+     *
+     * @param warmth resolved model parameters and evaluation instant, required
+     * @return one bucket per band, plus {@code __none__}
+     */
+    public List<FacetCount> countsByWarmthBand(WarmthFilter warmth) {
+        Objects.requireNonNull(warmth, "warmth is required to compute warmth band facets");
+        return companyMapper.countsByWarmthBand(workspaceService.getCurrentWorkspaceId(), warmth);
     }
 
     /** How many companies the active workspace currently holds archived. */
@@ -305,18 +318,20 @@ public class CompanyService {
      * broad requests before loading the ids.
      */
     public List<Integer> getMatchingCompanyIds(String query, List<String> industry, boolean noIndustry,
-            List<Integer> ids, MemberScope memberScope, boolean archived) {
-        if (!archived && !hasMatchingIdFilter(query, industry, noIndustry, ids, memberScope)) {
+            List<Integer> ids, MemberScope memberScope, boolean archived, WarmthFilter warmth) {
+        if (!archived && (warmth == null || !warmth.restrictsRows())
+                && !hasMatchingIdFilter(query, industry, noIndustry, ids, memberScope)) {
             throw new BadRequestException("At least one filter is required before selecting matching company ids");
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         long total = companyMapper.countCompanies(
-            workspaceId, query, industry, noIndustry, ids, memberScope, archived);
+            workspaceId, query, industry, noIndustry, ids, memberScope, archived, warmth);
         if (total > MAX_MATCHING_IDS) {
             throw new BadRequestException("Too many matching companies; narrow the filters before selecting all");
         }
         return companyMapper.getCompanyIdsFiltered(
-            workspaceId, query, industry, noIndustry, ids, memberScope, archived, MAX_MATCHING_IDS, 0);
+            workspaceId, query, industry, noIndustry, ids, memberScope, archived, warmth,
+            MAX_MATCHING_IDS, 0);
     }
 
     private static boolean hasMatchingIdFilter(String query, List<String> industry, boolean noIndustry,
@@ -351,7 +366,7 @@ public class CompanyService {
     public Company getCompanyById(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company company = companyMapper.getCompanyById(workspaceId, id);
-        if (company == null) throw new ResourceNotFoundException("Company not found with id: " + id);
+        if (company == null) throw new ResourceNotFoundException("Company not found");
         return company;
     }
 
@@ -361,7 +376,7 @@ public class CompanyService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company company = companyMapper.getOwnedCompanyByIdForUpdate(workspaceId, id);
         if (company == null) {
-            throw new ResourceNotFoundException("Company not found with id: " + id);
+            throw new ResourceNotFoundException("Company not found");
         }
         return company;
     }
@@ -434,7 +449,11 @@ public class CompanyService {
         String normalized = website.trim().toLowerCase(Locale.ROOT);
         normalized = normalized.replaceFirst("^https?://", "");
         normalized = normalized.replaceFirst("^www\\.", "");
-        return normalized.replaceAll("/+$", "");
+        int end = normalized.length();
+        while (end > 0 && normalized.charAt(end - 1) == '/') {
+            end--;
+        }
+        return normalized.substring(0, end);
     }
 
     /**
@@ -524,11 +543,11 @@ public class CompanyService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         duplicateDecisionLockService.lockCurrentOrganization();
         if (companyMapper.lockById(workspaceId, id) == null) {
-            throw new ResourceNotFoundException("Company not found with id: " + id);
+            throw new ResourceNotFoundException("Company not found");
         }
         Company before = requireOwnedCompany(workspaceId, id);
         if (companyMapper.archive(workspaceId, id) != 1) {
-            throw new ResourceNotFoundException("Company not found with id: " + id);
+            throw new ResourceNotFoundException("Company not found");
         }
         Company after = requireArchivedCompany(workspaceId, id);
         auditService.record("company.archive", "company", id, before.getName(),
@@ -552,11 +571,11 @@ public class CompanyService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         duplicateDecisionLockService.lockCurrentOrganization();
         if (companyMapper.lockById(workspaceId, id) == null) {
-            throw new ResourceNotFoundException("Company not found with id: " + id);
+            throw new ResourceNotFoundException("Company not found");
         }
         Company before = requireArchivedCompany(workspaceId, id);
         if (companyMapper.restore(workspaceId, id) != 1) {
-            throw new ResourceNotFoundException("Company not found with id: " + id);
+            throw new ResourceNotFoundException("Company not found");
         }
         Company after = requireOwnedCompany(workspaceId, id);
         identityIntakeService.recordCompany(
@@ -573,7 +592,7 @@ public class CompanyService {
     private Company requireArchivedCompany(int workspaceId, int id) {
         Company company = companyMapper.getOwnedArchivedCompanyById(workspaceId, id);
         if (company == null) {
-            throw new ResourceNotFoundException("Company not found with id: " + id);
+            throw new ResourceNotFoundException("Company not found");
         }
         return company;
     }
@@ -595,7 +614,7 @@ public class CompanyService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company company = requireOwnedCompany(workspaceId, companyId);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
-        if (tag == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
+        if (tag == null) throw new ResourceNotFoundException("Tag not found");
         if (companyMapper.addTag(workspaceId, companyId, tagId) != 1) {
             return false;
         }
@@ -721,13 +740,13 @@ public class CompanyService {
 
     private Company requireCompany(int workspaceId, int companyId) {
         Company company = companyMapper.getCompanyById(workspaceId, companyId);
-        if (company == null) throw new ResourceNotFoundException("Company not found with id: " + companyId);
+        if (company == null) throw new ResourceNotFoundException("Company not found");
         return company;
     }
 
     private Company requireOwnedCompany(int workspaceId, int companyId) {
         if (!companyMapper.existsOwned(workspaceId, companyId)) {
-            throw new ResourceNotFoundException("Company not found with id: " + companyId);
+            throw new ResourceNotFoundException("Company not found");
         }
         return requireCompany(workspaceId, companyId);
     }

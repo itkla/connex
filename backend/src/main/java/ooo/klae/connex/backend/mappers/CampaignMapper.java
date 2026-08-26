@@ -9,10 +9,22 @@ import ooo.klae.connex.backend.beans.CampaignAudience;
 import ooo.klae.connex.backend.beans.CampaignAudienceMember;
 import ooo.klae.connex.backend.beans.CampaignAudienceSnapshot;
 import ooo.klae.connex.backend.dto.CampaignAudienceSnapshotSummaryDto;
+import ooo.klae.connex.backend.dto.CampaignSummaryDto;
 
 /** Data access for workspace-scoped campaigns and immutable audience snapshots. */
 public interface CampaignMapper {
     List<Campaign> getCampaigns(@Param("workspaceId") int workspaceId);
+
+    /**
+     * Bounded global-search slice of the campaign list, matched on name and objective.
+     *
+     * @param workspaceId the resolved tenant
+     * @param query the escaped {@code LIKE} pattern
+     * @return at most ten matching campaigns, ordered by name
+     */
+    List<CampaignSummaryDto> searchCampaigns(
+            @Param("workspaceId") int workspaceId,
+            @Param("query") String query);
 
     Campaign getCampaign(@Param("workspaceId") int workspaceId, @Param("id") int id);
 

@@ -19,7 +19,12 @@ import {
 type CapturedProps = Record<string, unknown>;
 type DynamicModule = { default: ComponentType<CapturedProps> };
 
-const MOBILE_DRAWER_EXIT_DURATION_MS = 200;
+/**
+ * An arbitrary slice of the retention window, used to split fake-timer advances either side of
+ * `OVERLAY_MAX_EXIT_DURATION_MS`. It is not any surface's real exit duration — those are the
+ * `--motion-*` tokens — so it must stay strictly between zero and the retention backstop.
+ */
+const RETENTION_PARTITION_MS = 200;
 
 type CaptureState = {
     nextDynamicIndex: number;
@@ -32,6 +37,7 @@ type CaptureState = {
     radarCardProps: Map<number, CapturedProps>;
     radarCardRenders: number;
     renderRealRadarCards: boolean;
+    ownedUrlParams: Record<string, string | undefined> | null;
 };
 
 const captures = vi.hoisted<CaptureState>(() => ({
@@ -45,6 +51,7 @@ const captures = vi.hoisted<CaptureState>(() => ({
     radarCardProps: new Map(),
     radarCardRenders: 0,
     renderRealRadarCards: false,
+    ownedUrlParams: null,
 }));
 
 const api = vi.hoisted(() => ({
@@ -66,12 +73,17 @@ const api = vi.hoisted(() => ({
 const actions = vi.hoisted(() => ({ run: vi.fn() }));
 const navigation = vi.hoisted(() => ({
     refresh: vi.fn(),
-    searchParams: { get: vi.fn(() => null) },
+    searchParams: { get: vi.fn((key: string): string | null => {
+        void key;
+        return null;
+    }) },
 }));
-const translate = vi.hoisted(() => (
-    key: string,
-    values?: Record<string, string | number>,
-) => values?.subject === undefined ? key : `${key}:${values.subject}`);
+const translate = vi.hoisted(() => {
+    const format = (key: string, values?: Record<string, string | number>) => (
+        values?.subject === undefined ? key : `${key}:${values.subject}`
+    );
+    return Object.assign(format, { rich: (key: string) => key });
+});
 
 vi.mock('next/dynamic', async () => {
     const React = await import('react');
@@ -157,7 +169,9 @@ vi.mock('@/app/hooks/useUnsavedChangesGuard', () => ({
 }));
 
 vi.mock('@/app/hooks/useOwnedUrlParams', () => ({
-    useOwnedUrlParams: () => undefined,
+    useOwnedUrlParams: (params: Record<string, string | undefined>) => {
+        captures.ownedUrlParams = params;
+    },
 }));
 
 vi.mock('@/app/hooks/usePermissions', () => ({
@@ -315,7 +329,14 @@ function installMinimalDocument() {
         lastChild: null,
         parentNode: null,
         textContent: '',
-        style: {},
+        style: {
+            setProperty: vi.fn(),
+            removeProperty: vi.fn(() => ''),
+            getPropertyValue: vi.fn(() => ''),
+        },
+        getBoundingClientRect: vi.fn(() => ({
+            x: 0, y: 0, top: 0, right: 0, bottom: 0, left: 0, width: 0, height: 0,
+        })),
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
         appendChild: vi.fn(),
@@ -330,12 +351,16 @@ function installMinimalDocument() {
         body: containerTarget,
     });
     vi.stubGlobal('window', windowTarget);
+    vi.stubGlobal('self', windowTarget);
     vi.stubGlobal('document', documentTarget);
     vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
         callback(0);
         return 1;
     }));
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    vi.stubGlobal('requestIdleCallback', vi.fn(() => 1));
+    vi.stubGlobal('cancelIdleCallback', vi.fn());
+    vi.stubGlobal('getComputedStyle', vi.fn(() => ({ getPropertyValue: () => '' })));
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     return {
         container: document.createElement('div'),
@@ -356,6 +381,17 @@ type InteractiveText = {
     ownerDocument: InteractiveDocument;
 };
 
+/**
+ * The slice of `CSSStyleDeclaration` React writes through. Custom properties go through
+ * `setProperty`, which `motion` also reaches for when it drives a layout thumb, so a bare object
+ * literal is not a faithful enough stand-in to render the real control surfaces.
+ */
+type InteractiveStyle = Record<string, unknown> & {
+    setProperty: (name: string, value: string) => void;
+    removeProperty: (name: string) => string;
+    getPropertyValue: (name: string) => string;
+};
+
 type InteractiveElement = {
     nodeType: 1;
     tagName: string;
@@ -366,7 +402,7 @@ type InteractiveElement = {
     childNodes: Array<InteractiveElement | InteractiveText>;
     attributes: Map<string, string>;
     listeners: Map<string, InteractiveListener[]>;
-    style: Record<string, unknown>;
+    style: InteractiveStyle;
     disabled?: boolean;
     id?: string;
     type?: string;
@@ -382,6 +418,7 @@ type InteractiveElement = {
     setAttribute: (name: string, value: string) => void;
     removeAttribute: (name: string) => void;
     getAttribute: (name: string) => string | null;
+    getBoundingClientRect: () => DOMRectInit;
     focus: () => void;
 };
 
@@ -434,6 +471,21 @@ function installInteractiveDocument() {
         ));
     }
 
+    function createInteractiveStyle(): InteractiveStyle {
+        const properties = new Map<string, string>();
+        return {
+            setProperty: (name, value) => {
+                properties.set(name, value);
+            },
+            removeProperty: (name) => {
+                const previous = properties.get(name) ?? '';
+                properties.delete(name);
+                return previous;
+            },
+            getPropertyValue: (name) => properties.get(name) ?? '',
+        };
+    }
+
     function createInteractiveElement(tagName: string, namespaceURI = 'http://www.w3.org/1999/xhtml') {
         const childNodes: Array<InteractiveElement | InteractiveText> = [];
         const attributes = new Map<string, string>();
@@ -448,7 +500,7 @@ function installInteractiveDocument() {
             childNodes,
             attributes,
             listeners,
-            style: {},
+            style: createInteractiveStyle(),
             addEventListener: (type, callback, options) => {
                 addListener(listeners, type, callback, options);
             },
@@ -484,6 +536,9 @@ function installInteractiveDocument() {
                 if (name === 'disabled') element.disabled = false;
             },
             getAttribute: (name) => attributes.get(name) ?? null,
+            getBoundingClientRect: () => ({
+                x: 0, y: 0, top: 0, right: 0, bottom: 0, left: 0, width: 0, height: 0,
+            }),
             focus: () => {
                 documentTarget.activeElement = element;
             },
@@ -493,11 +548,16 @@ function installInteractiveDocument() {
             lastChild: { get: () => childNodes.at(-1) ?? null },
             textContent: {
                 get: () => '',
-                set: () => {
+                set: (value: string) => {
                     childNodes.forEach((child) => {
                         child.parentNode = null;
                     });
                     childNodes.length = 0;
+                    if (value.length > 0) {
+                        const child = documentTarget.createTextNode(value);
+                        child.parentNode = element;
+                        childNodes.push(child);
+                    }
                 },
             },
         });
@@ -543,11 +603,22 @@ function installInteractiveDocument() {
         body,
     });
     vi.stubGlobal('window', windowTarget);
+    vi.stubGlobal('self', windowTarget);
     vi.stubGlobal('document', documentTarget);
     vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
         callback(0);
         return 1;
     }));
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    vi.stubGlobal('requestIdleCallback', vi.fn(() => 1));
+    vi.stubGlobal('cancelIdleCallback', vi.fn());
+    vi.stubGlobal('getComputedStyle', vi.fn(() => ({ getPropertyValue: () => '' })));
+    vi.stubGlobal('IntersectionObserver', class {
+        observe = vi.fn();
+        unobserve = vi.fn();
+        disconnect = vi.fn();
+        takeRecords = vi.fn(() => []);
+    });
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     const container = document.createElement('div');
     const containerNode = elements.at(-1);
@@ -767,12 +838,24 @@ async function renderOverlayHost() {
     };
 }
 
+/**
+ * Renders the board the way the app shell does. The D4 icon button carries its own tooltip, so the
+ * shell's `TooltipProvider` is part of the contract these tests exercise rather than decoration.
+ */
+async function renderBoardTree(initialPayload: RadarPayload) {
+    const { TooltipProvider } = await import('@/components/ui/tooltip');
+    const providerProps: Parameters<typeof TooltipProvider>[0] = {
+        children: createElement(RadarBoard, { initialPayload }),
+    };
+    return createElement(TooltipProvider, providerProps);
+}
+
 async function renderRadarBoard(initialPayload: RadarPayload) {
     const installed = installMinimalDocument();
     const { createRoot } = await import('react-dom/client');
     const root = createRoot(installed.container);
     await act(async () => {
-        root.render(createElement(RadarBoard, { initialPayload }));
+        root.render(await renderBoardTree(initialPayload));
         await Promise.resolve();
         await Promise.resolve();
     });
@@ -787,7 +870,7 @@ async function renderInteractiveRadarBoard(initialPayload: RadarPayload) {
     const { createRoot } = await import('react-dom/client');
     const root = createRoot(installed.container, { onCaughtError: vi.fn() });
     await act(async () => {
-        root.render(createElement(RadarBoard, { initialPayload }));
+        root.render(await renderBoardTree(initialPayload));
         await Promise.resolve();
         await Promise.resolve();
     });
@@ -807,7 +890,12 @@ beforeEach(() => {
     captures.radarCardProps.clear();
     captures.radarCardRenders = 0;
     captures.renderRealRadarCards = false;
+    captures.ownedUrlParams = null;
     vi.clearAllMocks();
+    navigation.searchParams.get.mockImplementation((key: string) => {
+        void key;
+        return null;
+    });
     api.getContacts.mockResolvedValue([]);
     api.getDeals.mockResolvedValue([]);
     api.getUsers.mockResolvedValue([]);
@@ -819,34 +907,23 @@ afterEach(() => {
 });
 
 describe('Radar action integration', () => {
-    it('opens task and record contexts from the production Radar card controls', async () => {
+    it('opens the intro-path task from the one action the production card promotes', async () => {
         const currentPayload = payload([warmPathSignal()]);
         api.getRadar.mockResolvedValue(currentPayload);
-        api.getRadarContext.mockResolvedValue({
-            type: 'person',
-            id: 10,
-            label: 'Ada Lovelace',
-            href: '/records/people/10',
-        });
         actions.run.mockResolvedValue({ status: 'completed' });
         captures.renderRealRadarCards = true;
         const board = await renderInteractiveRadarBoard(currentPayload);
-        const createTaskButton = board.elements.find((element) => (
+        const askIntroButton = board.elements.find((element) => (
             element.tagName === 'BUTTON'
             && element.parentNode !== null
-            && element.getAttribute('aria-label') === 'actions.createTaskNamed:Ada Lovelace'
+            && element.getAttribute('aria-label') === 'actions.askIntroNamed:Ada Lovelace'
         ));
-        const openContextButton = board.elements.find((element) => (
-            element.tagName === 'BUTTON'
-            && element.parentNode !== null
-            && element.getAttribute('aria-label') === 'actions.openContextNamed:Ada Lovelace'
-        ));
-        if (!createTaskButton || !openContextButton) {
-            throw new Error('Production Radar card actions did not render');
+        if (!askIntroButton) {
+            throw new Error('The production Radar card promoted no intro-path action');
         }
 
         await act(async () => {
-            board.dispatch('click', createTaskButton);
+            board.dispatch('click', askIntroButton);
             await Promise.resolve();
         });
         expect(actions.run).toHaveBeenCalledWith('create.task', expect.objectContaining({
@@ -858,15 +935,216 @@ describe('Radar action integration', () => {
                 bridgePersonId: 20,
             }),
         }));
+        await board.unmount();
+    });
+
+    it('replaces raw-id subject fallbacks before rendering copy or opening an action', async () => {
+        navigation.searchParams.get.mockImplementation((key: string) => key === 'q' ? '#10' : null);
+        const currentPayload = payload([warmPathSignal({
+            subject: { type: 'person', id: 10, label: '#10' },
+        })]);
+        api.getRadar.mockResolvedValue(currentPayload);
+        actions.run.mockResolvedValue({ status: 'completed' });
+        captures.renderRealRadarCards = true;
+        const board = await renderInteractiveRadarBoard(currentPayload);
+        const action = board.elements.find((element) => (
+            element.tagName === 'BUTTON'
+            && element.parentNode !== null
+            && element.getAttribute('aria-label') === 'actions.askIntroNamed:subject.unnamed.person'
+        ));
+        if (!action) throw new Error('The unnamed Radar subject did not receive safe localized copy');
+        expect(captures.ownedUrlParams?.q).toBeUndefined();
+        expect(captures.ownedUrlParams?.subject).toBeUndefined();
+
+        expect(board.elements.flatMap((element) => (
+            [element.getAttribute('aria-label'), element.getAttribute('title')]
+                .filter((value): value is string => value !== null)
+        )).some((value) => /#\s*\d+/.test(value))).toBe(false);
 
         await act(async () => {
-            board.dispatch('click', openContextButton);
+            board.dispatch('click', action);
+            await Promise.resolve();
+        });
+        expect(actions.run).toHaveBeenCalledWith('create.task', expect.objectContaining({
+            record: { type: 'person', id: 10, label: 'subject.unnamed.person' },
+        }));
+        await board.unmount();
+    });
+
+    it('does not render a raw-id connector fallback in expanded evidence', async () => {
+        const currentPayload = payload([warmPathSignal({
+            evidence: [{
+                type: 'warm_path',
+                parameters: { bridgePersonId: 20, bridgeName: '#20' },
+                references: [
+                    { type: 'person', id: 10 },
+                    { type: 'person', id: 20, label: '#20' },
+                ],
+            }],
+        })]);
+        api.getRadar.mockResolvedValue(currentPayload);
+        captures.renderRealRadarCards = true;
+        const board = await renderInteractiveRadarBoard(currentPayload);
+        const disclosure = board.elements.find((element) => (
+            element.tagName === 'BUTTON'
+            && element.getAttribute('aria-label') === 'detail.showNamed:Ada Lovelace'
+        ));
+        if (!disclosure) throw new Error('The Radar evidence disclosure did not render');
+
+        await act(async () => {
+            board.dispatch('click', disclosure);
+            await Promise.resolve();
+        });
+        const renderedText = board.elements.flatMap((element) => element.childNodes)
+            .filter((node): node is InteractiveText => node.nodeType === 3)
+            .map((node) => node.nodeValue);
+        expect(renderedText).toContain('Ada Lovelace');
+        expect(renderedText.some((value) => /#\s*\d+/.test(value))).toBe(false);
+        await board.unmount();
+    });
+
+    it('renders the horizon before family layers and signal evidence at mobile-safe widths', async () => {
+        const currentPayload = payload([signal({
+            evidence: [{
+                type: 'relationship_temperature',
+                parameters: { band: 'cool', trend: 'cooling', daysUntilCold: 3 },
+                references: [{ type: 'person', id: 10, label: 'Ada Lovelace' }],
+            }],
+        })]);
+        api.getRadar.mockResolvedValue(currentPayload);
+        captures.renderRealRadarCards = true;
+        const board = await renderInteractiveRadarBoard(currentPayload);
+        const horizonHeading = board.elements.find((element) => element.id === 'radar-horizon-heading');
+        const familyHeading = board.elements.find((element) => element.id === 'radar-layer-relationship_decay');
+        const signalRow = board.elements.find((element) => element.id === 'radar-signal-1');
+        if (!horizonHeading || !familyHeading || !signalRow) {
+            throw new Error('The rendered Radar disclosure hierarchy is incomplete');
+        }
+
+        expect(board.elements.indexOf(horizonHeading)).toBeLessThan(board.elements.indexOf(familyHeading));
+        expect(board.elements.indexOf(familyHeading)).toBeLessThan(board.elements.indexOf(signalRow));
+
+        const horizonGroup = board.elements.find((element) => (
+            element.getAttribute('role') === 'group'
+            && element.getAttribute('aria-label') === 'horizon.heading'
+        ));
+        if (!horizonGroup) throw new Error('The rendered Radar horizon group is missing');
+        expect(horizonGroup.getAttribute('class')).toContain('overflow-x-auto');
+        const columns = board.elements.filter((element) => (
+            element.tagName === 'BUTTON' && element.parentNode === horizonGroup
+        ));
+        expect(columns).toHaveLength(5);
+        expect(columns.every((column) => column.getAttribute('class')?.includes('min-w-28'))).toBe(true);
+        await board.unmount();
+    });
+
+    it('renders the capped horizon and overflow summary at the detector volume extreme', async () => {
+        const currentPayload = payload(Array.from({ length: 45 }, (unused, index) => signal({
+            id: index + 1,
+            subject: { type: 'person', id: index + 1, label: `Contact ${index + 1}` },
+            evidence: [{
+                type: 'relationship_temperature',
+                parameters: { band: 'cold' },
+                references: [{ type: 'person', id: index + 1, label: `Contact ${index + 1}` }],
+            }],
+        })));
+        api.getRadar.mockResolvedValue(currentPayload);
+        const board = await renderInteractiveRadarBoard(currentPayload);
+        const horizonGroup = board.elements.find((element) => (
+            element.getAttribute('role') === 'group'
+            && element.getAttribute('aria-label') === 'horizon.heading'
+        ));
+        if (!horizonGroup) throw new Error('The rendered Radar horizon group is missing');
+        const overdueColumn = board.elements.find((element) => (
+            element.tagName === 'BUTTON'
+            && element.parentNode === horizonGroup
+            && element.getAttribute('aria-label') === 'horizon.bandNamed'
+        ));
+        if (!overdueColumn) throw new Error('The overdue horizon column did not render');
+        const marks = board.elements.filter((element) => (
+            element.parentNode?.parentNode === overdueColumn
+            && element.getAttribute('aria-hidden') === 'true'
+        ));
+        const overflow = board.elements.find((element) => (
+            element.parentNode?.parentNode === overdueColumn
+            && element.getAttribute('class')?.includes('self-center')
+        ));
+
+        expect(marks).toHaveLength(30);
+        expect(overflow).toBeDefined();
+        await board.unmount();
+    });
+
+    it('round-trips every Radar-owned URL filter from a shared link', async () => {
+        const params = new Map([
+            ['family', 'deal_risk'],
+            ['state', 'snoozed'],
+            ['q', 'Apollo'],
+            ['when', 'month'],
+            ['subject', 'deal:20'],
+        ]);
+        navigation.searchParams.get.mockImplementation((key: string) => params.get(key) ?? null);
+        const currentPayload = payload([
+            signal({
+                family: 'deal_risk',
+                subject: { type: 'deal', id: 20, label: 'Apollo' },
+                state: 'snoozed',
+                evidence: [{
+                    type: 'closing_soon_quiet',
+                    parameters: { daysUntilClose: 20 },
+                    references: [{ type: 'deal', id: 20, label: 'Apollo' }],
+                }],
+            }),
+            signal({
+                id: 2,
+                family: 'deal_risk',
+                subject: { type: 'deal', id: 21, label: 'Apollo' },
+                state: 'snoozed',
+                evidence: [{
+                    type: 'closing_soon_quiet',
+                    parameters: { daysUntilClose: 20 },
+                    references: [{ type: 'deal', id: 21, label: 'Apollo' }],
+                }],
+            }),
+        ]);
+        api.getRadar.mockResolvedValue(currentPayload);
+        const board = await renderRadarBoard(currentPayload);
+
+        expect(captures.ownedUrlParams).toEqual({
+            family: 'deal_risk',
+            state: 'snoozed',
+            q: 'Apollo',
+            when: 'month',
+            subject: 'deal:20',
+        });
+        expect([...captures.radarCardProps.keys()]).toEqual([1]);
+        await board.unmount();
+    });
+
+    it('opens the current record through the authorized context lookup, not a guessed href', async () => {
+        const currentPayload = payload([warmPathSignal({
+            subject: { type: 'person', id: 10, label: '#10' },
+        })]);
+        api.getRadar.mockResolvedValue(currentPayload);
+        api.getRadarContext.mockResolvedValue({
+            type: 'person',
+            id: 10,
+            label: '#10',
+            href: '/records/contacts/10',
+        });
+        actions.run.mockResolvedValue({ status: 'completed' });
+        const board = await renderRadarBoard(currentPayload);
+
+        await act(async () => {
+            invoke(requiredProps(captures.radarCardProps.get(1), 'Radar card'), 'onOpenContext');
             await Promise.resolve();
             await Promise.resolve();
         });
+
+        expect(api.getRadarContext).toHaveBeenCalledWith(1);
         expect(actions.run).toHaveBeenCalledWith('record.open', {
             source: 'menu',
-            record: { type: 'person', id: 10, label: 'Ada Lovelace' },
+            record: { type: 'person', id: 10, label: 'subject.unnamed.person' },
         });
         await board.unmount();
     });
@@ -1027,6 +1305,54 @@ describe('Radar action integration', () => {
         await board.unmount();
     });
 
+    it('promotes exactly one action per row, with the dispositions behind the menu', async () => {
+        const cardModule = await vi.importActual<
+            typeof import('@/app/components/radar/RadarSignalCard')
+        >('@/app/components/radar/RadarSignalCard');
+        const { TooltipProvider } = await vi.importActual<
+            typeof import('@/components/ui/tooltip')
+        >('@/components/ui/tooltip');
+        const installed = installInteractiveDocument();
+        const { createRoot } = await import('react-dom/client');
+        const root = createRoot(installed.container, { onCaughtError: vi.fn() });
+
+        await act(async () => {
+            const providerProps: Parameters<typeof TooltipProvider>[0] = {
+                children: createElement(cardModule.default, {
+                    signal: warmPathSignal(),
+                    pageAsOf: '2026-08-08T12:00:00Z',
+                    freshnessStatus: 'current',
+                    busy: false,
+                    snoozeOpen: false,
+                    expanded: false,
+                    onExpandedChange: vi.fn(),
+                    onSnoozeOpenChange: vi.fn(),
+                    onFollow: vi.fn(),
+                    onSnooze: vi.fn(),
+                    onDismiss: vi.fn(),
+                    onCreateTask: vi.fn(),
+                    onRefreshEvidence: vi.fn(),
+                    onOpenContext: vi.fn(),
+                }),
+            };
+            root.render(createElement(TooltipProvider, providerProps));
+        });
+
+        const buttons = installed.elements.filter(
+            (element) => element.tagName === 'BUTTON' && element.parentNode !== null,
+        );
+        const promoted = buttons.filter((button) => (
+            button.getAttribute('aria-controls') !== 'radar-detail-1'
+            && button.getAttribute('aria-haspopup') === null
+        ));
+
+        expect(promoted).toHaveLength(1);
+        expect(promoted[0].getAttribute('aria-label')).toBe('actions.askIntroNamed:Ada Lovelace');
+        expect(buttons.filter((button) => button.getAttribute('aria-haspopup') !== null)).toHaveLength(1);
+
+        await act(async () => root.unmount());
+    });
+
     it('disables every mutating card action while the board-wide gate is occupied, leaving the evidence disclosure usable', async () => {
         const cardModule = await vi.importActual<
             typeof import('@/app/components/radar/RadarSignalCard')
@@ -1044,29 +1370,38 @@ describe('Radar action integration', () => {
             onOpenContext: vi.fn(),
         };
 
+        const { TooltipProvider } = await vi.importActual<
+            typeof import('@/components/ui/tooltip')
+        >('@/components/ui/tooltip');
+
         await act(async () => {
-            root.render(createElement(cardModule.default, {
-                signal: signal(),
-                pageAsOf: '2026-08-08T12:00:00Z',
-                freshnessStatus: 'current',
-                busy: true,
-                snoozeOpen: false,
-                expanded: false,
-                onExpandedChange: vi.fn(),
-                ...callbacks,
-            }));
+            const providerProps: Parameters<typeof TooltipProvider>[0] = {
+                children: createElement(cardModule.default, {
+                    signal: signal(),
+                    pageAsOf: '2026-08-08T12:00:00Z',
+                    freshnessStatus: 'current',
+                    busy: true,
+                    snoozeOpen: false,
+                    expanded: false,
+                    onExpandedChange: vi.fn(),
+                    ...callbacks,
+                }),
+            };
+            root.render(createElement(TooltipProvider, providerProps));
         });
         const buttons = installed.elements.filter(
             (element) => element.tagName === 'BUTTON' && element.parentNode !== null,
         );
-        const disclosure = buttons.filter((button) => button.getAttribute('aria-expanded') !== null);
-        const actionButtons = buttons.filter((button) => button.getAttribute('aria-expanded') === null);
+        const disclosure = buttons.filter(
+            (button) => button.getAttribute('aria-controls') === 'radar-detail-1',
+        );
+        const mutating = buttons.filter((button) => !disclosure.includes(button));
 
-        expect(actionButtons).toHaveLength(5);
-        expect(actionButtons.every((button) => button.disabled === true)).toBe(true);
         expect(disclosure).toHaveLength(1);
         expect(disclosure[0].disabled).not.toBe(true);
         expect(disclosure[0].getAttribute('aria-expanded')).toBe('false');
+        expect(mutating.length).toBeGreaterThan(0);
+        expect(mutating.every((button) => button.disabled === true)).toBe(true);
 
         await act(async () => root.unmount());
     });
@@ -1222,7 +1557,7 @@ describe('Radar action integration', () => {
         await host.show(null, null);
         expect(vi.getTimerCount()).toBe(0);
         await act(async () => {
-            vi.advanceTimersByTime(OVERLAY_MAX_EXIT_DURATION_MS + MOBILE_DRAWER_EXIT_DURATION_MS);
+            vi.advanceTimersByTime(OVERLAY_MAX_EXIT_DURATION_MS + RETENTION_PARTITION_MS);
         });
         expect(captures.dynamicUnmounts.get(0) ?? 0).toBe(before);
         if (pendingFrame === null) throw new Error('Terminal fallback frame was not scheduled');
@@ -1232,11 +1567,11 @@ describe('Radar action integration', () => {
         });
         expect(vi.getTimerCount()).toBe(1);
         await act(async () => {
-            vi.advanceTimersByTime(MOBILE_DRAWER_EXIT_DURATION_MS);
+            vi.advanceTimersByTime(RETENTION_PARTITION_MS);
         });
         expect(captures.dynamicUnmounts.get(0) ?? 0).toBe(before);
         await act(async () => {
-            vi.advanceTimersByTime(OVERLAY_MAX_EXIT_DURATION_MS - MOBILE_DRAWER_EXIT_DURATION_MS);
+            vi.advanceTimersByTime(OVERLAY_MAX_EXIT_DURATION_MS - RETENTION_PARTITION_MS);
         });
         expect(captures.dynamicUnmounts.get(0) ?? 0).toBe(before + 1);
         expect(cancelFrame).toHaveBeenCalledWith(41);

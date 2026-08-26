@@ -139,4 +139,107 @@ class ProductMapperTest extends AbstractMapperTest {
             productMapper.getFiltered(
                 workspace.getId(), LikePattern.containing("CAFÉ")).stream().map(Product::getId).toList());
     }
+
+    @Test
+    void findBySkus_returnsOnlyTheCurrentWorkspaceRows() {
+        Product mine = newProduct(workspace.getId(), "Widget");
+        Product other = newProduct(workspace.getId(), "Gadget");
+        Workspace foreign = new Workspace();
+        foreign.setName("Foreign " + unique());
+        foreign.setSlug("foreign-" + unique());
+        workspaceMapper.insert(foreign);
+        Product foreignProduct = newProduct(foreign.getId(), "Foreign Widget");
+        foreignProduct.setSku(mine.getSku());
+        productMapper.update(foreignProduct);
+
+        List<Product> found = productMapper.findBySkus(
+            workspace.getId(), List.of(mine.getSku(), other.getSku(), "absent-" + unique()));
+
+        assertEquals(
+            List.of(mine.getId(), other.getId()),
+            found.stream().map(Product::getId).sorted().toList());
+        assertEquals(
+            List.of(foreignProduct.getId()),
+            productMapper.findBySkus(foreign.getId(), List.of(mine.getSku()))
+                .stream().map(Product::getId).toList());
+    }
+
+    @Test
+    void findBySkus_matchesUnderTheColumnCollation() {
+        Product product = newProduct(workspace.getId(), "Widget");
+        product.setSku("A-1-" + unique());
+        productMapper.update(product);
+
+        assertEquals(
+            List.of(product.getId()),
+            productMapper.findBySkus(
+                    workspace.getId(), List.of(product.getSku().toUpperCase(java.util.Locale.ROOT)))
+                .stream().map(Product::getId).toList());
+    }
+
+    @Test
+    void getByIdForUpdate_returnsTheRowAndIsWorkspaceScoped() {
+        Product product = newProduct(workspace.getId(), "Widget");
+        Workspace foreign = new Workspace();
+        foreign.setName("Foreign " + unique());
+        foreign.setSlug("foreign-" + unique());
+        workspaceMapper.insert(foreign);
+
+        Product locked = productMapper.getByIdForUpdate(workspace.getId(), product.getId());
+
+        assertNotNull(locked);
+        assertEquals(product.getSku(), locked.getSku());
+        assertNull(productMapper.getByIdForUpdate(foreign.getId(), product.getId()));
+    }
+
+    @Test
+    void insertBatch_roundTripsEveryColumnIncludingNullables() {
+        Product full = new Product();
+        full.setWorkspaceId(workspace.getId());
+        full.setSku("batch-full-" + unique());
+        full.setName("Full widget");
+        full.setDescription("Everything set");
+        full.setActive(false);
+        full.setUnit("seat");
+        full.setUnitPrice(new BigDecimal("1200.01"));
+        full.setCurrency("JPY");
+        full.setTaxRate(new BigDecimal("10.001"));
+        full.setBillingFrequency("recurring");
+        full.setEffectiveStart(java.time.LocalDate.parse("2026-01-01"));
+        full.setEffectiveEnd(java.time.LocalDate.parse("2026-12-31"));
+
+        Product sparse = new Product();
+        sparse.setWorkspaceId(workspace.getId());
+        sparse.setSku("batch-sparse-" + unique());
+        sparse.setName("Sparse widget");
+        sparse.setActive(true);
+        sparse.setUnitPrice(BigDecimal.ZERO);
+        sparse.setCurrency("USD");
+        sparse.setBillingFrequency("one_time");
+
+        assertEquals(2, productMapper.insertBatch(List.of(full, sparse)));
+
+        Product storedFull = productMapper.getById(workspace.getId(), full.getId());
+        assertNotNull(storedFull);
+        assertEquals("Full widget", storedFull.getName());
+        assertEquals("Everything set", storedFull.getDescription());
+        assertFalse(storedFull.isActive());
+        assertEquals("seat", storedFull.getUnit());
+        assertEquals(0, new BigDecimal("1200.01").compareTo(storedFull.getUnitPrice()));
+        assertEquals("JPY", storedFull.getCurrency());
+        assertEquals(0, new BigDecimal("10.001").compareTo(storedFull.getTaxRate()));
+        assertEquals("recurring", storedFull.getBillingFrequency());
+        assertEquals(java.time.LocalDate.parse("2026-01-01"), storedFull.getEffectiveStart());
+        assertEquals(java.time.LocalDate.parse("2026-12-31"), storedFull.getEffectiveEnd());
+
+        Product storedSparse = productMapper.getById(workspace.getId(), sparse.getId());
+        assertNotNull(storedSparse);
+        assertNull(storedSparse.getDescription());
+        assertNull(storedSparse.getUnit());
+        assertNull(storedSparse.getTaxRate());
+        assertNull(storedSparse.getEffectiveStart());
+        assertNull(storedSparse.getEffectiveEnd());
+        assertNotEquals(0, storedSparse.getId());
+        assertNotEquals(storedFull.getId(), storedSparse.getId());
+    }
 }

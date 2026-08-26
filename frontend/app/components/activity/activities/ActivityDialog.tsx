@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
 import { ChatBubbleLeftRightIcon, PencilSquareIcon, CalendarIcon, Bars3BottomLeftIcon, UserIcon, BriefcaseIcon, CheckCircleIcon, ClockIcon } from '@heroicons/react/24/outline';
 
@@ -40,7 +40,8 @@ import {
 } from '@/components/ui/dialog-status-cover';
 import { cn } from '@/lib/utils';
 
-import { ApiError, createActivity, createTask, isFieldError } from '@/app/lib/api';
+import { createActivity, createTask, isFieldError } from '@/app/lib/api';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { toMysqlDateTime } from '@/app/lib/utils';
 import { isSubmitShortcut } from '@/app/lib/submitShortcut';
@@ -50,7 +51,7 @@ import {
     ActivityTypePicker,
     type ActivityType,
 } from '@/app/components/activity/activities/activityTypes';
-import type { Contact, Deal } from '@/app/lib/types';
+import type { Contact, CreateActivityPayload, Deal } from '@/app/lib/types';
 
 /** The serializable slice of the activity composer persisted as a draft and re-injected on resume. */
 export type ActivityDraftData = {
@@ -77,11 +78,17 @@ type Props = {
     defaultSubject?: string;
     /** Prefills the notes, e.g. carried over from the Quick Create panel. */
     defaultNotes?: string;
+    /** Replaces "No contact found." when the surface knows why the list is empty. */
+    personEmptyMessage?: string;
+    /** Replaces "No deal found." when the surface knows why the list is empty. */
+    dealEmptyMessage?: string;
     /** Requires a contact or deal link when this activity is intended to create relationship evidence. */
     requireRelationshipTarget?: boolean;
     initialDraftGeneration?: number;
     onDraftMounted?: () => void;
     requestInit?: RequestInit;
+    /** Replaces the plain create call, e.g. to also file the contact on the linked deal. */
+    createRequest?: (payload: CreateActivityPayload, init?: RequestInit) => Promise<unknown>;
 };
 
 function nowLocalValue(): string {
@@ -116,10 +123,13 @@ export default function ActivityDialog({
     defaultType,
     defaultSubject = '',
     defaultNotes = '',
+    personEmptyMessage,
+    dealEmptyMessage,
     requireRelationshipTarget = false,
     initialDraftGeneration,
     onDraftMounted,
     requestInit,
+    createRequest,
 }: Props) {
     const t = useTranslations('ActivityCreateDialog');
     const { activeWorkspaceId } = useWorkspace();
@@ -171,9 +181,12 @@ export default function ActivityDialog({
                         defaultType={defaultType}
                         defaultSubject={defaultSubject}
                         defaultNotes={defaultNotes}
+                        personEmptyMessage={personEmptyMessage}
+                        dealEmptyMessage={dealEmptyMessage}
                         requireRelationshipTarget={requireRelationshipTarget}
                         ownsInitialDraft={initialDraftGeneration !== undefined}
                         requestInit={requestInit}
+                        createRequest={createRequest}
                         onSubmittingChange={(value) => {
                             submittingRef.current = value;
                         }}
@@ -207,9 +220,12 @@ type ActivityDialogFormProps = {
     defaultType?: ActivityType;
     defaultSubject?: string;
     defaultNotes?: string;
+    personEmptyMessage?: string;
+    dealEmptyMessage?: string;
     requireRelationshipTarget?: boolean;
     ownsInitialDraft?: boolean;
     requestInit?: RequestInit;
+    createRequest?: (payload: CreateActivityPayload, init?: RequestInit) => Promise<unknown>;
     onSubmittingChange: (submitting: boolean) => void;
     /** Reports whether the form holds unsaved edits, so a wrapper can guard against accidental discard. */
     onDirtyChange?: (dirty: boolean) => void;
@@ -238,9 +254,12 @@ export function ActivityDialogForm({
     defaultType,
     defaultSubject = '',
     defaultNotes = '',
+    personEmptyMessage,
+    dealEmptyMessage,
     requireRelationshipTarget = false,
     ownsInitialDraft = false,
     requestInit,
+    createRequest = createActivity,
     onSubmittingChange,
     onDirtyChange,
     onPersistDraft,
@@ -250,6 +269,7 @@ export function ActivityDialogForm({
 }: ActivityDialogFormProps) {
     const router = useRouter();
     const t = useTranslations('ActivityCreateDialog');
+    const showApiError = useApiErrorToast('ActivityCreateDialog');
 
     const [type, setType] = useState<ActivityType>(() => defaultType ?? ACTIVITY_TYPES[0]);
     const [subject, setSubject] = useState(() => defaultSubject);
@@ -334,7 +354,7 @@ export function ActivityDialogForm({
         onSubmittingChange(true);
         try {
             if (!activityCreatedRef.current) {
-                await createActivity(
+                await createRequest(
                     {
                         type,
                         subject: subject.trim(),
@@ -366,8 +386,7 @@ export function ActivityDialogForm({
                 } catch (taskErr) {
                     if (requestInit?.signal?.aborted) return;
                     setFollowUpFailed(true);
-                    const message = taskErr instanceof ApiError ? taskErr.message : t('toastFollowUpFailed');
-                    toastError(message);
+                    showApiError(taskErr, 'toastFollowUpFailed');
                     router.refresh();
                     return;
                 }
@@ -388,9 +407,7 @@ export function ActivityDialogForm({
                 }
                 return;
             }
-            const message =
-                err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('toastFailedCreate');
-            toastError(message);
+            showApiError(err, 'toastFailedCreate');
         } finally {
             if (!requestInit?.signal?.aborted) {
                 setSubmitting(false);
@@ -522,7 +539,7 @@ export function ActivityDialogForm({
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{t('noPersonFound')}</ComboboxEmpty>
+                                        <ComboboxEmpty>{personEmptyMessage ?? t('noPersonFound')}</ComboboxEmpty>
                                         {persons.map((p) => (
                                             <ComboboxItem key={p.id} value={p}>
                                                 {p.name}
@@ -556,7 +573,7 @@ export function ActivityDialogForm({
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{t('noDealFound')}</ComboboxEmpty>
+                                        <ComboboxEmpty>{dealEmptyMessage ?? t('noDealFound')}</ComboboxEmpty>
                                         {deals.map((d) => (
                                             <ComboboxItem key={d.id} value={d}>
                                                 {d.name}

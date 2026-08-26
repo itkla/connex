@@ -3,7 +3,7 @@ import { PageShell } from '@/app/components/PageShell';
 
 export default function DealDetailLoading() {
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <header className="flex flex-col gap-6 py-4 sm:flex-row sm:items-end sm:justify-between">
                     <div className="flex flex-col gap-3">
                         <div className="flex flex-row flex-wrap items-center gap-3">

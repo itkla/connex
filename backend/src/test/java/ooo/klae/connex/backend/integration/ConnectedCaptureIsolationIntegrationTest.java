@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -40,11 +41,13 @@ import org.springframework.web.context.request.RequestContextHolder;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.ProviderCapturedInteraction;
 import ooo.klae.connex.backend.beans.ProviderCapturedParticipant;
+import ooo.klae.connex.backend.beans.ProviderConnection;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.connectedaccounts.capture.ProviderCapturePurgeService;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.ProviderCaptureMapper;
+import ooo.klae.connex.backend.mappers.ProviderConnectionMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.SessionSecurityService;
@@ -58,7 +61,8 @@ import ooo.klae.connex.backend.services.SessionSecurityService;
     "connex.connected-accounts.google.client-id=capture-isolation-client",
     "connex.connected-accounts.google.client-secret=capture-isolation-secret",
     "connex.connected-capture.scheduling-enabled=true",
-    "connex.connected-capture.google.enabled=true"
+    "connex.connected-capture.google.enabled=true",
+    "connex.connected-capture.scheduler-batch-size=1000"
 })
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class ConnectedCaptureIsolationIntegrationTest {
@@ -72,6 +76,7 @@ class ConnectedCaptureIsolationIntegrationTest {
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private ProviderCaptureMapper captureMapper;
+    @Autowired private ProviderConnectionMapper connectionMapper;
     @Autowired private ProviderCapturePurgeService purgeService;
     @Autowired private SessionSecurityService sessionSecurityService;
     @Autowired private UserMapper userMapper;
@@ -95,6 +100,7 @@ class ConnectedCaptureIsolationIntegrationTest {
         for (int workspaceId : workspaceIds.reversed()) {
             for (int userId : userIds.reversed()) {
                 purgeService.purge(workspaceId, userId, "google");
+                purgeService.purge(workspaceId, userId, "microsoft");
             }
             jdbcTemplate.update(
                 "DELETE FROM workspace_member WHERE workspace_id = ?",
@@ -116,10 +122,15 @@ class ConnectedCaptureIsolationIntegrationTest {
         Workspace ownerWorkspace = newWorkspace();
         Workspace otherWorkspace = newWorkspace();
         User owner = newMember(ownerWorkspace);
+        workspaceMapper.addMember(otherWorkspace.getId(), owner.getId(), "member");
+        User otherMember = newMember(ownerWorkspace);
         User outsider = newMember(otherWorkspace);
         ProviderCapturedInteraction interaction =
             capturedInteraction(ownerWorkspace, owner);
         capturedParticipant(ownerWorkspace, interaction);
+        capturedInteraction(otherWorkspace, owner, "google");
+        capturedInteraction(ownerWorkspace, otherMember, "google");
+        capturedInteraction(ownerWorkspace, owner, "microsoft");
 
         mockMvc.perform(get("/api/account/connections/google/reviews"))
             .andExpect(status().isUnauthorized());
@@ -167,6 +178,151 @@ class ConnectedCaptureIsolationIntegrationTest {
             0,
             captureMapper.countUserProviderResiduals(
                 ownerWorkspace.getId(), owner.getId(), "google"));
+        assertEquals(
+            1,
+            captureMapper.countUserProviderResiduals(
+                otherWorkspace.getId(), owner.getId(), "google"));
+        assertEquals(
+            1,
+            captureMapper.countUserProviderResiduals(
+                ownerWorkspace.getId(), otherMember.getId(), "google"));
+        assertEquals(
+            1,
+            captureMapper.countUserProviderResiduals(
+                ownerWorkspace.getId(), owner.getId(), "microsoft"));
+    }
+
+    @Test
+    void disconnectRetainsEvidenceUntilExplicitCurrentWorkspaceErasure() throws Exception {
+        Workspace workspace = newWorkspace();
+        User owner = newMember(workspace);
+        ProviderCapturedInteraction interaction =
+            capturedInteraction(workspace, owner);
+        capturedParticipant(workspace, interaction);
+        ProviderConnection connection = new ProviderConnection();
+        connection.setUserId(owner.getId());
+        connection.setProvider("google");
+        connection.setStatus("connected");
+        connection.setProviderAccountId("provider-account");
+        connection.setCredentialGeneration(1);
+        connectionMapper.insert(connection);
+        MockHttpSession session = login(owner.getUsername());
+        MockHttpServletRequest stepUpRequest =
+            new MockHttpServletRequest(context.getServletContext());
+        stepUpRequest.setSession(session);
+        sessionSecurityService.markStepUp(stepUpRequest, owner.getId());
+
+        mockMvc.perform(delete("/api/account/connections/google")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isNoContent());
+
+        ProviderConnection tombstone = connectionMapper
+            .getByUserAndProvider(owner.getId(), "google");
+        assertEquals("disconnected", tombstone.getStatus());
+        assertEquals(
+            1,
+            captureMapper.countUserProviderResiduals(
+                workspace.getId(), owner.getId(), "google"));
+        mockMvc.perform(get("/api/account/connections/capture")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.providers[0].provider").value("google"))
+            .andExpect(jsonPath("$.providers[0].retainedData").value(true))
+            .andExpect(jsonPath("$.providers[0].accountResetAvailable").value(true));
+
+        mockMvc.perform(delete(
+                "/api/account/connections/google/captured-data")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.active").value(false));
+
+        assertEquals(
+            0,
+            captureMapper.countUserProviderResiduals(
+                workspace.getId(), owner.getId(), "google"));
+        mockMvc.perform(get("/api/account/connections/capture")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.providers[0].retainedData").value(false))
+            .andExpect(jsonPath("$.providers[0].accountResetAvailable").value(true));
+
+        tombstone.setStatus("purge_failed");
+        tombstone.setErrorCode("purge_failed");
+        connectionMapper.update(tombstone);
+        mockMvc.perform(get("/api/account/connections/capture")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.providers[0].purge.active").value(false))
+            .andExpect(jsonPath("$.providers[0].purge.status").value("purge_failed"));
+    }
+
+    @Test
+    void allWorkspaceResetPurgesOnlyTheTargetUserAndProvider() throws Exception {
+        Workspace firstWorkspace = newWorkspace();
+        Workspace secondWorkspace = newWorkspace();
+        User owner = newMember(firstWorkspace);
+        workspaceMapper.addMember(secondWorkspace.getId(), owner.getId(), "member");
+        User otherUser = newMember(firstWorkspace);
+        capturedInteraction(firstWorkspace, owner, "google");
+        capturedInteraction(secondWorkspace, owner, "google");
+        capturedInteraction(firstWorkspace, otherUser, "google");
+        capturedInteraction(firstWorkspace, owner, "microsoft");
+        ProviderConnection connection = new ProviderConnection();
+        connection.setUserId(owner.getId());
+        connection.setProvider("google");
+        connection.setStatus("disconnected");
+        connection.setProviderAccountId("google:issuer:subject");
+        connection.setCredentialGeneration(2);
+        connectionMapper.insert(connection);
+        MockHttpSession session = login(owner.getUsername());
+        MockHttpServletRequest stepUpRequest =
+            new MockHttpServletRequest(context.getServletContext());
+        stepUpRequest.setSession(session);
+        sessionSecurityService.markStepUp(stepUpRequest, owner.getId());
+
+        mockMvc.perform(delete(
+                "/api/account/connections/google/retained-data")
+                .header("X-Workspace-Id", firstWorkspace.getId())
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isAccepted());
+
+        assertNull(connectionMapper.getByUserAndProvider(owner.getId(), "google"));
+        assertEquals(0, captureMapper.countUserProviderResiduals(
+            firstWorkspace.getId(), owner.getId(), "google"));
+        assertEquals(0, captureMapper.countUserProviderResiduals(
+            secondWorkspace.getId(), owner.getId(), "google"));
+        assertEquals(1, captureMapper.countUserProviderResiduals(
+            firstWorkspace.getId(), otherUser.getId(), "google"));
+        assertEquals(1, captureMapper.countUserProviderResiduals(
+            firstWorkspace.getId(), owner.getId(), "microsoft"));
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log "
+                + "WHERE action = 'provider.capture.purge.complete' "
+                + "AND entity_type = 'user' AND entity_id = ? AND workspace_id = ?",
+            Integer.class,
+            owner.getId(),
+            firstWorkspace.getId()));
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log "
+                + "WHERE action = 'provider.capture.purge.complete' "
+                + "AND entity_type = 'user' AND entity_id = ? AND workspace_id = ?",
+            Integer.class,
+            owner.getId(),
+            secondWorkspace.getId()));
+        mockMvc.perform(get("/api/account/connections/capture")
+                .header("X-Workspace-Id", firstWorkspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.providers[0].retainedData").value(false))
+            .andExpect(jsonPath("$.providers[0].accountResetAvailable").value(false));
     }
 
     private MockHttpSession login(String username) throws Exception {
@@ -217,11 +373,16 @@ class ConnectedCaptureIsolationIntegrationTest {
 
     private ProviderCapturedInteraction capturedInteraction(
             Workspace workspace, User user) {
+        return capturedInteraction(workspace, user, "google");
+    }
+
+    private ProviderCapturedInteraction capturedInteraction(
+            Workspace workspace, User user, String provider) {
         ProviderCapturedInteraction interaction =
             new ProviderCapturedInteraction();
         interaction.setWorkspaceId(workspace.getId());
         interaction.setUserId(user.getId());
-        interaction.setProvider("google");
+        interaction.setProvider(provider);
         interaction.setStream("mail_inbox");
         interaction.setProviderSourceId("source-" + suffix());
         interaction.setProviderConversationId("thread-" + suffix());

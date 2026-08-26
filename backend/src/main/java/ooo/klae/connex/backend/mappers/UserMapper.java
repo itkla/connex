@@ -31,6 +31,13 @@ public interface UserMapper {
     List<UserReferenceDto> getActiveWorkspaceMemberReferencesByIds(
         @Param("workspaceId") int workspaceId,
         @Param("ids") List<Integer> ids);
+    List<Integer> findMatchingWorkspaceMemberIds(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query);
+    List<Integer> findMatchingWorkspaceMemberIdsIn(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query,
+        @Param("ids") List<Integer> ids);
     User getUserById(int id);
     User getUserByIdForShare(int id);
     Integer lockById(int id);

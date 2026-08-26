@@ -13,8 +13,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
 import DocumentBodyEditor from '@/app/components/library/documents/editor/DocumentBodyEditor';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { toastError, toastSuccess } from '@/app/lib/toast';
-import { createDocumentTemplate, updateDocumentTemplate, ApiError } from '@/app/lib/api';
+import { createDocumentTemplate, updateDocumentTemplate } from '@/app/lib/api';
 import { DOCUMENT_TYPES } from '@/app/lib/documentTokens';
 import type { CreateDocumentTemplatePayload, DocumentBodyNode, DocumentTemplate, DocumentType } from '@/app/lib/types';
 
@@ -89,6 +90,7 @@ function toDraft(template: DocumentTemplate | null, termsLabel: string): Draft {
  */
 export default function TemplateBuilder({ template }: { template: DocumentTemplate | null }) {
     const t = useTranslations('DocumentTemplateBuilder');
+    const showApiError = useApiErrorToast('DocumentTemplateBuilder');
     const router = useRouter();
     const [draft, setDraft] = useState<Draft>(() => toDraft(template, t('slashTermsHeading')));
     const [saving, setSaving] = useState(false);
@@ -123,7 +125,7 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
             router.push('/library/documents');
             router.refresh();
         } catch (err) {
-            toastError(err instanceof ApiError ? err.message : t('saveFailed'));
+            showApiError(err, 'saveFailed');
         } finally {
             setSaving(false);
         }
@@ -132,7 +134,7 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
     return (
         <div className="min-h-full bg-background">
             <div className="sticky top-0 z-20 border-b border-border bg-background/85 backdrop-blur">
-                <div className="mx-auto flex w-full max-w-[100rem] items-center gap-4 px-4 py-3 sm:px-6">
+                <div className="flex w-full items-center gap-4 px-4 py-3 sm:px-6">
                     <Button variant="ghost" size="sm" onClick={() => router.push('/library/documents')}>
                         <ChevronLeftIcon className="size-4" />
                         <span className="hidden sm:inline">{t('back')}</span>
@@ -148,7 +150,7 @@ export default function TemplateBuilder({ template }: { template: DocumentTempla
                 </div>
             </div>
 
-            <div className="mx-auto grid w-full max-w-[100rem] gap-8 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] lg:gap-10">
+            <div className="grid w-full gap-8 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] lg:gap-10">
                 <div className="lg:sticky lg:top-20 lg:self-start">
                     <SectionHeader title={t('groupIdentity')} />
                     <div className="flex flex-col gap-4 px-1 sm:px-6">

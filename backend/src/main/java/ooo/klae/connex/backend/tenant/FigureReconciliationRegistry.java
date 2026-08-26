@@ -37,7 +37,8 @@ public final class FigureReconciliationRegistry {
         /**
          * Evidence: {@code DealMapper#dealMetricsFiltered} reads {@code d.value} and
          * {@code d.actual_value}, resolves the archived-company and share-aware visibility joins,
-         * has no period parameter, and resolves the current-owner member-scope predicate.
+         * enforces person-processing restrictions when contact-filtered, has no period parameter,
+         * and resolves the current-owner member-scope predicate.
          */
         DEAL_BROWSER_METRICS,
         /**
@@ -112,6 +113,12 @@ public final class FigureReconciliationRegistry {
     /** How APPI person-processing restrictions participate in the deal-based figure. */
     public enum RestrictionPosture {
         /**
+         * Evidence: the optional contact filter joins {@code person} and requires
+         * {@code archived_at IS NULL}, {@code suspended_at IS NULL}, and
+         * {@code provision_ceased_at IS NULL}.
+         */
+        CONTACT_FILTER_EXCLUDES_UNAVAILABLE_PERSONS,
+        /**
          * Evidence: the resolved statement neither joins {@code person} nor tests the person
          * restriction columns {@code suspended_at} or {@code provision_ceased_at}.
          */
@@ -121,10 +128,11 @@ public final class FigureReconciliationRegistry {
     /** Whether the figure traverses cross-workspace record shares. */
     public enum SharingPosture {
         /**
-         * Evidence: the resolved statement contains both {@code company_share} and
-         * {@code pipeline_share}; stage visibility is inherited through the pipeline share path.
+         * Evidence: the resolved statement contains {@code company_share}, {@code person_share},
+         * and {@code pipeline_share}; stage visibility is inherited through the pipeline share
+         * path, while person shares participate only when the contact filter is active.
          */
-        COMPANY_AND_PIPELINE_SHARE_TRAVERSAL,
+        COMPANY_PERSON_AND_PIPELINE_SHARE_TRAVERSAL,
         /** Evidence: the resolved statement contains no table whose name ends in {@code _share}. */
         NO_SHARE_TRAVERSAL
     }
@@ -225,13 +233,14 @@ public final class FigureReconciliationRegistry {
             List.of(evidence("DealMapper", "dealMetricsFiltered")),
             ValueSource.CANONICAL_AND_ACTUAL_DEAL_VALUES,
             ArchivePosture.ARCHIVED_COMPANY_AS_UNASSIGNED,
-            RestrictionPosture.NO_PERSON_RESTRICTION_PREDICATE,
-            SharingPosture.COMPANY_AND_PIPELINE_SHARE_TRAVERSAL,
+            RestrictionPosture.CONTACT_FILTER_EXCLUDES_UNAVAILABLE_PERSONS,
+            SharingPosture.COMPANY_PERSON_AND_PIPELINE_SHARE_TRAVERSAL,
             PeriodBasis.UNBOUNDED,
             OwnerBasis.MEMBER_SCOPE_ON_CURRENT_OWNER,
             "The filtered browser uses canonical open value and realized closed revenue, buckets an "
-                + "archived company's deals as unassigned, traverses company, pipeline, and stage "
-                + "visibility shares, remains unbounded, and filters on the current owner.");
+                + "archived company's deals as unassigned, traverses company, pipeline, stage, and "
+                + "contact visibility shares, excludes restricted contacts from contact-filtered "
+                + "figures, remains unbounded, and filters on the current owner.");
         declare(entries, Figure.DEAL_BROWSER_METRICS_UNSCOPED,
             List.of(evidence("DealMapper", "dealMetrics")),
             ValueSource.CANONICAL_AND_ACTUAL_DEAL_VALUES,

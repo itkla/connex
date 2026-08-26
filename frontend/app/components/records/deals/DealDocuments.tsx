@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
+import { useReducedMotion } from 'motion/react';
 import { useLocale, useTranslations } from 'next-intl';
 import {
     ArrowDownTrayIcon,
@@ -9,16 +10,24 @@ import {
     ArchiveBoxXMarkIcon,
     TrashIcon,
     EllipsisHorizontalIcon,
-    ChevronDownIcon,
     PlusIcon,
     DocumentTextIcon,
     ShieldCheckIcon,
+    UserPlusIcon,
     XCircleIcon,
     ArrowUturnLeftIcon,
 } from '@heroicons/react/24/outline';
 import { Loader2Icon } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import {
+    Autocomplete,
+    AutocompleteContent,
+    AutocompleteEmpty,
+    AutocompleteInput,
+    AutocompleteItem,
+    AutocompleteList,
+} from '@/components/ui/autocomplete';
 import {
     Dialog,
     DialogContent,
@@ -38,9 +47,10 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import SectionHeader from '@/app/components/dashboard/SectionHeader';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { canDeleteOwnedRecord } from '@/app/lib/deletionPolicy';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastSuccess } from '@/app/lib/toast';
 import { formatCurrency, formatDateTime } from '@/app/lib/utils';
 import {
     getDocumentTemplates,
@@ -50,9 +60,12 @@ import {
     deleteDealDocument,
     requestDocumentApproval,
     decideDocumentApproval,
+    delegateDocumentApproval,
     cancelDocumentApproval,
+    getDocumentApprovalDelegateCandidates,
 } from '@/app/lib/api';
 import type {
+    ApprovalDelegate,
     DealDocument,
     DocumentApprovalStep,
     DocumentClientStatus,
@@ -61,6 +74,21 @@ import type {
     DocumentType,
 } from '@/app/lib/types';
 import DocumentApprovalChain from './DocumentApprovalChain';
+import { DEAL_DOCUMENTS_ANCHOR } from './dealLinks';
+
+/**
+ * Subscribes to same-document fragment changes. A fragment set by a client-side navigation arrives
+ * in the first snapshot rather than as an event, so this only has to carry the case where the
+ * fragment changes while the panel stays mounted.
+ */
+function subscribeToHash(onChange: () => void): () => void {
+    window.addEventListener('hashchange', onChange);
+    return () => window.removeEventListener('hashchange', onChange);
+}
+
+function hashSnapshot(): string {
+    return window.location.hash;
+}
 
 type Props = {
     dealId: number;
@@ -70,12 +98,16 @@ type Props = {
     currentUserId: number;
 };
 
-type ApprovalAction = 'request' | 'approve' | 'reject';
+type ApprovalAction = 'request' | 'approve' | 'reject' | 'delegate';
 
-const APPROVAL_DIALOG_KEYS: Record<ApprovalAction, { title: string; body: string; confirm: string }> = {
-    request: { title: 'requestDialogTitle', body: 'requestDialogBody', confirm: 'requestConfirm' },
-    approve: { title: 'approveDialogTitle', body: 'approveDialogBody', confirm: 'approveConfirm' },
-    reject: { title: 'rejectDialogTitle', body: 'rejectDialogBody', confirm: 'rejectConfirm' },
+const APPROVAL_DIALOG_KEYS: Record<
+    ApprovalAction,
+    { title: string; body: string; confirm: string; failure: string }
+> = {
+    request: { title: 'requestDialogTitle', body: 'requestDialogBody', confirm: 'requestConfirm', failure: 'requestFailed' },
+    approve: { title: 'approveDialogTitle', body: 'approveDialogBody', confirm: 'approveConfirm', failure: 'approveFailed' },
+    reject: { title: 'rejectDialogTitle', body: 'rejectDialogBody', confirm: 'rejectConfirm', failure: 'rejectFailed' },
+    delegate: { title: 'delegateDialogTitle', body: 'delegateDialogBody', confirm: 'delegateConfirm', failure: 'delegateFailed' },
 };
 
 const TYPE_KEY: Record<DocumentType, string> = {
@@ -93,6 +125,19 @@ const STATUS_DOT: Record<DocumentStatus, string> = {
     superseded: 'bg-muted-foreground',
 };
 
+const delegateOption = (candidate: ApprovalDelegate) =>
+    `${candidate.displayName || candidate.username} (${candidate.email})`;
+
+function terminatedApproval(doc: DealDocument) {
+    const approval = doc.latestApproval;
+    if (!approval?.outcomeReason) return null;
+    return approval.status === 'invalidated'
+        || approval.status === 'unsatisfiable'
+        || approval.status === 'expired'
+        ? approval
+        : null;
+}
+
 /**
  * Generated-documents panel for a deal. Documents are immutable server-side snapshots; the client
  * generates a draft from a template, transitions its status, runs the approval flow (request /
@@ -108,8 +153,13 @@ export default function DealDocuments({
     currentUserId,
 }: Props) {
     const t = useTranslations('DealsDocuments');
+    const showApiError = useApiErrorToast('DealsDocuments');
     const locale = useLocale();
     const router = useRouter();
+    const reduceMotion = useReducedMotion() ?? false;
+    const sectionRef = useRef<HTMLElement>(null);
+    const scrolledForHash = useRef<string | null>(null);
+    const hash = useSyncExternalStore(subscribeToHash, hashSnapshot, () => '');
     const { activeWorkspace } = useWorkspace();
     const [documents, setDocuments] = useState<DealDocument[]>(initial);
     const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
@@ -118,6 +168,11 @@ export default function DealDocuments({
         { doc: DealDocument; action: ApprovalAction; stepId: number | null } | null>(null);
     const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
     const [comment, setComment] = useState('');
+    const [delegateCandidates, setDelegateCandidates] = useState<ApprovalDelegate[]>([]);
+    const [delegateCandidatesLoading, setDelegateCandidatesLoading] = useState(false);
+    const [delegateCandidatesError, setDelegateCandidatesError] = useState(false);
+    const [delegateQuery, setDelegateQuery] = useState('');
+    const [delegateUserId, setDelegateUserId] = useState<number | null>(null);
 
     useEffect(() => {
         getDocumentTemplates()
@@ -125,12 +180,52 @@ export default function DealDocuments({
             .catch(() => setTemplates([]));
     }, []);
 
-    const run = async (op: () => Promise<void>) => {
+    useEffect(() => {
+        if (hash !== `#${DEAL_DOCUMENTS_ANCHOR}`) scrolledForHash.current = null;
+    }, [hash]);
+
+    useEffect(() => {
+        if (hash !== `#${DEAL_DOCUMENTS_ANCHOR}` || scrolledForHash.current === hash) return;
+        const section = sectionRef.current;
+        if (!section) return;
+        scrolledForHash.current = hash;
+        const behavior = reduceMotion ? 'auto' : 'smooth';
+        section.scrollIntoView({ behavior, block: 'start' });
+        const frame = requestAnimationFrame(() => section.scrollIntoView({ behavior, block: 'start' }));
+        return () => cancelAnimationFrame(frame);
+    }, [hash, reduceMotion]);
+
+    useEffect(() => {
+        if (
+            !approvalDialogOpen
+            || approvalDialog?.action !== 'delegate'
+            || approvalDialog.stepId == null
+        ) return;
+        let cancelled = false;
+        getDocumentApprovalDelegateCandidates(dealId, approvalDialog.doc.id, approvalDialog.stepId)
+            .then((candidates) => {
+                if (!cancelled) setDelegateCandidates(candidates);
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setDelegateCandidates([]);
+                    setDelegateCandidatesError(true);
+                }
+            })
+            .finally(() => {
+                if (!cancelled) setDelegateCandidatesLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [approvalDialog, approvalDialogOpen, dealId]);
+
+    const run = async (op: () => Promise<void>, fallbackKey: string) => {
         setBusy(true);
         try {
             await op();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('actionFailed'));
+            showApiError(err, fallbackKey);
         } finally {
             setBusy(false);
         }
@@ -145,18 +240,18 @@ export default function DealDocuments({
         const created = await generateDealDocument(dealId, template.id);
         setDocuments((prev) => [created, ...prev]);
         toastSuccess(t('generated'));
-    });
+    }, 'generateFailed');
 
     const changeStatus = (doc: DealDocument, status: DocumentClientStatus) => run(async () => {
         const updated = await updateDealDocumentStatus(dealId, doc.id, status);
         setDocuments((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
-    });
+    }, 'statusFailed');
 
     const remove = (doc: DealDocument) => run(async () => {
         await deleteDealDocument(dealId, doc.id);
         setDocuments((prev) => prev.filter((d) => d.id !== doc.id));
         toastSuccess(t('deleted'));
-    });
+    }, 'deleteFailed');
 
     const cancelRequest = (doc: DealDocument) => run(async () => {
         try {
@@ -165,7 +260,7 @@ export default function DealDocuments({
         } finally {
             await refreshDocument(doc.id).catch(() => undefined);
         }
-    });
+    }, 'cancelRequestFailed');
 
     const submitApprovalAction = () => {
         if (!approvalDialog) return;
@@ -176,6 +271,16 @@ export default function DealDocuments({
                 if (action === 'request') {
                     await requestDocumentApproval(dealId, doc.id, trimmed || null);
                     toastSuccess(t('approvalRequested'));
+                } else if (action === 'delegate') {
+                    if (delegateUserId == null || approvalDialog.stepId == null) return;
+                    await delegateDocumentApproval(
+                        dealId,
+                        doc.id,
+                        approvalDialog.stepId,
+                        delegateUserId,
+                        trimmed || null,
+                    );
+                    toastSuccess(t('approvalDelegated'));
                 } else {
                     await decideDocumentApproval(
                         dealId,
@@ -190,11 +295,18 @@ export default function DealDocuments({
                 await refreshDocument(doc.id).catch(() => undefined);
             }
             setApprovalDialogOpen(false);
-        });
+        }, APPROVAL_DIALOG_KEYS[action].failure);
     };
 
     const openApprovalDialog = (doc: DealDocument, action: ApprovalAction, stepId: number | null = null) => {
         setComment('');
+        setDelegateQuery('');
+        setDelegateUserId(null);
+        if (action === 'delegate') {
+            setDelegateCandidates([]);
+            setDelegateCandidatesLoading(true);
+            setDelegateCandidatesError(false);
+        }
         setApprovalDialog({ doc, action, stepId });
         setApprovalDialogOpen(true);
     };
@@ -205,28 +317,15 @@ export default function DealDocuments({
 
     const isRequester = (doc: DealDocument) => doc.latestApproval?.requestedBy === currentUserId;
 
-    /**
-     * The chain step this user may decide right now, mirroring the server's rules so the menu only
-     * offers an action that will succeed. The server re-checks all of it.
-     */
     const actionableStep = (doc: DealDocument): DocumentApprovalStep | null => {
         const approval = doc.latestApproval;
         if (!canApprove || !approval || approval.status !== 'pending' || doc.status !== 'pending_approval') {
             return null;
         }
-        if (approval.separationOfDuties !== 'off') {
-            if (approval.requestedBy == null || approval.requestedBy === currentUserId) return null;
-            if (approval.separationOfDuties === 'strict'
-                && (doc.createdBy == null || doc.createdBy === currentUserId)) {
-                return null;
-            }
-        }
         let candidate: DocumentApprovalStep | null = null;
         for (const step of approval.steps) {
             if (step.status !== 'active') continue;
-            if (!step.approvers.some(
-                (approver) => approver.approverKind === 'any_approver' || approver.userId === currentUserId)) continue;
-            if (step.decisions.some((decision) => decision.decidedBy === currentUserId)) continue;
+            if (!step.effectiveApproverIds.includes(currentUserId)) continue;
             if (candidate === null || step.stepOrder < candidate.stepOrder) candidate = step;
         }
         return candidate;
@@ -238,10 +337,9 @@ export default function DealDocuments({
     const generateMenu = (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <Button variant="brand" size="sm" disabled={busy}>
+                <Button variant="brand" size="toolbar" menu disabled={busy}>
                     <PlusIcon className="size-4" />
                     {t('generate')}
-                    <ChevronDownIcon className="size-3.5 opacity-70 transition-transform duration-150 group-data-[state=open]/button:rotate-180" />
                 </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-56">
@@ -265,9 +363,10 @@ export default function DealDocuments({
     );
 
     const dialogKeys = approvalDialog ? APPROVAL_DIALOG_KEYS[approvalDialog.action] : null;
+    const eligibleDelegates = approvalDialog?.action === 'delegate' ? delegateCandidates : [];
 
     return (
-        <section>
+        <section id={DEAL_DOCUMENTS_ANCHOR} ref={sectionRef}>
             <div className="mb-3 flex items-center justify-between">
                 <SectionHeader title={t('title')} />
                 {documents.length > 0 && generateMenu}
@@ -317,6 +416,11 @@ export default function DealDocuments({
                                                     : t('rejectedNote')}
                                             </div>
                                         )}
+                                        {doc.status === 'draft' && terminatedApproval(doc) && (
+                                            <div className="mt-1 text-xs text-destructive">
+                                                {t(`outcome_${terminatedApproval(doc)!.outcomeReason!}`)}
+                                            </div>
+                                        )}
                                     </td>
                                     <td className="px-4 py-3">
                                         <span className={`inline-flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-xs font-medium ${doc.status === 'superseded' ? 'text-muted-foreground' : 'text-foreground'}`}>
@@ -332,13 +436,13 @@ export default function DealDocuments({
                                     </td>
                                     <td className="px-2 py-3">
                                         <div className="flex items-center justify-end gap-1">
-                                            <Button variant="outline" size="sm" onClick={() => openPdf(doc)} disabled={busy}>
+                                            <Button variant="outline" size="toolbar" onClick={() => openPdf(doc)} disabled={busy}>
                                                 <ArrowDownTrayIcon className="size-4" />
                                                 <span className="hidden sm:inline">{t('pdf')}</span>
                                             </Button>
                                             <DropdownMenu>
                                                 <DropdownMenuTrigger asChild>
-                                                    <Button variant="ghost" size="icon-xs" aria-label={t('actions')} disabled={busy}>
+                                                    <Button variant="ghost" size="icon-inline" aria-label={t('actions')} disabled={busy}>
                                                         <EllipsisHorizontalIcon className="size-4" />
                                                     </Button>
                                                 </DropdownMenuTrigger>
@@ -364,6 +468,11 @@ export default function DealDocuments({
                                                                 onSelect={() => openApprovalDialog(doc, 'reject', actionableStep(doc)?.id ?? null)}
                                                             >
                                                                 <XCircleIcon className="size-4" />{t('reject')}
+                                                            </DropdownMenuItem>
+                                                            <DropdownMenuItem
+                                                                onSelect={() => openApprovalDialog(doc, 'delegate', actionableStep(doc)?.id ?? null)}
+                                                            >
+                                                                <UserPlusIcon className="size-4" />{t('delegate')}
                                                             </DropdownMenuItem>
                                                         </>
                                                     )}
@@ -406,12 +515,58 @@ export default function DealDocuments({
                             {dialogKeys ? t(dialogKeys.body, { title: approvalDialog?.doc.title ?? '' }) : ''}
                         </DialogDescription>
                     </DialogHeader>
+                    {approvalDialog?.action === 'delegate' && (
+                        <div className="space-y-2">
+                            <Label htmlFor="approval-delegate-member">{t('delegateMemberLabel')}</Label>
+                            <Autocomplete
+                                items={eligibleDelegates}
+                                value={delegateQuery}
+                                onValueChange={(value, eventDetails) => {
+                                    if (eventDetails.reason === 'escape-key') {
+                                        eventDetails.allowPropagation();
+                                        return;
+                                    }
+                                    const picked = eligibleDelegates.find(
+                                        (member) => delegateOption(member) === value,
+                                    );
+                                    setDelegateQuery(value);
+                                    setDelegateUserId(picked?.id ?? null);
+                                }}
+                                mode="list"
+                                openOnInputClick
+                            >
+                                <AutocompleteInput
+                                    id="approval-delegate-member"
+                                    placeholder={delegateCandidatesLoading
+                                        ? t('delegateMemberLoading')
+                                        : t('delegateMemberPlaceholder')}
+                                    aria-label={t('delegateMemberLabel')}
+                                    disabled={busy || delegateCandidatesLoading || delegateCandidatesError}
+                                />
+                                <AutocompleteContent>
+                                    <AutocompleteEmpty>{t('delegateMemberNoMatches')}</AutocompleteEmpty>
+                                    <AutocompleteList>
+                                        {(member: ApprovalDelegate) => (
+                                            <AutocompleteItem key={member.id} value={delegateOption(member)}>
+                                                {delegateOption(member)}
+                                            </AutocompleteItem>
+                                        )}
+                                    </AutocompleteList>
+                                </AutocompleteContent>
+                            </Autocomplete>
+                            {delegateCandidatesError && (
+                                <p role="alert" className="text-xs text-destructive">
+                                    {t('delegateMemberLoadFailed')}
+                                </p>
+                            )}
+                        </div>
+                    )}
                     <div className="space-y-2">
                         <Label htmlFor="approval-comment">{t('commentLabel')}</Label>
                         <Textarea
                             id="approval-comment"
                             rows={3}
-                            maxLength={1000}
+                            maxLength={approvalDialog?.action === 'delegate' ? 500 : 1000}
                             value={comment}
                             placeholder={t('commentPlaceholder')}
                             onChange={(e) => setComment(e.target.value)}
@@ -424,7 +579,10 @@ export default function DealDocuments({
                         </DialogClose>
                         <Button
                             variant={approvalDialog?.action === 'reject' ? 'destructive' : 'brand'}
-                            disabled={busy}
+                            disabled={busy || (approvalDialog?.action === 'delegate'
+                                && (delegateCandidatesLoading
+                                    || delegateCandidatesError
+                                    || delegateUserId == null))}
                             onClick={submitApprovalAction}
                         >
                             {busy

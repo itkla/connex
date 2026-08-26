@@ -37,6 +37,143 @@
     provider_material_exclusions_json
   </sql>
 
+  <sql id="assistantProcessablePerson">
+    p.archived_at IS NULL
+    AND p.suspended_at IS NULL
+    AND p.provision_ceased_at IS NULL
+    AND (p.workspace_id = #{workspaceId}
+      OR (p.workspace_id IN
+        <foreach item="organizationWorkspaceId" collection="organizationWorkspaceIds"
+                 open="(" separator="," close=")">#{organizationWorkspaceId}</foreach>
+        AND EXISTS (SELECT 1 FROM person_share ps
+          WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId})))
+  </sql>
+
+  <!-- The turn's declared period, applied inside the per-record assistant reads rather than
+       filtered afterwards. Absent bounds leave the read unbounded, which is what a turn that
+       declared no period asked for. -->
+  <sql id="assistantPeriodBounds">
+    <if test="startUtc != null">
+      AND a.timestamp &gt;= #{startUtc}
+    </if>
+    <if test="endUtc != null">
+      AND a.timestamp &lt;= #{endUtc}
+    </if>
+  </sql>
+
+  <sql id="assistantLinkedPeopleProcessable">
+    (a.person_id IS NULL OR EXISTS (SELECT 1 FROM person p
+      WHERE p.id = a.person_id
+        AND <include refid="assistantProcessablePerson"/>))
+    AND NOT EXISTS (SELECT 1 FROM entity_reference linked_reference
+      WHERE linked_reference.workspace_id = #{workspaceId}
+        AND linked_reference.source_type = 'activity'
+        AND linked_reference.source_id = a.id
+        AND linked_reference.ref_type = 'person'
+        AND NOT EXISTS (SELECT 1 FROM person p
+          WHERE p.id = linked_reference.ref_id
+            AND <include refid="assistantProcessablePerson"/>))
+  </sql>
+
+  <!-- Cohort visibility mirrors assistantProcessablePerson but makes the processing-restriction
+       clauses switchable, so the same predicate can produce both the answer's rows and the count
+       that proves whether restricted subjects were excluded from it. -->
+  <sql id="scopePersonReadable">
+    <if test="honorRestrictions">
+      p.archived_at IS NULL
+      AND p.suspended_at IS NULL
+      AND p.provision_ceased_at IS NULL
+      AND
+    </if>
+    (p.workspace_id = #{workspaceId}
+      <!-- A workspace that belongs to no organization contributes no sibling ids, and emitting the
+           branch anyway would render as IN () and fail the whole read. -->
+      <if test="organizationWorkspaceIds != null and organizationWorkspaceIds.size() > 0">
+        OR (p.workspace_id IN
+          <foreach item="organizationWorkspaceId" collection="organizationWorkspaceIds"
+                   open="(" separator="," close=")">#{organizationWorkspaceId}</foreach>
+          AND EXISTS (SELECT 1 FROM person_share ps
+            WHERE ps.person_id = p.id AND ps.workspace_id = #{workspaceId}))
+      </if>
+    )
+  </sql>
+
+  <sql id="scopeLinkedPeopleReadable">
+    (a.person_id IS NULL OR EXISTS (SELECT 1 FROM person p
+      WHERE p.id = a.person_id
+        AND <include refid="scopePersonReadable"/>))
+    AND NOT EXISTS (SELECT 1 FROM entity_reference linked_reference
+      WHERE linked_reference.workspace_id = #{workspaceId}
+        AND linked_reference.source_type = 'activity'
+        AND linked_reference.source_id = a.id
+        AND linked_reference.ref_type = 'person'
+        AND NOT EXISTS (SELECT 1 FROM person p
+          WHERE p.id = linked_reference.ref_id
+            AND <include refid="scopePersonReadable"/>))
+  </sql>
+
+  <!-- A company-scoped activity is attributed to its contact's employer first and to its deal's
+       company otherwise, so one activity belongs to exactly one cohort record and the per-record
+       cap stays meaningful. -->
+  <sql id="scopeRecordIdExpression">
+    <choose>
+      <when test="cohortKind == 'person'">a.person_id</when>
+      <when test="cohortKind == 'deal'">a.deal_id</when>
+      <otherwise>COALESCE(cohort_person.company_id, cohort_deal.company_id)</otherwise>
+    </choose>
+  </sql>
+
+  <sql id="scopeCohortJoins">
+    <if test="cohortKind == 'company'">
+      LEFT JOIN person cohort_person ON cohort_person.id = a.person_id
+      LEFT JOIN deal cohort_deal
+        ON cohort_deal.workspace_id = a.workspace_id AND cohort_deal.id = a.deal_id
+    </if>
+  </sql>
+
+  <sql id="scopeActivityPredicate">
+    a.workspace_id = #{workspaceId}
+    AND <include refid="scopeRecordIdExpression"/> IN
+      <foreach item="recordId" collection="recordIds" open="(" separator="," close=")">#{recordId}</foreach>
+    AND <include refid="scopeLinkedPeopleReadable"/>
+    <if test="startUtc != null">
+      AND a.timestamp &gt;= #{startUtc}
+    </if>
+    <if test="endUtc != null">
+      AND a.timestamp &lt;= #{endUtc}
+    </if>
+    <if test="types != null and types.size() > 0">
+      AND LOWER(TRIM(a.type)) IN
+        <foreach item="activityType" collection="types" open="(" separator="," close=")">#{activityType}</foreach>
+    </if>
+  </sql>
+
+  <select id="getAiAssistantScopeActivities"
+          resultType="ooo.klae.connex.backend.ai.assistant.AiAssistantScopeActivity">
+    SELECT ranked.id, ranked.scope_record_id, ranked.type, ranked.subject, ranked.notes,
+           ranked.timestamp, ranked.person_id, ranked.deal_id
+    FROM (
+      SELECT a.id, a.type, a.subject, a.notes, a.timestamp, a.person_id, a.deal_id,
+             <include refid="scopeRecordIdExpression"/> AS scope_record_id,
+             ROW_NUMBER() OVER (
+               PARTITION BY <include refid="scopeRecordIdExpression"/>
+               ORDER BY a.timestamp DESC, a.id DESC) AS scope_rank
+      FROM activity a
+      <include refid="scopeCohortJoins"/>
+      WHERE <include refid="scopeActivityPredicate"/>
+    ) ranked
+    WHERE ranked.scope_rank &lt;= #{perRecordLimit}
+    ORDER BY ranked.timestamp DESC, ranked.id DESC
+    LIMIT #{limit}
+  </select>
+
+  <select id="countAiAssistantScopeActivities" resultType="long">
+    SELECT COUNT(*)
+    FROM activity a
+    <include refid="scopeCohortJoins"/>
+    WHERE <include refid="scopeActivityPredicate"/>
+  </select>
+
   <select id="getAllActivities" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
     WHERE workspace_id = #{workspaceId} ORDER BY timestamp DESC
@@ -218,9 +355,41 @@
       AND a.timestamp &lt;= DATE_ADD(NOW(), INTERVAL #{days} DAY)
   </select>
 
+  <!-- Scoped to the member's own logged activities. Connex has no attendee model, so "the member's
+       meetings" can only honestly mean the ones they logged; widening this to the workspace would
+       put other people's schedules into a personal brief. -->
+  <select id="getAiAssistantUpcomingMeetings"
+          resultType="ooo.klae.connex.backend.ai.assistant.AiAssistantUpcomingMeeting">
+    SELECT a.id, a.type, a.subject, a.timestamp,
+           a.person_id AS personId, a.deal_id AS dealId
+    FROM activity a
+    WHERE a.workspace_id = #{workspaceId}
+      AND a.created_by_id = #{createdById}
+      AND a.timestamp &gt; #{startUtc}
+      AND a.timestamp &lt;= #{endUtc}
+      AND LOWER(TRIM(a.type)) IN
+        <foreach item="activityType" collection="types" open="(" separator="," close=")">#{activityType}</foreach>
+      AND <include refid="assistantLinkedPeopleProcessable"/>
+    ORDER BY a.timestamp, a.id
+    LIMIT #{limit}
+  </select>
+
   <select id="getActivitiesByPersonId" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
     WHERE workspace_id = #{workspaceId} AND person_id = #{personId} ORDER BY timestamp DESC, id DESC
+  </select>
+
+  <select id="getAiAssistantActivitiesByPersonId" resultMap="ActivityResult">
+    SELECT a.id, a.workspace_id, a.type, a.subject, a.notes, a.person_id, a.deal_id,
+      a.created_by_id, a.timestamp, a.provider_owned, a.provider_name, a.provider_stream,
+      a.provider_source_id, a.provider_captured_at, a.provider_visibility,
+      a.provider_admitted_fields_json, a.provider_material_exclusions_json
+    FROM activity a
+    WHERE a.workspace_id = #{workspaceId} AND a.person_id = #{personId}
+      AND <include refid="assistantLinkedPeopleProcessable"/>
+      <include refid="assistantPeriodBounds"/>
+    ORDER BY a.timestamp DESC, a.id DESC
+    LIMIT #{limit}
   </select>
 
   <select id="getActivitiesByPersonIdInWindow" resultMap="ActivityResult">
@@ -246,6 +415,19 @@
     WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId} ORDER BY timestamp DESC, id DESC
   </select>
 
+  <select id="getAiAssistantActivitiesByDealId" resultMap="ActivityResult">
+    SELECT a.id, a.workspace_id, a.type, a.subject, a.notes, a.person_id, a.deal_id,
+      a.created_by_id, a.timestamp, a.provider_owned, a.provider_name, a.provider_stream,
+      a.provider_source_id, a.provider_captured_at, a.provider_visibility,
+      a.provider_admitted_fields_json, a.provider_material_exclusions_json
+    FROM activity a
+    WHERE a.workspace_id = #{workspaceId} AND a.deal_id = #{dealId}
+      AND <include refid="assistantLinkedPeopleProcessable"/>
+      <include refid="assistantPeriodBounds"/>
+    ORDER BY a.timestamp DESC, a.id DESC
+    LIMIT #{limit}
+  </select>
+
   <select id="getActivitiesByCreatedById" resultMap="ActivityResult">
     SELECT <include refid="activityColumns"/> FROM activity
     WHERE workspace_id = #{workspaceId} AND created_by_id = #{createdById} ORDER BY timestamp DESC, id DESC
@@ -262,6 +444,24 @@
             AND p.company_id = #{companyId} AND p.archived_at IS NULL)
         OR EXISTS (SELECT 1 FROM deal d
           WHERE d.workspace_id = #{workspaceId} AND d.id = a.deal_id AND d.company_id = #{companyId}))
+    ORDER BY a.timestamp DESC, a.id DESC
+    LIMIT #{limit}
+  </select>
+
+  <select id="getAiAssistantActivitiesByCompanyId" resultMap="ActivityResult">
+    SELECT a.id, a.workspace_id, a.type, a.subject, a.notes, a.person_id, a.deal_id,
+      a.created_by_id, a.timestamp, a.provider_owned, a.provider_name, a.provider_stream,
+      a.provider_source_id, a.provider_captured_at, a.provider_visibility,
+      a.provider_admitted_fields_json, a.provider_material_exclusions_json
+    FROM activity a
+    WHERE a.workspace_id = #{workspaceId}
+      AND <include refid="assistantLinkedPeopleProcessable"/>
+      AND (EXISTS (SELECT 1 FROM person p
+          WHERE p.id = a.person_id AND p.company_id = #{companyId}
+            AND <include refid="assistantProcessablePerson"/>)
+        OR EXISTS (SELECT 1 FROM deal d
+          WHERE d.workspace_id = #{workspaceId} AND d.id = a.deal_id AND d.company_id = #{companyId}))
+      <include refid="assistantPeriodBounds"/>
     ORDER BY a.timestamp DESC, a.id DESC
     LIMIT #{limit}
   </select>
@@ -291,7 +491,7 @@
     SELECT <include refid="activityColumns"/> FROM activity
     WHERE workspace_id = #{workspaceId} AND (subject LIKE #{query} OR notes LIKE #{query})
     ORDER BY timestamp DESC, id DESC
-    LIMIT 10
+    LIMIT #{limit} OFFSET #{offset}
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
@@ -365,6 +565,15 @@
     SELECT EXISTS(
       SELECT 1 FROM activity WHERE workspace_id = #{workspaceId} AND id = #{id}
     )
+  </select>
+
+  <select id="getVisibleIdsIn" resultType="int">
+    SELECT id
+    FROM activity
+    WHERE workspace_id = #{workspaceId}
+      AND id IN
+      <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    ORDER BY id
   </select>
 
   <select id="countCreatedAnywhere" resultType="int">

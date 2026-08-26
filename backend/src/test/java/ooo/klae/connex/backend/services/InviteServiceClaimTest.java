@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -22,7 +23,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.WorkspaceInvite;
-import ooo.klae.connex.backend.beans.WorkspaceMember;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.InviteMapper;
@@ -83,20 +83,37 @@ class InviteServiceClaimTest {
     }
 
     @Test
-    void currentMembershipAfterSupersedeCheckStopsPendingInsertion() {
+    void revokedStoredGrantStopsBeforeInviteClaim() {
+        WorkspaceInvite invite = pendingInvite();
+        User user = user("recipient@example.com");
+        when(inviteMapper.findByToken(invite.getToken())).thenReturn(invite);
+        when(inviteMapper.isRedeemable(invite.getToken())).thenReturn(true);
+        doThrow(new ForbiddenException("Grant exceeds the creator's current permissions"))
+            .when(workspaceService)
+            .lockPersistedInviteGrantAuthorization(
+                invite.getWorkspaceId(), invite.getInvitedById(), user.getId(), invite.getRole());
+
+        assertThrows(
+            ForbiddenException.class,
+            () -> inviteService.acceptInvite(invite.getToken(), user));
+
+        verify(inviteMapper, never()).claimAcceptance(
+            invite.getId(), invite.getToken(), invite.getWorkspaceId(), user.getId());
+        verifyNoInteractions(userOffboardingService, notificationStateVersionService, auditService);
+    }
+
+    @Test
+    void lockedGrantAuthorizationStopsBeforeSupersedeAndPendingInsertion() {
         User actor = user("owner@example.com");
         User existing = user("recipient@example.com");
         existing.setId(10);
-        WorkspaceMember currentMembership = new WorkspaceMember();
-        currentMembership.setWorkspaceId(7);
-        currentMembership.setUserId(existing.getId());
-        currentMembership.setStatus("active");
         when(workspaceService.getOrgId(7)).thenReturn(3);
         when(orgAllowedDomainService.isJoinAllowed(3, existing.getEmail())).thenReturn(true);
         when(userMapper.getUserByEmail(existing.getEmail())).thenReturn(existing);
-        when(workspaceMapper.getMember(7, existing.getId())).thenReturn(null);
-        when(workspaceMapper.lockAuthorizationMembership(7, existing.getId()))
-            .thenReturn(currentMembership);
+        doThrow(new BadRequestException(
+            "That person is already a member of or invited to this workspace"))
+            .when(workspaceService)
+            .lockInviteGrantAuthorization(7, actor.getId(), existing.getId(), "member");
 
         BadRequestException exception = assertThrows(
             BadRequestException.class,
@@ -105,11 +122,29 @@ class InviteServiceClaimTest {
         assertEquals(
             "That person is already a member of or invited to this workspace",
             exception.getMessage());
-        InOrder order = inOrder(inviteMapper, workspaceMapper);
-        order.verify(inviteMapper).revokePendingForEmail(7, existing.getEmail());
-        order.verify(workspaceMapper).lockAuthorizationMembership(7, existing.getId());
+        verify(inviteMapper, never()).revokePendingForEmail(7, existing.getEmail());
         verify(workspaceService, never()).addPendingMember(7, actor, existing, "member");
         verifyNoInteractions(userOffboardingService, notificationStateVersionService, auditService);
+    }
+
+    @Test
+    void deniedGrantStopsBeforeInviteSideEffects() {
+        User actor = user("delegate@example.com");
+        String email = "recipient@example.com";
+        when(workspaceService.getOrgId(7)).thenReturn(3);
+        when(orgAllowedDomainService.isJoinAllowed(3, email)).thenReturn(true);
+        when(userMapper.getUserByEmail(email)).thenReturn(null);
+        doThrow(new ForbiddenException("Grant exceeds the actor's permissions"))
+            .when(workspaceService)
+            .lockInviteGrantAuthorization(7, actor.getId(), null, "admin");
+
+        assertThrows(
+            ForbiddenException.class,
+            () -> inviteService.createInvite(7, actor, email, "admin"));
+
+        verify(inviteMapper, never()).revokePendingForEmail(7, email);
+        verify(inviteMapper, never()).insertHashed(any(WorkspaceInvite.class));
+        verifyNoInteractions(auditService, inviteEmailService);
     }
 
     @Test
@@ -145,6 +180,7 @@ class InviteServiceClaimTest {
         invite.setRole("member");
         invite.setToken("invite-token");
         invite.setStatus("pending");
+        invite.setInvitedById(1);
         return invite;
     }
 

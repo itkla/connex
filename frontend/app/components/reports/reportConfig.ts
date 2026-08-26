@@ -19,7 +19,10 @@ export type ReportTemplateGroupId = 'pipeline' | 'relationships' | 'other';
  * `other` group so new templates always remain reachable.
  */
 const REPORT_TEMPLATE_GROUPS: { id: Exclude<ReportTemplateGroupId, 'other'>; keys: string[] }[] = [
-    { id: 'pipeline', keys: ['sales-performance', 'pipeline-health', 'forecasting', 'quota-attainment'] },
+    {
+        id: 'pipeline',
+        keys: ['lead-lifecycle', 'sales-performance', 'pipeline-health', 'forecasting', 'quota-attainment', 'commercial-documents'],
+    },
     {
         id: 'relationships',
         keys: ['relationship-coverage', 'relationship-health', 'network-warm-intros', 'employment-moves', 'activity-team'],
@@ -67,6 +70,8 @@ export const REPORT_DATA_SOURCES: ReportDataSource[] = [
     'activities',
     'tasks',
     'relationships',
+    'documents',
+    'leads',
 ];
 
 export const REPORT_CHART_TYPES: ReportChartType[] = ['bar', 'line-area', 'donut', 'funnel', 'table', 'kpi'];
@@ -93,6 +98,8 @@ export const REPORT_MEASURES: Record<ReportDataSource, ReportMeasure[]> = {
         'at_risk_revenue',
         'single_threaded_deal_count',
         'single_threaded_deal_value',
+        'effective_discount_percent',
+        'open_discount_percent',
     ],
     people: ['count', 'employment_departure_count', 'employment_arrival_count'],
     companies: [
@@ -105,6 +112,24 @@ export const REPORT_MEASURES: Record<ReportDataSource, ReportMeasure[]> = {
     activities: ['count'],
     tasks: ['count'],
     relationships: ['count', 'company_count', 'reverse_intro_weighted_opportunities'],
+    documents: [
+        'quote_count',
+        'quote_issue_rate',
+        'document_to_win_rate',
+        'approval_decision_count',
+        'approval_cycle_days',
+    ],
+    leads: [
+        'lead_count',
+        'qualified_count',
+        'converted_count',
+        'disqualified_count',
+        'qualification_rate',
+        'conversion_rate',
+        'time_to_convert_days',
+        'first_response_hours',
+        'first_response_breach_rate',
+    ],
 };
 
 export const REPORT_GROUPS: Record<ReportDataSource, ReportGroupBy[]> = {
@@ -114,6 +139,8 @@ export const REPORT_GROUPS: Record<ReportDataSource, ReportGroupBy[]> = {
     activities: ['none', 'date', 'activity_type', 'owner'],
     tasks: ['none', 'date', 'status', 'owner'],
     relationships: ['none', 'warmth_band', 'trend'],
+    documents: ['none', 'date', 'owner', 'company'],
+    leads: ['none', 'date', 'owner', 'lead_source'],
 };
 
 export function reportGroupsForMeasure(
@@ -136,7 +163,12 @@ export function reportGroupsForMeasure(
     if (measure === 'forecast_best' || measure === 'forecast_weighted' || measure === 'forecast_worst') {
         return ['none', 'date', 'pipeline', 'stage'];
     }
+    if (measure === 'effective_discount_percent' || measure === 'open_discount_percent') {
+        return ['none', 'date', 'pipeline', 'stage', 'owner', 'company'];
+    }
     if (measure === 'attainment') return ['none', 'owner'];
+    if (dataSource === 'leads') return REPORT_GROUPS.leads;
+    if (dataSource === 'documents') return REPORT_GROUPS.documents;
     if (dataSource === 'companies') return ['none', 'industry'];
     if (dataSource === 'deals') return REPORT_GROUPS.deals.filter((group) => group !== 'deal');
     return REPORT_GROUPS[dataSource];

@@ -21,27 +21,20 @@ import type { Contact, Deal, RelationshipTemperature } from '@/app/lib/types';
 import { useNow } from '@/app/hooks/useNow';
 import { addDays, dayKeyOf, startOfDay, type CalendarEvent } from '@/app/lib/calendar';
 import { KIND_ICON, KIND_LABEL_KEY } from './constants';
+import { linkedIds } from './eventLinks';
+import { useMediaQuery } from './useMediaQuery';
 import { WARMTH_CHIP_CLASS, WARMTH_DOT_CLASS, WARMTH_LABEL_KEY, WARMTH_TREND_KEY } from './warmth';
 import ProviderCaptureEvidence from '@/app/components/activity/ProviderCaptureEvidence';
 
-function linkedIds(event: CalendarEvent): { personId: number | null; dealId: number | null } {
-    switch (event.kind) {
-        case 'task':
-        case 'activity':
-            return { personId: event.raw.personId ?? null, dealId: event.raw.dealId ?? null };
-        case 'note':
-            return { personId: event.raw.person ?? null, dealId: event.raw.deal ?? null };
-        case 'deal':
-            return { personId: null, dealId: null };
-    }
-}
-
 /**
- * Bottom-sheet detail for a tapped event. Shows kind, localized date/time, linked
- * contact/deal, a relationship-warmth card (band, trend, last touch, decay) when the
- * linked contact has a temperature, and quick actions: complete (tasks), reschedule chips
- * + a date picker (tasks, open deals) wired to the optimistic reschedule path, and an
- * "open record" link.
+ * The expanded view of a calendar event, in the D5 inspect archetype: a right drawer on desktop and
+ * a bottom sheet on a narrow screen. It is what `EventPeekPopover`'s "Details" expands into, and on
+ * a coarse pointer it is what a tapped event opens directly.
+ *
+ * Shows kind, localized date/time, linked contact/deal, a relationship-warmth card (band, trend,
+ * last touch, decay) when the linked contact has a temperature, and quick actions: complete (tasks),
+ * reschedule chips + a date picker (tasks, open deals) wired to the optimistic reschedule path, and
+ * an "open record" link.
  */
 export default function EventDetailSheet({
     event,
@@ -70,6 +63,7 @@ export default function EventDetailSheet({
 }) {
     const t = useTranslations('Calendar');
     const sharedNow = useNow();
+    const isNarrow = !useMediaQuery('(min-width: 768px)');
 
     const whenLabel = useMemo(() => {
         if (!event) return '';
@@ -109,8 +103,13 @@ export default function EventDetailSheet({
     ];
 
     return (
-        <Drawer open={open} onOpenChange={onOpenChange} swipeDirection="down">
-            <DrawerContent className="mx-auto max-h-[85vh] gap-0 rounded-t-2xl pb-[max(1rem,env(safe-area-inset-bottom))] sm:max-w-lg">
+        <Drawer
+            open={open}
+            onOpenChange={onOpenChange}
+            swipeDirection={isNarrow ? 'down' : 'right'}
+            showSwipeHandle={isNarrow}
+        >
+            <DrawerContent className="mx-auto flex max-h-[85vh] w-full flex-col gap-0 rounded-t-2xl pb-[max(1rem,env(safe-area-inset-bottom))] md:mx-0 md:h-full md:max-h-none md:max-w-md md:rounded-2xl md:pb-4">
                 <DrawerHeader className="gap-2">
                     <Badge variant="secondary" className="w-fit gap-1.5">
                         <Icon className="size-3.5" aria-hidden />

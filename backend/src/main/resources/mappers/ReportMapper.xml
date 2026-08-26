@@ -19,6 +19,14 @@
     ORDER BY updated_at DESC, id DESC
   </select>
 
+  <select id="searchDefinitions" resultType="ooo.klae.connex.backend.dto.ReportSummaryDto">
+    SELECT id, name, description, cadence, updated_at FROM report_definition
+    WHERE workspace_id = #{workspaceId}
+      AND (name LIKE #{query} OR description LIKE #{query})
+    ORDER BY name, id
+    LIMIT 10
+  </select>
+
   <select id="getDefinition" resultType="ReportDefinition">
     SELECT <include refid="definitionColumns"/> FROM report_definition
     WHERE workspace_id = #{workspaceId} AND id = #{id}
@@ -163,8 +171,8 @@
 
   <sql id="dealEventDate">
     <choose>
-      <when test="query.measure == 'won_revenue' or query.measure == 'win_rate' or query.measure == 'avg_cycle_days'">d.closed_at</when>
-      <when test="query.measure == 'open_pipeline_value' or query.measure == 'open_deal_count'">d.expected_close_date</when>
+      <when test="query.measure == 'won_revenue' or query.measure == 'win_rate' or query.measure == 'avg_cycle_days' or query.measure == 'effective_discount_percent'">d.closed_at</when>
+      <when test="query.measure == 'open_pipeline_value' or query.measure == 'open_deal_count' or query.measure == 'open_discount_percent'">d.expected_close_date</when>
       <otherwise>d.created_at</otherwise>
     </choose>
   </sql>
@@ -179,7 +187,7 @@
 
   <sql id="localizedDealEventDate">
     <choose>
-      <when test="query.measure == 'open_pipeline_value' or query.measure == 'open_deal_count'">
+      <when test="query.measure == 'open_pipeline_value' or query.measure == 'open_deal_count' or query.measure == 'open_discount_percent'">
         d.expected_close_date
       </when>
       <otherwise>
@@ -294,6 +302,43 @@
     <if test="query.measure == 'open_pipeline_value' or query.measure == 'open_deal_count'">AND d.won IS NULL</if>
     <include refid="dealFilters"/>
     GROUP BY group_key, group_label, unit
+    <choose>
+      <when test="query.groupBy == 'stage'">ORDER BY MIN(d.pipeline_id), MIN(s.position), group_key</when>
+      <otherwise>ORDER BY group_key</otherwise>
+    </choose>
+  </select>
+
+  <select id="aggregateDealDiscount" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
+    SELECT
+      CONCAT(COALESCE(d.currency, ''), ':', <include refid="dealGroupKey"/>) AS group_key,
+      CONCAT(COALESCE(d.currency, ''), ' · ', <include refid="dealGroupLabel"/>) AS group_label,
+      'percent' AS unit,
+      GREATEST(ROUND(
+        100.0 * (SUM(li.unit_price * li.quantity) - SUM(li.line_subtotal))
+          / NULLIF(SUM(li.unit_price * li.quantity), 0), 3), 0) AS value
+    FROM deal d
+    JOIN deal_line_item li ON li.workspace_id = d.workspace_id AND li.deal_id = d.id
+    LEFT JOIN pipeline p ON p.id = d.pipeline_id AND p.workspace_id = #{query.workspaceId}
+    LEFT JOIN stage s ON s.id = d.stage_id AND s.pipeline_id = d.pipeline_id
+      AND s.workspace_id = #{query.workspaceId}
+    LEFT JOIN company c ON c.id = d.company_id AND c.workspace_id = #{query.workspaceId}
+    WHERE d.workspace_id = #{query.workspaceId}
+      AND li.workspace_id = #{query.workspaceId}
+    <choose>
+      <when test="query.measure == 'open_discount_percent'">
+        AND d.won IS NULL
+        AND d.expected_close_date &gt;= #{query.startDate}
+        AND d.expected_close_date &lt; #{query.endDateExclusive}
+      </when>
+      <otherwise>
+        AND d.won = TRUE
+        AND d.closed_at &gt;= #{query.startUtc}
+        AND d.closed_at &lt; #{query.endUtc}
+      </otherwise>
+    </choose>
+    <include refid="dealFilters"/>
+    GROUP BY group_key, group_label
+    HAVING SUM(li.unit_price * li.quantity) &gt; 0
     <choose>
       <when test="query.groupBy == 'stage'">ORDER BY MIN(d.pipeline_id), MIN(s.position), group_key</when>
       <otherwise>ORDER BY group_key</otherwise>
@@ -515,6 +560,114 @@
     </choose>
   </sql>
 
+  <!-- Lead-lifecycle reporting (#559 increment 6).
+
+       The unit of analysis is the lifecycle pass, not the contact and not a transition row. Every
+       measure ranges and groups on the pass's entry, so a period's counts and the rates derived
+       from them describe one cohort and visibly divide into each other: "of the leads that arrived
+       in March, this many qualified, which is this rate". Reporting the other way — outcomes this
+       period over arrivals this period — moves with intake volume rather than performance and can
+       exceed 100% whenever a cycle spans the boundary, which for this product's cycle lengths is
+       most of the time.
+
+       A recent cohort has not matured and will read low. That is inherent to cohort measurement and
+       is left visible rather than hidden behind an invented maturation window; lead_count sits
+       beside every rate so the cohort's size is never in doubt. -->
+  <sql id="localizedLeadDate">
+    CASE
+      <foreach item="segment" collection="query.offsets">
+        WHEN pass.entered_at &gt;= #{segment.startUtc} AND pass.entered_at &lt; #{segment.endUtc}
+        THEN TIMESTAMPADD(MINUTE, #{segment.offsetMinutes}, pass.entered_at)
+      </foreach>
+      ELSE pass.entered_at
+    END
+  </sql>
+
+  <sql id="leadGroupKey">
+    <choose>
+      <when test="query.groupBy == 'date'">
+        <choose>
+          <when test="query.bucket == 'day'">DATE_FORMAT(<include refid="localizedLeadDate"/>, '%Y-%m-%d')</when>
+          <when test="query.bucket == 'week'">DATE_FORMAT(DATE_SUB(DATE(<include refid="localizedLeadDate"/>), INTERVAL WEEKDAY(<include refid="localizedLeadDate"/>) DAY), '%Y-%m-%d')</when>
+          <otherwise>DATE_FORMAT(<include refid="localizedLeadDate"/>, '%Y-%m')</otherwise>
+        </choose>
+      </when>
+      <!-- The pass's own snapshot, not the contact's live owner: routing reassigns leads constantly,
+           and reading the current owner would move historical credit to whoever inherited the
+           record long after the work was done. -->
+      <when test="query.groupBy == 'owner'">COALESCE(CAST(pass.owner_id AS CHAR), 'unassigned')</when>
+      <when test="query.groupBy == 'lead_source'">COALESCE(person.lead_source, 'uncaptured')</when>
+      <otherwise>'total'</otherwise>
+    </choose>
+  </sql>
+
+  <sql id="leadGroupLabel">
+    <choose>
+      <when test="query.groupBy == 'date'"><include refid="leadGroupKey"/></when>
+      <when test="query.groupBy == 'owner'">COALESCE(CAST(pass.owner_id AS CHAR), 'Unassigned')</when>
+      <when test="query.groupBy == 'lead_source'">COALESCE(person.lead_source, 'Uncaptured')</when>
+      <otherwise>'Total'</otherwise>
+    </choose>
+  </sql>
+
+  <select id="aggregateLeadLifecycle" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
+    SELECT <include refid="leadGroupKey"/> AS group_key,
+           <include refid="leadGroupLabel"/> AS group_label,
+           <choose>
+             <when test="query.measure == 'qualification_rate' or query.measure == 'conversion_rate' or query.measure == 'first_response_breach_rate'">'percent'</when>
+             <when test="query.measure == 'time_to_convert_days'">'days'</when>
+             <when test="query.measure == 'first_response_hours'">'hours'</when>
+             <otherwise>'count'</otherwise>
+           </choose> AS unit,
+           <choose>
+             <when test="query.measure == 'lead_count'">COUNT(*)</when>
+             <when test="query.measure == 'qualified_count'">SUM(CASE WHEN pass.qualified_at IS NOT NULL THEN 1 ELSE 0 END)</when>
+             <when test="query.measure == 'converted_count'">SUM(CASE WHEN pass.converted_at IS NOT NULL THEN 1 ELSE 0 END)</when>
+             <when test="query.measure == 'disqualified_count'">SUM(CASE WHEN pass.disqualified_at IS NOT NULL THEN 1 ELSE 0 END)</when>
+             <when test="query.measure == 'qualification_rate'">100.0 * SUM(CASE WHEN pass.qualified_at IS NOT NULL THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0)</when>
+             <when test="query.measure == 'conversion_rate'">100.0 * SUM(CASE WHEN pass.converted_at IS NOT NULL THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0)</when>
+             <when test="query.measure == 'time_to_convert_days'">AVG(CASE WHEN pass.converted_at IS NOT NULL THEN DATEDIFF(pass.converted_at, pass.entered_at) END)</when>
+             <!-- Averaged in seconds: truncating each lead to whole hours first would report every
+                  response inside an hour as zero, in the measure whose entire point is speed. -->
+             <when test="query.measure == 'first_response_hours'">AVG(CASE WHEN pass.first_responded_at IS NOT NULL THEN TIMESTAMPDIFF(SECOND, pass.first_response_started_at, pass.first_responded_at) END) / 3600.0</when>
+             <!-- Numerator and denominator share one observation instant — the end of the reported
+                  period, half-open like every other boundary here. A clock whose deadline falls
+                  after it cannot have breached yet, so counting it would let starting new clocks
+                  lower the rate; a breach or a response recorded after it belongs to a later period,
+                  so admitting either would put the two sides on different clocks and let the rate
+                  exceed 100%. -->
+             <when test="query.measure == 'first_response_breach_rate'">100.0 * SUM(CASE WHEN pass.first_response_breached_at IS NOT NULL AND pass.first_response_breached_at &lt; #{query.endUtc} THEN 1 ELSE 0 END) / NULLIF(SUM(CASE WHEN pass.first_response_due_at IS NOT NULL AND (pass.first_responded_at &lt; #{query.endUtc} OR pass.first_response_due_at &lt; #{query.endUtc}) THEN 1 ELSE 0 END), 0)</when>
+             <otherwise>COUNT(*)</otherwise>
+           </choose> AS value
+    FROM person_lifecycle_pass pass
+    JOIN person ON person.id = pass.person_id AND person.workspace_id = #{query.workspaceId}
+    WHERE pass.workspace_id = #{query.workspaceId}
+      AND person.archived_at IS NULL
+      AND person.suspended_at IS NULL
+      AND person.provision_ceased_at IS NULL
+      AND pass.entered_at &gt;= #{query.startUtc}
+      AND pass.entered_at &lt; #{query.endUtc}
+    <if test="query.ownerIds != null and !query.ownerIds.isEmpty()">
+      AND pass.owner_id IN
+      <foreach item="id" collection="query.ownerIds" open="(" separator="," close=")">#{id}</foreach>
+    </if>
+    <if test="query.tagIds != null and !query.tagIds.isEmpty()">
+      AND EXISTS (
+        SELECT 1
+        FROM person_tag lead_person_tag
+        JOIN tag lead_tag ON lead_tag.id = lead_person_tag.tag_id
+          AND lead_tag.workspace_id = #{query.workspaceId}
+        WHERE lead_person_tag.person_id = person.id
+          AND lead_person_tag.tag_id IN
+          <foreach item="id" collection="query.tagIds" open="(" separator="," close=")">#{id}</foreach>)
+    </if>
+    GROUP BY group_key, group_label
+    <!-- A group with nothing to measure emits no row, so the caller's undefined-when-empty handling
+         applies instead of a zero being published as if it were a measurement. -->
+    HAVING value IS NOT NULL
+    ORDER BY group_key
+  </select>
+
   <sql id="localizedEmploymentDate">
     CASE
       <foreach item="segment" collection="query.offsets">
@@ -614,6 +767,145 @@
         <foreach item="id" collection="query.tagIds" open="(" separator="," close=")">#{id}</foreach>)
     </if>
     GROUP BY group_key, group_label
+    ORDER BY group_key
+  </select>
+
+  <sql id="documentEventDate">
+    <choose>
+      <when test="query.measure == 'approval_decision_count' or query.measure == 'approval_cycle_days'">a.decided_at</when>
+      <when test="query.measure == 'document_to_win_rate'">first_document.first_generated_at</when>
+      <otherwise>dd.generated_at</otherwise>
+    </choose>
+  </sql>
+
+  <sql id="localizedDocumentDate">
+    CASE
+      <foreach item="segment" collection="query.offsets">
+        WHEN <include refid="documentEventDate"/> &gt;= #{segment.startUtc}
+          AND <include refid="documentEventDate"/> &lt; #{segment.endUtc}
+        THEN TIMESTAMPADD(MINUTE, #{segment.offsetMinutes}, <include refid="documentEventDate"/>)
+      </foreach>
+      ELSE <include refid="documentEventDate"/>
+    END
+  </sql>
+
+  <sql id="documentDateGroupKey">
+    <choose>
+      <when test="query.bucket == 'day'">DATE_FORMAT(<include refid="localizedDocumentDate"/>, '%Y-%m-%d')</when>
+      <when test="query.bucket == 'week'">DATE_FORMAT(DATE_SUB(DATE(<include refid="localizedDocumentDate"/>), INTERVAL WEEKDAY(<include refid="localizedDocumentDate"/>) DAY), '%Y-%m-%d')</when>
+      <otherwise>DATE_FORMAT(<include refid="localizedDocumentDate"/>, '%Y-%m')</otherwise>
+    </choose>
+  </sql>
+
+  <sql id="documentGroupKey">
+    <choose>
+      <when test="query.groupBy == 'date'"><include refid="documentDateGroupKey"/></when>
+      <when test="query.groupBy == 'owner'">COALESCE(CAST(d.owner_id AS CHAR), 'unassigned')</when>
+      <when test="query.groupBy == 'company'">COALESCE(CAST(d.company_id AS CHAR), 'unassigned')</when>
+      <otherwise>'total'</otherwise>
+    </choose>
+  </sql>
+
+  <sql id="documentGroupLabel">
+    <choose>
+      <when test="query.groupBy == 'date'"><include refid="documentDateGroupKey"/></when>
+      <when test="query.groupBy == 'owner'">COALESCE(CAST(d.owner_id AS CHAR), 'Unassigned')</when>
+      <when test="query.groupBy == 'company'">COALESCE(c.name, 'Unassigned')</when>
+      <otherwise>'Total'</otherwise>
+    </choose>
+  </sql>
+
+  <!--
+    A quote counts as issued once it has reached final. The delivery lifecycle (#904) owns two
+    further statuses beyond it — a finalized quote becomes sent when its envelope goes out and
+    signed when the recipient completes it — so testing final alone would drop a quote out of the
+    numerator at the exact moment it was genuinely issued, making the rate fall as quotes are
+    delivered. A superseded quote no longer carries the status it held before it was replaced, so a
+    delivery envelope is used as the surviving evidence that it was issued: only a final document
+    can be sent, and the envelope row outlives the supersede.
+  -->
+  <sql id="quoteReachedFinal">
+    dd.status IN ('final', 'sent', 'signed')
+      OR (dd.status = 'superseded' AND EXISTS (
+        SELECT 1 FROM document_delivery issued_delivery
+        WHERE issued_delivery.workspace_id = #{query.workspaceId}
+          AND issued_delivery.document_id = dd.id))
+  </sql>
+
+  <select id="aggregateDocuments" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
+    SELECT <include refid="documentGroupKey"/> AS group_key,
+           <include refid="documentGroupLabel"/> AS group_label,
+           <choose>
+             <when test="query.measure == 'quote_issue_rate'">'percent'</when>
+             <otherwise>'count'</otherwise>
+           </choose> AS unit,
+           <choose>
+             <when test="query.measure == 'quote_issue_rate'">
+               COALESCE(100.0 * SUM(CASE WHEN (<include refid="quoteReachedFinal"/>) THEN 1 ELSE 0 END)
+                 / NULLIF(COUNT(*), 0), 0)
+             </when>
+             <otherwise>COUNT(*)</otherwise>
+           </choose> AS value
+    FROM deal_document dd
+    JOIN deal d ON d.workspace_id = dd.workspace_id AND d.id = dd.deal_id
+    LEFT JOIN company c ON c.id = d.company_id AND c.workspace_id = #{query.workspaceId}
+    WHERE dd.workspace_id = #{query.workspaceId}
+      AND d.workspace_id = #{query.workspaceId}
+      AND dd.type = 'quote'
+      AND dd.generated_at &gt;= #{query.startUtc}
+      AND dd.generated_at &lt; #{query.endUtc}
+    <include refid="dealFilters"/>
+    GROUP BY group_key, group_label, unit
+    ORDER BY group_key
+  </select>
+
+  <select id="aggregateDocumentOutcomes" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
+    SELECT <include refid="documentGroupKey"/> AS group_key,
+           <include refid="documentGroupLabel"/> AS group_label,
+           'percent' AS unit,
+           COALESCE(100.0 * SUM(CASE WHEN d.won = TRUE THEN 1 ELSE 0 END)
+             / NULLIF(COUNT(*), 0), 0) AS value
+    FROM deal d
+    JOIN (
+      SELECT workspace_id, deal_id, MIN(generated_at) AS first_generated_at
+      FROM deal_document
+      WHERE workspace_id = #{query.workspaceId}
+      GROUP BY workspace_id, deal_id
+    ) first_document ON first_document.workspace_id = d.workspace_id
+      AND first_document.deal_id = d.id
+    LEFT JOIN company c ON c.id = d.company_id AND c.workspace_id = #{query.workspaceId}
+    WHERE d.workspace_id = #{query.workspaceId}
+      AND first_document.first_generated_at &gt;= #{query.startUtc}
+      AND first_document.first_generated_at &lt; #{query.endUtc}
+    <include refid="dealFilters"/>
+    GROUP BY group_key, group_label, unit
+    ORDER BY group_key
+  </select>
+
+  <select id="aggregateDocumentApprovals" resultType="ooo.klae.connex.backend.dto.ReportAggregateRow">
+    SELECT <include refid="documentGroupKey"/> AS group_key,
+           <include refid="documentGroupLabel"/> AS group_label,
+           <choose>
+             <when test="query.measure == 'approval_cycle_days'">'days'</when>
+             <otherwise>'count'</otherwise>
+           </choose> AS unit,
+           <choose>
+             <when test="query.measure == 'approval_cycle_days'">
+               COALESCE(ROUND(
+                 AVG(GREATEST(TIMESTAMPDIFF(SECOND, a.created_at, a.decided_at), 0)) / 86400, 2), 0)
+             </when>
+             <otherwise>COUNT(*)</otherwise>
+           </choose> AS value
+    FROM document_approval a
+    JOIN deal d ON d.workspace_id = a.workspace_id AND d.id = a.deal_id
+    LEFT JOIN company c ON c.id = d.company_id AND c.workspace_id = #{query.workspaceId}
+    WHERE a.workspace_id = #{query.workspaceId}
+      AND d.workspace_id = #{query.workspaceId}
+      AND a.status IN ('approved', 'rejected')
+      AND a.decided_at &gt;= #{query.startUtc}
+      AND a.decided_at &lt; #{query.endUtc}
+    <include refid="dealFilters"/>
+    GROUP BY group_key, group_label, unit
     ORDER BY group_key
   </select>
 

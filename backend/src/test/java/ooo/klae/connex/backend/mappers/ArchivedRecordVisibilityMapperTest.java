@@ -180,11 +180,11 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
 
         assertFalse(personMapper.distinctCompanies(workspace.getId()).contains(employer.getName()));
         assertFalse(personMapper.getPersonIdsFiltered(workspace.getId(), null,
-            List.of(employer.getName()), null, false, allTeamScope(), false, 100)
+            List.of(employer.getName()), null, false, allTeamScope(), null, false, null, false, null, false, false, null, 100)
             .contains(employee.getId()));
         assertTrue(personMapper.hasPersonWithoutCompany(workspace.getId()));
         assertTrue(personMapper.getPersonIdsFiltered(workspace.getId(), null, null, null,
-            true, allTeamScope(), false, 100).contains(employee.getId()));
+            true, allTeamScope(), null, false, null, false, null, false, false, null, 100).contains(employee.getId()));
     }
 
     /** P1-4: the file browser labels every file with its owner's name. */
@@ -235,7 +235,7 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
         assertEquals(2L, after.get("__empty__"));
         assertEquals(2L, after.values().stream().mapToLong(Long::longValue).sum());
         List<Integer> unassignedIds = dealMapper.getFilteredDealIds(workspace.getId(), null, null,
-            null, null, null, null, true, null, null, allTeamScope(), 100);
+            null, null, null, null, null, true, null, null, allTeamScope(), 100);
         assertTrue(unassignedIds.contains(onAccount.getId()));
         assertTrue(unassignedIds.contains(unassigned.getId()));
     }
@@ -361,7 +361,7 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
 
     private Person personPageOf(Person person) {
         return personMapper.getPersonsPage(workspace.getId(), null, "name", "asc", null, null,
-                false, allTeamScope(), false, 500, 0)
+                false, allTeamScope(), null, false, null, false, null, false, false, null, 500, 0)
             .stream().filter(row -> row.getId() == person.getId()).findFirst().orElseThrow();
     }
 
@@ -473,13 +473,13 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
 
     private List<Integer> personPageIds(Workspace viewer, boolean archived) {
         return personMapper.getPersonsPage(viewer.getId(), null, "name", "asc", null, null, false,
-                allTeamScope(), archived, 500, 0)
+                allTeamScope(), null, false, null, false, null, false, archived, null, 500, 0)
             .stream().map(Person::getId).toList();
     }
 
     private List<Integer> companyPageIds(Workspace viewer, boolean archived) {
         return companyMapper.getCompaniesPage(viewer.getId(), null, "name", "asc", null, false, null,
-                allTeamScope(), archived, 500, 0)
+                allTeamScope(), archived, null, 500, 0)
             .stream().map(Company::getId).toList();
     }
 

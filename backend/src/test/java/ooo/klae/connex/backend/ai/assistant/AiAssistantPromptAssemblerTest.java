@@ -23,6 +23,7 @@ import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import ooo.klae.connex.backend.ai.provider.AiToolCall;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
+import ooo.klae.connex.backend.dto.MemberScope;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -430,18 +431,18 @@ class AiAssistantPromptAssemblerTest {
         ToolTurn first = nativeBudgetTurn(1, "A");
         ToolTurn second = nativeBudgetTurn(2, "B");
         ToolTurn prospective = nativeBudgetTurn(3, "C");
-        String firstSignature = "first-/+=" + "S".repeat(1_191);
-        String secondSignature = "second-日本語-" + "T".repeat(1_182);
+        String firstSignature = "first-/+=" + "S".repeat(2_391);
+        String secondSignature = "second-日本語-" + "T".repeat(2_382);
         Map<Integer, AiToolCall> calls = Map.of(
                 first.seq(), nativeBudgetCall(first, "A", firstSignature),
                 second.seq(), nativeBudgetCall(second, "B", secondSignature),
                 prospective.seq(), nativeBudgetCall(
-                        prospective, "C", "prospective-" + "U".repeat(1_188)));
+                        prospective, "C", "prospective-" + "U".repeat(2_388)));
         AiAssistantPromptBudget budget = AiAssistantPromptBudget.from(
                 new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
                         AiReasoningMode.NATIVE,
-                        32_768,
+                        AiAssistantPromptBudget.ASSISTANT_MIN_CONTEXT_TOKENS,
                         4_096),
                 4_096);
 
@@ -454,6 +455,13 @@ class AiAssistantPromptAssemblerTest {
                         budget);
         AiAssistantPromptAssembler.NativeReplay replay = assembler.nativeReplay(
                 List.of(first, second), calls, new MaskingContext(), budget, null);
+        long contentBytes = replay.exchanges().stream()
+                .mapToLong(exchange -> budget.utf8Bytes(exchange.call().arguments())
+                        + budget.utf8Bytes(exchange.maskedResult()))
+                .sum();
+        long signatureBytes = replay.exchanges().stream()
+                .mapToLong(exchange -> budget.utf8Bytes(exchange.call().thoughtSignature()))
+                .sum();
 
         assertEquals(AiAssistantPromptAssembler.ToolBudgetAudit.NONE, admission);
         assertEquals(firstSignature,
@@ -461,6 +469,10 @@ class AiAssistantPromptAssemblerTest {
         assertEquals(secondSignature,
                 replay.exchanges().getLast().call().thoughtSignature());
         assertEquals(AiAssistantPromptAssembler.ToolBudgetAudit.NONE, replay.audit());
+        assertTrue(contentBytes <= budget.toolResultBytes());
+        assertTrue(contentBytes + signatureBytes > budget.toolResultBytes(),
+                "The signatures no longer exceed the tool allocation, so this test would pass"
+                        + " even if they were counted against it");
     }
 
     @Test
@@ -740,6 +752,54 @@ class AiAssistantPromptAssemblerTest {
     }
 
     @Test
+    void durableUserIdentifiersAreRemaskedWithTheFreshEgressContext() throws Exception {
+        AiChatMessage priorRequest = new AiChatMessage();
+        priorRequest.setAuthorKind("user");
+        priorRequest.setContent("What changed for Kenji Sato?");
+        priorRequest.setStructuredJson("""
+                {"kind":"user_message",
+                "resources":[{"handle":"r1","kind":"person","id":31}],
+                "identifiers":[{"kind":"person","value":"Kenji Sato"}]}
+                """);
+        MaskingContext context = new MaskingContext();
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register("person", 31);
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(priorRequest),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(),
+                context,
+                resources);
+        String serialized = objectMapper.writeValueAsString(prompt.getMessages());
+
+        OutboundLeakScan.assertNoLeak(serialized, context, objectMapper);
+        assertFalse(serialized.contains("Kenji Sato"));
+        assertTrue(serialized.contains("{{P1}}"));
+    }
+
+    @Test
+    void inaccessibleUserIdentifierResourcesOmitTheHistoricalTurnFromReplay() {
+        AiChatMessage priorRequest = new AiChatMessage();
+        priorRequest.setAuthorKind("user");
+        priorRequest.setContent("What changed for Kenji Sato?");
+        priorRequest.setStructuredJson("""
+                {"kind":"user_message",
+                "resources":[{"handle":"r1","kind":"person","id":31}],
+                "identifiers":[{"kind":"person","value":"Kenji Sato"}]}
+                """);
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(priorRequest),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(),
+                new MaskingContext(),
+                new AiChatResourceRegistry());
+
+        assertTrue(prompt.getMessages().isEmpty());
+    }
+
+    @Test
     void durableSummarySpecialCareTextIsOmittedBeforeEgress() throws Exception {
         AiChatMessage summary = new AiChatMessage();
         summary.setAuthorKind("system");
@@ -782,7 +842,7 @@ class AiAssistantPromptAssemblerTest {
     }
 
     @Test
-    void compactionRejectsAssistantSourceWhoseResourcesAreNoLongerAuthorized() {
+    void compactionOmitsAssistantSourceWhoseResourcesAreNoLongerAuthorized() {
         AiChatMessage priorAnswer = new AiChatMessage();
         priorAnswer.setAuthorKind("assistant");
         priorAnswer.setContent("Restricted Person is the key contact from r1.");
@@ -792,32 +852,32 @@ class AiAssistantPromptAssemblerTest {
                 List.of(),
                 Map.of("r1", new AiChatResourceRegistry.ResourceRef("person", 71))));
 
-        assertThrows(
-                AiAssistantLoopException.class,
-                () -> assembler.assembleSummary(
-                        null,
-                        List.of(priorAnswer),
-                        new MaskingContext(),
-                        new AiChatResourceRegistry()));
+        MaskedPrompt prompt = assembler.assembleSummary(
+                null,
+                List.of(priorAnswer),
+                new MaskingContext(),
+                new AiChatResourceRegistry());
+
+        assertFalse(prompt.getMessages().getFirst().getContent().contains("Restricted Person"));
     }
 
     @Test
-    void compactionRejectsAssistantSourceWithoutDurableResourceProvenance() {
+    void compactionOmitsAssistantSourceWithoutDurableResourceProvenance() {
         AiChatMessage priorAnswer = new AiChatMessage();
         priorAnswer.setAuthorKind("assistant");
         priorAnswer.setContent("A legacy answer with unknown provenance.");
 
-        assertThrows(
-                AiAssistantLoopException.class,
-                () -> assembler.assembleSummary(
-                        null,
-                        List.of(priorAnswer),
-                        new MaskingContext(),
-                        new AiChatResourceRegistry()));
+        MaskedPrompt prompt = assembler.assembleSummary(
+                null,
+                List.of(priorAnswer),
+                new MaskingContext(),
+                new AiChatResourceRegistry());
+
+        assertFalse(prompt.getMessages().getFirst().getContent().contains("unknown provenance"));
     }
 
     @Test
-    void compactionRejectsUserSourceWhosePageContextIsNoLongerAuthorized() {
+    void compactionOmitsUserSourceWhosePageContextIsNoLongerAuthorized() {
         AiChatMessage priorRequest = new AiChatMessage();
         priorRequest.setAuthorKind("user");
         priorRequest.setContent("What changed on the current record?");
@@ -826,13 +886,34 @@ class AiAssistantPromptAssemblerTest {
                 {"handle":"r1","kind":"person","id":71}]}
                 """);
 
-        assertThrows(
-                AiAssistantLoopException.class,
-                () -> assembler.assembleSummary(
-                        null,
-                        List.of(priorRequest),
-                        new MaskingContext(),
-                        new AiChatResourceRegistry()));
+        MaskedPrompt prompt = assembler.assembleSummary(
+                null,
+                List.of(priorRequest),
+                new MaskingContext(),
+                new AiChatResourceRegistry());
+
+        assertFalse(prompt.getMessages().getFirst().getContent().contains("current record"));
+    }
+
+    @Test
+    void compactionOmitsLegacyResourceBackedUserSourceWithoutIdentifierProvenance() {
+        AiChatMessage priorRequest = new AiChatMessage();
+        priorRequest.setAuthorKind("user");
+        priorRequest.setContent("What changed for the legacy contact?");
+        priorRequest.setStructuredJson("""
+                {"kind":"user_message","resources":[
+                {"handle":"r1","kind":"person","id":71}]}
+                """);
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register("person", 71);
+
+        MaskedPrompt prompt = assembler.assembleSummary(
+                null,
+                List.of(priorRequest),
+                new MaskingContext(),
+                resources);
+
+        assertFalse(prompt.getMessages().getFirst().getContent().contains("legacy contact"));
     }
 
     @Test
@@ -925,29 +1006,91 @@ class AiAssistantPromptAssemblerTest {
     }
 
     @Test
-    void repairAndPriorToolResultsShareOneGracefullyDegradedToolAllocation() {
+    void repairKeepsTheCompleteIndependentlyBudgetedPriorToolReplay() {
         AiChatMessage request = new AiChatMessage();
         request.setAuthorKind("user");
         request.setContent("Repair the response");
-        AiAssistantToolResult oversizedToolResult = new AiAssistantToolResult(
-                Map.of("result", "TOOL_RESULT_MUST_BE_DROPPED".repeat(40)), List.of());
+        AiAssistantToolResult toolResult = new AiAssistantToolResult(
+                Map.of("result", "TOOL_RESULT_MUST_SURVIVE".repeat(12)), List.of());
         AiStructuredRepair repair = AiStructuredRepair.from(
                 "exclusive_step", "{\"tool\":null,\"final\":null}");
         AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
-                64, 1_000, 1_000, 1_000, 500, 1_000);
+                64, 1_000, 1_000, 1_000, 500, 2_000, 1_000);
 
-        MaskedPrompt prompt = assembler.assemble(
+        MaskedPrompt withoutRepair = assembler.assemble(
                 List.of(request),
                 new AiAssistantToolResult(Map.of(), List.of()),
-                List.of(new ToolTurn(1, "search_records", oversizedToolResult)),
+                List.of(new ToolTurn(1, "search_records", toolResult)),
+                new MaskingContext(),
+                new AiChatResourceRegistry(),
+                budget,
+                null);
+        MaskedPrompt withRepair = assembler.assemble(
+                List.of(request),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(new ToolTurn(1, "search_records", toolResult)),
                 new MaskingContext(),
                 new AiChatResourceRegistry(),
                 budget,
                 repair);
 
-        assertTrue(prompt.getMessages().stream()
-                .anyMatch(message -> message.getContent().contains("[truncated:")));
-        assertTrue(prompt.getMessages().getLast().getContent().contains("MODEL_OUTPUT_BEGIN"));
+        assertEquals(
+                withoutRepair.getMessages().getLast().getContent(),
+                withRepair.getMessages().get(withRepair.getMessages().size() - 2).getContent());
+        assertTrue(withRepair.getMessages().getLast().getContent().contains("MODEL_OUTPUT_BEGIN"));
+    }
+
+    @Test
+    void nativeRepairKeepsTheCompleteIndependentlyBudgetedExchangeReplay() {
+        ToolTurn turn = new ToolTurn(
+                1,
+                "search_records",
+                new AiAssistantToolResult(
+                        Map.of("result", "TOOL_RESULT_MUST_SURVIVE".repeat(12)), List.of()));
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                64, 1_000, 1_000, 1_000, 500, 2_000, 1_000);
+        Map<Integer, AiToolCall> calls = Map.of(
+                1, new AiToolCall("call_1", "search_records", "{}"));
+
+        AiAssistantPromptAssembler.NativeReplay withoutRepair = assembler.nativeReplay(
+                List.of(turn), calls, new MaskingContext(), budget, null);
+        AiAssistantPromptAssembler.NativeReplay withRepair = assembler.nativeReplay(
+                List.of(turn),
+                calls,
+                new MaskingContext(),
+                budget,
+                AiStructuredRepair.from("final_response", "{\"content\":null}"));
+
+        assertEquals(withoutRepair.exchanges(), withRepair.exchanges());
+        assertEquals(withoutRepair.audit(), withRepair.audit());
+        assertTrue(withRepair.repairMessage().contains("MODEL_OUTPUT_BEGIN"));
+    }
+
+    @Test
+    void oversizedRepairFailsAgainstItsIndependentEnvelope() {
+        AiChatMessage request = new AiChatMessage();
+        request.setAuthorKind("user");
+        request.setContent("Repair the response");
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                64, 1_000, 1_000, 1_000, 500, 64, 1_000);
+
+        AiAssistantLoopException exception = assertThrows(
+                AiAssistantLoopException.class,
+                () -> assembler.assemble(
+                        List.of(request),
+                        new AiAssistantToolResult(Map.of(), List.of()),
+                        List.of(new ToolTurn(
+                                1,
+                                "search_records",
+                                new AiAssistantToolResult(
+                                        Map.of("result", "TOOL_RESULT_MUST_SURVIVE"),
+                                        List.of()))),
+                        new MaskingContext(),
+                        new AiChatResourceRegistry(),
+                        budget,
+                        AiStructuredRepair.from("exclusive_step", "x".repeat(200))));
+
+        assertEquals("prompt_budget_exceeded", exception.terminalReason());
     }
 
     private JsonNode toolPayload(String content) throws Exception {
@@ -982,5 +1125,80 @@ class AiAssistantPromptAssemblerTest {
                 turn.tool(),
                 "{\"query\":\"" + marker.repeat(60) + "\"}",
                 thoughtSignature);
+    }
+
+    /**
+     * On the smallest supported context window the tool allocation is two kilobytes, which one long
+     * note can exceed on a read that entirely succeeded. Replacing the whole result with a budget
+     * marker would leave the synthesis model with no records and no citation handles for evidence
+     * the server did retrieve, so rows are dropped and the loss is disclosed instead.
+     */
+    @Test
+    void skillEvidenceTooLargeForTheStepKeepsAFittingSubsetAndDisclosesTheRest() throws Exception {
+        AiChatMessage request = new AiChatMessage();
+        request.setAuthorKind("user");
+        request.setContent("Brief me on this account");
+        List<Map<String, Object>> rows = List.of(
+                Map.of("handle", "r1", "notes", "FIRST_ROW_MUST_SURVIVE"),
+                Map.of("handle", "r2", "notes", "SECOND_ROW_MUST_BE_DROPPED".repeat(80)));
+        AiAssistantPromptAssembler.SkillContext skill =
+                new AiAssistantPromptAssembler.SkillContext(
+                        "Server-owned skill: relationship brief.",
+                        Map.of(
+                                "skill", "relationship_brief_v1",
+                                "evidence", List.of(Map.of(
+                                        "kind", "list_activities",
+                                        "status", "ok",
+                                        "data", Map.of("activities", rows)))));
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                512, 4_000, 1_000, 1_000, 2_048, 8_000);
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(request),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(),
+                new MaskingContext(),
+                new AiChatResourceRegistry(),
+                List.of(),
+                budget,
+                null,
+                skill);
+        String serialized = objectMapper.writeValueAsString(prompt.getMessages());
+
+        assertTrue(serialized.contains("FIRST_ROW_MUST_SURVIVE"));
+        assertFalse(serialized.contains("SECOND_ROW_MUST_BE_DROPPED"));
+        assertTrue(serialized.contains("truncated: showing 1 of 2 items"));
+        assertFalse(serialized.contains("budget_exceeded"));
+    }
+
+    /**
+     * The declared-scope instruction is server-authored and per-turn, so it travels outside the
+     * CRM_DATA delimiters and never enters the fixed envelope the answer budget pays for.
+     */
+    @Test
+    void theDeclaredScopeInstructionTravelsPerTurnOutsideTheUntrustedDataDelimiters() {
+        AiChatMessage request = new AiChatMessage();
+        request.setAuthorKind("user");
+        request.setContent("What happened with my accounts?");
+        AiChatQueryScope declared = new AiChatQueryScope(
+                true, null, null, 90, MemberScope.allTeam(), List.of(), List.of("company"),
+                List.of(), List.of(), List.of(), null);
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(request),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(),
+                new MaskingContext(),
+                new AiChatResourceRegistry(),
+                List.of(),
+                new AiAssistantPromptBudget(512, 4_000, 1_000, 1_000, 2_048, 8_000),
+                null,
+                AiAssistantPromptAssembler.SkillContext.NONE.withScopeDirective(
+                        AiChatScopedToolPolicy.directive(declared)));
+
+        assertFalse(prompt.getSystemPrompt().contains("server-declared query scope"));
+        assertTrue(prompt.getMessages().stream()
+                .anyMatch(message -> message.getContent() != null
+                        && message.getContent().contains("server-declared query scope")));
     }
 }

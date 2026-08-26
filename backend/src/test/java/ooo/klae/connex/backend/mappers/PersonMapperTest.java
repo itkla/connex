@@ -251,14 +251,15 @@ class PersonMapperTest extends AbstractMapperTest {
         assertFalse(personMapper.getPersonsForNetworkReport(workspace.getId(), 10_000).stream()
             .anyMatch(person -> person.getId() == suspended.getId()));
         assertFalse(personMapper.getPersonsFiltered(
-            workspace.getId(), null, null, null, false, allTeamScope(), false).stream()
+            workspace.getId(), null, null, null, false, allTeamScope(), null, false, null, false, null, false, false, null).stream()
             .anyMatch(person -> person.getId() == suspended.getId()));
 
         assertNotNull(personMapper.getPersonById(workspace.getId(), suspended.getId()));
         assertTrue(personMapper.getAllPersons(workspace.getId()).stream()
             .anyMatch(person -> person.getId() == suspended.getId()));
         assertTrue(personMapper.getPersonsPage(
-            workspace.getId(), null, null, null, null, null, false, allTeamScope(), false, 10_000, 0).stream()
+            workspace.getId(), null, null, null, null, null, false, allTeamScope(),
+            null, false, null, false, null, false, false, null, 10_000, 0).stream()
             .anyMatch(person -> person.getId() == suspended.getId()));
         assertTrue(personMapper.getPersonsByDealId(workspace.getId(), deal.getId()).stream()
             .anyMatch(person -> person.getId() == suspended.getId()));
@@ -301,11 +302,12 @@ class PersonMapperTest extends AbstractMapperTest {
         Person foreign = newPerson(newCompany());
 
         List<Person> page = personMapper.getPersonsPage(
-            pageWorkspace.getId(), null, null, null, null, null, false, allTeamScope(), false, 2, 0);
+            pageWorkspace.getId(), null, null, null, null, null, false, allTeamScope(),
+            null, false, null, false, null, false, false, null, 2, 0);
 
         assertEquals(2, page.size());
         assertEquals(3, personMapper.countPersons(
-            pageWorkspace.getId(), null, null, null, false, allTeamScope(), false));
+            pageWorkspace.getId(), null, null, null, false, allTeamScope(), null, false, null, false, null, false, false, null));
         assertTrue(page.stream().noneMatch(person -> person.getId() == foreign.getId()));
         assertTrue(page.stream().allMatch(person -> List.of(first.getId(), second.getId(), third.getId()).contains(person.getId())));
     }
@@ -319,7 +321,7 @@ class PersonMapperTest extends AbstractMapperTest {
         Person foreign = newPerson(newCompany());
 
         List<Integer> ids = personMapper.getPersonIdsFiltered(
-            pageWorkspace.getId(), null, null, null, false, allTeamScope(), false, 2);
+            pageWorkspace.getId(), null, null, null, false, allTeamScope(), null, false, null, false, null, false, false, null, 2);
 
         assertEquals(List.of(first.getId(), second.getId()), ids);
         assertFalse(ids.contains(foreign.getId()));
@@ -577,11 +579,12 @@ class PersonMapperTest extends AbstractMapperTest {
 
     private void assertOwnerScope(Workspace ws, MemberScope memberScope, List<Integer> expectedIds) {
         List<Integer> actualIds = personMapper.getPersonsPage(
-            ws.getId(), null, "name", "asc", null, null, false, memberScope, false, 100, 0)
+            ws.getId(), null, "name", "asc", null, null, false, memberScope,
+            null, false, null, false, null, false, false, null, 100, 0)
             .stream().map(Person::getId).toList();
         assertEquals(expectedIds.stream().sorted().toList(), actualIds.stream().sorted().toList());
         assertEquals(expectedIds.size(), personMapper.countPersons(
-            ws.getId(), null, null, null, false, memberScope, false));
+            ws.getId(), null, null, null, false, memberScope, null, false, null, false, null, false, false, null));
     }
 
     private Map<String, Long> facetCounts(List<FacetCount> counts) {
@@ -600,6 +603,21 @@ class PersonMapperTest extends AbstractMapperTest {
     @Test
     void findMentionedRecordsMapsMatchingRowsWithoutAssociationColumns() {
         Person person = newPerson(newCompany());
+        Person shortName = newPerson(newCompany());
+        shortName.setName("d");
+        personMapper.update(shortName);
+        Person abbreviation = newPerson(newCompany());
+        abbreviation.setName("Al");
+        personMapper.update(abbreviation);
+        Person multiWordName = newPerson(newCompany());
+        multiWordName.setName("Kenji Sato");
+        personMapper.update(multiWordName);
+        Person japaneseName = newPerson(newCompany());
+        japaneseName.setName("山田");
+        personMapper.update(japaneseName);
+        Person singleCharacterCjkName = newPerson(newCompany());
+        singleCharacterCjkName.setName("李");
+        personMapper.update(singleCharacterCjkName);
         java.util.List<Person> matches = personMapper.findMentionedRecords(
             workspace.getId(), "Tell me about " + person.getName() + " please", 21);
 
@@ -608,5 +626,29 @@ class PersonMapperTest extends AbstractMapperTest {
         org.junit.jupiter.api.Assertions.assertTrue(
             personMapper.findMentionedRecords(
                 workspace.getId(), "No record names appear here", 21).isEmpty());
+        assertTrue(personMapper.findMentionedRecords(
+                workspace.getId(), "deadline", 21).stream()
+                .noneMatch(match -> match.getId() == shortName.getId()));
+        assertTrue(personMapper.findMentionedRecords(
+                workspace.getId(), "Tell me about d?", 21).stream()
+                .anyMatch(match -> match.getId() == shortName.getId()));
+        assertTrue(personMapper.findMentionedRecords(
+                workspace.getId(), "Alice", 21).stream()
+                .noneMatch(match -> match.getId() == abbreviation.getId()));
+        assertTrue(personMapper.findMentionedRecords(
+                workspace.getId(), "Tell me about Al?", 21).stream()
+                .anyMatch(match -> match.getId() == abbreviation.getId()));
+        assertTrue(personMapper.findMentionedRecords(
+                workspace.getId(), "Kenji Satomi", 21).stream()
+                .noneMatch(match -> match.getId() == multiWordName.getId()));
+        assertTrue(personMapper.findMentionedRecords(
+                workspace.getId(), "Tell me about Kenji Sato?", 21).stream()
+                .anyMatch(match -> match.getId() == multiWordName.getId()));
+        assertTrue(personMapper.findMentionedRecords(
+                workspace.getId(), "山田さんについて教えて", 21).stream()
+                .anyMatch(match -> match.getId() == japaneseName.getId()));
+        assertTrue(personMapper.findMentionedRecords(
+                workspace.getId(), "李さんについて教えて", 21).stream()
+                .anyMatch(match -> match.getId() == singleCharacterCjkName.getId()));
     }
 }

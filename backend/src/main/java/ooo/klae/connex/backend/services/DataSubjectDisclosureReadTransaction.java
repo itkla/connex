@@ -147,6 +147,12 @@ public class DataSubjectDisclosureReadTransaction {
             dataSubjectDisclosureMapper.findAttachments(workspaceId, personId, workspaceIds));
         disclosure.setEmploymentHistory(
             dataSubjectDisclosureMapper.findEmployment(workspaceId, personId, workspaceIds));
+        disclosure.setLifecycleHistory(
+            dataSubjectDisclosureMapper.findLifecycleHistory(workspaceId, personId, workspaceIds));
+        disclosure.setLifecyclePasses(
+            dataSubjectDisclosureMapper.findLifecyclePasses(workspaceId, personId, workspaceIds));
+        disclosure.setQualificationAnswers(
+            dataSubjectDisclosureMapper.findQualificationAnswers(workspaceId, personId, workspaceIds));
         disclosure.setRelationshipEdges(dataSubjectDisclosureMapper.findEdges(workspaceId, personId, workspaceIds));
         disclosure.setDealAssociations(dataSubjectDisclosureMapper.findDeals(workspaceId, personId, workspaceIds));
         disclosure.setIntroductions(

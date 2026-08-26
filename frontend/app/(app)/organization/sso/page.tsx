@@ -1,18 +1,19 @@
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
+import { permanentRedirect } from "next/navigation";
 
-import CapabilityUnavailablePage from "@/app/components/CapabilityUnavailablePage";
-import SsoPanel from "@/app/components/settings/SsoPanel";
-import { getCapabilitiesResultFromCookie } from "@/app/lib/api";
+import { settingsRedirectTarget, type RouteSearchParams } from "@/app/lib/settingsRedirects";
 
-export default async function OrgSsoPage() {
-    const cookie = (await headers()).get("cookie");
-    const capabilitiesResult = await getCapabilitiesResultFromCookie(cookie);
-    if (!capabilitiesResult.ok) {
-        return <CapabilityUnavailablePage />;
-    }
-    if (!capabilitiesResult.data.sso) {
-        redirect("/organization/members");
-    }
-    return <SsoPanel />;
+/**
+ * The retired address for single sign-on configuration (#1340 WS4.6).
+ *
+ * The job now lives at the `sso` section of Identity & administrators, and this path forwards there permanently rather than 404ing an
+ * address readers have bookmarked and linked. The target is the manifest’s, not this file’s, so a
+ * destination that moves again takes its redirect with it; the query string is the reader’s and
+ * survives the hop whole.
+ */
+export default async function OrganizationSsoPage({
+    searchParams,
+}: {
+    searchParams: Promise<RouteSearchParams>;
+}) {
+    permanentRedirect(settingsRedirectTarget("organization.sso", await searchParams));
 }

@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.mappers;
 
 import org.apache.ibatis.annotations.Param;
 
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWorkCommitment;
+import ooo.klae.connex.backend.ai.assistant.AiWatchOverdueCommitments;
 import ooo.klae.connex.backend.beans.HistoryImportProvenance;
 import ooo.klae.connex.backend.beans.HistoryImportWrite;
 import ooo.klae.connex.backend.beans.Task;
@@ -28,11 +30,49 @@ public interface TaskMapper {
         @Param("memberScope") MemberScope memberScope
     );
     List<Task> getUpcomingOpenTasks(@Param("workspaceId") int workspaceId, @Param("limit") int limit);
+
+    /**
+     * Reads one member's open commitments that are already overdue or fall due inside the brief's
+     * window, ordered overdue-first. Restricted linked people are excluded by the same assistant
+     * processability rule the per-record assistant task reads apply.
+     */
+    List<AiAssistantWorkCommitment> getAiAssistantWorkCommitments(
+        @Param("workspaceId") int workspaceId,
+        @Param("assignedToId") int assignedToId,
+        @Param("today") LocalDate today,
+        @Param("dueThrough") LocalDate dueThrough,
+        @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
+        @Param("limit") int limit);
+
+    /**
+     * Counts the open, past-due tasks linked to one watched record and names the earliest due date.
+     *
+     * <p>Exactly one of the three subject identifiers is non-null. A company is matched through its
+     * contacts and its deals, matching how the company task list already resolves membership, so a
+     * watch on an account sees the same commitments the account page does.
+     *
+     * <p>Restricted linked people are excluded by the same assistant processability rule the other
+     * assistant task reads apply, in every subject branch: a suspended, provision-ceased, or
+     * archived contact must not raise a count that tells its watcher something about them.
+     */
+    AiWatchOverdueCommitments countOverdueForSubject(
+        @Param("workspaceId") int workspaceId,
+        @Param("personId") Integer personId,
+        @Param("companyId") Integer companyId,
+        @Param("dealId") Integer dealId,
+        @Param("today") LocalDate today,
+        @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds);
+
     List<Task> getTasksByAssignedToId(
         @Param("workspaceId") int workspaceId,
         @Param("assignedToId") int assignedToId
     );
     List<Task> getTasksByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
+    List<Task> getAiAssistantTasksByPersonId(
+        @Param("workspaceId") int workspaceId,
+        @Param("personId") int personId,
+        @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
+        @Param("limit") int limit);
     List<Task> getTasksByPersonIds(@Param("workspaceId") int workspaceId,
             @Param("personIds") List<Integer> personIds);
     List<Task> getTasksByPersonCompanyIds(
@@ -41,14 +81,33 @@ public interface TaskMapper {
         @Param("companyIds") List<Integer> companyIds
     );
     List<Task> getTasksByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
+    List<Task> getAiAssistantTasksByDealId(
+        @Param("workspaceId") int workspaceId,
+        @Param("dealId") int dealId,
+        @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
+        @Param("limit") int limit);
     List<Task> getCompanyTasks(@Param("workspaceId") int workspaceId,
             @Param("companyId") int companyId, @Param("limit") int limit);
+    List<Task> getAiAssistantTasksByCompanyId(
+        @Param("workspaceId") int workspaceId,
+        @Param("companyId") int companyId,
+        @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
+        @Param("limit") int limit);
     List<Task> getTasksByDealCompanyIds(@Param("workspaceId") int workspaceId,
             @Param("companyIds") List<Integer> companyIds);
     Task getTaskById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Task getTaskByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
-    List<Task> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
+    List<Integer> getVisibleIdsIn(
+        @Param("workspaceId") int workspaceId,
+        @Param("ids") List<Integer> ids
+    );
+    List<Task> search(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query,
+        @Param("limit") int limit,
+        @Param("offset") int offset
+    );
     int insert(Task task);
     List<HistoryImportProvenance> findHistoryImports(
         @Param("workspaceId") int workspaceId,

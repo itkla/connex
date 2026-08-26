@@ -844,12 +844,30 @@ prepare_retained_rollback() {
     DEPLOY_RETAINED="$deployed"
 }
 
+# Logout is CSRF-protected. It used to sit in the SecurityConfig ignore list, so a bare cookie POST
+# was enough; #1289/#1300 hardened it and removed that exemption, which made every deploy of a
+# post-#1300 main fail this gate and roll back. Login, register and the webauthn entry points are
+# still exempt, so only logout needs the token. The header name comes from the server rather than a
+# hardcoded constant so a future rename cannot silently reintroduce this failure.
+csrf_smoke_header() {
+    local body token header
+    body="$(curl -fsS --max-time 5 --cookie "$SMOKE_COOKIE_JAR" --cookie-jar "$SMOKE_COOKIE_JAR" \
+        "$FRONTEND_URL/api/auth/csrf" 2>/dev/null)" || return 1
+    token="$(printf '%s' "$body" | sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+    header="$(printf '%s' "$body" | sed -n 's/.*"headerName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+    [ -n "$token" ] && [ -n "$header" ] || return 1
+    printf '%s: %s' "$header" "$token"
+}
+
 logout_smoke_session() {
     [ "$SMOKE_SESSION_ACTIVE" = "1" ] || return 0
     [ -f "$SMOKE_COOKIE_JAR" ] && [ ! -L "$SMOKE_COOKIE_JAR" ] && [ -s "$SMOKE_COOKIE_JAR" ] || return 1
     awk -F '\t' 'NF == 7 && $6 == "JSESSIONID" && length($7) > 0 { found = 1 } END { exit !found }' \
         "$SMOKE_COOKIE_JAR" || return 1
-    if ! curl -fsS --max-time 5 --cookie "$SMOKE_COOKIE_JAR" -X POST -o /dev/null \
+    local csrf_header
+    csrf_header="$(csrf_smoke_header)" || return 1
+    if ! curl -fsS --max-time 5 --cookie "$SMOKE_COOKIE_JAR" --cookie-jar "$SMOKE_COOKIE_JAR" \
+        -H "$csrf_header" -X POST -o /dev/null \
         "$FRONTEND_URL/api/auth/logout" 2>/dev/null; then
         return 1
     fi

@@ -19,9 +19,21 @@ export type ContactsPageParams = PageParams & MemberScopeParams & {
     companies?: string[];
     titles?: string[];
     noCompany?: boolean;
+    /** Lead-lifecycle stages to include (issue #559). */
+    lifecycleStages?: ContactLifecycleStage[];
+    /** Includes contacts that are not in a lead lifecycle at all (issue #559). */
+    noLifecycle?: boolean;
+    /** Lead sources to include (issue #559). */
+    leadSources?: ContactLeadSource[];
+    /** Includes contacts whose provenance was never captured (issue #559). */
+    noLeadSource?: boolean;
+    /** First-response SLA states to include (issue #559). */
+    firstResponseStates?: ContactFirstResponseState[];
+    /** Includes contacts that were never put under a first-response SLA (issue #559). */
+    noFirstResponse?: boolean;
     /** Selects the archived contacts instead of the active ones (issue #854). */
     archived?: boolean;
-};
+} & WarmthFilterParams;
 
 export type CompaniesPageParams = PageParams & MemberScopeParams & {
     industry?: string[];
@@ -29,6 +41,20 @@ export type CompaniesPageParams = PageParams & MemberScopeParams & {
     ids?: number[];
     /** Selects the archived companies instead of the active ones (issue #854). */
     archived?: boolean;
+} & WarmthFilterParams;
+
+/**
+ * The warmth dimension a records request can filter by (issue #1342). Accepted by the contact and
+ * company page, id, and CSV-export surfaces alike, so select-all-matching and an export return
+ * exactly the records the list showed.
+ */
+export type WarmthFilterParams = {
+    /** Warmth bands to include; records with no interaction history are selected by {@link noWarmth}. */
+    warmthBands?: TemperatureBand[];
+    /** Includes records with no interaction history at all, counted under the `__none__` facet key. */
+    noWarmth?: boolean;
+    /** Selects records predicted to go cold within this many whole days; the backend accepts 1–3650. */
+    goesColdWithinDays?: number;
 };
 
 export type CompanySegmentPageParams = Omit<CompaniesPageParams, 'ids'> & {
@@ -214,6 +240,28 @@ export type PersonFacets = {
     owners: FacetCount[];
     /** How many contacts the workspace currently holds archived (issue #854). */
     archivedCount: number;
+    /**
+     * How many active contacts sit in each lead-lifecycle stage (issue #559). Contacts outside the
+     * lifecycle are counted under the `__none__` key.
+     */
+    lifecycleStages: FacetCount[];
+    /**
+     * How many active contacts entered through each lead source (issue #559); uncaptured
+     * provenance is counted under the `__none__` key.
+     */
+    leadSources: FacetCount[];
+    /**
+     * How many active contacts sit in each first-response SLA state (issue #559); contacts under no
+     * SLA are counted under the `__none__` key.
+     */
+    firstResponseStates: FacetCount[];
+    /**
+     * How many active contacts sit in each warmth band (issue #1342); contacts with no interaction
+     * history are counted under the `__none__` key. Absent from the response unless the request
+     * asked for it with `warmth=true`, because the count is a full-workspace decayed-touch
+     * aggregate — treat undefined as "not requested" rather than "no contacts".
+     */
+    warmthBands?: FacetCount[];
 };
 
 export type CompanyFacets = {
@@ -222,6 +270,8 @@ export type CompanyFacets = {
     owners: FacetCount[];
     /** How many companies the workspace currently holds archived (issue #854). */
     archivedCount: number;
+    /** How many active companies sit in each warmth band; opt-in exactly as {@link PersonFacets.warmthBands}. */
+    warmthBands?: FacetCount[];
 };
 
 export type TemperatureBand = 'hot' | 'warm' | 'cool' | 'cold';
@@ -690,6 +740,12 @@ export type RadarSubject = {
 export type RadarEvidenceReference = {
     type: string;
     id: number;
+    /**
+     * Display name of the referenced record, when the API supplies one. Radar renders a cited
+     * record as a named link and renders nothing at all when it cannot name it, so this optional
+     * field is what turns a source reference into a working link rather than a bare id.
+     */
+    label?: string | null;
 };
 
 export type RadarEvidence = {
@@ -1134,6 +1190,176 @@ export type Contact = {
     provisionCeasedAt?: string | null;
     /** Set while the contact is archived (issue #854); read-only, cleared by restore. */
     archivedAt?: string | null;
+    /**
+     * Lead lifecycle (issue #559); read-only, set through the lifecycle endpoints. A null or
+     * absent stage means the contact is not in a lead lifecycle — it is a relationship, not a
+     * prospect — and is not the same as being at the start of one.
+     */
+    lifecycleStage?: ContactLifecycleStage | null;
+    lifecycleChangedAt?: string | null;
+    disqualifiedReason?: ContactDisqualificationReason | null;
+    qualificationNotes?: string | null;
+    /**
+     * Source provenance (issue #559): how the relationship originally entered Connex. Owner-workspace
+     * only, settable at creation and via the provenance endpoint. Absent means never captured.
+     */
+    leadSource?: ContactLeadSource | null;
+    leadSourceDetail?: string | null;
+    referrerPersonId?: number | null;
+    /**
+     * First-response SLA clock (issue #559), owner-workspace only. The deadline is set by the rule
+     * engine's `set_response_due` action; absent means the contact was never put under an SLA. A
+     * contact answered after its deadline carries both a response and a breach.
+     */
+    firstResponseDueAt?: string | null;
+    firstRespondedAt?: string | null;
+    firstResponseBreachedAt?: string | null;
+};
+
+/** The single first-response SLA state a contact is in, mirroring the server (issue #559). */
+export type ContactFirstResponseState = 'PENDING' | 'OVERDUE' | 'RESPONDED';
+
+/** The closed vocabulary for how a contact originally entered Connex (issue #559). */
+export type ContactLeadSource =
+    | 'REFERRAL'
+    | 'EVENT'
+    | 'WEB'
+    | 'OUTBOUND'
+    | 'BUSINESS_CARD'
+    | 'IMPORT'
+    | 'PARTNER'
+    | 'OTHER';
+
+/** A requested replacement of a contact's source provenance; all-null clears it. */
+export type UpdateContactProvenancePayload = {
+    leadSource?: ContactLeadSource | null;
+    leadSourceDetail?: string | null;
+    referrerPersonId?: number | null;
+};
+
+/** The closed lead-lifecycle vocabulary a contact can hold (issue #559). */
+export type ContactLifecycleStage =
+    | 'NEW'
+    | 'WORKING'
+    | 'NURTURING'
+    | 'QUALIFIED'
+    | 'DISQUALIFIED'
+    | 'CONVERTED'
+    | 'RECYCLED';
+
+/** Why a contact was disqualified from its lead lifecycle (issue #559). */
+export type ContactDisqualificationReason =
+    | 'NO_BUDGET'
+    | 'NO_FIT'
+    | 'NO_AUTHORITY'
+    | 'BAD_TIMING'
+    | 'COMPETITOR'
+    | 'DUPLICATE'
+    | 'UNRESPONSIVE'
+    | 'SPAM'
+    | 'OTHER';
+
+/**
+ * A contact's current lifecycle state plus the stages it may move to next. The server owns the
+ * transition rules, so the client renders `allowedTransitions` rather than recomputing them.
+ */
+export type ContactLifecycle = {
+    personId: number | null;
+    stage: ContactLifecycleStage | null;
+    changedAt: string | null;
+    disqualifiedReason: ContactDisqualificationReason | null;
+    qualificationNotes: string | null;
+    allowedTransitions: ContactLifecycleStage[];
+};
+
+/** The two axes a lead is assessed on, kept separate on purpose (issue #559). */
+export type QualificationDimension = 'FIT' | 'ENGAGEMENT';
+
+/**
+ * How a contact stands against one criterion. `UNKNOWN` is a real answer — the team asked and could
+ * not find out — which is different from the criterion having no answer at all.
+ */
+export type QualificationAnswer = 'MET' | 'NOT_MET' | 'UNKNOWN';
+
+/** One workspace-authored qualification question (issue #559). */
+export type QualificationCriterion = {
+    id: number;
+    workspaceId: number;
+    label: string;
+    dimension: QualificationDimension;
+    weight: number;
+    required: boolean;
+    position: number;
+    archivedAt?: string | null;
+};
+
+/** A criterion paired with this contact's answer to it. */
+export type ContactQualificationCriterion = {
+    criterionId: number;
+    label: string;
+    dimension: QualificationDimension;
+    weight: number;
+    required: boolean;
+    answer: QualificationAnswer | null;
+    answeredById: number | null;
+    answeredAt: string | null;
+};
+
+/**
+ * A contact's deterministic score on one dimension.
+ *
+ * `percent` is `null` when the workspace configured no criteria for the dimension — which is not
+ * zero. A workspace that never wrote a fit question has not judged the contact a bad fit, and
+ * rendering 0% would show an assessment nobody made.
+ */
+export type ContactQualificationScore = {
+    dimension: QualificationDimension;
+    percent: number | null;
+    metWeight: number;
+    totalWeight: number;
+    unansweredCount: number;
+    unmetRequiredLabels: string[];
+};
+
+/** A contact's full qualification picture; `qualifiable` is the server's own gate verdict. */
+export type ContactQualification = {
+    criteria: ContactQualificationCriterion[];
+    scores: ContactQualificationScore[];
+    qualifiable: boolean;
+};
+
+/** A requested answer; omitting `answer` clears the criterion back to unanswered. */
+export type AnswerContactQualificationPayload = {
+    criterionId: number;
+    answer?: QualificationAnswer | null;
+};
+
+/** A requested criterion definition (issue #559). */
+export type QualificationCriterionPayload = {
+    label: string;
+    dimension: QualificationDimension;
+    weight?: number;
+    required?: boolean;
+    position?: number;
+};
+
+/** One entry of a contact's append-only lifecycle timeline (issue #559). */
+export type ContactLifecycleHistoryEntry = {
+    id: number;
+    personId: number;
+    fromStage: ContactLifecycleStage | null;
+    toStage: ContactLifecycleStage | null;
+    reason: ContactDisqualificationReason | null;
+    note: string | null;
+    changedById: number | null;
+    changedAt: string;
+};
+
+/** A requested lifecycle move. Withdrawal is a separate delete, never an omitted stage. */
+export type UpdateContactLifecyclePayload = {
+    stage: ContactLifecycleStage;
+    reason?: ContactDisqualificationReason | null;
+    note?: string | null;
 };
 
 export type DataSubjectRequestType = 'disclosure' | 'correction' | 'cease_use' | 'cease_provision';
@@ -1303,6 +1529,17 @@ export type UpdateStagePayload = {
     position: number;
     success?: boolean;
     failure?: boolean;
+};
+
+/**
+ * One entry in a pipeline's intended stage set. An `id` marks an existing stage to keep; omitting it
+ * creates one. Order in the list is the stage order — the server renumbers positions to match.
+ */
+export type PipelineStageInput = {
+    id?: number;
+    name: string;
+    success: boolean;
+    failure: boolean;
 };
 
 export type UpdatePipelinePayload = {
@@ -1516,7 +1753,29 @@ export type DocumentStatus = 'draft' | 'pending_approval' | 'approved' | 'final'
  */
 export type DocumentClientStatus = 'draft' | 'final' | 'superseded';
 
-export type DocumentApprovalStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
+export type DocumentApprovalStatus =
+    | 'pending'
+    | 'approved'
+    | 'rejected'
+    | 'cancelled'
+    | 'invalidated'
+    | 'unsatisfiable'
+    | 'expired';
+
+/**
+ * Why a request ended. `cancelled_legacy` only appears on rows written before outcome reasons
+ * existed, where supersede and manual cancellation are indistinguishable.
+ */
+export type ApprovalOutcomeReason =
+    | 'quorum'
+    | 'rejected'
+    | 'superseded'
+    | 'cancelled_by_requester'
+    | 'cancelled_by_admin'
+    | 'policy_invalidated'
+    | 'unsatisfiable'
+    | 'expired'
+    | 'cancelled_legacy';
 
 /** How an approval chain runs: one step at a time, or every step at once. */
 export type ApprovalChainMode = 'sequential' | 'parallel';
@@ -1530,7 +1789,17 @@ export type SeparationOfDuties = 'strict' | 'requester' | 'off';
 /** Whether a step is decided by named members or by anyone who can approve documents. */
 export type ApprovalApproverKind = 'user' | 'any_approver';
 
-export type ApprovalStepStatus = 'pending' | 'active' | 'approved' | 'rejected' | 'cancelled';
+/** What happens when an active approval step reaches its deadline. */
+export type ApprovalStepExpiryAction = 'expire' | 'escalate';
+
+export type ApprovalStepStatus =
+    | 'pending'
+    | 'active'
+    | 'approved'
+    | 'rejected'
+    | 'cancelled'
+    | 'unsatisfiable'
+    | 'expired';
 
 export type ApprovalStepApprover = {
     approverKind: ApprovalApproverKind;
@@ -1547,6 +1816,30 @@ export type DocumentApprovalDecision = {
     decidedAt: string;
 };
 
+/** One delegation, escalation, or reassignment fact appended to a frozen approval step. */
+export type ApprovalStepAssignment = {
+    id: number;
+    assignmentKind: 'delegation' | 'escalation' | 'reassignment';
+    assignmentRound: number;
+    approverKind: ApprovalApproverKind;
+    userId?: number | null;
+    userDisplayName?: string | null;
+    delegatedByUserId?: number | null;
+    delegatedByDisplayName?: string | null;
+    createdByUserId?: number | null;
+    createdByDisplayName?: string | null;
+    comment?: string | null;
+    createdAt: string;
+};
+
+/** One server-authorized destination for delegating the current approval seat. */
+export type ApprovalDelegate = {
+    id: number;
+    username: string;
+    displayName?: string | null;
+    email: string;
+};
+
 /** One frozen step of an approval chain, with the approvals collected so far. */
 export type DocumentApprovalStep = {
     id: number;
@@ -1556,7 +1849,17 @@ export type DocumentApprovalStep = {
     approvedCount: number;
     status: ApprovalStepStatus;
     decidedAt?: string | null;
+    dueIntervalHours?: number | null;
+    onExpiry: ApprovalStepExpiryAction;
+    activatedAt?: string | null;
+    dueAt?: string | null;
+    escalatedAt?: string | null;
+    satisfiable: boolean;
+    unsatisfiableReason?: string | null;
+    effectiveAnyApprover: boolean;
+    effectiveApproverIds: number[];
     approvers: ApprovalStepApprover[];
+    assignments: ApprovalStepAssignment[];
     decisions: DocumentApprovalDecision[];
 };
 
@@ -1566,6 +1869,10 @@ export type DocumentApproval = {
     documentId: number;
     policyId?: number | null;
     status: DocumentApprovalStatus;
+    outcomeReason?: ApprovalOutcomeReason | null;
+    outcomeDetail?: string | null;
+    satisfiable: boolean;
+    blockedReason?: string | null;
     mode: ApprovalChainMode;
     separationOfDuties: SeparationOfDuties;
     requestedBy?: number | null;
@@ -1582,7 +1889,28 @@ export type ApprovalPolicyStep = {
     id?: number;
     name?: string | null;
     requiredCount: number;
+    dueIntervalHours?: number | null;
+    onExpiry: ApprovalStepExpiryAction;
     approvers: ApprovalStepApprover[];
+};
+
+/** One workspace-scoped approval step the caller can still decide. */
+export type ApprovalInboxItem = {
+    approvalId: number;
+    dealId: number;
+    dealName: string;
+    documentId: number;
+    documentTitle: string;
+    documentType: DocumentType;
+    version: number;
+    stepId: number;
+    stepOrder: number;
+    stepName?: string | null;
+    requiredCount: number;
+    dueAt?: string | null;
+    escalated: boolean;
+    requestedBy?: number | null;
+    requestedAt: string;
 };
 
 /** Declares when a generated document requires internal approval before finalization. */
@@ -1616,8 +1944,43 @@ export type CreateApprovalPolicyPayload = {
 /**
  * Full-replace payload: the backend PUT nulls any omitted field and re-activates when
  * {@code active} is absent, so partial bodies are not safe — always send the complete policy.
+ *
+ * Each step must carry the {@link ApprovalPolicyStep.id} it was loaded with. A step arriving
+ * without one is treated as newly added, which classifies the whole edit as a tightening and
+ * invalidates approvals already pending under the policy.
  */
-export type UpdateApprovalPolicyPayload = CreateApprovalPolicyPayload;
+export type UpdateApprovalPolicyPayload = CreateApprovalPolicyPayload & {
+    confirmInvalidation?: boolean;
+    impactFingerprint?: string;
+};
+
+/** How a proposed policy edit compares with the persisted one. */
+export type PolicyChangeClass = 'TIGHTEN' | 'LOOSEN' | 'RETARGET' | 'NONE';
+
+/** One pending approval a policy edit would invalidate. Carries no document content. */
+export type ApprovalImpactItem = {
+    dealId: number;
+    dealName: string;
+    documentId: number;
+    documentTitle: string;
+    version: number;
+    requestedByName: string;
+    requestedByFormerMember: boolean;
+    requestedAt: string;
+};
+
+/**
+ * Preview of what a proposed policy edit does to approvals already in flight. Only a `TIGHTEN`
+ * with a non-zero count invalidates anything; `affected` is capped, so `pendingApprovalCount` is
+ * the authoritative total.
+ */
+export type ApprovalPolicyImpact = {
+    changeClass: PolicyChangeClass;
+    pendingApprovalCount: number;
+    effect: string;
+    impactFingerprint: string;
+    affected: ApprovalImpactItem[];
+};
 
 /** A party rendered on a document (workspace, company, or owner). */
 export type DocumentParty = {
@@ -2016,6 +2379,79 @@ export type CampaignEngagement = {
     sends: CampaignSendEngagement[];
 };
 
+/**
+ * One recipient behind a campaign engagement count, carrying the contact record the delivery
+ * reached. `personId` is absent once the contact link was cleared and `personLabel` is absent when
+ * the contact is no longer visible, so a row can name a delivery without ever claiming a record it
+ * cannot open.
+ */
+export type CampaignRecipient = {
+    deliveryId: number;
+    sendId: number;
+    channel: string;
+    personId?: number;
+    personLabel?: string;
+    status: string;
+    skipReason?: string;
+    createdAt?: string;
+    updatedAt?: string;
+};
+
+/** Which population of a campaign's deliveries a recipient page is drawn from. */
+export type CampaignRecipientsPageParams = PageParams & {
+    sendId?: number;
+    status?: string[];
+    event?: string;
+};
+
+/**
+ * Why a contact is excluded from marketing on one channel, most restrictive first. `state` is the
+ * single token a badge renders from and is absent when the channel is still contactable; the flags
+ * stay available so a surface can explain the state without re-deriving it.
+ */
+export type ContactChannelMarketingState = "do_not_contact" | "opted_out";
+
+/** One delivery channel's marketing exclusion state for a contact. */
+export type ContactChannelMarketingStatus = {
+    channel: string;
+    state?: ContactChannelMarketingState;
+    optedOut: boolean;
+    doNotContact: boolean;
+    consentRevoked: boolean;
+    addressable: boolean;
+};
+
+/**
+ * Whether a contact may still be marketed to, and why not.
+ *
+ * A privacy hold is the record-level restriction the contact themself asked for and is reported
+ * once for the whole contact; an opt-out or do-not-contact is a workspace-owned marketing exclusion
+ * and is always per channel. The two are never folded into one badge.
+ */
+export type ContactMarketingStatus = {
+    personId: number;
+    privacyHold: boolean;
+    suspendedAt?: string;
+    provisionCeasedAt?: string;
+    channels: ContactChannelMarketingStatus[];
+};
+
+/**
+ * One campaign touch on a contact's timeline: the campaign that reached them, on which channel, and
+ * what became of that delivery. The delivery's skip reason is deliberately absent — it names the
+ * ground a send was withheld on and stays with the campaign's recipient roster.
+ */
+export type PersonCampaignTouch = {
+    deliveryId: number;
+    campaignId: number;
+    campaignName: string;
+    sendId: number;
+    channel: string;
+    status: string;
+    createdAt?: string;
+    updatedAt?: string;
+};
+
 export type CampaignExportStatus = "draft" | "running" | "completed" | "failed";
 
 /** A campaign audience export bound to a frozen snapshot and an external connector. */
@@ -2230,7 +2666,15 @@ export type ReportBucket = "day" | "week" | "month";
 
 export type ReportChartType = "bar" | "line-area" | "donut" | "funnel" | "table" | "kpi";
 
-export type ReportDataSource = "deals" | "people" | "companies" | "activities" | "tasks" | "relationships";
+export type ReportDataSource =
+    | "deals"
+    | "people"
+    | "companies"
+    | "activities"
+    | "tasks"
+    | "relationships"
+    | "documents"
+    | "leads";
 
 export type ReportMeasure =
     | "count"
@@ -2251,10 +2695,26 @@ export type ReportMeasure =
     | "reverse_intro_weighted_opportunities"
     | "employment_departure_count"
     | "employment_arrival_count"
+    | "quote_count"
+    | "quote_issue_rate"
+    | "document_to_win_rate"
+    | "approval_decision_count"
+    | "approval_cycle_days"
+    | "effective_discount_percent"
+    | "open_discount_percent"
     | "forecast_best"
     | "forecast_weighted"
     | "forecast_worst"
-    | "attainment";
+    | "attainment"
+    | "lead_count"
+    | "qualified_count"
+    | "converted_count"
+    | "disqualified_count"
+    | "qualification_rate"
+    | "conversion_rate"
+    | "time_to_convert_days"
+    | "first_response_hours"
+    | "first_response_breach_rate";
 
 export type ReportGroupBy =
     | "none"
@@ -2272,7 +2732,8 @@ export type ReportGroupBy =
     | "trend"
     | "connector"
     | "pair"
-    | "person";
+    | "person"
+    | "lead_source";
 
 export type ReportRange = {
     start: string;
@@ -2402,7 +2863,6 @@ export type AiChatSession = {
     updatedAt: string;
 };
 
-/** API representation of one ordered assistant chat message. */
 /**
  * One record an assistant answer cited, projected for the current viewer. Citations the viewer may
  * not access are omitted by the backend rather than marked, so a shared session can legitimately
@@ -2414,8 +2874,136 @@ export type AiChatCitation = {
     kind: 'person' | 'company' | 'deal';
     id: number;
     label?: string | null;
+    /** ISO-8601 instant the cited value was last true, or null when the source carries no timestamp. */
+    asOf?: string | null;
+    /** Viewer-safe excerpt or structured value the citation supports, or null when none was projected. */
+    detail?: string | null;
+    /**
+     * Whether `asOf` and `detail` are the values the answering turn recorded rather than the
+     * record's state right now. An answer stored before turn-time evidence snapshots existed carries
+     * none, so its freshness has to be labelled as the record's own rather than the answer's.
+     */
+    observed?: boolean;
 };
 
+/** Closed presentation vocabulary for one native Ask Connex answer block. */
+export type AiChatAnswerBlockKind =
+    | 'answer'
+    | 'fact'
+    | 'inference'
+    | 'recommendation'
+    | 'metric'
+    | 'list'
+    | 'comparison'
+    | 'timeline'
+    | 'draft'
+    | 'extraction'
+    | 'diff'
+    | 'limitation';
+
+/**
+ * One structured line inside a block whose kind carries tabular meaning. The four fields are read
+ * differently per kind and the block kind is the only thing that says how: `metric` reads
+ * label/value as a tile with `detail` as its delta or qualifier, `comparison` reads `value` and
+ * `detail` as the two compared sides, `timeline` reads `at` as the entry's instant, `diff` reads
+ * `value` as the before and `detail` as the after, and `extraction` reads label/value as a field
+ * pair. Every string field is nullable because the server projects only what it could establish.
+ */
+export interface AiChatAnswerRow {
+    label: string;
+    value: string | null;
+    detail: string | null;
+    /** ISO-8601 instant this row happened, or null for rows that are not events. */
+    at: string | null;
+    /** Citations already authorized for the current viewer, supporting this row alone. */
+    evidence: AiChatCitation[];
+}
+
+/**
+ * One answer-document block with evidence already authorized for the current viewer.
+ *
+ * `rows` is only ever populated for the structured kinds (`metric`, `comparison`, `timeline`,
+ * `diff`, `extraction`); every other kind carries an empty array and renders from `body`/`items`.
+ */
+export type AiChatAnswerBlock = {
+    kind: AiChatAnswerBlockKind;
+    title: string | null;
+    body: string | null;
+    items: string[];
+    rows: AiChatAnswerRow[];
+    evidence: AiChatCitation[];
+};
+
+/**
+ * The one canonical source vocabulary shared by coverage disclosure and the checked trail, so
+ * "Sources checked" and "What I checked" can never describe the same turn differently. It mirrors
+ * the backend's `AiAssistantStepGuard.COVERAGE_SOURCES` exactly.
+ *
+ * This is a runtime tuple rather than a bare union because the realtime frame parser has to reject
+ * unknown sources at runtime: deriving both the type and the allowlist from one value makes it
+ * impossible for a hand-maintained runtime check to drift from the union it claims to narrow.
+ */
+export const AI_CHAT_SOURCES = [
+    'records',
+    'deals',
+    'activities',
+    'tasks',
+    'notes',
+    'files',
+    'metrics',
+    'schedule',
+    'actions',
+    'other',
+] as const;
+
+/** One category the assistant declares as checked for an answer. */
+export type AiChatSource = (typeof AI_CHAT_SOURCES)[number];
+
+/**
+ * The progress vocabulary: every coverage source plus the two synthetic milestones that bracket a
+ * turn. It mirrors the backend's `AiChatProgressService.PROGRESS_SOURCES`.
+ */
+export const AI_CHAT_PROGRESS_SOURCES = [...AI_CHAT_SOURCES, 'scope', 'answer'] as const;
+
+/** One milestone category in the assistant's live and durable checked-source trail. */
+export type AiChatProgressSource = (typeof AI_CHAT_PROGRESS_SOURCES)[number];
+
+/** Bounded coverage, freshness, and exclusion disclosure for one answer. */
+export type AiChatCoverage = {
+    status: 'complete' | 'partial' | 'insufficient';
+    asOf: string | null;
+    periodStart: string | null;
+    periodEnd: string | null;
+    sources: AiChatSource[];
+    exclusions: (
+        | 'private_data'
+        | 'restricted_records'
+        | 'unavailable_sources'
+        | 'unsupported_context'
+        | 'bounded_results'
+        | 'tool_failure'
+    )[];
+    truncated: boolean;
+};
+
+/** One durable, viewer-safe milestone in the assistant's checked-source trail. */
+export type AiChatProgressItem = {
+    seq: number;
+    source: AiChatProgressSource;
+    status: 'running' | 'proposed' | 'complete' | 'failed' | 'skipped' | 'timed_out' | 'cancelled';
+    count: number | null;
+    truncated: boolean;
+};
+
+/** Native answer document projected from validated durable metadata. */
+export type AiChatAnswerDocument = {
+    turnId: number;
+    blocks: AiChatAnswerBlock[];
+    coverage: AiChatCoverage;
+    progress: AiChatProgressItem[];
+};
+
+/** API representation of one ordered assistant chat message. */
 export type AiChatMessage = {
     id: number;
     sessionId: number;
@@ -2424,11 +3012,12 @@ export type AiChatMessage = {
     authorUserId: number | null;
     authorDisplayName: string | null;
     content: string;
-    reasoning?: string | null;
+    contentWithheld?: boolean;
     historySummarized?: boolean;
     createdAt: string;
     citations?: AiChatCitation[] | null;
     suggestions?: string[] | null;
+    answerDocument?: AiChatAnswerDocument | null;
 };
 
 /** Viewer-safe membership state for one shared assistant session participant. */
@@ -2454,10 +3043,12 @@ export type AiChatRealtimeFrame = {
     sessionId: number;
     turnId: number;
     seq: number;
-    kind: 'session' | 'message' | 'state' | 'step' | 'terminal';
-    tool: string | null;
+    kind: 'session' | 'message' | 'state' | 'reset' | 'step' | 'terminal';
+    tool: AiChatProgressItem['source'] | null;
     status: string;
     reason: string | null;
+    toolCallId?: number | null;
+    text?: null;
 };
 
 /**
@@ -2467,6 +3058,8 @@ export type AiChatRealtimeFrame = {
  * against a REST-hydrated persisted partial by comparing offsets against applied length.
  */
 export type AiChatDeltaFrame = {
+    workspaceId: number;
+    sessionId: number;
     turnId: number;
     seq: number;
     kind: 'delta';
@@ -2505,12 +3098,96 @@ export type AiOrganizationBudget = {
 export type AiChatSessionDetail = {
     session: AiChatSession;
     messages: Page<AiChatMessage>;
+    activeTurn: AiChatTurn | null;
+};
+
+/** One declared assistant capability the calling member may run on the current surface. */
+export type AiAssistantSkill = {
+    key: string;
+    version: string;
+    /** Catalog-owned i18n key the client renders the product-language name from. */
+    nameKey: string;
+    /** Catalog-owned i18n key the client renders the product-language description from. */
+    descriptionKey: string;
+    contextKinds: AiChatPageContextKind[];
+    /** Whether the skill refuses without a record to anchor to. */
+    needsSubject: boolean;
+    authority: string;
+};
+
+/** How a declared scope names the members whose records it covers. */
+export type AiChatScopeOwnerMode = 'all_team' | 'me' | 'members';
+
+/** Relationship warmth bands a declared scope may cover. */
+export type AiChatScopeWarmthBand = 'hot' | 'warm' | 'cool' | 'cold';
+
+/** Deal statuses a declared scope may cover. */
+export type AiChatScopeDealStatus = 'open' | 'won' | 'lost';
+
+/** Declared query filters carried by one assistant request, validated and applied server-side. */
+export type AiChatQueryScopeRequest = {
+    periodStart?: string;
+    periodEnd?: string;
+    periodDays?: number;
+    ownerMode?: AiChatScopeOwnerMode;
+    ownerMemberIds?: number[];
+    warmthBands?: AiChatScopeWarmthBand[];
+    recordKinds?: AiChatPageContextKind[];
+    stageIds?: number[];
+    dealStatuses?: AiChatScopeDealStatus[];
+    activityTypes?: string[];
+    savedViewId?: number;
+};
+
+/** One authorized record named by an interpreted query scope. */
+export type AiChatScopeReference = {
+    id: number;
+    label: string;
+};
+
+/** The exact scope the server interpreted, including the caps the retrieval will apply. */
+export type AiChatQueryScope = {
+    declared: boolean;
+    periodStart: string | null;
+    periodEnd: string | null;
+    periodDays: number | null;
+    ownerMode: string;
+    owners: AiChatScopeReference[];
+    warmthBands: string[];
+    recordKinds: string[];
+    stages: AiChatScopeReference[];
+    dealStatuses: string[];
+    activityTypes: string[];
+    savedView: AiChatScopeReference | null;
+    matchedRecordCount: number | null;
+    matchedRecordCountTruncated: boolean;
+    recordCap: number;
+    activityCap: number;
+    perRecordCap: number;
+    /** Stable reasons a requested filter could not be applied, never silently dropped. */
+    unavailable: string[];
+};
+
+/** Request body for the interpreted-scope preview a declared scope is reviewed through. */
+export type AiChatScopePreviewRequest = {
+    content?: string;
+    pageContext?: AiChatPageContext[];
+    scope?: AiChatQueryScopeRequest;
+};
+
+/** The truthful breadth statement shown before a scoped assistant request runs. */
+export type AiChatScopePreview = {
+    scope: AiChatQueryScope;
+    skillKey: string | null;
+    skillVersion: string | null;
+    confirmationRecommended: boolean;
 };
 
 /** Request body for starting one bounded assistant turn. */
 export type AiChatTurnCreateRequest = {
     content: string;
     pageContext?: AiChatPageContext[];
+    scope?: AiChatQueryScopeRequest;
 };
 
 /** Accepted assistant turn and its opaque generation handle. */
@@ -2519,6 +3196,8 @@ export type AiChatTurnAccepted = {
     sessionId: number;
     generationHandle: string;
     status: string;
+    /** The exact scope the server interpreted, or null when the request declared none. */
+    scope?: AiChatQueryScope | null;
 };
 
 /** Caller-safe durable state for one assistant turn, including the persisted streamed partial. */
@@ -2528,6 +3207,13 @@ export type AiChatTurn = {
     status: string;
     terminalReason: string | null;
     partialContent?: string | null;
+    progress: AiChatProgressItem[];
+    /**
+     * Whether the reader asked for this turn. A shared-session participant watching another
+     * member's turn is not its requester, and the cancellation endpoint rejects them, so the stop
+     * control must not be offered.
+     */
+    requestedByCurrentUser?: boolean;
 };
 
 /** Viewer-authorized target identity for an assistant write-tool call. */
@@ -2535,6 +3221,63 @@ export type AiAssistantToolCallTarget = {
     kind: AiChatPageContextKind;
     id: number | null;
     label: string | null;
+};
+
+/** The field an assistant proposal would rewrite on an existing record. */
+export type AiAssistantToolCallChangeField = 'owner' | 'stage';
+
+/**
+ * Whether a reviewed change can still be applied as reviewed.
+ *
+ * Applying revalidates everything on the server and refuses on its own terms; this states the same
+ * conclusions early, so a lost permission, a change that would now do nothing, or a record edited
+ * since the proposal was made is read before pressing apply rather than after being turned away.
+ * Only `ready` can be applied — every other state is a refusal the card states instead of arming a
+ * control over it.
+ */
+export type AiAssistantToolCallChangeState =
+    | 'ready'
+    | 'unchanged'
+    | 'recordChanged'
+    | 'permissionLost'
+    | 'unresolved';
+
+/**
+ * The exact before and after values one pending proposal would write.
+ *
+ * Absent entirely for a viewer who did not ask for the proposal or cannot currently open its
+ * target, which is what keeps one record's field value out of a shared chat. Either value may be
+ * null in its own right: a record with no owner has no current value, and a proposal to clear an
+ * owner has no proposed one. `currentValueUnresolved` is the third case: the record does hold a
+ * value, and this workspace can no longer name who or what it is.
+ */
+export type AiAssistantToolCallChange = {
+    field: AiAssistantToolCallChangeField;
+    currentValue: string | null;
+    currentValueUnresolved: boolean;
+    proposedValue: string | null;
+    state: AiAssistantToolCallChangeState;
+};
+
+/** One value a completed assistant action wrote, named by field rather than pre-rendered. */
+export type AiAssistantToolCallOutcomeValue = {
+    field: string;
+    value: string;
+};
+
+/** The record kinds an assistant action can create, each of which has a detail route. */
+export type AiAssistantCreatedRecordKind = 'activity' | 'task' | 'note';
+
+/**
+ * The record a completed assistant action created.
+ *
+ * Carried under the same viewer authorization as the rest of a completed action's detail, and
+ * absent for an action that changed an existing record rather than creating one — or for one whose
+ * creation has since been undone.
+ */
+export type AiAssistantToolCallCreatedRecord = {
+    kind: AiAssistantCreatedRecordKind;
+    id: number;
 };
 
 /** Viewer-safe transcript projection for one assistant write-tool call. */
@@ -2546,6 +3289,9 @@ export type AiAssistantToolCall = {
     target: AiAssistantToolCallTarget;
     requestSummary: string;
     outcomeSummary: string | null;
+    change: AiAssistantToolCallChange | null;
+    outcomeValues: AiAssistantToolCallOutcomeValue[];
+    createdRecord: AiAssistantToolCallCreatedRecord | null;
     messageId: number | null;
     turnId: number;
     undoExpiresAt: string | null;
@@ -3030,6 +3776,7 @@ export type DealFilterParams = MemberScopeParams & {
     stageId?: number[];
     pipelineId?: number[];
     companyId?: number[];
+    personId?: number[];
     noCompany?: boolean;
     currency?: string;
 };
@@ -3061,6 +3808,7 @@ export type DealFacets = {
     stages: FacetCount[];
     pipelines: FacetCount[];
     companies: FacetCount[];
+    people?: FacetCount[];
     currencies: FacetCount[];
     risk: FacetCount[];
     owners: FacetCount[];
@@ -3259,6 +4007,85 @@ export type WarmthSummary = {
     contactDecay: WarmthDecayCounts;
 };
 
+/**
+ * Bounded catalog-product row carried by the global-search products group. The full {@link Product}
+ * is deliberately not sent: a search row renders a label and a short qualifier, never pricing.
+ */
+export type ProductSearchResult = {
+    id: number;
+    name: string;
+    sku?: string;
+    active: boolean;
+};
+
+/** Bounded campaign row carried by the global-search campaigns group. */
+export type CampaignSearchResult = {
+    id: number;
+    name: string;
+    type: string;
+    status: CampaignStatus;
+    startAt?: string;
+    endAt?: string;
+    updatedAt?: string;
+};
+
+/** Bounded report-definition row carried by the global-search reports group. */
+export type ReportSearchResult = {
+    id: number;
+    name: string;
+    description?: string;
+    cadence: string;
+    updatedAt?: string;
+};
+
+/** Bounded document-template row carried by the global-search document-templates group. */
+export type DocumentTemplateSearchResult = {
+    id: number;
+    name: string;
+    type: DocumentType;
+    locale: string;
+    active: boolean;
+    updatedAt?: string;
+};
+
+/**
+ * A generated commercial document as the cross-deal index and the global-search documents group
+ * see it: the parent deal it belongs to, its state, and when it was generated — never the
+ * immutable content snapshot the full {@link DealDocument} carries.
+ */
+export type GeneratedDocumentSummary = {
+    id: number;
+    dealId: number;
+    dealName?: string;
+    dealOwnerId?: number;
+    type: DocumentType;
+    status: DocumentStatus;
+    version: number;
+    title?: string;
+    currency?: string;
+    createdBy?: number;
+    generatedAt?: string;
+    createdAt?: string;
+    updatedAt?: string;
+};
+
+/** Filters accepted by the cross-deal generated-document index. */
+export type GeneratedDocumentsPageParams = PageParams & MemberScopeParams & {
+    status?: DocumentStatus[];
+    type?: DocumentType[];
+    dealId?: number;
+};
+
+/** Bounded workflow row carried by the global-search workflows group. */
+export type WorkflowSearchResult = {
+    id: number;
+    name: string;
+    description?: string;
+    enabled: boolean;
+    recordType?: string;
+    updatedAt?: string;
+};
+
 export type SearchResults = {
     companies: Company[];
     people: Contact[];
@@ -3270,6 +4097,12 @@ export type SearchResults = {
     tasks: Task[];
     users: User[];
     attachments: Attachment[];
+    products: ProductSearchResult[];
+    campaigns: CampaignSearchResult[];
+    reports: ReportSearchResult[];
+    documentTemplates: DocumentTemplateSearchResult[];
+    documents: GeneratedDocumentSummary[];
+    workflows: WorkflowSearchResult[];
 };
 
 export type AuditChange = {
@@ -3377,6 +4210,7 @@ export type WorkspaceMember = {
     email: string;
     profilePictureUrl?: string;
     role: string;
+    builtInRole: WorkspaceRole;
     roleId?: number | null;
     status?: string;
 };
@@ -3402,6 +4236,7 @@ export type RuleAction = {
     activityType?: string;
     tagId?: number;
     dueInDays?: number;
+    dueInHours?: number;
     severity?: string;
     targetUserId?: number;
     targetStageId?: number;
@@ -3931,6 +4766,7 @@ export type WorkflowManualFilter = {
     pipelineIds?: number[];
     stageIds?: number[];
     companyIds?: number[];
+    personIds?: number[];
     statuses?: string[];
     risks?: string[];
     memberScope?: string;
@@ -3972,6 +4808,7 @@ export type WorkflowManualPreparation = {
     definitionHash: string;
     executionMode: WorkflowExecutionMode;
     actorUserId: number | null;
+    actorLabel: string | null;
     scopeKind: WorkflowManualScope["kind"];
     resolvedScopeKind: WorkflowManualResolvedScope["kind"];
     sourceSurface: WorkflowManualSourceSurface;
@@ -3983,6 +4820,7 @@ export type WorkflowManualPreparation = {
     readyCount: number;
     expectedSkips: WorkflowManualExpectedSkips;
     samples: Array<{ recordId: number; label: string }>;
+    skippedSamples: Array<{ recordId: number; label: string }>;
     actions: Array<{ nodeId: string; actionType: string; retrySafety: WorkflowRetrySafety }>;
     confirmable: boolean;
     blockers: string[];
@@ -4237,6 +5075,7 @@ export type InstanceCapabilities = {
     sso: boolean;
     socialLogin: { google: boolean; microsoft: boolean };
     connectedAccounts: { google: boolean; microsoft: boolean };
+    connectedAccountModes?: ConnectedAccountModes;
     connectedCapture: { google: boolean; microsoft: boolean };
     mailManaged: boolean;
     businessCardScanning: boolean;
@@ -4246,6 +5085,41 @@ export type InstanceCapabilities = {
 };
 
 export type ConnectedAccountProvider = 'google' | 'microsoft';
+
+/**
+ * Which OAuth client identity this instance uses for a connected-account provider: the Connex-owned
+ * verified application (`managed`) or credentials the operator created themselves (`custom`).
+ */
+export type ConnectedAccountMode = 'custom' | 'managed';
+
+/** Per-provider credential mode; absent on instances that predate Connex-managed OAuth. */
+export type ConnectedAccountModes = {
+    google: ConnectedAccountMode;
+    microsoft: ConnectedAccountMode;
+};
+
+/** A pairing handle the browser shows so the user's local helper process can claim the flow. */
+export type ManagedPairingSession = {
+    pairingCode: string;
+    expiresAt: string;
+    instanceBaseUrl: string;
+    helperCommand: string;
+};
+
+export type ManagedPairingStatusValue =
+    | 'none'
+    | 'pending'
+    | 'prepared'
+    | 'exchanging'
+    | 'completed'
+    | 'failed';
+
+/** Server-side progress of one managed pairing, polled while the local helper drives the flow. */
+export type ManagedPairingStatus = {
+    status: ManagedPairingStatusValue;
+    errorCode: string | null;
+    expiresAt: string | null;
+};
 
 export type ProviderConnectionStatus =
     | 'connected'
@@ -4262,7 +5136,6 @@ export type ProviderConnection = {
     providerAccountEmail?: string | null;
     grantedScopes?: string | null;
     hasCredential: boolean;
-    lastSyncAt?: string | null;
     errorCode?: string | null;
     createdAt: string;
     updatedAt: string;
@@ -4359,6 +5232,8 @@ export type ProviderCaptureOverview = {
     reviewCount: number;
     pendingApprovalCount: number;
     activationReady: boolean;
+    retainedData: boolean;
+    accountResetAvailable: boolean;
     disclosures: CaptureDisclosures;
     purge: CapturePurgeState;
 };
@@ -4735,4 +5610,101 @@ export type MailDiagnosticTest = {
     sender: MailDiagnosticSender;
     transport: MailDiagnosticTransport;
     dns: MailDnsAdvisory;
+};
+
+/** Which period a scheduled Ask Connex brief covers. */
+export type AiBriefKind = "daily" | "weekly";
+
+/**
+ * One member's Ask Connex brief schedule.
+ *
+ * Hours are local to `timeZone` and weekdays are ISO (1 = Monday). Every nullable field is an
+ * explicit null rather than an absent key, because "never delivered" and "delivery time unknown"
+ * are different facts the surface states differently.
+ */
+export type AiBriefSchedule = {
+    timeZone: string;
+    dailyEnabled: boolean;
+    dailyHour: number;
+    weeklyEnabled: boolean;
+    weeklyWeekday: number;
+    weeklyHour: number;
+    /** The period currently generating, or null when nothing is in flight. */
+    pendingKind: AiBriefKind | null;
+    lastDeliveredAt: string | null;
+    lastFailureAt: string | null;
+    lastFailureReason: string | null;
+};
+
+/** The complete schedule a member applies; a write always replaces every field. */
+export type AiBriefSchedulePayload = {
+    timeZone: string;
+    dailyEnabled: boolean;
+    dailyHour: number;
+    weeklyEnabled: boolean;
+    weeklyWeekday: number;
+    weeklyHour: number;
+};
+
+/** The watch types this build evaluates. */
+export type AiWatchType =
+    | "relationship_cooling"
+    | "no_interaction"
+    | "commitment_overdue"
+    | "deal_risk_threshold";
+
+/** Record kinds a watch can be created against. */
+export type AiWatchSubjectKind = "person" | "company" | "deal";
+
+/**
+ * One typed watch as its owner inspects it.
+ *
+ * Every field of the trigger travels so the surface can restate the exact condition rather than a
+ * summary of it. `subjectLabel` is null when the watched record is no longer readable, which is what
+ * the surface shows instead of a stale name.
+ */
+export type AiWatch = {
+    id: number;
+    watchType: AiWatchType;
+    subjectKind: AiWatchSubjectKind;
+    subjectId: number;
+    subjectLabel: string | null;
+    thresholdBand: string | null;
+    thresholdDays: number | null;
+    thresholdLevel: string | null;
+    status: "active" | "paused";
+    cooldownDays: number;
+    expiresOn: string | null;
+    lastEvaluatedAt: string | null;
+    lastFiredAt: string | null;
+    lastFiredState: string | null;
+};
+
+/** The complete typed trigger a member applies after reviewing it. */
+export type AiWatchPayload = {
+    watchType: AiWatchType;
+    subjectKind: AiWatchSubjectKind;
+    subjectId: number;
+    thresholdBand?: string | null;
+    thresholdDays?: number | null;
+    thresholdLevel?: string | null;
+    cooldownDays?: number | null;
+    expiresOn?: string | null;
+};
+
+/** Everything the Ask Connex command centre renders, in one authorized read. */
+export type AiCommandCenter = {
+    schedule: AiBriefSchedule;
+    latestBriefSessionId: number | null;
+    latestBriefKind: AiBriefKind | null;
+    latestBriefDeliveredAt: string | null;
+    briefSkillAvailable: boolean;
+    /**
+     * Whether watches may be used, provider aside. Deciding a watch fired invokes no model, so
+     * watches keep working in a workspace whose provider is unconfigured and briefs do not — the two
+     * flags are deliberately not the same fact.
+     */
+    watchesAvailable: boolean;
+    watches: AiWatch[];
+    watchLimit: number;
 };

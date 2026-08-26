@@ -350,6 +350,23 @@
     )
   </select>
 
+  <select id="getVisibleIdsIn" resultType="int">
+    SELECT a.id
+    FROM attachment a
+    WHERE a.workspace_id = #{workspaceId}
+      AND a.entity_type != 'ai_chat_session'
+      AND (a.entity_type != 'note' OR EXISTS (
+        SELECT 1
+        FROM note n
+        WHERE n.workspace_id = a.workspace_id
+          AND n.id = a.entity_id
+          AND (n.visibility = 'workspace' OR n.author_id = #{currentUserId})
+      ))
+      AND a.id IN
+      <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    ORDER BY a.id
+  </select>
+
   <update id="clearUploaderAnywhere">
     UPDATE attachment SET uploaded_by_id = NULL WHERE uploaded_by_id = #{userId}
   </update>

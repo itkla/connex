@@ -1,8 +1,10 @@
 package ooo.klae.connex.backend.connectedaccounts;
 
+import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -38,6 +40,13 @@ public class ConnectedAccountProviders {
     private static final String MICROSOFT_TOKEN_URI = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
     private static final String MICROSOFT_SCOPES =
         "openid email offline_access https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/Calendars.Read";
+    private static final List<String> EGRESS_HOSTS = List.of(
+        URI.create(GOOGLE_AUTHORIZE_URI).getHost(),
+        URI.create(GOOGLE_TOKEN_URI).getHost(),
+        "www.googleapis.com",
+        "gmail.googleapis.com",
+        URI.create(MICROSOFT_AUTHORIZE_URI).getHost(),
+        "graph.microsoft.com");
 
     private final ConnectedAccountProperties properties;
 
@@ -57,8 +66,10 @@ public class ConnectedAccountProviders {
      */
     public boolean isEnabled(String provider) {
         return switch (provider) {
-            case GOOGLE -> isConfigured(properties.getGoogle());
-            case MICROSOFT -> isConfigured(properties.getMicrosoft());
+            case GOOGLE -> isConfigured(
+                properties.getGoogle(), properties.getManaged().getGoogle());
+            case MICROSOFT -> isConfigured(
+                properties.getMicrosoft(), properties.getManaged().getMicrosoft());
             default -> false;
         };
     }
@@ -84,6 +95,25 @@ public class ConnectedAccountProviders {
             case MICROSOFT -> properties.getMicrosoft();
             default -> throw new IllegalArgumentException("Unsupported provider: " + provider);
         };
+    }
+
+    /** The configured ownership mode for a supported provider. */
+    public ConnectedAccountMode mode(String provider) {
+        return client(provider).getMode();
+    }
+
+    /** The OAuth client id effective for the provider's configured ownership mode. */
+    public String effectiveClientId(String provider) {
+        return mode(provider) == ConnectedAccountMode.MANAGED
+            ? managedClient(provider).getClientId()
+            : client(provider).getClientId();
+    }
+
+    /** The OAuth client secret effective for the provider's configured ownership mode. */
+    public String effectiveClientSecret(String provider) {
+        return mode(provider) == ConnectedAccountMode.MANAGED
+            ? managedClient(provider).getClientSecret()
+            : client(provider).getClientSecret();
     }
 
     /** The provider's token endpoint (fixed host). */
@@ -147,9 +177,8 @@ public class ConnectedAccountProviders {
      * @return the fully encoded authorize URL
      */
     public String authorizeUrl(String provider, String redirectUri, String state) {
-        ConnectedAccountProperties.Provider client = client(provider);
         Map<String, String> params = new LinkedHashMap<>();
-        params.put("client_id", client.getClientId());
+        params.put("client_id", effectiveClientId(provider));
         params.put("redirect_uri", redirectUri);
         params.put("response_type", "code");
         params.put("scope", scopes(provider));
@@ -172,9 +201,67 @@ public class ConnectedAccountProviders {
         return url.toString();
     }
 
-    private static boolean isConfigured(ConnectedAccountProperties.Provider provider) {
-        return provider.isEnabled()
-            && provider.getClientId() != null && !provider.getClientId().isBlank()
+    /** Builds an installed-application authorize URL carrying an S256 PKCE challenge. */
+    public String nativeAuthorizeUrl(
+            String provider,
+            String redirectUri,
+            String state,
+            String codeChallenge) {
+        Map<String, String> params = new LinkedHashMap<>();
+        params.put("client_id", effectiveClientId(provider));
+        params.put("redirect_uri", redirectUri);
+        params.put("response_type", "code");
+        params.put("scope", scopes(provider));
+        params.put("state", state);
+        params.put("code_challenge", codeChallenge);
+        params.put("code_challenge_method", "S256");
+        if (GOOGLE.equals(provider)) {
+            params.put("access_type", "offline");
+            params.put("prompt", "consent");
+        } else {
+            params.put("response_mode", "query");
+        }
+        return authorizeUrl(provider, params);
+    }
+
+    /** Exact operator egress allowlist for connected-account authorization and capture. */
+    public static List<String> egressHosts() {
+        return EGRESS_HOSTS;
+    }
+
+    private String authorizeUrl(String provider, Map<String, String> params) {
+        StringBuilder url = new StringBuilder(
+            GOOGLE.equals(provider) ? GOOGLE_AUTHORIZE_URI : MICROSOFT_AUTHORIZE_URI);
+        char separator = '?';
+        for (Map.Entry<String, String> entry : params.entrySet()) {
+            url.append(separator)
+                .append(entry.getKey())
+                .append('=')
+                .append(URLEncoder.encode(entry.getValue(), StandardCharsets.UTF_8));
+            separator = '&';
+        }
+        return url.toString();
+    }
+
+    private ConnectedAccountProperties.ManagedClient managedClient(String provider) {
+        return switch (provider) {
+            case GOOGLE -> properties.getManaged().getGoogle();
+            case MICROSOFT -> properties.getManaged().getMicrosoft();
+            default -> throw new IllegalArgumentException("Unsupported provider: " + provider);
+        };
+    }
+
+    private static boolean isConfigured(
+            ConnectedAccountProperties.Provider provider,
+            ConnectedAccountProperties.ManagedClient managedClient) {
+        if (!provider.isEnabled() || provider.getMode() == null) {
+            return false;
+        }
+        if (provider.getMode() == ConnectedAccountMode.MANAGED) {
+            return managedClient.getClientId() != null
+                && !managedClient.getClientId().isBlank();
+        }
+        return provider.getClientId() != null && !provider.getClientId().isBlank()
             && provider.getClientSecret() != null && !provider.getClientSecret().isBlank();
     }
 }

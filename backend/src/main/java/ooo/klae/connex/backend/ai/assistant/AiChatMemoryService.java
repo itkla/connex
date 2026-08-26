@@ -40,11 +40,13 @@ public class AiChatMemoryService {
     private static final double SUMMARY_TEMPERATURE = 0.1;
     private static final String OVERSIZED_MESSAGE_OMISSION =
             "Historical message omitted because it exceeded the compaction input budget.";
+    private static final String OVERSIZED_INITIATING_MESSAGE_OMISSION =
+            "Current request omitted because it exceeded the model input budget. "
+                    + "Ask the user to retry with a shorter request.";
 
     private final AiInvocationService invocationService;
     private final AiInvocationAdmissionService invocationAdmissionService;
     private final AiProperties aiProperties;
-    private final AiAssistantIdentifierResolver identifierResolver;
     private final AiAssistantPromptAssembler promptAssembler;
     private final AiAssistantToolExecutor toolExecutor;
     private final AiAssistantSummaryGuard summaryGuard;
@@ -95,10 +97,9 @@ public class AiChatMemoryService {
                 .orElseThrow(() -> new IllegalStateException(
                         "Assistant initiating message is unavailable"));
         if (utf8Bytes(initiatingMessage.getContent()) > budget.historyBytes()) {
-            throw new AiAssistantLoopException(
-                    "prompt_budget_exceeded", "prompt_budget_exceeded");
+            initiatingMessage = providerMessage(
+                    initiatingMessage, OVERSIZED_INITIATING_MESSAGE_OMISSION);
         }
-        identifierResolver.seed(initiatingMessage.getContent(), context);
         AiChatMessage summary = persistenceService.loadHistorySummary(turn);
         if (summary != null
                 && saturatedAdd(
@@ -132,15 +133,15 @@ public class AiChatMemoryService {
                 if (source.isEmpty()) {
                     source = List.of(oversizedCompactionMessage(candidates.getFirst()));
                 }
-                identifierResolver.seed(identifierSource(summary, source), context);
                 List<AiChatMessage> provenance = new ArrayList<>(source.size() + 1);
                 if (summary != null) {
                     provenance.add(summary);
                 }
                 provenance.addAll(source);
                 AiChatResourceRegistry summaryResources = new AiChatResourceRegistry();
-                toolExecutor.pageContext(
+                AiAssistantToolResult summaryContext = toolExecutor.pageContext(
                         promptAssembler.replayPageContext(provenance), summaryResources);
+                summaryContext.identifiers().forEach(identifier -> identifier.seed(context));
                 AiInvocation invocation = new AiInvocation(
                         AiFeature.ASSISTANT_CHAT,
                         context,
@@ -223,7 +224,6 @@ public class AiChatMemoryService {
         }
         List<AiChatMessage> bounded = boundedHistory(
                 summary, dialogue, initiatingMessage, budget.historyBytes());
-        identifierResolver.seed(identifierSource(null, bounded), context);
         return new AiChatMemory(
                 bounded,
                 budget,
@@ -243,8 +243,9 @@ public class AiChatMemoryService {
         for (int index = dialogue.size() - 1; index >= 0; index--) {
             AiChatMessage message = dialogue.get(index);
             if (message.getId() == initiatingMessage.getId()) {
-                selected.add(message);
-                remaining = Math.max(0, remaining - utf8Bytes(message.getContent()));
+                selected.add(initiatingMessage);
+                remaining = Math.max(
+                        0, remaining - utf8Bytes(initiatingMessage.getContent()));
             } else if (utf8Bytes(message.getContent()) <= remaining) {
                 selected.add(message);
                 remaining -= utf8Bytes(message.getContent());
@@ -284,10 +285,13 @@ public class AiChatMemoryService {
                 index >= 0 && selected.size() < MAX_VERBATIM_MESSAGES;
                 index--) {
             AiChatMessage message = messages.get(index);
-            if (message.getId() == initiatingMessage.getId()
-                    || utf8Bytes(message.getContent()) <= remaining) {
+            if (message.getId() == initiatingMessage.getId()) {
+                selected.add(initiatingMessage);
+                remaining = Math.max(
+                        0, remaining - utf8Bytes(initiatingMessage.getContent()));
+            } else if (utf8Bytes(message.getContent()) <= remaining) {
                 selected.add(message);
-                remaining = Math.max(0, remaining - utf8Bytes(message.getContent()));
+                remaining -= utf8Bytes(message.getContent());
             } else {
                 break;
             }
@@ -384,19 +388,11 @@ public class AiChatMemoryService {
                 .toList();
     }
 
-    private static String identifierSource(
-            AiChatMessage summary, List<AiChatMessage> messages) {
-        StringBuilder source = new StringBuilder();
-        if (summary != null) {
-            source.append(summary.getContent()).append('\n');
-        }
-        for (AiChatMessage message : messages) {
-            source.append(message.getContent()).append('\n');
-        }
-        return source.toString();
+    private static AiChatMessage oversizedCompactionMessage(AiChatMessage source) {
+        return providerMessage(source, OVERSIZED_MESSAGE_OMISSION);
     }
 
-    private static AiChatMessage oversizedCompactionMessage(AiChatMessage source) {
+    private static AiChatMessage providerMessage(AiChatMessage source, String content) {
         AiChatMessage omitted = new AiChatMessage();
         omitted.setId(source.getId());
         omitted.setWorkspaceId(source.getWorkspaceId());
@@ -404,7 +400,7 @@ public class AiChatMemoryService {
         omitted.setSeq(source.getSeq());
         omitted.setAuthorKind(source.getAuthorKind());
         omitted.setAuthorUserId(source.getAuthorUserId());
-        omitted.setContent(OVERSIZED_MESSAGE_OMISSION);
+        omitted.setContent(content);
         omitted.setStructuredJson(source.getStructuredJson());
         omitted.setInputTokens(source.getInputTokens());
         omitted.setOutputTokens(source.getOutputTokens());

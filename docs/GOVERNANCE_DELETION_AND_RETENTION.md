@@ -62,6 +62,64 @@ Deciding re-reads the actor's permissions from **exclusively locked** membership
 before the document row lock so the order stays membership → record. A concurrent removal or role
 change therefore serializes against the decision instead of racing it.
 
+## Policy changes and approvals already in flight
+
+Policy edits are classified against the persisted policy, including its steps and approver sets.
+When an edit contains more than one kind of change, the precedence is **tighten → loosen →
+retarget → none**:
+
+- **Tighten** adds a step, raises a step quorum, narrows its approver set, replaces "any approver"
+  with named approvers, or strengthens separation of duties along `off` → `requester` → `strict`.
+- **Loosen** only removes a step, lowers a quorum, adds approvers, replaces named approvers with
+  "any approver", or relaxes separation of duties.
+- **Retarget** changes the policy name, active state, document type, currency, total or discount
+  threshold, or chain mode without tightening or loosening the chain.
+- **None** is a semantically identical save.
+
+Only tightening invalidates pending requests frozen from that policy. Loosening, retargeting,
+identical saves, and policy deletion leave them in flight because each request was legitimately
+raised under the rule in force at the time. Invalidation terminates the request, cancels its open
+steps, returns the document to `draft`, and requires a fresh request to freeze the new chain; it
+never replaces the request's frozen steps or approver assignments.
+
+An administrator must explicitly confirm a tightening edit when pending requests would be
+invalidated. The pending count, confirmation check, policy write, and invalidations are evaluated in
+one transaction while the policy root is locked. The write therefore cannot proceed against a count
+that changed between disclosure and save.
+
+## A step that can no longer be satisfied
+
+Every approval read projects whether each open frozen step can still reach quorum from current
+workspace membership and `DOCUMENT_APPROVE` grants. Named steps count only their still-active,
+still-permitted named approvers; "any approver" steps count every active permission holder. Both
+remove the people excluded by the request's frozen separation-of-duties rule and people whose
+approval is already recorded, then compare the remaining people with the remaining approvals needed.
+
+This is a computed projection and never edits the snapshot. A bounded reconciliation sweep revisits
+pending requests and terminates a request whose step is unsatisfiable: the blocking step becomes
+`unsatisfiable`, other open steps are cancelled, and the document returns to `draft`. Decisions
+already recorded and every frozen step and approver assignment remain as historical evidence.
+
+## Why a request ended
+
+Every terminal request records an `outcome_reason` in addition to its coarse status:
+
+| Reason | Meaning |
+| --- | --- |
+| `quorum` | Every frozen step reached quorum. |
+| `rejected` | An eligible approver rejected a step. |
+| `superseded` | The immutable document version was superseded. |
+| `cancelled_by_requester` | The attributed requester withdrew it. |
+| `cancelled_by_admin` | An administrator withdrew an unattributed legacy request. |
+| `policy_invalidated` | A confirmed tightening policy edit invalidated it. |
+| `unsatisfiable` | Current membership, permissions, decisions, and separation of duties left a step unable to reach quorum. |
+| `cancelled_legacy` | Backfill-only marker for cancellations written before reasons existed. |
+
+New application code never writes `cancelled_legacy`; old rows cannot reliably distinguish a
+supersede from a manual cancellation, so the migration preserves that uncertainty instead of
+inventing history. `outcome_detail` carries bounded context for policy invalidation and
+unsatisfiability without storing document body content.
+
 ## Creator-or-admin deletion
 
 `DeletionPolicy.requireDeletable(creatorUserId)` gates deletion of **report definitions, report
@@ -88,6 +146,28 @@ Finalized and approved documents are immutable, but deleting the parent deal rem
 carrying **any** non-draft document (`status != 'draft'`) is therefore deletable by **admin/owner
 only**, in both the single and bulk delete paths. Deals carrying only drafts, or no documents, are
 unchanged.
+
+### Completed document-delivery evidence
+
+A completed commercial-document envelope retains its frozen `signed_document` JSON or authenticated
+provider PDF and deterministic completion `certificate` as managed tenant objects. Completion,
+termination, and deal deletion use the record lock order `deal` →
+`deal_document` → `document_delivery` → recipients ascending by id. This keeps the delivery
+lifecycle aligned with the parent-root lock that deal deletion takes before cascading into documents.
+A provider artifact may be staged before terminal completion to tolerate callback reordering; if that
+envelope later expires or is voided, the staged immutable object remains under the same retention and
+deletion lifecycle. Workspace export includes artifact metadata and object bytes. Tenant teardown
+enumerates the artifact keys, enqueues them through the same durable `object_deletion_queue` used by
+attachments, removes metadata in child-before-parent order, and verifies that no object or quota ledger
+residue remains. Ordinary deal deletion enqueues every delivery artifact before the database cascade
+removes its metadata.
+
+Recipient identity, typed acceptance name, decision time, and salted request-evidence hashes are part of
+the completion record. “Erase where legally permitted” therefore means an operator must first decide
+whether the completed envelope is subject to a contractual, tax, litigation-hold, or other retention
+obligation. Where erasure is permitted, delete the owning deal or workspace through the supported
+lifecycle path so object bytes and metadata are removed together; direct object-store deletion is not a
+supported erasure procedure. See [ESIGNATURE.md](ESIGNATURE.md) for the artifact and recovery contract.
 
 ## Report-snapshot retention
 

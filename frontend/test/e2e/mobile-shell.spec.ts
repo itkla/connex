@@ -19,7 +19,7 @@ test.describe("mobile shell", () => {
 
     test("the compact breadcrumb is localized and does not widen the phone shell @mobile-only", async ({ page }) => {
         await useLocale(page, "ja");
-        await page.goto("/settings/general");
+        await page.goto("/settings/workspace/general");
 
         const breadcrumb = page.getByRole("navigation", {
             name: message("ja", "common", "CommonBreadcrumb.ariaLabel"),
@@ -29,7 +29,7 @@ test.describe("mobile shell", () => {
             name: message("ja", "common", "CommonBreadcrumb.settings"),
             exact: true,
         })).toBeVisible();
-        await expect(breadcrumb).toContainText(message("ja", "common", "CommonBreadcrumb.general"));
+        await expect(breadcrumb).toContainText(message("ja", "workspace", "WorkspaceSettings.tabGeneral"));
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     });
 });

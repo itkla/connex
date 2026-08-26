@@ -2,9 +2,9 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import ReportSnapshotsPage from '@/app/(app)/overview/reports/[id]/snapshots/page';
+import ReportSnapshotsPage from '@/app/(app)/insights/reports/[id]/snapshots/page';
 
-const SEGMENT = 'app/(app)/overview/reports/[id]/snapshots';
+const SEGMENT = 'app/(app)/insights/reports/[id]/snapshots';
 
 function digestOf(error: unknown): string {
     if (typeof error === 'object' && error !== null && 'digest' in error) {
@@ -24,7 +24,7 @@ async function outcomeOf(id: string): Promise<string> {
 }
 
 /**
- * The scheduled-delivery email deep-links `/overview/reports/{id}/snapshots/{snapshotId}`. Before
+ * The scheduled-delivery email deep-links `/insights/reports/{id}/snapshots/{snapshotId}`. Before
  * this route existed, truncating that link to its parent hit a hard 404 rather than the report.
  */
 describe('the bare report snapshots path resolves instead of 404ing', () => {
@@ -39,7 +39,7 @@ describe('the bare report snapshots path resolves instead of 404ing', () => {
         const digest = await outcomeOf('42');
 
         expect(digest).toContain('NEXT_REDIRECT');
-        expect(digest).toContain('/overview/reports/42');
+        expect(digest).toContain('/insights/reports/42');
         expect(digest).not.toContain('/snapshots');
     });
 

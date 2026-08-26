@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import {
     CalendarDaysIcon,
@@ -14,6 +14,8 @@ import type {
     ReportScheduleRequest,
     WorkspaceMember,
 } from '@/app/lib/types';
+import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
+import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -80,16 +82,28 @@ export default function ScheduleDialog({
     onRequestDelete,
 }: ScheduleDialogProps) {
     const [saving, setSaving] = useState(false);
+    const [isDirty, setIsDirty] = useState(false);
+    const guard = useUnsavedChangesGuard({
+        isDirty: isDirty && !saving,
+        onClose: () => onOpenChange(false),
+    });
+
+    const [wasOpen, setWasOpen] = useState(open);
+    if (open !== wasOpen) {
+        setWasOpen(open);
+        if (!open) setIsDirty(false);
+    }
 
     const handleOpenChange = (next: boolean) => {
         if (!next && saving) return;
-        onOpenChange(next);
+        guard.onOpenChange(next);
     };
 
     const handleSubmit = async (payload: ReportScheduleRequest) => {
         setSaving(true);
         try {
             await onSubmit(payload);
+            setIsDirty(false);
             onOpenChange(false);
         } finally {
             setSaving(false);
@@ -99,34 +113,42 @@ export default function ScheduleDialog({
     const managementAvailable = canManage && !membersFailed;
 
     return (
-        <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
-            <ResponsiveDialogContent className="sm:max-w-2xl" showCloseButton={false}>
-                {open ? (
-                    loading ? (
-                        <ScheduleLoading />
-                    ) : loadFailed ? (
-                        <ScheduleLoadError onRetry={onRetry} />
-                    ) : managementAvailable ? (
-                        <ScheduleForm
-                            key={schedule ? `schedule-${schedule.id}-${schedule.updatedAt}` : 'new-schedule'}
-                            schedule={schedule}
-                            members={members}
-                            defaultTimezone={defaultTimezone}
-                            saving={saving}
-                            onSubmit={handleSubmit}
-                            onRequestDelete={onRequestDelete}
-                        />
-                    ) : (
-                        <ScheduleReadOnly
-                            schedule={schedule}
-                            canManage={canManage}
-                            membersFailed={membersFailed}
-                            onRetry={onRetry}
-                        />
-                    )
-                ) : null}
-            </ResponsiveDialogContent>
-        </ResponsiveDialog>
+        <>
+            <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
+                <ResponsiveDialogContent className="sm:max-w-2xl" showCloseButton={false}>
+                    {open ? (
+                        loading ? (
+                            <ScheduleLoading />
+                        ) : loadFailed ? (
+                            <ScheduleLoadError onRetry={onRetry} />
+                        ) : managementAvailable ? (
+                            <ScheduleForm
+                                key={schedule ? `schedule-${schedule.id}-${schedule.updatedAt}` : 'new-schedule'}
+                                schedule={schedule}
+                                members={members}
+                                defaultTimezone={defaultTimezone}
+                                saving={saving}
+                                onDirtyChange={setIsDirty}
+                                onSubmit={handleSubmit}
+                                onRequestDelete={onRequestDelete}
+                            />
+                        ) : (
+                            <ScheduleReadOnly
+                                schedule={schedule}
+                                canManage={canManage}
+                                membersFailed={membersFailed}
+                                onRetry={onRetry}
+                            />
+                        )
+                    ) : null}
+                </ResponsiveDialogContent>
+            </ResponsiveDialog>
+            <ConfirmDiscardDialog
+                open={guard.confirm.open}
+                onKeepEditing={guard.confirm.onKeepEditing}
+                onDiscard={guard.confirm.onDiscard}
+            />
+        </>
     );
 }
 
@@ -135,6 +157,7 @@ function ScheduleForm({
     members,
     defaultTimezone,
     saving,
+    onDirtyChange,
     onSubmit,
     onRequestDelete,
 }: {
@@ -142,6 +165,8 @@ function ScheduleForm({
     members: WorkspaceMember[];
     defaultTimezone: string;
     saving: boolean;
+    /** Reports whether the form holds unsaved edits, so the dialog can guard against accidental discard. */
+    onDirtyChange: (dirty: boolean) => void;
     onSubmit: (payload: ReportScheduleRequest) => Promise<void>;
     onRequestDelete: () => void;
 }) {
@@ -159,6 +184,22 @@ function ScheduleForm({
         () => supportedTimezones(timezone, defaultTimezone),
         [timezone, defaultTimezone],
     );
+    const [initial] = useState(() => ({
+        cadence,
+        recipientIds: selectedMembers.map((member) => member.id).join(','),
+        timezone,
+        hourOfDay,
+        enabled,
+    }));
+    const dirty = cadence !== initial.cadence
+        || selectedMembers.map((member) => member.id).join(',') !== initial.recipientIds
+        || timezone !== initial.timezone
+        || hourOfDay !== initial.hourOfDay
+        || enabled !== initial.enabled;
+    useEffect(() => {
+        onDirtyChange(dirty);
+    }, [dirty, onDirtyChange]);
+
     const recipientsChanged = useMemo(() => {
         if (schedule === null) {
             return false;

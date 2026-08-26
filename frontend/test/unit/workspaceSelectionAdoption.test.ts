@@ -676,7 +676,7 @@ describe("authoritative workspace selection adoption", () => {
             const unavailableBranch = section(
                 caller,
                 "if (err instanceof WorkspaceSelectionUnavailableError)",
-                "toastError",
+                "\n            }",
             );
 
             expect(successBranch).toContain('window.location.replace("/dashboard");');

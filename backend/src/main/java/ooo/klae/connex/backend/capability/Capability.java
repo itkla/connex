@@ -35,5 +35,8 @@ public enum Capability {
     BUSINESS_CARD_IMPORT,
 
     /** Native email campaign delivery on an extensible channel/provider SPI. */
-    CAMPAIGN_DELIVERY
+    CAMPAIGN_DELIVERY,
+
+    /** Provider-neutral commercial-document signature delivery. */
+    DOCUMENT_SIGNATURE
 }

@@ -16,6 +16,7 @@ import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService;
 import ooo.klae.connex.backend.ai.AiInvocationService;
+import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.PromptAssembly;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
@@ -45,6 +46,12 @@ public class AiChatAttachmentContextService {
 
     /** Prepares every currently authorized session attachment for one generation turn. */
     public AiChatAttachmentContext prepare(AiChatQueuedTurn turn, Instant deadline) {
+        return prepare(turn, deadline, new MaskingContext(turn.privacyMode()));
+    }
+
+    AiChatAttachmentContext prepare(
+            AiChatQueuedTurn turn, Instant deadline, MaskingContext maskingContext) {
+        java.util.Objects.requireNonNull(maskingContext, "maskingContext");
         requireBeforeDeadline(deadline);
         List<Attachment> attachments = persistenceService.loadAttachments(turn);
         if (attachments.isEmpty()) {
@@ -68,7 +75,7 @@ public class AiChatAttachmentContextService {
                 ImageDescription described = describeImage(turn, attachment, deadline);
                 requireBeforeDeadline(deadline);
                 BoundedContent bounded = boundContent(
-                        described.description(), remainingContextCharacters);
+                        described.description(), remainingContextCharacters, maskingContext);
                 remainingContextCharacters -= bounded.content().length();
                 data.add(attachmentData(
                         attachment, "image", bounded.content(), bounded.truncated()));
@@ -79,7 +86,7 @@ public class AiChatAttachmentContextService {
                 int characterLimit = Math.min(
                         remainingContextCharacters,
                         AiChatAttachmentPolicy.MAX_PROMPT_TEXT_CHARS);
-                BoundedContent bounded = boundContent(content, characterLimit);
+                BoundedContent bounded = boundContent(content, characterLimit, maskingContext);
                 remainingContextCharacters -= bounded.content().length();
                 data.add(attachmentData(
                         attachment, "text", bounded.content(), bounded.truncated()));
@@ -167,10 +174,12 @@ public class AiChatAttachmentContextService {
         }
     }
 
-    private static BoundedContent boundContent(String content, int characterLimit) {
+    private static BoundedContent boundContent(
+            String content, int characterLimit, MaskingContext maskingContext) {
+        String screened = MaskingEngine.screenFreeTextBeforeTruncation(content, maskingContext);
         return new BoundedContent(
-                content.substring(0, Math.min(content.length(), characterLimit)),
-                content.length() > characterLimit);
+                screened.substring(0, Math.min(screened.length(), characterLimit)),
+                screened.length() > characterLimit);
     }
 
     private record ImageDescription(String description, int inputTokens, int outputTokens) {

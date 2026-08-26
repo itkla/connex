@@ -6,13 +6,14 @@ import { useTranslations } from "next-intl";
 import { ArrowRightIcon, ArrowLeftIcon, CheckCircleIcon } from "@heroicons/react/24/outline";
 import { LoaderCircle } from "lucide-react";
 
-import { ApiError, requestPasswordReset } from "@/app/lib/api";
-import { toastError } from "@/app/lib/toast";
+import { requestPasswordReset } from "@/app/lib/api";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
 
 export function ForgotPasswordForm() {
     const tForm = useTranslations("AuthForm");
     const t = useTranslations("AuthForgotPassword");
+    const showApiError = useApiErrorToast("AuthForgotPassword");
 
     const [email, setEmail] = useState("");
     const [submitting, setSubmitting] = useState(false);
@@ -26,8 +27,7 @@ export function ForgotPasswordForm() {
             await requestPasswordReset({ email });
             setSent(true);
         } catch (err) {
-            const message = err instanceof ApiError ? err.message : t("genericError");
-            toastError(message);
+            showApiError(err, "genericError");
         } finally {
             setSubmitting(false);
         }

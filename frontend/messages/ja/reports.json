@@ -17,16 +17,14 @@
     "common": {
       "cancel": "キャンセル",
       "delete": "削除",
-      "deleting": "削除中…",
       "edit": "編集",
       "retry": "再試行",
       "saving": "保存中…",
       "requestFailed": "リクエストを完了できませんでした。"
     },
     "landing": {
-      "eyebrow": "ワークスペースインテリジェンス",
       "title": "レポート",
-      "subtitle": "確定的なCRM数値を、グラフ、推奨事項、データ付録、追跡可能な出典を備えたレビュー用の文章に変換します。",
+      "subtitle": "ワークスペースの数値を、グラフ・推奨事項・データ付録・追跡可能な出典を備えたレビュー用の文章に変換します。",
       "newReport": "新規レポート",
       "blankBuilder": "空のビルダー",
       "otherWays": "別の方法で作成",
@@ -53,9 +51,12 @@
       "noDescription": "説明なし",
       "updated": "{date} に更新",
       "actions": "{name} の操作",
-      "deleteTitle": "レポートを削除しますか？",
-      "deleteBody": "{name} とすべての確定スナップショットが完全に削除されます。",
-      "deleted": "{name} を削除しました"
+      "entityLabel": "レポート",
+      "deleteDetails": "確定スナップショットも一緒に削除されます。",
+      "deleted": "{name} を削除しました",
+      "createFailed": "レポートを作成できませんでした",
+      "deleteFailed": "レポートを削除できませんでした",
+      "duplicateFailed": "レポートを複製できませんでした"
     },
     "composer": {
       "eyebrow": "Ask Connex",
@@ -94,10 +95,12 @@
       "unavailable": {
         "not_configured": "AI が無効または未設定の間は、テンプレートまたは空のビルダーを使用してください。",
         "input_restricted": "設定されたプロバイダーへ送信できない内容が含まれています。機微な情報を削除して再試行してください。",
-        "rate_limited": "AI 生成の上限に達しました。後でもう一度試すか、確定的なビルダーを使用してください。",
+        "rate_limited": "AI 生成の上限に達しました。しばらくしてからもう一度お試しいただくか、ご自身でレポートを作成してください。",
         "invalid_definition": "この依頼を有効なレポート定義に変換できませんでした。言い換えるか、ビルダーを使用してください。",
-        "provider_error": "プロバイダーが定義を生成できませんでした。再試行するか、確定的な開始方法を使用してください。"
-      }
+        "provider_error": "プロバイダーが定義を生成できませんでした。もう一度お試しいただくか、ご自身でレポートを作成してください。"
+      },
+      "previewFailed": "レポート定義をプレビューできませんでした",
+      "saveFailed": "レポートを保存できませんでした"
     },
     "templates": {
       "sales-performance": {
@@ -116,21 +119,29 @@
         "name": "目標達成率",
         "description": "担当者およびワークスペースの売上目標と受注売上を比較します。"
       },
+      "lead-lifecycle": {
+        "name": "リードライフサイクル",
+        "description": "リードの獲得元、見込みありへの到達率、初回応答の速さ、そして商談化の状況。"
+      },
+      "commercial-documents": {
+        "name": "見積と承認",
+        "description": "見積の作成状況、承認の所要日数、実際に譲歩した値引率を可視化します。"
+      },
       "relationship-coverage": {
         "name": "関係性カバレッジ",
-        "description": "温度分布とアカウントのカバレッジ。"
+        "description": "温度感の分布と会社のカバレッジ。"
       },
       "relationship-health": {
         "name": "関係性の健全性",
-        "description": "関係性が低下しているアカウント、カバレッジ不足、単一接点に依存する案件リスク。"
+        "description": "関係性が低下している会社、カバレッジ不足、単一接点に依存する案件リスク。"
       },
       "network-warm-intros": {
         "name": "ネットワークとウォーム紹介",
-        "description": "到達可能なパイプライン、未活用の紹介経路、コネクターのカバレッジ、リバース紹介の可能性。"
+        "description": "到達可能なパイプライン、未活用の紹介ルート、コネクターのカバレッジ、リバース紹介の可能性。"
       },
       "employment-moves": {
         "name": "勤務先の変化",
-        "description": "連絡先の離職・入社を追跡し、関係性リスクと新規開拓の機会を可視化します。"
+        "description": "連絡先の離職・入社を追跡し、関係性リスクと、転職先の会社で生まれる新しい接点を可視化します。"
       },
       "activity-team": {
         "name": "活動とチーム",
@@ -187,7 +198,8 @@
       "dragLifted": "{name} を持ち上げました",
       "dragOver": "{name} は {target} の上にあります",
       "dragDropped": "{name} を {target} の前に配置しました",
-      "dragCancelled": "{name} の移動をキャンセルしました"
+      "dragCancelled": "{name} の移動をキャンセルしました",
+      "saveFailed": "レポートを保存できませんでした"
     },
     "document": {
       "run": "レポートを実行",
@@ -200,8 +212,8 @@
       "live": "ライブレポート",
       "deleteSnapshot": "スナップショットを削除",
       "deleteSnapshotNamed": "{date}のスナップショットを削除",
-      "deleteSnapshotTitle": "スナップショットを削除しますか？",
-      "deleteSnapshotConfirm": "この確定スナップショットは完全に削除されます。この操作は元に戻せません。",
+      "snapshotNamed": "{date}のスナップショット",
+      "snapshotEntityLabel": "スナップショット",
       "export": "エクスポート",
       "exporting": "エクスポート中…",
       "csv": "CSV",
@@ -218,7 +230,7 @@
       "executiveSummary": "エグゼクティブサマリー",
       "findings": "所見と推奨事項",
       "narrativeUnavailable": "文章を利用できません",
-      "narrativeUnavailableBody": "確定的な数値と出典付録は完全な状態で確認できます。",
+      "narrativeUnavailableBody": "数値と出典付録はそろっており、そのままご確認いただけます。",
       "narrativeGenerating": "エグゼクティブサマリーを作成中",
       "narrativeGeneratingBody": "以下の数値はすでに利用できます。出典に基づく文章を作成しており、まもなくここに表示されます。",
       "narrativeErrorTitle": "文章を生成できませんでした",
@@ -230,7 +242,7 @@
       "figures": "根拠と数値",
       "appendix": "データ付録",
       "citations": "出典",
-      "generatedBy": "Connexがワークスペースの確定的な数値から生成",
+      "generatedBy": "Connex がワークスペースの数値をもとに生成",
       "widgetScope": "{source}・{group}別",
       "currentPeriod": "当期",
       "currentStateAsOf": "現在状態の数値の基準時点",
@@ -258,10 +270,14 @@
       "snapshotForbiddenBody": "このレポートへのアクセスが必要な場合は、ワークスペース管理者にお問い合わせください。",
       "viewLiveReport": "ライブレポートを表示",
       "figureBasis": {
-        "wonRevenue": "受注売上・期間内に成約・現在の担当者・ワークスペースの案件のみ・アーカイブ済みアカウント名を保持",
-        "openPipeline": "オープンパイプライン・期間内に決着予定・現在の担当者・ワークスペースの案件のみ・アーカイブ済みアカウント名を保持",
+        "wonRevenue": "受注売上・期間内に成約・現在の担当者・ワークスペースの案件のみ・アーカイブ済みの会社名を保持",
+        "openPipeline": "オープンパイプライン・期間内に決着予定・現在の担当者・ワークスペースの案件のみ・アーカイブ済みの会社名を保持",
         "forecastWeighted": "加重フォーキャスト・期間内に決着予定・全履歴のステージ率・現在の担当者・ワークスペースの案件のみ"
-      }
+      },
+      "csvFailed": "CSVをエクスポートできませんでした",
+      "snapshotDeleteFailed": "スナップショットを削除できませんでした",
+      "snapshotFailed": "スナップショットを作成できませんでした",
+      "snapshotOpenFailed": "スナップショットを開けませんでした"
     },
     "cadence": {
       "weekly": "週次",
@@ -276,14 +292,25 @@
     },
     "source": {
       "deals": "案件",
-      "people": "人物",
+      "people": "連絡先",
       "companies": "会社",
       "activities": "活動",
       "tasks": "タスク",
-      "relationships": "関係性"
+      "relationships": "関係性",
+      "documents": "書類",
+      "leads": "リード"
     },
     "measure": {
       "count": "件数",
+      "lead_count": "リード獲得数",
+      "qualified_count": "見込みあり",
+      "converted_count": "商談化",
+      "disqualified_count": "見込みなし",
+      "qualification_rate": "見込みあり率",
+      "conversion_rate": "商談化率",
+      "time_to_convert_days": "商談化までの日数",
+      "first_response_hours": "初回応答までの時間",
+      "first_response_breach_rate": "初回応答期限超過率",
       "new_pipeline_value": "新規パイプライン金額",
       "won_revenue": "受注売上",
       "win_rate": "勝率",
@@ -296,11 +323,18 @@
       "coverage_gap_open_pipeline_value": "カバレッジ不足のオープンパイプライン金額",
       "single_threaded_deal_count": "単一接点案件数",
       "single_threaded_deal_value": "単一接点案件金額",
-      "warm_intro_opportunity_value": "ウォーム紹介の機会価値",
-      "warm_intro_reachable_account_count": "ウォーム紹介で到達可能なアカウント",
-      "reverse_intro_weighted_opportunities": "加重リバース紹介機会",
+      "warm_intro_opportunity_value": "紹介候補の価値",
+      "warm_intro_reachable_account_count": "紹介ルートで到達できる会社",
+      "reverse_intro_weighted_opportunities": "加重リバース紹介候補",
       "employment_departure_count": "勤務先からの離職数",
       "employment_arrival_count": "勤務先への入社数",
+      "quote_count": "見積作成数",
+      "quote_issue_rate": "見積確定率",
+      "document_to_win_rate": "書類からの受注率",
+      "approval_decision_count": "承認決裁数",
+      "approval_cycle_days": "承認所要日数",
+      "effective_discount_percent": "実効値引率（受注）",
+      "open_discount_percent": "実効値引率（進行中）",
       "forecast_best": "最良ケース予測",
       "forecast_weighted": "見込み予測（加重）",
       "forecast_worst": "コミット予測",
@@ -308,6 +342,7 @@
     },
     "group": {
       "none": "グループ化なし",
+      "lead_source": "リードソース",
       "date": "日付",
       "pipeline": "パイプライン",
       "stage": "ステージ",
@@ -405,15 +440,17 @@
       "deleted": "配信スケジュールを削除しました",
       "conflict": "編集中にスケジュールが変更されました。最新の内容を読み込みました。",
       "delete": "スケジュールを削除",
-      "deleteTitle": "配信スケジュールを削除しますか？",
-      "deleteBody": "{name} の予約配信が完全に削除されます。",
+      "entityLabel": "配信スケジュール",
+      "deleteDetails": "{name} の予約配信が止まります。",
       "validation": {
         "recipients": "有効なワークスペースメンバーを1人以上選択してください。",
         "recipientLimit": "受信者は100人以内で選択してください。",
         "recipientAccess": "すべての受信者は有効なワークスペースメンバーで、このレポートの閲覧に必要なすべての権限を持っている必要があります。",
         "timezone": "有効なIANAタイムゾーンを選択してください。",
         "hour": "0時から23時までの配信時刻を選択してください。"
-      }
+      },
+      "deleteFailed": "配信スケジュールを削除できませんでした",
+      "saveFailed": "配信スケジュールを保存できませんでした"
     },
     "goals": {
       "backToReports": "レポートに戻る",
@@ -442,10 +479,10 @@
       "created": "目標を作成しました",
       "updated": "目標を更新しました",
       "deleted": "目標を削除しました",
-      "deleteTitle": "目標を削除しますか？",
-      "deleteBody": "{scope} の売上目標が完全に削除されます。",
+      "entityLabel": "目標",
+      "deleteDetails": "{scope} の売上目標です。",
       "emptyTitle": "売上目標はまだありません",
-      "emptyBody": "月次または四半期レポートに確定的な達成率を追加する目標を作成してください。",
+      "emptyBody": "月次・四半期レポートに達成率を表示するには、目標を作成してください。",
       "loadErrorTitle": "目標を読み込めませんでした",
       "loadErrorBody": "ワークスペースの目標を現在利用できません。目標を作成または変更する前に再試行してください。",
       "ownersLoadError": "ワークスペースメンバーを読み込めなかったため、目標管理を一時的に利用できません。",
@@ -461,7 +498,9 @@
         "quarter": "四半期目標は1月、4月、7月、10月に開始する必要があります。",
         "target": "整数部13桁、小数部2桁以内の0以上の目標を入力してください。",
         "currency": "通貨は3〜8文字の英字で入力してください。"
-      }
+      },
+      "deleteFailed": "目標を削除できませんでした",
+      "saveFailed": "目標を保存できませんでした"
     }
   }
 }

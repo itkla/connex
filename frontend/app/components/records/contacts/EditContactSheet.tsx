@@ -3,8 +3,9 @@
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { toast } from 'sonner';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { useFieldErrors } from '@/app/hooks/useFieldErrors';
+import { toastError, toastInfo, toastSuccess } from '@/app/lib/toast';
 
 import QuickEditSheet, { type ContactDraft } from '@/app/components/records/contacts/QuickEditSheet';
 import { CustomFieldsEditSection, type CustomFieldsEditHandle } from '@/app/components/records/CustomFieldsEditSection';
@@ -35,33 +36,39 @@ export default function EditContactSheet({
 }) {
     const router = useRouter();
     const t = useTranslations('ContactsEditSheet');
+    const showApiError = useApiErrorToast('ContactsEditSheet');
     const [draft, setDraft] = useState<ContactDraft>(() => toDraft(contact));
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [isSaving, setIsSaving] = useState(false);
     const cfRef = useRef<CustomFieldsEditHandle>(null);
+    const [customFieldsDirty, setCustomFieldsDirty] = useState(false);
+    const { fieldErrors, setFieldErrors, reset: resetFieldErrors, clearError } = useFieldErrors();
 
     const handleOpenChange = (next: boolean) => {
         onOpenChange(next);
         if (!next) {
             setDraft(toDraft(contact));
             setImageFile(null);
+            resetFieldErrors();
         }
     };
 
     const saveEdits = async () => {
+        resetFieldErrors();
         const original = toDraft(contact);
         const textChanged = diffDraft(original, draft);
         const pictureChanged = imageFile !== null;
         const customChanged = cfRef.current?.hasChanges() ?? false;
 
         if (!textChanged && !pictureChanged && !customChanged) {
-            toast.info(t('toastNoChanges'));
+            toastInfo(t('toastNoChanges'));
             handleOpenChange(false);
             return;
         }
 
         if (!draft.name.trim()) {
-            toast.error(t('toastNameRequired'));
+            setFieldErrors({ name: t('toastNameRequired') });
+            requestAnimationFrame(() => document.getElementById(`name-${contact.id}`)?.focus());
             return;
         }
 
@@ -100,7 +107,7 @@ export default function EditContactSheet({
                 toastError(t('toastPartiallySaved'));
                 router.refresh();
             } else {
-                toastError(err instanceof Error ? err.message : t('toastFailedSave'));
+                showApiError(err, 'toastFailedSave');
             }
         } finally {
             setIsSaving(false);
@@ -114,12 +121,24 @@ export default function EditContactSheet({
             selectedIds={new Set([contact.id])}
             selectedContacts={[contact]}
             drafts={{ [contact.id]: draft }}
-            updateDraft={(_id, patch) => setDraft((prev) => ({ ...prev, ...patch }))}
+            updateDraft={(_id, patch) => {
+                for (const key of Object.keys(patch)) clearError(key);
+                setDraft((prev) => ({ ...prev, ...patch }));
+            }}
             imageFiles={{ [contact.id]: imageFile }}
             updateImageFile={(_id, file) => setImageFile(file)}
             isSaving={isSaving}
             saveEdits={saveEdits}
-            customFieldsSlot={<CustomFieldsEditSection ref={cfRef} entityType="person" entityId={contact.id} />}
+            fieldErrors={{ [contact.id]: fieldErrors }}
+            customFieldsDirty={customFieldsDirty}
+            customFieldsSlot={(
+                <CustomFieldsEditSection
+                    ref={cfRef}
+                    entityType="person"
+                    entityId={contact.id}
+                    onDirtyChange={setCustomFieldsDirty}
+                />
+            )}
         />
     );
 }

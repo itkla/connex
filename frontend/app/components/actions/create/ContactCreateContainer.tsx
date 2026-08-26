@@ -6,7 +6,8 @@ import { useTranslations } from 'next-intl';
 
 import NewContactDialog, { NewContactForm } from '@/app/components/records/contacts/NewContactDialog';
 import { createContact, importBusinessCard, isFieldError, uploadContactPicture } from '@/app/lib/api';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { toastSuccess } from '@/app/lib/toast';
 import type { BusinessCardImportDraft, CreateContactPayload } from '@/app/lib/types';
 import type { CreateDefaults } from '@/app/lib/actions/types';
 import { publishRecordMutation } from '@/app/lib/record-mutation-events';
@@ -39,6 +40,7 @@ export default function ContactCreateContainer({
 }) {
     const router = useRouter();
     const t = useTranslations('Actions');
+    const showApiError = useApiErrorToast('Actions');
 
     const [payload, setPayload] = useState<CreateContactPayload>(EMPTY_DRAFT);
     const [imageFile, setImageFile] = useState<File | null>(null);
@@ -164,7 +166,7 @@ export default function ContactCreateContainer({
             setCreating(false);
             emitDismissLock();
             if (isFieldError(err) || businessCard) throw err;
-            toastError(err instanceof Error ? err.message : t('feedback.createFailed'));
+            showApiError(err, 'feedback.personCreateFailed');
         }
     };
 

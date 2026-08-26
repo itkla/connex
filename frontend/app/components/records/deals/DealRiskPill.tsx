@@ -10,7 +10,7 @@ import type { DealRisk } from '@/app/lib/types';
 import { useRiskText } from './dealRisk';
 
 /**
- * Compact risk indicator for a deal — the sibling of {@link TemperaturePill}. Renders nothing when
+ * Compact risk indicator for a deal — the sibling of {@link WarmthPill}. Renders nothing when
  * the deal is not at risk; on hover its tooltip lists the contributing factors.
  */
 export default function DealRiskPill({ risk }: { risk?: DealRisk | null }) {

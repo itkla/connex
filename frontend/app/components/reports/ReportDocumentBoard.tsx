@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useReducer, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState, type RefObject, useMemo } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import {
     ArchiveBoxArrowDownIcon,
@@ -34,6 +34,7 @@ import {
     resolveAcceptedAiGeneration,
     subscribeClientRequestIdentityInvalidation,
 } from '@/app/lib/api';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { AiGenerationError } from '@/app/lib/aiGeneration';
 import { canDeleteOwnedRecord } from '@/app/lib/deletionPolicy';
@@ -49,15 +50,7 @@ import type {
     ReportSnapshotSummary,
 } from '@/app/lib/types';
 import { Button } from '@/components/ui/button';
-import {
-    Dialog,
-    DialogClose,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
+import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -175,7 +168,9 @@ export default function ReportDocumentBoard({
     defaultTimezone: string;
 }) {
     const t = useTranslations('Reports');
+    const showApiError = useApiErrorToast('Reports');
     const locale = useLocale();
+    const snapshotDateFormatter = useMemo(() => new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }), [locale]);
     const { activeWorkspace } = useWorkspace();
     const [reportState, dispatchReport] = useReducer(liveReportReducer, { status: 'loading' });
     const [snapshots, setSnapshots] = useState<ReportSnapshotSummary[]>(initialSnapshots);
@@ -332,8 +327,8 @@ export default function ReportDocumentBoard({
      */
     const syncSnapshotUrl = useCallback((snapshotId: number | null) => {
         const path = snapshotId == null
-            ? `/overview/reports/${definition.id}`
-            : `/overview/reports/${definition.id}/snapshots/${snapshotId}`;
+            ? `/insights/reports/${definition.id}`
+            : `/insights/reports/${definition.id}/snapshots/${snapshotId}`;
         if (window.location.pathname === path) return;
         window.history.replaceState(null, '', `${path}${window.location.search}`);
     }, [definition.id]);
@@ -363,7 +358,7 @@ export default function ReportDocumentBoard({
             syncSnapshotUrl(snapshot.id);
             toastSuccess(t('document.snapshotCreated'));
         } catch (error) {
-            toastError(error instanceof Error ? error.message : t('common.requestFailed'));
+            showApiError(error, 'document.snapshotFailed');
         } finally {
             setSnapshotting(false);
         }
@@ -385,7 +380,7 @@ export default function ReportDocumentBoard({
             toastSuccess(t('document.snapshotDeleted'));
             setSnapshotPendingDelete(null);
         } catch (error) {
-            toastError(error instanceof Error ? error.message : t('common.requestFailed'));
+            showApiError(error, 'document.snapshotDeleteFailed');
         } finally {
             setDeletingSnapshotId(null);
         }
@@ -408,7 +403,7 @@ export default function ReportDocumentBoard({
         } catch (error) {
             if (snapshotRequestRef.current === requestId) {
                 fallbackToLive();
-                toastError(error instanceof Error ? error.message : t('common.requestFailed'));
+                showApiError(error, 'document.snapshotOpenFailed');
             }
         }
     };
@@ -424,7 +419,7 @@ export default function ReportDocumentBoard({
                 await exportReportCsv(definition.id, input ?? {}, `${definition.name}.csv`);
             }
         } catch (error) {
-            toastError(error instanceof Error ? error.message : t('common.requestFailed'));
+            showApiError(error, 'document.csvFailed');
         } finally {
             setExporting(false);
         }
@@ -443,192 +438,179 @@ export default function ReportDocumentBoard({
     };
 
     return (
-        <div className="report-page min-h-full px-2 pb-16 pt-8">
-            <div className="mx-auto w-full max-w-[100rem]">
-                <div className="report-controls mb-6 flex flex-wrap items-end justify-between gap-4 rounded-2xl border border-border bg-card p-4">
-                    <div className="flex flex-wrap items-end gap-3">
-                        <div className="space-y-1.5">
-                            <Label htmlFor="report-live-start">{t('builder.startDate')}</Label>
-                            <Input id="report-live-start" type="date" value={start} onChange={(event) => setStart(event.target.value)} />
-                        </div>
-                        <div className="space-y-1.5">
-                            <Label htmlFor="report-live-end">{t('builder.endDate')}</Label>
-                            <Input id="report-live-end" type="date" value={end} onChange={(event) => setEnd(event.target.value)} />
-                        </div>
-                        <Button variant="outline" onClick={generate}>
-                            <ArrowPathIcon />
-                            {t('document.run')}
-                        </Button>
+        <div className="report-page min-h-full px-2 pb-16 pt-8 2xl:px-6">
+            <div className="report-controls mb-6 flex flex-wrap items-end justify-between gap-4 rounded-2xl border border-border bg-card p-4">
+                <div className="flex flex-wrap items-end gap-3">
+                    <div className="space-y-1.5">
+                        <Label htmlFor="report-live-start">{t('builder.startDate')}</Label>
+                        <Input id="report-live-start" type="date" value={start} onChange={(event) => setStart(event.target.value)} />
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                        <ScheduleManager
-                            reportId={definition.id}
-                            reportName={definition.name}
-                            canManage={canUpdateReports}
-                            defaultTimezone={defaultTimezone}
-                        />
-                        <Button variant="outline" onClick={createSnapshot} disabled={!document || snapshotting}>
-                            <ArchiveBoxArrowDownIcon />
-                            {snapshotting ? t('document.snapshotting') : t('document.snapshot')}
-                        </Button>
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button variant="outline" disabled={!document || exporting || exportingPng}>
-                                    <ArrowDownTrayIcon />
-                                    {exporting || exportingPng ? t('document.exporting') : t('document.export')}
-                                    <ChevronDownIcon className="size-4 opacity-60" />
-                                </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                                <DropdownMenuItem onSelect={() => void exportCsv()} disabled={exporting}>
-                                    <ArrowDownTrayIcon />
-                                    {t('document.csv')}
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onSelect={() => void exportPng()} disabled={exportingPng}>
-                                    <PhotoIcon />
-                                    {t('document.png')}
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onSelect={() => window.print()}>
-                                    <PrinterIcon />
-                                    {t('document.pdf')}
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
-                        {canUpdateReports ? (
-                            <Button asChild variant="brand">
-                                <Link href={`/overview/reports/${definition.id}/edit`}>
-                                    <PencilSquareIcon />
-                                    {t('common.edit')}
-                                </Link>
-                            </Button>
-                        ) : null}
+                    <div className="space-y-1.5">
+                        <Label htmlFor="report-live-end">{t('builder.endDate')}</Label>
+                        <Input id="report-live-end" type="date" value={end} onChange={(event) => setEnd(event.target.value)} />
                     </div>
+                    <Button variant="outline" onClick={generate}>
+                        <ArrowPathIcon />
+                        {t('document.run')}
+                    </Button>
                 </div>
-
-                {snapshots.length > 0 ? (
-                    <section className="report-controls mb-6 rounded-2xl border border-border bg-card p-4" aria-labelledby="snapshots-title">
-                        <div className="flex items-center gap-2">
-                            <ClockIcon className="size-4 text-muted-foreground" />
-                            <h2 id="snapshots-title" className="text-sm font-semibold text-foreground">{t('document.snapshots')}</h2>
-                        </div>
-                        <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-                            <Button
-                                variant={activeSnapshotId == null ? 'secondary' : 'ghost'}
-                                size="sm"
-                                onClick={fallbackToLive}
-                            >
-                                {t('document.live')}
-                            </Button>
-                            {snapshots.map((snapshot) => {
-                                const active = activeSnapshotId === snapshot.id;
-                                const dateLabel = new Intl.DateTimeFormat(locale, { dateStyle: 'medium' })
-                                    .format(new Date(snapshot.generatedAt));
-                                const deletable = canDeleteReports
-                                    && canDeleteOwnedRecord(snapshot.generatedBy, currentUserId, activeWorkspace?.role);
-                                return (
-                                    <div
-                                        key={snapshot.id}
-                                        className={cn(
-                                            'flex shrink-0 items-center rounded-full border',
-                                            active ? 'border-brand/40 bg-secondary' : 'border-border',
-                                        )}
-                                    >
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => openSnapshot(snapshot)}
-                                            aria-pressed={active}
-                                            className={cn(
-                                                'rounded-l-full hover:bg-transparent',
-                                                deletable ? 'rounded-r-none' : 'rounded-r-full',
-                                            )}
-                                        >
-                                            {snapshot.origin === 'scheduled' ? (
-                                                <CalendarDaysIcon
-                                                    role="img"
-                                                    aria-label={t('document.scheduledSnapshot')}
-                                                    className="size-3.5 text-muted-foreground"
-                                                />
-                                            ) : null}
-                                            {dateLabel}
-                                        </Button>
-                                        {deletable ? (
-                                            <Button
-                                                variant="ghost"
-                                                size="icon-sm"
-                                                onClick={() => setSnapshotPendingDelete(snapshot)}
-                                                disabled={deletingSnapshotId === snapshot.id}
-                                                aria-label={t('document.deleteSnapshotNamed', { date: dateLabel })}
-                                                className="rounded-l-none rounded-r-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                                            >
-                                                <TrashIcon className="size-3.5" />
-                                            </Button>
-                                        ) : null}
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </section>
-                ) : null}
-
-                {activeSnapshotId != null && activeSnapshot == null ? (
-                    <ReportDocumentSkeleton />
-                ) : activeSnapshot == null && reportState.status === 'loading' ? (
-                    <ReportDocumentSkeleton />
-                ) : activeSnapshot == null && reportState.status === 'report_failed' ? (
-                    <div className="rounded-2xl border border-border bg-card px-6 py-20 text-center">
-                        <DocumentTextIcon className="mx-auto size-8 text-muted-foreground" />
-                        <h2 className="mt-4 text-lg font-semibold text-foreground">{t('document.errorTitle')}</h2>
-                        <p className="mt-1 text-sm text-muted-foreground">{t('document.errorBody')}</p>
-                        <Button className="mt-6" variant="outline" onClick={generate}>
-                            <ArrowPathIcon />
-                            {t('common.retry')}
-                        </Button>
-                    </div>
-                ) : document ? (
-                    <ReportPaper
-                        document={document}
-                        snapshot={activeSnapshot}
-                        paperRef={paperRef}
-                        narrativePhase={activeSnapshot != null
-                            ? null
-                            : reportState.status === 'accepted' || reportState.status === 'running'
-                                ? 'generating'
-                                : reportState.status === 'timed_out'
-                                    ? 'timedOut'
-                                    : reportState.status === 'rate_limited'
-                                        ? 'rateLimited'
-                                        : reportState.status === 'failed'
-                                            ? 'error'
-                                            : null}
-                        onRetryNarrative={activeSnapshot != null ? undefined : retryNarrative}
+                <div className="flex flex-wrap items-center gap-2">
+                    <ScheduleManager
+                        reportId={definition.id}
+                        reportName={definition.name}
+                        canManage={canUpdateReports}
+                        defaultTimezone={defaultTimezone}
                     />
-                ) : null}
+                    <Button variant="outline" onClick={createSnapshot} disabled={!document || snapshotting}>
+                        <ArchiveBoxArrowDownIcon />
+                        {snapshotting ? t('document.snapshotting') : t('document.snapshot')}
+                    </Button>
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button variant="outline" disabled={!document || exporting || exportingPng}>
+                                <ArrowDownTrayIcon />
+                                {exporting || exportingPng ? t('document.exporting') : t('document.export')}
+                                <ChevronDownIcon className="size-4 opacity-60" />
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                            <DropdownMenuItem onSelect={() => void exportCsv()} disabled={exporting}>
+                                <ArrowDownTrayIcon />
+                                {t('document.csv')}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onSelect={() => void exportPng()} disabled={exportingPng}>
+                                <PhotoIcon />
+                                {t('document.png')}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onSelect={() => window.print()}>
+                                <PrinterIcon />
+                                {t('document.pdf')}
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                    {canUpdateReports ? (
+                        <Button asChild variant="brand">
+                            <Link href={`/insights/reports/${definition.id}/edit`}>
+                                <PencilSquareIcon />
+                                {t('common.edit')}
+                            </Link>
+                        </Button>
+                    ) : null}
+                </div>
             </div>
 
-            <Dialog
+            {snapshots.length > 0 ? (
+                <section className="report-controls mb-6 rounded-2xl border border-border bg-card p-4" aria-labelledby="snapshots-title">
+                    <div className="flex items-center gap-2">
+                        <ClockIcon className="size-4 text-muted-foreground" />
+                        <h2 id="snapshots-title" className="text-sm font-semibold text-foreground">{t('document.snapshots')}</h2>
+                    </div>
+                    <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+                        <Button
+                            variant={activeSnapshotId == null ? 'secondary' : 'ghost'}
+                            size="sm"
+                            onClick={fallbackToLive}
+                        >
+                            {t('document.live')}
+                        </Button>
+                        {snapshots.map((snapshot) => {
+                            const active = activeSnapshotId === snapshot.id;
+                            const dateLabel = new Intl.DateTimeFormat(locale, { dateStyle: 'medium' })
+                                .format(new Date(snapshot.generatedAt));
+                            const deletable = canDeleteReports
+                                && canDeleteOwnedRecord(snapshot.generatedBy, currentUserId, activeWorkspace?.role);
+                            return (
+                                <div
+                                    key={snapshot.id}
+                                    className={cn(
+                                        'flex shrink-0 items-center rounded-full border',
+                                        active ? 'border-brand/40 bg-secondary' : 'border-border',
+                                    )}
+                                >
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => openSnapshot(snapshot)}
+                                        aria-pressed={active}
+                                        className={cn(
+                                            'rounded-l-full hover:bg-transparent',
+                                            deletable ? 'rounded-r-none' : 'rounded-r-full',
+                                        )}
+                                    >
+                                        {snapshot.origin === 'scheduled' ? (
+                                            <CalendarDaysIcon
+                                                role="img"
+                                                aria-label={t('document.scheduledSnapshot')}
+                                                className="size-3.5 text-muted-foreground"
+                                            />
+                                        ) : null}
+                                        {dateLabel}
+                                    </Button>
+                                    {deletable ? (
+                                        <Button
+                                            variant="ghost"
+                                            size="icon-sm"
+                                            onClick={() => setSnapshotPendingDelete(snapshot)}
+                                            disabled={deletingSnapshotId === snapshot.id}
+                                            aria-label={t('document.deleteSnapshotNamed', { date: dateLabel })}
+                                            className="rounded-l-none rounded-r-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                                        >
+                                            <TrashIcon className="size-3.5" />
+                                        </Button>
+                                    ) : null}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </section>
+            ) : null}
+
+            {activeSnapshotId != null && activeSnapshot == null ? (
+                <ReportDocumentSkeleton />
+            ) : activeSnapshot == null && reportState.status === 'loading' ? (
+                <ReportDocumentSkeleton />
+            ) : activeSnapshot == null && reportState.status === 'report_failed' ? (
+                <div className="rounded-2xl border border-border bg-card px-6 py-20 text-center">
+                    <DocumentTextIcon className="mx-auto size-8 text-muted-foreground" />
+                    <h2 className="mt-4 text-lg font-semibold text-foreground">{t('document.errorTitle')}</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">{t('document.errorBody')}</p>
+                    <Button className="mt-6" variant="outline" onClick={generate}>
+                        <ArrowPathIcon />
+                        {t('common.retry')}
+                    </Button>
+                </div>
+            ) : document ? (
+                <ReportPaper
+                    document={document}
+                    snapshot={activeSnapshot}
+                    paperRef={paperRef}
+                    narrativePhase={activeSnapshot != null
+                        ? null
+                        : reportState.status === 'accepted' || reportState.status === 'running'
+                            ? 'generating'
+                            : reportState.status === 'timed_out'
+                                ? 'timedOut'
+                                : reportState.status === 'rate_limited'
+                                    ? 'rateLimited'
+                                    : reportState.status === 'failed'
+                                        ? 'error'
+                                        : null}
+                    onRetryNarrative={activeSnapshot != null ? undefined : retryNarrative}
+                />
+            ) : null}
+
+            <DeleteRecordDialog
                 open={snapshotPendingDelete !== null}
                 onOpenChange={(open) => !open && deletingSnapshotId === null && setSnapshotPendingDelete(null)}
-            >
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>{t('document.deleteSnapshotTitle')}</DialogTitle>
-                        <DialogDescription>{t('document.deleteSnapshotConfirm')}</DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button variant="outline" disabled={deletingSnapshotId !== null}>{t('common.cancel')}</Button>
-                        </DialogClose>
-                        <Button
-                            variant="destructive"
-                            onClick={confirmDeleteSnapshot}
-                            disabled={deletingSnapshotId !== null}
-                        >
-                            {deletingSnapshotId !== null ? t('common.deleting') : t('common.delete')}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+                selectedIds={new Set(snapshotPendingDelete !== null ? [snapshotPendingDelete.id] : [])}
+                selectedItems={snapshotPendingDelete !== null ? [snapshotPendingDelete] : []}
+                entityLabel={t('document.snapshotEntityLabel')}
+                getDisplayName={(snapshot) => t('document.snapshotNamed', {
+                    date: snapshotDateFormatter.format(new Date(snapshot.generatedAt)),
+                })}
+                isDeleting={deletingSnapshotId !== null}
+                confirmDelete={confirmDeleteSnapshot}
+            />
         </div>
     );
 }

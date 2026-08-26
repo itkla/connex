@@ -11,12 +11,13 @@ import {
     TagIcon,
     EllipsisHorizontalIcon,
     ClipboardIcon,
+    MagnifyingGlassIcon,
 } from '@heroicons/react/24/outline';
 import { PlusIcon } from '@heroicons/react/24/solid';
-import { Loader2Icon } from 'lucide-react';
 
 import { SearchField, FilterBar, SortToggle, type FilterChipData } from '@/app/components/filters';
 import { Button } from '@/components/ui/button';
+import { IconButton } from '@/components/ui/icon-button';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -24,24 +25,18 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogDescription,
-    DialogFooter,
-    DialogClose,
-} from '@/components/ui/dialog';
 
 import { deleteTag } from '@/app/lib/api';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { compareByColor, copyToClipboard, readableTextColor } from '@/app/lib/utils';
 import type { Tag } from '@/app/lib/types';
 import Rise from '@/app/components/motion/Rise';
 import TagDialog from '@/app/components/library/tags/TagDialog';
+import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
+import { EmptyState } from '@/app/components/EmptyState';
 
 type Props = { tags: Tag[] };
 type SortKey = 'color' | 'name';
@@ -66,6 +61,7 @@ function tilePresence(reduce: boolean) {
 export default function TagsBrowser({ tags: initialTags }: Props) {
     const t = useTranslations('ActivityLibraryTags');
     const tf = useTranslations('Filters');
+    const showApiError = useApiErrorToast('ActivityLibraryTags');
     const reduce = useReducedMotion() ?? false;
 
     const [tags, setTags] = useState<Tag[]>(initialTags);
@@ -112,7 +108,7 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
             toastSuccess(t('toastDeleted', { name: deletingTag.name }));
             setDeletingTag(null);
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastFailedDelete'));
+            showApiError(err, 'toastFailedDelete');
         } finally {
             setDeleting(false);
         }
@@ -135,7 +131,7 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
     const noResults = hasTags && visible.length === 0;
 
     return (
-        <PageShell tier="wide">
+        <PageShell>
             <Rise>
                 <PageHeader
                     title={t('title')}
@@ -195,15 +191,28 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
             <Rise delay={0.12}>
             {!hasTags ? (
                 <EmptyState
+                    icon={TagIcon}
                     title={t('emptyTitle')}
                     body={t('emptyBody')}
-                    cta={t('createFirst')}
-                    onCreate={openCreate}
+                    action={
+                        <Button onClick={openCreate} variant="brand">
+                            <PlusIcon strokeWidth={2.5} />
+                            {t('createFirst')}
+                        </Button>
+                    }
                 />
             ) : noResults ? (
-                <div className="rounded-2xl border border-border bg-card px-6 py-20 text-center">
-                    <p className="text-sm text-muted-foreground">{t('noResults', { query: query.trim() })}</p>
-                </div>
+                <EmptyState
+                    tone="muted"
+                    icon={MagnifyingGlassIcon}
+                    title={t('noResultsTitle')}
+                    body={t('noResults', { query: query.trim() })}
+                    action={
+                        <Button variant="outline" onClick={() => setQuery('')}>
+                            {tf('clearAll')}
+                        </Button>
+                    }
+                />
             ) : (
                 <ul className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
                     <AnimatePresence mode="popLayout" initial={false}>
@@ -234,15 +243,15 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
                 onSaved={handleSaved}
             />
 
-            <Dialog open={!!deletingTag} onOpenChange={(open) => !open && setDeletingTag(null)}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>{t('deleteTitle')}</DialogTitle>
-                        <DialogDescription>
-                            {t('deleteBody', { name: deletingTag?.name ?? '' })}
-                        </DialogDescription>
-                    </DialogHeader>
-                    {deletingTag && (
+            <DeleteRecordDialog
+                open={!!deletingTag}
+                onOpenChange={(open) => !open && setDeletingTag(null)}
+                selectedIds={new Set(deletingTag ? [deletingTag.id] : [])}
+                selectedItems={deletingTag ? [deletingTag] : []}
+                entityLabel={t('entityLabel')}
+                getDisplayName={(tag) => tag.name}
+                details={deletingTag ? (
+                    <div className="grid gap-3">
                         <div className="flex items-center justify-center rounded-xl bg-muted px-4 py-5 ring-1 ring-border">
                             <span
                                 className="inline-flex max-w-full items-center rounded-4xl px-3 py-1 text-sm font-medium"
@@ -254,19 +263,12 @@ export default function TagsBrowser({ tags: initialTags }: Props) {
                                 <span className="truncate">{deletingTag.name}</span>
                             </span>
                         </div>
-                    )}
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button type="button" variant="outline" disabled={deleting}>
-                                {t('cancel')}
-                            </Button>
-                        </DialogClose>
-                        <Button type="button" variant="destructive" onClick={handleDelete} disabled={deleting}>
-                            {deleting ? <Loader2Icon className="size-4 animate-spin" /> : t('confirmDelete')}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+                        <p className="text-sm text-muted-foreground">{t('deleteDetails')}</p>
+                    </div>
+                ) : undefined}
+                isDeleting={deleting}
+                confirmDelete={handleDelete}
+            />
         </PageShell>
     );
 }
@@ -317,13 +319,14 @@ function TagTile({ tag, reduce, onEdit, onCopy, onDelete, t }: TileProps) {
                     </button>
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                            <button
-                                type="button"
-                                aria-label={t('actionsAria', { name: tag.name })}
-                                className="flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground"
+                            <IconButton
+                                variant="ghost"
+                                size="icon-inline"
+                                label={t('actionsAria', { name: tag.name })}
+                                className="text-muted-foreground"
                             >
                                 <EllipsisHorizontalIcon className="size-4" />
-                            </button>
+                            </IconButton>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-40">
                             <DropdownMenuItem onSelect={onEdit}>
@@ -376,31 +379,5 @@ function AddTile({
                 <span className="text-sm font-medium">{label}</span>
             </motion.button>
         </motion.li>
-    );
-}
-
-function EmptyState({
-    title,
-    body,
-    cta,
-    onCreate,
-}: {
-    title: string;
-    body: string;
-    cta: string;
-    onCreate: () => void;
-}) {
-    return (
-        <div className="rounded-2xl border border-border bg-card px-6 py-20 text-center">
-            <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-dark">
-                <TagIcon className="size-7" />
-            </div>
-            <h2 className="mt-5 text-lg font-semibold text-foreground">{title}</h2>
-            <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">{body}</p>
-            <Button onClick={onCreate} variant="brand" className="mt-6">
-                <PlusIcon strokeWidth={2.5} />
-                {cta}
-            </Button>
-        </div>
     );
 }

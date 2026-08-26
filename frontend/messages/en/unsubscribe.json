@@ -15,7 +15,8 @@
         "doneBody": "We've removed this address. You won't receive further messages.",
         "invalidTitle": "Link unavailable",
         "invalidBody": "This unsubscribe link is invalid or has expired. If you keep receiving messages, contact the sender.",
-        "error": "Something went wrong. Please try again.",
-        "footer": "Sent with Connex"
+        "footer": "Sent with Connex",
+        "errorBody": "This link may have expired. Try the unsubscribe link in a more recent message, or reply to the sender to be removed.",
+        "errorTitle": "Couldn't unsubscribe you"
     }
 }

@@ -7,6 +7,7 @@ import { clearAllDrafts } from "@/app/lib/formDrafts";
 import { resolveAiGeneration } from '@/app/lib/aiGeneration';
 import { isProtectedPath } from "@/app/lib/protectedRoutes";
 import { isProtectedMediaPath } from "@/app/lib/protectedMedia";
+import { settingsDestination } from "@/app/lib/settingsEntryPoints";
 
 import type {
     AuthenticationResponseJSON,
@@ -361,7 +362,8 @@ export const PASSKEY_ENROLLMENT_REQUIRED_CODE = "PASSKEY_ENROLLMENT_REQUIRED";
 export const PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE = "PRIVILEGED_MFA_ENROLLMENT_REQUIRED";
 export const PASSKEY_STEP_UP_CANCELED_CODE = "PASSKEY_STEP_UP_CANCELED";
 export const PASSKEY_STEP_UP_FAILED_CODE = "PASSKEY_STEP_UP_FAILED";
-const PRIVILEGED_MFA_ENROLLMENT_DESTINATION = "/account/security?mfa=enroll";
+const PRIVILEGED_MFA_ENROLLMENT_ROUTE = settingsDestination("personal.security").href;
+const PRIVILEGED_MFA_ENROLLMENT_DESTINATION = `${PRIVILEGED_MFA_ENROLLMENT_ROUTE}?mfa=enroll`;
 const PRIVILEGED_MFA_ENROLLMENT_GET_PATHS = new Set([
     "/api/auth/me",
     "/api/auth/csrf",
@@ -389,7 +391,7 @@ const privilegedMfaEnrollmentListeners = new Set<(active: boolean) => void>();
 /** Returns whether the browser is on the privileged-account passkey enrolment destination. */
 export function isPrivilegedMfaEnrollmentDestination(): boolean {
     if (typeof window === "undefined") return false;
-    return window.location.pathname === "/account/security"
+    return window.location.pathname === PRIVILEGED_MFA_ENROLLMENT_ROUTE
         && new URLSearchParams(window.location.search).get("mfa") === "enroll";
 }
 
@@ -411,7 +413,7 @@ export function subscribePrivilegedMfaEnrollmentConfinement(
 /** Releases browser-local confinement after the server accepts passkey enrolment. */
 export function completePrivilegedMfaEnrollment(): void {
     if (isPrivilegedMfaEnrollmentDestination()) {
-        window.history.replaceState(null, "", "/account/security");
+        window.history.replaceState(null, "", PRIVILEGED_MFA_ENROLLMENT_ROUTE);
     }
     privilegedMfaEnrollmentRequired = false;
     privilegedMfaEnrollmentCompleted = true;
@@ -905,6 +907,23 @@ function buildQuery(params: Record<string, unknown>): string {
     return qs ? `?${qs}` : "";
 }
 
+/**
+ * Projects the warmth dimension of a records filter into query params. The page, the
+ * select-all-matching id read, and the CSV export each build their own query string, so they share
+ * this projection rather than three hand-kept key lists that could drift — a drift that would let a
+ * bulk action reach records the list never showed (#1342). A false `noWarmth` is normalized away
+ * rather than sent as `noWarmth=false`: the backend defaults it to false either way, so dropping it
+ * is what makes the three surfaces emit byte-identical warmth params for the same filter, which is
+ * what their parity is actually asserted on.
+ */
+function warmthQueryParams(params: Types.WarmthFilterParams): Record<string, unknown> {
+    return {
+        warmthBands: params.warmthBands,
+        noWarmth: params.noWarmth ? true : undefined,
+        goesColdWithinDays: params.goesColdWithinDays,
+    };
+}
+
 const WORKSPACE_LIST_PAGE_SIZE = 100;
 const RELATIONSHIP_MAP_RECORD_LIMIT = 2_000;
 const RELATIONSHIP_MAP_TOUCH_LIMIT = 4_000;
@@ -1180,6 +1199,19 @@ function isStringRecord(value: unknown): value is Record<string, string> {
     );
 }
 
+/**
+ * An error response body: string metadata keys, plus either flat string field errors or a nested
+ * `fieldErrors` envelope — the envelope keeps a field literally named "message" or "code" from
+ * colliding with the reserved metadata keys.
+ */
+function isErrorRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asString(value: unknown): string | undefined {
+    return typeof value === "string" ? value : undefined;
+}
+
 async function getApiError(res: Response): Promise<ApiError> {
     const text = await res.text().catch(() => "");
 
@@ -1190,16 +1222,20 @@ async function getApiError(res: Response): Promise<ApiError> {
     try {
         const data = JSON.parse(text) as unknown;
 
-        if (isStringRecord(data)) {
-            const { message, error, code, correlationId, ...fieldErrors } = data;
-            const fields = Object.keys(fieldErrors).length > 0 ? fieldErrors : undefined;
+        if (isErrorRecord(data)) {
+            const { message, error, code, correlationId, fieldErrors, ...rest } = data;
+            const flat = Object.fromEntries(
+                Object.entries(rest).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+            );
+            const enveloped = isStringRecord(fieldErrors) ? fieldErrors : undefined;
+            const fields = enveloped ?? (Object.keys(flat).length > 0 ? flat : undefined);
 
             return new ApiError(
-                message ?? error ?? "Please fix the highlighted fields.",
+                asString(message) ?? asString(error) ?? "Please fix the highlighted fields.",
                 res.status,
-                code,
+                asString(code),
                 fields,
-                correlationId,
+                asString(correlationId),
             );
         }
 
@@ -1561,6 +1597,7 @@ export const DEFAULT_CAPABILITIES: Types.InstanceCapabilities = {
     sso: false,
     socialLogin: { google: false, microsoft: false },
     connectedAccounts: { google: false, microsoft: false },
+    connectedAccountModes: { google: "custom", microsoft: "custom" },
     connectedCapture: { google: false, microsoft: false },
     mailManaged: false,
     businessCardScanning: false,
@@ -1594,6 +1631,46 @@ export function resumeProviderConnection(provider: Types.ConnectedAccountProvide
 
 export function disconnectProviderConnection(provider: Types.ConnectedAccountProvider, init: RequestInit = {}) {
     return deleteJson<void[]>(`/api/account/connections/${provider}`, init);
+}
+
+/** Erases retained capture across every workspace and removes the provider identity tombstone. */
+export function resetRetainedProviderData(
+    provider: Types.ConnectedAccountProvider,
+    init: RequestInit = {},
+) {
+    return deleteJson<void>(`/api/account/connections/${provider}/retained-data`, init);
+}
+
+/**
+ * Issues a pairing handle for the Connex-managed connect flow. The authorization itself runs in a
+ * helper process on the user's own machine, so the browser only ever holds the pairing code.
+ * @param provider the provider being connected
+ * @returns the pairing code, its expiry, this instance's base URL, and the helper command to run
+ */
+export function beginManagedPairing(provider: Types.ConnectedAccountProvider) {
+    return postJson<Types.ManagedPairingSession>(
+        `/api/account/connections/native/${provider}/pairing`,
+        {},
+    );
+}
+
+/** Reads the server-side progress of the caller's own managed pairing for one provider. */
+export function getManagedPairingStatus(
+    provider: Types.ConnectedAccountProvider,
+    init: RequestInit = {},
+) {
+    return getJson<Types.ManagedPairingStatus>(
+        `/api/account/connections/native/${provider}/pairing`,
+        { cache: "no-store", ...init },
+    );
+}
+
+/** Cancels the caller's pending managed pairing so a stale code cannot later be claimed. */
+export function cancelManagedPairing(
+    provider: Types.ConnectedAccountProvider,
+    init: RequestInit = {},
+) {
+    return deleteJson<void>(`/api/account/connections/native/${provider}/pairing`, init);
 }
 
 export function getCaptureOverview(init: RequestInit = {}) {
@@ -2044,7 +2121,8 @@ export function getCompanies(init: RequestInit = {}) {
 }
 
 export function getCompaniesPage(params: Types.CompaniesPageParams = {}, init: RequestInit = {}) {
-    return getJson<Types.Page<Types.Company>>(`/api/companies/page${buildQuery(params)}`, init);
+    const query = buildQuery({ ...params, ...warmthQueryParams(params) });
+    return getJson<Types.Page<Types.Company>>(`/api/companies/page${query}`, init);
 }
 
 export function getCompaniesPageResultFromCookie(
@@ -2077,8 +2155,10 @@ export function getCompaniesSegmentPage(params: Types.CompanySegmentPageParams, 
     return postJson<Types.Page<Types.Company>>(`/api/companies/segment/page`, params, init);
 }
 
-export function getCompanyFacets(init: RequestInit = {}) {
-    return getJson<Types.CompanyFacets>(`/api/companies/facets`, init);
+/** Reads the company browser's facet counts, with the same opt-in warmth bands as {@link getPersonFacets}. */
+export function getCompanyFacets(params: { warmth?: boolean } = {}, init: RequestInit = {}) {
+    const query = buildQuery({ warmth: params.warmth ? true : undefined });
+    return getJson<Types.CompanyFacets>(`/api/companies/facets${query}`, init);
 }
 
 /** Ids of every company matching an active filter, capped by the backend bulk-operation limit. */
@@ -2086,6 +2166,7 @@ export function getCompanyIds(params: Types.CompaniesPageParams = {}, init: Requ
     const query = buildQuery({
         q: params.q, industry: params.industry, noIndustry: params.noIndustry, ids: params.ids,
         scope: params.scope, memberIds: params.memberIds, archived: params.archived,
+        ...warmthQueryParams(params),
     });
     return getJson<number[]>(`/api/companies/ids${query}`, init);
 }
@@ -2189,7 +2270,8 @@ export function getContactsFromCookie(cookie: string | null, filters: Types.Cont
 }
 
 export function getContactsPage(params: Types.ContactsPageParams = {}, init: RequestInit = {}) {
-    return getJson<Types.Page<Types.Contact>>(`/api/persons/page${buildQuery(params)}`, init);
+    const query = buildQuery({ ...params, ...warmthQueryParams(params) });
+    return getJson<Types.Page<Types.Contact>>(`/api/persons/page${query}`, init);
 }
 
 export function getContactsPageResultFromCookie(
@@ -2283,6 +2365,10 @@ export function exportContactsCsv(params: Types.ContactsPageParams = {}, init: R
     const query = buildQuery({
         q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany,
         scope: params.scope, memberIds: params.memberIds,
+        lifecycleStages: params.lifecycleStages, noLifecycle: params.noLifecycle,
+        leadSources: params.leadSources, noLeadSource: params.noLeadSource,
+        firstResponseStates: params.firstResponseStates, noFirstResponse: params.noFirstResponse,
+        ...warmthQueryParams(params),
     });
     return downloadCsv(`/api/exports/persons${query}`, "contacts.csv", init);
 }
@@ -2291,6 +2377,7 @@ export function exportCompaniesCsv(params: Types.CompaniesPageParams = {}, init:
     const query = buildQuery({
         q: params.q, industry: params.industry, noIndustry: params.noIndustry, ids: params.ids,
         scope: params.scope, memberIds: params.memberIds,
+        ...warmthQueryParams(params),
     });
     return downloadCsv(`/api/exports/companies${query}`, "companies.csv", init);
 }
@@ -2298,7 +2385,8 @@ export function exportCompaniesCsv(params: Types.CompaniesPageParams = {}, init:
 export function exportDealsCsv(params: Types.DealFilterParams = {}, init: RequestInit = {}) {
     const query = buildQuery({
         q: params.q, currency: params.currency, pipelineId: params.pipelineId, stageId: params.stageId,
-        companyId: params.companyId, noCompany: params.noCompany, status: params.status, risk: params.risk,
+        companyId: params.companyId, personId: params.personId, noCompany: params.noCompany,
+        status: params.status, risk: params.risk,
         scope: params.scope, memberIds: params.memberIds,
     });
     return downloadCsv(`/api/exports/deals${query}`, "deals.csv", init);
@@ -2316,8 +2404,16 @@ export function exportDealSegmentCsv(params: Types.DealSegmentPageParams, init: 
     });
 }
 
-export function getPersonFacets(init: RequestInit = {}) {
-    return getJson<Types.PersonFacets>(`/api/persons/facets`, init);
+/**
+ * Reads the contact browser's facet counts. The warmth bands are opt-in because they cost a
+ * full-workspace decayed-touch aggregate: ask for them only where the warmth facet is actually
+ * shown, and read {@link Types.PersonFacets.warmthBands} as absent — not empty — when you did not.
+ *
+ * @param params - whether to include the warmth-band counts
+ */
+export function getPersonFacets(params: { warmth?: boolean } = {}, init: RequestInit = {}) {
+    const query = buildQuery({ warmth: params.warmth ? true : undefined });
+    return getJson<Types.PersonFacets>(`/api/persons/facets${query}`, init);
 }
 
 /*
@@ -2422,7 +2518,12 @@ export function bulkChangeDealStage(ids: number[], stageId: number) {
 export function getContactIds(params: Types.ContactsPageParams = {}, init: RequestInit = {}) {
     const query = buildQuery({
         q: params.q, companies: params.companies, titles: params.titles, noCompany: params.noCompany,
-        scope: params.scope, memberIds: params.memberIds, archived: params.archived,
+        scope: params.scope, memberIds: params.memberIds,
+        lifecycleStages: params.lifecycleStages, noLifecycle: params.noLifecycle,
+        leadSources: params.leadSources, noLeadSource: params.noLeadSource,
+        firstResponseStates: params.firstResponseStates, noFirstResponse: params.noFirstResponse,
+        archived: params.archived,
+        ...warmthQueryParams(params),
     });
     return getJson<number[]>(`/api/persons/ids${query}`, init);
 }
@@ -2618,6 +2719,15 @@ export function getIntroOverviewResultFromCookie(
     );
 }
 
+/**
+ * The ranked warm-path feed the Introductions board reads — already filtered by the server's own
+ * dismissal records and bridge-warmth eligibility. Any surface offering an introduction reads this,
+ * so no surface can offer an ask the board would not.
+ */
+export function getWarmPaths(limit?: number, init: RequestInit = {}) {
+    return getJson<Types.WarmPath[]>(`/api/introductions/paths${buildQuery({ limit })}`, init);
+}
+
 /** Accepts a warm path: the backend creates the follow-up task and retires the avenue. */
 export function acceptWarmPath(payload: Types.WarmPathPayload, init: RequestInit = {}) {
     return postJson<Types.Task>(`/api/introductions/paths/accept`, payload, init);
@@ -2635,6 +2745,25 @@ export type RadarCookieResult =
 /** Reads the canonical relationship-signal feed without collapsing refusal and failure into empty data. */
 export function getRadar(init: RequestInit = {}) {
     return getJson<Types.RadarPayload>('/api/radar', { cache: 'no-store', ...init });
+}
+
+/**
+ * Reads the Radar feed narrowed in the database to the signals about one record, for a record page
+ * that would otherwise pay for the whole workspace's feed to show a handful of rows. Both params are
+ * required together; the backend rejects one without the other.
+ *
+ * @param subjectType - the kind of record the signals are about
+ * @param subjectId - the record the signals are about
+ */
+export function getRadarForSubject(
+    subjectType: Types.RadarSubjectType,
+    subjectId: number,
+    init: RequestInit = {},
+) {
+    return getJson<Types.RadarPayload>(
+        `/api/radar${buildQuery({ subjectType, subjectId })}`,
+        { cache: 'no-store', ...init },
+    );
 }
 
 /** Server-side Radar read that preserves the HTTP status required for honest route states. */
@@ -2829,6 +2958,75 @@ export function updateContactEvaluation(id: number, payload: Types.UpdateContact
     return putJson<Types.Contact>(`/api/persons/${id}/evaluation`, payload);
 }
 
+/** Replaces a contact's source provenance (issue #559); an all-null body clears it. */
+export function updateContactProvenance(id: number, payload: Types.UpdateContactProvenancePayload) {
+    return putJson<Types.Contact>(`/api/persons/${id}/provenance`, payload);
+}
+
+/** The contact's current lead-lifecycle state and the moves it may make next (issue #559). */
+export function getContactLifecycle(id: number, init: RequestInit = {}) {
+    return getJson<Types.ContactLifecycle>(`/api/persons/${id}/lifecycle`, init);
+}
+
+/** Moves a contact to a lead-lifecycle stage (issue #559). */
+export function updateContactLifecycle(id: number, payload: Types.UpdateContactLifecyclePayload) {
+    return putJson<Types.ContactLifecycle>(`/api/persons/${id}/lifecycle`, payload);
+}
+
+/**
+ * Withdraws a contact from the lead lifecycle. Deliberately a separate call from
+ * {@link updateContactLifecycle} so an omitted stage can never erase the lifecycle by accident, and
+ * the note travels in the body so it never lands in a URL or an access log.
+ */
+export function withdrawContactLifecycle(id: number, note?: string) {
+    return postJson<Types.ContactLifecycle>(`/api/persons/${id}/lifecycle/withdrawal`, { note: note ?? null });
+}
+
+/** The contact's qualification criteria, answers, and deterministic scores (issue #559). */
+export function getContactQualification(id: number, init: RequestInit = {}) {
+    return getJson<Types.ContactQualification>(`/api/persons/${id}/qualification`, init);
+}
+
+/** Answers one qualification criterion; omitting the answer clears it back to unanswered. */
+export function answerContactQualification(
+    id: number,
+    payload: Types.AnswerContactQualificationPayload,
+) {
+    return putJson<Types.ContactQualification>(`/api/persons/${id}/qualification`, payload);
+}
+
+/** The workspace's qualification criteria (issue #559). */
+export function getQualificationCriteria(includeArchived = false, init: RequestInit = {}) {
+    return getJson<Types.QualificationCriterion[]>(
+        `/api/qualification-criteria${includeArchived ? '?includeArchived=true' : ''}`,
+        init,
+    );
+}
+
+export function createQualificationCriterion(payload: Types.QualificationCriterionPayload) {
+    return postJson<Types.QualificationCriterion>('/api/qualification-criteria', payload);
+}
+
+export function updateQualificationCriterion(
+    id: number,
+    payload: Types.QualificationCriterionPayload,
+) {
+    return putJson<Types.QualificationCriterion>(`/api/qualification-criteria/${id}`, payload);
+}
+
+/** Archives a criterion. There is no hard delete: answers already given must survive. */
+export function archiveQualificationCriterion(id: number) {
+    return deleteJson<void>(`/api/qualification-criteria/${id}`);
+}
+
+export function restoreQualificationCriterion(id: number) {
+    return postJson<void>(`/api/qualification-criteria/${id}/restore`, {});
+}
+
+export function getContactLifecycleHistory(id: number, init: RequestInit = {}) {
+    return getJson<Types.ContactLifecycleHistoryEntry[]>(`/api/persons/${id}/lifecycle/history`, init);
+}
+
 export function getContactTags(id: number, init: RequestInit = {}) {
     return getJson<Types.Tag[]>(`/api/persons/${id}/tags`, init);
 }
@@ -2896,7 +3094,8 @@ export function getDealsSegmentPage(params: Types.DealSegmentPageParams, init: R
 export function getDealIds(params: Types.DealsPageParams = {}, init: RequestInit = {}) {
     const query = buildQuery({
         q: params.q, currency: params.currency, pipelineId: params.pipelineId, stageId: params.stageId,
-        companyId: params.companyId, noCompany: params.noCompany, status: params.status, risk: params.risk,
+        companyId: params.companyId, personId: params.personId, noCompany: params.noCompany,
+        status: params.status, risk: params.risk,
         scope: params.scope, memberIds: params.memberIds,
     });
     return getJson<number[]>(`/api/deals/ids${query}`, init);
@@ -2953,7 +3152,8 @@ export function getDealMetricsResultFromCookie(
 }
 
 /**
- * Stable filter-facet vocabulary (status, stage, pipeline, company, currency, owners) with
+ * Stable filter-facet vocabulary (status, stage, pipeline, company, stakeholder contact, currency,
+ * owners) with
  * counts, computed server-side over the whole workspace so options never vanish when the
  * visible page lacks them (e.g. the "Closed" status option). The owners facet in particular
  * always reflects all-team counts — including the `__empty__` unassigned bucket — regardless
@@ -3512,6 +3712,21 @@ export function updateStage(id: number, payload: Types.UpdateStagePayload) {
     return putJson<Types.Stage>(`/api/pipelines/stages/${id}`, payload);
 }
 
+/**
+ * Replaces a pipeline's whole stage set in one transactional request. Entries with an `id` are kept
+ * and updated, entries without one are created, and a stage in `knownStageIds` but absent from
+ * `stages` is removed — a stage another editor added since this one loaded is left alone;
+ * positions follow the order given. Validating the final set is what lets a name swap or a moved
+ * Won flag succeed, neither of which is expressible as a sequence of single-stage writes.
+ */
+export function replacePipelineStages(
+    pipelineId: number,
+    knownStageIds: number[],
+    stages: Types.PipelineStageInput[],
+) {
+    return putJson<Types.Stage[]>(`/api/pipelines/${pipelineId}/stages`, { knownStageIds, stages });
+}
+
 export function deleteStage(id: number, init: RequestInit = {}) {
     return deleteJson<void>(`/api/pipelines/stages/${id}`, init);
 }
@@ -3608,6 +3823,18 @@ export function deleteDocumentTemplate(id: number, init: RequestInit = {}) {
     return deleteJson<void[]>(`/api/document-templates/${id}`, init);
 }
 
+/**
+ * One bounded page of generated documents across every deal in the workspace — the cross-deal index
+ * that makes a finished quote findable without already knowing which deal produced it. Returns
+ * summaries only; the immutable content snapshot stays behind the per-deal read.
+ *
+ * @param params - paging, a free-text match over document title and deal name, and the status, type,
+ *   deal, and ownership-scope filters the index offers
+ */
+export function getGeneratedDocuments(params: Types.GeneratedDocumentsPageParams = {}, init: RequestInit = {}) {
+    return getJson<Types.Page<Types.GeneratedDocumentSummary>>(`/api/documents${buildQuery(params)}`, init);
+}
+
 export function getDealDocuments(dealId: number, init: RequestInit = {}) {
     return getJson<Types.DealDocument[]>(`/api/deals/${dealId}/documents`, init);
 }
@@ -3653,6 +3880,15 @@ export function deleteApprovalPolicy(id: number, init: RequestInit = {}) {
     return deleteJson<void[]>(`/api/approval-policies/${id}`, init);
 }
 
+/**
+ * Previews what saving `payload` over policy `id` would do to approvals already pending under it.
+ * Read-only: the server runs the same classification the save enforces, so the disclosed count
+ * matches what a confirmed write invalidates.
+ */
+export function previewApprovalPolicyImpact(id: number, payload: Types.UpdateApprovalPolicyPayload) {
+    return postJson<Types.ApprovalPolicyImpact>(`/api/approval-policies/${id}/impact`, payload);
+}
+
 export function requestDocumentApproval(dealId: number, documentId: number, comment?: string | null) {
     return postJson<Types.DocumentApproval>(
         `/api/deals/${dealId}/documents/${documentId}/approval`, { comment: comment ?? null });
@@ -3672,6 +3908,42 @@ export function decideDocumentApproval(
 
 export function cancelDocumentApproval(dealId: number, documentId: number) {
     return postJson<Types.DocumentApproval>(`/api/deals/${dealId}/documents/${documentId}/approval/cancel`, {});
+}
+
+export function delegateDocumentApproval(
+    dealId: number,
+    documentId: number,
+    stepId: number,
+    delegateUserId: number,
+    comment?: string | null,
+) {
+    return postJson<Types.DocumentApproval>(
+        `/api/deals/${dealId}/documents/${documentId}/approval/steps/${stepId}/delegate`,
+        { delegateUserId, comment: comment ?? null },
+    );
+}
+
+export function getDocumentApprovalDelegateCandidates(
+    dealId: number,
+    documentId: number,
+    stepId: number,
+    init: RequestInit = {},
+) {
+    return getJson<Types.ApprovalDelegate[]>(
+        `/api/deals/${dealId}/documents/${documentId}/approval/steps/${stepId}/delegate-candidates`,
+        { cache: 'no-store', ...init },
+    );
+}
+
+export function getApprovalInbox(init: RequestInit = {}) {
+    return getJson<Types.ApprovalInboxItem[]>(`/api/approvals/inbox`, {
+        cache: 'no-store',
+        ...init,
+    });
+}
+
+export function getApprovalInboxResultFromCookie(cookie: string | null) {
+    return resultWithCookie<Types.ApprovalInboxItem[]>((init) => getApprovalInbox(init), cookie);
 }
 
 export function getDealLineItems(dealId: number, init: RequestInit = {}) {
@@ -3720,6 +3992,7 @@ export function search(query: string, init: RequestInit = {}) {
 
 const EMPTY_SEARCH_RESULTS: Types.SearchResults = {
     companies: [], people: [], deals: [], pipelines: [], tags: [], activities: [], notes: [], tasks: [], users: [], attachments: [],
+    products: [], campaigns: [], reports: [], documentTemplates: [], documents: [], workflows: [],
 };
 
 /**
@@ -5153,6 +5426,34 @@ export function leaveAiChatPresence(id: number, init: RequestInit = {}) {
     return deleteJson<void>(`/api/ai/assistant/sessions/${id}/presence`, init);
 }
 
+/**
+ * Lists the declared assistant capabilities this member can run, optionally for one record kind.
+ *
+ * The directory is the only source contextual entry points are built from: a suggestion whose
+ * backing capability is absent here is never offered, so a page cannot advertise work the server
+ * would decline. Listing needs no configured AI provider — describing the surface and running a
+ * request are separate gates.
+ */
+export function getAiAssistantSkills(
+    context?: Types.AiChatPageContextKind,
+    init: RequestInit = {},
+) {
+    const suffix = context === undefined ? "" : `?context=${encodeURIComponent(context)}`;
+    return getJson<Types.AiAssistantSkill[]>(`/api/ai/assistant/skills${suffix}`, init);
+}
+
+/** Evaluates one declared scope without asking anything, so its real breadth can be reviewed first. */
+export function previewAiChatScope(
+    payload: Types.AiChatScopePreviewRequest,
+    init: RequestInit = {},
+) {
+    return postJson<Types.AiChatScopePreview>(
+        "/api/ai/assistant/sessions/scope-preview",
+        payload,
+        init,
+    );
+}
+
 export async function startAiChatTurn(
     sessionId: number,
     payload: Types.AiChatTurnCreateRequest,
@@ -5877,6 +6178,26 @@ export function getCampaignEngagement(id: number, init: RequestInit = {}) {
 }
 
 /**
+ * One bounded page of the recipients behind a campaign's engagement counts, as contact record links.
+ * A delivery is always contact-scoped, so the server requires consent access on top of campaign
+ * read — a caller without it must never be offered the drill-through.
+ *
+ * @param id - the campaign whose deliveries to page through
+ * @param params - the population to draw from: `status` for the status-derived counters, `event` for
+ *   the unsubscribe counter, and an optional single send
+ */
+export function getCampaignRecipients(
+    id: number,
+    params: Types.CampaignRecipientsPageParams = {},
+    init: RequestInit = {},
+) {
+    return getJson<Types.Page<Types.CampaignRecipient>>(
+        `/api/campaigns/${id}/recipients${buildQuery(params)}`,
+        init,
+    );
+}
+
+/**
  * Fetches the public unsubscribe preview for a delivery token. Deliberately bypasses the workspace
  * and CSRF machinery: the route is unauthenticated and resolves the tenant from the token alone.
  * @param token the 64-character hex delivery token from the unsubscribe link
@@ -5903,6 +6224,32 @@ export function confirmUnsubscribe(token: string) {
 
 export function getPersonConsent(personId: number, init: RequestInit = {}) {
     return getJson<Types.ContactChannelConsent[]>(`/api/persons/${personId}/consent`, init);
+}
+
+/**
+ * A contact's marketing contactability, so a member sees that someone opted out — or is on a
+ * privacy hold — before writing to them. Reports the state only: the recorded address, note, and
+ * author stay behind the consent-management surface.
+ */
+export function getPersonMarketingStatus(personId: number, init: RequestInit = {}) {
+    return getJson<Types.ContactMarketingStatus>(`/api/persons/${personId}/marketing-status`, init);
+}
+
+/**
+ * One bounded page of the campaign touches on a contact's record timeline, newest first.
+ *
+ * @param personId - the contact whose touches to read
+ * @param page - the one-based page number and page size
+ */
+export function getPersonCampaignTouches(
+    personId: number,
+    page: { page?: number; size?: number } = {},
+    init: RequestInit = {},
+) {
+    return getJson<Types.Page<Types.PersonCampaignTouch>>(
+        `/api/persons/${personId}/campaign-touches${buildQuery(page)}`,
+        init,
+    );
 }
 
 export function setPersonConsent(personId: number, payload: Types.ContactChannelConsentPayload) {
@@ -5933,4 +6280,29 @@ export function deleteSuppression(id: number) {
  */
 export function reportClientError(payload: Types.ClientErrorReportPayload) {
     return postJson<void>(`/api/client-errors`, payload);
+}
+
+/** Reads the member's own brief schedule, last delivered brief, and watches in one call. */
+export function getAiCommandCenter(init: RequestInit = {}) {
+    return getJson<Types.AiCommandCenter>(`/api/ai/assistant/command-center`, init);
+}
+
+/** Replaces the member's own brief schedule in full. */
+export function replaceAiBriefSchedule(payload: Types.AiBriefSchedulePayload) {
+    return putJson<Types.AiBriefSchedule>(`/api/ai/assistant/brief-schedule`, payload);
+}
+
+/** Creates one typed watch from a trigger the member has already reviewed. */
+export function createAiWatch(payload: Types.AiWatchPayload) {
+    return postJson<Types.AiWatch>(`/api/ai/assistant/watches`, payload);
+}
+
+/** Pauses or resumes one of the member's own watches. */
+export function setAiWatchActive(id: number, active: boolean) {
+    return patchJson<Types.AiWatch>(`/api/ai/assistant/watches/${id}`, { active });
+}
+
+/** Deletes one of the member's own watches. */
+export function deleteAiWatch(id: number) {
+    return deleteJson<void>(`/api/ai/assistant/watches/${id}`);
 }

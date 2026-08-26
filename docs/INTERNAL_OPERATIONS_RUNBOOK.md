@@ -206,18 +206,14 @@ DELETE /api/workspaces/{workspaceId}/roles/{roleId}
 - **A custom role replaces the built-in bundle entirely.** A member with a custom role assigned gets
   that role's exact permission set; the built-in bundle for their `MEMBER`/`ADMIN`/`OWNER` role no
   longer applies. Assigning an under-specified custom role is how people accidentally remove access.
-- Deleting a custom role nulls the reference, so its members fall back to their built-in role rather
-  than losing everything.
+- An assigned custom role cannot be deleted. Reassign every affected member first; this makes the
+  resulting built-in or replacement role explicit and subjects it to the normal grant ceiling.
 - **No one can confer a permission they do not themselves hold.** This cap is enforced on role
   **create** and **update**, on custom-role assignment, and on built-in role change. Non-grantable
   values are rejected on input and silently dropped on read.
-- **Deletion is the exception, and it is not a cap at all.** `deleteRole` runs the same
-  authorization lock but passes an **empty** requested-permission set into the grantable check, so
-  the check iterates nothing: **any `ROLE_MANAGE` holder can delete a custom role that grants
-  permissions they do not hold.** The blast radius is a privilege *reduction* — deleted members fall
-  back to their built-in bundle — but do not describe deletion to a customer as
-  permission-capped, and treat "someone deleted the role that held our elevated access" as a
-  reachable state for any `ROLE_MANAGE` holder.
+- Deletion requires `ROLE_MANAGE`, recent step-up, the locked role-mutation protocol, and zero
+  assignees. Because deletion cannot change anyone's effective permissions, it does not need a
+  separate grant-ceiling comparison after those checks.
 - `GET /api/permissions` lists grantable names; `GET /api/permissions/effective` returns the calling
   member's effective set — that endpoint is the fastest way to settle a "why can't I do X" ticket.
 
@@ -591,12 +587,20 @@ This is the single most common support-flow mistake, so internalize it before th
 
 | The user is looking at | They can quote | Where it comes from |
 |---|---|---|
-| A broken **page** (render/boundary failure) | **`Reference: <digest>`** — a Next.js server digest | The error screen renders it in monospace, `select-all`. **This is the only correlation-like identifier any Connex UI shows.** |
+| A broken **page** (render/boundary failure) | **`Reference: <digest>`** — a Next.js server digest | The error screen renders it in monospace, `select-all`. This is the page identifier; it is NOT the API correlation ID. |
+| A failed **in-app action** (an error toast) | **`Reference: <correlationId>`** appended to the toast body | The API error mapper (`frontend/app/lib/errorMessages.ts`) appends it whenever the response carried a correlation id — today only the catch-all 500 handler emits one |
 | A raw API `500` (curl, devtools, an integration) | `correlationId` in the JSON body, and the `X-Correlation-Id` response header | The catch-all exception handler and the correlation filter |
+| A **workflow run** they are asking about | a **run reference** — `canonical-<id>` or `legacy-<id>` — from the "copy the run reference" button beside "Run #N" / "Earlier run #N" | `WorkflowInterventionService`/`WorkflowRunReadService` mint it; the UI shows only the number. Look it up in workflow operations at `/workflows/<workflowId>/runs/<runKey>`, **not** in the correlation logs — it is not a correlation ID |
 
-**No screen renders the correlation ID.** The frontend parses it into `ApiError.correlationId` and
-then never displays it. So a user reporting a broken page will hand you a **digest**, not a
-correlation ID — asking them for a correlation ID will produce confusion, not an identifier.
+**Which identifier you get depends on what broke.** A failed action (toast) hands you the API
+correlation ID as `Reference: <id>`; the admin diagnostics and mail-deliverability panels show the
+same id as "Reference ID". A broken **page** hands you a Next.js **digest** — also labeled
+`Reference:` — which is not a correlation ID and cannot be looked up as one. A **run reference** is
+a third thing again: it names a stored workflow run, not an incident, so it resolves in workflow
+operations and never in the correlation logs. Distinguish them by what the user was doing: an action
+that failed → correlation ID; a page that wouldn't render → digest; a workflow run they want traced
+→ run reference. The two run sequences are independent, so always take the prefix with the number —
+`canonical-42` and `legacy-42` are different runs.
 
 When the frontend error boundary fires, it best-effort reports to `POST /api/client-errors`. The
 digest, message, and stack remain only in the local log sink and never enter the database or bundle:
@@ -831,6 +835,179 @@ All customer-facing wording on this subject comes from
 [ENCRYPTION_GUARANTEE_MATRIX.md](ENCRYPTION_GUARANTEE_MATRIX.md), which is the canonical source and
 carries the review lint checklist. Use its questionnaire boilerplate verbatim rather than
 paraphrasing this section.
+
+## Runtime cutover
+
+`connex.workflows.runtime.enabled` / `CONNEX_WORKFLOWS_RUNTIME_ENABLED` defaults to **`false`**. The
+flag changes delivery for every workflow before any individual workflow changes owner: with it on,
+the after-commit legacy listener is inert, the legacy scheduler stops executing directly, and the
+durable workflow outbox delivers both legacy-owned and canonical-owned work. Runtime ownership is
+the persisted `workflow.runtime_owner` value, not a process-local flag.
+
+This section records the behavior that operators must measure before a supervised cutover. It is
+not an authorization to enable the flag or change ownership; the bounded flip procedure and its
+rollback sequence are a separate rollout artifact.
+
+### Engine delta inventory
+
+#### Trigger intake
+
+| Behavior | Legacy owner | Canonical owner |
+|---|---|---|
+| Entity-change delivery | Asynchronous `AFTER_COMMIT` listener; process death can lose the fire | Trigger target is written before source commit and drained by a leased worker |
+| Candidate selection | Loads all enabled entity-change rules, then filters each in Java | SQL pre-filters trigger event and excludes intake-paused workflows |
+| Fan-out | Unbounded | Maximum 128 matching workflow targets; excess intake fails with `trigger_fanout_limit` |
+| Delivery retry | None; a dispatch failure is logged and dropped | Up to 8 leased delivery attempts, pinned to workflow generation and version |
+| Typical latency | Near-immediate after commit | Up to the scheduler delay, 5 seconds by default, plus queue time |
+
+#### Scheduling
+
+| Behavior | Legacy owner | Canonical owner |
+|---|---|---|
+| Cadence producer | `RuleScheduler` evaluates every 15 minutes | The same tick creates a durable outbox target; the worker drains it |
+| Bucket identity | Production uses a UTC cadence bucket | Uses the same UTC cadence bucket |
+| Record enumeration | One unbounded whole-workspace segment evaluation | Freezes the upper record id at intake and scans pages of 100, checking each match |
+| Schedule with no WHEN condition | Inert: it enrolls no records | Invalid: compilation fails with `schedule_enrollment_condition_required`, blocking cutover |
+| Test-seam enrollment | Unbounded | `WorkflowRuntimeService` rejects more than 128 matches; production outbox delivery pages instead |
+
+The legacy `runSchedule(workspaceId, cadence)` test overload uses the system-default time zone. It is
+not the production path and must not be used as evidence for cadence-bucket parity.
+
+#### Actions and failure handling
+
+| Behavior | Legacy owner | Canonical owner |
+|---|---|---|
+| One action fails | Records the failure, continues later actions, and ends `partial` | Stops at that node; later nodes never run and the run fails or requires intervention |
+| Mutable-reference preflight | None | Checks action permission, tag existence, active assignment target, and stage/pipeline compatibility before each action |
+| Record guard | Contacts only, using the visibility-scoped person query | Every supported record type, owned by the workspace and not suspended/archived; rechecked before every node |
+| Retry | None | At most 3 attempts for classified transient database failures, subject to action retry safety |
+| Transaction boundary | All actions in one execution block | One node effect and checkpoint per `REQUIRES_NEW`, `READ_COMMITTED` transaction |
+| Traversal bound | At most 16 flattened actions | At most 50 traversed nodes |
+| Delays and non-legacy/arbitrary branching | Cannot be projected | Supported, but a workflow using either can no longer roll back to the legacy engine |
+
+Both engines call the same `RuleActionExecutor`, so a successfully admitted action has the same
+mechanics. The material differences are admission, transaction boundaries, retry, and what happens
+after failure.
+
+#### Notifications
+
+| Behavior | Legacy owner | Canonical owner |
+|---|---|---|
+| Dedupe scope | One `rule:{ruleId}:{entityId}:{suffix}` key shared by every notify action in a fire | One `workflow:{runId}:node:{nodeId}` key per action node |
+| Two notify actions | One notification row; the second action overwrites the first | Two notification rows |
+| Email consequence | One first-occurrence email claim | One first-occurrence email claim per notify node |
+
+Notification content other than the dedupe key is produced by the same executor: type `rule`,
+category, severity, title, body, actor label `Automation`, source type, and source id.
+
+#### Run recording
+
+| Behavior | Legacy owner | Canonical owner |
+|---|---|---|
+| Ledger | One `rule_execution` row with a JSON detail | `workflow_run`, `workflow_step_run`, and `workflow_step_attempt` |
+| WHEN not matched | `skipped` | `succeeded` after Condition → no → End |
+| Partial execution | `partial` | No equivalent; the run fails or becomes `intervention_required` |
+| User history | Exposed as stable `legacy-<id>` keys | Exposed as stable `canonical-<id>` keys; both histories are merged |
+| Operations telemetry | Not included in workflow operations summaries | Included in summaries, interventions, failures, and overdue counts |
+
+#### Idempotency and ownership
+
+Both engines claim through `WorkflowRuntimeClaimService`, lock the same workflow row, read the
+database-authoritative runtime owner under that lock, and check the opposite ledger before insert.
+The established legacy rule id remains the primary identity for paired workflows. A workflow-id
+compatibility identity is retained when needed, and schedule identities include the UTC cadence
+bucket. Never derive replay identity from process time or a JVM-local owner flag.
+
+#### Execution identity
+
+| Mode | Both engines |
+|---|---|
+| `system` | Execute as the built-in `SystemActor`; attribute the effect to `created_by_id` |
+| `user` | Execute as the configured live workspace member and current role; fail closed when the user or membership is gone |
+| Condition evaluation | Uses the same effective actor for every graph shape that a legacy rule can represent |
+
+### Read-only fleet pre-scan
+
+Run this against each active tenant catalog before planning any ownership change. Every statement is
+read-only. Save the complete output with the rollout evidence. The third query is deliberately
+conservative: SQL cannot evaluate the full segment condition model, so it reports schedule rules
+whose current eligible record-type population exceeds one 100-row production page. Evaluate those
+rules through the application condition model to determine the exact enrollment count; do not treat
+absence from this candidate list as proof that a future population will stay below 100.
+
+```sql
+SELECT workspace_id,
+       COUNT(*) AS legacy_owned_workflows
+FROM workflow
+WHERE runtime_owner = 'legacy'
+  AND archived_at IS NULL
+GROUP BY workspace_id
+ORDER BY workspace_id;
+
+SELECT r.workspace_id,
+       r.id AS rule_id,
+       w.id AS workflow_id,
+       r.enabled,
+       r.record_type,
+       JSON_UNQUOTE(JSON_EXTRACT(r.trigger_config, '$.cadence')) AS cadence
+FROM rule r
+LEFT JOIN workflow w
+  ON w.workspace_id = r.workspace_id
+ AND w.legacy_rule_id = r.id
+WHERE LOWER(TRIM(r.trigger_type)) = 'schedule'
+  AND r.condition_json IS NULL
+ORDER BY r.workspace_id, r.id;
+
+WITH record_population AS (
+    SELECT workspace_id, 'company' AS record_type, COUNT(*) AS eligible_records
+    FROM company
+    WHERE archived_at IS NULL
+    GROUP BY workspace_id
+    UNION ALL
+    SELECT workspace_id, 'person' AS record_type, COUNT(*) AS eligible_records
+    FROM person
+    WHERE suspended_at IS NULL
+      AND archived_at IS NULL
+    GROUP BY workspace_id
+    UNION ALL
+    SELECT workspace_id, 'deal' AS record_type, COUNT(*) AS eligible_records
+    FROM deal
+    GROUP BY workspace_id
+)
+SELECT r.workspace_id,
+       r.id AS rule_id,
+       w.id AS workflow_id,
+       r.record_type,
+       JSON_UNQUOTE(JSON_EXTRACT(r.trigger_config, '$.cadence')) AS cadence,
+       p.eligible_records AS conservative_enrollment_ceiling
+FROM rule r
+JOIN workflow w
+  ON w.workspace_id = r.workspace_id
+ AND w.legacy_rule_id = r.id
+JOIN record_population p
+  ON p.workspace_id = r.workspace_id
+ AND p.record_type = r.record_type
+WHERE LOWER(TRIM(r.trigger_type)) = 'schedule'
+  AND p.eligible_records > 100
+ORDER BY r.workspace_id, r.id;
+
+SELECT r.workspace_id,
+       r.id AS rule_id,
+       w.id AS workflow_id,
+       COUNT(*) AS notify_action_count
+FROM rule r
+JOIN workflow w
+  ON w.workspace_id = r.workspace_id
+ AND w.legacy_rule_id = r.id
+JOIN JSON_TABLE(
+    r.actions_json,
+    '$[*]' COLUMNS (action_type VARCHAR(24) PATH '$.type')
+) action_rows
+WHERE LOWER(TRIM(action_rows.action_type)) = 'notify'
+GROUP BY r.workspace_id, r.id, w.id
+HAVING COUNT(*) > 1
+ORDER BY r.workspace_id, r.id;
+```
 
 ## Offboarding
 

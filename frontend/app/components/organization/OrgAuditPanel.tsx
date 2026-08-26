@@ -1,27 +1,25 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useMessages, useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
 
 import type { AuditLogEntry } from "@/app/lib/types";
 import { ApiError, getOrgAudit } from "@/app/lib/api";
-import { toastError } from "@/app/lib/toast";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { useLiveNow } from "@/app/hooks/useNow";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { orgAuditActionKey, titleCaseAction } from "@/app/lib/orgAuditActionLabel";
+import { isSensitiveAuditEntry } from "@/app/lib/auditPresentation";
 import { Button } from "@/components/ui/button";
-import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import Rise from "@/app/components/motion/Rise";
+import {
+    SettingsPanelHeading,
+    type SettingsPanelPresentation,
+} from "@/app/components/settings/SettingsSection";
 import { NoAccessCard, EmptyRow, ListCard } from "@/app/components/organization/OrgPrimitives";
 
 const PAGE_SIZE = 30;
-
-function humanizeAction(action: string) {
-    return action
-        .split(".")
-        .map((part) => part.replace(/_/g, " "))
-        .join(" · ");
-}
 
 function relativeTime(iso: string, locale: string, now: number) {
     const then = new Date(iso.includes("T") ? iso : iso.replace(" ", "T") + "Z").getTime();
@@ -35,8 +33,22 @@ function relativeTime(iso: string, locale: string, now: number) {
     return new Date(then).toLocaleDateString(locale);
 }
 
-export default function OrgAuditPanel() {
+/**
+ * The organization's own audit log: the governance events that happen above any single workspace.
+ *
+ * Reading it requires an organization administrator, which both of this panel's homes establish
+ * before rendering it, so the panel carries no gate of its own.
+ *
+ * @param presentation - which of the panel's two homes is rendering it; defaults to its own route
+ */
+export default function OrgAuditPanel({
+    presentation = "page",
+}: {
+    presentation?: SettingsPanelPresentation;
+} = {}) {
     const t = useTranslations("OrgAudit");
+    const showApiError = useApiErrorToast("OrgAudit");
+    const messages = useMessages();
     const locale = useLocale();
     const now = useLiveNow();
     const { activeWorkspace } = useWorkspace();
@@ -48,6 +60,17 @@ export default function OrgAuditPanel() {
     const [loadError, setLoadError] = useState(false);
     const [loadingMore, setLoadingMore] = useState(false);
     const [hasMore, setHasMore] = useState(false);
+
+    const actionLabel = (action: string) => {
+        const key = orgAuditActionKey(messages, action);
+        return key === null ? titleCaseAction(action) : t(key);
+    };
+
+    const eventLines = (entry: AuditLogEntry) => {
+        const action = actionLabel(entry.action);
+        const summary = isSensitiveAuditEntry(entry) ? null : entry.summary;
+        return summary ? { title: summary, detail: action } : { title: action, detail: null };
+    };
 
     useEffect(() => {
         if (!orgId) return;
@@ -80,7 +103,7 @@ export default function OrgAuditPanel() {
             setEntries((prev) => [...prev, ...page]);
             setHasMore(page.length === PAGE_SIZE);
         } catch (err) {
-            toastError(err instanceof Error ? err.message : String(err));
+            showApiError(err, "loadMoreFailed");
         } finally {
             setLoadingMore(false);
         }
@@ -90,10 +113,11 @@ export default function OrgAuditPanel() {
 
     return (
         <Rise className="space-y-4">
-            <div>
-                <SectionHeader title={t("title")} />
-                <p className="px-6 text-sm text-muted-foreground">{t("subtitle")}</p>
-            </div>
+            <SettingsPanelHeading
+                presentation={presentation}
+                title={t("title")}
+                description={t("subtitle")}
+            />
 
             {loading ? (
                 <ListCard>
@@ -111,26 +135,27 @@ export default function OrgAuditPanel() {
             ) : (
                 <>
                     <ListCard>
-                        {entries.map((entry) => (
-                            <li key={entry.id} className="flex items-start justify-between gap-4 px-4 py-3">
-                                <div className="min-w-0 flex-1">
-                                    <p className="truncate text-sm font-medium text-foreground">
-                                        {entry.summary || humanizeAction(entry.action)}
-                                    </p>
-                                    <p className="truncate text-xs text-muted-foreground">
-                                        {humanizeAction(entry.action)} ·{" "}
-                                        {entry.currentActorLabel || entry.actorLabel || t("actorSystem")}
-                                    </p>
-                                </div>
-                                <time
-                                    className="shrink-0 pt-0.5 text-xs tabular-nums text-muted-foreground"
-                                    dateTime={entry.createdAt}
-                                    title={entry.createdAt}
-                                >
-                                    {relativeTime(entry.createdAt, locale, now)}
-                                </time>
-                            </li>
-                        ))}
+                        {entries.map((entry) => {
+                            const { title, detail } = eventLines(entry);
+                            const actor = entry.currentActorLabel || entry.actorLabel || t("actorSystem");
+                            return (
+                                <li key={entry.id} className="flex items-start justify-between gap-4 px-4 py-3">
+                                    <div className="min-w-0 flex-1">
+                                        <p className="truncate text-sm font-medium text-foreground">{title}</p>
+                                        <p className="truncate text-xs text-muted-foreground">
+                                            {detail === null ? actor : `${detail} · ${actor}`}
+                                        </p>
+                                    </div>
+                                    <time
+                                        className="shrink-0 pt-0.5 text-xs tabular-nums text-muted-foreground"
+                                        dateTime={entry.createdAt}
+                                        title={entry.createdAt}
+                                    >
+                                        {relativeTime(entry.createdAt, locale, now)}
+                                    </time>
+                                </li>
+                            );
+                        })}
                     </ListCard>
                     {hasMore && (
                         <div className="flex justify-center">

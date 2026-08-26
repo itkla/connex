@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { LoaderCircle } from 'lucide-react';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { toastSuccess } from '@/app/lib/toast';
 import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PlusIcon, ChatBubbleLeftRightIcon, DocumentTextIcon, CheckCircleIcon, PaperClipIcon } from '@heroicons/react/24/outline';
 import { BuildingOffice2Icon, NoSymbolIcon, ArchiveBoxIcon, ArchiveBoxArrowDownIcon, ShareIcon, ShieldExclamationIcon, UserCircleIcon } from '@heroicons/react/24/outline';
 
@@ -18,14 +19,18 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
+import { IconButton } from '@/components/ui/icon-button';
 import { ButtonGroup } from '@/components/ui/button-group';
 
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
 import ArchiveRecordDialog from '@/app/components/records/ArchiveRecordDialog';
 import ShareDialog from '@/app/components/records/ShareDialog';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
-import NewActivityDialog from '@/app/components/records/contacts/NewActivityDialog';
-import NewTaskDialog from '@/app/components/records/contacts/NewTaskDialog';
+import {
+    RecordActivityComposer,
+    RecordTaskComposer,
+    type RecordComposerAnchor,
+} from '@/app/components/records/RecordComposers';
 import NewNoteDialog from '@/app/components/activity/notes/NoteDialog';
 
 import { archiveContact, restoreContact, getActiveWorkspaceMembers, updateContact, updatePersonOwner } from '@/app/lib/api';
@@ -50,6 +55,7 @@ export default function ContactActionsMenu({
 }) {
     const router = useRouter();
     const t = useTranslations('ContactsActionsMenu');
+    const showApiError = useApiErrorToast('ContactsActionsMenu');
     const { inputRef: attachmentInputRef, uploading: attachmentsUploading, openPicker: openAttachmentPicker, onFilesSelected: onAttachmentFilesSelected } = useAttachmentUploader('person', contact.id);
     const [changeOpen, setChangeOpen] = useState(false);
     const [archiveOpen, setArchiveOpen] = useState(false);
@@ -64,6 +70,10 @@ export default function ContactActionsMenu({
     const [assignOwnerOpen, setAssignOwnerOpen] = useState(false);
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
     const contactSeeds = useMemo(() => [contact], [contact]);
+    const composerAnchor = useMemo<RecordComposerAnchor>(
+        () => ({ kind: 'person', person: contact, companyId: contact.companyId ?? contact.company?.id ?? null }),
+        [contact],
+    );
     const contactSearch = useContactTargetSearch(noteOpen, [contact.id], contactSeeds);
     const dealSearch = useDealTargetSearch(noteOpen, [], dealSeeds);
     useEffect(() => {
@@ -86,7 +96,7 @@ export default function ContactActionsMenu({
             toastSuccess(t('toastRemovedFromCompany', { contactName: contact.name, companyName: contact.company.name }));
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastFailedRemoveFromCompany'));
+            showApiError(err, 'toastFailedRemoveFromCompany');
         } finally {
             setRemovingCompany(false);
         }
@@ -109,7 +119,7 @@ export default function ContactActionsMenu({
                 router.refresh();
             }
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t(archived ? 'toastFailedRestore' : 'toastFailedArchive'));
+            showApiError(err, archived ? 'toastFailedRestore' : 'toastFailedArchive');
         } finally {
             setIsArchiving(false);
         }
@@ -119,14 +129,14 @@ export default function ContactActionsMenu({
         <>
             <div className="flex flex-row gap-2">
                 <ButtonGroup orientation="horizontal">
-                    <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
+                    <Button variant="outline" size="toolbar" onClick={() => setEditOpen(true)}>
                         <PencilSquareIcon className="size-4" />
                         {t('edit')}
                     </Button>
                     <Button
                         variant="outline"
-                        size="sm"
-                        onClick={() => router.push(`/overview/map?contactId=${contact.id}`)}
+                        size="toolbar"
+                        onClick={() => router.push(`/intelligence/map?contactId=${contact.id}`)}
                     >
                         <EyeIcon className="size-4" />
                         {t('viewInMap')}
@@ -136,7 +146,7 @@ export default function ContactActionsMenu({
                     {/* // add attachments, files, pictures, business cards etc */}
                     <Button
                         variant="outline"
-                        size="sm"
+                        size="toolbar"
                         onClick={openAttachmentPicker}
                         disabled={attachmentsUploading}
                     >
@@ -149,35 +159,26 @@ export default function ContactActionsMenu({
                     </Button>
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                            <Button variant="outline" size="sm">
+                            <Button variant="brand" size="toolbar" menu>
                                 <PlusIcon className="size-4" />
                                 {t('new')}
                             </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48">
                             <DropdownMenuItem
-                                onSelect={(e) => {
-                                    e.preventDefault();
-                                    setActivityOpen(true);
-                                }}
+                                onSelect={() => setActivityOpen(true)}
                             >
                                 <ChatBubbleLeftRightIcon className="size-4" />
                                 <span>{t('addActivity')}</span>
                             </DropdownMenuItem>
                             <DropdownMenuItem 
-                                onSelect={(e) => {
-                                    e.preventDefault();
-                                    setNoteOpen(true);
-                                }}
+                                onSelect={() => setNoteOpen(true)}
                             >
                                 <DocumentTextIcon className="size-4" />
                                 <span>{t('addNote')}</span>
                             </DropdownMenuItem>
                             <DropdownMenuItem
-                                onSelect={(e) => {
-                                    e.preventDefault();
-                                    setTaskOpen(true);
-                                }}
+                                onSelect={() => setTaskOpen(true)}
                             >
                                 <CheckCircleIcon className="size-4" />
                                 <span>{t('addTask')}</span>
@@ -187,9 +188,9 @@ export default function ContactActionsMenu({
 
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                            <Button variant="outline" size="sm">
+                            <IconButton variant="outline" size="icon-toolbar" label={t('moreActions')}>
                                 <EllipsisVerticalIcon className="size-4" />
-                            </Button>
+                            </IconButton>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48">
                             <DropdownMenuItem
@@ -275,18 +276,14 @@ export default function ContactActionsMenu({
 
                 <RestrictionsDialog contact={contact} open={restrictionsOpen} onOpenChange={setRestrictionsOpen} />
 
-                <NewActivityDialog
-                    contactId={contact.id}
-                    contactName={contact.name}
-                    companyId={contact.companyId ?? contact.company?.id}
+                <RecordActivityComposer
+                    anchor={composerAnchor}
                     currentUserId={currentUserId}
                     open={activityOpen}
                     onOpenChange={setActivityOpen}
                 />
-                <NewTaskDialog
-                    contactId={contact.id}
-                    contactName={contact.name}
-                    companyId={contact.companyId ?? contact.company?.id}
+                <RecordTaskComposer
+                    anchor={composerAnchor}
                     currentUserId={currentUserId}
                     open={taskOpen}
                     onOpenChange={setTaskOpen}

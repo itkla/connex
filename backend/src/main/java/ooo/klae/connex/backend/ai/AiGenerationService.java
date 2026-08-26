@@ -405,8 +405,7 @@ public class AiGenerationService {
             state.terminalClaimInProgress = false;
             if (claim == TerminalClaim.FAILED) {
                 return;
-            }
-            if (claim == TerminalClaim.SUPERSEDED) {
+            } else if (claim == TerminalClaim.SUPERSEDED) {
                 timeout = retireSupersededLocked(state);
             } else {
                 retainedResultBytes -= state.retainedResultBytes - result.bytes();
@@ -437,8 +436,7 @@ public class AiGenerationService {
             state.terminalClaimInProgress = false;
             if (claim == TerminalClaim.FAILED) {
                 return;
-            }
-            if (claim == TerminalClaim.SUPERSEDED) {
+            } else if (claim == TerminalClaim.SUPERSEDED) {
                 timeout = retireSupersededLocked(state);
             } else {
                 state.status = Status.FAILED;
@@ -457,33 +455,23 @@ public class AiGenerationService {
     private void timeOut(GenerationState state, String reason) {
         Future<?> future;
         ScheduledFuture<?> timeout;
-        boolean notifyTerminal;
         String stableReason = stableReason(reason, "generation_timeout");
         synchronized (stateLock) {
             if (generations.get(state.handle) != state || !state.isActive()) {
                 return;
             }
-            notifyTerminal = !state.terminalClaimInProgress;
-            if (notifyTerminal) {
-                state.terminalClaimInProgress = true;
-            }
-            if (!notifyTerminal) {
-                timeout = retireSupersededLocked(state);
-            } else {
-                state.status = Status.TIMED_OUT;
-                state.reason = stableReason;
-                releaseResultCapacityLocked(state);
-                timeout = finishLocked(state);
-            }
+            state.terminalClaimInProgress = true;
+            state.status = Status.TIMED_OUT;
+            state.reason = stableReason;
+            releaseResultCapacityLocked(state);
+            timeout = finishLocked(state);
             future = state.future;
         }
         cancelTimer(timeout);
         if (future != null) {
             future.cancel(true);
         }
-        if (notifyTerminal) {
-            submitTimeoutNotification(state, stableReason);
-        }
+        submitTimeoutNotification(state, stableReason);
     }
 
     private boolean beginTerminalClaimLocked(GenerationState state) {

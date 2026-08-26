@@ -71,6 +71,20 @@
     AND p.provision_ceased_at IS NULL
   </sql>
 
+  <sql id="visibleFilteredPersonJoin">
+    (filtered_person.workspace_id = #{workspaceId}
+     OR EXISTS (SELECT 1 FROM person_share filtered_ps
+        JOIN workspace vws ON vws.id = filtered_ps.workspace_id
+        JOIN workspace ows
+          ON ows.id = filtered_person.workspace_id
+         AND ows.org_id = vws.org_id
+        WHERE filtered_ps.person_id = filtered_person.id
+          AND filtered_ps.workspace_id = #{workspaceId}))
+    AND filtered_person.archived_at IS NULL
+    AND filtered_person.suspended_at IS NULL
+    AND filtered_person.provision_ceased_at IS NULL
+  </sql>
+
   <sql id="visiblePipelineJoin">
     (p.workspace_id = #{workspaceId}
      OR EXISTS (SELECT 1 FROM pipeline_share ps
@@ -174,6 +188,17 @@
             <if test="companyIds != null and companyIds.size() > 0">OR</if>
             c.id IS NULL
           </if>
+        )
+      </if>
+      <if test="personIds != null and personIds.size() > 0">
+        AND EXISTS (
+          SELECT 1
+          FROM deal_person filtered_dp
+          JOIN person filtered_person ON filtered_person.id = filtered_dp.person_id
+            AND <include refid="visibleFilteredPersonJoin"/>
+          WHERE filtered_dp.deal_id = d.id
+            AND filtered_dp.person_id IN
+            <foreach item="id" collection="personIds" open="(" separator="," close=")">#{id}</foreach>
         )
       </if>
       <if test="statuses != null and statuses.size() > 0">
@@ -897,6 +922,16 @@
     HAVING COUNT(*) &gt; 0
   </select>
 
+  <select id="countsByPerson" resultType="ooo.klae.connex.backend.dto.FacetCount">
+    SELECT CAST(dp.person_id AS CHAR) AS `key`, COUNT(DISTINCT dp.deal_id) AS count,
+           filtered_person.name AS label
+    FROM deal_person dp
+    JOIN deal d ON d.id = dp.deal_id AND d.workspace_id = #{workspaceId}
+    JOIN person filtered_person ON filtered_person.id = dp.person_id
+      AND <include refid="visibleFilteredPersonJoin"/>
+    GROUP BY dp.person_id, filtered_person.name
+  </select>
+
   <select id="countsByOwner" resultType="ooo.klae.connex.backend.dto.FacetCount">
     SELECT COALESCE(CAST(d.owner_id AS CHAR), '__empty__') AS `key`,
            COUNT(*) AS count, NULL AS label
@@ -996,6 +1031,15 @@
     SELECT EXISTS(
       SELECT 1 FROM deal WHERE workspace_id = #{workspaceId} AND id = #{id}
     )
+  </select>
+
+  <select id="getVisibleIdsIn" resultType="int">
+    SELECT id
+    FROM deal
+    WHERE workspace_id = #{workspaceId}
+      AND id IN
+      <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    ORDER BY id
   </select>
   <select id="existsOwned" resultType="boolean">
     SELECT EXISTS(SELECT 1 FROM deal WHERE workspace_id = #{workspaceId} AND id = #{id})
@@ -1317,6 +1361,13 @@
     WHERE workspace_id = #{workspaceId}
       AND name IS NOT NULL
       AND name != ''
+      AND (TRIM(name) = TRIM(#{text})
+        OR (TRIM(name) REGEXP '^[A-Za-z0-9_]+([[:space:]][A-Za-z0-9_]+)*$'
+          AND REGEXP_LIKE(
+            #{text},
+            CONCAT('(^|[^A-Za-z0-9_])', TRIM(name), '([^A-Za-z0-9_]|$)'),
+            'i'))
+        OR LENGTH(TRIM(name)) &gt; CHAR_LENGTH(TRIM(name)))
       AND LOCATE(name, #{text}) &gt; 0
     ORDER BY CHAR_LENGTH(name) DESC, id
     LIMIT #{limit}

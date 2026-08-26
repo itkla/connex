@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import ooo.klae.connex.backend.ai.assistant.AiWatchOverdueCommitments;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
@@ -309,6 +310,60 @@ class TaskMapperTest extends AbstractMapperTest {
         assertTrue(matched.stream().noneMatch(x -> x.getId() == task2.getId()));
     }
 
+    @Test
+    void assistantTaskPagesBoundVisibleRecordReadsWithoutChangingTheirOrder() {
+        User user = newUser();
+        Person person = newPerson(newCompany());
+        Person restrictedPerson = newPerson(newCompany());
+        personMapper.updateProcessingRestrictions(
+                workspace.getId(), restrictedPerson.getId(), true, false);
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+        Task laterPersonTask = build("later person", user, person, null);
+        laterPersonTask.setDueDate("2026-08-12");
+        Task earlierPersonTask = build("earlier person", user, person, null);
+        earlierPersonTask.setDueDate("2026-08-11");
+        Task laterDealTask = build("later deal", user, null, deal);
+        laterDealTask.setDueDate("2026-08-12");
+        Task earlierDealTask = build("earlier deal", user, null, deal);
+        earlierDealTask.setDueDate("2026-08-11");
+        Task restrictedPersonReference = build(
+                "restricted person reference", user, person, deal);
+        restrictedPersonReference.setDueDate("2026-08-10");
+        Task restrictedDealPerson = build(
+                "restricted deal person", user, restrictedPerson, deal);
+        restrictedDealPerson.setDueDate("2026-08-10");
+        taskMapper.insert(laterPersonTask);
+        taskMapper.insert(earlierPersonTask);
+        taskMapper.insert(laterDealTask);
+        taskMapper.insert(earlierDealTask);
+        taskMapper.insert(restrictedPersonReference);
+        taskMapper.insert(restrictedDealPerson);
+        jdbcTemplate.update(
+                "INSERT INTO entity_reference "
+                    + "(workspace_id, source_type, source_id, ref_type, ref_id, label) "
+                    + "VALUES (?, 'task', ?, 'person', ?, ?)",
+                workspace.getId(),
+                restrictedPersonReference.getId(),
+                restrictedPerson.getId(),
+                restrictedPerson.getName());
+
+        List<Task> personPage = taskMapper.getAiAssistantTasksByPersonId(
+                workspace.getId(), person.getId(), List.of(workspace.getId()), 1);
+        List<Task> dealPage = taskMapper.getAiAssistantTasksByDealId(
+                workspace.getId(), deal.getId(), List.of(workspace.getId()), 1);
+        List<Task> companyPage = taskMapper.getAiAssistantTasksByCompanyId(
+                workspace.getId(), deal.getCompanyId(), List.of(workspace.getId()), 1);
+
+        assertEquals(List.of(earlierPersonTask.getId()),
+                personPage.stream().map(Task::getId).toList());
+        assertEquals(List.of(earlierDealTask.getId()),
+                dealPage.stream().map(Task::getId).toList());
+        assertEquals(List.of(earlierDealTask.getId()),
+                companyPage.stream().map(Task::getId).toList());
+    }
+
     /**
      * Gets tasks by deal ID and checks if the returned list includes the inserted task.
      */
@@ -452,6 +507,86 @@ class TaskMapperTest extends AbstractMapperTest {
         assertEquals(1, taskMapper.taskSummary(target.getId(), today, me).todo());
         assertEquals(2, taskMapper.taskSummary(target.getId(), today, members).todo());
         assertEquals(1, taskMapper.taskSummary(target.getId(), today, unassigned).todo());
+    }
+
+    /**
+     * A watch may only count commitments the assistant is allowed to process. A contact who has been
+     * suspended, whose provision has ceased, or who has been archived is out of scope for assistant
+     * reads, and a count that moved because of their task would tell the watcher something about
+     * them — through the person branch, through their company, and through their deal alike.
+     */
+    @Test
+    void countOverdueForSubjectExcludesTasksLinkedToARestrictedPerson() {
+        LocalDate today = LocalDate.of(2026, 7, 10);
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+
+        assertOverdueCounts(overdueSubject(pipeline, stage, null), today, 1);
+        for (String column : List.of("suspended_at", "provision_ceased_at", "archived_at")) {
+            assertOverdueCounts(overdueSubject(pipeline, stage, column), today, 0);
+        }
+    }
+
+    /**
+     * One company, contact, deal, and overdue task, with the contact optionally restricted.
+     *
+     * <p>Each restriction gets its own records rather than reusing one contact, because the mapper's
+     * session cache would otherwise answer the second identical query from the first result and the
+     * assertion would pass without the guard being exercised at all.
+     */
+    private int[] overdueSubject(Pipeline pipeline, Stage stage, String restrictionColumn) {
+        Company company = newCompany();
+        Person person = newPerson(company);
+        Deal deal = newDeal(pipeline, stage, company);
+        Task overdue = build("overdue", newUser(), person, deal);
+        taskMapper.insert(overdue);
+        jdbcTemplate.update(
+            "UPDATE task SET due_date = ? WHERE id = ?",
+            LocalDate.of(2026, 7, 7), overdue.getId());
+        if (restrictionColumn != null) {
+            jdbcTemplate.update(
+                "UPDATE person SET " + restrictionColumn + " = NOW() WHERE id = ?", person.getId());
+        }
+        return new int[] {person.getId(), company.getId(), deal.getId()};
+    }
+
+    /** Asserts the same expected count through all three subject branches of one fixture. */
+    private void assertOverdueCounts(int[] subject, LocalDate today, int expected) {
+        List<Integer> organizationWorkspaceIds = List.of(workspace.getId());
+        assertEquals(expected, taskMapper.countOverdueForSubject(
+            workspace.getId(), subject[0], null, null, today,
+            organizationWorkspaceIds).overdueCount(),
+            "the person watch must count only processable commitments");
+        assertEquals(expected, taskMapper.countOverdueForSubject(
+            workspace.getId(), null, subject[1], null, today,
+            organizationWorkspaceIds).overdueCount(),
+            "the company watch must apply the same rule");
+        assertEquals(expected, taskMapper.countOverdueForSubject(
+            workspace.getId(), null, null, subject[2], today,
+            organizationWorkspaceIds).overdueCount(),
+            "the deal watch must apply the same rule");
+    }
+
+    /** A watch on a record counts every member's commitments, which is what its trigger states. */
+    @Test
+    void countOverdueForSubjectIsNotScopedToOneAssignee() {
+        LocalDate today = LocalDate.of(2026, 7, 10);
+        Company company = newCompany();
+        Person person = newPerson(company);
+        Task theirs = build("theirs", newUser(), person, null);
+        taskMapper.insert(theirs);
+        Task unassigned = build("unassigned", newUser(), person, null);
+        taskMapper.insert(unassigned);
+        jdbcTemplate.update("UPDATE task SET assigned_to_id = NULL WHERE id = ?", unassigned.getId());
+        jdbcTemplate.update(
+            "UPDATE task SET due_date = ? WHERE id IN (?, ?)",
+            today.minusDays(2), theirs.getId(), unassigned.getId());
+
+        AiWatchOverdueCommitments counted = taskMapper.countOverdueForSubject(
+            workspace.getId(), person.getId(), null, null, today, List.of(workspace.getId()));
+
+        assertEquals(2, counted.overdueCount());
+        assertEquals(today.minusDays(2).toString(), counted.earliestDueDate());
     }
 
     private Workspace newWorkspace() {

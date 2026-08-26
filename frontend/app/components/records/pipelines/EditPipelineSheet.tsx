@@ -2,11 +2,12 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { toast } from 'sonner';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastInfo, toastSuccess } from '@/app/lib/toast';
 import { useTranslations } from 'next-intl';
 
-import { createStage, deleteStage, getStagesByPipelineId, updatePipeline, updateStage } from '@/app/lib/api';
+import { useFieldErrors } from '@/app/hooks/useFieldErrors';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { replacePipelineStages, updatePipeline } from '@/app/lib/api';
 import { Pipeline, Stage, UpdatePipelinePayload } from '@/app/lib/types';
 import QuickEditPipelineSheet, { type PipelineDraft, type StageKind } from '@/app/components/records/pipelines/QuickEditPipelineSheet';
 
@@ -44,15 +45,21 @@ export default function EditPipelineSheet({
 }) {
     const router = useRouter();
     const t = useTranslations('PipelinesEditSheet');
+    const reportApiError = useApiErrorToast('PipelinesEditSheet');
     const [draft, setDraft] = useState<PipelineDraft>(() => toDraft(pipeline, stages));
     const [isSaving, setIsSaving] = useState(false);
+    const { fieldErrors, setFieldErrors, reset: resetFieldErrors, clearError } = useFieldErrors();
 
     const handleOpenChange = (next: boolean) => {
         onOpenChange(next);
-        if (!next) setDraft(toDraft(pipeline, stages));
+        if (!next) {
+            setDraft(toDraft(pipeline, stages));
+            resetFieldErrors();
+        }
     };
 
     const updateStageName = (_pipelineId: number, index: number, name: string) => {
+        clearError('stages');
         setDraft((prev) => ({
             ...prev,
             stages: prev.stages.map((s, i) => (i === index ? { ...s, name } : s)),
@@ -60,6 +67,7 @@ export default function EditPipelineSheet({
     };
 
     const updateStageKind = (_pipelineId: number, index: number, kind: StageKind) => {
+        clearError('stages');
         setDraft((prev) => ({
             ...prev,
             stages: prev.stages.map((s, i) =>
@@ -69,6 +77,7 @@ export default function EditPipelineSheet({
     };
 
     const addStage = () => {
+        clearError('stages');
         setDraft((prev) => ({
             ...prev,
             stages: [...prev.stages, { id: null, name: '', success: false, failure: false }],
@@ -76,26 +85,29 @@ export default function EditPipelineSheet({
     };
 
     const removeStage = (_pipelineId: number, index: number) => {
+        clearError('stages');
         setDraft((prev) => ({ ...prev, stages: prev.stages.filter((_, i) => i !== index) }));
     };
 
     const saveEdits = async () => {
+        resetFieldErrors();
         const original = toDraft(pipeline, stages);
         if (!diffDraft(original, draft)) {
-            toast.info(t('noChangesToSave'));
+            toastInfo(t('noChangesToSave'));
             handleOpenChange(false);
             return;
         }
         if (!draft.name.trim()) {
-            toast.error(t('nameRequired'));
+            setFieldErrors({ name: t('nameRequired') });
+            requestAnimationFrame(() => document.getElementById(`name-${pipeline.id}`)?.focus());
             return;
         }
         if (draft.stages.some((s) => !s.name.trim())) {
-            toast.error(t('stageNamesEmpty'));
+            setFieldErrors({ stages: t('stageNamesEmpty') });
             return;
         }
         if (draft.stages.filter((s) => s.success).length > 1 || draft.stages.filter((s) => s.failure).length > 1) {
-            toast.error(t('singleTerminalPerType'));
+            setFieldErrors({ stages: t('singleTerminalPerType') });
             return;
         }
 
@@ -106,38 +118,19 @@ export default function EditPipelineSheet({
                 await updatePipeline(pipeline.id, payload);
             }
 
-            const draftIds = new Set(draft.stages.filter((s) => s.id !== null).map((s) => s.id as number));
-            const toDelete = stages.filter((s) => !draftIds.has(s.id));
-            const originalById = new Map(stages.map((s) => [s.id, s]));
-
-            for (const stage of toDelete) {
-                await deleteStage(stage.id);
-            }
-
-            const maxOriginalPosition = stages.reduce((max, s) => Math.max(max, s.position), -1);
-            let nextNewPosition = maxOriginalPosition + 1;
-
-            for (const s of draft.stages) {
-                const name = s.name.trim();
-                if (s.id !== null) {
-                    const orig = originalById.get(s.id);
-                    if (orig && (orig.name !== name || orig.success !== s.success || orig.failure !== s.failure)) {
-                        await updateStage(s.id, { name, position: orig.position, success: s.success, failure: s.failure });
-                    }
-                } else {
-                    await createStage(pipeline.id, { name, position: nextNewPosition, success: s.success, failure: s.failure });
-                    nextNewPosition++;
-                }
-            }
+            const fresh = await replacePipelineStages(pipeline.id, stages.map((s) => s.id), draft.stages.map((s) => ({
+                id: s.id ?? undefined,
+                name: s.name.trim(),
+                success: s.success,
+                failure: s.failure,
+            })));
 
             toastSuccess(t('pipelineUpdated'));
             handleOpenChange(false);
-
-            const fresh = await getStagesByPipelineId(pipeline.id);
             setDraft(toDraft(pipeline, fresh));
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('failedToSave'));
+            reportApiError(err, 'failedToSave');
         } finally {
             setIsSaving(false);
         }
@@ -150,13 +143,17 @@ export default function EditPipelineSheet({
             selectedIds={new Set([pipeline.id])}
             selectedPipelines={[pipeline]}
             drafts={{ [pipeline.id]: draft }}
-            updateDraft={(_id, patch) => setDraft((prev) => ({ ...prev, ...patch }))}
+            updateDraft={(_id, patch) => {
+                for (const key of Object.keys(patch)) clearError(key);
+                setDraft((prev) => ({ ...prev, ...patch }));
+            }}
             updateStageName={updateStageName}
             updateStageKind={updateStageKind}
             addStage={addStage}
             removeStage={removeStage}
             isSaving={isSaving}
             saveEdits={saveEdits}
+            fieldErrors={{ [pipeline.id]: fieldErrors }}
         />
     );
 }

@@ -18,18 +18,20 @@ import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.services.ExportService;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
+import ooo.klae.connex.backend.services.WarmthFilterResolver;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 @ExtendWith(MockitoExtension.class)
 class ExportControllerTest {
     @Mock private ExportService exportService;
     @Mock private MemberScopeResolver memberScopeResolver;
+    @Mock private WarmthFilterResolver warmthFilterResolver;
     @Mock private WorkspaceService workspaceService;
 
     @Test
     void segmentDealExportPreservesTheValidatedBodyScope() {
         ExportController controller = new ExportController(
-            exportService, memberScopeResolver, workspaceService);
+            exportService, memberScopeResolver, warmthFilterResolver, workspaceService);
         SegmentDefinition definition = new SegmentDefinition();
         definition.setMatch("all");
         definition.setConditions(List.of());
@@ -40,6 +42,7 @@ class ExportControllerTest {
         request.setPipelineId(List.of(2, 2, 3));
         request.setStageId(List.of(5));
         request.setCompanyId(List.of(7));
+        request.setPersonId(List.of(13, 13));
         request.setNoCompany(true);
         request.setStatus(List.of("closed"));
         request.setRisk(List.of("high", "none"));
@@ -48,7 +51,7 @@ class ExportControllerTest {
         when(workspaceService.getCurrentUserId()).thenReturn(11);
         when(memberScopeResolver.resolve("me", null, 11)).thenReturn(memberScope);
         when(exportService.exportSegmentDeals(
-            definition, "%Acme%", "JPY", List.of(2, 3), List.of(5), List.of(7), true,
+            definition, "%Acme%", "JPY", List.of(2, 3), List.of(5), List.of(7), List.of(13), true,
             List.of("won", "lost"), List.of("high", "none"), memberScope))
             .thenReturn("id,name\n17,Deal");
 
@@ -64,14 +67,33 @@ class ExportControllerTest {
         System.arraycopy(csv, 0, expected, 3, csv.length);
         assertArrayEquals(expected, response.getBody());
         verify(exportService).exportSegmentDeals(
-            definition, "%Acme%", "JPY", List.of(2, 3), List.of(5), List.of(7), true,
+            definition, "%Acme%", "JPY", List.of(2, 3), List.of(5), List.of(7), List.of(13), true,
             List.of("won", "lost"), List.of("high", "none"), memberScope);
+    }
+
+    @Test
+    void nativeDealExportPreservesTheContactFilter() {
+        ExportController controller = new ExportController(
+            exportService, memberScopeResolver, warmthFilterResolver, workspaceService);
+        MemberScope memberScope = MemberScope.fromRequest(null, null, 11);
+        when(workspaceService.getCurrentUserId()).thenReturn(11);
+        when(memberScopeResolver.resolve(null, null, 11)).thenReturn(memberScope);
+        when(exportService.exportDeals(
+            "%Acme%", "JPY", null, null, null, List.of(13), false, null, null, memberScope))
+            .thenReturn("id,name\n17,Deal");
+
+        controller.exportDeals(
+            "Acme", "JPY", null, null, null, List.of(13, 13), false,
+            null, null, null, null);
+
+        verify(exportService).exportDeals(
+            "%Acme%", "JPY", null, null, null, List.of(13), false, null, null, memberScope);
     }
 
     @Test
     void productExportNormalizesSearchAndReturnsBomPrefixedCsv() {
         ExportController controller = new ExportController(
-            exportService, memberScopeResolver, workspaceService);
+            exportService, memberScopeResolver, warmthFilterResolver, workspaceService);
         when(exportService.exportProducts("%100\\%\\_ready%"))
             .thenReturn("id,name\r\n7,Product\r\n");
 

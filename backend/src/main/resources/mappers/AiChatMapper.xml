@@ -52,6 +52,9 @@
     <result property="requestedByUserId" column="requested_by_user_id"/>
     <result property="status" column="status"/>
     <result property="terminalReason" column="terminal_reason"/>
+    <result property="skillKey" column="skill_key"/>
+    <result property="skillVersion" column="skill_version"/>
+    <result property="scopeJson" column="scope_json"/>
     <result property="privacyMode" column="privacy_mode"/>
     <result property="streamed" column="streamed"/>
     <result property="partialContent" column="partial_content"/>
@@ -545,14 +548,27 @@
 
   <insert id="insertTurn" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO ai_chat_turn
-      (workspace_id, session_id, requested_by_user_id, status, privacy_mode, streamed)
+      (workspace_id, session_id, requested_by_user_id, status, scope_json,
+       privacy_mode, streamed)
     VALUES
-      (#{workspaceId}, #{sessionId}, #{requestedByUserId}, #{status}, #{privacyMode}, #{streamed})
+      (#{workspaceId}, #{sessionId}, #{requestedByUserId}, #{status},
+       #{scopeJson,jdbcType=VARCHAR}, #{privacyMode}, #{streamed})
   </insert>
+
+  <update id="applyTurnSkill">
+    UPDATE ai_chat_turn
+    SET skill_key = #{skillKey,jdbcType=VARCHAR},
+        skill_version = #{skillVersion,jdbcType=VARCHAR}
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+      AND id = #{turnId}
+      AND status = 'running'
+  </update>
 
   <select id="getTurnById" resultMap="turnResult">
     SELECT id, workspace_id, session_id, requested_by_user_id, status,
-           terminal_reason, privacy_mode, streamed, partial_content,
+           terminal_reason, skill_key, skill_version, scope_json,
+           privacy_mode, streamed, partial_content,
            partial_content_utf16_offset, cancel_requested_at, created_at, updated_at
     FROM ai_chat_turn
     WHERE workspace_id = #{workspaceId}
@@ -562,7 +578,8 @@
 
   <select id="getTurnByIdForUpdate" resultMap="turnResult">
     SELECT id, workspace_id, session_id, requested_by_user_id, status,
-           terminal_reason, privacy_mode, streamed, partial_content,
+           terminal_reason, skill_key, skill_version, scope_json,
+           privacy_mode, streamed, partial_content,
            partial_content_utf16_offset, cancel_requested_at, created_at, updated_at
     FROM ai_chat_turn
     WHERE workspace_id = #{workspaceId}
@@ -573,7 +590,8 @@
 
   <select id="listActiveTurnsBySessionForUpdate" resultMap="turnResult">
     SELECT id, workspace_id, session_id, requested_by_user_id, status,
-           terminal_reason, privacy_mode, streamed, partial_content,
+           terminal_reason, skill_key, skill_version, scope_json,
+           privacy_mode, streamed, partial_content,
            partial_content_utf16_offset, cancel_requested_at, created_at, updated_at
     FROM ai_chat_turn
     WHERE workspace_id = #{workspaceId}
@@ -585,7 +603,8 @@
 
   <select id="listTurnsByIds" resultMap="turnResult">
     SELECT id, workspace_id, session_id, requested_by_user_id, status,
-           terminal_reason, privacy_mode, streamed, partial_content,
+           terminal_reason, skill_key, skill_version, scope_json,
+           privacy_mode, streamed, partial_content,
            partial_content_utf16_offset, cancel_requested_at, created_at, updated_at
     FROM ai_chat_turn
     WHERE workspace_id = #{workspaceId}
@@ -594,6 +613,19 @@
       <foreach collection="ids" item="id" open="(" separator="," close=")">
         #{id}
       </foreach>
+  </select>
+
+  <select id="getLatestActiveTurnBySession" resultMap="turnResult">
+    SELECT id, workspace_id, session_id, requested_by_user_id, status,
+           terminal_reason, skill_key, skill_version, scope_json,
+           privacy_mode, streamed, partial_content,
+           partial_content_utf16_offset, cancel_requested_at, created_at, updated_at
+    FROM ai_chat_turn
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+      AND status IN ('queued', 'running')
+    ORDER BY id DESC
+    LIMIT 1
   </select>
 
   <update id="markTurnRunning">
@@ -751,6 +783,22 @@
       AND tc.status = 'proposed'
     </if>
     ORDER BY m.seq ASC, tc.id ASC
+    LIMIT #{limit}
+  </select>
+
+  <select id="listToolCallsByTurn" resultMap="toolCallResult">
+    SELECT tc.id, tc.workspace_id, tc.message_id, m.session_id,
+           m.author_user_id AS requested_by_user_id, tc.tool_name, tc.status,
+           tc.arguments_json, tc.thought_signature, tc.result_json,
+           tc.executed_by_user_id, tc.executed_at,
+           tc.idempotency_key, tc.created_at, tc.updated_at
+    FROM ai_chat_tool_call tc
+    JOIN ai_chat_message m
+      ON m.workspace_id = tc.workspace_id AND m.id = tc.message_id
+    WHERE tc.workspace_id = #{workspaceId}
+      AND m.session_id = #{sessionId}
+      AND tc.idempotency_key LIKE CONCAT(#{idempotencyPrefix}, '%')
+    ORDER BY tc.id ASC
     LIMIT #{limit}
   </select>
 

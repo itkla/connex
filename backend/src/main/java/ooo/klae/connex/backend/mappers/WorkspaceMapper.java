@@ -37,6 +37,10 @@ public interface WorkspaceMapper {
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId);
     boolean isMemberIncludingPending(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
+    List<Integer> getMemberIdsIncludingPending(
+        @Param("workspaceId") int workspaceId,
+        @Param("userIds") List<Integer> userIds
+    );
     int countActiveMembers(
         @Param("workspaceId") int workspaceId,
         @Param("memberIds") List<Integer> memberIds
@@ -46,6 +50,9 @@ public interface WorkspaceMapper {
     List<MemberDto> getMembersWithRoles(int workspaceId);
     MemberDto getMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     Integer getMemberRoleId(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
+    boolean hasMembersWithCustomRole(
+        @Param("workspaceId") int workspaceId,
+        @Param("roleId") int roleId);
     int setMemberCustomRole(@Param("workspaceId") int workspaceId, @Param("userId") int userId, @Param("roleId") int roleId);
     int countOwners(int workspaceId);
     java.util.List<Integer> workspaceIdsOwnedBy(@Param("userId") int userId);

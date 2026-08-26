@@ -554,7 +554,7 @@ public class IntroductionService {
         }
         Map<Integer, List<EntityReference>> bySource = referenceService.referencesBySource(
             workspaceId, ReferenceService.SOURCE_INTRODUCTION, items.stream().map(IntroductionDto::getId).toList());
-        List<ReferenceService.ReaderVisibleContent> visible = referenceService.redactInvisibleNoteTargets(
+        List<ReferenceService.ReaderVisibleContent> visible = referenceService.redactInvisibleTargets(
             workspaceId,
             items.stream()
                 .map(item -> new ReferenceService.ReaderVisibleContent(
@@ -575,7 +575,7 @@ public class IntroductionService {
         }
         String snippet = snippet(dto.getNote());
         String triggeredAt = now();
-        String actionUrl = "/introductions";
+        String actionUrl = "/intelligence/introductions";
         for (int recipientId : recipientIds) {
             if (recipientId == actor.getId()) {
                 continue;
@@ -623,7 +623,7 @@ public class IntroductionService {
 
     private void requireOwnedPerson(int workspaceId, int personId) {
         if (!personMapper.existsOwned(workspaceId, personId)) {
-            throw new ResourceNotFoundException("Person not found with id: " + personId);
+            throw new ResourceNotFoundException("Contact not found");
         }
     }
 

@@ -26,8 +26,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { DialogStatusCover, resolveDialogStatus } from '@/components/ui/dialog-status-cover';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { notifyBulkResult, type BulkToastMessages } from '@/app/lib/bulkToast';
-import { toastError } from '@/app/lib/toast';
 import { type BulkOperationResult, type WorkspaceMember } from '@/app/lib/types';
 
 type Props = {
@@ -46,6 +46,7 @@ type Props = {
  */
 export default function BulkAssignOwnerDialog({ open, onOpenChange, count, members, messages, onApply, onSuccess }: Props) {
     const t = useTranslations('RecordsBulkOwnerDialog');
+    const showApiError = useApiErrorToast('RecordsBulkOwnerDialog');
     const [selected, setSelected] = useState<WorkspaceMember | null>(null);
     const [isSaving, setIsSaving] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
@@ -67,7 +68,7 @@ export default function BulkAssignOwnerDialog({ open, onOpenChange, count, membe
                 setTimeout(() => { setSucceeded(false); setSelected(null); onOpenChange(false); }, 900);
             }
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastFailed'));
+            showApiError(err, 'toastFailed');
         } finally {
             setIsSaving(false);
         }

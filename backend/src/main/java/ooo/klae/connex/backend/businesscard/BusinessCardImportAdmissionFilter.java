@@ -1,7 +1,9 @@
 package ooo.klae.connex.backend.businesscard;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
+import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -62,7 +64,7 @@ public class BusinessCardImportAdmissionFilter extends OncePerRequestFilter {
             try {
                 BusinessCardIdempotencyKey.canonicalize(request.getHeader("Idempotency-Key"));
             } catch (BadRequestException exception) {
-                reject(response, HttpServletResponse.SC_BAD_REQUEST);
+                reject(response, HttpServletResponse.SC_BAD_REQUEST, Rejection.INVALID_IDEMPOTENCY_KEY);
                 return;
             }
         }
@@ -70,19 +72,19 @@ public class BusinessCardImportAdmissionFilter extends OncePerRequestFilter {
             ? Capability.BUSINESS_CARD_SCANNING
             : Capability.BUSINESS_CARD_IMPORT;
         if (!capabilityEntitlement.isEntitled(capability)) {
-            reject(response, HttpServletResponse.SC_FORBIDDEN);
+            reject(response, HttpServletResponse.SC_FORBIDDEN, Rejection.CAPABILITY_UNAVAILABLE);
             return;
         }
         Integer workspaceId = workspaceRequestResolver.resolve(request, user.getId());
         if (workspaceId == null) {
-            reject(response, HttpServletResponse.SC_FORBIDDEN);
+            reject(response, HttpServletResponse.SC_FORBIDDEN, Rejection.WORKSPACE_REQUIRED);
             return;
         }
         try {
             workspaceService.requirePermission(workspaceId, user.getId(), Permission.PERSON_CREATE);
             workspaceService.requirePermission(workspaceId, user.getId(), Permission.ATTACHMENT_CREATE);
         } catch (ForbiddenException exception) {
-            reject(response, HttpServletResponse.SC_FORBIDDEN);
+            reject(response, HttpServletResponse.SC_FORBIDDEN, Rejection.PERMISSION_DENIED);
             return;
         }
         try {
@@ -93,7 +95,7 @@ public class BusinessCardImportAdmissionFilter extends OncePerRequestFilter {
                 case STATUS -> rateLimiter.requireStatusAllowed(user.getId());
             }
         } catch (TooManyRequestsException exception) {
-            reject(response, 429);
+            reject(response, 429, Rejection.RATE_LIMITED);
             return;
         }
         chain.doFilter(request, response);
@@ -126,9 +128,40 @@ public class BusinessCardImportAdmissionFilter extends OncePerRequestFilter {
         return null;
     }
 
-    private static void reject(HttpServletResponse response, int status) {
+    private static void reject(HttpServletResponse response, int status, Rejection rejection)
+            throws IOException {
         response.setHeader("Cache-Control", "no-store");
         response.setStatus(status);
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.getWriter().write(
+            "{\"error\":\"" + rejection.error + "\",\"code\":\"" + rejection.code + "\"}");
+    }
+
+    private enum Rejection {
+        INVALID_IDEMPOTENCY_KEY(
+            "BUSINESS_CARD_INVALID_IDEMPOTENCY_KEY",
+            "The idempotency key is invalid"),
+        CAPABILITY_UNAVAILABLE(
+            "BUSINESS_CARD_CAPABILITY_UNAVAILABLE",
+            "Business-card operations are unavailable"),
+        WORKSPACE_REQUIRED(
+            "BUSINESS_CARD_WORKSPACE_REQUIRED",
+            "A workspace is required for business-card operations"),
+        PERMISSION_DENIED(
+            "BUSINESS_CARD_PERMISSION_DENIED",
+            "Business-card permission is required"),
+        RATE_LIMITED(
+            "BUSINESS_CARD_RATE_LIMITED",
+            "Too many business-card requests");
+
+        private final String code;
+        private final String error;
+
+        Rejection(String code, String error) {
+            this.code = code;
+            this.error = error;
+        }
     }
 
     private enum Operation {

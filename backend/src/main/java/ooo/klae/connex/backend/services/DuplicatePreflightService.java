@@ -545,20 +545,24 @@ public class DuplicatePreflightService {
             commitAdmission);
         try {
             List<DuplicatePreflightResponse> responses = new ArrayList<>(combined.size());
-            responses.addAll(match(
-                "person",
-                normalizedPersons,
-                IMPORT_CANDIDATE_LIMIT,
-                false,
-                identityMapper::findVisiblePersonIdentityMatches,
-                identityMapper::findVisiblePersonNameMatches));
-            responses.addAll(match(
-                "company",
-                normalizedCompanies,
-                IMPORT_CANDIDATE_LIMIT,
-                false,
-                identityMapper::findVisibleCompanyIdentityMatches,
-                identityMapper::findVisibleCompanyNameMatches));
+            if (!normalizedPersons.isEmpty()) {
+                responses.addAll(match(
+                    "person",
+                    normalizedPersons,
+                    IMPORT_CANDIDATE_LIMIT,
+                    false,
+                    identityMapper::findVisiblePersonIdentityMatches,
+                    identityMapper::findVisiblePersonNameMatches));
+            }
+            if (!normalizedCompanies.isEmpty()) {
+                responses.addAll(match(
+                    "company",
+                    normalizedCompanies,
+                    IMPORT_CANDIDATE_LIMIT,
+                    false,
+                    identityMapper::findVisibleCompanyIdentityMatches,
+                    identityMapper::findVisibleCompanyNameMatches));
+            }
             int aggregateCandidates = responses.stream()
                 .mapToInt(response -> response.candidates().size())
                 .sum();

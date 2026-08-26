@@ -7,9 +7,22 @@ import org.apache.ibatis.annotations.Param;
 import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowListView;
+import ooo.klae.connex.backend.dto.WorkflowSummaryDto;
 
 /** Workspace-scoped persistence for mutable workflows and deterministic legacy-rule pairing. */
 public interface WorkflowMapper {
+
+    /**
+     * Bounded global-search slice of live workflows, matched on name and description. Archived
+     * workflows are excluded, mirroring the default workflow list.
+     *
+     * @param workspaceId the resolved tenant
+     * @param query the escaped {@code LIKE} pattern
+     * @return at most ten matching workflows, ordered by name
+     */
+    List<WorkflowSummaryDto> search(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query);
 
     List<Workflow> listByWorkspace(
         @Param("workspaceId") int workspaceId,

@@ -14,15 +14,7 @@ import {
     SelectItem,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-    ResponsiveDialog,
-    ResponsiveDialogContent,
-    ResponsiveDialogHeader,
-    ResponsiveDialogTitle,
-    ResponsiveDialogDescription,
-    ResponsiveDialogFooter,
-    ResponsiveDialogClose,
-} from "@/components/ui/responsive-dialog";
+import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
 import Panel from "@/app/components/overview/analytics/Panel";
 import Rise from "@/app/components/motion/Rise";
 import InfoRow from "@/app/components/me/InfoRow";
@@ -34,7 +26,7 @@ import CampaignDelivery from "@/app/components/marketing/campaigns/CampaignDeliv
 import CampaignEngagement from "@/app/components/marketing/campaigns/CampaignEngagement";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import CampaignExportPanel from "@/app/components/marketing/campaigns/CampaignExportPanel";
-import CampaignFormDialog from "@/app/components/marketing/campaigns/CampaignFormDialog";
+import EditCampaignSheet from "@/app/components/marketing/campaigns/EditCampaignSheet";
 import { PageShell } from "@/app/components/PageShell";
 import {
     type Campaign,
@@ -63,10 +55,12 @@ import {
 import {
     canEstimateAudience,
     canFreezeSnapshot,
+    canReadRecipients,
     type CampaignAccess,
 } from "@/app/lib/campaignAccess";
 import AccessDenied from "@/app/components/AccessDenied";
-import { toastError, toastSuccess } from "@/app/lib/toast";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
+import { toastSuccess } from "@/app/lib/toast";
 import { formatCurrency, formatDate } from "@/app/lib/utils";
 import type { CapabilityAvailability } from "@/app/lib/capabilityAvailability";
 
@@ -152,6 +146,8 @@ export default function CampaignDetail({
 }) {
     const t = useTranslations("CampaignDetail");
     const at = useTranslations("CampaignAudience");
+    const showApiError = useApiErrorToast("CampaignDetail");
+    const showAudienceApiError = useApiErrorToast("CampaignAudience");
     const locale = useLocale();
     const router = useRouter();
 
@@ -220,7 +216,7 @@ export default function CampaignDetail({
             setAudienceSaved(true);
             toastSuccess(at("saved"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : String(err));
+            showAudienceApiError(err, "saveFailed");
         } finally {
             setIsSaving(false);
         }
@@ -231,7 +227,7 @@ export default function CampaignDetail({
         try {
             setEstimate(await estimateCampaignAudience(current.id));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : String(err));
+            showAudienceApiError(err, "estimateFailed");
         } finally {
             setIsEstimating(false);
         }
@@ -244,7 +240,7 @@ export default function CampaignDetail({
             setSnapshots((prev) => [snapshot, ...prev]);
             toastSuccess(at("frozen"));
         } catch (err) {
-            toastError(err instanceof Error ? err.message : String(err));
+            showAudienceApiError(err, "freezeFailed");
         } finally {
             setIsFreezing(false);
         }
@@ -272,7 +268,7 @@ export default function CampaignDetail({
         } catch (err) {
             setIsSavingCampaign(false);
             if (isFieldError(err)) throw err;
-            toastError(err instanceof Error ? err.message : String(err));
+            showApiError(err, "saveFailed");
         }
     };
 
@@ -283,7 +279,7 @@ export default function CampaignDetail({
             router.push("/marketing/campaigns");
         } catch (err) {
             setIsDeleting(false);
-            toastError(err instanceof Error ? err.message : String(err));
+            showApiError(err, "deleteFailed");
         }
     };
 
@@ -296,10 +292,15 @@ export default function CampaignDetail({
             ? `${formatDate(current.startAt ?? undefined, locale)} – ${formatDate(current.endAt ?? undefined, locale)}`
             : t("noValue");
     const latestSnapshot = snapshots[0] ?? null;
+    const deleteBlockedNote = latestSnapshot !== null
+        ? t("deleteBlocked")
+        : snapshotsRestricted
+            ? t("deleteBlockedUnknown")
+            : null;
 
     return (
         <>
-            <PageShell tier="reading">
+            <PageShell>
                 <Rise className="flex flex-col gap-4">
                     <CrumbLabel value={current.name} />
                     <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
@@ -331,7 +332,7 @@ export default function CampaignDetail({
 
                 <Rise delay={0.06}>
                     <Tabs value={tab} onValueChange={setTab} className="gap-6">
-                    <div className="-mx-2 overflow-x-auto px-2 pb-px">
+                    <div className="-mx-2 overflow-x-auto px-2 pb-px 2xl:-mx-6 2xl:px-6">
                         <TabsList className="w-max">
                             <TabsTrigger value="overview">{t("tabOverview")}</TabsTrigger>
                             <TabsTrigger value="audience">{t("tabAudience")}</TabsTrigger>
@@ -582,7 +583,11 @@ export default function CampaignDetail({
                     </TabsContent>
 
                     <TabsContent value="engagement" forceMount className="data-[state=inactive]:hidden">
-                        <CampaignEngagement engagement={initialEngagement} />
+                        <CampaignEngagement
+                            campaignId={current.id}
+                            engagement={initialEngagement}
+                            canReadRecipients={canReadRecipients(access)}
+                        />
                     </TabsContent>
 
                     <TabsContent value="exports" forceMount className="data-[state=inactive]:hidden">
@@ -598,8 +603,7 @@ export default function CampaignDetail({
                 </Rise>
             </PageShell>
 
-            <CampaignFormDialog
-                mode="edit"
+            <EditCampaignSheet
                 open={editOpen}
                 onOpenChange={setEditOpen}
                 payload={editPayload}
@@ -609,40 +613,19 @@ export default function CampaignDetail({
                 onSubmit={saveCampaign}
             />
 
-            <ResponsiveDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
-                <ResponsiveDialogContent className="p-0 sm:max-w-md">
-                    <div className="flex flex-col gap-4 p-6">
-                        <ResponsiveDialogHeader>
-                            <ResponsiveDialogTitle className="text-lg font-semibold tracking-tight">
-                                {t("deleteTitle")}
-                            </ResponsiveDialogTitle>
-                            <ResponsiveDialogDescription>{t("deleteBody")}</ResponsiveDialogDescription>
-                        </ResponsiveDialogHeader>
-                        <ResponsiveDialogFooter>
-                            <ResponsiveDialogClose asChild>
-                                <Button type="button" variant="outline" disabled={isDeleting}>
-                                    {t("cancel")}
-                                </Button>
-                            </ResponsiveDialogClose>
-                            <Button
-                                type="button"
-                                variant="destructive"
-                                onClick={removeCampaign}
-                                disabled={isDeleting}
-                            >
-                                {isDeleting ? (
-                                    <>
-                                        <Loader2Icon className="size-4 animate-spin" />
-                                        {t("delete")}
-                                    </>
-                                ) : (
-                                    t("delete")
-                                )}
-                            </Button>
-                        </ResponsiveDialogFooter>
-                    </div>
-                </ResponsiveDialogContent>
-            </ResponsiveDialog>
+            <DeleteRecordDialog
+                open={confirmDelete}
+                onOpenChange={setConfirmDelete}
+                selectedIds={new Set([current.id])}
+                selectedItems={[current]}
+                entityLabel={t("entityLabel")}
+                getDisplayName={(campaign) => campaign.name}
+                details={deleteBlockedNote ? (
+                    <p className="text-sm text-muted-foreground">{deleteBlockedNote}</p>
+                ) : undefined}
+                isDeleting={isDeleting}
+                confirmDelete={removeCampaign}
+            />
         </>
     );
 }

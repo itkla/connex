@@ -24,6 +24,7 @@ import {
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -98,8 +99,21 @@ function PermissionSummary({
  * included — and the app shell resolves those once per server render, so without the refresh
  * the editor would keep the gates and navigation of the permissions they just changed.
  */
-export default function RolesPanel() {
+/**
+ * Where the panel is rendering, so one component serves both of its homes while #1340 migrates the
+ * workspace destinations.
+ *
+ * - `page` is `/settings/roles` exactly as it ships: the panel's two headings are the page's only
+ *   section headings.
+ * - `section` is the roles section of People & access, which is already named "Roles" for the deep
+ *   link that leads to it, so the panel's own headings sit one level below that name.
+ */
+export type RolesPresentation = "page" | "section";
+
+export default function RolesPanel({ presentation = "page" }: { presentation?: RolesPresentation } = {}) {
     const t = useTranslations("WorkspaceRoles");
+    const showApiError = useApiErrorToast("WorkspaceRoles");
+    const headingLevel = presentation === "section" ? 3 : 2;
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const router = useRouter();
     const { activeWorkspaceId } = useWorkspace();
@@ -175,7 +189,7 @@ export default function RolesPanel() {
             router.refresh();
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("saveFailed"));
+                showApiError(err, "saveFailed");
             }
             throw err;
         }
@@ -192,7 +206,7 @@ export default function RolesPanel() {
             setRemoveTarget(null);
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("deleteFailed"));
+                showApiError(err, "deleteFailed");
             }
         } finally {
             setIsRemoving(false);
@@ -211,6 +225,7 @@ export default function RolesPanel() {
         <div className="space-y-10">
             <Rise className="space-y-4">
                 <SettingsSection
+                    headingLevel={headingLevel}
                     title={t("defaultRolesLabel")}
                     description={t("builtInSubtitle")}
                     action={
@@ -254,6 +269,7 @@ export default function RolesPanel() {
 
             <Rise className="space-y-4">
                 <SettingsSection
+                    headingLevel={headingLevel}
                     title={t("customRolesLabel")}
                     action={
                         !loading && roles.length > 0 ? (

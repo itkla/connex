@@ -1,5 +1,19 @@
-import OrganizationOverviewPanel from "@/app/components/organization/OrganizationOverviewPanel";
+import { permanentRedirect } from "next/navigation";
 
-export default function OrganizationOverviewPage() {
-    return <OrganizationOverviewPanel />;
+import { settingsRedirectTarget, type RouteSearchParams } from "@/app/lib/settingsRedirects";
+
+/**
+ * The retired address for the organization’s own identity (#1340 WS4.6).
+ *
+ * The job now lives at the `identity` section of organization General, and this path forwards there permanently rather than 404ing an
+ * address readers have bookmarked and linked. The target is the manifest’s, not this file’s, so a
+ * destination that moves again takes its redirect with it; the query string is the reader’s and
+ * survives the hop whole.
+ */
+export default async function OrganizationOverviewPage({
+    searchParams,
+}: {
+    searchParams: Promise<RouteSearchParams>;
+}) {
+    permanentRedirect(settingsRedirectTarget("organization.overview", await searchParams));
 }

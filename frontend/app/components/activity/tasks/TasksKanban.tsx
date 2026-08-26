@@ -12,7 +12,7 @@ import NoteContent from '@/app/components/activity/notes/NoteContent';
 import { DUE_CHIP, formatDue } from '@/app/components/activity/tasks/taskDue';
 import { moveTask } from '@/app/lib/api';
 import { noteContentToPlainText } from '@/app/lib/references';
-import { toastError } from '@/app/lib/toast';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import type { Contact, Deal, Task, TaskStatus, User } from '@/app/lib/types';
 
 interface TasksKanbanProps {
@@ -53,6 +53,7 @@ export default function TasksKanban({
     reduce,
 }: TasksKanbanProps) {
     const t = useTranslations('ActivityTasks');
+    const showApiError = useApiErrorToast('ActivityTasks');
     const locale = useLocale();
 
     const columns: KanbanColumnDef[] = useMemo(
@@ -131,11 +132,11 @@ export default function TasksKanban({
                 await moveTask(taskId, columnId as TaskStatus, index);
                 onMoved();
             } catch (err) {
-                toastError(err instanceof Error ? err.message : t('moveFailed'));
+                showApiError(err, 'moveFailed');
                 throw err;
             }
         },
-        [onMoved, t],
+        [onMoved, showApiError],
     );
 
     const taskName = useCallback((id: UniqueIdentifier) => noteContentToPlainText(tasksById.get(Number(id))?.description ?? ''), [tasksById]);

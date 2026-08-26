@@ -45,6 +45,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import WorkflowRecipeDetailSkeleton from "@/app/components/settings/workflows/recipes/WorkflowRecipeDetailSkeleton";
 
 function recipeMessageKey(recipeKey: string): (typeof WORKFLOW_RECIPE_KEYS)[number] {
     return isWorkflowRecipeKey(recipeKey) ? recipeKey : "person-job-change-follow-up";
@@ -212,7 +213,7 @@ export function WorkflowRecipeDetail({ recipeKey }: { recipeKey: string }) {
     if ((error === "load" && !recipe) || (!recipe && !switching && error)) {
         return <RecipeError onRetry={() => setAttempt((value) => value + 1)} />;
     }
-    if (!recipe || switching) return <RecipeDetailSkeleton />;
+    if (!recipe || switching) return <WorkflowRecipeDetailSkeleton />;
 
     const messageKey = recipeMessageKey(recipe.recipeKey);
     const canInstall = preview?.writesCreated === false
@@ -439,22 +440,6 @@ function RecipeListSkeleton() {
                     <Skeleton className="h-3 w-40" />
                 </div>
             ))}
-        </div>
-    );
-}
-
-function RecipeDetailSkeleton() {
-    return (
-        <div className="space-y-8" aria-busy="true">
-            <div className="space-y-3">
-                <Skeleton className="h-8 w-24" />
-                <Skeleton className="h-9 w-80 max-w-full" />
-                <Skeleton className="h-4 w-96 max-w-full" />
-            </div>
-            <div className="grid gap-8 xl:grid-cols-[minmax(0,1.25fr)_minmax(20rem,0.75fr)]">
-                <Skeleton className="h-[32rem] rounded-2xl" />
-                <Skeleton className="h-72 rounded-2xl" />
-            </div>
         </div>
     );
 }

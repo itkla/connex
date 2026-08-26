@@ -16,6 +16,9 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.PersonFirstResponseState;
+import ooo.klae.connex.backend.beans.PersonLeadSource;
+import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.util.LikePattern;
 import ooo.klae.connex.backend.util.PageBounds;
 import ooo.klae.connex.backend.dto.ActivityDto;
@@ -25,6 +28,7 @@ import ooo.klae.connex.backend.dto.BulkOperationResult;
 import ooo.klae.connex.backend.dto.BulkOwnerRequest;
 import ooo.klae.connex.backend.dto.BulkTagRequest;
 import ooo.klae.connex.backend.dto.ConnectionRequestDto;
+import ooo.klae.connex.backend.dto.ContactMarketingStatusDto;
 import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.CustomFieldValueRequest;
 import ooo.klae.connex.backend.dto.CustomFieldValuesRequest;
@@ -34,20 +38,33 @@ import ooo.klae.connex.backend.dto.JobMoveDto;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.NoteDto;
 import ooo.klae.connex.backend.dto.PageResponse;
+import ooo.klae.connex.backend.dto.PersonCampaignTouchDto;
 import ooo.klae.connex.backend.dto.PersonConnectionDto;
 import ooo.klae.connex.backend.dto.PersonEmploymentDto;
 import ooo.klae.connex.backend.dto.PersonFacets;
+import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.dto.PersonDetailDto;
 import ooo.klae.connex.backend.dto.PersonDto;
 import ooo.klae.connex.backend.dto.PersonEvaluationDto;
+import ooo.klae.connex.backend.dto.PersonLifecycleDto;
+import ooo.klae.connex.backend.dto.PersonQualificationDto;
+import ooo.klae.connex.backend.dto.PersonQualificationRequest;
+import ooo.klae.connex.backend.dto.PersonLifecycleHistoryDto;
+import ooo.klae.connex.backend.dto.PersonLifecycleRequest;
+import ooo.klae.connex.backend.dto.PersonLifecycleWithdrawalRequest;
+import ooo.klae.connex.backend.dto.PersonProvenanceRequest;
 import ooo.klae.connex.backend.dto.PersonOwnerDto;
 import ooo.klae.connex.backend.dto.PersonRestrictionsDto;
 import ooo.klae.connex.backend.dto.TagDto;
 import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.ConnectionService;
+import ooo.klae.connex.backend.services.ContactMarketingService;
 import ooo.klae.connex.backend.services.EmploymentService;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
+import ooo.klae.connex.backend.services.WarmthFilterResolver;
+import ooo.klae.connex.backend.services.PersonLifecycleService;
+import ooo.klae.connex.backend.services.PersonQualificationService;
 import ooo.klae.connex.backend.services.PersonService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.storage.UploadSource;
@@ -70,12 +87,15 @@ import lombok.RequiredArgsConstructor;
 @TenantJournalAttributable
 public class PersonController {
     private final PersonService personService;
+    private final PersonLifecycleService personLifecycleService;
+    private final PersonQualificationService personQualificationService;
     private final EmploymentService employmentService;
     private final ConnectionService connectionService;
+    private final ContactMarketingService contactMarketingService;
     private final BulkOperationService bulkOperationService;
     private final WorkspaceService workspaceService;
     private final MemberScopeResolver memberScopeResolver;
-    private static final String WARMTH_SORT = "warmth";
+    private final WarmthFilterResolver warmthFilterResolver;
 
     /**
      * GET endpoint for the "recently moved" feed: contacts who recently changed companies.
@@ -132,19 +152,31 @@ public class PersonController {
         @RequestParam(defaultValue = "false") boolean noCompany,
         @RequestParam(required = false) String scope,
         @RequestParam(required = false) List<Integer> memberIds,
+        @RequestParam(required = false) List<PersonLifecycleStage> lifecycleStages,
+        @RequestParam(defaultValue = "false") boolean noLifecycle,
+        @RequestParam(required = false) List<PersonLeadSource> leadSources,
+        @RequestParam(defaultValue = "false") boolean noLeadSource,
+        @RequestParam(required = false) List<PersonFirstResponseState> firstResponseStates,
+        @RequestParam(defaultValue = "false") boolean noFirstResponse,
+        @RequestParam(required = false) List<String> warmthBands,
+        @RequestParam(defaultValue = "false") boolean noWarmth,
+        @RequestParam(required = false) Integer goesColdWithinDays,
         @RequestParam(defaultValue = "false") boolean archived
     ) {
-        if (WARMTH_SORT.equalsIgnoreCase(sort)) {
-            throw new BadRequestException("Warmth sorting requires a precomputed score index and is not available for paginated contacts");
-        }
         PageBounds bounds = PageBounds.of(page, size);
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
+        String sortKey = WarmthFilter.canonicalSort(sort);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
-        List<PersonDto> items = personService.getPersonsPage(query, sort, dir, companies, titles, noCompany,
-            memberScope, archived, bounds.size(), bounds.offset())
+        WarmthFilter warmth = warmthFilterResolver.resolve(
+            warmthBands, noWarmth, goesColdWithinDays, sortKey);
+        List<PersonDto> items = personService.getPersonsPage(query, sortKey, dir, companies, titles, noCompany,
+            memberScope, lifecycleStages, noLifecycle, leadSources, noLeadSource,
+            firstResponseStates, noFirstResponse, archived, warmth,
+            bounds.size(), bounds.offset())
             .stream().map(PersonDto::from).toList();
-        return new PageResponse<>(items,
-            personService.countPersons(query, companies, titles, noCompany, memberScope, archived));
+        return new PageResponse<>(items, personService.countPersons(
+            query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
+            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth));
     }
 
     /**
@@ -165,19 +197,39 @@ public class PersonController {
         @RequestParam(defaultValue = "false") boolean noCompany,
         @RequestParam(required = false) String scope,
         @RequestParam(required = false) List<Integer> memberIds,
+        @RequestParam(required = false) List<PersonLifecycleStage> lifecycleStages,
+        @RequestParam(defaultValue = "false") boolean noLifecycle,
+        @RequestParam(required = false) List<PersonLeadSource> leadSources,
+        @RequestParam(defaultValue = "false") boolean noLeadSource,
+        @RequestParam(required = false) List<PersonFirstResponseState> firstResponseStates,
+        @RequestParam(defaultValue = "false") boolean noFirstResponse,
+        @RequestParam(required = false) List<String> warmthBands,
+        @RequestParam(defaultValue = "false") boolean noWarmth,
+        @RequestParam(required = false) Integer goesColdWithinDays,
         @RequestParam(defaultValue = "false") boolean archived
     ) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
+        WarmthFilter warmth = warmthFilterResolver.resolve(
+            warmthBands, noWarmth, goesColdWithinDays, null);
         if (!archived
+            && (warmth == null || !warmth.restrictsRows())
             && query == null
             && (companies == null || companies.isEmpty())
             && (titles == null || titles.isEmpty())
             && !noCompany
+            && (lifecycleStages == null || lifecycleStages.isEmpty())
+            && !noLifecycle
+            && (leadSources == null || leadSources.isEmpty())
+            && !noLeadSource
+            && (firstResponseStates == null || firstResponseStates.isEmpty())
+            && !noFirstResponse
             && memberScope.mode() == MemberScope.Mode.ALL_TEAM) {
             throw new BadRequestException("At least one filter is required before selecting matching contact ids");
         }
-        return personService.getMatchingPersonIds(query, companies, titles, noCompany, memberScope, archived);
+        return personService.getMatchingPersonIds(
+            query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
+            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth);
     }
 
     /**
@@ -186,13 +238,19 @@ public class PersonController {
      * @return
      */
     @GetMapping("/facets")
-    public PersonFacets getPersonFacets() {
+    public PersonFacets getPersonFacets(
+        @RequestParam(defaultValue = "false") boolean warmth
+    ) {
         return new PersonFacets(
             personService.distinctCompanies(),
             personService.distinctTitles(),
             personService.hasPersonWithoutCompany(),
             personService.countsByOwner(),
-            personService.countArchivedPersons()
+            personService.countArchivedPersons(),
+            personService.countsByLifecycleStage(),
+            personService.countsByLeadSource(),
+            personService.countsByFirstResponseState(),
+            warmth ? personService.countsByWarmthBand(warmthFilterResolver.forFacets()) : null
         );
     }
 
@@ -277,6 +335,92 @@ public class PersonController {
     public PersonDto updateRestrictions(@PathVariable int id, @Valid @RequestBody PersonRestrictionsDto dto) {
         return PersonDto.from(personService.updateProcessingRestrictions(
             id, dto.getSuspended(), dto.getProvisionCeased()));
+    }
+
+    /**
+     * PUT endpoint to replace the contact's source provenance (#559). A body with every field null
+     * clears it, recording that the origin is unknown.
+     * @param id contact id
+     * @param request requested provenance
+     * @return the updated contact
+     */
+    @PutMapping("/{id}/provenance")
+    public PersonDto updateProvenance(
+            @PathVariable int id, @Valid @RequestBody PersonProvenanceRequest request) {
+        return PersonDto.from(personService.updateProvenance(
+            id, request.getLeadSource(), request.getLeadSourceDetail(), request.getReferrerPersonId()));
+    }
+
+    /**
+     * GET endpoint for the contact's current lead-lifecycle state and its permitted next moves.
+     * @param id contact id
+     * @return current lifecycle state
+     */
+    @GetMapping("/{id}/lifecycle")
+    public PersonLifecycleDto getLifecycle(@PathVariable int id) {
+        return personLifecycleService.getLifecycle(id);
+    }
+
+    /**
+     * PUT endpoint to move a contact to a lead-lifecycle stage (#559). Requesting the stage the
+     * contact already holds updates only the accompanying reason and note.
+     * @param id contact id
+     * @param request requested stage with its reason and note
+     * @return the contact's lifecycle state after the move
+     */
+    @PutMapping("/{id}/lifecycle")
+    public PersonLifecycleDto updateLifecycle(
+            @PathVariable int id, @Valid @RequestBody PersonLifecycleRequest request) {
+        return personLifecycleService.updateLifecycleState(id, request);
+    }
+
+    /**
+     * POST endpoint to withdraw a contact from the lead lifecycle. Withdrawal is a deliberate,
+     * separate operation so that a client which omits the stage field cannot erase it by accident,
+     * and it carries its note in a body so the note never reaches a URL.
+     * @param id contact id
+     * @param request optional explanation recorded in the lifecycle history
+     * @return the contact's lifecycle state after the withdrawal
+     */
+    @PostMapping("/{id}/lifecycle/withdrawal")
+    public PersonLifecycleDto withdrawFromLifecycle(
+            @PathVariable int id,
+            @Valid @RequestBody(required = false) PersonLifecycleWithdrawalRequest request) {
+        return personLifecycleService.withdrawLifecycleState(
+            id, request == null ? null : request.getNote());
+    }
+
+    /**
+     * GET endpoint for the contact's qualification criteria, answers, and deterministic scores.
+     * @param id contact id
+     * @return qualification state
+     */
+    @GetMapping("/{id}/qualification")
+    public PersonQualificationDto getQualification(@PathVariable int id) {
+        return personQualificationService.getQualification(id);
+    }
+
+    /**
+     * PUT endpoint to answer one qualification criterion for a contact (#559). An omitted answer
+     * clears the criterion back to unanswered rather than asserting anything about it.
+     * @param id contact id
+     * @param request criterion and answer
+     * @return qualification state after the answer
+     */
+    @PutMapping("/{id}/qualification")
+    public PersonQualificationDto answerQualification(
+            @PathVariable int id, @Valid @RequestBody PersonQualificationRequest request) {
+        return personQualificationService.answer(id, request);
+    }
+
+    /**
+     * GET endpoint for the contact's append-only lead-lifecycle timeline, most recent first.
+     * @param id contact id
+     * @return transition history
+     */
+    @GetMapping("/{id}/lifecycle/history")
+    public List<PersonLifecycleHistoryDto> getLifecycleHistory(@PathVariable int id) {
+        return personLifecycleService.getHistory(id);
     }
 
     /**
@@ -424,6 +568,35 @@ public class PersonController {
     @GetMapping("/{id}/tasks")
     public List<TaskDto> getTasksForPerson(@PathVariable int id) {
         return personService.getTasksByPersonId(id).stream().map(TaskDto::from).toList();
+    }
+
+    /**
+     * GET endpoint for a contact's marketing exclusion state, so a member can see that someone
+     * opted out — or is on a privacy hold — before contacting them.
+     *
+     * @param id the contact id
+     * @return the per-channel marketing state plus the contact-level privacy hold
+     */
+    @GetMapping("/{id}/marketing-status")
+    public ContactMarketingStatusDto getMarketingStatus(@PathVariable int id) {
+        return contactMarketingService.getStatus(id);
+    }
+
+    /**
+     * GET endpoint for the campaign touches on a contact's timeline, newest first.
+     *
+     * @param id the contact id
+     * @param page the one-based page number
+     * @param size the page size, capped by {@link PageBounds#MAX_SIZE}
+     * @return the page of campaign touches and the total it was drawn from
+     */
+    @GetMapping("/{id}/campaign-touches")
+    public PageResponse<PersonCampaignTouchDto> getCampaignTouches(
+            @PathVariable int id,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "25") int size) {
+        PageBounds bounds = PageBounds.of(page, size);
+        return contactMarketingService.getCampaignTouches(id, bounds.size(), bounds.offset());
     }
 
     /**

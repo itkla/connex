@@ -1,6 +1,6 @@
 'use client';
 
-import TemperaturePill from '@/app/components/records/TemperaturePill';
+import WarmthPill from '@/app/components/records/WarmthPill';
 import type { Contact, RelationshipTemperature } from '@/app/lib/types';
 
 function secondaryLine(contact: Contact): string {
@@ -32,7 +32,7 @@ export default function ContactListRow({
                 {secondary && <span className="mt-0.5 block truncate text-xs text-muted-foreground">{secondary}</span>}
             </span>
             <span className="shrink-0">
-                <TemperaturePill temp={temperature} />
+                <WarmthPill temp={temperature} />
             </span>
         </span>
     );

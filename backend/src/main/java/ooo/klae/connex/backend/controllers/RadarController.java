@@ -28,13 +28,18 @@ import ooo.klae.connex.backend.services.RadarService;
 public class RadarController {
     private final RadarService radarService;
 
-    /** Returns the bounded ranked Radar feed with explicit family availability. */
+    /**
+     * Returns the bounded ranked Radar feed with explicit family availability, optionally narrowed
+     * to the signals raised against one record.
+     */
     @GetMapping
     public RadarResponseDto get(
             @RequestParam(required = false) List<String> family,
             @RequestParam(required = false) List<String> state,
-            @RequestParam(required = false) String q) {
-        return radarService.get(family, state, q);
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) String subjectType,
+            @RequestParam(required = false) Integer subjectId) {
+        return radarService.get(family, state, q, subjectType, subjectId);
     }
 
     /** Returns Radar counts and detector status without item bodies. */

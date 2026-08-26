@@ -1,6 +1,7 @@
 import { Client, type IMessage } from "@stomp/stompjs";
 
 import { csrfHeader } from "@/app/lib/api";
+import { isAskConnexProgressSource } from "@/app/lib/askConnex";
 import { type AiChatDeltaFrame, type AiChatRealtimeFrame, type Notification } from "@/app/lib/types";
 
 const NOTIFICATIONS_QUEUE = "/user/queue/notifications";
@@ -99,13 +100,17 @@ function parseJsonBody(message: IMessage): unknown {
 function parseAiChatDeltaFrame(parsed: unknown): AiChatDeltaFrame | null {
     if (typeof parsed !== "object" || parsed === null) return null;
     if (Reflect.get(parsed, "kind") !== "delta") return null;
+    const workspaceId = Reflect.get(parsed, "workspaceId");
+    const sessionId = Reflect.get(parsed, "sessionId");
     const turnId = Reflect.get(parsed, "turnId");
     const seq = Reflect.get(parsed, "seq");
     const text = Reflect.get(parsed, "text");
-    if (typeof turnId !== "number" || !Number.isSafeInteger(turnId) || turnId <= 0) return null;
+    const identities = [workspaceId, sessionId, turnId];
+    if (identities.some((value) => typeof value !== "number"
+            || !Number.isSafeInteger(value) || value <= 0)) return null;
     if (typeof seq !== "number" || !Number.isSafeInteger(seq) || seq < 0) return null;
     if (typeof text !== "string") return null;
-    return { turnId, seq, kind: "delta", text };
+    return { workspaceId, sessionId, turnId, seq, kind: "delta", text };
 }
 
 function parseAiChatFrame(parsed: unknown): AiChatRealtimeFrame | null {
@@ -126,11 +131,12 @@ function parseAiChatFrame(parsed: unknown): AiChatRealtimeFrame | null {
         kind !== "session"
         && kind !== "message"
         && kind !== "state"
+        && kind !== "reset"
         && kind !== "step"
         && kind !== "terminal"
     ) return null;
     if (typeof status !== "string") return null;
-    if (tool !== null && tool !== undefined && typeof tool !== "string") return null;
+    if (tool !== null && tool !== undefined && !isAskConnexProgressSource(tool)) return null;
     if (reason !== null && reason !== undefined && typeof reason !== "string") return null;
     return {
         workspaceId,
@@ -138,7 +144,7 @@ function parseAiChatFrame(parsed: unknown): AiChatRealtimeFrame | null {
         turnId,
         seq,
         kind,
-        tool: typeof tool === "string" ? tool : null,
+        tool: isAskConnexProgressSource(tool) ? tool : null,
         status,
         reason: typeof reason === "string" ? reason : null,
     };

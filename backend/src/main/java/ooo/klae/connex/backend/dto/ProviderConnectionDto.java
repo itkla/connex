@@ -11,7 +11,6 @@ import ooo.klae.connex.backend.beans.ProviderConnection;
  * @param providerAccountEmail account identity reported by the provider (display only)
  * @param grantedScopes        space-delimited scopes granted at consent
  * @param hasCredential        whether a token bundle is stored
- * @param lastSyncAt           last successful legacy connection sync, when available
  * @param errorCode            machine-readable connection or purge failure reason
  * @param createdAt            when first connected
  * @param updatedAt            last state change
@@ -22,15 +21,19 @@ public record ProviderConnectionDto(
     String providerAccountEmail,
     String grantedScopes,
     boolean hasCredential,
-    String lastSyncAt,
     String errorCode,
     String createdAt,
     String updatedAt
 ) {
     public static ProviderConnectionDto from(ProviderConnection c) {
         if (c == null) return null;
-        return new ProviderConnectionDto(c.getProvider(), c.getStatus(), c.getProviderAccountEmail(),
+        String status = switch (c.getStatus()) {
+            case "revoking" -> "disconnecting";
+            case "disconnected" -> "revoked";
+            default -> c.getStatus();
+        };
+        return new ProviderConnectionDto(c.getProvider(), status, c.getProviderAccountEmail(),
             c.getGrantedScopes(), c.getCredentialRef() != null && !c.getCredentialRef().isBlank(),
-            c.getLastSyncAt(), c.getErrorCode(), c.getCreatedAt(), c.getUpdatedAt());
+            c.getErrorCode(), c.getCreatedAt(), c.getUpdatedAt());
     }
 }

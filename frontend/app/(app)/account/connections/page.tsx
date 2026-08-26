@@ -1,107 +1,19 @@
-import { Suspense } from "react";
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
+import { permanentRedirect } from "next/navigation";
 
-import {
-    DEFAULT_CAPABILITIES,
-    getCapabilitiesResultFromCookie,
-    getEffectivePermissionsResultFromCookie,
-} from "@/app/lib/api";
-import ConnectionsPanel from "@/app/components/account/ConnectionsPanel";
-import { capabilityAvailability } from "@/app/lib/capabilityAvailability";
-import {
-    captureConnectionsHref,
-    parseCaptureRouteState,
-    providerCaptureEnabled,
-} from "@/app/lib/connectedCapture";
-import { checkPermission, type PermissionsStatus } from "@/app/lib/permissionState";
-import { Skeleton } from "@/components/ui/skeleton";
-
-function toSearchParams(
-    values: Record<string, string | string[] | undefined>,
-): URLSearchParams {
-    const params = new URLSearchParams();
-    for (const [key, value] of Object.entries(values)) {
-        if (Array.isArray(value)) {
-            value.forEach((entry) => params.append(key, entry));
-        } else if (value !== undefined) {
-            params.set(key, value);
-        }
-    }
-    return params;
-}
+import { settingsRedirectTarget, type RouteSearchParams } from "@/app/lib/settingsRedirects";
 
 /**
- * Self-owned provider connections, plus the workspace capture policy for members who administer it.
+ * The retired address for the reader's own connected provider accounts (#1340 WS4.6).
  *
- * Canonicalizing the query string is how a route state the viewer may not reach is refused, and it
- * is destructive: the deep link is rewritten away, so the reader has nothing left to retry. That is
- * only an honest answer to a permission check that actually returned one. When the effective
- * permissions could not be read at all, the deep link is preserved and the panel reports the failed
- * lookup instead — the administrator who followed a link to the policy panel during a blip can
- * retry it where they are, rather than going back to find the link again. Access still fails
- * closed either way: the permission list stays empty, so every gated affordance stays hidden.
+ * The job now lives at its canonical destination under the unified Settings shell, and this path
+ * forwards there permanently rather than 404ing an address readers have bookmarked and linked. The
+ * target is the manifest's, not this file's, so a destination that moves again takes its redirect
+ * with it; the query string is the reader's and survives the hop whole.
  */
 export default async function AccountConnectionsPage({
     searchParams,
 }: {
-    searchParams: Promise<Record<string, string | string[] | undefined>>;
+    searchParams: Promise<RouteSearchParams>;
 }) {
-    const cookie = (await headers()).get("cookie");
-    const capabilitiesResult = await getCapabilitiesResultFromCookie(cookie);
-    const capabilities = capabilitiesResult.ok
-        ? capabilitiesResult.data
-        : DEFAULT_CAPABILITIES;
-    const capabilitiesAvailability = capabilityAvailability(capabilitiesResult.ok
-        ? capabilities.connectedAccounts.google
-            || capabilities.connectedAccounts.microsoft
-            || capabilities.connectedCapture.google
-            || capabilities.connectedCapture.microsoft
-        : null);
-    const captureEnabled =
-        capabilities.connectedCapture.google || capabilities.connectedCapture.microsoft;
-    const permissionsResult = captureEnabled
-        ? await getEffectivePermissionsResultFromCookie(cookie)
-        : { ok: true as const, data: [] };
-    const effectivePermissions = permissionsResult.ok ? permissionsResult.data : [];
-    const permissionsStatus: PermissionsStatus = permissionsResult.ok ? "resolved" : "unavailable";
-    const currentSearchParams = toSearchParams(await searchParams);
-    const routeState = parseCaptureRouteState(currentSearchParams);
-    const routeUnavailable = capabilitiesResult.ok && routeState.provider
-        && !providerCaptureEnabled(capabilities, routeState.provider);
-    const workspacePolicyForbidden = capabilitiesResult.ok
-        && routeState.panel === "workspace-policy"
-        && checkPermission(permissionsStatus, new Set(effectivePermissions), "WORKSPACE_SETTINGS")
-            === "denied";
-    const canonicalHref = captureConnectionsHref(
-        currentSearchParams,
-        routeUnavailable || workspacePolicyForbidden
-            ? { provider: null, panel: null, reviewId: null, page: 1 }
-            : routeState,
-    );
-    const currentQuery = currentSearchParams.toString();
-    const currentHref = currentQuery
-        ? `/account/connections?${currentQuery}`
-        : "/account/connections";
-    if (canonicalHref !== currentHref) {
-        redirect(canonicalHref);
-    }
-
-    return (
-        <Suspense
-            fallback={(
-                <div className="grid gap-3" role="status">
-                    <Skeleton className="h-28 w-full rounded-2xl" />
-                    <Skeleton className="h-28 w-full rounded-2xl" />
-                </div>
-            )}
-        >
-            <ConnectionsPanel
-                capabilities={capabilities}
-                capabilitiesAvailability={capabilitiesAvailability}
-                effectivePermissions={effectivePermissions}
-                permissionsStatus={permissionsStatus}
-            />
-        </Suspense>
-    );
+    permanentRedirect(settingsRedirectTarget("account.connections", await searchParams));
 }

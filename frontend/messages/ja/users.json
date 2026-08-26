@@ -13,6 +13,9 @@
     "columnLastLogin": "最終ログイン",
     "columnMemberSince": "登録日",
     "neverLoggedIn": "なし",
+    "emptyTitle": "メンバーはまだいません",
+    "emptyBody": "このワークスペースを利用できる人がここに並びます。ワークスペース設定から、一緒に働くメンバーを招待してください。",
+    "emptyCta": "メンバーを招待",
     "entityLabel": "ユーザー"
   },
   "UsersPage": {
@@ -32,6 +35,7 @@
     "notesCount": "メモ{count}件",
     "timeline": "タイムライン",
     "emptyActivity": "まだアクティビティはありません",
+    "emptyActivityBody": "このメンバーが記録したアクティビティやメモと、このメンバーに割り当てられたタスクが、このタイムラインに表示されます。",
     "performance": "パフォーマンス",
     "performanceWindow": "過去90日間",
     "wonDeals": "成約した案件",
@@ -58,7 +62,7 @@
     "cancel": "キャンセル",
     "create": "作成",
     "toastCreated": "ユーザーを作成しました",
-    "toastFailed": "ユーザーの作成に失敗しました"
+    "toastFailed": "ユーザーを作成できませんでした"
   },
   "UsersLayout": {
     "title": "ユーザー",

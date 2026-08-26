@@ -18,7 +18,7 @@ import { useActions } from '@/app/hooks/useActions';
 import type { ActivationEvidence, ActivationInsight } from '@/app/lib/activation';
 import { easeOut, instant } from '@/app/lib/motion';
 import DealRiskPill from '@/app/components/records/deals/DealRiskPill';
-import TemperaturePill from '@/app/components/records/TemperaturePill';
+import WarmthPill from '@/app/components/records/WarmthPill';
 import { riskFactorIcon, useRiskText } from '@/app/components/records/deals/dealRisk';
 import { formatShortDate, riskContainerClasses, riskTextClass } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
@@ -85,7 +85,7 @@ export default function FirstInsightCard({
                     {t(`insight.${insight.kind}.headline`)}
                 </h3>
                 {insight.risk ? <DealRiskPill risk={insight.risk} /> : null}
-                {insight.temperature ? <TemperaturePill temp={insight.temperature} /> : null}
+                {insight.temperature ? <WarmthPill temp={insight.temperature} /> : null}
             </div>
 
             <div className="flex flex-1 flex-col gap-4 px-5 py-4">

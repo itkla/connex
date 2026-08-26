@@ -16,6 +16,7 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
+import ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
@@ -86,6 +87,34 @@ public class AiChatTurnPersistenceService {
             long restrictionEpoch,
             AiPrivacyMode privacyMode,
             boolean streamed) {
+        return queue(
+                sessionId, request, restrictionEpoch, privacyMode, streamed,
+                AiChatQueryScope.none(), null);
+    }
+
+    /**
+     * Commits a user message and turn together with the exact query scope it was authorized to
+     * read, so a later read of the turn restates the same breadth the requester was shown.
+     *
+     * @param sessionId owning session
+     * @param request validated turn request
+     * @param restrictionEpoch processing-restriction fence captured before admission
+     * @param privacyMode immutable privacy posture
+     * @param streamed whether terminal text is streamed
+     * @param scope validated declared query scope
+     * @param interpretedScopeJson serialized interpreted scope echo, or null when none was declared
+     * @return committed durable preparation
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.AI_USE)
+    public AiChatQueuedTurn queue(
+            int sessionId,
+            AiChatTurnCreateRequest request,
+            long restrictionEpoch,
+            AiPrivacyMode privacyMode,
+            boolean streamed,
+            AiChatQueryScope scope,
+            String interpretedScopeJson) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
         requireActiveAiAccess(workspaceId, userId);
@@ -127,9 +156,12 @@ public class AiChatTurnPersistenceService {
         if (!request.pageContext().isEmpty()) {
             toolExecutor.pageContext(request.pageContext(), messageResources);
         }
-        identifierResolver.mentionedResources(request.content()).forEach(resource ->
+        AiAssistantIdentifierResolver.Resolution identifierResolution =
+                identifierResolver.resolve(request.content());
+        identifierResolution.resources().forEach(resource ->
                 messageResources.register(resource.kind(), resource.id()));
-        message.setStructuredJson(userMessageMetadata(messageResources.snapshot()));
+        message.setStructuredJson(userMessageMetadata(
+                messageResources.snapshot(), identifierResolution.identifiers()));
         chatMapper.insertMessage(message);
 
         AiChatTurn turn = new AiChatTurn();
@@ -137,6 +169,7 @@ public class AiChatTurnPersistenceService {
         turn.setSessionId(sessionId);
         turn.setRequestedByUserId(userId);
         turn.setStatus(QUEUED);
+        turn.setScopeJson(interpretedScopeJson);
         turn.setPrivacyMode(privacyMode.name().toLowerCase(java.util.Locale.ROOT));
         turn.setStreamed(streamed);
         chatMapper.insertTurn(turn);
@@ -151,7 +184,27 @@ public class AiChatTurnPersistenceService {
                 workspaceId, userId, sessionId, turn.getId(), message.getId(),
                 message.getSeq(), restrictionEpoch,
                 !SHARED.equals(session.getVisibility()),
-                request.pageContext(), attachmentIds, privacyMode, streamed);
+                request.pageContext(), attachmentIds, privacyMode, streamed, scope);
+    }
+
+    /**
+     * Records the declared skill a running turn routed to.
+     *
+     * <p>Written before the plan executes so a turn that later fails still names the declaration
+     * that produced it, which is what makes a failure attributable to a specific skill version.
+     *
+     * @param turn running turn
+     * @param skillKey stable catalog key
+     * @param skillVersion semantic version of the declaration
+     * @return whether the running turn accepted the attribution
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
+    public boolean applySkill(AiChatQueuedTurn turn, String skillKey, String skillVersion) {
+        requireCurrentActor(turn);
+        lockAuthorizedTurn(turn, RUNNING);
+        return chatMapper.applyTurnSkill(
+                turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                skillKey, skillVersion) == 1;
     }
 
     /** Returns one authorized durable turn after applying its lazy generation deadline. */
@@ -239,12 +292,12 @@ public class AiChatTurnPersistenceService {
             int outputTokens) {
         requireActiveTransaction();
         requireCurrentActor(turn);
+        lockAuthorizedTurn(turn, RUNNING);
         if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
                 turn.workspaceId(), turn.restrictionEpoch())) {
             throw new AiAssistantLoopException(
                     "restrictions_changed", "restrictions_changed");
         }
-        lockAuthorizedTurn(turn, RUNNING);
         AiChatMessage currentSummary = chatMapper.getHistorySummary(
                 turn.workspaceId(), turn.sessionId());
         if (existingSummaryId == null) {
@@ -346,7 +399,7 @@ public class AiChatTurnPersistenceService {
         return proposeTool(turn, stepNumber, toolName, argumentsJson, null);
     }
 
-    /** Persists a demasked read-tool proposal with optional provider reasoning state. */
+    /** Persists a demasked read-tool proposal with optional opaque provider replay state. */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
     public int proposeTool(
             AiChatQueuedTurn turn,
@@ -377,7 +430,7 @@ public class AiChatTurnPersistenceService {
         return proposeWriteTool(turn, stepNumber, write, null);
     }
 
-    /** Persists or replays a validated write proposal with optional provider reasoning state. */
+    /** Persists or replays a validated write proposal with optional opaque provider replay state. */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
     public AiAssistantToolProposal proposeWriteTool(
             AiChatQueuedTurn turn,
@@ -421,7 +474,8 @@ public class AiChatTurnPersistenceService {
     }
 
     private String userMessageMetadata(
-            java.util.Map<String, AiChatResourceRegistry.ResourceRef> resources) {
+            java.util.Map<String, AiChatResourceRegistry.ResourceRef> resources,
+            List<AiAssistantIdentifierResolver.Identifier> identifiers) {
         try {
             List<java.util.Map<String, Object>> storedResources = resources.entrySet().stream()
                     .map(entry -> java.util.Map.<String, Object>of(
@@ -429,9 +483,15 @@ public class AiChatTurnPersistenceService {
                             "kind", entry.getValue().kind(),
                             "id", entry.getValue().id()))
                     .toList();
+            List<java.util.Map<String, String>> storedIdentifiers = identifiers.stream()
+                    .map(identifier -> java.util.Map.of(
+                            "kind", identifier.kind().name().toLowerCase(java.util.Locale.ROOT),
+                            "value", identifier.value()))
+                    .toList();
             return objectMapper.writeValueAsString(java.util.Map.of(
                     "kind", "user_message",
-                    "resources", storedResources));
+                    "resources", storedResources,
+                    "identifiers", storedIdentifiers));
         } catch (JacksonException exception) {
             throw new IllegalStateException(
                     "Assistant user message metadata could not be serialized", exception);
@@ -442,7 +502,8 @@ public class AiChatTurnPersistenceService {
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
     public void requireRunning(AiChatQueuedTurn turn) {
         requireCurrentActor(turn);
-        AiChatTurn stored = lockGenerationOwnedTurn(turn);
+        AiChatTurn stored = lockAuthorizedTurn(turn, RUNNING);
+        retainRestrictionFence(turn);
         if (CANCELLED.equals(stored.getStatus())) {
             throw new AiAssistantLoopException(CANCELLED, CANCELLED);
         }
@@ -460,7 +521,8 @@ public class AiChatTurnPersistenceService {
         if (expectedOffset < 0 || expectedOffset + content.length() > 16_000) {
             throw new AiAssistantLoopException("malformed_output", "malformed_output");
         }
-        AiChatTurn stored = lockGenerationOwnedTurn(turn);
+        AiChatTurn stored = lockAuthorizedTurn(turn, RUNNING);
+        retainRestrictionFence(turn);
         if (CANCELLED.equals(stored.getStatus())) {
             throw new AiAssistantLoopException(CANCELLED, CANCELLED);
         }
@@ -474,8 +536,8 @@ public class AiChatTurnPersistenceService {
                 expectedOffset, content, nextOffset) != 1) {
             throw new ConflictException("Assistant stream state changed");
         }
-        realtimeDispatcher.sessionAfterCommit(
-                turn.workspaceId(), turn.sessionId(), AiChatStepFrameDto.delta(
+        realtimeDispatcher.userAfterCommit(
+                turn.userId(), AiChatStepFrameDto.delta(
                         turn.workspaceId(), turn.sessionId(), turn.turnId(),
                         expectedOffset, content));
         return nextOffset;
@@ -487,7 +549,7 @@ public class AiChatTurnPersistenceService {
         if (!turn.streamed() || expectedOffset < 0 || expectedOffset > 16_000) {
             throw new IllegalArgumentException("A valid streamed assistant offset is required");
         }
-        AiChatTurn stored = lockGenerationOwnedTurn(turn);
+        AiChatTurn stored = lockAuthorizedTurn(turn, RUNNING);
         if (CANCELLED.equals(stored.getStatus())) {
             throw new AiAssistantLoopException(CANCELLED, CANCELLED);
         }
@@ -500,7 +562,7 @@ public class AiChatTurnPersistenceService {
         realtimeDispatcher.sessionAfterCommit(
                 turn.workspaceId(), turn.sessionId(), new AiChatStepFrameDto(
                         turn.workspaceId(), turn.sessionId(), turn.turnId(),
-                        0, "state", null, RUNNING, null));
+                        0, "reset", null, RUNNING, null));
     }
 
     /** Cancels one active turn for its requester or session owner. */
@@ -557,12 +619,12 @@ public class AiChatTurnPersistenceService {
             String status,
             String resultJson) {
         requireCurrentActor(turn);
+        lockAuthorizedTurn(turn, RUNNING);
         if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
                 turn.workspaceId(), turn.restrictionEpoch())) {
             throw new AiAssistantLoopException(
                     "restrictions_changed", "restrictions_changed");
         }
-        lockAuthorizedTurn(turn, RUNNING);
         return chatMapper.updateToolCall(
                 turn.workspaceId(), turn.userMessageId(), toolCallId, status,
                 resultJson, turn.userId()) == 1;
@@ -601,12 +663,12 @@ public class AiChatTurnPersistenceService {
             int outputTokens) {
         requireActiveTransaction();
         requireCurrentActor(turn);
+        lockAuthorizedTurn(turn, RUNNING);
         if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
                 turn.workspaceId(), turn.restrictionEpoch())) {
             throw new AiAssistantLoopException(
                     "restrictions_changed", "restrictions_changed");
         }
-        lockAuthorizedTurn(turn, RUNNING);
         if (turn.streamed() && chatMapper.replaceTurnPartialContent(
                 turn.workspaceId(), turn.sessionId(), turn.turnId(),
                 content, content.length()) != 1) {
@@ -639,10 +701,6 @@ public class AiChatTurnPersistenceService {
             return false;
         }
         requireCurrentActor(turn);
-        if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
-                turn.workspaceId(), turn.restrictionEpoch())) {
-            return false;
-        }
         AiChatSession session = chatMapper.getSessionByIdForUpdate(
                 turn.workspaceId(), turn.userId(), turn.sessionId());
         if (session == null
@@ -650,11 +708,27 @@ public class AiChatTurnPersistenceService {
                 || session.isTitleUserSet()) {
             return false;
         }
+        if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
+                turn.workspaceId(), turn.restrictionEpoch())) {
+            return false;
+        }
         return chatMapper.updateGeneratedTitle(
                 turn.workspaceId(), turn.sessionId(), title) == 1;
     }
 
-    /** Applies a generation-owned terminal transition without requiring request-thread state. */
+    /**
+     * Applies a generation-owned terminal transition without requiring request-thread state.
+     *
+     * <p>A failed, cancelled, or timed-out streamed turn keeps its durable partial answer so the
+     * requester can still read what was established before the turn stopped. The partial is
+     * re-screened for suspected special-care content here because a stopped turn never reaches the
+     * terminal screen the resolved path applies, and it is purged when it cannot be shown.
+     *
+     * <p>A turn stopped by {@link AiAssistantTerminalReasons#AUTHORIZATION_WITHDRAWN} purges its
+     * partial unconditionally. The retained text carries no resource metadata, so a later read can
+     * only gate it on session access; retaining it would leave facts readable that the requester
+     * lost the right to read, or that a processing restriction withdrew mid-turn.
+     */
     @Transactional(
         isolation = Isolation.READ_COMMITTED,
         propagation = Propagation.REQUIRES_NEW,
@@ -663,17 +737,32 @@ public class AiChatTurnPersistenceService {
             AiChatQueuedTurn turn,
             String status,
             String reason) {
-        lockGenerationOwnedTurn(turn);
+        AiChatTurn stored = lockGenerationOwnedTurn(turn);
+        if (RUNNING.equals(stored.getStatus())
+                && stored.isStreamed() && stored.getPartialContentUtf16Offset() > 0
+                && (AiAssistantTerminalReasons.withdrawsAuthorization(reason)
+                        || SpecialCareTextScreen.screen(stored.getPartialContent()).excluded())
+                && chatMapper.resetTurnPartialContent(
+                        turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                        stored.getPartialContentUtf16Offset()) != 1) {
+            throw new IllegalStateException("Assistant terminal stream reset lost its durable state");
+        }
         return chatMapper.updateTurnTerminal(
                 turn.workspaceId(), turn.sessionId(), turn.turnId(),
                 status, reason, null, null) == 1;
     }
 
-    /** Returns the durable UTF-16 terminal offset, or zero for buffered turns. */
+    /** Returns the durable terminal projection after a generation callback settles. */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
-    public int terminalOffset(AiChatQueuedTurn turn) {
+    public AiChatDurableTerminal terminalState(AiChatQueuedTurn turn) {
         AiChatTurn stored = lockGenerationOwnedTurn(turn);
-        return stored.isStreamed() ? stored.getPartialContentUtf16Offset() : 0;
+        if (QUEUED.equals(stored.getStatus()) || RUNNING.equals(stored.getStatus())) {
+            throw new IllegalStateException("Assistant turn is not terminal");
+        }
+        return new AiChatDurableTerminal(
+                stored.getStatus(),
+                stored.getTerminalReason(),
+                stored.isStreamed() ? stored.getPartialContentUtf16Offset() : 0);
     }
 
     private static void requireActiveTransaction() {
@@ -681,6 +770,14 @@ public class AiChatTurnPersistenceService {
                 || !TransactionSynchronizationManager.isSynchronizationActive()) {
             throw new IllegalStateException(
                 "Assistant answer persistence requires an active transaction");
+        }
+    }
+
+    private void retainRestrictionFence(AiChatQueuedTurn turn) {
+        if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
+                turn.workspaceId(), turn.restrictionEpoch())) {
+            throw new AiAssistantLoopException(
+                    "restrictions_changed", "restrictions_changed");
         }
     }
 

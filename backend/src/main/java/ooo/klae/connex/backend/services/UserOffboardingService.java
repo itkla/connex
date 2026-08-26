@@ -11,7 +11,9 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
+import ooo.klae.connex.backend.mappers.AiBriefScheduleMapper;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
+import ooo.klae.connex.backend.mappers.AiWatchMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.CampaignMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
@@ -21,6 +23,7 @@ import ooo.klae.connex.backend.mappers.DealDuplicateReviewProofMapper;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.mappers.PersonLifecyclePassMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RelationshipSignalMapper;
@@ -71,10 +74,13 @@ public class UserOffboardingService {
     private final NoteMapper noteMapper;
     private final ActivityMapper activityMapper;
     private final AiChatMapper aiChatMapper;
+    private final AiBriefScheduleMapper aiBriefScheduleMapper;
+    private final AiWatchMapper aiWatchMapper;
     private final IntroductionMapper introductionMapper;
     private final NotificationMapper notificationMapper;
     private final CompanyMapper companyMapper;
     private final PersonMapper personMapper;
+    private final PersonLifecyclePassMapper personLifecyclePassMapper;
     private final DealMapper dealMapper;
     private final DealDuplicateReviewProofMapper dealDuplicateReviewProofMapper;
     private final TaskMapper taskMapper;
@@ -168,6 +174,8 @@ public class UserOffboardingService {
             savedViewMapper.deleteForFreshMembership(workspaceId, userId);
             dealDuplicateReviewProofMapper.deleteForActor(workspaceId, userId);
             aiChatMapper.deleteParticipantsForUser(workspaceId, userId);
+            aiBriefScheduleMapper.deleteForUser(workspaceId, userId);
+            aiWatchMapper.deleteForUser(workspaceId, userId);
             notificationMapper.deleteHistoricalNotificationBaselinesForRecipient(
                 workspaceId, userId);
             notificationMapper.deleteAllForRecipient(workspaceId, userId);
@@ -238,6 +246,8 @@ public class UserOffboardingService {
         savedViewMapper.deleteForUser(workspaceId, userId);
         dealDuplicateReviewProofMapper.deleteForActor(workspaceId, userId);
         aiChatMapper.deleteParticipantsForUser(workspaceId, userId);
+        aiBriefScheduleMapper.deleteForUser(workspaceId, userId);
+        aiWatchMapper.deleteForUser(workspaceId, userId);
         taskMapper.unassignMemberTasks(workspaceId, userId);
         companyMapper.clearMemberOwnership(workspaceId, userId);
         personMapper.clearMemberOwnership(workspaceId, userId);
@@ -305,6 +315,8 @@ public class UserOffboardingService {
         userDashboardMapper.deleteForUserAnywhere(userId);
         aiChatMapper.deleteParticipantsForUserAnywhere(userId);
         aiChatMapper.clearParticipantInvitersAnywhere(userId);
+        aiBriefScheduleMapper.deleteForUserAnywhere(userId);
+        aiWatchMapper.deleteForUserAnywhere(userId);
         notificationMapper.deleteHistoricalNotificationBaselinesForRecipientAnywhere(userId);
         notificationMapper.deleteAllForRecipientAnywhere(userId);
         dealMapper.removeCollaboratorAnywhere(userId);
@@ -316,6 +328,7 @@ public class UserOffboardingService {
         }
         companyMapper.clearOwnershipAnywhere(userId);
         personMapper.clearOwnershipAnywhere(userId);
+        personLifecyclePassMapper.clearOwnerAnywhere(userId);
         dealMapper.clearOwnershipAnywhere(userId);
         aiChatMapper.clearSessionCreatorsAnywhere(userId);
         aiChatMapper.clearMessageAuthorsAnywhere(userId);

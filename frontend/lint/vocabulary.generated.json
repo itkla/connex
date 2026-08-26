@@ -1,0 +1,1431 @@
+{
+    "terms": [
+        {
+            "id": "en:Assigned to",
+            "term": "Assigned to",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": true,
+            "pattern": {
+                "source": "\\bAssigned\\s+to\\b",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"Task ownership\""
+            ]
+        },
+        {
+            "id": "en:ESP",
+            "term": "ESP",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:ESPing|ESPed|ESPes|ESPs|ESP)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:Overview",
+            "term": "Overview",
+            "locale": "en",
+            "scope": {
+                "excludeNamespaces": [
+                    "campaigns.json#CampaignDetail"
+                ]
+            },
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": true,
+            "pattern": {
+                "source": "^Overview$",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"Home / metrics / documents split\""
+            ]
+        },
+        {
+            "id": "en:People",
+            "term": "People",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": true,
+            "pattern": {
+                "source": "^People$",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"Person record\""
+            ]
+        },
+        {
+            "id": "en:RBAC",
+            "term": "RBAC",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:RBACing|RBACed|RBACes|RBACs|RBAC)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:RULE_MANAGE",
+            "term": "RULE_MANAGE",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": true,
+            "pattern": {
+                "source": "\\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\\b",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:Relationship Radar",
+            "term": "Relationship Radar",
+            "locale": "en",
+            "scope": {
+                "namespaces": [
+                    "actions.json",
+                    "radar.json"
+                ]
+            },
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\bRelationship[\\s-]+(?:Radarring|Radaring|Radarred|Radared|Radares|Radars|Radar)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 glossary row \"The signals triage surface\""
+            ]
+        },
+        {
+            "id": "en:admitted",
+            "term": "admitted",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:admitting|admitted|admits)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:canonical",
+            "term": "canonical",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:canonicalling|canonicaling|canonicalled|canonicaled|canonicales|canonicals|canonical)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 glossary row \"The automation object\"",
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:cease of use",
+            "term": "cease of use",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [
+                "legal.json",
+                "organization.json#OrgDataRequests"
+            ],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\bcease[\\s-]+of[\\s-]+(?:using|used|uses|use)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:consent access",
+            "term": "consent access",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\bconsent[\\s-]+(?:accessing|accessed|accesses|accesss|access)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 glossary row \"Marketing exclusion states\""
+            ]
+        },
+        {
+            "id": "en:consent and suppression",
+            "term": "consent and suppression",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\bconsent[\\s-]+and[\\s-]+(?:suppressions|suppressing|suppression|suppressed|suppresses)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 glossary row \"Marketing exclusion states\""
+            ]
+        },
+        {
+            "id": "en:context space",
+            "term": "context space",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\bcontext[\\s-]+(?:spacing|spaced|spaces|space)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:correlation ID",
+            "term": "correlation ID",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\bcorrelation[\\s-]+(?:IDDing|IDDed|IDing|IDed|IDes|IDs|ID)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 glossary row \"Support reference on failures\"",
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:data subject",
+            "term": "data subject",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [
+                "legal.json",
+                "organization.json#OrgDataRequests"
+            ],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\bdata[\\s-]+(?:subjecting|subjected|subjectes|subjects|subject)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:demask",
+            "term": "demask",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:demasking|demasked|demaskes|demasks|demask)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:deterministic",
+            "term": "deterministic",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:deterministicing|deterministiced|deterministices|deterministics|deterministic)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:egress",
+            "term": "egress",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:egressing|egressed|egresses|egresss|egress)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:epoch",
+            "term": "epoch",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:epoching|epoched|epoches|epochs|epoch)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:graph",
+            "term": "graph",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:graphing|graphed|graphes|graphs|graph)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:hash",
+            "term": "hash",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:hashing|hashed|hashes|hashs|hash)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:idempotency",
+            "term": "idempotency",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:idempotencies|idempotency)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:invocation",
+            "term": "invocation",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:invocations|invocating|invocation|invocated|invocates)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:legacy runtime",
+            "term": "legacy runtime",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\blegacy[\\s-]+(?:runtiming|runtimed|runtimes|runtime)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 glossary row \"The automation object\""
+            ]
+        },
+        {
+            "id": "en:mutation",
+            "term": "mutation",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:mutations|mutating|mutation|mutated|mutates)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:node",
+            "term": "node",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": true,
+            "pattern": {
+                "source": "\\b(?:noding|noded|nodes|node)\\b(?!\\.js)",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:opaque identifier",
+            "term": "opaque identifier",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\bopaque[\\s-]+(?:identifierring|identifiering|identifierred|identifiered|identifieres|identifiers|identifier)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:opportunity",
+            "term": "opportunity",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": true,
+            "pattern": {
+                "source": "\\bOpportunit(?:y|ies)\\b",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"Deal record\""
+            ]
+        },
+        {
+            "id": "en:predicate",
+            "term": "predicate",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:predicating|predicated|predicates|predicate)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:preflight",
+            "term": "preflight",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:preflighting|preflighted|preflightes|preflights|preflight)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:processing restrictions",
+            "term": "processing restrictions",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [
+                "legal.json",
+                "organization.json#OrgDataRequests"
+            ],
+            "canonicalExceptions": [],
+            "narrowed": true,
+            "pattern": {
+                "source": "\\b(?:processing[\\s-]+restrictions?|restrict(?:s|ed|ing)?[\\s-]+(?:the[\\s-]+)?processing)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 glossary row \"APPI use-limitation state\""
+            ]
+        },
+        {
+            "id": "en:processing suspended",
+            "term": "processing suspended",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [
+                "legal.json",
+                "organization.json#OrgDataRequests"
+            ],
+            "canonicalExceptions": [],
+            "narrowed": true,
+            "pattern": {
+                "source": "\\b(?:processing[\\s-]+suspend(?:ed|ing|s)?|suspend(?:ed|ing|s)?[\\s-]+(?:the[\\s-]+)?processing)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 glossary row \"APPI use-limitation state\""
+            ]
+        },
+        {
+            "id": "en:provider egress",
+            "term": "provider egress",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\bprovider[\\s-]+(?:egressing|egressed|egresses|egresss|egress)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:provision ceased",
+            "term": "provision ceased",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [
+                "legal.json",
+                "organization.json#OrgDataRequests"
+            ],
+            "canonicalExceptions": [],
+            "narrowed": true,
+            "pattern": {
+                "source": "\\b(?:provision[\\s-]+ceas(?:ed|es|ing)?|ceas(?:e|ed|es|ing)[\\s-]+(?:the[\\s-]+)?provisions?)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 glossary row \"APPI use-limitation state\""
+            ]
+        },
+        {
+            "id": "en:purge",
+            "term": "purge",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:purging|purged|purges|purge)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 glossary row \"Permanent removal\"",
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:relationship score",
+            "term": "relationship score",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\brelationship[\\s-]+(?:scoring|scored|scores|score)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 glossary row \"The relationship metric (the differentiator)\""
+            ]
+        },
+        {
+            "id": "en:relationship temperature",
+            "term": "relationship temperature",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\brelationship[\\s-]+(?:temperaturing|temperatured|temperatures|temperature)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 glossary row \"The relationship metric (the differentiator)\""
+            ]
+        },
+        {
+            "id": "en:rewrap",
+            "term": "rewrap",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:rewrapping|rewraping|rewrapped|rewraped|rewrapes|rewraps|rewrap)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:rule",
+            "term": "rule",
+            "locale": "en",
+            "scope": {
+                "namespaces": [
+                    "workflow-operations.json",
+                    "workspace.json#WorkflowAuthoring",
+                    "workspace.json#WorkflowsLayout",
+                    "workspace.json#WorkspaceWorkflows"
+                ]
+            },
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:ruling|ruled|rules|rule)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 glossary row \"The automation object\""
+            ]
+        },
+        {
+            "id": "en:runtime",
+            "term": "runtime",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:runtiming|runtimed|runtimes|runtime)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 glossary row \"The automation object\""
+            ]
+        },
+        {
+            "id": "en:slug",
+            "term": "slug",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:slugging|slugged|sluging|sluged|sluges|slugs|slug)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:suppression",
+            "term": "suppression",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:suppressions|suppressing|suppression|suppressed|suppresses)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:tear down",
+            "term": "tear down",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:tearring|tearing|tearred|teared|teares|tears|tear)[\\s-]+(?:downing|downed|downes|downs|down)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 glossary row \"Permanent removal\""
+            ]
+        },
+        {
+            "id": "en:teardown",
+            "term": "teardown",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:teardowning|teardowned|teardownes|teardowns|teardown)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 glossary row \"Permanent removal\"",
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:temperature band",
+            "term": "temperature band",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\btemperature[\\s-]+(?:banding|banded|bandes|bands|band)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 glossary row \"The relationship metric (the differentiator)\""
+            ]
+        },
+        {
+            "id": "en:tenant",
+            "term": "tenant",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [
+                "legal.json"
+            ],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:tenanting|tenanted|tenantes|tenants|tenant)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 glossary row \"Where records live and are shared\"",
+                "§4 glossary row \"The admin level above workspaces\"",
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:third-party provision",
+            "term": "third-party provision",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [
+                "legal.json",
+                "organization.json#OrgDataRequests"
+            ],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\bthird-party[\\s-]+(?:provisions|provising|provision|provised|provises)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:token budget",
+            "term": "token budget",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\btoken[\\s-]+(?:budgetting|budgeting|budgetted|budgeted|budgetes|budgets|budget)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:traversal",
+            "term": "traversal",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:traversalling|traversaling|traversalled|traversaled|traversales|traversals|traversal)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:turn",
+            "term": "turn",
+            "locale": "en",
+            "scope": {
+                "namespaces": [
+                    "assistant.json",
+                    "common.json#AskConnex",
+                    "organization.json#OrgAi"
+                ]
+            },
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\b(?:turning|turned|turnes|turns|turn)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:warm path",
+            "term": "warm path",
+            "locale": "en",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "\\bwarm[\\s-]+(?:pathing|pathed|pathes|paths|path)\\b",
+                "flags": "iu"
+            },
+            "sources": [
+                "§4 glossary row \"The route through the network\""
+            ]
+        },
+        {
+            "id": "ja:アカウント",
+            "term": "アカウント",
+            "locale": "ja",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": true,
+            "pattern": {
+                "source": "アーカイブ済みアカウント",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"Company record\""
+            ]
+        },
+        {
+            "id": "ja:ウォームパス",
+            "term": "ウォームパス",
+            "locale": "ja",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "ウォームパス",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"The route through the network\""
+            ]
+        },
+        {
+            "id": "ja:グラフ",
+            "term": "グラフ",
+            "locale": "ja",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": true,
+            "pattern": {
+                "source": "(?:リレーションシップ|関係性?)の?グラフ|グラフ表示",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list (Japanese rendering)"
+            ]
+        },
+        {
+            "id": "ja:スラッグ",
+            "term": "スラッグ",
+            "locale": "ja",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "スラッグ",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list (Japanese rendering)"
+            ]
+        },
+        {
+            "id": "ja:テナント",
+            "term": "テナント",
+            "locale": "ja",
+            "scope": "global",
+            "allowFiles": [
+                "legal.json"
+            ],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "テナント",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"The admin level above workspaces\""
+            ]
+        },
+        {
+            "id": "ja:トークン予算",
+            "term": "トークン予算",
+            "locale": "ja",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "トークン予算",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list (Japanese rendering)"
+            ]
+        },
+        {
+            "id": "ja:ノート",
+            "term": "ノート",
+            "locale": "ja",
+            "scope": {
+                "namespaces": [
+                    "account.json",
+                    "actions.json",
+                    "activity.json",
+                    "dashboard.json",
+                    "docs.json",
+                    "notifications.json",
+                    "records.json"
+                ]
+            },
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "ノート",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"Standalone linked note record\""
+            ]
+        },
+        {
+            "id": "ja:ノード",
+            "term": "ノード",
+            "locale": "ja",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "ノード",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list (Japanese rendering)"
+            ]
+        },
+        {
+            "id": "ja:パージ",
+            "term": "パージ",
+            "locale": "ja",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "パージ",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"Permanent removal\""
+            ]
+        },
+        {
+            "id": "ja:マイページ",
+            "term": "マイページ",
+            "locale": "ja",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "マイページ",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"The personal work page\""
+            ]
+        },
+        {
+            "id": "ja:ルール",
+            "term": "ルール",
+            "locale": "ja",
+            "scope": {
+                "namespaces": [
+                    "workflow-operations.json",
+                    "workspace.json#WorkflowAuthoring",
+                    "workspace.json#WorkflowsLayout",
+                    "workspace.json#WorkspaceWorkflows"
+                ]
+            },
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "ルール",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"The automation object\" (Japanese rendering)"
+            ]
+        },
+        {
+            "id": "ja:取引先",
+            "term": "取引先",
+            "locale": "ja",
+            "scope": "global",
+            "allowFiles": [
+                "legal.json"
+            ],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "取引先",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"Company record\""
+            ]
+        },
+        {
+            "id": "ja:抑制",
+            "term": "抑制",
+            "locale": "ja",
+            "scope": {
+                "namespaces": [
+                    "campaigns.json",
+                    "docs.json",
+                    "unsubscribe.json"
+                ]
+            },
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "抑制",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"Marketing exclusion states\""
+            ]
+        },
+        {
+            "id": "ja:決定論的",
+            "term": "決定論的",
+            "locale": "ja",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "決定論的",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list (Japanese rendering)"
+            ]
+        },
+        {
+            "id": "ja:温かい経路",
+            "term": "温かい経路",
+            "locale": "ja",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "温かい経路",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"The route through the network\""
+            ]
+        },
+        {
+            "id": "ja:温度",
+            "term": "温度",
+            "locale": "ja",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [
+                "温度帯",
+                "温度感"
+            ],
+            "narrowed": false,
+            "pattern": {
+                "source": "温度(?!帯|感)",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"The relationship metric (the differentiator)\""
+            ]
+        },
+        {
+            "id": "ja:温度バンド",
+            "term": "温度バンド",
+            "locale": "ja",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "温度バンド",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"The relationship metric (the differentiator)\""
+            ]
+        },
+        {
+            "id": "ja:相関ID",
+            "term": "相関ID",
+            "locale": "ja",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "相関ID",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 banned-on-all-product-surfaces list (Japanese rendering)"
+            ]
+        },
+        {
+            "id": "ja:関係の温度",
+            "term": "関係の温度",
+            "locale": "ja",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [
+                "温度帯",
+                "温度感"
+            ],
+            "narrowed": false,
+            "pattern": {
+                "source": "関係の温度(?!帯|感)",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"The relationship metric (the differentiator)\""
+            ]
+        },
+        {
+            "id": "ja:関係スコア",
+            "term": "関係スコア",
+            "locale": "ja",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": false,
+            "pattern": {
+                "source": "関係スコア",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"The relationship metric (the differentiator)\""
+            ]
+        },
+        {
+            "id": "ja:関係性の温度",
+            "term": "関係性の温度",
+            "locale": "ja",
+            "scope": "global",
+            "allowFiles": [],
+            "canonicalExceptions": [
+                "温度帯",
+                "温度感"
+            ],
+            "narrowed": false,
+            "pattern": {
+                "source": "関係性の温度(?!帯|感)",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"The relationship metric (the differentiator)\""
+            ]
+        }
+    ],
+    "skipped": [
+        {
+            "id": "en:Note",
+            "term": "Note",
+            "locale": "en",
+            "reason": "Note is the canonical record name; the activity-type fold is a picker and read-time rename, not a string the gate can identify by value.",
+            "sources": [
+                "§4 glossary row \"Free-text activity logging\""
+            ]
+        },
+        {
+            "id": "en:Profile",
+            "term": "Profile",
+            "locale": "en",
+            "reason": "Profile is correct for the account and member profile surfaces; only the My Work page must not be called one.",
+            "sources": [
+                "§4 glossary row \"The personal work page\""
+            ]
+        },
+        {
+            "id": "en:Request failed (403)",
+            "term": "Request failed (403)",
+            "locale": "en",
+            "reason": "an illustrative HTTP status; bare three-digit numerals are indistinguishable from legitimate counts and amounts.",
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:Retention rule: {code}",
+            "term": "Retention rule: {code}",
+            "locale": "en",
+            "reason": "an illustrative raw-code fallback; detecting them needs analysis of the interpolated value's shape, not of the message text.",
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:account",
+            "term": "account",
+            "locale": "en",
+            "reason": "account is correct for sign-in and billing senses; only the Company record must not be called one.",
+            "sources": [
+                "§4 glossary row \"Company record\""
+            ]
+        },
+        {
+            "id": "en:at a glance",
+            "term": "at a glance",
+            "locale": "en",
+            "reason": "banned as a repetition across surfaces rather than as a value, so the ratchet over AT_A_GLANCE_SURFACES enforces it instead of a pattern.",
+            "sources": [
+                "§4 glossary row \"Home / metrics / documents split\""
+            ]
+        },
+        {
+            "id": "en:contact #42",
+            "term": "contact #42",
+            "locale": "en",
+            "reason": "an illustrative raw id; detecting raw ids in copy needs analysis of what the interpolated values hold.",
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:delete",
+            "term": "delete",
+            "locale": "en",
+            "reason": "Delete is canonical for permanent removal; whether the record behind a string is recoverable is not visible in the value.",
+            "sources": [
+                "§4 glossary row \"Recoverable hide\""
+            ]
+        },
+        {
+            "id": "en:legacy",
+            "term": "legacy",
+            "locale": "en",
+            "reason": "§4 sanctions \"legacy automations\" on the one migration screen while it exists.",
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:note",
+            "term": "note",
+            "locale": "en",
+            "reason": "Note is the canonical name of the standalone record; only the Comment concept must not be called a note.",
+            "sources": [
+                "§4 glossary row \"Discussion on a record\""
+            ]
+        },
+        {
+            "id": "en:organization",
+            "term": "organization",
+            "locale": "en",
+            "reason": "Organization is canonical on organization-admin surfaces and in prose stating a genuinely organization-scoped fact.",
+            "sources": [
+                "§4 glossary row \"Where records live and are shared\""
+            ]
+        },
+        {
+            "id": "en:projected",
+            "term": "projected",
+            "locale": "en",
+            "reason": "banned only as data provenance — copy that says an activity was projected from provider data. §4's deal-forecast row makes Projected value and Projected revenue canonical, and a value-level scan cannot tell the two senses apart.",
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:projection",
+            "term": "projection",
+            "locale": "en",
+            "reason": "the noun of the same provenance sense; §4 sanctions the deal forecast it otherwise collides with, so the sense is decided in review rather than by a pattern.",
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:register",
+            "term": "register",
+            "locale": "en",
+            "reason": "banned only as a noun for a list; register is the legitimate auth verb on sign-up and passkey surfaces.",
+            "sources": [
+                "§4 banned-on-all-product-surfaces list"
+            ]
+        },
+        {
+            "id": "en:restricted",
+            "term": "restricted",
+            "locale": "en",
+            "reason": "banned only when unglossed in headline copy; whether a gloss follows lives in neighbouring keys, not in the value.",
+            "sources": [
+                "§4 glossary row \"APPI use-limitation state\""
+            ]
+        },
+        {
+            "id": "en:team",
+            "term": "team",
+            "locale": "en",
+            "reason": "banned only as a scope word; §4 keeps team fine informally for the humans.",
+            "sources": [
+                "§4 glossary row \"Where records live and are shared\""
+            ]
+        },
+        {
+            "id": "en:teammate",
+            "term": "teammate",
+            "locale": "en",
+            "reason": "§4 sanctions teammate in informal prose; only labels must say member.",
+            "sources": [
+                "§4 glossary row \"A person in a workspace\""
+            ]
+        },
+        {
+            "id": "en:to-do",
+            "term": "to-do",
+            "locale": "en",
+            "reason": "\"To do\" is the sanctioned kanban column name; standalone-noun usage needs grammatical analysis.",
+            "sources": [
+                "§4 glossary row \"Task and its kinds\""
+            ]
+        },
+        {
+            "id": "en:todo",
+            "term": "todo",
+            "locale": "en",
+            "reason": "\"To do\" is the sanctioned kanban column name; standalone-noun usage needs grammatical analysis.",
+            "sources": [
+                "§4 glossary row \"Task and its kinds\""
+            ]
+        },
+        {
+            "id": "en:user",
+            "term": "user",
+            "locale": "en",
+            "reason": "§4 sanctions user in auth, sign-in, and session contexts, which a catalog value cannot be classified into.",
+            "sources": [
+                "§4 glossary row \"A person in a workspace\""
+            ]
+        },
+        {
+            "id": "ja:商談",
+            "term": "商談",
+            "locale": "ja",
+            "reason": "§4 sanctions 商談 as an example pipeline stage name.",
+            "sources": [
+                "§4 glossary row \"Deal record\""
+            ]
+        }
+    ]
+}

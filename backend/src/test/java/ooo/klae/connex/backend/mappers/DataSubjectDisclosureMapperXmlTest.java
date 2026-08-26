@@ -41,7 +41,9 @@ class DataSubjectDisclosureMapperXmlTest {
         Set<String> expectedStatements = Set.of(
             "subjectPersonExists", "lockSubjectPersonForShare", "findPerson", "findIdentities", "findTags",
             "findCustomFields", "findActivities", "findNotes", "findTasks", "findAttachments",
-            "findEmployment", "findEdges", "findDeals", "findIntroductions", "findProvisions",
+            "findEmployment", "findLifecycleHistory", "findQualificationAnswers", "findLifecyclePasses",
+            "findEdges", "findDeals", "findIntroductions",
+            "findProvisions",
             "findProviderCaptureEvidence", "findRecordCommentThreads", "findRecordComments");
         String namespacePrefix = DataSubjectDisclosureMapper.class.getName() + ".";
         Set<String> found = new HashSet<>();

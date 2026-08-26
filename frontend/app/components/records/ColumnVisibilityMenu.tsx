@@ -3,6 +3,7 @@
 import { useTranslations } from 'next-intl';
 import { ViewColumnsIcon } from '@heroicons/react/24/outline';
 
+import { Button } from '@/components/ui/button';
 import {
     DropdownMenu,
     DropdownMenuTrigger,
@@ -36,10 +37,13 @@ export default function ColumnVisibilityMenu({
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <button
+                <Button
                     type="button"
+                    variant="ghost"
+                    size="page"
+                    menu
                     aria-label={t('ariaLabel')}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-full bg-muted px-3 text-xs font-medium text-muted-foreground ring-1 ring-border transition hover:text-foreground aria-expanded:text-foreground"
+                    className="bg-muted px-3 text-xs text-muted-foreground ring-1 ring-border shadow-none hover:text-foreground aria-expanded:text-foreground"
                 >
                     <ViewColumnsIcon className="size-3.5" />
                     <span>{t('label')}</span>
@@ -48,7 +52,7 @@ export default function ColumnVisibilityMenu({
                             {hiddenCount}
                         </span>
                     )}
-                </button>
+                </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-52">
                 <DropdownMenuLabel>{t('title')}</DropdownMenuLabel>

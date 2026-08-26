@@ -18,7 +18,7 @@ function activityCsv(email: string, sourceId: string, subject: string): Buffer {
 }
 
 async function openHistoryImport(page: Page, locale: "en" | "ja") {
-    await page.goto("/settings/data");
+    await page.goto("/settings/workspace/data-privacy");
     await page.getByRole("button", {
         name: message(locale, "workspace", "WorkspaceData.historyAction"),
     }).click();
@@ -31,8 +31,9 @@ for (const locale of ["en", "ja"] as const) {
     test(`imports and replay-skips exact interaction history in ${locale} @mobile`, async ({ page }, testInfo) => {
         const fixture = runFixture(testInfo.project.name);
         const contact = fixture.contacts.activity;
-        const sourceId = `e2e-history-${locale}-${testInfo.project.name}`;
-        const subject = locale === "ja" ? "導入前の打ち合わせ" : "Pre-launch discovery";
+        const attemptKey = `${locale}-${testInfo.project.name}-r${testInfo.retry}`;
+        const sourceId = `e2e-history-${attemptKey}`;
+        const subject = locale === "ja" ? `導入前の打ち合わせ ${attemptKey}` : `Pre-launch discovery ${attemptKey}`;
         const csv = activityCsv(contactEmail(contact.name), sourceId, subject);
 
         await useLocale(page, locale);

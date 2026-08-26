@@ -26,7 +26,11 @@ import tools.jackson.databind.ObjectMapper;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.PersonFirstResponseState;
+import ooo.klae.connex.backend.beans.PersonLeadSource;
+import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.beans.SavedView;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowInvocation;
 import ooo.klae.connex.backend.beans.WorkflowInvocationRecord;
@@ -50,6 +54,7 @@ import ooo.klae.connex.backend.mappers.WorkflowOperationsMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.util.LikePattern;
 
 /** Freezes, confirms, and reports exact-scope canonical manual workflow invocations. */
 @Service
@@ -58,11 +63,13 @@ public class WorkflowManualRunService {
 
     private static final int MAX_RECORDS = 1000;
     private static final int MAX_SAMPLES = 25;
+    private static final int MAX_SKIPPED_SAMPLES = 50;
     private static final int MAX_LABEL_LENGTH = 128;
     private static final Set<String> TERMINAL_INVOCATION_STATUSES = Set.of(
         "succeeded", "failed", "partial", "cancelled", "expired");
     private static final Set<String> SOURCE_SURFACES = Set.of(
         "record", "record_list", "saved_view", "search", "command_palette");
+    private static final Set<String> RECORD_TYPES = Set.of("company", "person", "deal");
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     private final WorkflowMapper workflowMapper;
@@ -96,15 +103,18 @@ public class WorkflowManualRunService {
         String sourceSurface = requireSourceSurface(request.sourceSurface());
         Workflow workflow = requireWorkflow(workspaceId, workflowId);
         WorkflowVersion version = requireActiveVersion(workspaceId, workflow);
+        requireManualRunnable(version.getRecordType());
         ResolvedScope resolved = resolveScope(
             request.scope(), sourceSurface, requesterId, version.getRecordType());
         WorkflowDefinition definition = canonicalizer.parseDefinition(version.getDefinitionJson());
         definitionValidator.validate(version.getRecordType(), version.getExecutionMode(), definition);
         int actorUserId = actorUserId(version);
+        String actorLabel = actorLabel(workspaceId, version, actorUserId);
         List<WorkflowManualPreparationDto.Action> actions = actions(definition);
         List<String> blockers = operationalBlockers(workflow, version, actorUserId, resolved.ids());
         List<WorkflowInvocationRecord> records = new ArrayList<>();
         List<WorkflowManualPreparationDto.Sample> samples = new ArrayList<>();
+        List<WorkflowManualPreparationDto.Sample> skippedSamples = new ArrayList<>();
         int missingReferences = 0;
         int configurationSkips = 0;
         int ordinal = 0;
@@ -131,6 +141,10 @@ public class WorkflowManualRunService {
                     missingReferences++;
                 } else {
                     configurationSkips++;
+                    if (skippedSamples.size() < MAX_SKIPPED_SAMPLES) {
+                        skippedSamples.add(new WorkflowManualPreparationDto.Sample(
+                            recordId, recordLabel(version.getRecordType(), recordId)));
+                    }
                 }
             }
             records.add(record);
@@ -170,6 +184,7 @@ public class WorkflowManualRunService {
             HexFormat.of().formatHex(version.getDefinitionHash()),
             version.getExecutionMode(),
             actorUserId,
+            actorLabel,
             resolved.scopeKind(),
             resolved.resolvedKind(),
             sourceSurface,
@@ -181,6 +196,7 @@ public class WorkflowManualRunService {
             (int) records.stream().filter(record -> "ready".equals(record.getPreviewStatus())).count(),
             expectedSkips,
             List.copyOf(samples),
+            List.copyOf(skippedSamples),
             actions,
             blockers.isEmpty() && records.stream().anyMatch(
                 record -> "ready".equals(record.getPreviewStatus())),
@@ -356,7 +372,8 @@ public class WorkflowManualRunService {
                 "search_snapshot",
                 resolveFilterForRecordType(recordType, new WorkflowManualFilter(
                     query, null, null, null, false, null, null, null,
-                    null, null, null, null, null), requesterId),
+                    null, null, null, null, null, null, null, false, null, false, null, false),
+                    requesterId),
                 scope);
         }
         throw new BadRequestException("Unsupported manual workflow scope");
@@ -383,7 +400,7 @@ public class WorkflowManualRunService {
                 throw new BadRequestException("Saved view scope is malformed");
             }
         }
-        WorkflowManualFilter filter = filterFromSavedView(config);
+        WorkflowManualFilter filter = filterFromSavedView(config, recordType);
         boolean nativeFilterConfigured = hasNativeFilter(filter);
         List<Integer> nativeMatches = nativeFilterConfigured
             ? resolveFilterForRecordType(view.getRecordType(), filter, requesterId)
@@ -405,32 +422,48 @@ public class WorkflowManualRunService {
             int requesterId) {
         WorkflowManualFilter resolved = filter == null
             ? new WorkflowManualFilter(
-                null, null, null, null, false, null, null, null,
-                null, null, null, null, null)
+                null, null, null, null,
+                false, null,
+                null, null, null, null,
+                null, null,
+                null, null,
+                null, false,
+                null, false,
+                null, false)
             : filter;
         MemberScope memberScope = memberScopeResolver.resolve(
             resolved.memberScope(), resolved.memberIds(), requesterId);
+        String query = containingQuery(resolved.query());
         return switch (recordType) {
             case "person" -> personService.getMatchingPersonIds(
-                blankToNull(resolved.query()),
+                query,
                 resolved.companies(),
                 resolved.titles(),
                 Boolean.TRUE.equals(resolved.noCompany()),
                 memberScope,
-                false);
+                resolved.lifecycleStages(),
+                Boolean.TRUE.equals(resolved.noLifecycle()),
+                resolved.leadSources(),
+                Boolean.TRUE.equals(resolved.noLeadSource()),
+                resolved.firstResponseStates(),
+                Boolean.TRUE.equals(resolved.noFirstResponse()),
+                false,
+                null);
             case "company" -> companyService.getMatchingCompanyIds(
-                blankToNull(resolved.query()),
+                query,
                 resolved.industry(),
                 false,
                 null,
                 memberScope,
-                false);
+                false,
+                null);
             case "deal" -> dealService.getMatchingDealIds(
-                blankToNull(resolved.query()),
+                query,
                 blankToNull(resolved.currency()),
                 resolved.pipelineIds(),
                 resolved.stageIds(),
                 resolved.companyIds(),
+                resolved.personIds(),
                 Boolean.TRUE.equals(resolved.noCompany()),
                 resolved.statuses(),
                 resolved.risks(),
@@ -564,6 +597,31 @@ public class WorkflowManualRunService {
         return actor;
     }
 
+    private String actorLabel(int workspaceId, WorkflowVersion version, int actorUserId) {
+        if ("system".equals(version.getExecutionMode())) {
+            return null;
+        }
+        List<User> members = workspaceService.getMembers(workspaceId);
+        if (members == null) {
+            return null;
+        }
+        return members.stream()
+            .filter(member -> member.getId() == actorUserId)
+            .map(WorkflowManualRunService::memberLabel)
+            .filter(label -> label != null && !label.isBlank())
+            .findFirst()
+            .orElse(null);
+    }
+
+    private static String memberLabel(User member) {
+        String displayName = member.getDisplayName();
+        if (displayName != null && !displayName.isBlank()) {
+            return displayName.trim();
+        }
+        String username = member.getUsername();
+        return username == null || username.isBlank() ? null : username.trim();
+    }
+
     private WorkflowInvocation invocation(
             int workspaceId,
             Workflow workflow,
@@ -645,27 +703,73 @@ public class WorkflowManualRunService {
         return deal.getName();
     }
 
-    private WorkflowManualFilter filterFromSavedView(JsonNode config) {
+    private WorkflowManualFilter filterFromSavedView(JsonNode config, String recordType) {
         if (config == null || config.isNull()) {
             return new WorkflowManualFilter(
                 null, null, null, null, false, null, null, null,
-                null, null, null, null, null);
+                null, null, null, null, null, null, null, false, null, false, null, false);
         }
         JsonNode filters = config.get("filters");
+        List<String> lifecycle = textValues(filters, "lifecycle");
+        List<String> leadSource = textValues(filters, "leadSource");
+        List<String> firstResponse = textValues(filters, "firstResponse");
+        List<String> companies = textValues(filters, "company");
+        SavedViewMemberScope memberScope = savedViewMemberScope(filters);
+        boolean deal = "deal".equals(recordType);
         return new WorkflowManualFilter(
             text(config.get("query")),
-            textValues(filters, "company"),
+            companies,
             textValues(filters, "title"),
             textValues(filters, "industry"),
-            booleanValue(filters, "noCompany"),
+            booleanValue(filters, "noCompany") || containsEmptySentinel(companies),
             firstValue(filters, "currency"),
-            integerValues(filters, "pipelineId"),
-            integerValues(filters, "stageId"),
-            integerValues(filters, "companyId"),
+            deal ? preferredIdentifierValues(filters, "pipeline", "pipelineId") : null,
+            deal ? preferredIdentifierValues(filters, "stage", "stageId") : null,
+            deal ? preferredIdentifierValues(filters, "company", "companyId") : null,
+            deal ? integerValues(filters, "contact") : null,
             textValues(filters, "status"),
             textValues(filters, "risk"),
-            firstValue(filters, "scope"),
-            integerValues(filters, "memberId"));
+            memberScope.scope(),
+            memberScope.memberIds(),
+            enumValues(lifecycle, PersonLifecycleStage.class),
+            containsEmptySentinel(lifecycle),
+            enumValues(leadSource, PersonLeadSource.class),
+            containsEmptySentinel(leadSource),
+            enumValues(firstResponse, PersonFirstResponseState.class),
+            containsEmptySentinel(firstResponse));
+    }
+
+    /**
+     * The record browsers store their none-bucket selection as the {@code __empty__} sentinel
+     * inside the facet's value list; it maps to the corresponding no-value flag here.
+     */
+    private static final String EMPTY_FACET_SENTINEL = "__empty__";
+
+    private static boolean containsEmptySentinel(List<String> values) {
+        return values != null && values.contains(EMPTY_FACET_SENTINEL);
+    }
+
+    /**
+     * Maps stored facet values onto a closed enum vocabulary, failing loudly on anything
+     * unrecognised: silently dropping a value would run the workflow against a broader set of
+     * records than the saved view showed.
+     */
+    private static <E extends Enum<E>> List<E> enumValues(List<String> values, Class<E> type) {
+        if (values == null) {
+            return null;
+        }
+        List<E> result = new ArrayList<>();
+        for (String value : values) {
+            if (EMPTY_FACET_SENTINEL.equals(value)) {
+                continue;
+            }
+            try {
+                result.add(Enum.valueOf(type, value));
+            } catch (IllegalArgumentException exception) {
+                throw new BadRequestException("Saved view filter value is not recognised: " + value);
+            }
+        }
+        return result.isEmpty() ? null : List.copyOf(result);
     }
 
     private static boolean hasNativeFilter(WorkflowManualFilter filter) {
@@ -678,8 +782,15 @@ public class WorkflowManualRunService {
             || nonempty(filter.pipelineIds())
             || nonempty(filter.stageIds())
             || nonempty(filter.companyIds())
+            || nonempty(filter.personIds())
             || nonempty(filter.statuses())
             || nonempty(filter.risks())
+            || nonempty(filter.lifecycleStages())
+            || Boolean.TRUE.equals(filter.noLifecycle())
+            || nonempty(filter.leadSources())
+            || Boolean.TRUE.equals(filter.noLeadSource())
+            || nonempty(filter.firstResponseStates())
+            || Boolean.TRUE.equals(filter.noFirstResponse())
             || blankToNull(filter.memberScope()) != null;
     }
 
@@ -707,6 +818,21 @@ public class WorkflowManualRunService {
 
     private static List<Integer> integerValues(JsonNode object, String key) {
         List<String> values = textValues(object, key);
+        return integerValues(values);
+    }
+
+    private static List<Integer> preferredIdentifierValues(
+            JsonNode object, String primaryKey, String legacyKey) {
+        List<String> values = textValues(object, primaryKey);
+        if (values == null) {
+            return integerValues(object, legacyKey);
+        }
+        return integerValues(values.stream()
+            .filter(value -> !EMPTY_FACET_SENTINEL.equals(value))
+            .toList());
+    }
+
+    private static List<Integer> integerValues(List<String> values) {
         if (values == null) {
             return null;
         }
@@ -715,6 +841,23 @@ public class WorkflowManualRunService {
         } catch (NumberFormatException exception) {
             throw new BadRequestException("Saved view identifier filter is malformed");
         }
+    }
+
+    private static SavedViewMemberScope savedViewMemberScope(JsonNode filters) {
+        List<String> owner = textValues(filters, "owner");
+        if (owner == null) {
+            return new SavedViewMemberScope(
+                firstValue(filters, "scope"),
+                preferredIdentifierValues(filters, "memberIds", "memberId"));
+        }
+        if (owner.contains("me")) {
+            return new SavedViewMemberScope("me", null);
+        }
+        if (owner.contains(EMPTY_FACET_SENTINEL)) {
+            return new SavedViewMemberScope("unassigned", null);
+        }
+        return new SavedViewMemberScope(
+            "members", integerValues(owner).stream().distinct().toList());
     }
 
     private static String firstValue(JsonNode object, String key) {
@@ -735,6 +878,18 @@ public class WorkflowManualRunService {
         return normalized;
     }
 
+    /**
+     * Refuses a manual run for a record type this surface cannot scope. Only filter-shaped scopes
+     * reach {@code resolveFilterForRecordType}, so a directly enumerated selection would otherwise
+     * carry an unsupported record type all the way to the {@code workflow_invocation} check
+     * constraint and surface as a server error instead of a rejected request.
+     */
+    private static void requireManualRunnable(String recordType) {
+        if (!RECORD_TYPES.contains(recordType)) {
+            throw new BadRequestException("Unsupported workflow record type");
+        }
+    }
+
     private static String requireQuery(String value) {
         String query = blankToNull(value);
         if (query == null || query.length() > 1024) {
@@ -743,8 +898,16 @@ public class WorkflowManualRunService {
         return query;
     }
 
+    private static String containingQuery(String value) {
+        String query = blankToNull(value);
+        return query == null ? null : LikePattern.containing(query);
+    }
+
     private static String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private record SavedViewMemberScope(String scope, List<Integer> memberIds) {
     }
 
     private static String requireToken(String value) {

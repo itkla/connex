@@ -5,12 +5,14 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 
 import type { RecordSelectOption } from "@/app/components/records/RecordSelect";
+import { supportsSimulation } from "@/app/components/settings/workflows/vocabulary";
 import {
     connectWorkflowBranch,
     createEmptyWorkflowGraph,
     disconnectWorkflowBranch,
     ensureScheduleEnrollment,
     insertWorkflowNode,
+    normalizeWorkflowForRecordType,
     removeWorkflowNode,
 } from "@/app/components/settings/workflows/workflowGraph";
 import {
@@ -199,7 +201,7 @@ export function useWorkflowEditor({
         } catch {
             if (!signal?.aborted
                 && loadGeneration === versionsLoadGenerationRef.current
-                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) toastError(t("versions.loadFailed"));
+                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) toastError(t("versions.loadFailed"), { description: t("versions.loadFailedBody") });
         } finally {
             if (!signal?.aborted
                 && loadGeneration === versionsLoadGenerationRef.current
@@ -359,12 +361,9 @@ export function useWorkflowEditor({
         mode: "transient" | "commit",
     ) => {
         let document = { ...history.present, [field]: value };
-        if (field === "recordType" && typeof value === "string") {
-            const trigger = document.definition.nodes.find((node) => node.id === document.definition.entryNodeId);
-            if (trigger?.type === "TRIGGER" && trigger.config.type === "schedule") {
-                const enrollment = ensureScheduleEnrollment(document.definition, document.canvas, value);
-                document = { ...document, definition: enrollment.definition, canvas: enrollment.canvas };
-            }
+        if (field === "recordType" && typeof value === "string" && value !== history.present.recordType) {
+            const normalized = normalizeWorkflowForRecordType(document.definition, document.canvas, value);
+            document = { ...document, definition: normalized.definition, canvas: normalized.canvas };
         }
         updateDocument(document, mode);
     }, [history.present, updateDocument]);
@@ -463,7 +462,7 @@ export function useWorkflowEditor({
             reconcileServerWorkflow(serverWorkflow);
         } catch {
             if (recoveryGeneration === conflictRecoveryGenerationRef.current
-                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) toastError(t("conflict.loadFailed"));
+                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) toastError(t("conflict.loadFailed"), { description: t("conflict.loadFailedBody") });
         }
     }, [activeWorkspaceId, isCurrentWorkflow, reconcileServerWorkflow, scopeReady, t, workflow]);
 
@@ -527,7 +526,7 @@ export function useWorkflowEditor({
                 : isCurrentWorkspace(workspaceId) && creationContinuation === creationContinuationRef.current;
             if (!currentScope || actionGeneration !== busyActionGenerationRef.current) return;
             if (error instanceof ApiError && error.status === 409) await beginConflictRecovery();
-            else toastError(t("saveFailed"));
+            else toastError(t("saveFailed"), { description: t("saveFailedBody") });
         } finally {
             const creationContinuationCurrent = creationContinuation === creationContinuationRef.current;
             if (!workflow && !creationCompleted && creationContinuationCurrent) creationLockRef.current = false;
@@ -563,7 +562,7 @@ export function useWorkflowEditor({
         } catch {
             if (documentGeneration === documentGenerationRef.current
                 && actionGeneration === busyActionGenerationRef.current
-                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) toastError(t("validationFailed"));
+                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) toastError(t("validationFailed"), { description: t("validationFailedBody") });
         } finally {
             if (actionGeneration === busyActionGenerationRef.current
                 && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setBusyAction(null);
@@ -597,7 +596,7 @@ export function useWorkflowEditor({
             if (actionGeneration !== busyActionGenerationRef.current
                 || !isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
             if (error instanceof ApiError && error.status === 409) await beginConflictRecovery();
-            else toastError(t("publishFailed"));
+            else toastError(t("publishFailed"), { description: t("publishFailedBody") });
         } finally {
             if (actionGeneration === busyActionGenerationRef.current
                 && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setBusyAction(null);
@@ -627,7 +626,7 @@ export function useWorkflowEditor({
             toastSuccess(t(updated.enabled ? "enabled" : "disabled"));
         } catch {
             if (actionGeneration === busyActionGenerationRef.current
-                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) toastError(t("lifecycleFailed"));
+                && isCurrentWorkflow(id, workspaceId, scopeGeneration)) toastError(t("lifecycleFailed"), { description: t("lifecycleFailedBody") });
         } finally {
             if (actionGeneration === busyActionGenerationRef.current
                 && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setBusyAction(null);
@@ -655,7 +654,7 @@ export function useWorkflowEditor({
                 || simulationGeneration !== simulationGenerationRef.current
                 || !isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
             if (error instanceof ApiError && error.status === 409) await beginConflictRecovery();
-            else toastError(t("simulation.failed"));
+            else toastError(t("simulation.failed"), { description: t("simulation.failedBody") });
         } finally {
             if (simulationGeneration === simulationGenerationRef.current
                 && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setSimulationLoadState("idle");
@@ -670,12 +669,12 @@ export function useWorkflowEditor({
         if (!isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
         searchControllerRef.current?.abort();
         if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-        if (query.trim().length < 2) {
+        const recordType = history.present.recordType ?? "deal";
+        if (query.trim().length < 2 || !supportsSimulation(recordType)) {
             setSimulationRecords([]);
             return;
         }
         const documentGeneration = documentGenerationRef.current;
-        const recordType = history.present.recordType;
         searchTimerRef.current = setTimeout(() => {
             if (documentGeneration !== documentGenerationRef.current
                 || !isCurrentWorkflow(id, workspaceId, scopeGeneration)) return;
@@ -695,7 +694,9 @@ export function useWorkflowEditor({
                             ? results.people.map((person) => ({ id: person.id, label: person.name, imageUrl: person.imageUrl }))
                             : recordType === "task"
                                 ? results.tasks.map((task) => ({ id: task.id, label: task.description }))
-                                : results.deals.map((deal) => ({ id: deal.id, label: deal.name }));
+                                : recordType === "deal"
+                                    ? results.deals.map((deal) => ({ id: deal.id, label: deal.name }))
+                                    : [];
                     setSimulationRecords(options.slice(0, 50));
                 })
                 .catch(() => {
@@ -768,6 +769,7 @@ export function useWorkflowEditor({
         simulation: scopeReady ? simulation : null,
         simulationLoading: scopeReady && simulationLoadState === "loading",
         simulationRecords: scopeReady ? simulationRecords : [],
+        simulationSupported: supportsSimulation(history.present.recordType ?? "deal"),
         conflict,
         conflictOpen,
         selectedNodeId,

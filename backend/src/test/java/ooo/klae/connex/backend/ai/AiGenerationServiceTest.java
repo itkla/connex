@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -9,9 +10,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Field;
@@ -29,17 +32,25 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.ai.assistant.AiChatDurableTerminal;
+import ooo.klae.connex.backend.ai.assistant.AiChatQueuedTurn;
+import ooo.klae.connex.backend.ai.assistant.AiChatTurnPersistenceService;
+import ooo.klae.connex.backend.ai.assistant.AiChatTurnTerminalCoordinator;
+import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
 import ooo.klae.connex.backend.dto.AiGenerationStatusDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
+import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import tools.jackson.databind.json.JsonMapper;
 
 class AiGenerationServiceTest {
@@ -312,6 +323,147 @@ class AiGenerationServiceTest {
     }
 
     @Test
+    void hardTimeoutBoundsAResolvingDurableClaim() throws Exception {
+        service.shutdown();
+        service = new AiGenerationService(
+                properties(Duration.ofMillis(100)),
+                workspaceService,
+                aiFeatureGate,
+                aiRestrictionEpoch,
+                contextRunner,
+                JsonMapper.builder().build(),
+                Clock.systemUTC());
+        CountDownLatch listenerStarted = new CountDownLatch(1);
+        CountDownLatch releaseListener = new CountDownLatch(1);
+        AtomicInteger interruptions = new AtomicInteger();
+        AtomicInteger callbacks = new AtomicInteger();
+        AiGenerationStatusDto accepted = service.startAtRestrictionEpoch(
+                AiFeature.ASSISTANT_CHAT,
+                "resolving-across-timeout",
+                Set.of(Permission.AI_USE),
+                "unavailable",
+                () -> AiGenerationTaskResult.resolved("ready"),
+                restrictionEpoch.get(),
+                (outcome, reason) -> {
+                    int callback = callbacks.incrementAndGet();
+                    listenerStarted.countDown();
+                    try {
+                        releaseListener.await();
+                    } catch (InterruptedException exception) {
+                        interruptions.incrementAndGet();
+                        Thread.currentThread().interrupt();
+                    }
+                    return callback == 1;
+                });
+
+        assertTrue(listenerStarted.await(2, TimeUnit.SECONDS));
+        assertFalse(releaseListener.await(250, TimeUnit.MILLISECONDS));
+        assertEquals("timed_out", service.status(accepted.handle()).status());
+        assertEquals(1, interruptions.get());
+        releaseListener.countDown();
+
+        awaitUnavailable(accepted.handle());
+        assertEquals(2, callbacks.get());
+        assertEquals(1, interruptions.get());
+    }
+
+    @Test
+    void durableWinnerAfterHardTimeoutRetiresTheHandleWithoutInterruptingItsClaim() throws Exception {
+        service.shutdown();
+        service = new AiGenerationService(
+                properties(Duration.ofMillis(100)),
+                workspaceService,
+                aiFeatureGate,
+                aiRestrictionEpoch,
+                contextRunner,
+                JsonMapper.builder().build(),
+                Clock.systemUTC());
+        CountDownLatch listenerStarted = new CountDownLatch(1);
+        CountDownLatch releaseListener = new CountDownLatch(1);
+        AtomicInteger interruptions = new AtomicInteger();
+        AiGenerationStatusDto accepted = service.startAtRestrictionEpoch(
+                AiFeature.ASSISTANT_CHAT,
+                "superseded-across-timeout",
+                Set.of(Permission.AI_USE),
+                "unavailable",
+                () -> AiGenerationTaskResult.resolved("unused"),
+                restrictionEpoch.get(),
+                (outcome, reason) -> {
+                    listenerStarted.countDown();
+                    try {
+                        releaseListener.await();
+                    } catch (InterruptedException exception) {
+                        interruptions.incrementAndGet();
+                        Thread.currentThread().interrupt();
+                    }
+                    return false;
+                });
+
+        assertTrue(listenerStarted.await(2, TimeUnit.SECONDS));
+        assertFalse(releaseListener.await(250, TimeUnit.MILLISECONDS));
+        assertEquals("timed_out", service.status(accepted.handle()).status());
+        assertEquals(1, interruptions.get());
+        releaseListener.countDown();
+
+        awaitUnavailable(accepted.handle());
+        assertEquals(1, interruptions.get());
+    }
+
+    @Test
+    void failedDurableClaimAfterHardTimeoutRetriesAsTimedOut() throws Exception {
+        service.shutdown();
+        service = new AiGenerationService(
+                properties(Duration.ofMillis(100)),
+                workspaceService,
+                aiFeatureGate,
+                aiRestrictionEpoch,
+                contextRunner,
+                JsonMapper.builder().build(),
+                Clock.systemUTC());
+        CountDownLatch listenerStarted = new CountDownLatch(1);
+        CountDownLatch releaseListener = new CountDownLatch(1);
+        CountDownLatch timeoutRetried = new CountDownLatch(1);
+        AtomicInteger callbacks = new AtomicInteger();
+        AtomicInteger interruptions = new AtomicInteger();
+        AiGenerationStatusDto accepted = service.startAtRestrictionEpoch(
+                AiFeature.ASSISTANT_CHAT,
+                "failed-claim-across-timeout",
+                Set.of(Permission.AI_USE),
+                "unavailable",
+                () -> AiGenerationTaskResult.resolved("unused"),
+                restrictionEpoch.get(),
+                (outcome, reason) -> {
+                    int callback = callbacks.incrementAndGet();
+                    if (callback == 1) {
+                        listenerStarted.countDown();
+                        try {
+                            releaseListener.await();
+                        } catch (InterruptedException exception) {
+                            interruptions.incrementAndGet();
+                            Thread.currentThread().interrupt();
+                        }
+                        throw new IllegalStateException("durable terminal unavailable");
+                    }
+                    assertEquals(AiGenerationTaskResult.Outcome.TIMED_OUT, outcome);
+                    assertEquals("generation_timeout", reason);
+                    timeoutRetried.countDown();
+                    return true;
+                });
+
+        assertTrue(listenerStarted.await(2, TimeUnit.SECONDS));
+        assertFalse(releaseListener.await(250, TimeUnit.MILLISECONDS));
+        assertEquals("timed_out", service.status(accepted.handle()).status());
+        assertEquals(1, interruptions.get());
+        releaseListener.countDown();
+
+        AiGenerationStatusDto timedOut = awaitStatus(accepted.handle(), "timed_out");
+        assertTrue(timeoutRetried.await(2, TimeUnit.SECONDS));
+        assertEquals("generation_timeout", timedOut.reason());
+        assertEquals(2, callbacks.get());
+        assertEquals(1, interruptions.get());
+    }
+
+    @Test
     void durableTerminalWinnerClosesTheSupersededInMemoryHandle() throws Exception {
         service.shutdown();
         service = new AiGenerationService(
@@ -322,36 +474,56 @@ class AiGenerationServiceTest {
                 contextRunner,
                 JsonMapper.builder().build(),
                 Clock.systemUTC());
-        CountDownLatch timeoutAttempted = new CountDownLatch(1);
-        AtomicInteger timeoutClaims = new AtomicInteger();
-        AtomicInteger resolvedClaims = new AtomicInteger();
-        AtomicReference<String> durableOutcome = new AtomicReference<>("resolved");
+        AiChatQueuedTurn turn = new AiChatQueuedTurn(
+                7, 42, 13, 20, 19, 1, restrictionEpoch.get(),
+                false, List.of(), List.of());
+        TenantWorkScope tenantWorkScope = mock(TenantWorkScope.class);
+        AiChatTurnPersistenceService persistenceService =
+                mock(AiChatTurnPersistenceService.class);
+        AiChatRealtimeDispatcher dispatcher = mock(AiChatRealtimeDispatcher.class);
+        when(tenantWorkScope.inWorkspace(
+                eq(turn.workspaceId()),
+                org.mockito.ArgumentMatchers.<Supplier<Object>>any()))
+                .thenAnswer(invocation -> {
+                    Supplier<?> work = invocation.getArgument(1);
+                    return work.get();
+                });
+        when(persistenceService.markTerminal(
+                turn, "timed_out", "generation_timeout")).thenReturn(false);
+        when(persistenceService.terminalState(turn)).thenReturn(
+                new AiChatDurableTerminal("resolved", null, 17));
+        AiChatTurnTerminalCoordinator coordinator = new AiChatTurnTerminalCoordinator(
+                tenantWorkScope, persistenceService, dispatcher);
+        CountDownLatch terminalPublished = new CountDownLatch(1);
+        AtomicReference<AiChatStepFrameDto> published = new AtomicReference<>();
+        doAnswer(invocation -> {
+            published.set(invocation.getArgument(2));
+            terminalPublished.countDown();
+            return null;
+        }).when(dispatcher).sessionNow(
+                eq(turn.workspaceId()), eq(turn.sessionId()), any(AiChatStepFrameDto.class));
         AiGenerationStatusDto accepted = service.startAtRestrictionEpoch(
                 AiFeature.ASSISTANT_CHAT,
                 "turn-20-race",
                 Set.of(Permission.AI_USE),
                 "unavailable",
                 () -> {
-                    await(timeoutAttempted);
+                    await(terminalPublished);
                     return AiGenerationTaskResult.resolved("durably-resolved");
                 },
                 restrictionEpoch.get(),
-                (outcome, stableReason) -> {
-                    if (outcome == AiGenerationTaskResult.Outcome.TIMED_OUT) {
-                        timeoutClaims.incrementAndGet();
-                        timeoutAttempted.countDown();
-                        return false;
-                    }
-                    resolvedClaims.incrementAndGet();
-                    return true;
-                });
+                coordinator.listener(turn));
 
-        assertTrue(timeoutAttempted.await(2, TimeUnit.SECONDS));
+        assertTrue(terminalPublished.await(2, TimeUnit.SECONDS));
         awaitUnavailable(accepted.handle());
 
-        assertEquals("resolved", durableOutcome.get());
-        assertEquals(1, timeoutClaims.get());
-        assertEquals(0, resolvedClaims.get());
+        assertNotNull(published.get());
+        assertEquals("resolved", published.get().status());
+        assertNull(published.get().reason());
+        assertEquals(17, published.get().seq());
+        verify(persistenceService).markTerminal(
+                turn, "timed_out", "generation_timeout");
+        verify(persistenceService).terminalState(turn);
     }
 
     @Test

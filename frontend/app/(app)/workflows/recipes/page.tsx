@@ -3,7 +3,7 @@ import { WorkflowRecipeGallery } from "@/app/components/settings/workflows/recip
 
 export default function WorkflowRecipesPage() {
     return (
-        <PageShell tier="wide">
+        <PageShell>
             <WorkflowRecipeGallery />
         </PageShell>
     );

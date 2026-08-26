@@ -1,8 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 
+import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
+import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import type {
     ReportGoal,
     ReportGoalInput,
@@ -46,16 +48,28 @@ export default function GoalDialog({
     onSubmit,
 }: GoalDialogProps) {
     const [saving, setSaving] = useState(false);
+    const [isDirty, setIsDirty] = useState(false);
+    const guard = useUnsavedChangesGuard({
+        isDirty: isDirty && !saving,
+        onClose: () => onOpenChange(false),
+    });
+
+    const [wasOpen, setWasOpen] = useState(open);
+    if (open !== wasOpen) {
+        setWasOpen(open);
+        if (!open) setIsDirty(false);
+    }
 
     const handleOpenChange = (next: boolean) => {
         if (!next && saving) return;
-        onOpenChange(next);
+        guard.onOpenChange(next);
     };
 
     const handleSubmit = async (payload: ReportGoalInput) => {
         setSaving(true);
         try {
             await onSubmit(payload);
+            setIsDirty(false);
             onOpenChange(false);
         } finally {
             setSaving(false);
@@ -63,19 +77,27 @@ export default function GoalDialog({
     };
 
     return (
-        <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
-            <ResponsiveDialogContent className="sm:max-w-lg">
-                {open ? (
-                    <GoalForm
-                        key={editing ? `edit-${editing.id}` : 'new'}
-                        editing={editing}
-                        owners={owners}
-                        saving={saving}
-                        onSubmit={handleSubmit}
-                    />
-                ) : null}
-            </ResponsiveDialogContent>
-        </ResponsiveDialog>
+        <>
+            <ResponsiveDialog open={open} onOpenChange={handleOpenChange}>
+                <ResponsiveDialogContent className="sm:max-w-lg">
+                    {open ? (
+                        <GoalForm
+                            key={editing ? `edit-${editing.id}` : 'new'}
+                            editing={editing}
+                            owners={owners}
+                            saving={saving}
+                            onDirtyChange={setIsDirty}
+                            onSubmit={handleSubmit}
+                        />
+                    ) : null}
+                </ResponsiveDialogContent>
+            </ResponsiveDialog>
+            <ConfirmDiscardDialog
+                open={guard.confirm.open}
+                onKeepEditing={guard.confirm.onKeepEditing}
+                onDiscard={guard.confirm.onDiscard}
+            />
+        </>
     );
 }
 
@@ -83,11 +105,14 @@ function GoalForm({
     editing,
     owners,
     saving,
+    onDirtyChange,
     onSubmit,
 }: {
     editing: ReportGoal | null;
     owners: WorkspaceMember[];
     saving: boolean;
+    /** Reports whether the form holds unsaved edits, so the dialog can guard against accidental discard. */
+    onDirtyChange: (dirty: boolean) => void;
     onSubmit: (payload: ReportGoalInput) => Promise<void>;
 }) {
     const t = useTranslations('Reports');
@@ -97,6 +122,16 @@ function GoalForm({
     const [target, setTarget] = useState(editing ? String(editing.targetValue) : '');
     const [currency, setCurrency] = useState(editing?.currency ?? 'USD');
     const [error, setError] = useState<{ fieldId: string; message: string } | null>(null);
+
+    const [initial] = useState(() => ({ scope, periodType, period, target, currency }));
+    const dirty = scope !== initial.scope
+        || periodType !== initial.periodType
+        || period !== initial.period
+        || target !== initial.target
+        || currency !== initial.currency;
+    useEffect(() => {
+        onDirtyChange(dirty);
+    }, [dirty, onDirtyChange]);
 
     const fail = (fieldId: string, message: string) => {
         setError({ fieldId, message });

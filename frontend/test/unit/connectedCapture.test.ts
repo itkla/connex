@@ -62,7 +62,7 @@ describe('connected capture route state', () => {
             'connected=google&provider=javascript%3Aalert(1)&panel=reviews&review=-1',
         );
         expect(captureConnectionsHref(current, parseCaptureRouteState(current))).toBe(
-            '/account/connections?connected=google',
+            '/settings/personal/connected-accounts?connected=google',
         );
     });
 
@@ -71,7 +71,7 @@ describe('connected capture route state', () => {
             'connected=google&error=denied&provider=microsoft&panel=reviews&page=2',
         );
         expect(connectionsHrefWithoutOAuthCallback(current)).toBe(
-            '/account/connections?provider=microsoft&panel=reviews&page=2',
+            '/settings/personal/connected-accounts?provider=microsoft&panel=reviews&page=2',
         );
     });
 });

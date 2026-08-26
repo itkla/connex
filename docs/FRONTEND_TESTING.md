@@ -3,7 +3,7 @@
 The frontend has two test layers, both living in `frontend/`:
 
 - **Unit tests** — [vitest](https://vitest.dev), `frontend/test/unit/`, covering pure logic (analytics bucketing, URL list-state helpers, formatters/parsers, segment validation, shortcut normalization, locale resolution) plus the toolchain's declared Node floor. Node environment, no DOM, no snapshots — behavioral assertions only.
-- **E2E tests** — [`@playwright/test`](https://playwright.dev), `frontend/test/e2e/`, driving fourteen critical flows through a real browser against a running full stack. The harness provides project-isolated desktop/phone tenants and EN/JA locale control; individual specs opt into the additional quadrants they prove.
+- **E2E tests** — [`@playwright/test`](https://playwright.dev), `frontend/test/e2e/`, driving fifteen critical flows through a real browser against a running full stack. The harness provides project-isolated desktop/phone tenants and EN/JA locale control; individual specs opt into the additional quadrants they prove.
 
 ## Running locally
 
@@ -110,7 +110,7 @@ bash gradlew seedData -PseederProfile=small -PseederSeed=853 -PseederWorkspaces=
 
 Then boot the backend against that same schema. Every seeded user's password is `seeder-password`; treat any schema the seeder touched as compromised for authentication.
 
-## The fourteen flows
+## The fifteen flows
 
 | Spec | Flow |
 | --- | --- |
@@ -128,6 +128,7 @@ Then boot the backend against that same schema. Every seeded user's password is 
 | `wave2-evaluator.spec.ts` | EN/JA desktop/phone CSV ambiguity review → evidence-backed insight → safe action, with three identical submissions |
 | `archive-records.spec.ts` | contact/company archive visibility and restore round trips through the record browser |
 | `mobile-record-lists.spec.ts` | Pixel-width contacts/companies/deals/tasks use list rows, mobile sheets filter/sort, and the stored desktop mode survives the forced phone presentation |
+| `ask-connex.spec.ts` | EN/JA drawer open/close, page-context correction and pinning, drawer width states, drawer → full workspace handoff, session rail banding/search, deep links, and the phone bottom-bar entry |
 
 Three further specs exist to keep the harness itself honest rather than to cover a product flow:
 
@@ -136,6 +137,8 @@ Three further specs exist to keep the harness itself honest rather than to cover
 | `locale-ja.spec.ts` | the `NEXT_LOCALE` helper actually switches server-rendered copy, logged out and signed in, and that the same page stays English without it (one test tagged `@mobile`) |
 | `mobile-shell.spec.ts` | the phone-viewport project really is mobile: the bottom bar and the sidebar toggle that `md:hidden` removes on desktop are both rendered (`@mobile-only`) |
 | `seeded-persona.spec.ts` | the identities derived from the seeder log are real: the Japanese persona signs in with the seeded password |
+
+Known scope cut: **Ask Connex specs stop short of asking a question.** The e2e stack boots the backend with no AI provider configured, and `AiFeatureGate` fails closed on provider readiness — but only at *turn start*. Session create/list/read, presence, and participants need `AI_USE` and workspace membership alone, which the registered owner has. So every surface, context, navigation, width, rail, deep-link, and locale assertion runs against the real stack unchanged, while send → answer → evidence peek → tool-call approval cannot run at all. Those need a provider or a test-only provider stub, and no such stub exists server-side; do not fake one client-side, because the retention, masking, and citation behaviour under test *is* the provider round trip. `ask-connex.spec.ts` therefore needs no feature-gate enablement in CI.
 
 Known scope cut: the notifications flow asserts the inbox/read-state surface but does not exercise *mark as read on a real notification* — generating one deterministically requires a second workspace member (mention flow), which is deferred until the volume-seeder workstream lands. Documented here so nobody mistakes it for coverage.
 

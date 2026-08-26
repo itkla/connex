@@ -18,7 +18,7 @@ import { SettingsSection } from "@/app/components/settings/SettingsSection";
 export function DiagnosticsSection({
     title,
     description,
-    loading,
+    loading = false,
     unavailable,
     isEmpty,
     emptyLabel,
@@ -26,7 +26,7 @@ export function DiagnosticsSection({
 }: {
     title: string;
     description?: string;
-    loading: boolean;
+    loading?: boolean;
     unavailable?: boolean;
     isEmpty?: boolean;
     emptyLabel?: string;

@@ -1,6 +1,7 @@
 'use client';
 
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { quickEditErrorId } from '@/app/hooks/useFieldErrors';
 import { motion, useReducedMotion } from 'motion/react';
 import { Loader2Icon } from 'lucide-react';
 import { CameraIcon } from '@heroicons/react/24/outline';
@@ -17,6 +18,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
+import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
+import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import { isManagedImageFile, MANAGED_IMAGE_ACCEPT } from '@/app/lib/managed-image';
 import ProtectedMediaImage from '@/app/components/ProtectedMediaImage';
 import { cn } from '@/lib/utils';
@@ -35,13 +38,29 @@ type QuickEditSheetShellProps = {
     onSave: () => void;
     saveLabel: string;
     cancelLabel: string;
+    /**
+     * Serializable snapshot of the drafts this sheet is editing. The shell remembers it when the
+     * sheet opens and treats any later difference as unsaved work, so a dismissal asks before
+     * discarding instead of destroying the edits.
+     */
+    dirtySnapshot?: unknown;
     children: ReactNode;
 };
+
+function serializeSnapshot(snapshot: unknown): string | null {
+    if (snapshot === undefined) return null;
+    return JSON.stringify(snapshot) ?? null;
+}
 
 /**
  * Shared chrome for the record quick-edit sheets: a header that names what is being
  * edited, a scrollable body, and a sticky cancel/save footer. Keeps every quick-edit
  * surface (contacts, companies, deals, pipelines, notes) visually identical.
+ *
+ * Dismissing a sheet that has accumulated input asks before discarding it. Two signals feed
+ * that: `dirtySnapshot` catches value changes made through controls that never emit an input
+ * event (comboboxes, selects, outcome pickers), and typing or picking a file anywhere in the
+ * body catches edits owned by embedded sections the caller cannot snapshot.
  */
 export function QuickEditSheetShell({
     open,
@@ -55,44 +74,80 @@ export function QuickEditSheetShell({
     onSave,
     saveLabel,
     cancelLabel,
+    dirtySnapshot,
     children,
 }: QuickEditSheetShellProps) {
+    const snapshot = useMemo(() => serializeSnapshot(dirtySnapshot), [dirtySnapshot]);
+    const [openedSnapshot, setOpenedSnapshot] = useState<string | null>(() => (open ? snapshot : null));
+    const [touched, setTouched] = useState(false);
+    const [prevOpen, setPrevOpen] = useState(open);
+    if (open !== prevOpen) {
+        setPrevOpen(open);
+        setOpenedSnapshot(open ? snapshot : null);
+        setTouched(false);
+    }
+
+    const dirty = !isSaving
+        && (touched || (openedSnapshot !== null && snapshot !== null && snapshot !== openedSnapshot));
+    const guard = useUnsavedChangesGuard({
+        isDirty: dirty,
+        onClose: () => onOpenChange(false),
+    });
+
+    const handleOpenChange = (next: boolean) => {
+        if (!next && interactionPending) return;
+        guard.onOpenChange(next);
+    };
+
     return (
-        <Drawer open={open} onOpenChange={onOpenChange} swipeDirection="right">
-            <DrawerContent className="flex w-full flex-col gap-0 sm:max-w-lg">
-                <DrawerHeader className="border-b pr-12">
-                    <div className="flex items-center gap-3">
-                        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground ring-1 ring-border [&_svg]:size-5">
-                            {icon}
-                        </span>
-                        <DrawerTitle className="min-w-0 flex-1 truncate text-base">{title}</DrawerTitle>
-                        {count > 1 ? (
-                            <Badge variant="secondary" className="tabular-nums">
-                                {count}
-                            </Badge>
-                        ) : null}
-                    </div>
-                    {description ? <DrawerDescription>{description}</DrawerDescription> : null}
-                </DrawerHeader>
+        <>
+            <Drawer open={open} onOpenChange={handleOpenChange} swipeDirection="right">
+                <DrawerContent className="flex w-full flex-col gap-0 sm:max-w-lg">
+                    <DrawerHeader className="border-b pr-12">
+                        <div className="flex items-center gap-3">
+                            <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground ring-1 ring-border [&_svg]:size-5">
+                                {icon}
+                            </span>
+                            <DrawerTitle className="min-w-0 flex-1 truncate text-base">{title}</DrawerTitle>
+                            {count > 1 ? (
+                                <Badge variant="secondary" className="tabular-nums">
+                                    {count}
+                                </Badge>
+                            ) : null}
+                        </div>
+                        {description ? <DrawerDescription>{description}</DrawerDescription> : null}
+                    </DrawerHeader>
 
-                <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">{children}</div>
-
-                <DrawerFooter className="flex-row justify-end gap-2 border-t">
-                    <DrawerClose render={<Button variant="outline" disabled={isSaving || interactionPending} />}>
-                        {cancelLabel}
-                    </DrawerClose>
-                    <Button
-                        onClick={onSave}
-                        variant="brand"
-                        disabled={isSaving || interactionPending}
-                        className="min-w-24"
+                    <div
+                        className="flex flex-1 flex-col gap-4 overflow-y-auto p-4"
+                        onInput={() => setTouched(true)}
+                        onChange={() => setTouched(true)}
                     >
-                        {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : null}
-                        {saveLabel}
-                    </Button>
-                </DrawerFooter>
-            </DrawerContent>
-        </Drawer>
+                        {children}
+                    </div>
+
+                    <DrawerFooter className="flex-row justify-end gap-2 border-t">
+                        <DrawerClose render={<Button variant="outline" disabled={isSaving || interactionPending} />}>
+                            {cancelLabel}
+                        </DrawerClose>
+                        <Button
+                            onClick={onSave}
+                            variant="brand"
+                            disabled={isSaving || interactionPending}
+                            className="min-w-24"
+                        >
+                            {isSaving ? <Loader2Icon className="size-4 animate-spin" /> : null}
+                            {saveLabel}
+                        </Button>
+                    </DrawerFooter>
+                </DrawerContent>
+            </Drawer>
+            <ConfirmDiscardDialog
+                open={guard.confirm.open}
+                onKeepEditing={guard.confirm.onKeepEditing}
+                onDiscard={guard.confirm.onDiscard}
+            />
+        </>
     );
 }
 
@@ -145,12 +200,14 @@ type QuickEditFieldProps = {
     label: ReactNode;
     htmlFor?: string;
     required?: boolean;
+    /** Validation message for this field, shown under the control instead of as a toast. */
+    error?: string;
     className?: string;
     children: ReactNode;
 };
 
-/** Label-over-control field wrapper that fixes the sheet's form rhythm and required marker. */
-export function QuickEditField({ label, htmlFor, required, className, children }: QuickEditFieldProps) {
+/** Label-over-control field wrapper that fixes the sheet's form rhythm, required marker, and error line. */
+export function QuickEditField({ label, htmlFor, required, error, className, children }: QuickEditFieldProps) {
     return (
         <div className={cn('grid gap-1.5', className)}>
             <Label htmlFor={htmlFor}>
@@ -158,6 +215,14 @@ export function QuickEditField({ label, htmlFor, required, className, children }
                 {required ? <span className="text-destructive">*</span> : null}
             </Label>
             {children}
+            {error ? (
+                <p
+                    id={htmlFor ? quickEditErrorId(htmlFor) : undefined}
+                    className="text-sm text-destructive"
+                >
+                    {error}
+                </p>
+            ) : null}
         </div>
     );
 }

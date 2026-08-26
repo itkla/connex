@@ -23,7 +23,7 @@
     },
     "DocsHome": {
         "title": "Connex documentation",
-        "lead": "Connex is a relationship-intelligence CRM: it scores how warm each relationship is, predicts when one is cooling, and surfaces the warmest path to any introduction. These docs walk every capability, from the big fundamentals down to the small interface details."
+        "lead": "Connex is a relationship-intelligence CRM: it scores how warm each relationship is, predicts when one is cooling, and surfaces the strongest intro path to anyone you want to reach. These docs walk every capability, from the big fundamentals down to the small interface details."
     },
     "DocsGettingStarted": {
         "title": "Getting started",
@@ -37,7 +37,7 @@
                     {
                         "type": "prose",
                         "text": [
-                            "Connex is a CRM built around one simple idea: your relationships have a temperature, and that temperature changes over time. Instead of leaving your contacts as a flat, static list, Connex quietly keeps track of how warm each relationship is, gives you a heads-up when one is starting to cool, and shows you the friendliest way to reach anyone you want to meet.",
+                            "Connex is a CRM built around one simple idea: your relationships have a warmth to them, and that warmth changes over time. Instead of leaving your contacts as a flat, static list, Connex quietly keeps track of how warm each relationship is, gives you a heads-up when one is starting to cool, and shows you the friendliest way to reach anyone you want to meet.",
                             "Everything you do lives inside your own workspace, and what you can see, edit, and share follows your role on the team. You are always working in your own space, with your own people."
                         ]
                     },
@@ -115,7 +115,58 @@
                 "blocks": [
                     {
                         "type": "prose",
-                        "text": "The sidebar on the left splits Connex into a few clear areas: Overview, Records, Activity, Library, and Team. The bar across the top holds search, along with a button to hide or show the sidebar. The workspace you are in is shown at the top of the sidebar itself. On most detail pages a back button takes you straight to the list you came from."
+                        "text": "The sidebar on the left splits Connex into a few clear areas: Intelligence, Records, Activity, Insights, Marketing (when campaigns are enabled), Library, and Workspace. Dashboard and My Work each have a row of their own above those areas, Workflows has one below them when your workspace uses workflows, and Documentation sits in the menu behind your name at the bottom, beside My Work and Account settings."
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "What sits where",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "Dashboard",
+                                "description": "Your workspace as it stands today: what needs attention, what just moved, and which relationships are cooling."
+                            },
+                            {
+                                "title": "My Work",
+                                "description": "The tasks, records, and mentions waiting on you personally, gathered onto one page."
+                            },
+                            {
+                                "title": "Intelligence",
+                                "description": "Radar, Introductions, and the relationship map: the pages that read how your network connects rather than list it."
+                            },
+                            {
+                                "title": "Records",
+                                "description": "Companies, contacts, deals, pipelines, and products."
+                            },
+                            {
+                                "title": "Activity",
+                                "description": "Activities, tasks, notes, and the calendar."
+                            },
+                            {
+                                "title": "Insights",
+                                "description": "Analytics, reports, and goals: your figures as charts, and as documents you can hand to somebody else."
+                            },
+                            {
+                                "title": "Marketing",
+                                "description": "Campaigns, shown when your workspace has campaigns switched on."
+                            },
+                            {
+                                "title": "Library",
+                                "description": "Documents, tags, and files, with the approval policies that govern them."
+                            },
+                            {
+                                "title": "Workflows",
+                                "description": "The automations that run on your behalf, shown when your workspace has workflows switched on."
+                            },
+                            {
+                                "title": "Workspace",
+                                "description": "The member directory, capture reviews, settings, and the audit log."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "prose",
+                        "text": "The bar across the top holds search, along with a button to hide or show the sidebar. The workspace you are in is shown at the top of the sidebar itself. On most detail pages a back button takes you straight to the list you came from."
                     },
                     {
                         "type": "shortcuts",
@@ -244,7 +295,7 @@
                         "items": [
                             {
                                 "question": "Do I have to set the warmth score myself?",
-                                "answer": "No. Connex works out the temperature for you from the notes, activities, and meetings you already log. There is nothing to fill in by hand."
+                                "answer": "No. Connex works out warmth for you from the notes, activities, and meetings you already log. There is nothing to fill in by hand."
                             },
                             {
                                 "question": "Where does everything I add live?",
@@ -437,7 +488,7 @@
                             },
                             {
                                 "title": "Deals",
-                                "description": "Opportunities moving through a pipeline, each with a value, an owner, and an outcome."
+                                "description": "Deals moving through a pipeline, each with a value, an owner, and an outcome."
                             },
                             {
                                 "title": "Pipelines",
@@ -452,7 +503,7 @@
                         "items": [
                             {
                                 "title": "Warmth scoring",
-                                "description": "Contacts and companies get a relationship temperature you can sort and filter by."
+                                "description": "Contacts and companies get a warmth score you can sort and filter by."
                             },
                             {
                                 "title": "Tags",
@@ -498,7 +549,7 @@
                             },
                             {
                                 "title": "Deals & pipelines",
-                                "description": "Opportunities moving through the stages you set up.",
+                                "description": "Deals moving through the stages you set up.",
                                 "href": "/docs/records/deals-and-pipelines"
                             },
                             {
@@ -653,11 +704,11 @@
                             },
                             {
                                 "title": "Warmth",
-                                "description": "A color-coded temperature pill with a score and the days left before it cools."
+                                "description": "A color-coded warmth pill with a score and the days left before it cools."
                             },
                             {
                                 "title": "Connections",
-                                "description": "How you're related (colleague, friend, and more) and the shortest warm-intro path to reach them."
+                                "description": "How you're related (colleague, friend, and more) and the shortest intro path to reach them."
                             },
                             {
                                 "title": "Activity timeline",
@@ -743,7 +794,7 @@
                                 "answer": "Yes. Connex keeps a 'recently moved' feed of contacts who changed companies recently, so you can reach out at the right moment."
                             },
                             {
-                                "question": "What does the warm-intro path show?",
+                                "question": "What does the intro path show?",
                                 "answer": "It's the shortest chain of people you know that reaches someone you'd like to meet. It also tells you when you already know them directly, or when there's no path to them right now."
                             }
                         ]
@@ -752,7 +803,7 @@
             },
             "deals-and-pipelines": {
                 "title": "Deals & pipelines",
-                "description": "Opportunities moving through stages, and the pipelines that shape them.",
+                "description": "Deals moving through stages, and the pipelines that shape them.",
                 "blocks": [
                     {
                         "type": "prose",
@@ -810,7 +861,7 @@
                                 "description": "Give the deal one owner and as many collaborators as you like."
                             },
                             {
-                                "title": "People",
+                                "title": "Contacts",
                                 "description": "Link the contacts involved, each with the role they play in the deal."
                             },
                             {
@@ -1137,15 +1188,15 @@
     "DocsRelationshipIntelligence": {
         "title": "Relationship intelligence",
         "description": "Warmth scoring, decay prediction, connections, and employment history: the heart of Connex.",
-        "lead": "This is what sets Connex apart. Relationships are scored, watched for decay, and mapped into a graph you can traverse.",
+        "lead": "This is what sets Connex apart. Relationships are scored, watched for decay, and drawn into a map you can explore.",
         "articles": {
-            "warmth-and-temperature": {
-                "title": "Warmth & temperature",
-                "description": "How relationship temperature is scored and what the bands mean.",
+            "warmth": {
+                "title": "Warmth",
+                "description": "How warmth is scored and what the bands mean.",
                 "blocks": [
                     {
                         "type": "prose",
-                        "text": "Ever wish you could glance at your contacts and instantly know which relationships are thriving and which need a little love? That is exactly what temperature does. Every relationship in Connex carries a warmth reading that goes up when you are in regular, meaningful contact and drifts down when things go quiet. It rolls up into four simple bands, so you can scan a whole list and know where you stand at a glance."
+                        "text": "Ever wish you could glance at your contacts and instantly know which relationships are thriving and which need a little love? That is exactly what warmth does. Every relationship in Connex carries a warmth reading that goes up when you are in regular, meaningful contact and drifts down when things go quiet. It rolls up into four simple bands, so you can scan a whole list and know where you stand at a glance."
                     },
                     {
                         "type": "illustration",
@@ -1182,7 +1233,7 @@
                         "type": "callout",
                         "variant": "note",
                         "title": "You never set this by hand",
-                        "body": "There is nothing to fill in. Connex works out the temperature for you from the things you already track: your notes, activities, meetings, and tasks. Just keep working normally and the score keeps itself current."
+                        "body": "There is nothing to fill in. Connex works out warmth for you from the things you already track: your notes, activities, meetings, and tasks. Just keep working normally and the score keeps itself current."
                     },
                     {
                         "type": "callout",
@@ -1233,7 +1284,7 @@
             },
             "connections-and-employment": {
                 "title": "Connections & employment",
-                "description": "The relationship graph and how job history keeps context when people move.",
+                "description": "The relationship map and how job history keeps context when people move.",
                 "blocks": [
                     {
                         "type": "prose",
@@ -1259,7 +1310,7 @@
                         "title": "Keep exploring",
                         "items": [
                             {
-                                "title": "Warm-intro paths",
+                                "title": "Intro paths",
                                 "description": "Find the strongest person to introduce you to someone you want to reach.",
                                 "href": "/docs/overview-suite/warm-intro-paths"
                             },
@@ -1303,7 +1354,7 @@
                                 "description": "If a deal has almost no history, Connex says there is not enough activity yet to write a reliable brief instead of producing something confident and empty."
                             },
                             {
-                                "title": "It admits when it was working blind",
+                                "title": "It tells you when it was working blind",
                                 "description": "If part of the surrounding context could not be gathered, the brief says so underneath rather than quietly leaving it out."
                             },
                             {
@@ -1322,8 +1373,8 @@
                         "columns": 1,
                         "items": [
                             {
-                                "title": "Names and contact details are replaced first",
-                                "description": "People, companies, email addresses and phone numbers are swapped for placeholders before anything is sent, and swapped back in the answer. In free text, Connex additionally removes email addresses, web addresses and long runs of digits such as phone numbers. It does not detect postal addresses in free text, so a street address typed into a note is sent as written."
+                                "title": "Known identifiers are replaced first",
+                                "description": "Structured identifiers are tokenized. Free text is screened for special-care data, pattern-redacted for email addresses, URLs, phone numbers, and long identifiers, and tokenized for identifiers matched to CRM records. Names, postal addresses, and other identifiers in free text that do not match a CRM record may be sent as written."
                             },
                             {
                                 "title": "Sensitive free text is withheld, not masked",
@@ -1370,7 +1421,7 @@
                             },
                             {
                                 "question": "Can I stop a particular contact being sent to an AI provider?",
-                                "answer": "Yes. Restricting processing for a contact excludes them from AI features and clears anything already generated that involved them."
+                                "answer": "Yes. Putting a contact on privacy hold excludes them from AI features and clears anything already generated about them."
                             },
                             {
                                 "question": "Does it write in Japanese?",
@@ -1383,13 +1434,13 @@
                         "title": "Keep going",
                         "items": [
                             {
-                                "title": "Warmth & temperature",
+                                "title": "Warmth",
                                 "description": "The computed signals the AI explanations sit on top of.",
-                                "href": "/docs/relationship-intelligence/warmth-and-temperature"
+                                "href": "/docs/relationship-intelligence/warmth"
                             },
                             {
                                 "title": "Privacy and data requests",
-                                "description": "Restricting processing for a contact, and what that clears.",
+                                "description": "Putting a contact on privacy hold, and what that clears.",
                                 "href": "/docs/settings/privacy-and-data-requests"
                             }
                         ]
@@ -1399,9 +1450,9 @@
         }
     },
     "DocsOverviewSuite": {
-        "title": "Overview suite",
-        "description": "Analytics, the relationship map, calendar, introductions, and warm-intro paths.",
-        "lead": "The overview suite turns your records into insight: charts, a live relationship graph, and tools for engineering introductions.",
+        "title": "Intelligence & insights",
+        "description": "Analytics, the relationship map, introductions, and intro paths.",
+        "lead": "These pages turn your records into something you can act on: charts and reports, a live relationship map, and the tools for engineering introductions.",
         "articles": {
             "analytics": {
                 "title": "Analytics",
@@ -1409,7 +1460,7 @@
                 "blocks": [
                     {
                         "type": "prose",
-                        "text": "The analytics dashboard brings your deals, pipelines, and team activity together on one screen, so you can see how the business is doing at a glance: revenue, pipeline health, win rates, and where deals are getting stuck. It's one of the overview pages in Connex, reached from the sidebar, alongside the map, calendar, and introductions."
+                        "text": "The analytics dashboard brings your deals, pipelines, and team activity together on one screen, so you can see how the business is doing at a glance: revenue, pipeline health, win rates, and where deals are getting stuck. You will find it under Insights in the sidebar, next to Reports."
                     },
                     {
                         "type": "featureList",
@@ -1516,7 +1567,7 @@
             },
             "relationship-map": {
                 "title": "Relationship map",
-                "description": "An interactive graph of people, companies, and how they connect.",
+                "description": "An interactive map of people, companies, and how they connect.",
                 "blocks": [
                     {
                         "type": "prose",
@@ -1556,16 +1607,16 @@
                         "columns": 2,
                         "items": [
                             {
-                                "title": "Expand a node",
+                                "title": "Expand a company or contact",
                                 "description": "Click any company or contact to open a card with the details, like industry, revenue, recent engagement, and contact info."
                             },
                             {
                                 "title": "Hover to trace",
-                                "description": "Hover a node to light up its whole chain, everyone above and below it, while the rest fades back."
+                                "description": "Hover anyone on the map to light up their whole chain, everyone above and below them, while the rest fades back."
                             },
                             {
                                 "title": "Drag to reposition",
-                                "description": "Grab any node and move it. The map gently rearranges itself so it stays balanced."
+                                "description": "Grab anything on the map and move it. The map gently rearranges itself so it stays balanced."
                             },
                             {
                                 "title": "Zoom and fit",
@@ -1573,7 +1624,7 @@
                             },
                             {
                                 "title": "Legend",
-                                "description": "Open the legend in the corner for a full key to node types, connections, and deal statuses."
+                                "description": "Open the legend in the corner for a full key to what the map shows, how connections are drawn, and deal statuses."
                             }
                         ]
                     },
@@ -1584,7 +1635,7 @@
                         "items": [
                             {
                                 "title": "Warmth at a glance",
-                                "description": "Each node is tinted by how warm the relationship is, hot to cold. Contacts you've been active with get a solid green outline; quiet ones get a dashed one."
+                                "description": "Everyone on the map is tinted by how warm the relationship is, hot to cold. Contacts you've been active with get a solid green outline; quiet ones get a dashed one."
                             },
                             {
                                 "title": "What the lines mean",
@@ -1607,7 +1658,7 @@
                         "title": "Related reading",
                         "items": [
                             {
-                                "title": "Warm-intro paths",
+                                "title": "Intro paths",
                                 "description": "Turn the same map into the strongest route to a contact you want to reach.",
                                 "href": "/docs/overview-suite/warm-intro-paths"
                             },
@@ -1617,79 +1668,6 @@
                                 "href": "/docs/overview-suite/introductions"
                             }
                         ]
-                    }
-                ]
-            },
-            "calendar": {
-                "title": "Calendar",
-                "description": "Your meetings and events tied back to the relationships they involve.",
-                "blocks": [
-                    {
-                        "type": "prose",
-                        "text": "The calendar gathers everything happening across your workspace, tasks, activities, deals, and notes, onto the days they belong to. You can view it by month, week, or day, or as a simple list. It's a clean way to see what's coming and what just happened, all in one place."
-                    },
-                    {
-                        "type": "featureList",
-                        "title": "What shows up",
-                        "columns": 2,
-                        "items": [
-                            {
-                                "title": "Tasks",
-                                "description": "In your brand colour."
-                            },
-                            {
-                                "title": "Activities",
-                                "description": "In blue."
-                            },
-                            {
-                                "title": "Deals",
-                                "description": "In amber."
-                            },
-                            {
-                                "title": "Notes",
-                                "description": "In muted grey."
-                            }
-                        ]
-                    },
-                    {
-                        "type": "featureList",
-                        "title": "Getting around",
-                        "columns": 2,
-                        "items": [
-                            {
-                                "title": "Move back and forward",
-                                "description": "Step back and forward through time with the arrows at the top."
-                            },
-                            {
-                                "title": "Jump to today",
-                                "description": "The Today button brings you back to the current day, and today's date is marked with a circle."
-                            }
-                        ]
-                    },
-                    {
-                        "type": "featureList",
-                        "title": "Working with entries",
-                        "columns": 2,
-                        "items": [
-                            {
-                                "title": "Most important first",
-                                "description": "Within a day, deals sit at the top, then tasks, activities, and notes, so the big items are easy to spot."
-                            },
-                            {
-                                "title": "See the full detail",
-                                "description": "Click any item to open a panel with its full detail, right beside the calendar."
-                            },
-                            {
-                                "title": "Jump to the record",
-                                "description": "From that panel, 'Open record' takes you to the full deal, task, activity, or note behind it."
-                            }
-                        ]
-                    },
-                    {
-                        "type": "callout",
-                        "variant": "tip",
-                        "title": "Packed days stay tidy",
-                        "body": "Every item always lands on the right day. When a day holds more than fits, it shows the first few with a '+ more' link; open the day to see everything, so even a busy week never throws off the layout."
                     }
                 ]
             },
@@ -1779,17 +1757,17 @@
                 ]
             },
             "warm-intro-paths": {
-                "title": "Warm-intro paths",
+                "title": "Intro paths",
                 "description": "Reverse-introduction search for the strongest path to any target.",
                 "blocks": [
                     {
                         "type": "prose",
-                        "text": "Warm-intro paths flip the usual question around. Instead of asking who can reach someone, Connex looks at the people your team already knows and finds pairs you're perfectly placed to introduce, because you know both of them but they don't yet know each other. Each pair comes with a score and a short reason. You'll find them on the introductions page, and as a quick set of top opportunities on your dashboard."
+                        "text": "Intro paths flip the usual question around. Instead of asking who can reach someone, Connex looks at the people your team already knows and finds pairs you're perfectly placed to introduce, because you know both of them but they don't yet know each other. Each pair comes with a score and a short reason. You'll find them on the introductions page, and as a quick set of top suggestions on your dashboard."
                     },
                     {
                         "type": "illustration",
                         "name": "warm-intro-path",
-                        "caption": "A warm path from you to the person you want to meet"
+                        "caption": "An intro path from you to the person you want to meet"
                     },
                     {
                         "type": "featureList",
@@ -1871,7 +1849,7 @@
                         "type": "prose",
                         "text": [
                             "A report turns your workspace's figures into something you can hand to somebody else. Start from one of the ready-made reports and you get a finished document immediately, or build your own by choosing measures, groupings and charts.",
-                            "Reports live under Overview, alongside analytics."
+                            "Reports live under Insights in the sidebar, next to Analytics."
                         ]
                     },
                     {
@@ -2294,6 +2272,79 @@
                     }
                 ]
             },
+            "calendar": {
+                "title": "Calendar",
+                "description": "Your meetings and events tied back to the relationships they involve.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": "The calendar gathers everything happening across your workspace, tasks, activities, deals, and notes, onto the days they belong to. You can view it by month, week, or day, or as a simple list. It's a clean way to see what's coming and what just happened, all in one place."
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "What shows up",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "Tasks",
+                                "description": "In your brand colour."
+                            },
+                            {
+                                "title": "Activities",
+                                "description": "In blue."
+                            },
+                            {
+                                "title": "Deals",
+                                "description": "In amber."
+                            },
+                            {
+                                "title": "Notes",
+                                "description": "In muted grey."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "Getting around",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "Move back and forward",
+                                "description": "Step back and forward through time with the arrows at the top."
+                            },
+                            {
+                                "title": "Jump to today",
+                                "description": "The Today button brings you back to the current day, and today's date is marked with a circle."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "Working with entries",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "Most important first",
+                                "description": "Within a day, deals sit at the top, then tasks, activities, and notes, so the big items are easy to spot."
+                            },
+                            {
+                                "title": "See the full detail",
+                                "description": "Click any item to open a panel with its full detail, right beside the calendar."
+                            },
+                            {
+                                "title": "Jump to the record",
+                                "description": "From that panel, 'Open record' takes you to the full deal, task, activity, or note behind it."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "tip",
+                        "title": "Packed days stay tidy",
+                        "body": "Every item always lands on the right day. When a day holds more than fits, it shows the first few with a '+ more' link; open the day to see everything, so even a busy week never throws off the layout."
+                    }
+                ]
+            },
             "calendar-events": {
                 "title": "Calendar events",
                 "description": "Meetings connected to the people and companies involved.",
@@ -2668,7 +2719,7 @@
                         "type": "prose",
                         "text": [
                             "A document template is a reusable layout for something you send to a customer, like a quote. You build it once with headings, lists and merge fields, and then generate a document from any deal.",
-                            "Templates live in the library. Documents themselves live on the deal they were generated from."
+                            "Templates live in the library, next to an index of every document the workspace has generated. A document itself still lives on the deal it was generated from, and each row in the index opens that deal."
                         ]
                     },
                     {
@@ -3482,7 +3533,7 @@
     },
     "DocsSettings": {
         "title": "Settings & administration",
-        "description": "Members, roles and permissions, rules and automation, notification settings, and audit logs.",
+        "description": "Members, roles and permissions, workflows and automation, notification settings, and audit logs.",
         "lead": "Administration controls who can do what, automates routine work, and keeps a record of every change.",
         "articles": {
             "members-and-roles": {
@@ -3562,61 +3613,81 @@
                     }
                 ]
             },
-            "rules-and-automation": {
-                "title": "Rules & automation",
-                "description": "Automate routine changes with workspace rules.",
+            "workflows-and-automation": {
+                "title": "Workflows & automation",
+                "description": "Automate the routine with workflows.",
                 "blocks": [
                     {
                         "type": "prose",
                         "text": [
-                            "Rules take care of the repetitive stuff for you. Set one up once, and whenever something happens, like a deal is won or a company goes quiet, Connex runs the steps you chose automatically. No reminders to yourself, no manual busywork.",
-                            "Anyone with permission to manage rules can create them, and you can switch any rule on or off whenever you like."
+                            "A workflow takes care of the repetitive work for you. Build one once, and whenever something happens — a deal is won, a contact changes jobs, a company goes quiet — Connex runs the steps you laid out. No reminders to yourself, no manual busywork.",
+                            "Workflows live under Workflows in the sidebar. Anyone with permission to manage them can build one, and you can switch any workflow on or off whenever you like."
                         ]
                     },
                     {
                         "type": "featureList",
-                        "title": "How a rule works",
+                        "title": "What a workflow is made of",
                         "columns": 2,
                         "items": [
                             {
-                                "title": "The trigger",
-                                "description": "What sets the rule off. Usually a change to a record, like a deal moving to a new stage. It can also run on a schedule."
+                                "title": "A trigger",
+                                "description": "What starts it. Usually a change to a record, like a deal moving to a new stage. Deals, companies, and contacts can also start on a schedule — hourly, daily, or weekly."
                             },
                             {
-                                "title": "A condition (optional)",
-                                "description": "A way to narrow things down so the rule only runs for the records you care about. Available for company rules."
+                                "title": "Conditions",
+                                "description": "Branching questions. Each condition sends the workflow down its Yes branch or its No branch, so one workflow can handle several cases."
                             },
                             {
-                                "title": "The actions",
-                                "description": "What Connex does when the rule runs. You can line up several steps."
+                                "title": "Actions",
+                                "description": "What Connex does — create a task, log an activity, add or remove a tag, add a note, assign an owner, move a deal to a stage, or send a notification."
+                            },
+                            {
+                                "title": "Waits",
+                                "description": "A pause before the next step. A single wait can be anything from a minute to 30 days, and one path can wait 90 days in total."
                             },
                             {
                                 "title": "Who it runs as",
-                                "description": "A rule can act as you, using your permissions, or as the workspace itself for team-wide automation."
+                                "description": "A workflow can act as you, using your permissions, or as the workspace itself for team-wide automation. Running as the workspace is limited to owners and admins."
+                            },
+                            {
+                                "title": "Versions",
+                                "description": "You edit a draft and publish it when it's ready. Each published version is kept as it was, and runs already going finish on the version they started with."
                             }
                         ]
                     },
                     {
                         "type": "table",
-                        "title": "What can set off a rule",
+                        "title": "What can start a workflow",
                         "columns": [
                             "Record",
-                            "What can trigger it"
+                            "What can start it"
                         ],
                         "rows": [
                             [
                                 "Deals",
-                                "Created, moved to a new stage, won, lost, or updated."
+                                "Created, moved to a new stage, won, lost, updated, reassigned, or the amount changed. Deals can also start on a schedule."
                             ],
                             [
                                 "Companies",
-                                "Created or updated. Companies can also run on a schedule."
+                                "Created, updated, or reassigned. Companies can also start on a schedule."
+                            ],
+                            [
+                                "Contacts",
+                                "Created, updated, changed jobs, reassigned, lifecycle changed, or a first response went overdue. Contacts can also start on a schedule."
+                            ],
+                            [
+                                "Tasks",
+                                "Created or completed."
+                            ],
+                            [
+                                "Documents",
+                                "Approval requested, approved, rejected, finalized, or superseded."
                             ]
                         ]
                     },
                     {
                         "type": "table",
-                        "title": "What a rule can do",
+                        "title": "What a workflow can do",
                         "columns": [
                             "Action",
                             "What it does",
@@ -3626,46 +3697,76 @@
                             [
                                 "Send a notification",
                                 "Sends someone an in-app notification with your message.",
-                                "All records"
+                                "Every record"
                             ],
                             [
                                 "Create a task",
                                 "Adds a task with a title and a due date, three days out by default.",
-                                "Deals"
+                                "Deals, contacts, documents"
                             ],
                             [
                                 "Log an activity",
-                                "Records an activity, like a note or a call.",
+                                "Records an activity, such as a call.",
+                                "Deals, contacts, documents"
+                            ],
+                            [
+                                "Add a note",
+                                "Writes a note onto the record.",
+                                "Deals, contacts, documents"
+                            ],
+                            [
+                                "Add or remove a tag",
+                                "Applies or clears a tag you've already set up.",
+                                "Deals, companies, contacts"
+                            ],
+                            [
+                                "Assign an owner",
+                                "Hands the record to the member you choose.",
+                                "Deals, contacts"
+                            ],
+                            [
+                                "Move to a stage",
+                                "Moves the deal to another stage in its pipeline.",
                                 "Deals"
                             ],
                             [
-                                "Add a tag",
-                                "Applies a tag you've already set up.",
-                                "All records"
+                                "Set a first-response deadline",
+                                "Starts the clock on replying to a contact.",
+                                "Contacts"
                             ]
                         ]
                     },
                     {
                         "type": "callout",
                         "variant": "tip",
-                        "title": "Schedules keep an eye on your companies",
-                        "body": "Besides reacting to changes, a rule can run on a repeating schedule, hourly, daily, or weekly, for your companies. Pair it with a condition (say, companies that have gone quiet or have an open deal) and Connex checks in for you on its own. It won't run twice for the same window, so you won't get duplicates."
+                        "title": "Start from a recipe",
+                        "body": "Recipes are ready-made workflows — follow up after a job change, hand off a won deal, check in on a company whose warmth is cooling. Each one shows exactly who it runs as, what it reads, and what it changes before you create it, and Connex creates it turned off so you can review it first."
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "note",
+                        "title": "See what happened, and step in when it matters",
+                        "body": "Operations shows every workflow's health, what's queued or waiting, and the runs that need a person. Open a run to see each step it took, retry a step that failed, cancel one that's still going, or start a fresh run over the records you pick."
                     },
                     {
                         "type": "faq",
                         "title": "Good to know",
                         "items": [
                             {
-                                "question": "Can I turn a rule off without deleting it?",
-                                "answer": "Yes. Each rule has a switch. A paused rule keeps all its settings but won't run until you turn it back on."
+                                "question": "Can I turn a workflow off without deleting it?",
+                                "answer": "Yes, and there are two ways. Turning it off stops new runs while runs already going finish. Pausing stops new records from being picked up but keeps everything waiting where it is, so nothing is lost when you resume."
                             },
                             {
-                                "question": "Can one rule react to more than one event?",
-                                "answer": "Yes. Pick any mix of events you like. Leave it blank and the rule reacts to every change."
+                                "question": "Can one workflow react to more than one event?",
+                                "answer": "Yes. Pick any mix of events you like. Leave it blank and the workflow reacts to every change."
                             },
                             {
-                                "question": "Can I tell what a rule does at a glance?",
-                                "answer": "Yes. Each rule shows a plain-language summary of its trigger and actions, with a badge when it's paused or set to run as the workspace."
+                                "question": "Can I try a workflow before publishing it?",
+                                "answer": "Yes. Preview runs your saved draft against a single record and shows the path it would take — nothing is created, changed, or sent."
+                            },
+                            {
+                                "question": "What happens to a workflow I archive?",
+                                "answer": "It stops running and moves to the Archived tab, keeping every version and its whole run history. You can restore it later; it comes back turned off."
                             }
                         ]
                     }
@@ -3794,7 +3895,7 @@
                             },
                             {
                                 "title": "Participant review",
-                                "description": "Unmatched or ambiguous participants stay in a review queue. Attach, create through duplicate preflight, or ignore them."
+                                "description": "Unmatched or ambiguous participants stay in a review queue. Attach them to a contact, create a new contact after the usual duplicate check, or ignore them."
                             },
                             {
                                 "title": "Approval and evidence",
@@ -3805,8 +3906,8 @@
                     {
                         "type": "callout",
                         "variant": "warning",
-                        "title": "Purge and disconnect have different scopes",
-                        "body": "Purge removes captured content and derived evidence from the active workspace. Disconnect purges this provider's captured data from every workspace before deleting the credential. Metadata-only audit records remain."
+                        "title": "Erasing and disconnecting cover different things",
+                        "body": "Erasing removes captured content and derived evidence from the active workspace. Disconnecting erases this provider's captured data from every workspace before deleting the credential. Metadata-only audit records remain."
                     }
                 ]
             },
@@ -3817,7 +3918,7 @@
                     {
                         "type": "prose",
                         "text": [
-                            "The audit log is a complete, unchangeable history of everything that happens in your workspace. You'll find it under Admin, then Logs, laid out as a timeline with the newest events first.",
+                            "The audit log is a complete, unchangeable history of everything that happens in your workspace. You'll find it under Workspace in the sidebar, and in settings under Audit & diagnostics, laid out as a timeline with the newest events first.",
                             "Connex records events on its own as people work, so nothing depends on anyone remembering to write it down. Once an event is recorded, it can never be edited or deleted, which makes the log a record you can trust when you need to look back."
                         ]
                     },
@@ -4096,7 +4197,7 @@
                         "items": [
                             {
                                 "title": "Connected account capture",
-                                "description": "What is captured, how it is reviewed, and how to purge it.",
+                                "description": "What is captured, how it is reviewed, and how to erase it.",
                                 "href": "/docs/settings/connected-capture"
                             },
                             {
@@ -4110,7 +4211,7 @@
             },
             "privacy-and-data-requests": {
                 "title": "Privacy & data requests",
-                "description": "Handling a request from someone whose data you hold, and restricting processing for a contact.",
+                "description": "Handling a request from someone whose data you hold, and putting a contact on privacy hold.",
                 "blocks": [
                     {
                         "type": "prose",
@@ -4133,8 +4234,8 @@
                                 "description": "Connex assembles what it holds about a person into a single disclosure, so answering an access request is not a manual search across screens."
                             },
                             {
-                                "title": "Restrictions on a contact",
-                                "description": "Suspending processing stops scoring, automation, suggestions, AI features and exports for that contact. Ceasing third-party provision blocks new sharing and excludes them from AI entirely."
+                                "title": "Privacy hold on a contact",
+                                "description": "Putting a contact on privacy hold stops scoring, automation, suggestions, AI features and exports for them. Stopping sharing blocks new shares with other workspaces and keeps them out of AI entirely."
                             },
                             {
                                 "title": "An audit trail you cannot rewrite",
@@ -4145,8 +4246,8 @@
                     {
                         "type": "callout",
                         "variant": "note",
-                        "title": "Restricting a contact clears what AI already wrote",
-                        "body": "When you suspend processing or cease third-party provision for a contact, anything AI previously generated that involved them is purged, and future AI features exclude them. This happens as part of applying the restriction rather than as a separate cleanup you have to remember."
+                        "title": "Putting a contact on privacy hold clears what AI already wrote",
+                        "body": "When you put a contact on privacy hold or stop sharing them, anything AI generated about them earlier is deleted, and future AI features leave them out. It happens as part of applying the hold, not as a separate cleanup you have to remember."
                     },
                     {
                         "type": "featureList",
@@ -4175,7 +4276,7 @@
                         "type": "callout",
                         "variant": "warning",
                         "title": "Finish outstanding requests before removing a workspace",
-                        "body": "Tearing down a workspace or an organisation is refused while a data subject request is still open against it. That is deliberate: it stops a request being made unanswerable by deleting the evidence. Close out the request first, then tear down."
+                        "body": "Deleting a workspace or an organisation is refused while a privacy request against it is still open. That is deliberate: it stops a request being made unanswerable by deleting the evidence. Close the request out first, then delete."
                     },
                     {
                         "type": "faq",
@@ -4186,7 +4287,7 @@
                                 "answer": "Organisation administrators. Acting on one asks you to confirm with a passkey first, because the actions are not reversible."
                             },
                             {
-                                "question": "Does restricting a contact delete them?",
+                                "question": "Does a privacy hold delete the contact?",
                                 "answer": "No. They stay in your CRM, but Connex stops scoring, suggesting, automating and exporting them. Deletion is a separate decision."
                             },
                             {
@@ -4270,7 +4371,7 @@
                             },
                             {
                                 "title": "Warmth colors",
-                                "description": "Each relationship temperature, hot, warm, cool, and cold, has its own color and dot, so you can scan a list and know where things stand."
+                                "description": "Each warmth band — hot, warm, cool, and cold — has its own color and dot, so you can scan a list and know where things stand."
                             },
                             {
                                 "title": "Chart colors",
@@ -4580,7 +4681,7 @@
                             },
                             {
                                 "title": "Warmth",
-                                "description": "A color-coded temperature pill shows how warm the relationship is and how many days before it starts to cool."
+                                "description": "A color-coded warmth pill shows how warm the relationship is and how many days before it starts to cool."
                             },
                             {
                                 "title": "Timeline",
@@ -4622,7 +4723,7 @@
             },
             "log-activity-and-warmth": {
                 "title": "Log a meeting and watch warmth rise",
-                "description": "Record an interaction and see how it lifts a relationship's temperature.",
+                "description": "Record an interaction and see how it lifts a relationship's warmth.",
                 "blocks": [
                     {
                         "type": "prose",
@@ -4661,7 +4762,7 @@
                     },
                     {
                         "type": "prose",
-                        "text": "You never set warmth by hand. Connex reads it from the things you log: your calls, meetings, notes, and follow-ups. The moment your activity is saved, it counts as recent, meaningful contact, and the relationship's warmth ticks upward. You will see it on the contact's profile as a color-coded temperature pill with a score and the days left before it starts to cool."
+                        "text": "You never set warmth by hand. Connex reads it from the things you log: your calls, meetings, notes, and follow-ups. The moment your activity is saved, it counts as recent, meaningful contact, and the relationship's warmth ticks upward. You will see it on the contact's profile as a color-coded warmth pill with a score and the days left before it starts to cool."
                     },
                     {
                         "type": "illustration",
@@ -4679,9 +4780,9 @@
                         "title": "Keep going",
                         "items": [
                             {
-                                "title": "Warmth & temperature",
+                                "title": "Warmth",
                                 "description": "What each band means and how the score keeps itself current.",
-                                "href": "/docs/relationship-intelligence/warmth-and-temperature"
+                                "href": "/docs/relationship-intelligence/warmth"
                             },
                             {
                                 "title": "Activities",
@@ -4789,16 +4890,16 @@
                 "blocks": [
                     {
                         "type": "prose",
-                        "text": "The warmest way to reach someone new is through a person you both trust. In this tutorial you will open the Introductions tool, find a warm path between two people in your network, and make the introduction. By the end you will know how to spot the strongest connector for any pairing and record the intro so it becomes part of your history."
+                        "text": "The warmest way to reach someone new is through a person you both trust. In this tutorial you will open the Introductions tool, find an intro path between two people in your network, and make the introduction. By the end you will know how to spot the strongest connector for any pairing and record the intro so it becomes part of your history."
                     },
                     {
                         "type": "illustration",
                         "name": "warm-intro-path",
-                        "caption": "A warm path from you to the person you want to reach, through someone you both know."
+                        "caption": "An intro path from you to the person you want to reach, through someone you both know."
                     },
                     {
                         "type": "prose",
-                        "text": "A warm path is simply the chain of trust that gets you to someone. Instead of a cold message to a stranger, Connex looks at the people you already know and finds pairs you are perfectly placed to introduce, because you know both of them but they do not yet know each other. Each suggested pair comes with a match strength and a short reason, so you can see at a glance why it is a good introduction to make."
+                        "text": "An intro path is simply the chain of trust that gets you to someone. Instead of a cold message to a stranger, Connex looks at the people you already know and finds pairs you are perfectly placed to introduce, because you know both of them but they do not yet know each other. Each suggested pair comes with a match strength and a short reason, so you can see at a glance why it is a good introduction to make."
                     },
                     {
                         "type": "steps",
@@ -4806,15 +4907,15 @@
                         "items": [
                             {
                                 "title": "Open the Introductions page",
-                                "description": "Head to Introductions in your overview area. You can also open it from the introduction opportunities shown on your dashboard, which link straight through to this page."
+                                "description": "Head to Introductions, under Intelligence in the sidebar. You can also open it from the introduction opportunities shown on your dashboard, which link straight through to this page."
                             },
                             {
                                 "title": "Review your intros to make",
                                 "description": "Under Intros to make you will see pairs of people you are well placed to connect. Each one is someone your team has actually engaged with, so every suggestion is a person you can credibly introduce."
                             },
                             {
-                                "title": "Read the warm path",
-                                "description": "Every suggestion shows a match strength, either Strong, Good, or Fair, along with a short reason such as shared connections or a shared employer. That reason is the warm path itself, the honest answer to why these two belong together."
+                                "title": "Read the intro path",
+                                "description": "Every suggestion shows a match strength, either Strong, Good, or Fair, along with a short reason such as shared connections or a shared employer. That reason is the intro path itself, the honest answer to why these two belong together."
                             },
                             {
                                 "title": "Search for a specific person",
@@ -4855,7 +4956,7 @@
                         "title": "Keep exploring",
                         "items": [
                             {
-                                "title": "Warm-intro paths",
+                                "title": "Intro paths",
                                 "description": "A deeper look at how Connex finds the strongest path to any person.",
                                 "href": "/docs/overview-suite/warm-intro-paths"
                             },
@@ -4978,7 +5079,7 @@
                             },
                             {
                                 "title": "Build the audience",
-                                "description": "Use the segment builder to describe who should receive it. Estimate the audience to see how many people are included, and how many were left out because of consent, suppression, or a processing restriction."
+                                "description": "Use the segment builder to describe who should receive it. Estimate the audience to see how many people are included, and how many were left out because they opted out, are marked do not contact, or are on privacy hold."
                             },
                             {
                                 "title": "Freeze a snapshot",
@@ -5007,7 +5108,7 @@
                         "items": [
                             {
                                 "title": "Only people, and only the willing",
-                                "description": "Only person audiences can be sent to. Anyone who has unsubscribed, been suppressed, or had processing restricted is excluded, and the estimate tells you how many that was."
+                                "description": "Only contact audiences can be sent to. Anyone who has unsubscribed, is marked do not contact, or is on privacy hold is excluded, and the estimate tells you how many that was."
                             },
                             {
                                 "title": "One message per person per day",
@@ -5015,11 +5116,11 @@
                             },
                             {
                                 "title": "Unsubscribes are automatic",
-                                "description": "Connex gives every recipient their own unsubscribe token, but it only reaches them if the message body includes the unsubscribe placeholder, so put it in every template you write. Unsubscribing suppresses that person and withdraws consent immediately, and it applies to future campaigns too."
+                                "description": "Connex gives every recipient their own unsubscribe token, but it only reaches them if the message body includes the unsubscribe placeholder, so put it in every template you write. Unsubscribing marks that contact do not contact and withdraws their consent immediately, and it applies to future campaigns too."
                             },
                             {
-                                "title": "Bounces and complaints suppress",
-                                "description": "When your email provider reports a hard bounce or a spam complaint, Connex suppresses that address and revokes consent without anyone having to act. This needs an email provider that sends those reports back; on a plain mail server no such report ever arrives and nothing is suppressed."
+                                "title": "Bounces and complaints stop future sends",
+                                "description": "When your email provider reports a hard bounce or a spam complaint, Connex marks that address do not contact and revokes consent without anyone having to act. This needs an email provider that sends those reports back; on a plain mail server no such report ever arrives, so nothing changes."
                             }
                         ]
                     },
@@ -5061,7 +5162,7 @@
                             },
                             {
                                 "question": "Why did far fewer people receive it than my audience showed?",
-                                "answer": "Check the skip reasons on the send. The usual causes are people with no address on that channel, the one-message-per-day cap, or consent and suppression."
+                                "answer": "Check the skip reasons on the send. The usual causes are people with no address on that channel, the one-message-per-day cap, or an opt-out or a do-not-contact mark."
                             },
                             {
                                 "question": "Is the Exports tab a download?",
@@ -5101,7 +5202,7 @@
                     {
                         "type": "prose",
                         "text": [
-                            "Connex is a relationship-intelligence CRM. It keeps companies, contacts and deals, scores how warm each relationship is, warns you when one is cooling, and works out the friendliest route to an introduction. On top of that sit reports, documents, campaigns and a set of optional AI features.",
+                            "Connex is a relationship-intelligence CRM. It keeps companies, contacts and deals, scores how warm each relationship is, warns you when one is cooling, and works out the strongest intro path to anyone you want to reach. On top of that sit reports, documents, campaigns and a set of optional AI features.",
                             "This page describes the state of the product rather than how to use it. If you are evaluating Connex, or you are responsible for it inside your organisation, start here."
                         ]
                     },
@@ -5115,7 +5216,7 @@
                                 "description": "Every record, file, tag and setting belongs to exactly one workspace and never appears in another. That separation is enforced in the database layer, not just in the interface."
                             },
                             {
-                                "title": "Deterministic figures first",
+                                "title": "Figures you can trace",
                                 "description": "Warmth, risk, pipeline and report figures are computed from your data by rules you can reason about. Where AI is involved it explains those figures, it does not produce them."
                             },
                             {
@@ -5189,7 +5290,7 @@
                                 "Shipped and on."
                             ],
                             [
-                                "Warm introduction paths",
+                                "Intro paths",
                                 "Shipped and on."
                             ],
                             [
@@ -5229,7 +5330,7 @@
                                 "Shipped and on."
                             ],
                             [
-                                "Tenant diagnostics",
+                                "Workspace diagnostics",
                                 "Shipped and on. A read-only health page for your workspace, and an organisation-wide view for administrators."
                             ],
                             [
@@ -5709,7 +5810,7 @@
                             ],
                             [
                                 "A test email works but real mail does not",
-                                "The transport is fine. Look at the per-flow switches and at whether the recipient is suppressed or unsubscribed."
+                                "The transport is fine. Look at the per-flow switches and at whether the recipient is marked do not contact or unsubscribed."
                             ]
                         ]
                     },
@@ -5717,7 +5818,7 @@
                         "type": "callout",
                         "variant": "note",
                         "title": "Bounces are only handled for campaigns",
-                        "body": "Bounce and complaint handling, suppression lists and unsubscribes exist for marketing campaigns, and only when your administrator has connected an email provider that reports receipts. Invitations, notifications, reports and password mail have none of that: they are sent, and if they fail, the failure is only visible in your operator's logs."
+                        "body": "Bounce and complaint handling, do-not-contact lists and unsubscribes exist for marketing campaigns, and only when your administrator has connected an email provider that reports receipts. Invitations, notifications, reports and password mail have none of that: they are sent, and if they fail, the failure is only visible in your operator's logs."
                     },
                     {
                         "type": "cards",

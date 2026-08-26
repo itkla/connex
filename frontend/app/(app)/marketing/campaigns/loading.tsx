@@ -3,7 +3,7 @@ import { PageShell } from "@/app/components/PageShell";
 
 export default function CampaignsLoading() {
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
                     <div className="space-y-2">
                         <Skeleton className="h-10 w-40" />

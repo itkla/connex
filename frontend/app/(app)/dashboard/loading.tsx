@@ -7,7 +7,7 @@ function SectionLabel() {
 
 export default function DashboardLoading() {
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between md:gap-8">
                     <div className="space-y-3">
                         <Skeleton className="h-6 w-32" />

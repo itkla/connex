@@ -2,16 +2,13 @@
   "Organization": {
     "title": "Organization",
     "subtitle": "Administer your organization — the account above your workspaces. These settings apply to every workspace in the organization.",
-    "tabOverview": "Overview",
     "tabMembers": "Administrators",
     "tabDomains": "Allowed domains",
     "tabSso": "Single sign-on",
-    "tabSsoAvailabilityUnknown": "Availability could not be confirmed",
     "tabAi": "AI provider",
     "tabAudit": "Audit log",
     "noAccessTitle": "Organization administrators only",
     "noAccessBody": "You need an organization owner or admin role to manage these settings.",
-    "tabDataRequests": "Data requests",
     "tabDiagnostics": "Diagnostics"
   },
   "OrgOverview": {
@@ -21,17 +18,17 @@
     "nameHint": "This name updates throughout the organization and workspace shell.",
     "nameRequired": "Enter an organization name.",
     "nameTooLong": "Use 128 characters or fewer.",
-    "slugLabel": "Organization slug",
-    "slugHint": "This stable identifier cannot be changed here.",
+    "slugLabel": "Organization ID (used in links)",
+    "slugHint": "This ID appears in links and can't be changed here.",
     "save": "Save changes",
     "saving": "Saving",
     "saved": "Organization settings updated.",
     "stale": "The organization changed while you were editing. Refresh and try again.",
-    "saveFailed": "Could not update the organization.",
+    "saveFailed": "Couldn't save the organization changes",
     "layoutTitle": "Organization layout",
     "layoutDescription": "See how organization authority, workspaces, and the memberships you may access fit together.",
-    "lifecycleTitle": "Export and teardown",
-    "lifecycleDescription": "Export complete workspace holdings or permanently remove tenant data. These actions require passkey re-authentication.",
+    "lifecycleTitle": "Export and delete",
+    "lifecycleDescription": "Export everything in a workspace, or permanently delete a workspace or this organization. Both ask for your passkey again.",
     "viewLabel": "Organization layout view",
     "structureView": "Structure",
     "tableView": "Table",
@@ -58,18 +55,18 @@
     "pendingMembership": "Pending",
     "loadMore": "Load more",
     "loadingMore": "Loading",
-    "loadFailed": "Could not load the organization layout.",
-    "loadMoreFailed": "Could not load more of the organization layout.",
+    "loadFailed": "Couldn't load the organization layout",
+    "loadMoreFailed": "Couldn't load more of the organization layout",
     "loadFailedTitle": "Organization layout unavailable",
     "loadFailedBody": "The organization structure could not be loaded. Your permissions and membership data have not been inferred.",
     "retry": "Retry",
     "switchInProgress": "Another workspace operation is already in progress.",
-    "navigationFailed": "Could not open that workspace or member."
+    "navigationFailed": "Couldn't open that workspace or member"
   },
   "OrgDataLifecycle": {
     "authorityTitle": "Organization authority",
-    "ownerAuthority": "You are an organization owner. You can export workspaces and permanently tear down workspaces or this organization.",
-    "adminAuthority": "You are an organization administrator. You can export workspaces; only an organization owner can tear them down.",
+    "ownerAuthority": "You are an organization owner. You can export workspaces, and permanently delete a workspace or this organization.",
+    "adminAuthority": "You are an organization administrator. You can export workspaces; only an organization owner can delete them.",
     "roleOwner": "Organization owner",
     "roleAdmin": "Organization administrator",
     "plaintextTitle": "Exports are plaintext at generation",
@@ -81,26 +78,26 @@
     "preparingExport": "Preparing",
     "downloadExport": "Download ZIP",
     "renewExportGrant": "Renew download",
-    "exportFailed": "The workspace export could not be started.",
+    "exportFailed": "Couldn't start the workspace export",
     "deleteWorkspace": "Delete workspace",
     "organizationTeardownTitle": "Permanently delete this organization",
-    "organizationTeardownDescription": "This removes every workspace, membership, configuration, tenant record, and managed file in the organization.",
+    "organizationTeardownDescription": "This deletes every workspace, membership, setting, and managed file in the organization, and the organization itself.",
     "deleteOrganization": "Delete organization",
-    "ownerOnlyTitle": "Teardown requires an organization owner",
-    "ownerOnlyDescription": "Workspace ownership is separate from organization authority. Ask an organization owner to complete a workspace or organization teardown.",
+    "ownerOnlyTitle": "Deleting requires an organization owner",
+    "ownerOnlyDescription": "Workspace ownership is separate from organization authority. Ask an organization owner to delete a workspace or this organization.",
     "confirmWorkspaceTitle": "Delete {name}?",
-    "confirmWorkspaceDescription": "A passkey prompt will verify you before Connex starts the permanent workspace teardown.",
+    "confirmWorkspaceDescription": "A passkey prompt will verify you before Connex permanently deletes this workspace.",
     "confirmOrganizationTitle": "Delete {name}?",
-    "confirmOrganizationDescription": "A passkey prompt will verify you before Connex permanently tears down the organization and every workspace in it.",
-    "irreversibleTitle": "This action cannot be undone",
-    "workspaceRetention": "Workspace records and managed files are deleted. Integrity-protected audit metadata and closed or refused organization-level data-subject request records are retained with workspace and person links cleared. Backup copies expire under the backup-retention policy.",
-    "organizationRetention": "All organization workspaces, memberships, settings, tenant records, managed files, and closed or refused data-subject request records are deleted. Integrity-protected audit metadata is retained without the deleted organization link. Backup copies expire under the backup-retention policy.",
-    "confirmationLabel": "Type {slug} exactly to confirm",
+    "confirmOrganizationDescription": "A passkey prompt will verify you before Connex permanently deletes this organization and every workspace in it.",
+    "irreversibleTitle": "This can't be undone.",
+    "workspaceRetention": "Workspace records and managed files are deleted. Integrity-protected audit metadata and closed or refused organization-level privacy requests are kept, with their workspace and person links cleared. Backup copies expire under the backup-retention policy.",
+    "organizationRetention": "Every workspace, membership, setting, managed file, and closed or refused privacy request in this organization is deleted, along with the organization itself. Integrity-protected audit metadata is kept without its link to the deleted organization. Backup copies expire under the backup-retention policy.",
+    "confirmationLabel": "Type {id} exactly to confirm",
     "confirmationHint": "The confirmation is case-sensitive. Spaces are not removed.",
-    "refusedTitle": "Teardown refused",
-    "workspaceOpenObligation": "This workspace still has an open data-subject request. Close or refuse that obligation, then try the teardown again.",
-    "organizationOpenObligation": "This organization still has an open data-subject request. Close or refuse every obligation, then try the teardown again.",
-    "teardownFailed": "Connex refused the teardown because its safety checks did not complete.",
+    "refusedTitle": "Deletion refused",
+    "workspaceOpenObligation": "This workspace still has an open privacy request. Close or refuse it, then delete the workspace again.",
+    "organizationOpenObligation": "This organization still has an open privacy request. Close or refuse every one of them, then delete the organization again.",
+    "teardownFailed": "Connex stopped the deletion because its safety checks didn't finish.",
     "cancel": "Cancel",
     "deletePermanently": "Delete permanently",
     "deleting": "Deleting",
@@ -111,24 +108,24 @@
     "title": "AI provider",
     "subtitle": "Bring your own AI provider for this organization. Connex masks text identifiers where feasible and audits every outbound request. Image features, including fallback business-card reading, send metadata-free image data whose visible contents cannot be masked. AI stays off until you configure and enable a provider here.",
     "workspaceEnableTitle": "Enable AI in this workspace",
-    "workspaceEnableDescription": "This workspace kill switch overrides member AI permissions and stops in-flight assistant turns at the next safety check.",
-    "assistantMaxSteps": "Assistant steps per turn",
-    "assistantMaxStepsDescription": "Limit each Ask Connex turn to 1-12 model or tool steps.",
+    "workspaceEnableDescription": "This workspace switch overrides member AI permissions and stops assistant answers already in progress at the next safety check.",
+    "assistantMaxSteps": "Assistant steps per answer",
+    "assistantMaxStepsDescription": "Limit each Ask Connex answer to 1-12 model or tool steps.",
     "saveWorkspaceControls": "Save workspace controls",
     "governanceSaved": "Workspace AI controls saved.",
-    "governanceSaveFailed": "Could not save the workspace AI controls.",
-    "dailyBudgetTitle": "Daily organization token budget",
-    "dailyBudgetDescription": "A shared UTC-day limit enforced in the database across every Connex server and workspace in this organization.",
-    "dailyTokenLimit": "Token limit",
-    "dailyTokenLimitHint": "Set 0 for unlimited. In-flight calls reserve a conservative ceiling before provider egress.",
+    "governanceSaveFailed": "Couldn't save the workspace AI controls",
+    "dailyBudgetTitle": "Daily AI limit for the organization",
+    "dailyBudgetDescription": "One shared limit for every workspace in this organization. It resets at midnight UTC.",
+    "dailyTokenLimit": "Daily limit",
+    "dailyTokenLimitHint": "Set 0 for no limit. Requests already running reserve a cautious amount before Connex sends anything to the provider.",
     "tokensUsed": "Used today",
     "tokensRemaining": "Remaining",
     "unlimited": "Unlimited",
-    "budgetExhausted": "Exhausted",
+    "budgetExhausted": "Limit reached",
     "todayUsage": "Today by member and feature",
-    "saveBudget": "Save budget",
-    "budgetSaved": "Organization AI budget saved.",
-    "budgetSaveFailed": "Could not save the organization AI budget.",
+    "saveBudget": "Save limit",
+    "budgetSaved": "Daily AI limit saved.",
+    "budgetSaveFailed": "Couldn't save the daily AI limit",
     "enableTitle": "Enable AI features",
     "enableDescription": "Let members who hold the AI permission use AI features in this organization's workspaces.",
     "enableRequiresAttestation": "Requires the no-training attestation below.",
@@ -167,12 +164,13 @@
     "save": "Save",
     "saving": "Saving…",
     "saved": "AI provider settings saved.",
-    "saveFailed": "Could not save the AI provider settings.",
+    "saveFailed": "Couldn't save the AI provider settings",
     "stepUpRequired": "Recent sign-in required. Verify your identity in Settings → Security, then try again.",
-    "loadFailed": "Could not load the AI provider settings.",
+    "loadFailed": "Couldn't load the AI provider settings",
     "retry": "Retry",
     "revoke": "Revoke",
-    "revoked": "AI provider configuration revoked."
+    "revoked": "AI provider configuration revoked.",
+    "revokeFailed": "Couldn't revoke the AI provider settings"
   },
   "OrgMembers": {
     "title": "Administrators",
@@ -209,7 +207,9 @@
     "empty": "No domain restrictions — members can be invited from any email domain. Add a domain to restrict who can join workspaces in this organization.",
     "loadError": "Couldn't load allowed domains. Refresh to try again.",
     "addedToast": "Domain added",
-    "removedToast": "Domain removed"
+    "removedToast": "Domain removed",
+    "addFailed": "Couldn't add the domain",
+    "removeFailed": "Couldn't remove the domain"
   },
   "OrgAudit": {
     "title": "Audit log",
@@ -220,7 +220,82 @@
     "actorSystem": "System",
     "colEvent": "Event",
     "colActor": "By",
-    "colWhen": "When"
+    "colWhen": "When",
+    "action": {
+      "appi": {
+        "subject_request": {
+          "create": "Privacy request logged",
+          "update": "Privacy request updated",
+          "disclosure": "Disclosure export assembled for a privacy request"
+        },
+        "incident": {
+          "create": "Data incident logged",
+          "update": "Data incident updated"
+        }
+      },
+      "org": {
+        "create": "Organization created",
+        "rename": "Organization renamed",
+        "member": {
+          "set": "Organization administrator role changed",
+          "remove": "Organization administrator removed",
+          "founding_owner": "Founding owner recorded"
+        },
+        "allowed_domain": {
+          "add": "Allowed email domain added",
+          "remove": "Allowed email domain removed"
+        },
+        "sso_config": {
+          "save": "Single sign-on settings saved"
+        },
+        "sso_user": {
+          "provision": "Member account created by single sign-on"
+        },
+        "workspace_member": {
+          "sso_provision": "Workspace membership granted by single sign-on"
+        },
+        "federated_identity": {
+          "link": "Single sign-on identity linked"
+        },
+        "login": {
+          "federated_link": "Signed in with a linked single sign-on identity"
+        },
+        "ai_provider": {
+          "save": "AI provider settings saved",
+          "revoke": "AI provider credential revoked",
+          "zdr_attest": "AI provider confirmed it keeps no copy of your data"
+        },
+        "workspace": {
+          "create": "Workspace created",
+          "export": "Workspace data exported"
+        },
+        "support_bundle": {
+          "completed": "Support bundle prepared",
+          "download": "Support bundle downloaded"
+        }
+      },
+      "secret_store": {
+        "secret": {
+          "use": "Stored credential used",
+          "use_failed": "Couldn't use a stored credential",
+          "rewrap": "Stored credential re-encrypted with the current key",
+          "rewrap_failed": "Couldn't re-encrypt a stored credential"
+        },
+        "diagnostics": {
+          "read": "Stored credential health checked"
+        },
+        "operation": "Stored credential activity"
+      },
+      "tenant": {
+        "organization": {
+          "teardown": "Organization deleted"
+        },
+        "workspace": {
+          "teardown": "Workspace deleted"
+        }
+      }
+    },
+    "loadMoreFailed": "Couldn't load more audit events"
   },
   "OrgDataRequests": {
     "title": "Data-subject requests",
@@ -241,7 +316,7 @@
     "downloadDisclosure": "Download disclosure",
     "downloading": "Preparing",
     "disclosureDownloaded": "Disclosure export downloaded. Apply statutory redactions before sharing it with the subject.",
-    "disclosureFailed": "The disclosure could not be assembled.",
+    "disclosureFailed": "Couldn't prepare the disclosure",
     "status_received": "Received",
     "status_verifying": "Verifying identity",
     "status_in_progress": "In progress",
@@ -291,6 +366,7 @@
     "subjectRequired": "Data-subject name is required.",
     "toastCreated": "Request logged.",
     "toastUpdated": "Request updated.",
-    "toastSaveFailed": "The request could not be saved."
+    "toastSaveFailed": "Couldn't save the request",
+    "loadMoreFailed": "Couldn't load more requests"
   }
 }

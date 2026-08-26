@@ -8,12 +8,16 @@
     "tableViewAriaLabel": "テーブル表示",
     "selectedCount": "{count} 件選択中",
     "quickEdit": "クイック編集",
+    "moreActions": "その他のアクション",
     "share": "共有",
     "delete": "削除",
     "searchPlaceholder": "パイプラインを検索",
     "columnName": "名前",
     "columnCreated": "作成日",
     "columnUpdated": "更新日",
+    "emptyTitle": "パイプラインはまだありません",
+    "emptyBody": "パイプラインは、案件が進むステージの並びです。チームの売り方に合わせて最初の1つを作成してください。",
+    "emptyCta": "新規パイプライン",
     "entityLabel": "パイプライン",
     "noChangesToSave": "保存する変更はありません",
     "nameRequiredFor": "「{name}」の名前を入力してください",
@@ -22,14 +26,16 @@
     "singleTerminalPerTypeIn": "「{name}」には成約ステージと失注ステージをそれぞれ1つまでしか設定できません",
     "pipelineUpdated": "パイプラインを更新しました",
     "pipelinesUpdated": "{count} 件のパイプラインを更新しました",
-    "failedToSave": "保存できませんでした",
+    "failedToSave": "パイプラインの変更を保存できませんでした",
     "pipelineDeleted": "パイプラインを削除しました",
     "pipelinesDeleted": "{count} 件のパイプラインを削除しました",
-    "failedToDelete": "削除できませんでした",
+    "failedToDelete": "選択したパイプラインを削除できませんでした",
     "pipelineCreated": "パイプラインを作成しました",
     "pipelineCreatedWithFailedStages": "パイプラインを作成しましたが、{total} 個中 {failed} 個のステージが失敗しました",
     "failedToCreate": "パイプラインを作成できませんでした",
-    "failedToLoadMetrics": "パイプラインの指標を読み込めませんでした"
+    "failedToLoadMetrics": "パイプラインの指標を読み込めませんでした",
+    "failedToOpen": "そのパイプラインを開けませんでした。もう一度お試しください。",
+    "pipelineUnavailable": "そのパイプラインは利用できなくなりました。"
   },
   "PipelinesCard": {
     "actionsAriaLabel": "パイプライン操作",
@@ -38,7 +44,7 @@
     "delete": "削除",
     "openPipelineAriaLabel": "パイプラインページを開く",
     "loadingMetrics": "指標を読み込み中…",
-    "failedToLoadMetrics": "指標を読み込めませんでした。",
+    "failedToLoadMetrics": "指標を読み込めませんでした",
     "retry": "再試行",
     "stages": "ステージ",
     "deals": "案件",
@@ -49,7 +55,7 @@
   },
   "PipelinesNewDialog": {
     "title": "新規パイプライン",
-    "description": "パイプラインをレコードに追加します。これらのパイプラインはこの組織のすべてのユーザーに共有されます。",
+    "description": "パイプラインをレコードに追加します。追加したパイプラインは、このワークスペースのメンバー全員と共有されます。",
     "name": "名前",
     "namePlaceholder": "営業パイプライン",
     "stages": "ステージ",
@@ -89,6 +95,6 @@
     "stageNamesEmpty": "ステージ名は空にできません",
     "singleTerminalPerType": "パイプラインには成約ステージと失注ステージをそれぞれ1つまでしか設定できません",
     "pipelineUpdated": "パイプラインを更新しました",
-    "failedToSave": "保存できませんでした"
+    "failedToSave": "パイプラインを保存できませんでした"
   }
 }

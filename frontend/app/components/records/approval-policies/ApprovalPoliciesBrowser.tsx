@@ -20,8 +20,10 @@ import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import ApprovalPolicyDialog from '@/app/components/records/approval-policies/ApprovalPolicyDialog';
 import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
+import { SettingsSection } from '@/app/components/settings/SettingsSection';
 import { deleteApprovalPolicy } from '@/app/lib/api';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { toastSuccess } from '@/app/lib/toast';
 import { formatCurrency } from '@/app/lib/utils';
 import type { ApprovalPolicy, DocumentType } from '@/app/lib/types';
 
@@ -33,11 +35,46 @@ const TYPE_KEY: Record<DocumentType, string> = {
 };
 
 /**
+ * Which of the browser's two homes is rendering it while #1340 migrates the workspace destinations.
+ *
+ * - `page` is `/records/approval-policies` exactly as it ships: its own route, its own shell, its
+ *   own page header.
+ * - `section` is the approval-policies section of CRM configuration. The settings layout already
+ *   owns the shell, and the page is already one outline of section headings, so the browser trades
+ *   its page header for a section heading of the same name and keeps both of its actions.
+ */
+export type ApprovalPoliciesPresentation = 'page' | 'section';
+
+/**
+ * The shell the browser stands in: its own on its own route, and none inside a settings page whose
+ * layout already supplies one. A second shell would re-pad and re-clamp content that is already
+ * inside one.
+ */
+function PolicyShell({
+    presentation,
+    children,
+}: {
+    presentation: ApprovalPoliciesPresentation;
+    children: React.ReactNode;
+}) {
+    if (presentation === 'section') return <div className="flex flex-col gap-6">{children}</div>;
+    return <PageShell>{children}</PageShell>;
+}
+
+/**
  * Workspace-scoped approval-policy admin: a searchable list with a dialog editor. Policies gate
  * finalization of generated deal documents server-side; this surface only configures them.
  */
-export default function ApprovalPoliciesBrowser({ policies: initial }: { policies: ApprovalPolicy[] }) {
+
+export default function ApprovalPoliciesBrowser({
+    policies: initial,
+    presentation = 'page',
+}: {
+    policies: ApprovalPolicy[];
+    presentation?: ApprovalPoliciesPresentation;
+}) {
     const t = useTranslations('ApprovalPoliciesBrowser');
+    const showApiError = useApiErrorToast('ApprovalPoliciesBrowser');
     const tf = useTranslations('Filters');
     const locale = useLocale();
     const router = useRouter();
@@ -80,7 +117,7 @@ export default function ApprovalPoliciesBrowser({ policies: initial }: { policie
             toastSuccess(t('deleted'));
             setRemoveTarget(null);
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('deleteFailed'));
+            showApiError(err, 'deleteFailed');
         } finally {
             setIsRemoving(false);
         }
@@ -97,26 +134,33 @@ export default function ApprovalPoliciesBrowser({ policies: initial }: { policie
         return parts.length === 0 ? t('conditionAlways') : parts.join(t('conditionJoin'));
     };
 
+    const actions = (
+        <>
+            <Button variant="outline" onClick={() => router.push('/library/documents')}>
+                <DocumentDuplicateIcon className="size-4" />
+                {t('templatesLink')}
+            </Button>
+            <Button variant="brand" onClick={openNew}>
+                <PlusIcon className="size-4" />
+                {t('newButton')}
+            </Button>
+        </>
+    );
+
+    const heading = presentation === 'section' ? (
+        <SettingsSection
+            title={t('title')}
+            description={t('sectionDescription')}
+            action={<div className="flex flex-wrap items-center gap-2">{actions}</div>}
+        />
+    ) : (
+        <PageHeader title={t('title')} actions={actions} />
+    );
+
     return (
         <>
-            <PageShell tier="wide">
-                <Rise>
-                    <PageHeader
-                        title={t('title')}
-                        actions={
-                            <>
-                                <Button variant="outline" onClick={() => router.push('/library/documents')}>
-                                    <DocumentDuplicateIcon className="size-4" />
-                                    {t('templatesLink')}
-                                </Button>
-                                <Button variant="brand" onClick={openNew}>
-                                    <PlusIcon className="size-4" />
-                                    {t('newButton')}
-                                </Button>
-                            </>
-                        }
-                    />
-                </Rise>
+            <PolicyShell presentation={presentation}>
+                <Rise>{heading}</Rise>
 
                 <Rise delay={0.06}>
                     <div className="flex items-center justify-between gap-3">
@@ -204,7 +248,7 @@ export default function ApprovalPoliciesBrowser({ policies: initial }: { policie
                         </div>
                     )}
                 </Rise>
-            </PageShell>
+            </PolicyShell>
 
             <ApprovalPolicyDialog
                 open={editorOpen}

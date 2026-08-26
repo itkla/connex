@@ -3,6 +3,8 @@ import type {
     DashboardWidgetSpan,
     DashboardWidgetType,
 } from '@/app/lib/types';
+import { DEAL_RISK_LEVELS, riskDealsHref } from '@/app/components/records/deals/dealLinks';
+import { radarFamilyHref } from '@/app/components/radar/radarLinks';
 
 /**
  * Static metadata for a dashboard widget type. Titles and action labels are `next-intl` keys in
@@ -28,15 +30,15 @@ export const WIDGET_META: Record<DashboardWidgetType, WidgetMeta> = {
         titleKey: 'atRiskDeals',
         defaultSpan: 1,
         allowedSpans: [1, 2],
-        actionHref: '/records/deals',
-        actionLabelKey: 'viewDeals',
+        actionHref: riskDealsHref(DEAL_RISK_LEVELS),
+        actionLabelKey: 'viewAtRiskDeals',
     },
     coolingRelationships: {
         titleKey: 'coolingRelationships',
         defaultSpan: 1,
         allowedSpans: [1, 2],
-        actionHref: '/overview/map',
-        actionLabelKey: 'viewMap',
+        actionHref: radarFamilyHref('relationship_decay'),
+        actionLabelKey: 'viewInRadar',
     },
     recentMoves: {
         titleKey: 'recentlyMoved',
@@ -49,7 +51,7 @@ export const WIDGET_META: Record<DashboardWidgetType, WidgetMeta> = {
         titleKey: 'introductions',
         defaultSpan: 2,
         allowedSpans: [1, 2],
-        actionHref: '/overview/introductions',
+        actionHref: '/intelligence/introductions',
         actionLabelKey: 'viewAll',
     },
     recentFiles: {

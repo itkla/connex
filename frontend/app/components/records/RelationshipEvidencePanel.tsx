@@ -9,9 +9,9 @@ import {
 } from '@heroicons/react/24/outline';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 
-import TemperaturePill from '@/app/components/records/TemperaturePill';
+import WarmthPill from '@/app/components/records/WarmthPill';
 import ProviderCaptureEvidence from '@/app/components/activity/ProviderCaptureEvidence';
 import type {
     RelationshipEvidence,
@@ -61,16 +61,19 @@ function contributorLabel(
 /**
  * Explains a canonical contact or company warmth score with bounded source metadata and coverage.
  * Use {@code variant="dialog"} to flush the same chrome into a modal shell (close-button gutter,
- * no outer card border).
+ * no outer card border). An optional {@code actions} row closes the loop: a reading that offers a
+ * next step, rendered last so the provenance stays fine print above it.
  */
 export default function RelationshipEvidencePanel({
     evidence,
     className,
     variant = 'page',
+    actions,
 }: {
     evidence?: RelationshipEvidence | null;
     className?: string;
     variant?: 'page' | 'dialog';
+    actions?: ReactNode;
 }) {
     const t = useTranslations('RelationshipEvidence');
     const locale = useLocale();
@@ -124,7 +127,7 @@ export default function RelationshipEvidencePanel({
                     </h2>
                     <p className="mt-1 text-sm text-foreground">{t('subtitle')}</p>
                 </div>
-                <TemperaturePill temp={temperature} />
+                <WarmthPill temp={temperature} />
             </div>
 
             {!hasHistory ? (
@@ -230,6 +233,15 @@ export default function RelationshipEvidencePanel({
                     })}
                 </p>
             </div>
+
+            {actions ? (
+                <div className="border-t border-border px-5 py-3">
+                    <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+                        {t('actionsTitle')}
+                    </p>
+                    <div className="mt-2">{actions}</div>
+                </div>
+            ) : null}
         </section>
     );
 }

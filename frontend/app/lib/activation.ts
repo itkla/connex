@@ -1,4 +1,5 @@
 import type { ActiveRecordRef } from '@/app/lib/actions/types';
+import { settingsDestination } from '@/app/lib/settingsEntryPoints';
 import type { CapabilityAvailability } from '@/app/lib/capabilityAvailability';
 import type {
     Company,
@@ -180,7 +181,7 @@ export function selectFirstInsight(candidates: ActivationCandidates): Activation
             kind: 'introPath',
             title: `${suggestion.personAName} · ${suggestion.personBName}`,
             subtitle: suggestion.personACompany ?? suggestion.personBCompany ?? null,
-            href: '/overview/introductions',
+            href: '/intelligence/introductions',
             record: null,
             risk: null,
             temperature: null,
@@ -256,7 +257,7 @@ export function buildActivationSteps(counts: ActivationCounts): ActivationStep[]
             done: counts.members > 1,
             required: false,
             actionId: null,
-            href: '/settings/members',
+            href: settingsDestination('workspace.members').href,
             count: counts.members,
             requireRelationshipTarget: false,
         });
@@ -272,7 +273,7 @@ export function buildActivationSteps(counts: ActivationCounts): ActivationStep[]
             required: false,
             actionId: null,
             href: counts.connectedAccountsAvailability === 'enabled'
-                ? '/account/connections'
+                ? settingsDestination('account.connections').href
                 : null,
             count: null,
             requireRelationshipTarget: false,

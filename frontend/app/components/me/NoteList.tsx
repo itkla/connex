@@ -1,9 +1,9 @@
-// NOTE: again, not used anymore but keeping it just in case
-
 import { getLocale, getTranslations } from "next-intl/server";
+import { DocumentTextIcon } from "@heroicons/react/24/outline";
 
 import { type Note } from "@/app/lib/types";
-import EmptyState from "./EmptyState";
+import { EmptyState } from "@/app/components/EmptyState";
+import NoteContent from "@/app/components/activity/notes/NoteContent";
 import { timeOf, formatShortDate } from "@/app/lib/utils";
 
 export default async function NoteList({ notes }: { notes: Note[] }) {
@@ -11,7 +11,15 @@ export default async function NoteList({ notes }: { notes: Note[] }) {
     const locale = await getLocale();
 
     if (notes.length === 0) {
-        return <EmptyState message={t("empty")} />;
+        return (
+            <EmptyState
+                variant="inline"
+                tone="muted"
+                icon={DocumentTextIcon}
+                title={t("emptyTitle")}
+                body={t("empty")}
+            />
+        );
     }
 
     const sorted = [...notes].sort((a, b) => timeOf(b.createdAt) - timeOf(a.createdAt));
@@ -22,9 +30,11 @@ export default async function NoteList({ notes }: { notes: Note[] }) {
             {recent.map((note) => (
                 <li key={note.id} className="flex flex-col gap-1 px-6 py-3">
                     <div className="flex items-start justify-between gap-4">
-                        <span className="line-clamp-2 text-sm text-foreground">
-                            {note.content}
-                        </span>
+                        <NoteContent
+                            content={note.content}
+                            references={note.references}
+                            className="line-clamp-2 text-sm text-foreground"
+                        />
                         {note.createdAt ? (
                             <span className="shrink-0 text-xs text-muted-foreground">
                                 {formatShortDate(note.createdAt, locale)}

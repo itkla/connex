@@ -3,7 +3,7 @@ import { PageShell } from "@/app/components/PageShell";
 
 export default function MeLoading() {
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <div className="relative grid min-h-[30rem] place-items-center overflow-hidden rounded-3xl border border-border bg-card sm:min-h-[34rem]">
                     <Skeleton className="size-24 rounded-full sm:size-28" />
                     <div className="absolute left-6 top-6 space-y-2 sm:left-8 sm:top-8">

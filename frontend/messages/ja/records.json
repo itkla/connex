@@ -11,8 +11,8 @@
   },
   "SmartSegments": {
     "title": "スマートセグメント",
-    "evaluateFailed": "セグメントを評価できませんでした。",
-    "fieldsFailed": "セグメントの選択肢を読み込めませんでした。",
+    "evaluateFailed": "スマートセグメントで絞り込めませんでした",
+    "fieldsFailed": "セグメントの選択肢を読み込めませんでした",
     "builderTitle": "セグメントを作成",
     "builderDescription": "関係シグナルとフィールド条件を組み合わせて、目的の会社を正確に絞り込みます。",
     "matchPrefix": "次の条件の",
@@ -88,7 +88,7 @@
     "cooling": {
       "label": "冷めかけ／冷たい",
       "labelNot": "冷めかけ／冷たくない",
-      "description": "関係の温度が低い、または下降傾向です。"
+      "description": "温度感がクールかコールド、または下降傾向です。"
     },
     "no_activity": {
       "label": "最近の活動なし",
@@ -110,7 +110,7 @@
     "pickOwner": "担当者を選択",
     "pickCompany": "会社を選択",
     "pickStage": "ステージを選択",
-    "catalogFailed": "セグメントビルダーを読み込めませんでした。",
+    "catalogFailed": "セグメントビルダーを読み込めませんでした",
     "loading": "読み込み中…",
     "has_open_task": {
       "label": "未完了タスクあり",
@@ -140,27 +140,27 @@
     "warmth_hot": {
       "label": "ホット",
       "labelNot": "ホットでない",
-      "description": "関係の温度がホットです。"
+      "description": "温度感がホットです。"
     },
     "warmth_warm": {
       "label": "ウォーム",
       "labelNot": "ウォームでない",
-      "description": "関係の温度がウォームです。"
+      "description": "温度感がウォームです。"
     },
     "warmth_cool": {
       "label": "クール",
       "labelNot": "クールでない",
-      "description": "関係の温度がクールです。"
+      "description": "温度感がクールです。"
     },
     "warmth_cold": {
       "label": "コールド",
       "labelNot": "コールドでない",
-      "description": "関係の温度がコールドです。"
+      "description": "温度感がコールドです。"
     },
     "warmth_rising": {
       "label": "上昇中",
       "labelNot": "上昇していない",
-      "description": "関係の温度が上昇傾向です。"
+      "description": "温度感が上昇傾向です。"
     },
     "going_cold": {
       "label": "まもなく冷却",
@@ -216,8 +216,8 @@
     "modified": "変更あり",
     "saved": "ビューを保存しました",
     "deleted": "ビューを削除しました",
-    "saveFailed": "ビューを保存できませんでした。",
-    "deleteFailed": "ビューを削除できませんでした。",
+    "saveFailed": "ビューを保存できませんでした",
+    "deleteFailed": "ビューを削除できませんでした",
     "renameTitle": "ビュー名を変更",
     "saveViewTitle": "ビューを保存",
     "nameDescription": "このビューに名前を付けて、後で切り替えられるようにします。",
@@ -238,10 +238,10 @@
     "madeShared": "ワークスペースで共有しました",
     "madePrivate": "ビューを非公開にしました",
     "copyLink": "リンクをコピー",
-    "copyLinkFailed": "リンクをコピーできませんでした。",
+    "copyLinkFailed": "リンクをコピーできませんでした",
     "linkCopied": "リンクをクリップボードにコピーしました",
     "viewUnavailable": "そのビューは利用できなくなりました。",
-    "actionFailed": "問題が発生しました。もう一度お試しください。",
+    "actionFailed": "ビューを更新できませんでした",
     "switchWorkspaceTitle": "ワークスペースを切り替えますか？",
     "switchWorkspacePrompt": "このビューは別のワークスペースに属しています。切り替えてビューを開きますか？",
     "switchWorkspaceConfirm": "切り替える",
@@ -256,13 +256,13 @@
     "yes": "はい",
     "no": "いいえ",
     "saved": "カスタムフィールドを更新しました",
-    "saveFailed": "カスタムフィールドを保存できませんでした。",
+    "saveFailed": "カスタムフィールドを保存できませんでした",
     "doubleClickToEdit": "ダブルクリックで編集",
     "addColumn": "フィールドを追加",
     "configureColumn": "設定",
     "deleteColumn": "フィールドを削除",
     "columnDeleted": "フィールドを削除しました",
-    "deleteFailed": "フィールドを削除できませんでした。",
+    "deleteFailed": "フィールドを削除できませんでした",
     "fieldLabel": "カスタムフィールド"
   },
   "ShareDialog": {
@@ -274,11 +274,11 @@
     "shareButton": "共有",
     "noTargets": "利用可能な他のワークスペースがありません",
     "shared": "共有しました",
-    "shareFailed": "このレコードを共有できませんでした。",
+    "shareFailed": "このレコードを共有できませんでした",
     "revoke": "取り消し",
     "revoked": "共有を取り消しました",
-    "revokeFailed": "共有を取り消せませんでした。",
-    "loadFailed": "共有を読み込めませんでした。"
+    "revokeFailed": "共有を停止できませんでした",
+    "loadFailed": "共有を読み込めませんでした"
   },
   "RecordInlineEdit": {
     "doubleClickToEdit": "ダブルクリックして編集",
@@ -288,33 +288,28 @@
     "selectAllAria": "すべての {entityLabel} を選択",
     "selectItemAria": "{name} を選択",
     "copiedToast": "{label} をコピーしました",
-    "copyFailedToast": "{label} のコピーに失敗しました",
+    "copyFailedToast": "{label} をコピーできませんでした",
     "editFieldAria": "{name} の{field}を編集",
     "selectedLabel": "選択中",
     "clearSelection": "選択を解除",
     "rowActionsAria": "{name} の操作",
     "quickEdit": "クイック編集",
     "delete": "削除",
-    "emptyState": "表示できるものがありません。",
     "rowsPerPage": "表示件数",
     "showing": "{total} 件中 {from}–{to} 件",
     "previousPage": "前のページへ",
     "nextPage": "次のページへ",
-    "noResults": "現在のフィルターに一致するものがありません。",
+    "noResults": "この条件に一致するものはありません",
+    "noResultsBody": "検索語を変えるか、フィルターを解除するとすべて表示されます。",
     "clearFilters": "フィルターを解除",
     "sortBy": "並び替え"
   },
-  "RecordsFilterMenu": {
-    "filterAria": "フィルター",
-    "filterBy": "フィルター",
-    "clearAll": "すべてクリア"
-  },
   "RecordsDeleteDialog": {
-    "titleSingle": "{entityLabel} を削除",
-    "titleMultiple": "{count} 件の {entityLabel} を削除",
-    "descriptionNamed": "「{name}」を削除してもよろしいですか？この操作は取り消せません。",
-    "descriptionSingle": "この {entityLabel} を削除してもよろしいですか？この操作は取り消せません。",
-    "descriptionMultiple": "これら {count} 件の {entityLabel} を削除してもよろしいですか？この操作は取り消せません。",
+    "titleSingle": "{entityLabel} を削除しますか？",
+    "titleMultiple": "{count} 件の {entityLabel} を削除しますか？",
+    "descriptionNamed": "「{name}」を削除します。この操作は取り消せません。",
+    "descriptionSingle": "この {entityLabel} を削除します。この操作は取り消せません。",
+    "descriptionMultiple": "これら {count} 件の {entityLabel} を削除します。この操作は取り消せません。",
     "cancel": "キャンセル",
     "delete": "削除"
   },
@@ -400,7 +395,7 @@
     "noDecayDate": "低下予測日はありません",
     "sources": "主な根拠",
     "sourceType": {
-      "note": "ワークスペースノート",
+      "note": "ワークスペースメモ",
       "task": "タスク"
     },
     "activityType": "アクティビティ: {type}",
@@ -418,9 +413,20 @@
     },
     "omitted": "ほか{count}件の対象ソースもスコアに含まれています。",
     "limited": "根拠が限定的です。信頼度の高い評価には{minimum}件以上の対象ソースが必要です。",
-    "privateNotesExcluded": "あなたの非公開ノート{count}件はこのスコアから除外されています。",
+    "privateNotesExcluded": "あなたの非公開メモ{count}件はこのスコアから除外されています。",
     "asOf": "{date}時点、モデル{version}で計算。",
-    "unknownModel": "不明"
+    "unknownModel": "不明",
+    "actionsTitle": "次にできること",
+    "actionLogInteraction": "やり取りを記録",
+    "actionScheduleFollowUp": "フォローアップを設定",
+    "followUpDescription": "{name} さんとの関係が冷え込む前にフォローアップする"
+  },
+  "RecordSignals": {
+    "title": "シグナル",
+    "openInRadar": "レーダーで開く",
+    "empty": "このレコードに関するシグナルは現在ありません。レーダーが温度感・案件リスク・紹介ルートを見守り、対応すべきことがあればここに表示します。",
+    "unavailable": "シグナルを一時的に取得できません。このレコードの情報は変わっていません。しばらくしてからもう一度お試しください。",
+    "evaluationHeading": "レーダーの監視設定"
   },
   "RecordPeek": {
     "type_company": "会社",
@@ -436,7 +442,7 @@
     "error_failed": "このレコードを読み込めませんでした。",
     "openFull": "レコードを開く",
     "moreActions": "その他のアクション",
-    "addNote": "ノートを追加",
+    "addNote": "メモを追加",
     "createTask": "タスクを作成",
     "copyLink": "リンクをコピー",
     "email": "メール",
@@ -445,7 +451,7 @@
     "openDeals": "進行中の案件",
     "industry": "業種",
     "website": "ウェブサイト",
-    "people": "担当者",
+    "people": "連絡先",
     "openTasks": "未完了タスク",
     "projectedRevenue": "予測売上",
     "stage": "ステージ",

@@ -8,12 +8,16 @@
     "tableViewAriaLabel": "Table view",
     "selectedCount": "{count} selected",
     "quickEdit": "Quick edit",
+    "moreActions": "More actions",
     "share": "Share",
     "delete": "Delete",
     "searchPlaceholder": "Search pipelines",
     "columnName": "Name",
     "columnCreated": "Created",
     "columnUpdated": "Updated",
+    "emptyTitle": "No pipelines yet",
+    "emptyBody": "A pipeline is the set of stages your deals move through. Create one that matches how your team actually sells.",
+    "emptyCta": "New pipeline",
     "entityLabel": "pipeline",
     "noChangesToSave": "No changes to save",
     "nameRequiredFor": "Name is required for \"{name}\"",
@@ -22,14 +26,16 @@
     "singleTerminalPerTypeIn": "\"{name}\" can have only one Won stage and one Lost stage",
     "pipelineUpdated": "Pipeline updated",
     "pipelinesUpdated": "{count} pipelines updated",
-    "failedToSave": "Failed to save",
+    "failedToSave": "Couldn't save the pipeline changes",
     "pipelineDeleted": "Pipeline deleted",
     "pipelinesDeleted": "{count} pipelines deleted",
-    "failedToDelete": "Failed to delete",
+    "failedToDelete": "Couldn't delete the selected pipelines",
     "pipelineCreated": "Pipeline created",
     "pipelineCreatedWithFailedStages": "Pipeline created, but {failed} of {total} stages failed",
-    "failedToCreate": "Failed to create pipeline",
-    "failedToLoadMetrics": "Failed to load pipeline metrics"
+    "failedToCreate": "Couldn't create the pipeline",
+    "failedToLoadMetrics": "Couldn't load the pipeline metrics",
+    "failedToOpen": "Couldn't open that pipeline. Try again.",
+    "pipelineUnavailable": "That pipeline is no longer available."
   },
   "PipelinesCard": {
     "actionsAriaLabel": "Pipeline actions",
@@ -38,7 +44,7 @@
     "delete": "Delete",
     "openPipelineAriaLabel": "Open pipeline page",
     "loadingMetrics": "Loading metrics…",
-    "failedToLoadMetrics": "Failed to load metrics.",
+    "failedToLoadMetrics": "Couldn't load metrics",
     "retry": "Retry",
     "stages": "Stages",
     "deals": "Deals",
@@ -49,7 +55,7 @@
   },
   "PipelinesNewDialog": {
     "title": "New pipeline",
-    "description": "Add a pipeline to your records. These pipelines will be shared with all users of this organization.",
+    "description": "Add a pipeline to your records. These pipelines will be shared with everyone in this workspace.",
     "name": "Name",
     "namePlaceholder": "Sales Pipeline",
     "stages": "Stages",
@@ -89,6 +95,6 @@
     "stageNamesEmpty": "Stage names cannot be empty",
     "singleTerminalPerType": "A pipeline can have only one Won stage and one Lost stage",
     "pipelineUpdated": "Pipeline updated",
-    "failedToSave": "Failed to save"
+    "failedToSave": "Couldn't save the pipeline"
   }
 }

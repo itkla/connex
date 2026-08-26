@@ -1,46 +1,19 @@
-import type { Metadata } from "next";
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
-import { getTranslations } from "next-intl/server";
-import { getCurrentUserResultFromCookie, getAuditLogs } from "@/app/lib/api";
-import { loadCollection } from "@/app/lib/recordAccess";
-import AccessDeniedPage from "@/app/components/AccessDeniedPage";
-import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
-import AuditLogBrowser from "@/app/components/admin/AuditLogBrowser";
+import { permanentRedirect } from "next/navigation";
 
-export async function generateMetadata(): Promise<Metadata> {
-    const t = await getTranslations("AdminLogsLayout");
-    return {
-        title: t("title"),
-        description: t("description"),
-    };
-}
+import { settingsRedirectTarget, type RouteSearchParams } from "@/app/lib/settingsRedirects";
 
-const PAGE_SIZE = 200;
-
-export default async function AuditLogPage() {
-    const cookie = (await headers()).get("cookie");
-    const currentUserResult = await getCurrentUserResultFromCookie(cookie);
-
-    if (!currentUserResult.ok) {
-        return <WorkspaceUnavailablePage />;
-    }
-    const currentUser = currentUserResult.data;
-    if (!currentUser) {
-        redirect("/auth/login");
-    }
-
-    const access = await loadCollection(() =>
-        getAuditLogs(
-            { limit: PAGE_SIZE, offset: 0 },
-            { headers: { cookie: cookie ?? "" }, cache: "no-store" },
-        ),
-    );
-
-    if (access.kind === "forbidden") {
-        const t = await getTranslations("AdminAuditLog");
-        return <AccessDeniedPage title={t("deniedTitle")} body={t("deniedBody")} />;
-    }
-
-    return <AuditLogBrowser initialEntries={access.items} pageSize={PAGE_SIZE} />;
+/**
+ * The retired address for the workspace audit log (#1340 WS4.6).
+ *
+ * The job now lives at the `audit` section of Audit & diagnostics, and this path forwards there permanently rather than 404ing an
+ * address readers have bookmarked and linked. The target is the manifest’s, not this file’s, so a
+ * destination that moves again takes its redirect with it; the query string is the reader’s and
+ * survives the hop whole.
+ */
+export default async function AdminLogsPage({
+    searchParams,
+}: {
+    searchParams: Promise<RouteSearchParams>;
+}) {
+    permanentRedirect(settingsRedirectTarget("workspace.audit-log", await searchParams));
 }

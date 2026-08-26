@@ -12,7 +12,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { Loader2Icon, Redo2Icon, Undo2Icon } from "lucide-react";
 
-import type { WorkflowExecutionMode, WorkflowRuntimeOwner, WorkflowValidation } from "@/app/lib/types";
+import type { WorkflowExecutionMode, WorkflowValidation } from "@/app/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,7 +25,6 @@ export default function WorkflowLifecycleBar({
     activeVersionNumber,
     hasActiveVersion,
     enabled,
-    runtimeOwner,
     executionMode,
     archived,
     dirty,
@@ -52,7 +51,6 @@ export default function WorkflowLifecycleBar({
     activeVersionNumber: number | null;
     hasActiveVersion: boolean;
     enabled: boolean;
-    runtimeOwner: WorkflowRuntimeOwner;
     executionMode: WorkflowExecutionMode;
     archived: boolean;
     dirty: boolean;
@@ -154,8 +152,6 @@ export default function WorkflowLifecycleBar({
                 <span className={cn(dirty && "font-medium text-foreground")}>
                     {dirty ? t("unpublishedChanges") : t("draftSaved")}
                 </span>
-                <span aria-hidden>/</span>
-                <span>{t(`runtimeOwner.${runtimeOwner}`)}</span>
                 {enabled && dirty ? <span>{t("runsUseActiveVersion")}</span> : null}
                 {validationCurrent && validation.requiredPermissions.length > 0 ? (
                     <span>{t("permissionsRequired", { permissions: requiredPermissions })}</span>

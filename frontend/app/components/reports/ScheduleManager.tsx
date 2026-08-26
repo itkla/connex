@@ -6,6 +6,7 @@ import { useTranslations } from 'next-intl';
 import { CalendarDaysIcon } from '@heroicons/react/24/outline';
 
 import ScheduleDialog from '@/app/components/reports/ScheduleDialog';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import {
     ApiError,
     deleteReportSchedule,
@@ -20,15 +21,7 @@ import type {
     WorkspaceMember,
 } from '@/app/lib/types';
 import { Button } from '@/components/ui/button';
-import {
-    Dialog,
-    DialogClose,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
+import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 
 type LoadOutcome<T> = { ok: true; data: T } | { ok: false };
 
@@ -45,6 +38,7 @@ export default function ScheduleManager({
     defaultTimezone: string;
 }) {
     const t = useTranslations('Reports');
+    const showApiError = useApiErrorToast('Reports');
     const router = useRouter();
     const [open, setOpen] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -102,10 +96,10 @@ export default function ScheduleManager({
                 toastError(t('schedule.conflict'));
                 await load();
                 router.refresh();
+            } else if (error instanceof ApiError && error.status === 400) {
+                toastError(t('schedule.validation.recipientAccess'));
             } else {
-                toastError(error instanceof ApiError && error.status === 400
-                    ? t('schedule.validation.recipientAccess')
-                    : error instanceof Error ? error.message : t('common.requestFailed'));
+                showApiError(error, 'schedule.saveFailed');
             }
             throw error;
         }
@@ -136,7 +130,7 @@ export default function ScheduleManager({
                 await load();
                 router.refresh();
             } else {
-                toastError(error instanceof Error ? error.message : t('common.requestFailed'));
+                showApiError(error, 'schedule.deleteFailed');
             }
         } finally {
             setDeleting(false);
@@ -165,25 +159,20 @@ export default function ScheduleManager({
                 onRequestDelete={requestDelete}
             />
 
-            <Dialog
+            <DeleteRecordDialog
                 open={deleteOpen && canManage && schedule !== null}
                 onOpenChange={(next) => !next && !deleting && setDeleteOpen(false)}
-            >
-                <DialogContent showCloseButton={false}>
-                    <DialogHeader>
-                        <DialogTitle>{t('schedule.deleteTitle')}</DialogTitle>
-                        <DialogDescription>{t('schedule.deleteBody', { name: reportName })}</DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button variant="outline" disabled={deleting}>{t('common.cancel')}</Button>
-                        </DialogClose>
-                        <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>
-                            {deleting ? t('common.deleting') : t('schedule.delete')}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+                selectedIds={new Set(schedule ? [schedule.id] : [])}
+                selectedItems={schedule ? [schedule] : []}
+                entityLabel={t('schedule.entityLabel')}
+                details={(
+                    <p className="text-sm text-muted-foreground">
+                        {t('schedule.deleteDetails', { name: reportName })}
+                    </p>
+                )}
+                isDeleting={deleting}
+                confirmDelete={confirmDelete}
+            />
         </>
     );
 }

@@ -30,6 +30,7 @@ import {
     WORKFLOW_RUN_STATUS_CLASS,
     WorkflowRunStatusIcon,
 } from "@/app/components/settings/workflows/workflowRunStatus";
+import { workflowRunReferenceParts } from "@/app/components/settings/workflows/workflowRunKey";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -321,6 +322,7 @@ function RunRow({ item, locale }: { item: WorkflowOperationsRunItem; locale: str
     const t = useTranslations("WorkflowOperations");
     const tw = useTranslations("WorkspaceWorkflows");
     const status = normalizeWorkflowRunStatus(item.run.status);
+    const { earlier, number } = workflowRunReferenceParts(item.run.runKey);
     return (
         <li>
             <Link
@@ -343,8 +345,8 @@ function RunRow({ item, locale }: { item: WorkflowOperationsRunItem; locale: str
                         {item.recipeKey ? <Badge variant="outline">{t("runs.recipeOrigin")}</Badge> : null}
                     </div>
                     <p className="text-xs text-muted-foreground">
-                        {t("runs.runMeta", {
-                            runKey: item.run.runKey,
+                        {t(earlier ? "runs.legacyRunMeta" : "runs.runMeta", {
+                            run: number,
                             version: item.run.version?.number ?? 0,
                         })}
                     </p>

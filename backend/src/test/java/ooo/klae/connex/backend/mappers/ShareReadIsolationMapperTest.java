@@ -22,10 +22,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
@@ -46,6 +48,8 @@ class ShareReadIsolationMapperTest extends AbstractMapperTest {
     @Autowired private ActivityMapper activityMapper;
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private PipelineMapper pipelineMapper;
+    @Autowired private NoteMapper noteMapper;
+    @Autowired private TaskMapper taskMapper;
     @Autowired private ScoringService scoringService;
     @Autowired private DataSource dataSource;
 
@@ -99,6 +103,91 @@ class ShareReadIsolationMapperTest extends AbstractMapperTest {
 
         assertTrue(personMapper.getProcessablePersonIds(
             workspace.getId(), java.util.List.of(person.getId())).contains(person.getId()));
+    }
+
+    @Test
+    void assistantHistoryPagesExcludeCrossOrgShareRowsBeforeApplyingTheirLimit() {
+        User creator = newUser();
+        Workspace sibling = newWorkspaceInOrg(orgIdOf(workspace));
+        Workspace foreign = newWorkspaceInOrg(newOrganization().getId());
+        Person sameOrgPerson = newPersonIn(sibling);
+        Person crossOrgPerson = newPersonIn(foreign);
+        insertShare("person_share", "person_id", sameOrgPerson.getId(), workspace.getId());
+        insertShare("person_share", "person_id", crossOrgPerson.getId(), workspace.getId());
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, newCompany());
+
+        Activity visibleActivity = newActivity(sameOrgPerson, deal, creator);
+        visibleActivity.setTimestamp("2026-08-10 09:00:00");
+        Activity crossOrgDirectActivity = newActivity(crossOrgPerson, deal, creator);
+        crossOrgDirectActivity.setTimestamp("2026-08-12 09:00:00");
+        Activity crossOrgReferenceActivity = newActivity(sameOrgPerson, deal, creator);
+        crossOrgReferenceActivity.setTimestamp("2026-08-11 09:00:00");
+        activityMapper.insert(visibleActivity);
+        activityMapper.insert(crossOrgDirectActivity);
+        activityMapper.insert(crossOrgReferenceActivity);
+        insertReference("activity", crossOrgReferenceActivity.getId(), crossOrgPerson);
+
+        Task visibleTask = newTask(sameOrgPerson, deal, creator, "2026-08-12");
+        Task crossOrgDirectTask = newTask(crossOrgPerson, deal, creator, "2026-08-10");
+        Task crossOrgReferenceTask = newTask(sameOrgPerson, deal, creator, "2026-08-11");
+        taskMapper.insert(visibleTask);
+        taskMapper.insert(crossOrgDirectTask);
+        taskMapper.insert(crossOrgReferenceTask);
+        insertReference("task", crossOrgReferenceTask.getId(), crossOrgPerson);
+        jdbc().update("UPDATE task SET updated_at = ? WHERE id = ?", "2026-08-10 09:00:00", visibleTask.getId());
+        jdbc().update("UPDATE task SET updated_at = ? WHERE id = ?", "2026-08-12 09:00:00", crossOrgDirectTask.getId());
+        jdbc().update("UPDATE task SET updated_at = ? WHERE id = ?", "2026-08-11 09:00:00", crossOrgReferenceTask.getId());
+
+        Note visibleNote = newNote(sameOrgPerson, deal, creator);
+        Note crossOrgDirectNote = newNote(crossOrgPerson, deal, creator);
+        Note crossOrgReferenceNote = newNote(sameOrgPerson, deal, creator);
+        noteMapper.insert(visibleNote);
+        noteMapper.insert(crossOrgDirectNote);
+        noteMapper.insert(crossOrgReferenceNote);
+        insertReference("note", crossOrgReferenceNote.getId(), crossOrgPerson);
+        jdbc().update("UPDATE note SET updated_at = ? WHERE id = ?", "2026-08-10 09:00:00", visibleNote.getId());
+        jdbc().update("UPDATE note SET updated_at = ? WHERE id = ?", "2026-08-12 09:00:00", crossOrgDirectNote.getId());
+        jdbc().update("UPDATE note SET updated_at = ? WHERE id = ?", "2026-08-11 09:00:00", crossOrgReferenceNote.getId());
+
+        List<Integer> organizationWorkspaceIds = List.of(workspace.getId(), sibling.getId());
+        assertEquals(
+                List.of(visibleActivity.getId()),
+                activityMapper.getAiAssistantActivitiesByDealId(
+                        workspace.getId(), deal.getId(), organizationWorkspaceIds,
+                        null, null, 1).stream()
+                        .map(Activity::getId)
+                        .toList());
+        assertEquals(
+                List.of(visibleTask.getId()),
+                taskMapper.getAiAssistantTasksByDealId(
+                        workspace.getId(), deal.getId(), organizationWorkspaceIds, 1).stream()
+                        .map(Task::getId)
+                        .toList());
+        assertEquals(
+                List.of(visibleActivity.getId()),
+                activityMapper.getAiAssistantActivitiesByCompanyId(
+                        workspace.getId(), deal.getCompanyId(), organizationWorkspaceIds,
+                        null, null, 1).stream()
+                        .map(Activity::getId)
+                        .toList());
+        assertEquals(
+                List.of(visibleTask.getId()),
+                taskMapper.getAiAssistantTasksByCompanyId(
+                        workspace.getId(), deal.getCompanyId(), organizationWorkspaceIds, 1).stream()
+                        .map(Task::getId)
+                        .toList());
+        assertEquals(
+                List.of(visibleNote.getId()),
+                noteMapper.getAiAssistantVisibleNotesByCompanyId(
+                        workspace.getId(),
+                        deal.getCompanyId(),
+                        creator.getId(),
+                        organizationWorkspaceIds,
+                        1).stream()
+                        .map(Note::getId)
+                        .toList());
     }
 
     @Test
@@ -163,6 +252,14 @@ class ShareReadIsolationMapperTest extends AbstractMapperTest {
             + "VALUES (?, ?, ?, ?)", entityId, granteeWorkspaceId, newUser().getId(), false);
     }
 
+    private void insertReference(String sourceType, int sourceId, Person person) {
+        jdbc().update(
+                "INSERT INTO entity_reference "
+                    + "(workspace_id, source_type, source_id, ref_type, ref_id, label) "
+                    + "VALUES (?, ?, ?, 'person', ?, ?)",
+                workspace.getId(), sourceType, sourceId, person.getId(), person.getName());
+    }
+
     private Organization newOrganization() {
         String s = unique();
         Organization organization = new Organization();
@@ -219,6 +316,30 @@ class ShareReadIsolationMapperTest extends AbstractMapperTest {
         activity.setCreatedBy(creator);
         activity.setTimestamp(LocalDateTime.now(ZoneOffset.UTC).minusHours(1).format(MYSQL_DATETIME));
         return activity;
+    }
+
+    private Task newTask(Person person, Deal deal, User assignee, String dueDate) {
+        Task task = new Task();
+        task.setWorkspaceId(workspace.getId());
+        task.setDescription("Task " + unique());
+        task.setCompleted(false);
+        task.setStatus("todo");
+        task.setDueDate(dueDate);
+        task.setAssignedTo(assignee);
+        task.setPerson(person);
+        task.setDeal(deal);
+        return task;
+    }
+
+    private Note newNote(Person person, Deal deal, User author) {
+        Note note = new Note();
+        note.setWorkspaceId(workspace.getId());
+        note.setContent("Note " + unique());
+        note.setVisibility("workspace");
+        note.setAuthor(author);
+        note.setPerson(person);
+        note.setDeal(deal);
+        return note;
     }
 
     private Pipeline newPipelineIn(Workspace ws) {

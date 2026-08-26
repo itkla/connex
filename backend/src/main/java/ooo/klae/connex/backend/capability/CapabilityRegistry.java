@@ -16,6 +16,7 @@ import ooo.klae.connex.backend.delivery.DeliveryProperties;
 import ooo.klae.connex.backend.mail.MailProperties;
 import ooo.klae.connex.backend.services.BusinessCardService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
+import ooo.klae.connex.backend.signature.SignatureProperties;
 import ooo.klae.connex.backend.sso.SocialLoginClientRegistrations;
 
 /**
@@ -49,7 +50,8 @@ public class CapabilityRegistry {
             Map.entry(Capability.MANAGED_MAIL, Set.of(DeploymentProperties.PROFILE_ON_PREM)),
             Map.entry(Capability.BUSINESS_CARD_SCANNING, Set.of()),
             Map.entry(Capability.BUSINESS_CARD_IMPORT, Set.of()),
-            Map.entry(Capability.CAMPAIGN_DELIVERY, Set.of()));
+            Map.entry(Capability.CAMPAIGN_DELIVERY, Set.of()),
+            Map.entry(Capability.DOCUMENT_SIGNATURE, Set.of()));
 
     private static final Map<Capability, Set<String>> PRODUCTION_PROFILE_POLICY =
             immutableForbiddenProfiles(FORBIDDEN_PROFILES);
@@ -63,6 +65,7 @@ public class CapabilityRegistry {
     private final DeploymentProperties deploymentProperties;
     private final CapabilityEntitlement capabilityEntitlement;
     private final DeliveryProperties deliveryProperties;
+    private final SignatureProperties signatureProperties;
     private final Map<Capability, Set<String>> forbiddenProfiles;
 
     /**
@@ -76,6 +79,7 @@ public class CapabilityRegistry {
      * @param deploymentProperties active deployment profile
      * @param capabilityEntitlement capability entitlement source
      * @param deliveryProperties native delivery capability source
+     * @param signatureProperties document-signature capability source
      */
     @Autowired
     public CapabilityRegistry(SsoConnectionService ssoConnectionService,
@@ -86,11 +90,13 @@ public class CapabilityRegistry {
             BusinessCardService businessCardService,
             DeploymentProperties deploymentProperties,
             CapabilityEntitlement capabilityEntitlement,
-            DeliveryProperties deliveryProperties) {
+            DeliveryProperties deliveryProperties,
+            SignatureProperties signatureProperties) {
         this(ssoConnectionService, socialLoginClientRegistrations, connectedAccountProviders,
                 connectedCaptureProperties,
                 mailProperties, businessCardService,
-                deploymentProperties, capabilityEntitlement, deliveryProperties, PRODUCTION_PROFILE_POLICY);
+                deploymentProperties, capabilityEntitlement, deliveryProperties, signatureProperties,
+                PRODUCTION_PROFILE_POLICY);
     }
 
     CapabilityRegistry(SsoConnectionService ssoConnectionService,
@@ -102,6 +108,7 @@ public class CapabilityRegistry {
             DeploymentProperties deploymentProperties,
             CapabilityEntitlement capabilityEntitlement,
             DeliveryProperties deliveryProperties,
+            SignatureProperties signatureProperties,
             Map<Capability, Set<String>> forbiddenProfiles) {
         this.ssoConnectionService = Objects.requireNonNull(ssoConnectionService, "ssoConnectionService");
         this.socialLoginClientRegistrations = Objects.requireNonNull(
@@ -115,6 +122,7 @@ public class CapabilityRegistry {
         this.deploymentProperties = Objects.requireNonNull(deploymentProperties, "deploymentProperties");
         this.capabilityEntitlement = Objects.requireNonNull(capabilityEntitlement, "capabilityEntitlement");
         this.deliveryProperties = Objects.requireNonNull(deliveryProperties, "deliveryProperties");
+        this.signatureProperties = Objects.requireNonNull(signatureProperties, "signatureProperties");
         this.forbiddenProfiles = immutableForbiddenProfiles(forbiddenProfiles);
     }
 
@@ -191,6 +199,7 @@ public class CapabilityRegistry {
             case BUSINESS_CARD_SCANNING -> businessCardService.isAvailable();
             case BUSINESS_CARD_IMPORT -> businessCardService.isImportAvailable();
             case CAMPAIGN_DELIVERY -> deliveryProperties.isEnabled();
+            case DOCUMENT_SIGNATURE -> signatureProperties.isEnabled();
         };
     }
 

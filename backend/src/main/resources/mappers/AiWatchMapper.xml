@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.AiWatchMapper">
+
+    <resultMap id="watchMap" type="ooo.klae.connex.backend.beans.AiWatch">
+        <id property="id" column="id" />
+        <result property="workspaceId" column="workspace_id" />
+        <result property="ownerUserId" column="owner_user_id" />
+        <result property="watchType" column="watch_type" />
+        <result property="subjectKind" column="subject_kind" />
+        <result property="subjectId" column="subject_id" />
+        <result property="thresholdBand" column="threshold_band" />
+        <result property="thresholdDays" column="threshold_days" />
+        <result property="thresholdLevel" column="threshold_level" />
+        <result property="status" column="status" />
+        <result property="cooldownDays" column="cooldown_days" />
+        <result property="expiresOn" column="expires_on" />
+        <result property="lastEvaluatedAt" column="last_evaluated_at" />
+        <result property="lastFiredAt" column="last_fired_at" />
+        <result property="lastFiredState" column="last_fired_state" />
+        <result property="createdAt" column="created_at" />
+        <result property="updatedAt" column="updated_at" />
+    </resultMap>
+
+    <sql id="columns">
+        id, workspace_id, owner_user_id, watch_type, subject_kind, subject_id,
+        threshold_band, threshold_days, threshold_level, status, cooldown_days, expires_on,
+        last_evaluated_at, last_fired_at, last_fired_state, created_at, updated_at
+    </sql>
+
+    <select id="listForOwner" resultMap="watchMap">
+        SELECT <include refid="columns" />
+        FROM ai_watch
+        WHERE workspace_id = #{workspaceId}
+          AND owner_user_id = #{ownerUserId}
+        ORDER BY created_at DESC, id DESC
+    </select>
+
+    <select id="findForOwner" resultMap="watchMap">
+        SELECT <include refid="columns" />
+        FROM ai_watch
+        WHERE workspace_id = #{workspaceId}
+          AND owner_user_id = #{ownerUserId}
+          AND id = #{id}
+    </select>
+
+    <select id="countForOwner" resultType="int">
+        SELECT COUNT(*)
+        FROM ai_watch
+        WHERE workspace_id = #{workspaceId}
+          AND owner_user_id = #{ownerUserId}
+    </select>
+
+    <select id="findEvaluable" resultMap="watchMap">
+        SELECT <include refid="columns" />
+        FROM ai_watch
+        WHERE workspace_id = #{workspaceId}
+          AND status = 'active'
+          AND (expires_on IS NULL OR expires_on &gt;= #{today})
+        ORDER BY id
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="watch.id">
+        INSERT INTO ai_watch
+            (workspace_id, owner_user_id, watch_type, subject_kind, subject_id,
+             threshold_band, threshold_days, threshold_level, status, cooldown_days, expires_on)
+        VALUES
+            (#{watch.workspaceId}, #{watch.ownerUserId}, #{watch.watchType},
+             #{watch.subjectKind}, #{watch.subjectId},
+             #{watch.thresholdBand}, #{watch.thresholdDays}, #{watch.thresholdLevel},
+             #{watch.status}, #{watch.cooldownDays}, #{watch.expiresOn})
+    </insert>
+
+    <update id="updateStatus">
+        UPDATE ai_watch
+        SET status = #{status}
+        WHERE workspace_id = #{workspaceId}
+          AND owner_user_id = #{ownerUserId}
+          AND id = #{id}
+    </update>
+
+    <update id="recordEvaluated">
+        UPDATE ai_watch
+        SET last_evaluated_at = #{at}
+        WHERE workspace_id = #{workspaceId}
+          AND id = #{id}
+    </update>
+
+    <update id="claimFiring">
+        UPDATE ai_watch
+        SET last_fired_state = #{state},
+            last_fired_at = #{at}
+        WHERE workspace_id = #{workspaceId}
+          AND id = #{id}
+          AND status = 'active'
+          AND (last_fired_at IS NULL
+               OR last_fired_state IS NULL
+               OR last_fired_state &lt;&gt; #{state}
+               OR last_fired_at &lt;= #{cooldownCutoff})
+    </update>
+
+    <delete id="delete">
+        DELETE FROM ai_watch
+        WHERE workspace_id = #{workspaceId}
+          AND owner_user_id = #{ownerUserId}
+          AND id = #{id}
+    </delete>
+
+    <delete id="deleteForUser">
+        DELETE FROM ai_watch
+        WHERE workspace_id = #{workspaceId}
+          AND owner_user_id = #{userId}
+    </delete>
+
+    <delete id="deleteForUserAnywhere">
+        DELETE FROM ai_watch
+        WHERE owner_user_id = #{userId}
+    </delete>
+</mapper>

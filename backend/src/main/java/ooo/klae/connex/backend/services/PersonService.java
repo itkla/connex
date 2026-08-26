@@ -23,6 +23,9 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.PersonEmployment;
+import ooo.klae.connex.backend.beans.PersonFirstResponseState;
+import ooo.klae.connex.backend.beans.PersonLeadSource;
+import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.Workspace;
@@ -30,6 +33,7 @@ import ooo.klae.connex.backend.dto.CustomFieldEntryDto;
 import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
+import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -90,6 +94,9 @@ public class PersonService {
     private static final Set<String> RESTRICTION_AUDIT_FIELDS =
         Set.of("suspendedAt", "provisionCeasedAt");
 
+    private static final Set<String> PROVENANCE_AUDIT_FIELDS =
+        Set.of("leadSource", "leadSourceDetail", "referrerPersonId");
+
     private static final int MAX_MATCHING_IDS = 1000;
 
     /**
@@ -111,7 +118,7 @@ public class PersonService {
     public List<Person> getPersonsByDealId(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (!dealMapper.exists(workspaceId, dealId)) {
-            throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+            throw new ResourceNotFoundException("Deal not found");
         }
         return personMapper.getPersonsByDealId(workspaceId, dealId);
     }
@@ -121,17 +128,26 @@ public class PersonService {
      * active one, so the reversible archive has a place to be reviewed and restored from.
      */
     public List<Person> getPersonsPage(String query, String sort, String dir, List<String> companies,
-            List<String> titles, boolean noCompany, MemberScope memberScope, boolean archived,
-            int limit, int offset) {
+            List<String> titles, boolean noCompany, MemberScope memberScope,
+            List<PersonLifecycleStage> lifecycleStages, boolean noLifecycle,
+            List<PersonLeadSource> leadSources, boolean noLeadSource,
+            List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
+            boolean archived, WarmthFilter warmth, int limit, int offset) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         return personMapper.getPersonsPage(workspaceId, query, sort, dir,
-            companies, titles, noCompany, memberScope, archived, limit, offset);
+            companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
+            leadSources, noLeadSource, firstResponseStates, noFirstResponse,
+            archived, warmth, limit, offset);
     }
 
     public long countPersons(String query, List<String> companies, List<String> titles, boolean noCompany,
-            MemberScope memberScope, boolean archived) {
+            MemberScope memberScope, List<PersonLifecycleStage> lifecycleStages, boolean noLifecycle,
+            List<PersonLeadSource> leadSources, boolean noLeadSource,
+            List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
+            boolean archived, WarmthFilter warmth) {
         return personMapper.countPersons(workspaceService.getCurrentWorkspaceId(),
-            query, companies, titles, noCompany, memberScope, archived);
+            query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
+            leadSources, noLeadSource, firstResponseStates, noFirstResponse, archived, warmth);
     }
 
     /** How many contacts the active workspace currently holds archived. */
@@ -145,26 +161,43 @@ public class PersonService {
      * bulk action can target the whole filtered set, not just the loaded page.
      */
     public List<Integer> getMatchingPersonIds(String query, List<String> companies, List<String> titles,
-            boolean noCompany, MemberScope memberScope, boolean archived) {
-        if (!archived && !hasMatchingIdFilter(query, companies, titles, noCompany, memberScope)) {
+            boolean noCompany, MemberScope memberScope, List<PersonLifecycleStage> lifecycleStages,
+            boolean noLifecycle, List<PersonLeadSource> leadSources, boolean noLeadSource,
+            List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
+            boolean archived, WarmthFilter warmth) {
+        if (!archived && (warmth == null || !warmth.restrictsRows()) && !hasMatchingIdFilter(
+                query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
+                leadSources, noLeadSource, firstResponseStates, noFirstResponse)) {
             throw new BadRequestException("At least one filter is required before selecting matching contact ids");
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         long total = personMapper.countPersons(
-            workspaceId, query, companies, titles, noCompany, memberScope, archived);
+            workspaceId, query, companies, titles, noCompany, memberScope,
+            lifecycleStages, noLifecycle, leadSources, noLeadSource,
+            firstResponseStates, noFirstResponse, archived, warmth);
         if (total > MAX_MATCHING_IDS) {
             throw new BadRequestException("Too many matching contacts; narrow the filters before selecting all");
         }
         return personMapper.getPersonIdsFiltered(
-            workspaceId, query, companies, titles, noCompany, memberScope, archived, MAX_MATCHING_IDS);
+            workspaceId, query, companies, titles, noCompany, memberScope,
+            lifecycleStages, noLifecycle, leadSources, noLeadSource,
+            firstResponseStates, noFirstResponse, archived, warmth, MAX_MATCHING_IDS);
     }
 
     private static boolean hasMatchingIdFilter(String query, List<String> companies, List<String> titles,
-            boolean noCompany, MemberScope memberScope) {
+            boolean noCompany, MemberScope memberScope, List<PersonLifecycleStage> lifecycleStages,
+            boolean noLifecycle, List<PersonLeadSource> leadSources, boolean noLeadSource,
+            List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse) {
         return query != null
             || (companies != null && !companies.isEmpty())
             || (titles != null && !titles.isEmpty())
             || noCompany
+            || (lifecycleStages != null && !lifecycleStages.isEmpty())
+            || noLifecycle
+            || (leadSources != null && !leadSources.isEmpty())
+            || noLeadSource
+            || (firstResponseStates != null && !firstResponseStates.isEmpty())
+            || noFirstResponse
             || (memberScope != null && memberScope.mode() != MemberScope.Mode.ALL_TEAM);
     }
 
@@ -184,13 +217,40 @@ public class PersonService {
         return personMapper.countsByOwner(workspaceService.getCurrentWorkspaceId());
     }
 
+    /** How many active contacts sit in each lead-lifecycle stage, for the browser's filter menu. */
+    public List<FacetCount> countsByLifecycleStage() {
+        return personMapper.countsByLifecycleStage(workspaceService.getCurrentWorkspaceId());
+    }
+
+    /** How many active contacts entered through each lead source, for the browser's filter menu. */
+    public List<FacetCount> countsByLeadSource() {
+        return personMapper.countsByLeadSource(workspaceService.getCurrentWorkspaceId());
+    }
+
+    /**
+     * How many visible contacts sit in each relationship-warmth band, plus those with no history.
+     * This scans the workspace's whole interaction history, so callers request it deliberately.
+     *
+     * @param warmth resolved model parameters and evaluation instant, required
+     * @return one bucket per band, plus {@code __none__}
+     */
+    public List<FacetCount> countsByWarmthBand(WarmthFilter warmth) {
+        Objects.requireNonNull(warmth, "warmth is required to compute warmth band facets");
+        return personMapper.countsByWarmthBand(workspaceService.getCurrentWorkspaceId(), warmth);
+    }
+
+    /** How many active contacts sit in each first-response SLA state, for the browser's filter menu. */
+    public List<FacetCount> countsByFirstResponseState() {
+        return personMapper.countsByFirstResponseState(workspaceService.getCurrentWorkspaceId());
+    }
+
     /**
      * Retrieves a workspace-scoped {@code Person} by ID, throwing if absent.
      */
     public Person getPersonById(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person person = personMapper.getPersonById(workspaceId, id);
-        if (person == null) throw new ResourceNotFoundException("Person not found with id: " + id);
+        if (person == null) throw new ResourceNotFoundException("Contact not found");
         Person hydrated = hydrateScopedRelationships(person, workspaceId);
         referenceService.hydrateTasks(workspaceId, List.of(hydrated.getTasks()));
         if (hydrated.getActivities() != null && hydrated.getActivities().length > 0) {
@@ -293,7 +353,7 @@ public class PersonService {
                 || person.getArchivedAt() != null
                 || person.getSuspendedAt() != null
                 || person.getProvisionCeasedAt() != null) {
-            throw new ResourceNotFoundException("Person not found with id: " + id);
+            throw new ResourceNotFoundException("Contact not found");
         }
         return person;
     }
@@ -319,6 +379,11 @@ public class PersonService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         duplicateDecisionLockService.lockCurrentOrganization();
         preserveHiddenCompanyAndValidateRequestedCompany(workspaceId, null, person);
+        if (source == IdentityAcquisitionSource.BUSINESS_CARD && person.getLeadSource() == null) {
+            person.setLeadSource(PersonLeadSource.BUSINESS_CARD);
+        }
+        validateProvenance(workspaceId, null,
+            person.getLeadSource(), person.getLeadSourceDetail(), person.getReferrerPersonId());
         person.setWorkspaceId(workspaceId);
         person.setOwnerId(authService.getCurrentUser().getId());
         person.setImageUrl(null);
@@ -352,7 +417,7 @@ public class PersonService {
         duplicateDecisionLockService.lockCurrentOrganization();
         Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
         if (before == null || before.getArchivedAt() != null) {
-            throw new ResourceNotFoundException("Person not found with id: " + id);
+            throw new ResourceNotFoundException("Contact not found");
         }
         preserveHiddenCompanyAndValidateRequestedCompany(
             workspaceId, companyIdOf(before), person);
@@ -421,6 +486,68 @@ public class PersonService {
     }
 
     /**
+     * Replaces the contact's source provenance (#559). Every field is written so a correction can
+     * also clear a value; the previous values stay in the audit log. Provenance, like the lead
+     * lifecycle, is the owning workspace's own record — a merely shared-in contact is not
+     * updatable here, which {@code requireOwnedPerson} already enforces.
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public Person updateProvenance(
+            int id, PersonLeadSource source, String detail, Integer referrerPersonId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
+        if (before == null || before.getArchivedAt() != null) {
+            throw new ResourceNotFoundException("Contact not found");
+        }
+        String acceptedDetail = trimToNull(detail);
+        validateProvenance(workspaceId, id, source, acceptedDetail, referrerPersonId);
+        personMapper.updateProvenance(workspaceId, id, source, acceptedDetail, referrerPersonId);
+        Person after = requireOwnedPerson(workspaceId, id);
+        Map<String, Object> diff = auditService.diff(before, after, PROVENANCE_AUDIT_FIELDS);
+        if (diff != null) {
+            auditService.record("person.provenance", "person", id, after.getName(),
+                "Updated lead source for " + after.getName(), diff);
+        }
+        return after;
+    }
+
+    /**
+     * Rejects a provenance combination the model forbids: detail without a source, or a referrer on
+     * a source that does not carry one. The referrer must be a different contact the workspace owns.
+     */
+    private void validateProvenance(
+            int workspaceId,
+            Integer personId,
+            PersonLeadSource source,
+            String detail,
+            Integer referrerPersonId) {
+        if (detail != null && source == null) {
+            throw new BadRequestException("Source detail requires a lead source");
+        }
+        if (referrerPersonId == null) {
+            return;
+        }
+        if (source == null || !source.supportsReferrer()) {
+            throw new BadRequestException("A referrer applies only to referral or partner sources");
+        }
+        if (personId != null && referrerPersonId.intValue() == personId.intValue()) {
+            throw new BadRequestException("A contact cannot refer itself");
+        }
+        if (!personMapper.existsOwned(workspaceId, referrerPersonId)) {
+            throw new BadRequestException("Referring contact not found");
+        }
+    }
+
+    private static String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    /**
      * Sets the contact's engine-evaluation opt-outs (issue #358). {@code riskExcluded} removes the
      * contact from relationship-decay nudges and from contributing a stakeholder-cold factor to
      * deal risk; {@code introExcluded} removes them from introduction suggestions and
@@ -456,7 +583,7 @@ public class PersonService {
         int orgId = duplicateDecisionLockService.lockCurrentOrganization();
         Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
         if (before == null) {
-            throw new ResourceNotFoundException("Person not found with id: " + id);
+            throw new ResourceNotFoundException("Contact not found");
         }
         List<Integer> restrictionWorkspaceIds = suspended || provisionCeased
             ? restrictionWorkspaceIds(orgId, workspaceId)
@@ -532,7 +659,7 @@ public class PersonService {
             return;
         }
         if (!companyMapper.exists(workspaceId, requestedCompanyId)) {
-            throw new BadRequestException("Company not found with id: " + requestedCompanyId);
+            throw new BadRequestException("Company not found");
         }
     }
 
@@ -561,11 +688,11 @@ public class PersonService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         duplicateDecisionLockService.lockCurrentOrganization();
         if (personMapper.lockById(workspaceId, id) == null) {
-            throw new ResourceNotFoundException("Person not found with id: " + id);
+            throw new ResourceNotFoundException("Contact not found");
         }
         Person before = requireOwnedPerson(workspaceId, id);
         if (personMapper.archive(workspaceId, id) != 1) {
-            throw new ResourceNotFoundException("Person not found with id: " + id);
+            throw new ResourceNotFoundException("Contact not found");
         }
         withdrawProviderCapture(workspaceId, id);
         Person after = requireArchivedPerson(workspaceId, id);
@@ -590,11 +717,11 @@ public class PersonService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         duplicateDecisionLockService.lockCurrentOrganization();
         if (personMapper.lockById(workspaceId, id) == null) {
-            throw new ResourceNotFoundException("Person not found with id: " + id);
+            throw new ResourceNotFoundException("Contact not found");
         }
         Person before = requireArchivedPerson(workspaceId, id);
         if (personMapper.restore(workspaceId, id) != 1) {
-            throw new ResourceNotFoundException("Person not found with id: " + id);
+            throw new ResourceNotFoundException("Contact not found");
         }
         Person after = requireOwnedPerson(workspaceId, id);
         identityIntakeService.recordPerson(
@@ -612,7 +739,7 @@ public class PersonService {
     private Person requireArchivedPerson(int workspaceId, int id) {
         Person person = personMapper.getOwnedArchivedPersonById(workspaceId, id);
         if (person == null) {
-            throw new ResourceNotFoundException("Person not found with id: " + id);
+            throw new ResourceNotFoundException("Contact not found");
         }
         return person;
     }
@@ -640,7 +767,7 @@ public class PersonService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person person = requireOwnedPerson(workspaceId, personId);
         Tag tag = tagMapper.getTagById(workspaceId, tagId);
-        if (tag == null) throw new ResourceNotFoundException("Tag not found with id: " + tagId);
+        if (tag == null) throw new ResourceNotFoundException("Tag not found");
         if (personMapper.addTag(workspaceId, personId, tagId) != 1) {
             return false;
         }
@@ -777,13 +904,13 @@ public class PersonService {
 
     private Person requirePerson(int workspaceId, int personId) {
         Person person = personMapper.getPersonById(workspaceId, personId);
-        if (person == null) throw new ResourceNotFoundException("Person not found with id: " + personId);
+        if (person == null) throw new ResourceNotFoundException("Contact not found");
         return person;
     }
 
     private Person requireOwnedPerson(int workspaceId, int personId) {
         if (!personMapper.existsOwned(workspaceId, personId)) {
-            throw new ResourceNotFoundException("Person not found with id: " + personId);
+            throw new ResourceNotFoundException("Contact not found");
         }
         return requirePerson(workspaceId, personId);
     }

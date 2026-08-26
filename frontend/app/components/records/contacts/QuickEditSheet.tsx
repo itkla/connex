@@ -15,6 +15,7 @@ import {
     QuickEditRecordCard,
     QuickEditSheetShell,
 } from '@/app/components/records/quick-edit/QuickEditSheetShell';
+import { quickEditErrorId } from '@/app/hooks/useFieldErrors';
 
 export type ContactDraft = {
     name: string;
@@ -34,6 +35,10 @@ type Props = {
     updateImageFile?: (id: number, file: File | null) => void;
     isSaving: boolean;
     saveEdits: () => void;
+    /** Per-contact inline validation messages, keyed by contact id then draft field. */
+    fieldErrors?: Record<number, Record<string, string>>;
+    /** Unsaved state owned by `customFieldsSlot`, folded into the sheet's discard guard. */
+    customFieldsDirty?: boolean;
     customFieldsSlot?: ReactNode;
 };
 
@@ -47,6 +52,8 @@ export default function QuickEditSheet({
     updateImageFile,
     isSaving,
     saveEdits,
+    fieldErrors,
+    customFieldsDirty,
     customFieldsSlot,
 }: Props) {
     const t = useTranslations('ContactsQuickEditSheet');
@@ -81,6 +88,7 @@ export default function QuickEditSheet({
             }}
             saveLabel={t('save')}
             cancelLabel={t('cancel')}
+            dirtySnapshot={{ drafts, customFieldsDirty }}
         >
             {selectedContacts.map((c, idx) => {
                 const draft = drafts[c.id];
@@ -117,12 +125,19 @@ export default function QuickEditSheet({
                         title={c.name}
                         subtitle={draft.title || draft.email || undefined}
                     >
-                        <QuickEditField label={t('name')} htmlFor={`name-${c.id}`} required>
+                        <QuickEditField
+                            label={t('name')}
+                            htmlFor={`name-${c.id}`}
+                            required
+                            error={fieldErrors?.[c.id]?.name}
+                        >
                             <Input
                                 id={`name-${c.id}`}
                                 type="text"
                                 value={draft.name}
                                 onChange={(e) => updateDraft(c.id, { name: e.target.value })}
+                                aria-invalid={Boolean(fieldErrors?.[c.id]?.name)}
+                                aria-describedby={fieldErrors?.[c.id]?.name ? quickEditErrorId(`name-${c.id}`) : undefined}
                                 required
                             />
                         </QuickEditField>

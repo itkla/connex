@@ -40,7 +40,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import {
-    ApiError,
     clearDefaultSavedView,
     createSavedView,
     deleteSavedView,
@@ -57,6 +56,7 @@ import {
     normalizeSegmentDefinition,
 } from "@/app/lib/segmentDefinition";
 import { savedViewConfigKey } from "@/app/lib/savedViewConfig";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { publishSavedViewMutation } from "@/app/lib/saved-view-events";
 import { parseSavedViewToken, savedViewRecordPath, savedViewToken } from "@/app/lib/savedViewLink";
@@ -114,6 +114,7 @@ export default function SavedViewsBar({
     unavailable?: boolean;
 }) {
     const t = useTranslations("SavedViews");
+    const showApiError = useApiErrorToast("SavedViews");
     const pathname = usePathname();
     const { activeWorkspaceId, workspaces, switching, runInWorkspace } = useWorkspace();
     const [views, setViews] = useState(initialViews);
@@ -254,7 +255,7 @@ export default function SavedViewsBar({
             setSwitchPrompt(null);
             window.location.reload();
         } catch (err) {
-            toastError(err instanceof ApiError ? err.message : t("actionFailed"));
+            showApiError(err, "actionFailed");
         }
     };
     const declineSwitchWorkspace = () => {
@@ -282,7 +283,7 @@ export default function SavedViewsBar({
             onActiveScopeChange?.(saved.config, saved.id);
             toastSuccess(t("saved"));
         } catch (err) {
-            toastError(err instanceof ApiError ? err.message : t("saveFailed"));
+            showApiError(err, "saveFailed");
         }
     };
 
@@ -294,7 +295,7 @@ export default function SavedViewsBar({
             if (view.pinned) publishSavedViewMutation(recordType);
             toastSuccess(t("deleted"));
         } catch (err) {
-            toastError(err instanceof ApiError ? err.message : t("deleteFailed"));
+            showApiError(err, "deleteFailed");
         }
     };
 
@@ -306,7 +307,7 @@ export default function SavedViewsBar({
             publishSavedViewMutation(recordType);
             toastSuccess(view.pinned ? t("unpinned") : t("pinned"));
         } catch (err) {
-            toastError(err instanceof ApiError ? err.message : t("actionFailed"));
+            showApiError(err, "actionFailed");
         }
     };
 
@@ -321,7 +322,7 @@ export default function SavedViewsBar({
             })));
             toastSuccess(nextDefault ? t("defaultSet") : t("defaultCleared"));
         } catch (err) {
-            toastError(err instanceof ApiError ? err.message : t("actionFailed"));
+            showApiError(err, "actionFailed");
         }
     };
 
@@ -337,7 +338,7 @@ export default function SavedViewsBar({
             setViews((prev) => prev.map((other) => (other.id === saved.id ? saved : other)));
             toastSuccess(nextVisibility === "workspace" ? t("madeShared") : t("madePrivate"));
         } catch (err) {
-            toastError(err instanceof ApiError ? err.message : t("actionFailed"));
+            showApiError(err, "actionFailed");
         }
     };
 
@@ -372,7 +373,7 @@ export default function SavedViewsBar({
             return null;
         } catch (err) {
             if (isFieldError(err) && err.fieldErrors.name) return err.fieldErrors.name;
-            toastError(err instanceof ApiError ? err.message : t("saveFailed"));
+            showApiError(err, "saveFailed");
             return null;
         }
     };
@@ -406,7 +407,7 @@ export default function SavedViewsBar({
             {explicitView && modified ? (
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button size="xs" variant="ghost" className="ml-1 text-brand hover:text-brand-hover">
+                        <Button size="inline" variant="ghost" menu className="ml-1 text-brand hover:text-brand-hover">
                             {t("save")}
                         </Button>
                     </DropdownMenuTrigger>
@@ -420,7 +421,7 @@ export default function SavedViewsBar({
             ) : (
                 canSaveNew && (
                     <Button
-                        size="xs"
+                        size="inline"
                         variant="ghost"
                         className="ml-1 gap-1 text-brand hover:text-brand-hover"
                         onClick={() => setDialog({ mode: "create" })}
@@ -434,7 +435,7 @@ export default function SavedViewsBar({
             {activeView && (
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button size="icon-xs" variant="ghost" aria-label={t("viewActions")}>
+                        <Button size="icon-inline" variant="ghost" aria-label={t("viewActions")}>
                             <EllipsisHorizontalIcon className="size-4" />
                         </Button>
                     </DropdownMenuTrigger>

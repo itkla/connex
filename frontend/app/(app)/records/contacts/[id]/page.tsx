@@ -1,4 +1,4 @@
-import { getAttachmentsFromCookie, getContactById, getContactConnections, getContactEmployment, getContactEvidence, getContactIntroPath, getContextNotifications, getCurrentUserResultFromCookie, getEffectivePermissionsFromCookie, getEntityCustomFieldsFromCookie, getTags, getUserReferences } from "@/app/lib/api";
+import { getAttachmentsFromCookie, getCommentThreads, getContactById, getContactLifecycle, getContactLifecycleHistory, getContactQualification, getContactConnections, getContactEmployment, getContactEvidence, getContactIntroPath, getContextNotifications, getCurrentUserResultFromCookie, getEffectivePermissionsFromCookie, getEntityCustomFieldsFromCookie, getPersonCampaignTouches, getPersonMarketingStatus, getTags, getUserReferences } from "@/app/lib/api";
 import { notFound, redirect } from "next/navigation";
 import AccessDeniedPage from "@/app/components/AccessDeniedPage";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
@@ -6,7 +6,7 @@ import { loadRecord } from "@/app/lib/recordAccess";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
 import ActionRecordBridge from "@/app/components/actions/ActionRecordBridge";
 import RecentRecordBridge from "@/app/components/actions/RecentRecordBridge";
-import { type Tag, type Contact, type IntroPath, type PersonConnection, type PersonEmployment } from "@/app/lib/types";
+import { type Tag, type Contact, type IntroPath, type PersonCampaignTouch, type PersonConnection, type PersonEmployment } from "@/app/lib/types";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { UserIcon } from "@heroicons/react/24/outline";
@@ -15,21 +15,28 @@ import { getLocale, getTranslations } from "next-intl/server";
 import Rise from "@/app/components/motion/Rise";
 import { PageShell } from "@/app/components/PageShell";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
+import AskConnexRecordEntry from "@/app/components/ask-connex/AskConnexRecordEntry";
 import ContactActionsMenu from "@/app/components/records/contacts/ContactActionsMenu";
 import ContactAvatar from "@/app/components/records/contacts/ContactAvatar";
 import ContactConnections from "@/app/components/records/contacts/ContactConnections";
 import ContactStatCard from "@/app/components/records/contacts/ContactStatCard";
-import TemperatureEvidenceChip from "@/app/components/records/TemperatureEvidenceChip";
-import NewActivityDialog from "@/app/components/records/contacts/NewActivityDialog";
-import NewTaskDialog from "@/app/components/records/contacts/NewTaskDialog";
+import { contactDealsHref } from "@/app/components/records/deals/dealLinks";
+import WarmthEvidenceChip from "@/app/components/records/WarmthEvidenceChip";
+import { RecordActivityComposer, RecordTaskComposer } from "@/app/components/records/RecordComposers";
 import TagEditor from "@/app/components/records/contacts/TagEditor";
 import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/ui/avatar";
 import InfoRow from "@/app/components/me/InfoRow";
 import Timeline from "@/app/components/me/Timeline";
+import { commentsFromThreads, TIMELINE_CAMPAIGN_TOUCH_LIMIT, TIMELINE_COMMENT_LIMIT } from "@/app/components/me/timelineEntries";
+import MarketingExclusionBadge from "@/app/components/records/contacts/MarketingExclusionBadge";
+import { channelMarketingExclusion, EMAIL_CHANNEL } from "@/app/components/records/contacts/marketingStatus";
 import Attachments from "@/app/components/attachments/Attachments";
 import CommentsSection from "@/app/components/records/comments/CommentsSection";
 import CustomFieldRows from "@/app/components/records/CustomFieldRows";
+import ContactLeadPanel from "@/app/components/records/contacts/ContactLeadPanel";
 import EngineEvaluationPanel from "@/app/components/records/EngineEvaluationPanel";
+import RecordSignalsPanel from "@/app/components/records/RecordSignalsPanel";
+import ContactIntroAskProvider from "@/app/components/records/contacts/ContactIntroAskProvider";
 import RecordDetailSection from "@/app/components/records/RecordDetailSection";
 import { formatCompactCurrency, formatDate, formatDateTime, formatShortDate } from "@/app/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
@@ -55,7 +62,8 @@ export default async function ContactPage({ params }: ContactPageProps) {
         redirect('/auth/login');
     }
 
-    const [t, locale, contactAccess, allTags, attachments, notificationPage, employment, connections, introPath, customFields, evidence, effectivePermissions] = await Promise.all([
+    const permissionsPromise = getEffectivePermissionsFromCookie(cookie);
+    const [t, locale, contactAccess, allTags, attachments, notificationPage, employment, connections, introPath, customFields, evidence, effectivePermissions, lifecycle, lifecycleHistory, qualification, commentThreads, marketingStatus, campaignTouches] = await Promise.all([
         getTranslations("ContactsPage"),
         getLocale(),
         loadRecord<Contact>(() => getContactById(id, init)),
@@ -72,7 +80,21 @@ export default async function ContactPage({ params }: ContactPageProps) {
         getContactIntroPath(id, init).catch(() => ({ reachable: false, directlyKnown: false, steps: [] }) as IntroPath),
         getEntityCustomFieldsFromCookie("person", id, cookie),
         getContactEvidence(id, init).catch(() => null),
-        getEffectivePermissionsFromCookie(cookie),
+        permissionsPromise,
+        getContactLifecycle(id, init).catch(() => null),
+        getContactLifecycleHistory(id, init).catch(() => []),
+        getContactQualification(id, init).then(
+            (loaded) => ({ loaded }),
+            () => ({ failed: true as const }),
+        ),
+        getCommentThreads("person", id, { limit: TIMELINE_COMMENT_LIMIT }, init).catch(() => []),
+        getPersonMarketingStatus(id, init).catch(() => null),
+        permissionsPromise.then((permissions): Promise<PersonCampaignTouch[]> | PersonCampaignTouch[] =>
+            permissions.includes("CAMPAIGN_VIEW")
+                ? getPersonCampaignTouches(id, { size: TIMELINE_CAMPAIGN_TOUCH_LIMIT }, init)
+                    .then((page) => page.items)
+                    .catch(() => [])
+                : []),
     ]);
     if (contactAccess.kind === "forbidden") {
         return <AccessDeniedPage />;
@@ -81,6 +103,9 @@ export default async function ContactPage({ params }: ContactPageProps) {
         notFound();
     }
     const contact = contactAccess.record;
+    const referrer = contact.referrerPersonId != null
+        ? await getContactById(contact.referrerPersonId, init).catch(() => null)
+        : null;
 
     const tasks = contact.tasks ?? [];
     const activities = contact.activities ?? [];
@@ -95,6 +120,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
         ...activities.map((activity) => activity.createdById),
         ...notes.map((note) => note.author),
         ...tasks.map((task) => task.assignedToId),
+        ...lifecycleHistory.map((entry) => entry.changedById),
     ].filter((value): value is number => typeof value === "number"));
     const userIds = new Set(interactionUserIds);
     if (contact.ownerId != null) userIds.add(contact.ownerId);
@@ -105,7 +131,8 @@ export default async function ContactPage({ params }: ContactPageProps) {
         : null;
 
     return (
-        <PageShell tier="wide">
+        <ContactIntroAskProvider contactId={contact.id} contactName={contact.name}>
+        <PageShell>
                 <Rise>
                     <CrumbLabel value={contact.name} />
                     <ActionRecordBridge type="person" id={contact.id} label={contact.name} />
@@ -156,7 +183,15 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                             </>
                                         ) : null}
                                         {evidence ? (
-                                            <TemperatureEvidenceChip evidence={evidence} />
+                                            <WarmthEvidenceChip
+                                                evidence={evidence}
+                                                actions={{
+                                                    contact,
+                                                    companyId: contact.companyId ?? contact.company?.id ?? null,
+                                                    currentUserId: currentUser.id,
+                                                    goesColdAt: evidence.temperature.goesColdAt ?? null,
+                                                }}
+                                            />
                                         ) : null}
                                     </h3>
                                 </div>
@@ -201,7 +236,8 @@ export default async function ContactPage({ params }: ContactPageProps) {
                         </header>
                     </RecordDetailSection>
 
-                    <RecordDetailSection recordKind="contact" section="actions" className="mt-4 flex justify-end">
+                    <RecordDetailSection recordKind="contact" section="actions" className="mt-4 flex flex-wrap justify-end gap-2">
+                        <AskConnexRecordEntry kind="person" />
                         <ContactActionsMenu
                             contact={contact}
                             currentUserId={currentUser.id}
@@ -225,7 +261,15 @@ export default async function ContactPage({ params }: ContactPageProps) {
                             <div>
                                 <SectionHeader title={t("profile")} />
                                 <dl className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
-                                    <InfoRow label={t("email")} value={contact.email ?? ''} />
+                                    <InfoRow
+                                        label={t("email")}
+                                        value={contact.email ?? ''}
+                                        badge={(
+                                            <MarketingExclusionBadge
+                                                state={channelMarketingExclusion(marketingStatus, EMAIL_CHANNEL)}
+                                            />
+                                        )}
+                                    />
                                     <InfoRow label={t("phone")} value={contact.phone ?? ''} />
                                     <InfoRow label={t("title")} value={contact.title ?? ''} />
                                     <InfoRow label={t("company")} value={contact.company?.name ?? t("companyPlaceholder")} />
@@ -277,12 +321,17 @@ export default async function ContactPage({ params }: ContactPageProps) {
                             ) : null}
                         </RecordDetailSection>
 
-                        {ownsContact ? (
-                            <EngineEvaluationPanel
-                                kind="contact"
-                                id={contact.id}
-                                riskExcluded={contact.riskExcluded ?? false}
-                                introExcluded={contact.introExcluded ?? false}
+                        {ownsContact && lifecycle ? (
+                            <ContactLeadPanel
+                                contact={contact}
+                                lifecycle={lifecycle}
+                                qualification={"loaded" in qualification ? qualification.loaded : null}
+                                referrer={referrer}
+                                hasLinkedDeal={deals.length > 0}
+                                canEdit={effectivePermissions.includes("PERSON_UPDATE")
+                                    && !contact.archivedAt
+                                    && !contact.suspendedAt
+                                    && !contact.provisionCeasedAt}
                                 className="mt-0"
                             />
                         ) : null}
@@ -297,10 +346,12 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                     value={activities.length}
                                     subtitle={notes.length > 0 ? t("notesCount", { count: notes.length }) : undefined}
                                     addAction={
-                                        <NewActivityDialog
-                                            contactId={contact.id}
-                                            contactName={contact.name}
-                                            companyId={contact.companyId ?? contact.company?.id}
+                                        <RecordActivityComposer
+                                            anchor={{
+                                                kind: "person",
+                                                person: contact,
+                                                companyId: contact.companyId ?? contact.company?.id ?? null,
+                                            }}
                                             currentUserId={currentUser.id}
                                         />
                                     }
@@ -311,10 +362,12 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                     value={tasks.length}
                                     subtitle={tasks.length > 0 ? t("openCount", { count: openTasks }) : undefined}
                                     addAction={
-                                        <NewTaskDialog
-                                            contactId={contact.id}
-                                            contactName={contact.name}
-                                            companyId={contact.companyId ?? contact.company?.id}
+                                        <RecordTaskComposer
+                                            anchor={{
+                                                kind: "person",
+                                                person: contact,
+                                                companyId: contact.companyId ?? contact.company?.id ?? null,
+                                            }}
                                             currentUserId={currentUser.id}
                                         />
                                     }
@@ -324,10 +377,27 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                     label={t("deals")}
                                     value={deals.length}
                                     subtitle={deals.length > 0 ? t("dealsCount", { count: deals.length }) : undefined}
-                                    viewHref={`/activity/deals?contactId=${contact.id}`}
+                                    viewHref={contactDealsHref(contact.id)}
                                 />
                             </div>
                         </RecordDetailSection>
+
+                        {ownsContact ? (
+                            <RecordDetailSection recordKind="contact" section="relationship">
+                                <RecordSignalsPanel
+                                    subject={{ type: "person", id: contact.id, label: contact.name }}
+                                    evaluation={
+                                        <EngineEvaluationPanel
+                                            kind="contact"
+                                            id={contact.id}
+                                            riskExcluded={contact.riskExcluded ?? false}
+                                            introExcluded={contact.introExcluded ?? false}
+                                            embedded
+                                        />
+                                    }
+                                />
+                            </RecordDetailSection>
+                        ) : null}
 
                         <RecordDetailSection recordKind="contact" section="activity">
                             <SectionHeader title={t("activePipeline")} />
@@ -402,6 +472,9 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                 users={interactionUsers}
                                 persons={[contact]}
                                 deals={deals}
+                                lifecycleHistory={ownsContact ? lifecycleHistory : []}
+                                comments={commentsFromThreads(commentThreads)}
+                                campaignTouches={campaignTouches}
                                 currentUserId={currentUser.id}
                                 companyId={contact.companyId ?? contact.company?.id ?? null}
                             />
@@ -409,5 +482,6 @@ export default async function ContactPage({ params }: ContactPageProps) {
                     </RecordDetailSection>
                 </Rise>
         </PageShell>
+        </ContactIntroAskProvider>
     );
 }

@@ -41,6 +41,7 @@ import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.ai.assistant.AiAssistantLoopException;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptBudget;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantStep;
@@ -95,6 +96,8 @@ class AiInvocationServiceTest {
     private static final int ORG_ID = 22;
     private static final int ACTOR_ID = 33;
     private static final AiFeature FEATURE = AiFeature.DEAL_BRIEF;
+    private static final int ASSISTANT_FLOOR =
+            AiAssistantPromptBudget.ASSISTANT_MIN_CONTEXT_TOKENS;
     private static final Instant NOW = Instant.parse("2026-08-12T00:00:00Z");
 
     @Mock private AiFeatureGate aiFeatureGate;
@@ -288,6 +291,47 @@ class AiInvocationServiceTest {
         assertEquals("AI provider configuration changed before egress", exception.getMessage());
         assertEquals("failure", singleAuditMetadata().get("outcome"));
         verify(providerTransport, never()).run();
+    }
+
+    @Test
+    void completeRejectsAProviderConfigurationChangedDuringTheRequest() {
+        ResolvedAiProvider changed = unmaskedResolved();
+        when(aiProviderConfigService.resolveForOrg(ORG_ID, ACTOR_ID))
+                .thenReturn(resolved, resolved, changed);
+        providerReturns(new AiCompletionResult("unused", 12, 4, "end_turn"));
+
+        AiProviderException exception = assertThrows(
+                AiProviderException.class,
+                () -> service.complete(invocation("Summarize relationship state")));
+
+        assertEquals("AI provider configuration changed before egress", exception.getMessage());
+        verify(providerTransport).run();
+        verify(budgetLease).settle(12, 4);
+        verify(budgetLease, never()).close();
+    }
+
+    @Test
+    void completeRejectsPermissionLossDuringTheRequest() {
+        doNothing().doThrow(new ForbiddenException("AI access changed"))
+                .when(providerAttemptGuard).run();
+        providerReturns(new AiCompletionResult(
+                "{\"rationale\":\"unused\",\"evidence\":[]}",
+                12,
+                4,
+                "end_turn"));
+
+        assertThrows(
+                ForbiddenException.class,
+                () -> service.complete(
+                        invocation("Summarize relationship state"),
+                        directAdmission,
+                        restrictionEpoch.current(WORKSPACE_ID),
+                        providerAttemptGuard));
+
+        verify(providerAttemptGuard, times(2)).run();
+        verify(providerTransport).run();
+        verify(budgetLease).settle(12, 4);
+        verify(budgetLease, never()).close();
     }
 
     @Test
@@ -561,6 +605,33 @@ class AiInvocationServiceTest {
         verify(aiProvider).complete(any());
     }
 
+    /**
+     * The pre-egress admission ceiling is the last gate before a prompt leaves the process, and it
+     * is computed from the adapter's declared context window. A million-token model must widen that
+     * gate proportionally and must not saturate it: an admission ceiling pinned at
+     * {@link Integer#MAX_VALUE} would silently stop being a ceiling at all.
+     */
+    @Test
+    void completeAdmitsAtTheConservativeBoundaryOfAMillionTokenWindow() {
+        AiInvocation invocation = invocation("\u95a2\u4fc2\u6027\u3092\u8981\u7d04\u3057\u3066\u304f\u3060\u3055\u3044\u3002".repeat(256));
+        int serializedBytes = service.serializedPromptBytes(
+                invocation.prompt(), null, AiReasoningMode.NONE);
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(1_000_000);
+        providerReturns(new AiCompletionResult(
+                "{{P1}} is ready for follow-up.", 12, 7, "end_turn"));
+
+        AiCompletionOutcome outcome = service.complete(invocation);
+
+        int ceiling = AiProviderCapabilities.conservativeInputByteCeiling(
+                1_000_000, invocation.maxTokens());
+        assertEquals(1_000_000 - invocation.maxTokens(), ceiling);
+        assertTrue(ceiling > serializedBytes);
+        assertTrue(ceiling < Integer.MAX_VALUE,
+                "a million-token window must not saturate the admission ceiling");
+        assertEquals("Mina Patel is ready for follow-up.", outcome.text());
+        verify(aiProvider).complete(any());
+    }
+
     @Test
     void completeRejectsJapaneseDenseInputOneByteBeyondTheConservativeBoundary() {
         AiInvocation invocation = invocation("関係性を要約してください。".repeat(256));
@@ -578,8 +649,43 @@ class AiInvocationServiceTest {
         verify(aiProvider, never()).complete(any());
     }
 
+    /**
+     * The assistant floor refuses a 32k model before anything is assembled or sent.
+     *
+     * <p>An unknown OpenAI-compatible model falls back to a conservative 32k context declaration,
+     * which is exactly the configuration this refusal exists for: the prompt would have fitted, so
+     * no later guard would have objected, and the answer would have been truncated instead.
+     */
     @Test
-    void unknownOpenAiCompatible32kContextAcceptsTheRealFirstToolResultPrompt() {
+    void unknownOpenAiCompatible32kContextIsRefusedBeforeTheAssistantPromptIsAssembled() {
+        var catalog = new AiAssistantToolCatalog();
+        var promptAssembler = new AiAssistantPromptAssembler(new ObjectMapper(), catalog);
+        var stepSchema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
+        int fixedEnvelopeBytes = service.serializedPromptBytes(
+                promptAssembler.fixedPrompt(),
+                stepSchema.responseSchema(),
+                AiReasoningMode.TAGGED);
+
+        AiAssistantLoopException refused = assertThrows(
+                AiAssistantLoopException.class,
+                () -> AiAssistantPromptBudget.from(
+                        new AiProviderCapabilities(
+                                AiStructuredOutputEnforcement.JSON_SCHEMA,
+                                AiReasoningMode.TAGGED,
+                                32_768,
+                                8_192),
+                        16_384,
+                        fixedEnvelopeBytes));
+
+        assertEquals("context_window_too_small", refused.terminalReason());
+        assertTrue(fixedEnvelopeBytes < AiProviderCapabilities.conservativeInputByteCeiling(
+                32_768, 8_192),
+                "The 32k refusal must be the floor, not a prompt that no longer fits");
+        verify(aiProvider, never()).complete(any());
+    }
+
+    @Test
+    void unknownOpenAiCompatible64kContextAcceptsTheRealFirstToolResultPrompt() {
         ResolvedAiProvider openAiCompatible = new ResolvedAiProvider(
                 "openai_compatible",
                 null,
@@ -594,7 +700,7 @@ class AiInvocationServiceTest {
         when(aiProviderConfigService.resolveForOrg(ORG_ID, ACTOR_ID))
                 .thenReturn(openAiCompatible);
         when(aiProviderRouter.adapterFor("openai_compatible")).thenReturn(aiProvider);
-        when(aiProvider.contextWindowTokens(openAiCompatible.target())).thenReturn(32_768);
+        when(aiProvider.contextWindowTokens(openAiCompatible.target())).thenReturn(ASSISTANT_FLOOR);
         var catalog = new AiAssistantToolCatalog();
         var promptAssembler = new AiAssistantPromptAssembler(new ObjectMapper(), catalog);
         var stepSchema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
@@ -606,7 +712,7 @@ class AiInvocationServiceTest {
                 new AiProviderCapabilities(
                         AiStructuredOutputEnforcement.JSON_SCHEMA,
                         AiReasoningMode.TAGGED,
-                        32_768,
+                        ASSISTANT_FLOOR,
                         8_192),
                 16_384,
                 fixedEnvelopeBytes);
@@ -632,7 +738,14 @@ class AiInvocationServiceTest {
                 null);
         providerReturns(new AiCompletionResult(
                 "{\"tool\":null,\"final\":{\"text\":\"One relationship is cooling.\","
-                        + "\"citations\":[],\"suggestions\":[],\"title\":null}}",
+                        + "\"citations\":[],\"suggestions\":[],\"title\":null,"
+                        + "\"blocks\":[{\"kind\":\"answer\",\"title\":null,"
+                        + "\"body\":\"One relationship is cooling.\",\"items\":[],"
+                        + "\"rows\":[],\"citations\":[]}],"
+                        + "\"coverage\":{\"status\":\"complete\",\"asOf\":null,"
+                        + "\"periodStart\":null,\"periodEnd\":null,"
+                        + "\"sources\":[\"records\"],\"exclusions\":[],"
+                        + "\"truncated\":false}}}",
                 20,
                 8,
                 "stop",
@@ -658,13 +771,15 @@ class AiInvocationServiceTest {
         assertInstanceOf(AiStructuredOutcome.Parsed.class, attempt.outcome());
         assertTrue(service.serializedPromptBytes(
                 prompt, stepSchema.responseSchema(), AiReasoningMode.TAGGED)
-                <= AiProviderCapabilities.estimatedInputByteCeiling(
-                        32_768, budget.maxOutputTokens()));
+                <= AiProviderCapabilities.conservativeInputByteCeiling(
+                        ASSISTANT_FLOOR, budget.maxOutputTokens()),
+                "The floor must admit the real first-tool-result prompt with dense-input room,"
+                        + " not merely under the optimistic four-bytes-per-token estimate");
         verify(aiProvider).complete(any());
     }
 
     @Test
-    void nativeDefinitionsAndFirstToolResultFitTheConservative32kBudget() {
+    void nativeDefinitionsAndFirstToolResultFitTheConservativeFloorBudget() {
         ObjectMapper objectMapper = new ObjectMapper();
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
         AiAssistantPromptAssembler promptAssembler =
@@ -673,7 +788,7 @@ class AiInvocationServiceTest {
         AiProviderCapabilities capabilities = new AiProviderCapabilities(
                 AiStructuredOutputEnforcement.JSON_SCHEMA,
                 AiReasoningMode.TAGGED,
-                32_768,
+                ASSISTANT_FLOOR,
                 8_192,
                 AiToolCallingMode.NATIVE_FUNCTIONS,
                 AiReasoningMode.NATIVE);
@@ -1016,7 +1131,7 @@ class AiInvocationServiceTest {
 
         service.complete(invocation);
 
-        verify(aiFeatureGate, times(2)).requireAiUsable(AiFeature.BUSINESS_CARD_EXTRACTION);
+        verify(aiFeatureGate, times(3)).requireAiUsable(AiFeature.BUSINESS_CARD_EXTRACTION);
         ArgumentCaptor<AiCompletionRequest> requestCaptor = ArgumentCaptor.forClass(AiCompletionRequest.class);
         verify(aiProvider).complete(requestCaptor.capture());
         assertEquals(1, requestCaptor.getValue().images().size());

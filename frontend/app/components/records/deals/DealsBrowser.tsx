@@ -7,10 +7,11 @@ import { useLocale, useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import RecordsActions from '@/app/components/import/RecordsActions';
 import { ButtonGroup } from '@/components/ui/button-group';
-import { toast } from 'sonner';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { SegmentedControl } from '@/components/ui/segmented-control';
+import { IconButton } from '@/components/ui/icon-button';
+import { toastError, toastInfo, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import { TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon } from '@heroicons/react/24/solid';
+import { TrashIcon, PencilIcon, EllipsisVerticalIcon, EyeIcon, PlusIcon } from '@heroicons/react/24/solid';
 import {
     TableCellsIcon,
     Squares2X2Icon,
@@ -19,10 +20,12 @@ import {
     TagIcon,
     UserCircleIcon,
     Bars3BottomLeftIcon,
+    BriefcaseIcon,
 } from '@heroicons/react/24/outline';
 import { useReducedMotion } from 'motion/react';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import { EmptyState } from '@/app/components/EmptyState';
 import DensityToggle from '@/app/components/records/DensityToggle';
 import { useRecordDensity } from '@/app/hooks/useRecordDensity';
 import ColumnVisibilityMenu from '@/app/components/records/ColumnVisibilityMenu';
@@ -46,6 +49,7 @@ import { useActionSelection } from '@/app/hooks/useActions';
 import { useSavedViewScope } from '@/app/hooks/useSavedViewScope';
 import { useInlineEdit } from '@/app/hooks/useInlineEdit';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { MAX_URL_PAGE_SIZE, parseListInt, writeListStateToUrl } from '@/app/hooks/listStateUrl';
 import { FILTER_EMPTY, type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, facetChips, countActiveFilters } from '@/app/components/records/types';
 import DealCard from '@/app/components/records/deals/DealCard';
@@ -109,6 +113,7 @@ import {
     type DealMetrics,
     type DealFacets,
     type DealFilterParams,
+    type FacetCount,
     type DealRevenueSeries,
     type DealStageDistribution,
     type DealsPageParams,
@@ -124,6 +129,7 @@ import {
     type WorkspaceMember,
 } from '@/app/lib/types';
 import { actualValueForOutcome, isDealClosed } from './dealOutcome';
+import { DEAL_COMPANY_FILTER_KEY, DEAL_CONTACT_FILTER_KEY, DEAL_PIPELINE_FILTER_KEY } from './dealLinks';
 import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import ContactAvatar from '../contacts/ContactAvatar';
 import SummaryTile from '@/app/components/SummaryTile';
@@ -224,7 +230,15 @@ const EMPTY_DEAL_DRAFT: CreateDealPayload = {
     expectedCloseDate: undefined,
 };
 
-const DEAL_FILTER_KEYS = ['status', 'company', 'pipeline', 'stage', 'risk', 'owner'] as const;
+const DEAL_FILTER_KEYS = [
+    'status',
+    DEAL_COMPANY_FILTER_KEY,
+    DEAL_CONTACT_FILTER_KEY,
+    DEAL_PIPELINE_FILTER_KEY,
+    'stage',
+    'risk',
+    'owner',
+] as const;
 
 type DealsViewState = {
     definition: SegmentDefinition;
@@ -302,13 +316,13 @@ function resolveNamedFacetIds<T extends { id: number; name: string }>(values: st
     return values.some((value) => value !== FILTER_EMPTY) ? [0] : undefined;
 }
 
-function resolveCompanyFacetIds(values: string[] | undefined, facets: DealFacets['companies']): number[] | undefined {
+function resolveEntityFacetIds(values: string[] | undefined, facets: FacetCount[] | undefined): number[] | undefined {
     if (!values?.length) return undefined;
     const ids = values.flatMap((value) => {
         if (value === FILTER_EMPTY) return [];
         const id = Number(value);
         if (Number.isInteger(id) && id > 0) return [id];
-        return facets.flatMap((facet) => {
+        return (facets ?? []).flatMap((facet) => {
             if (facet.label !== value) return [];
             const facetId = Number(facet.key);
             return Number.isInteger(facetId) && facetId > 0 ? [facetId] : [];
@@ -349,6 +363,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const tf = useTranslations('Filters');
     const ts = useTranslations('MemberScope');
     const tSeg = useTranslations('SmartSegments');
+    const reportApiError = useApiErrorToast('DealsBrowser');
     const { levelLabel } = useRiskText();
     const locale = useLocale();
     const reduce = useReducedMotion() ?? false;
@@ -601,15 +616,21 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         return {
             status: status?.length ? status : undefined,
             risk: risk?.length ? risk : undefined,
-            companyId: resolveCompanyFacetIds(activeFilterState.company, dealFacets.companies),
+            companyId: resolveEntityFacetIds(activeFilterState.company, dealFacets.companies),
+            personId: resolveEntityFacetIds(activeFilterState.contact, dealFacets.people),
             noCompany: activeFilterState.company?.includes(FILTER_EMPTY) || undefined,
             pipelineId: resolveNamedFacetIds(activeFilterState.pipeline, pipelines),
             stageId: resolveNamedFacetIds(activeFilterState.stage, allStages),
             scope: ownerScope.mode === 'all' ? undefined : ownerScope.mode,
             memberIds: ownerScope.mode === 'members' ? ownerScope.memberIds : undefined,
         };
-    }, [activeFilterState, dealFacets.companies, pipelines, allStages, ownerScope]);
+    }, [activeFilterState, dealFacets.companies, dealFacets.people, pipelines, allStages, ownerScope]);
     const serverFilterKey = useMemo(() => JSON.stringify(serverFilters), [serverFilters]);
+    const contactFilterActive = Boolean(serverFilters.personId?.length);
+    const selectableDisplayMode = contactFilterActive && displayMode === 'kanban' ? 'table' : displayMode;
+    const renderedDisplayMode = contactFilterActive && effectiveDisplayMode === 'kanban'
+        ? 'table'
+        : effectiveDisplayMode;
     const deferredQuery = useDeferredValue(query.trim());
     const metricFilters = useMemo<DealFilterParams>(() => ({
         ...serverFilters,
@@ -671,12 +692,12 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             } else if (hasSegments) {
                 reportSegmentFailure();
             } else {
-                toastError(error instanceof Error ? error.message : t('toastSelectAllFailed'));
+                reportApiError(error, 'toastSelectAllFailed');
             }
         } finally {
             if (requestId === selectAllRequestRef.current) setSelectingAll(false);
         }
-    }, [currentDealFilters, evaluable, filterSignature, hasSegments, reportSegmentFailure, serverFilters.risk, setSelectedIds, t]);
+    }, [currentDealFilters, evaluable, filterSignature, hasSegments, reportApiError, reportSegmentFailure, serverFilters.risk, setSelectedIds, t]);
     const exportDeals = useCallback(
         (signal: AbortSignal, workspaceId: number) => {
             const init = { signal, headers: { 'X-Workspace-Id': String(workspaceId) } };
@@ -864,7 +885,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             if (isFieldError(err)) {
                 throw err;
             }
-            toastError(err instanceof Error ? err.message : t('failedToCreateDeal'));
+            reportApiError(err, 'failedToCreateDeal');
         } finally {
             setIsCreating(false);
         }
@@ -888,7 +909,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         });
 
         if (changed.length === 0) {
-            toast.info(t('noChangesToSave'));
+            toastInfo(t('noChangesToSave'));
             setEditSheetOpen(false);
             return;
         }
@@ -898,7 +919,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             return !draft.name.trim() || !draft.pipeline || !draft.stage || !draft.currency.trim();
         });
         if (invalid) {
-            toast.error(t('validationRequired', { name: invalid.name }));
+            toastError(t('validationRequired', { name: invalid.name }));
             return;
         }
 
@@ -915,7 +936,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             setEditSheetOpen(false);
             refreshRecords();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('failedToSave'));
+            reportApiError(err, 'failedToSave');
         } finally {
             setIsSaving(false);
         }
@@ -954,7 +975,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 refreshRecords();
             }
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('failedToDelete'));
+            reportApiError(err, 'failedToDelete');
         } finally {
             setIsDeleting(false);
         }
@@ -1031,9 +1052,9 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             toastSuccess(won === null ? t('dealReopened') : t('dealClosed'));
             refreshRecords();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('failedToUpdateStatus'));
+            reportApiError(err, 'failedToUpdateStatus');
         }
-    }, [refreshRecords, t]);
+    }, [refreshRecords, reportApiError, t]);
 
     const summary = useMemo(() => {
         const m = dealMetrics.byCurrency.find((c) => c.currency === activeCurrency);
@@ -1183,7 +1204,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const peek = useRecordPeekController(
         'deal',
         visibleDeals,
-        effectiveDisplayMode !== 'grid',
+        renderedDisplayMode !== 'grid',
         returnSelection,
     );
 
@@ -1215,13 +1236,19 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             const label = facet.label ?? companyById.get(Number(facet.key))?.name;
             return label ? [{ key: facet.key, label }] : [];
         });
-        if (companyOptions.length > 0) result.push({ key: 'company', label: t('columnCompany'), options: companyOptions });
+        if (companyOptions.length > 0) result.push({ key: DEAL_COMPANY_FILTER_KEY, label: t('columnCompany'), options: companyOptions });
+
+        const contactOptions = (dealFacets.people ?? []).flatMap((facet) => {
+            const label = facet.label;
+            return label ? [{ key: facet.key, label }] : [];
+        });
+        if (contactOptions.length > 0) result.push({ key: DEAL_CONTACT_FILTER_KEY, label: t('filterContact'), options: contactOptions });
 
         const pipelineOptions = dealFacets.pipelines.flatMap((facet) => {
             const pipeline = pipelineById.get(Number(facet.key));
             return pipeline ? [{ key: facet.key, label: pipeline.name }] : [];
         });
-        if (pipelineOptions.length > 0) result.push({ key: 'pipeline', label: t('columnPipeline'), options: pipelineOptions });
+        if (pipelineOptions.length > 0) result.push({ key: DEAL_PIPELINE_FILTER_KEY, label: t('columnPipeline'), options: pipelineOptions });
 
         const stageOptions = dealFacets.stages.flatMap((facet) => {
             const stage = stageById.get(Number(facet.key));
@@ -1299,11 +1326,11 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
         <ButtonGroup className="rounded-full bg-muted">
             {allSelectedDealsLoaded && (
                 <>
-                    <Button variant="outline" size="sm" onClick={viewSelected}>
+                    <Button variant="outline" size="toolbar" onClick={viewSelected}>
                         <EyeIcon className="size-4" />
                         {t('view')}
                     </Button>
-                    <Button variant="outline" size="sm" onClick={openEditSheet}>
+                    <Button variant="outline" size="toolbar" onClick={openEditSheet}>
                         <PencilIcon className="size-4" />
                         {t('quickEdit')}
                     </Button>
@@ -1311,9 +1338,9 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
             )}
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm">
+                    <IconButton variant="outline" size="icon-toolbar" label={t('moreActions')}>
                         <EllipsisVerticalIcon className="size-4" />
-                    </Button>
+                    </IconButton>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
                     {allSelectedDealsLoaded && (
@@ -1384,6 +1411,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                     pipelineIds: currentDealFilters.pipelineId,
                     stageIds: currentDealFilters.stageId,
                     companyIds: currentDealFilters.companyId,
+                    personIds: currentDealFilters.personId,
                     statuses: currentDealFilters.status,
                     risks: currentDealFilters.risk,
                     noCompany: currentDealFilters.noCompany,
@@ -1408,7 +1436,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 deferredQuery={deferredQuery}
                 onExternalQuery={changeQuery}
             />
-            <PageShell tier="wide">
+            <PageShell>
                 <Rise>
                     <PageHeader
                         title={t('title')}
@@ -1565,7 +1593,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                     allowGroups
                                     onChange={changeDefinition}
                                 />
-                                {effectiveDisplayMode !== 'table' && (
+                                {renderedDisplayMode !== 'table' && (
                                     <RecordsSortMenu
                                         columns={columns}
                                         sortKey={sortKey}
@@ -1573,41 +1601,21 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                         onSortChange={handleSortChange}
                                     />
                                 )}
-                                <div
-                                    role="group"
-                                    aria-label={t('displayMode')}
-                                    className="hidden rounded-full bg-muted p-0.5 ring-1 ring-border md:inline-flex"
-                                >
-                                    <button
-                                        type="button"
-                                        onClick={() => setDisplayMode('grid')}
-                                        aria-label={t('gridView')}
-                                        aria-pressed={displayMode === 'grid'}
-                                        className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'grid' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
-                                    >
-                                        <Squares2X2Icon className="size-4" />
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setDisplayMode('table')}
-                                        aria-label={t('tableView')}
-                                        aria-pressed={displayMode === 'table'}
-                                        className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'table' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
-                                    >
-                                        <TableCellsIcon className="size-4" />
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setDisplayMode('kanban')}
-                                        aria-label={t('kanbanView')}
-                                        aria-pressed={displayMode === 'kanban'}
-                                        className={`flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97] ${displayMode === 'kanban' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
-                                    >
-                                        <ViewColumnsIcon className="size-4" />
-                                    </button>
-                                </div>
-                                {effectiveDisplayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
-                                {effectiveDisplayMode === 'table' && (
+                                <SegmentedControl
+                                    ariaLabel={t('displayMode')}
+                                    className="hidden md:inline-flex"
+                                    value={selectableDisplayMode}
+                                    onChange={setDisplayMode}
+                                    options={[
+                                        { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridView') },
+                                        { value: 'table', icon: <TableCellsIcon className="size-4" />, ariaLabel: t('tableView') },
+                                        ...(contactFilterActive
+                                            ? []
+                                            : [{ value: 'kanban' as const, icon: <ViewColumnsIcon className="size-4" />, ariaLabel: t('kanbanView') }]),
+                                    ]}
+                                />
+                                {renderedDisplayMode === 'table' && <DensityToggle value={density} onChange={setDensity} />}
+                                {renderedDisplayMode === 'table' && (
                                     <ColumnVisibilityMenu
                                         toggles={toggles}
                                         onColumnVisibleChange={setColumnVisible}
@@ -1678,7 +1686,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                 )}
 
                 <Rise delay={0.3}>
-                    {effectiveDisplayMode === 'kanban' ? (
+                    {renderedDisplayMode === 'kanban' ? (
                         <DealsKanban
                             deals={visibleDeals}
                             pipelines={pipelines}
@@ -1730,7 +1738,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                 />
                             )}
                             renderAvatar={(item) => {
-                                const avatarSize = effectiveDisplayMode === 'list' ? 'small' : 'large';
+                                const avatarSize = renderedDisplayMode === 'list' ? 'small' : 'large';
                                 const company = item.company != null ? companyById.get(item.company) : undefined;
                                 if (company) return <CompanyAvatar company={company} type={avatarSize} />;
                                 const contact = contactByDealId.get(item.id);
@@ -1745,7 +1753,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             onRowClick={(item) => peek.openPeek(item.id)}
                             activeId={peek.activeId}
                             recordRef={recordRef}
-                            displayMode={effectiveDisplayMode}
+                            displayMode={renderedDisplayMode}
                             density={density}
                             selectedIds={selectedIds}
                             onSelectedIdsChange={handleSelectedIdsChange}
@@ -1754,6 +1762,19 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             gridClassName="grid grid-cols-1 gap-3"
                             entityLabel={t('entityLabel')}
                             selectionActions={selectionActions}
+                            emptyState={
+                                <EmptyState
+                                    icon={BriefcaseIcon}
+                                    title={t('emptyTitle')}
+                                    body={t('emptyBody')}
+                                    action={
+                                        <Button variant="brand" onClick={() => setNewDialogOpen(true)}>
+                                            <PlusIcon strokeWidth={2.5} />
+                                            {t('emptyCta')}
+                                        </Button>
+                                    }
+                                />
+                            }
                             filtersActive={hasActiveFilters}
                             onClearFilters={clearAll}
                             pagination={{

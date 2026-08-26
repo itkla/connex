@@ -16,9 +16,13 @@ import org.springframework.web.bind.annotation.RestController;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.DealSegmentQueryRequest;
+import ooo.klae.connex.backend.beans.PersonFirstResponseState;
+import ooo.klae.connex.backend.beans.PersonLeadSource;
+import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.services.ExportService;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
+import ooo.klae.connex.backend.services.WarmthFilterResolver;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.util.DealFilterNormalizer;
 import ooo.klae.connex.backend.util.LikePattern;
@@ -41,6 +45,7 @@ public class ExportController {
 
     private final ExportService exportService;
     private final MemberScopeResolver memberScopeResolver;
+    private final WarmthFilterResolver warmthFilterResolver;
     private final WorkspaceService workspaceService;
 
     /**
@@ -53,10 +58,22 @@ public class ExportController {
             @RequestParam(required = false) List<String> titles,
             @RequestParam(defaultValue = "false") boolean noCompany,
             @RequestParam(required = false) String scope,
-            @RequestParam(required = false) List<Integer> memberIds) {
+            @RequestParam(required = false) List<Integer> memberIds,
+            @RequestParam(required = false) List<PersonLifecycleStage> lifecycleStages,
+            @RequestParam(defaultValue = "false") boolean noLifecycle,
+            @RequestParam(required = false) List<PersonLeadSource> leadSources,
+            @RequestParam(defaultValue = "false") boolean noLeadSource,
+            @RequestParam(required = false) List<PersonFirstResponseState> firstResponseStates,
+            @RequestParam(defaultValue = "false") boolean noFirstResponse,
+            @RequestParam(required = false) List<String> warmthBands,
+            @RequestParam(defaultValue = "false") boolean noWarmth,
+            @RequestParam(required = false) Integer goesColdWithinDays) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
-        return csv("contacts.csv", exportService.exportPersons(query, companies, titles, noCompany, memberScope));
+        return csv("contacts.csv", exportService.exportPersons(
+            query, companies, titles, noCompany, memberScope, lifecycleStages, noLifecycle,
+            leadSources, noLeadSource, firstResponseStates, noFirstResponse,
+            warmthFilterResolver.resolve(warmthBands, noWarmth, goesColdWithinDays, null)));
     }
 
     /**
@@ -69,10 +86,15 @@ public class ExportController {
             @RequestParam(defaultValue = "false") boolean noIndustry,
             @RequestParam(required = false) List<Integer> ids,
             @RequestParam(required = false) String scope,
-            @RequestParam(required = false) List<Integer> memberIds) {
+            @RequestParam(required = false) List<Integer> memberIds,
+            @RequestParam(required = false) List<String> warmthBands,
+            @RequestParam(defaultValue = "false") boolean noWarmth,
+            @RequestParam(required = false) Integer goesColdWithinDays) {
         String query = (q == null || q.isBlank()) ? null : LikePattern.containing(q);
         MemberScope memberScope = resolveMemberScope(scope, memberIds);
-        return csv("companies.csv", exportService.exportCompanies(query, industry, noIndustry, ids, memberScope));
+        return csv("companies.csv", exportService.exportCompanies(query, industry, noIndustry, ids,
+            memberScope,
+            warmthFilterResolver.resolve(warmthBands, noWarmth, goesColdWithinDays, null)));
     }
 
     /** Export products as CSV, honoring the product catalog's search. */
@@ -92,6 +114,7 @@ public class ExportController {
             @RequestParam(required = false) List<Integer> pipelineId,
             @RequestParam(required = false) List<Integer> stageId,
             @RequestParam(required = false) List<Integer> companyId,
+            @RequestParam(required = false) List<Integer> personId,
             @RequestParam(defaultValue = "false") boolean noCompany,
             @RequestParam(required = false) List<String> status,
             @RequestParam(required = false) List<String> risk,
@@ -104,6 +127,7 @@ public class ExportController {
             DealFilterNormalizer.normalizeIds(pipelineId, "pipelineId"),
             DealFilterNormalizer.normalizeIds(stageId, "stageId"),
             DealFilterNormalizer.normalizeIds(companyId, "companyId"),
+            DealFilterNormalizer.normalizeIds(personId, "personId"),
             noCompany,
             DealFilterNormalizer.normalizeStatuses(status),
             DealFilterNormalizer.normalizeValues(risk, DealFilterNormalizer.DEAL_RISKS, "risk"),
@@ -124,6 +148,7 @@ public class ExportController {
             DealFilterNormalizer.normalizeIds(request.getPipelineId(), "pipelineId"),
             DealFilterNormalizer.normalizeIds(request.getStageId(), "stageId"),
             DealFilterNormalizer.normalizeIds(request.getCompanyId(), "companyId"),
+            DealFilterNormalizer.normalizeIds(request.getPersonId(), "personId"),
             request.isNoCompany(),
             DealFilterNormalizer.normalizeStatuses(request.getStatus()),
             DealFilterNormalizer.normalizeValues(

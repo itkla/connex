@@ -6,8 +6,8 @@ import { EnvelopeIcon } from "@heroicons/react/24/outline";
 import { Loader2Icon } from "lucide-react";
 
 import { ApiError, requestEmailChange } from "@/app/lib/api";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { useFieldErrors } from "@/app/hooks/useFieldErrors";
-import { toastError } from "@/app/lib/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -33,6 +33,7 @@ type Props = {
  */
 export default function ChangeEmailDialog({ open, onOpenChange }: Props) {
     const t = useTranslations("AccountChangeEmail");
+    const showApiError = useApiErrorToast("AccountChangeEmail");
     const { fieldErrors, reset, clearError, captureFieldErrors } = useFieldErrors();
 
     const [newEmail, setNewEmail] = useState("");
@@ -60,12 +61,8 @@ export default function ChangeEmailDialog({ open, onOpenChange }: Props) {
             setCurrentPassword("");
             setSent(true);
         } catch (err) {
-            if (err instanceof ApiError) {
-                if (!captureFieldErrors(err)) {
-                    toastError(err.message);
-                }
-            } else {
-                toastError(t("genericError"));
+            if (!(err instanceof ApiError) || !captureFieldErrors(err)) {
+                showApiError(err, "genericError");
             }
         } finally {
             setSubmitting(false);

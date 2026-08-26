@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.AiBriefScheduleMapper">
+
+    <resultMap id="scheduleMap" type="ooo.klae.connex.backend.beans.AiBriefSchedule">
+        <id property="id" column="id" />
+        <result property="workspaceId" column="workspace_id" />
+        <result property="userId" column="user_id" />
+        <result property="timeZone" column="time_zone" />
+        <result property="dailyEnabled" column="daily_enabled" />
+        <result property="dailyHour" column="daily_hour" />
+        <result property="weeklyEnabled" column="weekly_enabled" />
+        <result property="weeklyWeekday" column="weekly_weekday" />
+        <result property="weeklyHour" column="weekly_hour" />
+        <result property="lastDailyClaimOn" column="last_daily_claim_on" />
+        <result property="lastWeeklyClaimOn" column="last_weekly_claim_on" />
+        <result property="pendingKind" column="pending_kind" />
+        <result property="pendingSessionId" column="pending_session_id" />
+        <result property="pendingTurnId" column="pending_turn_id" />
+        <result property="pendingStartedAt" column="pending_started_at" />
+        <result property="lastDeliveredSessionId" column="last_delivered_session_id" />
+        <result property="lastDeliveredKind" column="last_delivered_kind" />
+        <result property="lastDeliveredAt" column="last_delivered_at" />
+        <result property="lastFailureAt" column="last_failure_at" />
+        <result property="lastFailureReason" column="last_failure_reason" />
+        <result property="createdAt" column="created_at" />
+        <result property="updatedAt" column="updated_at" />
+    </resultMap>
+
+    <sql id="columns">
+        id, workspace_id, user_id, time_zone, daily_enabled, daily_hour,
+        weekly_enabled, weekly_weekday, weekly_hour,
+        last_daily_claim_on, last_weekly_claim_on,
+        pending_kind, pending_session_id, pending_turn_id, pending_started_at,
+        last_delivered_session_id, last_delivered_kind, last_delivered_at,
+        last_failure_at, last_failure_reason, created_at, updated_at
+    </sql>
+
+    <select id="findForMember" resultMap="scheduleMap">
+        SELECT <include refid="columns" />
+        FROM ai_brief_schedule
+        WHERE workspace_id = #{workspaceId}
+          AND user_id = #{userId}
+    </select>
+
+    <select id="findEnabled" resultMap="scheduleMap">
+        SELECT <include refid="columns" />
+        FROM ai_brief_schedule
+        WHERE workspace_id = #{workspaceId}
+          AND (daily_enabled = TRUE OR weekly_enabled = TRUE)
+        ORDER BY id
+    </select>
+
+    <select id="findPendingDelivery" resultMap="scheduleMap">
+        SELECT <include refid="columns" />
+        FROM ai_brief_schedule
+        WHERE workspace_id = #{workspaceId}
+          AND pending_turn_id IS NOT NULL
+        ORDER BY id
+    </select>
+
+    <!-- The claim columns are written only when the caller supplies them, which it does exactly on a
+         disabled-to-enabled transition. Writing them unconditionally would either clear a live claim
+         (turning any preference save into a second brief for the same period) or pin an old one. -->
+    <insert id="upsert">
+        INSERT INTO ai_brief_schedule
+            (workspace_id, user_id, time_zone, daily_enabled, daily_hour,
+             weekly_enabled, weekly_weekday, weekly_hour
+             <if test="schedule.lastDailyClaimOn != null">, last_daily_claim_on</if>
+             <if test="schedule.lastWeeklyClaimOn != null">, last_weekly_claim_on</if>)
+        VALUES
+            (#{schedule.workspaceId}, #{schedule.userId}, #{schedule.timeZone},
+             #{schedule.dailyEnabled}, #{schedule.dailyHour},
+             #{schedule.weeklyEnabled}, #{schedule.weeklyWeekday}, #{schedule.weeklyHour}
+             <if test="schedule.lastDailyClaimOn != null">, #{schedule.lastDailyClaimOn}</if>
+             <if test="schedule.lastWeeklyClaimOn != null">, #{schedule.lastWeeklyClaimOn}</if>)
+        ON DUPLICATE KEY UPDATE
+            time_zone = VALUES(time_zone),
+            daily_enabled = VALUES(daily_enabled),
+            daily_hour = VALUES(daily_hour),
+            weekly_enabled = VALUES(weekly_enabled),
+            weekly_weekday = VALUES(weekly_weekday),
+            weekly_hour = VALUES(weekly_hour)
+            <if test="schedule.lastDailyClaimOn != null">
+                , last_daily_claim_on = VALUES(last_daily_claim_on)
+            </if>
+            <if test="schedule.lastWeeklyClaimOn != null">
+                , last_weekly_claim_on = VALUES(last_weekly_claim_on)
+            </if>
+    </insert>
+
+    <update id="claimPeriod">
+        UPDATE ai_brief_schedule
+        SET
+        <choose>
+            <when test="kind == 'weekly'">
+                last_weekly_claim_on = #{claimOn}
+            </when>
+            <otherwise>
+                last_daily_claim_on = #{claimOn}
+            </otherwise>
+        </choose>
+        WHERE workspace_id = #{workspaceId}
+          AND id = #{id}
+          AND pending_turn_id IS NULL
+        <choose>
+            <when test="kind == 'weekly'">
+                AND weekly_enabled = TRUE
+                AND (last_weekly_claim_on IS NULL OR last_weekly_claim_on &lt; #{claimOn})
+            </when>
+            <otherwise>
+                AND daily_enabled = TRUE
+                AND (last_daily_claim_on IS NULL OR last_daily_claim_on &lt; #{claimOn})
+            </otherwise>
+        </choose>
+    </update>
+
+    <update id="attachPendingTurn">
+        UPDATE ai_brief_schedule
+        SET pending_kind = #{kind},
+            pending_session_id = #{sessionId},
+            pending_turn_id = #{turnId},
+            pending_started_at = #{startedAt}
+        WHERE workspace_id = #{workspaceId}
+          AND id = #{id}
+          AND pending_turn_id IS NULL
+    </update>
+
+    <!-- MySQL evaluates SET assignments left to right, so the delivered columns must be copied out
+         of the pending columns before those are cleared; reversing these two blocks would record a
+         null session for every delivered brief. -->
+    <update id="releasePendingTurn">
+        UPDATE ai_brief_schedule
+        SET
+        <choose>
+            <when test="delivered">
+                last_delivered_session_id = pending_session_id,
+                last_delivered_kind = pending_kind,
+                last_delivered_at = #{at},
+            </when>
+            <otherwise>
+                last_failure_at = #{at},
+                last_failure_reason = #{failureReason},
+            </otherwise>
+        </choose>
+            pending_kind = NULL,
+            pending_session_id = NULL,
+            pending_turn_id = NULL,
+            pending_started_at = NULL
+        WHERE workspace_id = #{workspaceId}
+          AND id = #{id}
+          AND pending_turn_id = #{turnId}
+    </update>
+
+    <update id="recordStartFailure">
+        UPDATE ai_brief_schedule
+        SET last_failure_at = #{at},
+            last_failure_reason = #{failureReason}
+        WHERE workspace_id = #{workspaceId}
+          AND id = #{id}
+    </update>
+
+    <delete id="deleteForUser">
+        DELETE FROM ai_brief_schedule
+        WHERE workspace_id = #{workspaceId}
+          AND user_id = #{userId}
+    </delete>
+
+    <delete id="deleteForUserAnywhere">
+        DELETE FROM ai_brief_schedule
+        WHERE user_id = #{userId}
+    </delete>
+</mapper>

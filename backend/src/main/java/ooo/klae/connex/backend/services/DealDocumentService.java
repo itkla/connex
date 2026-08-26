@@ -5,7 +5,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -32,7 +31,11 @@ import ooo.klae.connex.backend.dto.DealDocumentDto;
 import ooo.klae.connex.backend.dto.DealLineItemsResponse;
 import ooo.klae.connex.backend.dto.DocumentApprovalDto;
 import ooo.klae.connex.backend.dto.DocumentContent;
+import ooo.klae.connex.backend.dto.GeneratedDocumentSummaryDto;
+import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealDocumentMapper;
@@ -41,6 +44,7 @@ import ooo.klae.connex.backend.mappers.DocumentApprovalMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.util.LikePattern;
 
 /**
  * Generates and manages commercial documents on a deal. A generated document is an immutable,
@@ -68,6 +72,8 @@ public class DealDocumentService {
     private final WorkspaceService workspaceService;
     private final DeletionPolicy deletionPolicy;
     private final AuditService auditService;
+    private final DocumentDeliveryService documentDeliveryService;
+    private final RuleTriggerPublisher ruleTriggers;
     private final ObjectMapper objectMapper;
 
     private static final Set<String> CLIENT_TARGET_STATUSES = Set.of("draft", "final", "superseded");
@@ -75,15 +81,63 @@ public class DealDocumentService {
     private static final int MAX_BODY_DEPTH = 50;
     private static final Pattern TOKEN_PATTERN = Pattern.compile("\\{\\{\\s*([\\w.]+)\\s*\\}\\}");
 
+    /**
+     * Every status a stored document can currently hold, as the {@code deal_document} status check
+     * constraint defines it. Wider than {@link #CLIENT_TARGET_STATUSES} because approval, delivery,
+     * and signature transitions are owned by their own services but remain filterable in the index.
+     */
+    public static final Set<String> INDEX_STATUSES = Set.of(
+        "draft", "pending_approval", "approved", "sent", "signed", "final", "superseded");
+
+    /** Every document type a template can produce. */
+    public static final Set<String> INDEX_TYPES = Set.of("quote", "proposal", "order_form", "contract");
+
+    /**
+     * One bounded page of generated documents across every deal in the workspace.
+     *
+     * <p>The per-deal reads this complements are membership-gated, and so is this index: it
+     * discloses no document a member could not already open from its parent deal, and it excludes
+     * the immutable content snapshot entirely. A generated document has no owner column of its own,
+     * so {@code memberScope} narrows by the parent deal's owner exactly as the deal list does.
+     *
+     * @param query the raw caller query over document title and deal name, or null
+     * @param statuses validated document statuses, or null for every status
+     * @param types validated document types, or null for every type
+     * @param dealId one parent deal to restrict to, or null for every deal
+     * @param memberScope the parent deal's ownership scope
+     * @param limit the page size
+     * @param offset the page offset
+     * @return the page of documents and the total it was drawn from
+     */
+    public PageResponse<GeneratedDocumentSummaryDto> getWorkspacePage(
+            String query,
+            List<String> statuses,
+            List<String> types,
+            Integer dealId,
+            MemberScope memberScope,
+            int limit,
+            int offset) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String pattern = query == null || query.isBlank() ? null : LikePattern.containing(query.trim());
+        MemberScope scope = memberScope == null ? MemberScope.allTeam() : memberScope;
+        List<GeneratedDocumentSummaryDto> items = documentMapper.getWorkspacePage(
+            workspaceId, pattern, statuses, types, dealId, scope, limit, offset);
+        long total = documentMapper.countWorkspace(
+            workspaceId, pattern, statuses, types, dealId, scope);
+        return new PageResponse<>(items, total);
+    }
+
     /** Documents on a deal, newest version first. */
     public List<DealDocumentDto> getForDeal(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireDeal(workspaceId, dealId);
         List<ApprovalPolicy> policies = policyService.activePolicies(workspaceId);
-        Map<Integer, DocumentApproval> latest = approvalService
-            .withChain(workspaceId, approvalMapper.getByDealId(workspaceId, dealId)).stream()
-            .collect(Collectors.toMap(DocumentApproval::getDocumentId, Function.identity(), (a, b) -> a));
-        return documentMapper.getByDealId(workspaceId, dealId).stream()
+        List<DealDocument> documents = documentMapper.getByDealId(workspaceId, dealId);
+        Map<Integer, DealDocument> documentsById = documents.stream()
+            .collect(Collectors.toMap(DealDocument::getId, document -> document));
+        Map<Integer, DocumentApprovalDto> latest = approvalService.latestDtosByDocument(
+            workspaceId, approvalMapper.getByDealId(workspaceId, dealId), documentsById);
+        return documents.stream()
             .map(document -> toDto(document, policies, latest.get(document.getId())))
             .toList();
     }
@@ -159,14 +213,20 @@ public class DealDocumentService {
     /**
      * Transitions a document's status on the client's behalf. draft → final|superseded,
      * approved → final|superseded, pending_approval → superseded (withdrawing the pending
-     * request), final → superseded. Finalizing a draft is refused while an active approval
-     * policy matches; the approval flow is the only path to {@code final} for such documents.
+     * request), final|sent|signed → superseded. Finalizing a draft is refused while an active
+     * approval policy matches; the approval flow is the only path to {@code final} for such
+     * documents. Superseding a sent document voids its live delivery before the status changes.
      */
     @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public DealDocumentDto updateStatus(int dealId, int documentId, String status) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal deal = requireDeal(workspaceId, dealId);
+        int actorId = workspaceService.getCurrentUserId();
+        Set<Permission> lockedPermissions = workspaceService.lockedPermissionsFor(workspaceId, actorId);
+        if (!lockedPermissions.contains(Permission.DEAL_UPDATE)) {
+            throw new ForbiddenException("Requires the DEAL_UPDATE permission in this workspace");
+        }
+        Deal deal = lockDeal(workspaceId, dealId);
         DealDocument document = lockDocument(workspaceId, dealId, documentId);
         if (status == null || !CLIENT_TARGET_STATUSES.contains(status)) {
             throw new BadRequestException("status must be one of: draft, final, superseded");
@@ -184,9 +244,21 @@ public class DealDocumentService {
         if ("pending_approval".equals(document.getStatus())) {
             approvalService.cancelPendingOnSupersede(workspaceId, deal, document);
         }
+        if ("superseded".equals(status) && "sent".equals(document.getStatus())) {
+            if (!lockedPermissions.contains(Permission.DOCUMENT_SEND)) {
+                throw new ForbiddenException(
+                    "Requires the DOCUMENT_SEND permission to supersede a sent document");
+            }
+            documentDeliveryService.voidOnSupersede(workspaceId, document);
+        }
         documentMapper.updateStatus(workspaceId, documentId, status);
         auditService.record("deal_document.status", "deal", dealId, deal.getName(),
             "Document v" + document.getVersion() + " status " + document.getStatus() + " → " + status, null);
+        if ("final".equals(status)) {
+            ruleTriggers.publish(workspaceId, "document", documentId, "document.finalized");
+        } else if ("superseded".equals(status)) {
+            ruleTriggers.publish(workspaceId, "document", documentId, "document.superseded");
+        }
         return enrichWith(workspaceId, requireDocument(workspaceId, dealId, documentId), policies);
     }
 
@@ -195,7 +267,7 @@ public class DealDocumentService {
     @RequirePermission(Permission.DEAL_UPDATE)
     public void delete(int dealId, int documentId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal deal = requireDeal(workspaceId, dealId);
+        Deal deal = lockDeal(workspaceId, dealId);
         DealDocument document = lockDocument(workspaceId, dealId, documentId);
         deletionPolicy.requireDeletable(document.getCreatedBy());
         if (!"draft".equals(document.getStatus())) {
@@ -211,7 +283,7 @@ public class DealDocumentService {
             case "draft" -> to.equals("final") || to.equals("superseded");
             case "pending_approval" -> to.equals("superseded");
             case "approved" -> to.equals("final") || to.equals("superseded");
-            case "final" -> to.equals("superseded");
+            case "final", "sent", "signed" -> to.equals("superseded");
             default -> false;
         };
     }
@@ -343,17 +415,19 @@ public class DealDocumentService {
             return toDto(document, policies, null);
         }
         DocumentApproval latest = approvals.getFirst();
-        return toDto(document, policies, approvalService.withChain(workspaceId, List.of(latest)).getFirst());
+        DocumentApproval withChain = approvalService.withChain(workspaceId, List.of(latest)).getFirst();
+        return toDto(document, policies, approvalService.toDto(workspaceId, withChain, document));
     }
 
-    private DealDocumentDto toDto(DealDocument d, List<ApprovalPolicy> policies, DocumentApproval latestApproval) {
+    private DealDocumentDto toDto(DealDocument d, List<ApprovalPolicy> policies,
+            DocumentApprovalDto latestApproval) {
         DocumentContent content = parseContent(d);
-        boolean requiresApproval = !"final".equals(d.getStatus()) && !"superseded".equals(d.getStatus())
-            && !"approved".equals(d.getStatus())
+        boolean requiresApproval = !Set.of("final", "sent", "signed", "superseded", "approved")
+            .contains(d.getStatus())
             && policyService.firstMatch(policies, d, content) != null;
         return new DealDocumentDto(d.getId(), d.getDealId(), d.getTemplateId(), d.getType(), d.getLocale(),
             d.getStatus(), d.getVersion(), d.getTitle(), d.getCurrency(), d.getGeneratedAt(), d.getCreatedBy(), content,
-            requiresApproval, DocumentApprovalDto.from(latestApproval));
+            requiresApproval, latestApproval);
     }
 
     private DocumentContent parseContent(DealDocument d) {
@@ -366,7 +440,15 @@ public class DealDocumentService {
 
     private Deal requireDeal(int workspaceId, int dealId) {
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
-        if (deal == null) throw new ResourceNotFoundException("Deal not found with id: " + dealId);
+        if (deal == null) throw new ResourceNotFoundException("Deal not found");
+        return deal;
+    }
+
+    private Deal lockDeal(int workspaceId, int dealId) {
+        Deal deal = dealMapper.getDealByIdForUpdate(workspaceId, dealId);
+        if (deal == null) {
+            throw new ResourceNotFoundException("Deal not found");
+        }
         return deal;
     }
 

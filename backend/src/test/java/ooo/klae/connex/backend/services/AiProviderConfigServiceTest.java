@@ -500,6 +500,28 @@ class AiProviderConfigServiceTest {
     }
 
     @Test
+    void anOperatorModalityOverrideNarrowsButNeverWidensImageReadiness() {
+        stored = readyConfig();
+        stored.setModelId("anthropic.claude-3-5-sonnet-20240620-v1:0");
+        assertTrue(service.isImageInputReadyForOrg(ORG_ID));
+
+        AiProperties.ModelOverride disable = new AiProperties.ModelOverride();
+        disable.setProvider("bedrock");
+        disable.setModelId("anthropic.claude-3-5-sonnet-20240620-v1:0");
+        disable.setImageInput(false);
+        when(aiProperties.getModelOverrides()).thenReturn(List.of(disable));
+        assertFalse(service.isImageInputReadyForOrg(ORG_ID));
+
+        stored.setModelId("anthropic.claude-v2:1");
+        AiProperties.ModelOverride enable = new AiProperties.ModelOverride();
+        enable.setProvider("bedrock");
+        enable.setModelId("anthropic.claude-v2:1");
+        enable.setImageInput(true);
+        lenient().when(aiProperties.getModelOverrides()).thenReturn(List.of(enable));
+        assertFalse(service.isImageInputReadyForOrg(ORG_ID));
+    }
+
+    @Test
     void imageReadinessRejectsKnownTextOnlyClaudeFamilies() {
         stored = readyConfig();
         stored.setModelId("anthropic.claude-v2:1");

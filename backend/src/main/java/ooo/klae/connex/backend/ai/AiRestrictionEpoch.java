@@ -124,8 +124,10 @@ public class AiRestrictionEpoch {
 
     /**
      * Retains a current-epoch read fence through completion of the active transaction. Callers
-     * acquire this only after preparing their transactional output so a concurrent restriction
-     * cannot commit between the final epoch check and the output commit.
+     * acquire this only after preparing their transactional output and acquiring the database row
+     * roots that participate in the shared lock order. This preserves the global row-before-fence
+     * order and prevents a concurrent restriction from committing between the final epoch check
+     * and the output commit.
      * @param workspaceId workspace whose restriction epoch is checked
      * @param expectedEpoch epoch captured before content assembly
      * @return true when the epoch is current and the fence is retained through transaction completion

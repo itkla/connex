@@ -3,12 +3,12 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { toast } from 'sonner';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
 import { ClipboardDocumentCheckIcon } from '@heroicons/react/24/outline';
 
 import { cn } from '@/lib/utils';
+import { fieldErrorClass } from '@/components/ui/dialog-status-cover';
 
 import {
     Drawer,
@@ -25,9 +25,13 @@ import MentionEditor from '@/app/components/activity/notes/MentionEditor';
 import { ENTITY_COMMANDS } from '@/app/components/activity/notes/commands/slashCommandRegistry';
 import RecordSelect from '@/app/components/records/RecordSelect';
 import { Checkbox } from '@/components/ui/checkbox';
+import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
 import { useDealTargetSearch } from '@/app/hooks/useRecordTargetSearch';
+import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 
-import { ApiError, getCompanyPeople, getUsers, updateTask } from '@/app/lib/api';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { useFieldErrors } from '@/app/hooks/useFieldErrors';
+import { getCompanyPeople, getUsers, updateTask } from '@/app/lib/api';
 import { type Contact, type Deal, type Task, type UpdateTaskPayload, type User } from '@/app/lib/types';
 import { calendarDateInputValue } from '@/app/lib/utils';
 
@@ -68,16 +72,27 @@ export default function EditTaskSheet({
 }) {
     const router = useRouter();
     const t = useTranslations('ActivityEditTaskSheet');
+    const showApiError = useApiErrorToast('ActivityEditTaskSheet');
     const [draft, setDraft] = useState<TaskDraft>(() => toDraft(task));
     const [users, setUsers] = useState<User[]>([]);
     const [contacts, setContacts] = useState<Contact[]>([]);
     const [isSaving, setIsSaving] = useState(false);
     const dealSearch = useDealTargetSearch(open, [task.dealId], deals);
+    const { fieldErrors, setFieldErrors, reset: resetFieldErrors, clearError } = useFieldErrors();
 
     const handleOpenChange = (next: boolean) => {
         onOpenChange(next);
-        if (!next) setDraft(toDraft(task));
+        if (!next) {
+            setDraft(toDraft(task));
+            resetFieldErrors();
+        }
     };
+
+    const dirty = JSON.stringify(draft) !== JSON.stringify(toDraft(task));
+    const guard = useUnsavedChangesGuard({
+        isDirty: dirty && !isSaving,
+        onClose: () => handleOpenChange(false),
+    });
 
     useEffect(() => {
         if (!open) return;
@@ -93,8 +108,10 @@ export default function EditTaskSheet({
     }, [companyId, open]);
 
     const saveUpdates = async () => {
+        resetFieldErrors();
         if (!draft.description.trim()) {
-            toast.error(t('descriptionRequired'));
+            setFieldErrors({ description: t('descriptionRequired') });
+            requestAnimationFrame(() => document.getElementById('task-description')?.focus());
             return;
         }
         setIsSaving(true);
@@ -112,15 +129,15 @@ export default function EditTaskSheet({
             handleOpenChange(false);
             router.refresh();
         } catch (err) {
-            const message = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('updateFailed');
-            toastError(message);
+            showApiError(err, 'updateFailed');
         } finally {
             setIsSaving(false);
         }
     };
 
     return (
-        <Drawer open={open} onOpenChange={handleOpenChange} swipeDirection="right">
+        <>
+        <Drawer open={open} onOpenChange={guard.onOpenChange} swipeDirection="right">
             <DrawerContent className="flex w-full flex-col sm:max-w-lg">
                 <DrawerHeader className="border-b pr-12">
                     <div className="flex items-start gap-3">
@@ -137,15 +154,31 @@ export default function EditTaskSheet({
                 <div className="flex-1 overflow-y-auto px-4 py-2">
                     <div className="grid gap-4 pt-6">
                         <div className="grid gap-1.5">
-                            <Label htmlFor="task-description">{t('descriptionLabel')}</Label>
+                            <Label htmlFor="task-description">
+                                {t('descriptionLabel')}
+                                <span className="text-destructive">*</span>
+                            </Label>
                             <MentionEditor
                                 id="task-description"
                                 value={draft.description}
-                                onChange={(next) => setDraft((d) => ({ ...d, description: next }))}
+                                onChange={(next) => {
+                                    clearError('description');
+                                    setDraft((d) => ({ ...d, description: next }));
+                                }}
+                                ariaInvalid={Boolean(fieldErrors.description)}
+                                ariaDescribedby={fieldErrors.description ? 'task-description-error' : undefined}
                                 autoFocus
                                 commands={ENTITY_COMMANDS}
-                                className="min-h-[6rem] rounded-lg bg-muted px-3 py-2 text-sm ring-1 ring-border focus:ring-2 focus:ring-brand"
+                                className={cn(
+                                    'min-h-[6rem] rounded-lg bg-muted px-3 py-2 text-sm ring-1 ring-border focus:ring-2 focus:ring-brand',
+                                    fieldErrors.description && fieldErrorClass,
+                                )}
                             />
+                            {fieldErrors.description ? (
+                                <p id="task-description-error" className="text-sm text-destructive">
+                                    {fieldErrors.description}
+                                </p>
+                            ) : null}
                         </div>
 
                         <div className="grid gap-1.5">
@@ -251,5 +284,11 @@ export default function EditTaskSheet({
                 </DrawerFooter>
             </DrawerContent>
         </Drawer>
+        <ConfirmDiscardDialog
+            open={guard.confirm.open}
+            onKeepEditing={guard.confirm.onKeepEditing}
+            onDiscard={guard.confirm.onDiscard}
+        />
+        </>
     );
 }

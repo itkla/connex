@@ -18,6 +18,9 @@ class RequestPathRedactorTest {
         "/records/contacts/42, /records/contacts/{id}",
         "/records/contacts/private@example.com, /records/contacts/{id}",
         "/overview/reports/9/snapshots/12, /overview/reports/{id}/snapshots/{snapshotId}",
+        "/insights/reports/9/snapshots/12, /insights/reports/{id}/snapshots/{snapshotId}",
+        "/intelligence/radar, /intelligence/radar",
+        "/settings/workspace/people, /settings/workspace/people",
         "/docs/using-connex/notifications-and-mentions, /docs/{...slug}",
         "/invite/private-token, /invite/{token}",
         "/ja/invite/private-token, /{locale}/invite/{token}"

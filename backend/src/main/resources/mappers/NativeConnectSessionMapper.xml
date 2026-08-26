@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.NativeConnectSessionMapper">
+
+  <resultMap id="NativeConnectSessionResult" type="NativeConnectSession">
+    <id property="id" column="id"/>
+    <result property="userId" column="user_id"/>
+    <result property="provider" column="provider"/>
+    <result property="status" column="status"/>
+    <result property="pairingCodeHash" column="pairing_code_hash"/>
+    <result property="handoffTicketHash" column="handoff_ticket_hash"/>
+    <result property="stateHash" column="state_hash"/>
+    <result property="verifierRef" column="verifier_ref"/>
+    <result property="redirectUri" column="redirect_uri"/>
+    <result property="expectedConnectionId" column="expected_connection_id"/>
+    <result property="expectedCredentialGeneration" column="expected_credential_generation"/>
+    <result property="errorCode" column="error_code"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+    <result property="expiresAt" column="expires_at"/>
+  </resultMap>
+
+  <sql id="cols">
+    id, user_id, provider, status, pairing_code_hash, handoff_ticket_hash,
+    state_hash, verifier_ref, redirect_uri, expected_connection_id,
+    expected_credential_generation, error_code, created_at, updated_at, expires_at
+  </sql>
+
+  <select id="getLatestByUserAndProvider" resultMap="NativeConnectSessionResult">
+    SELECT <include refid="cols"/>
+    FROM provider_native_connect_session
+    WHERE user_id = #{userId} AND provider = #{provider}
+    ORDER BY id DESC
+    LIMIT 1
+  </select>
+
+  <select id="getLatestByUserAndProviderForUpdate" resultMap="NativeConnectSessionResult">
+    SELECT <include refid="cols"/>
+    FROM provider_native_connect_session
+    WHERE user_id = #{userId} AND provider = #{provider}
+    ORDER BY id DESC
+    LIMIT 1
+    FOR UPDATE
+  </select>
+
+  <select id="getByIdForUpdate" resultMap="NativeConnectSessionResult">
+    SELECT <include refid="cols"/>
+    FROM provider_native_connect_session
+    WHERE id = #{id}
+    FOR UPDATE
+  </select>
+
+  <select id="getByPairingCodeHash" resultMap="NativeConnectSessionResult">
+    SELECT <include refid="cols"/>
+    FROM provider_native_connect_session
+    WHERE pairing_code_hash = #{pairingCodeHash}
+  </select>
+
+  <select id="getByPairingCodeHashForUpdate" resultMap="NativeConnectSessionResult">
+    SELECT <include refid="cols"/>
+    FROM provider_native_connect_session
+    WHERE pairing_code_hash = #{pairingCodeHash}
+    FOR UPDATE
+  </select>
+
+  <select id="getByHandoffTicketHash" resultMap="NativeConnectSessionResult">
+    SELECT <include refid="cols"/>
+    FROM provider_native_connect_session
+    WHERE handoff_ticket_hash = #{handoffTicketHash}
+  </select>
+
+  <select id="getByHandoffTicketHashForUpdate" resultMap="NativeConnectSessionResult">
+    SELECT <include refid="cols"/>
+    FROM provider_native_connect_session
+    WHERE handoff_ticket_hash = #{handoffTicketHash}
+    FOR UPDATE
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO provider_native_connect_session (
+      user_id, provider, status, pairing_code_hash, expected_connection_id,
+      expected_credential_generation, expires_at
+    ) VALUES (
+      #{userId}, #{provider}, #{status}, #{pairingCodeHash}, #{expectedConnectionId},
+      #{expectedCredentialGeneration}, #{expiresAt}
+    )
+  </insert>
+
+  <update id="failActiveForUserAndProvider">
+    UPDATE provider_native_connect_session
+    SET status = 'failed', error_code = #{errorCode}
+    WHERE user_id = #{userId}
+      AND provider = #{provider}
+      AND status IN ('pending', 'prepared', 'exchanging')
+  </update>
+
+  <update id="prepare">
+    UPDATE provider_native_connect_session
+    SET status = 'prepared',
+        handoff_ticket_hash = #{handoffTicketHash},
+        state_hash = #{stateHash},
+        verifier_ref = #{verifierRef},
+        redirect_uri = #{redirectUri},
+        error_code = NULL
+    WHERE id = #{id}
+      AND pairing_code_hash = #{pairingCodeHash}
+      AND status = 'pending'
+      AND expires_at &gt; UTC_TIMESTAMP(6)
+  </update>
+
+  <update id="claimForExchange">
+    UPDATE provider_native_connect_session
+    SET status = 'exchanging', error_code = NULL
+    WHERE id = #{id}
+      AND handoff_ticket_hash = #{handoffTicketHash}
+      AND status = 'prepared'
+      AND expires_at &gt; UTC_TIMESTAMP(6)
+  </update>
+
+  <update id="complete">
+    UPDATE provider_native_connect_session
+    SET status = 'completed', error_code = NULL
+    WHERE id = #{id} AND status = 'exchanging'
+  </update>
+
+  <update id="fail">
+    UPDATE provider_native_connect_session
+    SET status = 'failed', error_code = #{errorCode}
+    WHERE id = #{id} AND status = #{expectedStatus}
+  </update>
+
+  <select id="findTerminalForUserAndProvider" resultMap="NativeConnectSessionResult">
+    SELECT <include refid="cols"/>
+    FROM provider_native_connect_session
+    WHERE user_id = #{userId}
+      AND provider = #{provider}
+      AND status IN ('completed', 'failed')
+    FOR UPDATE
+  </select>
+
+  <delete id="deleteTerminalById">
+    DELETE FROM provider_native_connect_session
+    WHERE id = #{id} AND status IN ('completed', 'failed')
+  </delete>
+
+  <select id="findExpiredBefore" resultMap="NativeConnectSessionResult">
+    SELECT <include refid="cols"/>
+    FROM provider_native_connect_session
+    WHERE expires_at &lt;= #{cutoff}
+    ORDER BY expires_at, id
+    LIMIT #{limit}
+  </select>
+
+  <delete id="deleteExpired">
+    DELETE FROM provider_native_connect_session
+    WHERE id = #{id}
+      AND expires_at &lt;= #{cutoff}
+  </delete>
+</mapper>

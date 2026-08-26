@@ -1,9 +1,9 @@
 {
   "DashboardPage": {
-    "overview": "Overview",
     "companies": "Companies",
     "contacts": "Contacts",
     "deals": "Deals",
+    "overview": "Record counts",
     "pipelines": "Pipelines",
     "pipeline": "Pipeline",
     "tasks": "Tasks",
@@ -13,6 +13,8 @@
     "coolingRelationships": "Cooling relationships",
     "atRiskDeals": "At-risk deals",
     "viewDeals": "View deals",
+    "viewAtRiskDeals": "View at-risk deals",
+    "viewInRadar": "Open in Radar",
     "introductions": "Introductions",
     "recentlyMoved": "Recently moved",
     "files": "Files",
@@ -59,7 +61,7 @@
     "scheduleFollowUp": "Schedule a follow-up before it goes cold",
     "followUpWith": "Follow up with {name}",
     "scheduled": "Follow-up scheduled",
-    "scheduleFailed": "Couldn't schedule the follow-up."
+    "scheduleFailed": "Couldn't schedule the follow-up"
   },
   "RecentMoves": {
     "empty": "No recent job changes among workspace contacts.",
@@ -76,9 +78,10 @@
     "steps": {
       "contacts": {
         "title": "Bring in your contacts",
-        "body": "Import a CSV from your old CRM, or add the first person by hand. You can scan a business card while adding one.",
+        "body": "Import a CSV from your old CRM, or add the first person by hand.",
         "cta": "Import contacts",
-        "done": "{count, plural, =1 {# contact} other {# contacts}}"
+        "done": "{count, plural, =1 {# contact} other {# contacts}}",
+        "bodyScanning": "Import a CSV from your old CRM, or add the first person by hand. You can scan a business card while adding someone."
       },
       "companies": {
         "title": "Add the companies they work for",
@@ -100,7 +103,7 @@
       },
       "team": {
         "title": "Bring a colleague in",
-        "body": "Warm-intro paths get stronger with every colleague's network.",
+        "body": "Intro paths get stronger with every colleague's network.",
         "cta": "Invite a colleague",
         "done": "{count, plural, =1 {# member} other {# members}}"
       },
@@ -146,6 +149,16 @@
         "interactions": "No interactions logged",
         "noSignal": "Contacts and interactions are in, but none of them adds up to a signal worth claiming yet."
       }
+    }
+  },
+  "FirstRunJourney": {
+    "newContact": "New contact",
+    "warmth": {
+      "title": "Your first warmth reading",
+      "body": "Connex read the interactions you logged. This is how warm your relationships are right now.",
+      "readings": "Read from the interactions you logged",
+      "bandCount": "{count, plural, =1 {# contact} other {# contacts}}",
+      "cta": "See warmth"
     }
   },
   "DashboardGreeting": {
@@ -234,6 +247,6 @@
   },
   "DashboardLayout": {
     "title": "Dashboard",
-    "description": "Your organization at a glance"
+    "description": "Your workspace at a glance"
   }
 }

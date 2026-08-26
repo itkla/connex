@@ -1,9 +1,9 @@
 {
   "DashboardPage": {
-    "overview": "概要",
     "companies": "会社",
     "contacts": "連絡先",
     "deals": "案件",
+    "overview": "レコード数",
     "pipelines": "パイプライン",
     "pipeline": "パイプライン",
     "tasks": "タスク",
@@ -13,15 +13,17 @@
     "coolingRelationships": "冷め込んでいる関係",
     "atRiskDeals": "リスクのある案件",
     "viewDeals": "案件を表示",
+    "viewAtRiskDeals": "リスクのある案件を表示",
+    "viewInRadar": "レーダーで開く",
     "introductions": "紹介",
     "recentlyMoved": "最近の転職",
     "files": "ファイル",
     "storageUsed": "{count}件のファイル · {size}",
     "noFiles": "ファイルはまだありません",
-    "companyWarmth": "取引先の温度感",
+    "companyWarmth": "会社の温度感",
     "warmthDistribution": "温度感の分布",
     "closingSoon": "まもなくクローズ",
-    "recentNotes": "最近のノート",
+    "recentNotes": "最近のメモ",
     "notifications": "通知",
     "quickActions": "クイックアクション",
     "captureAttention": {
@@ -41,7 +43,7 @@
     "empty": "現在、冷え込みつつある会社はありません。"
   },
   "WarmthDistribution": {
-    "empty": "温度データがまだありません"
+    "empty": "温度感のデータはまだありません"
   },
   "ClosingSoonDeals": {
     "empty": "今週クローズ予定の案件はありません。"
@@ -59,7 +61,7 @@
     "scheduleFollowUp": "冷め込む前にフォローアップを予約",
     "followUpWith": "{name} にフォローアップ",
     "scheduled": "フォローアップを予約しました",
-    "scheduleFailed": "フォローアップを予約できませんでした。"
+    "scheduleFailed": "フォローアップタスクを作成できませんでした"
   },
   "RecentMoves": {
     "empty": "ワークスペースの連絡先に最近の転職はありません。",
@@ -76,9 +78,10 @@
     "steps": {
       "contacts": {
         "title": "連絡先を取り込む",
-        "body": "以前の CRM から CSV をインポートするか、最初の 1 名を手入力してください。追加時に名刺をスキャンすることもできます。",
+        "body": "以前の CRM から CSV をインポートするか、最初の 1 名を手入力してください。",
         "cta": "連絡先をインポート",
-        "done": "{count}件の連絡先"
+        "done": "{count}件の連絡先",
+        "bodyScanning": "以前の CRM から CSV をインポートするか、最初の 1 名を手入力してください。追加時に名刺をスキャンすることもできます。"
       },
       "companies": {
         "title": "所属する会社を追加する",
@@ -88,7 +91,7 @@
       },
       "interactions": {
         "title": "接点を記録する",
-        "body": "アクティビティ、共有ノート、紐づけたタスクを根拠として、Connex が関係の温度感を読み取ります。",
+        "body": "アクティビティ、共有メモ、紐づけたタスクを根拠として、Connex が関係の温度感を読み取ります。",
         "cta": "アクティビティを記録",
         "done": "接点を記録済み"
       },
@@ -100,7 +103,7 @@
       },
       "team": {
         "title": "同僚を招待する",
-        "body": "同僚のネットワークが加わるほど、温かい紹介の経路は強くなります。",
+        "body": "同僚のネットワークが加わるほど、紹介ルートは強くなります。",
         "cta": "同僚を招待",
         "done": "{count}人のメンバー"
       },
@@ -148,6 +151,16 @@
       }
     }
   },
+  "FirstRunJourney": {
+    "newContact": "新規連絡先",
+    "warmth": {
+      "title": "最初の温度感",
+      "body": "記録された接点をもとに、Connex が読み取った現在の関係の温度感です。",
+      "readings": "記録された接点から読み取っています",
+      "bandCount": "{count}件の連絡先",
+      "cta": "温度感を見る"
+    }
+  },
   "DashboardGreeting": {
     "workingLate": "遅くまでお疲れさまです、",
     "goodMorning": "おはようございます、",
@@ -191,21 +204,21 @@
   "DashboardQuickCreate": {
     "new": "新規",
     "newTask": "新しいタスク",
-    "newNote": "新しいノート",
+    "newNote": "新しいメモ",
     "taskTitle": "新しいタスク",
     "taskDescription": "自分に割り当てるタスクを作成します。",
-    "noteTitle": "新しいノート",
+    "noteTitle": "新しいメモ",
     "noteDescription": "メモを残しましょう。",
     "descriptionField": "説明",
     "descriptionPlaceholder": "何をしますか？",
     "dueDate": "期日",
-    "contentField": "ノート",
+    "contentField": "メモ",
     "contentPlaceholder": "メモを入力…",
     "cancel": "キャンセル",
     "create": "作成",
     "view": "表示",
     "taskCreated": "タスクを作成しました",
-    "noteCreated": "ノートを作成しました",
+    "noteCreated": "メモを作成しました",
     "descriptionRequired": "説明を入力してください。",
     "contentRequired": "内容を入力してください。",
     "failed": "問題が発生しました。"
@@ -234,6 +247,6 @@
   },
   "DashboardLayout": {
     "title": "ダッシュボード",
-    "description": "組織の状況をひと目で確認"
+    "description": "ワークスペースの状況をひと目で確認"
   }
 }

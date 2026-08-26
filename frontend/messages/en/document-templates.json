@@ -4,9 +4,6 @@
     "description": "Reusable templates for quotes, proposals, order forms, and contracts"
   },
   "DocumentTemplatesBrowser": {
-    "title": "Documents",
-    "newButton": "New template",
-    "approvalPoliciesLink": "Approval policies",
     "sectionTemplates": "Templates",
     "searchPlaceholder": "Search templates",
     "emptyTitle": "No templates yet",
@@ -109,5 +106,46 @@
     "slashTermsHeading": "Terms & conditions",
     "slashFooter": "Footer",
     "slashFooterHint": "A divider and closing line"
+  },
+  "DocumentsLibrary": {
+    "title": "Documents",
+    "documentsDescription": "Every quote, proposal, order form, and contract this workspace has generated. Each one opens the deal it belongs to.",
+    "templatesDescription": "Reusable layouts that turn a deal's data into a finished document.",
+    "viewSwitchAria": "View",
+    "viewDocuments": "Documents",
+    "viewTemplates": "Document templates",
+    "newTemplate": "New template",
+    "approvalPoliciesLink": "Approval policies"
+  },
+  "GeneratedDocuments": {
+    "emptyAction": "Open deals",
+    "searchPlaceholder": "Search documents",
+    "statusLabel": "Status",
+    "typeLabel": "Type",
+    "columnDocument": "Document",
+    "columnDeal": "Deal",
+    "columnStatus": "Status",
+    "columnOwner": "Owner",
+    "columnGenerated": "Generated",
+    "versionLabel": "Version {version}",
+    "dealUnavailable": "Deal unavailable",
+    "ownerUnassigned": "Unassigned",
+    "ownerUnknown": "Former member",
+    "statusDraft": "Draft",
+    "statusPendingApproval": "Awaiting approval",
+    "statusApproved": "Approved",
+    "statusFinal": "Final",
+    "statusSuperseded": "Superseded",
+    "typeQuote": "Quote",
+    "typeProposal": "Proposal",
+    "typeOrderForm": "Order form",
+    "typeContract": "Contract",
+    "emptyTitle": "No documents yet",
+    "emptyBody": "Documents are generated from a deal using a template. Open a deal, pick a template, and the finished quote or contract lands here.",
+    "noMatchesTitle": "No matches",
+    "noMatchesBody": "Try adjusting your search or filters.",
+    "page": "Page {page} of {pageCount}",
+    "previousPage": "Previous page",
+    "nextPage": "Next page"
   }
 }

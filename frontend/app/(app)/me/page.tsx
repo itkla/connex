@@ -10,6 +10,8 @@ import {
     getCurrentUserResultFromCookie,
     getDealRisksFromCookie,
     getDealsFromCookie,
+    getApprovalInboxResultFromCookie,
+    getEffectivePermissionsResultFromCookie,
     getUserActivitiesFromCookie,
     getUserNotesFromCookie,
     getUserTasksFromCookie,
@@ -27,6 +29,7 @@ import Timeline from "@/app/components/me/Timeline";
 import MeHero from "@/app/components/me/MeHero";
 import SignalStrip from "@/app/components/me/SignalStrip";
 import NeedsYou from "@/app/components/me/NeedsYou";
+import ApprovalInbox from "@/app/components/me/ApprovalInbox";
 import PulseStrip from "@/app/components/me/PulseStrip";
 import {
     activityPulse,
@@ -60,14 +63,17 @@ export default async function MePage() {
     }
 
     const init = { headers: { cookie: cookie ?? "" } } as const;
-    const [contacts, deals, tasks, activities, notes, users] = await Promise.all([
-        getContactsFromCookie(cookie).catch(() => [] as Contact[]),
-        getDealsFromCookie(cookie).catch(() => [] as Deal[]),
-        getUserTasksFromCookie(user.id, cookie).catch(() => [] as Task[]),
-        getUserActivitiesFromCookie(user.id, cookie).catch(() => [] as Activity[]),
-        getUserNotesFromCookie(user.id, cookie).catch(() => [] as Note[]),
-        getUsers(init).catch(() => [] as User[]),
-    ]);
+    const [contacts, deals, tasks, activities, notes, users, permissionsResult, approvalInboxResult]
+        = await Promise.all([
+            getContactsFromCookie(cookie).catch(() => [] as Contact[]),
+            getDealsFromCookie(cookie).catch(() => [] as Deal[]),
+            getUserTasksFromCookie(user.id, cookie).catch(() => [] as Task[]),
+            getUserActivitiesFromCookie(user.id, cookie).catch(() => [] as Activity[]),
+            getUserNotesFromCookie(user.id, cookie).catch(() => [] as Note[]),
+            getUsers(init).catch(() => [] as User[]),
+            getEffectivePermissionsResultFromCookie(cookie),
+            getApprovalInboxResultFromCookie(cookie),
+        ]);
     const myDeals = deals.filter((deal) => deal.ownerId === user.id);
     const [temps, dealRisks] = await Promise.all([
         getContactTemperaturesFromCookie(cookie, contacts.map((contact) => contact.id))
@@ -85,9 +91,11 @@ export default async function MePage() {
     const coolingCount = temps.filter((temp) => temp.trend === "cooling").length;
     const greeting = t(`greeting_${greetingKey(user.timezone)}`);
     const hasWork = tasks.length + activities.length + notes.length > 0;
+    const canApprove = permissionsResult.ok
+        && permissionsResult.data.includes("DOCUMENT_APPROVE");
 
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <Rise>
                     <MeHero
                         user={user}
@@ -106,12 +114,20 @@ export default async function MePage() {
                     <NeedsYou cooling={cooling} risks={risks} />
                 </Rise>
 
-                <Rise delay={0.2}>
+                {canApprove && (
+                    <Rise delay={0.2}>
+                        <ApprovalInbox
+                            items={approvalInboxResult.ok ? approvalInboxResult.data : null}
+                        />
+                    </Rise>
+                )}
+
+                <Rise delay={0.26}>
                     <PulseStrip days={pulse.days} totalTouches={pulse.totalTouches} streak={pulse.streak} />
                 </Rise>
 
                 {hasWork && (
-                    <Rise delay={0.26}>
+                    <Rise delay={0.32}>
                         <section>
                             <SectionHeader title={t("recentWork")} />
                             <div className="overflow-hidden rounded-2xl border border-border bg-card">

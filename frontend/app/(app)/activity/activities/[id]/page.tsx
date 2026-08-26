@@ -84,7 +84,7 @@ export default async function ActivityDetailPage({
     const typeLabel = tPage(`type${kind}` as "typeCall");
 
     return (
-        <PageShell tier="form">
+        <PageShell>
                 <Rise className="flex flex-col gap-6">
                     <CrumbLabel value={activity.subject} />
 

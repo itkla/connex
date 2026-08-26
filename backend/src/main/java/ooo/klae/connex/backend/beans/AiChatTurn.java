@@ -13,6 +13,9 @@ public class AiChatTurn {
     private Integer requestedByUserId;
     private String status;
     private String terminalReason;
+    private String skillKey;
+    private String skillVersion;
+    private String scopeJson;
     private String privacyMode = "masked";
     private boolean streamed;
     private String partialContent;

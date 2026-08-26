@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import type { TenantDiagnostics } from "@/app/lib/types";
@@ -15,6 +15,7 @@ import { MailDeliverabilitySection } from "./MailDeliverabilitySection";
 import { ProfileCapabilitiesSection } from "./ProfileCapabilitiesSection";
 import { ProviderReadinessSection } from "./ProviderReadinessSection";
 import { SecretStoreSection } from "./SecretStoreSection";
+import DiagnosticsPanelSkeleton from "./DiagnosticsPanelSkeleton";
 import { StatusPill } from "./StatusPill";
 
 /**
@@ -55,6 +56,8 @@ export default function DiagnosticsPanel({ scope }: { scope: DiagnosticsScope })
     const [accessDenied, setAccessDenied] = useState(false);
     const [reloadToken, setReloadToken] = useState(0);
 
+    const loadedScopeIdRef = useRef<number | null>(null);
+
     const workspaceId = activeWorkspace?.id ?? null;
     const orgId = activeWorkspace?.orgId ?? null;
     const scopeId = scope === "workspace" ? workspaceId : orgId;
@@ -62,6 +65,7 @@ export default function DiagnosticsPanel({ scope }: { scope: DiagnosticsScope })
     useEffect(() => {
         if (scopeId === null) return;
         let cancelled = false;
+        if (loadedScopeIdRef.current !== scopeId) setData(null);
         (async () => {
             setLoading(true);
             setError(null);
@@ -74,6 +78,7 @@ export default function DiagnosticsPanel({ scope }: { scope: DiagnosticsScope })
                         : await getOrgDiagnostics(scopeId);
                 if (cancelled) return;
                 setData(next);
+                loadedScopeIdRef.current = scopeId;
             } catch (caught) {
                 if (cancelled) return;
                 if (caught instanceof ApiError && caught.status === 403) {
@@ -106,6 +111,8 @@ export default function DiagnosticsPanel({ scope }: { scope: DiagnosticsScope })
     }
 
     const showLoading = scopeId !== null && loading;
+    if (showLoading && data === null) return <DiagnosticsPanelSkeleton scope={scope} />;
+
     const findings = showLoading ? [] : (data?.findings ?? []);
     const faulted = new Set((data?.unavailableSections ?? []).map((fault) => fault.section));
     const boundaryKey = `${scopeId ?? "none"}:${reloadToken}`;
@@ -170,28 +177,24 @@ export default function DiagnosticsPanel({ scope }: { scope: DiagnosticsScope })
                     <SectionBoundary resetKey={boundaryKey}>
                         <ProfileCapabilitiesSection
                             data={data}
-                            loading={showLoading}
                             unavailable={faulted.has("deployment")}
                         />
                     </SectionBoundary>
                     <SectionBoundary resetKey={boundaryKey}>
                         <ProviderReadinessSection
                             data={data}
-                            loading={showLoading}
                             unavailable={faulted.has("jobs_providers")}
                         />
                     </SectionBoundary>
                     <SectionBoundary resetKey={boundaryKey}>
                         <JobRunsSection
                             data={data}
-                            loading={showLoading}
                             unavailable={faulted.has("jobs_providers")}
                         />
                     </SectionBoundary>
                     <SectionBoundary resetKey={boundaryKey}>
                         <SecretStoreSection
                             data={data}
-                            loading={showLoading}
                             unavailable={faulted.has("secret_store")}
                         />
                     </SectionBoundary>

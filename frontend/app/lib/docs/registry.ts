@@ -135,7 +135,7 @@ export const docsCategories: DocCategory[] = [
         namespace: "DocsRelationshipIntelligence",
         icon: FireIcon,
         articles: [
-            { slug: "warmth-and-temperature", icon: FireIcon },
+            { slug: "warmth", icon: FireIcon },
             { slug: "decay-and-signals", icon: ArrowTrendingDownIcon },
             { slug: "connections-and-employment", icon: ArrowsRightLeftIcon },
             { slug: "ai-insights", icon: SparklesIcon },
@@ -149,7 +149,6 @@ export const docsCategories: DocCategory[] = [
             { slug: "analytics", icon: ChartBarIcon },
             { slug: "reports-and-goals", icon: DocumentChartBarIcon },
             { slug: "relationship-map", icon: MapIcon },
-            { slug: "calendar", icon: CalendarIcon },
             { slug: "introductions", icon: ArrowsRightLeftIcon },
             { slug: "warm-intro-paths", icon: ShareIcon },
         ],
@@ -168,6 +167,7 @@ export const docsCategories: DocCategory[] = [
             { slug: "notes", icon: DocumentTextIcon },
             { slug: "tasks", icon: CheckCircleIcon },
             { slug: "activities", icon: ChatBubbleLeftRightIcon },
+            { slug: "calendar", icon: CalendarIcon },
             { slug: "calendar-events", icon: CalendarDaysIcon },
         ],
     },
@@ -210,7 +210,7 @@ export const docsCategories: DocCategory[] = [
         articles: [
             { slug: "members-and-roles", icon: UserGroupIcon },
             { slug: "sign-in-and-security", icon: FingerPrintIcon },
-            { slug: "rules-and-automation", icon: BoltIcon },
+            { slug: "workflows-and-automation", icon: BoltIcon },
             { slug: "notification-settings", icon: BellIcon },
             { slug: "connected-accounts", icon: LinkIcon },
             { slug: "connected-capture", icon: EnvelopeIcon },

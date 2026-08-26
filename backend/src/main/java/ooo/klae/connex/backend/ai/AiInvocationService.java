@@ -832,6 +832,7 @@ public class AiInvocationService {
             AiCompletionResult result = withConservativeUsage(
                     providerResult, effectiveInvocation, serializedPrompt);
             attemptTracker.settleBudget(result.inputTokens(), result.outputTokens());
+            attemptTracker.checkpoint();
             return new RawInvocation(
                     workspaceId, orgId, resolved, correlationId, structured, result, mediaLease,
                     outputTokensClamped);

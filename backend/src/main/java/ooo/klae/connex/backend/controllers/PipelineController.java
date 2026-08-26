@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.dto.DealDto;
 import ooo.klae.connex.backend.dto.PipelineDto;
+import ooo.klae.connex.backend.dto.PipelineStagesDto;
 import ooo.klae.connex.backend.dto.StageDto;
 import ooo.klae.connex.backend.services.PipelineService;
 
@@ -117,6 +118,26 @@ public class PipelineController {
     @PostMapping("/{pipelineId}/stages")
     public StageDto createStage(@PathVariable int pipelineId, @Valid @RequestBody StageDto dto) {
         return StageDto.from(pipelineService.createStage(pipelineId, dto.toBean()));
+    }
+
+    /**
+     * PUT endpoint to replace a pipeline's whole stage set in one transaction. Entries carrying an
+     * id are kept and updated, entries without one are created, and any stage absent from the list
+     * is removed; positions follow the order given. Validating the final set rather than each write
+     * makes edits that are only valid as a whole — a name swap, or moving the Won flag — succeed.
+     * Only stages the editor had loaded, named in {@code knownStageIds}, are eligible for removal.
+     * @param pipelineId
+     * @param dto the complete stage set the pipeline should end up with
+     * @return the pipeline's stages after the replacement, in order
+     */
+    @PutMapping("/{pipelineId}/stages")
+    public List<StageDto> replaceStages(@PathVariable int pipelineId, @Valid @RequestBody PipelineStagesDto dto) {
+        return pipelineService
+            .replaceStages(
+                pipelineId,
+                dto.getKnownStageIds(),
+                dto.getStages().stream().map(PipelineStagesDto.Entry::toBean).toList())
+            .stream().map(StageDto::from).toList();
     }
 
     /**

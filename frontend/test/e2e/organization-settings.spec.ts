@@ -76,8 +76,8 @@ test.describe("workspace and organization identity", () => {
                 }
             });
 
-            await page.goto("/account/security");
-            await expect(page).toHaveURL(/\/account\/security\?mfa=enroll$/, { timeout: 20_000 });
+            await page.goto("/settings/personal/security");
+            await expect(page).toHaveURL(/\/settings\/personal\/security\?mfa=enroll$/, { timeout: 20_000 });
             const addPasskey = page.getByRole("button", { name: "Add a passkey" }).first();
             await expect(addPasskey).toBeVisible();
             expect(notificationCountRequests).toBe(1);
@@ -87,7 +87,7 @@ test.describe("workspace and organization identity", () => {
             await passwordDialog.getByLabel("Current password").fill(password);
             await passwordDialog.getByRole("button", { name: "Continue", exact: true }).click();
             await expect(page.getByText("Passkey added", { exact: true })).toBeVisible();
-            await expect(page).toHaveURL(/\/account\/security$/);
+            await expect(page).toHaveURL(/\/settings\/personal\/security$/);
             await page.getByRole("link", { name: "Dashboard", exact: true }).click();
             await expect(page).toHaveURL(/\/dashboard$/);
             await expect.poll(() => notificationCountRequests).toBeGreaterThan(1);
@@ -122,14 +122,14 @@ test.describe("workspace and organization identity", () => {
             const workspaceName = `Design operations ${runId}`;
             const organizationName = `Northstar ${runId}`;
 
-            await page.goto("/account/security");
+            await page.goto("/settings/personal/security");
             await page.getByRole("button", { name: "Add a passkey" }).first().click();
             const passwordDialog = page.getByRole("dialog", { name: "Confirm your password" });
             await passwordDialog.getByLabel("Current password").fill(password);
             await passwordDialog.getByRole("button", { name: "Continue", exact: true }).click();
             await expect(page.getByText("Passkey added", { exact: true })).toBeVisible();
 
-            await page.goto("/settings/general");
+            await page.goto("/settings/workspace/general");
             await expect(page.getByRole("heading", { name: "Workspace identity" })).toBeVisible();
             await page.getByLabel("Workspace name").fill(workspaceName);
             await page.getByLabel("Reporting timezone").fill("Asia/Tokyo");

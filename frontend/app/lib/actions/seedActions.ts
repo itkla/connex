@@ -7,29 +7,24 @@ import {
     BoltIcon,
     BookOpenIcon,
     BriefcaseIcon,
-    BuildingLibraryIcon,
     BuildingOffice2Icon,
     CalendarIcon,
     ChartBarIcon,
     ChatBubbleLeftRightIcon,
     CheckCircleIcon,
-    Cog6ToothIcon,
     CubeIcon,
     DocumentDuplicateIcon,
     DocumentTextIcon,
     FolderIcon,
     FunnelIcon,
     HomeIcon,
-    IdentificationIcon,
     LinkIcon,
     MagnifyingGlassIcon,
     MapIcon,
     PresentationChartLineIcon,
-    ShieldCheckIcon,
     SignalIcon,
     TagIcon,
     UserCircleIcon,
-    UserGroupIcon,
     UserPlusIcon,
     UsersIcon,
 } from "@heroicons/react/24/outline";
@@ -109,37 +104,36 @@ function navigateAction(
  * opens a shell-owned overlay seeded with context-aware prefills derived from the current record; the
  * notification "mark all read" action is contributed separately by a bridge that owns the notification
  * context.
+ *
+ * No settings, account, or administration destination is listed here. #1340 makes the committed
+ * settings manifest their only source of truth, and `settingsNavigationActions` generates them from
+ * it — a hand-written entry here would be a second answer to where a settings job lives.
  */
 export const SEED_ACTIONS: readonly AppAction[] = [
     navigateAction("navigate.dashboard", "navigate.dashboard", "/dashboard", HomeIcon, 10),
-    navigateAction("navigate.radar", "navigate.radar", "/radar", SignalIcon, 15),
+    navigateAction("navigate.radar", "navigate.radar", "/intelligence/radar", SignalIcon, 15),
     navigateAction("navigate.companies", "navigate.companies", "/records/companies", BuildingOffice2Icon, 20),
     navigateAction("navigate.contacts", "navigate.contacts", "/records/contacts", UsersIcon, 30, {
         keywordsKey: "keywords.navigate.contacts",
     }),
     navigateAction("navigate.deals", "navigate.deals", "/records/deals", BriefcaseIcon, 40),
     navigateAction("navigate.pipelines", "navigate.pipelines", "/records/pipelines", FunnelIcon, 50),
-    navigateAction("navigate.analytics", "navigate.analytics", "/overview/analytics", ChartBarIcon, 60),
-    navigateAction("navigate.calendar", "navigate.calendar", "/overview/calendar", CalendarIcon, 70),
-    navigateAction("navigate.reports", "navigate.reports", "/overview/reports", PresentationChartLineIcon, 65),
-    navigateAction("navigate.settings", "navigate.settings", "/settings/members", Cog6ToothIcon, 80),
+    navigateAction("navigate.analytics", "navigate.analytics", "/insights/analytics", ChartBarIcon, 60),
+    navigateAction("navigate.calendar", "navigate.calendar", "/activity/calendar", CalendarIcon, 70),
+    navigateAction("navigate.reports", "navigate.reports", "/insights/reports", PresentationChartLineIcon, 65),
     navigateAction("navigate.products", "navigate.products", "/records/products", CubeIcon, 85),
-    navigateAction("navigate.organization", "navigate.organization", "/organization/members", BuildingLibraryIcon, 90, {
-        isAvailable: (context) => context.can("ORGANIZATION_VIEW"),
-    }),
     navigateAction("navigate.tasks", "navigate.tasks", "/activity/tasks", CheckCircleIcon, 100),
     navigateAction("navigate.activities", "navigate.activities", "/activity/all", ChatBubbleLeftRightIcon, 105),
     navigateAction("navigate.notes", "navigate.notes", "/activity/notes", DocumentTextIcon, 110),
     navigateAction("navigate.notifications", "navigate.notifications", "/notifications", BellIcon, 115),
-    navigateAction("navigate.introductions", "navigate.introductions", "/overview/introductions", ArrowsRightLeftIcon, 120),
-    navigateAction("navigate.map", "navigate.map", "/overview/map", MapIcon, 125),
+    navigateAction("navigate.introductions", "navigate.introductions", "/intelligence/introductions", ArrowsRightLeftIcon, 120),
+    navigateAction("navigate.map", "navigate.map", "/intelligence/map", MapIcon, 125),
     navigateAction("navigate.documents", "navigate.documents", "/library/documents", DocumentDuplicateIcon, 135),
     navigateAction("navigate.tags", "navigate.tags", "/library/tags", TagIcon, 140),
     navigateAction("navigate.files", "navigate.files", "/library/files", FolderIcon, 145),
-    navigateAction("navigate.users", "navigate.users", "/users", UserGroupIcon, 160),
-    navigateAction("navigate.approval-policies", "navigate.approvalPolicies", "/records/approval-policies", ShieldCheckIcon, 165),
-    navigateAction("navigate.me", "navigate.me", "/me", UserCircleIcon, 175),
-    navigateAction("navigate.account", "navigate.account", "/account", IdentificationIcon, 180),
+    navigateAction("navigate.me", "navigate.me", "/me", UserCircleIcon, 175, {
+        keywordsKey: "keywords.navigate.me",
+    }),
     navigateAction("navigate.search", "navigate.search", "/search", MagnifyingGlassIcon, 185),
     navigateAction("navigate.docs", "navigate.docs", "/docs", BookOpenIcon, 190),
 

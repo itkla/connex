@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { useActions } from '@/app/hooks/useActions';
+import { actionLabel } from '@/app/lib/actions/actionLabels';
 import type { ActionId, ActiveRecordRef } from '@/app/lib/actions/types';
 import type { RecordRemoveIntent } from '@/app/components/records/types';
 
@@ -80,6 +81,7 @@ const REMOVE_ITEM: Record<RecordRemoveIntent, Omit<MenuItemDescriptor, 'label' |
 function useRecordMenuGroups(model: RecordMenuModel, enabled: boolean): MenuItemDescriptor[][] {
     const { actions, getAction, isAvailableForRecord, run } = useActions();
     const t = useTranslations('Actions');
+    const tMessage = useTranslations();
     const tr = useTranslations('RecordActionMenu');
 
     return useMemo(() => {
@@ -101,7 +103,7 @@ function useRecordMenuGroups(model: RecordMenuModel, enabled: boolean): MenuItem
             const Icon = action.icon;
             return {
                 key: id,
-                label: action.label ?? t(action.labelKey),
+                label: actionLabel(action, t, tMessage),
                 icon: Icon ? <Icon className="size-4 text-muted-foreground" /> : null,
                 onSelect: () => void run(id, { source: 'menu', record }),
             };
@@ -123,7 +125,7 @@ function useRecordMenuGroups(model: RecordMenuModel, enabled: boolean): MenuItem
             [remove],
         ];
         return groups.map((group) => group.filter((item): item is MenuItemDescriptor => item !== null)).filter((group) => group.length > 0);
-    }, [enabled, actions, model, getAction, isAvailableForRecord, run, t, tr]);
+    }, [enabled, actions, model, getAction, isAvailableForRecord, run, t, tMessage, tr]);
 }
 
 type MenuItemComponent = ComponentType<{ variant?: 'default' | 'destructive'; onSelect?: (event: Event) => void; children?: ReactNode }>;

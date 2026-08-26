@@ -17,7 +17,7 @@ class CapabilityProfileMatrixLoggerTest {
         assertEquals("Deployment capability matrix: profile=on-prem, forbidden=[MANAGED_MAIL], allowed=["
                 + "SSO, SOCIAL_LOGIN_GOOGLE, SOCIAL_LOGIN_MICROSOFT, CONNECTED_ACCOUNTS_GOOGLE, "
                 + "CONNECTED_ACCOUNTS_MICROSOFT, CONNECTED_CAPTURE_GOOGLE, CONNECTED_CAPTURE_MICROSOFT, "
-                + "BUSINESS_CARD_SCANNING, BUSINESS_CARD_IMPORT, CAMPAIGN_DELIVERY]",
+                + "BUSINESS_CARD_SCANNING, BUSINESS_CARD_IMPORT, CAMPAIGN_DELIVERY, DOCUMENT_SIGNATURE]",
             capture(DeploymentProperties.PROFILE_ON_PREM));
     }
 
@@ -26,7 +26,8 @@ class CapabilityProfileMatrixLoggerTest {
         String allAllowed = "forbidden=[], allowed=["
             + "SSO, SOCIAL_LOGIN_GOOGLE, SOCIAL_LOGIN_MICROSOFT, CONNECTED_ACCOUNTS_GOOGLE, "
             + "CONNECTED_ACCOUNTS_MICROSOFT, CONNECTED_CAPTURE_GOOGLE, CONNECTED_CAPTURE_MICROSOFT, "
-            + "MANAGED_MAIL, BUSINESS_CARD_SCANNING, BUSINESS_CARD_IMPORT, CAMPAIGN_DELIVERY]";
+            + "MANAGED_MAIL, BUSINESS_CARD_SCANNING, BUSINESS_CARD_IMPORT, CAMPAIGN_DELIVERY, "
+            + "DOCUMENT_SIGNATURE]";
 
         assertEquals("Deployment capability matrix: profile=saas, " + allAllowed,
             capture(DeploymentProperties.PROFILE_SAAS));
@@ -39,7 +40,8 @@ class CapabilityProfileMatrixLoggerTest {
         assertEquals("Deployment capability matrix: profile=unset, forbidden=[], allowed=["
                 + "SSO, SOCIAL_LOGIN_GOOGLE, SOCIAL_LOGIN_MICROSOFT, CONNECTED_ACCOUNTS_GOOGLE, "
                 + "CONNECTED_ACCOUNTS_MICROSOFT, CONNECTED_CAPTURE_GOOGLE, CONNECTED_CAPTURE_MICROSOFT, "
-                + "MANAGED_MAIL, BUSINESS_CARD_SCANNING, BUSINESS_CARD_IMPORT, CAMPAIGN_DELIVERY]",
+                + "MANAGED_MAIL, BUSINESS_CARD_SCANNING, BUSINESS_CARD_IMPORT, CAMPAIGN_DELIVERY, "
+                + "DOCUMENT_SIGNATURE]",
             capture(""));
     }
 

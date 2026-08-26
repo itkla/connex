@@ -82,7 +82,7 @@ function DrawerOverlay({
     <DrawerPrimitive.Backdrop
       data-slot="drawer-overlay"
       className={cn(
-        "fixed inset-0 z-50 bg-black/10 bg-clip-padding opacity-[max(0,calc(1-var(--drawer-swipe-progress,0)))] transition-opacity duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] select-none dark:bg-black/50 supports-backdrop-filter:backdrop-blur-xs motion-reduce:transition-none data-swiping:duration-0 data-starting-style:opacity-0 data-ending-style:pointer-events-none data-ending-style:opacity-0 supports-[-webkit-touch-callout:none]:absolute",
+        "fixed inset-0 z-50 bg-black/10 bg-clip-padding opacity-[max(0,calc(1-var(--drawer-swipe-progress,0)))] transition-opacity duration-(--motion-standard) ease-calm select-none dark:bg-black/50 supports-backdrop-filter:backdrop-blur-xs motion-reduce:transition-none data-swiping:duration-0 data-starting-style:opacity-0 data-ending-style:pointer-events-none data-ending-style:opacity-0 data-ending-style:duration-(--motion-micro) supports-[-webkit-touch-callout:none]:absolute",
         motionClassName,
         className
       )}
@@ -100,7 +100,7 @@ function DrawerSwipeHandle({
       data-slot="drawer-swipe-handle"
       aria-hidden="true"
       className={cn(
-        "mx-auto mt-2 h-1.5 w-12 shrink-0 cursor-grab rounded-full bg-border transition-opacity duration-200 group-data-[swipe-axis=x]/drawer-popup:hidden group-data-[swipe-direction=up]/drawer-popup:order-last active:cursor-grabbing",
+        "mx-auto mt-2 h-1.5 w-12 shrink-0 cursor-grab rounded-full bg-border transition-opacity duration-(--motion-micro) group-data-[swipe-axis=x]/drawer-popup:hidden group-data-[swipe-direction=up]/drawer-popup:order-last active:cursor-grabbing motion-reduce:transition-none",
         className
       )}
       {...props}
@@ -164,7 +164,7 @@ function DrawerContent({
           data-snap-points={hasSnapPoints ? "" : undefined}
           className={cn(
             "group/drawer-popup pointer-events-auto relative flex min-h-0 flex-col overflow-hidden bg-popover bg-clip-padding text-sm text-popover-foreground shadow-2xl ring-1 ring-foreground/10 outline-none",
-            "transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] will-change-transform motion-reduce:transition-none data-swiping:transition-none",
+            "transition-transform duration-(--motion-standard) ease-calm will-change-transform motion-reduce:transition-none data-swiping:transition-none data-ending-style:duration-(--motion-micro)",
             motionClassName,
             layout,
             className

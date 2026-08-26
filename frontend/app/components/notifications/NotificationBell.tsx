@@ -189,7 +189,7 @@ export default function NotificationBell() {
                     side="bottom"
                     align="start"
                     sideOffset={8}
-                    className="z-50 w-[min(20rem,calc(100vw-2rem))] origin-(--radix-dropdown-menu-content-transform-origin) rounded-xl border border-border bg-popover p-2 text-popover-foreground shadow-xl duration-150 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+                    className="z-50 w-[min(20rem,calc(100vw-2rem))] origin-(--radix-dropdown-menu-content-transform-origin) rounded-xl border border-border bg-popover p-2 text-popover-foreground shadow-xl duration-(--motion-micro) data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 motion-reduce:animate-none!"
                 >
                     <div className="flex items-center justify-between px-2 py-1.5">
                         <div>

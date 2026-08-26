@@ -1,5 +1,12 @@
-import { defaultAction } from "@/app/components/settings/workflows/vocabulary";
+import {
+    actionsFor,
+    defaultAction,
+    eventsFor,
+    SCHEDULE_RECORD_TYPES,
+    SEGMENT_RECORD_TYPES,
+} from "@/app/components/settings/workflows/vocabulary";
 import type {
+    RuleTrigger,
     WorkflowCanvas,
     WorkflowConditionNode,
     WorkflowDefinition,
@@ -8,6 +15,7 @@ import type {
     WorkflowEdgeOutcome,
     WorkflowNode,
     WorkflowNodeType,
+    WorkflowTriggerNode,
 } from "@/app/lib/types";
 
 export const WORKFLOW_NODE_LIMIT = 50;
@@ -380,6 +388,121 @@ export function removeWorkflowNode(
     const positions = { ...canvas.positions };
     delete positions[nodeId];
     return { definition: next, canvas: { ...canvas, positions } };
+}
+
+function spliceConditionThroughYes(
+    definition: WorkflowDefinition,
+    nodeId: string,
+): WorkflowDefinition {
+    const continuation = definition.edges.find(
+        (edge) => edge.sourceNodeId === nodeId && edge.outcome === "yes",
+    )?.targetNodeId;
+    return {
+        ...definition,
+        nodes: definition.nodes.filter((node) => node.id !== nodeId),
+        edges: definition.edges
+            .filter((edge) => edge.sourceNodeId !== nodeId)
+            .flatMap((edge) => {
+                if (edge.targetNodeId !== nodeId) return [edge];
+                return continuation && continuation !== edge.sourceNodeId
+                    ? [{ ...edge, targetNodeId: continuation }]
+                    : [];
+            }),
+    };
+}
+
+function pruneUnreachable(
+    definition: WorkflowDefinition,
+    canvas: WorkflowCanvas,
+): { definition: WorkflowDefinition; canvas: WorkflowCanvas } {
+    const outgoing = new Map<string, string[]>();
+    for (const edge of definition.edges) {
+        outgoing.set(edge.sourceNodeId, [...(outgoing.get(edge.sourceNodeId) ?? []), edge.targetNodeId]);
+    }
+    const reachable = new Set<string>();
+    const stack = [definition.entryNodeId];
+    while (stack.length > 0) {
+        const current = stack.pop();
+        if (!current || reachable.has(current)) continue;
+        reachable.add(current);
+        stack.push(...(outgoing.get(current) ?? []));
+    }
+    const positions: WorkflowCanvas["positions"] = {};
+    for (const [nodeId, position] of Object.entries(canvas.positions)) {
+        if (reachable.has(nodeId)) positions[nodeId] = position;
+    }
+    return {
+        definition: {
+            ...definition,
+            nodes: definition.nodes.filter((node) => reachable.has(node.id)),
+            edges: definition.edges.filter(
+                (edge) => reachable.has(edge.sourceNodeId) && reachable.has(edge.targetNodeId),
+            ),
+        },
+        canvas: { ...canvas, positions },
+    };
+}
+
+function retypedTrigger(trigger: WorkflowTriggerNode, recordType: string): WorkflowTriggerNode {
+    if (SCHEDULE_RECORD_TYPES.includes(recordType) && trigger.config.type === "schedule") {
+        return { ...trigger, config: { type: "schedule", cadence: trigger.config.cadence ?? "daily" } };
+    }
+    const supportedEvents = eventsFor(recordType);
+    const config: RuleTrigger = {
+        type: "entity_change",
+        events: (trigger.config.events ?? []).filter((event) => supportedEvents.includes(event)),
+    };
+    if (trigger.config.throttleMinutes !== undefined) config.throttleMinutes = trigger.config.throttleMinutes;
+    if (recordType === "deal" && trigger.config.targetStageId !== undefined) {
+        config.targetStageId = trigger.config.targetStageId;
+    }
+    return { ...trigger, config };
+}
+
+/**
+ * Rewrites a graph so it stays authorable and publishable after its record type changes, mirroring
+ * the record-type reset the retired rule dialog performed. The entry trigger drops events and any
+ * stage filter belonging to the previous record type; a schedule trigger falls back to
+ * `entity_change` when the new record type has no schedule; every Condition is spliced out through
+ * its `yes` branch when the new record type supports none, dropping whatever only its `no` branch
+ * reached; and any action the new record type does not offer falls back to its default.
+ *
+ * Without this, switching to a record type outside `SCHEDULE_RECORD_TYPES` strands the draft with no
+ * way back: the inspector hides the schedule option, the auto-inserted enrollment Condition refuses
+ * deletion while the trigger is still a schedule, its stale events are no longer rendered as
+ * deselectable chips, and the server refuses to publish any of it.
+ */
+export function normalizeWorkflowForRecordType(
+    definition: WorkflowDefinition,
+    canvas: WorkflowCanvas,
+    recordType: string,
+): { definition: WorkflowDefinition; canvas: WorkflowCanvas } {
+    const entry = definition.nodes.find((node) => node.id === definition.entryNodeId);
+    if (!entry || entry.type !== "TRIGGER") return { definition, canvas };
+    const trigger = retypedTrigger(entry, recordType);
+    const supportedActions = actionsFor(recordType);
+    let next: WorkflowDefinition = {
+        ...definition,
+        nodes: definition.nodes.map((node) => {
+            if (node.id === entry.id) return trigger;
+            if (node.type !== "ACTION" || supportedActions.includes(node.config.type)) return node;
+            return { ...node, config: defaultAction(recordType) };
+        }),
+    };
+    let nextCanvas = canvas;
+    if (!SEGMENT_RECORD_TYPES.includes(recordType)) {
+        for (const conditionId of next.nodes.filter((node) => node.type === "CONDITION").map((node) => node.id)) {
+            next = spliceConditionThroughYes(next, conditionId);
+        }
+        const pruned = pruneUnreachable(next, nextCanvas);
+        next = pruned.definition;
+        nextCanvas = pruned.canvas;
+    }
+    if (trigger.config.type === "schedule") {
+        const enrollment = ensureScheduleEnrollment(next, nextCanvas, recordType);
+        return { definition: enrollment.definition, canvas: enrollment.canvas };
+    }
+    return { definition: next, canvas: nextCanvas };
 }
 
 /** Ensures a schedule trigger immediately targets its single enrollment Condition. */

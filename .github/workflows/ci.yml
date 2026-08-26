@@ -311,6 +311,10 @@ jobs:
           CONNEX_DB_PASSWORD: ci-${{ github.run_id }}-e2e-root
           CONNEX_PRIVILEGED_MFA_ENFORCED: 'false'
           CONNEX_PRIVILEGED_MFA_CHANGE_ACTOR: frontend-e2e-suite
+          # AI governance on with no provider configured: the provider-independent surfaces
+          # (watch CRUD, skill directory) are exercisable while every provider-egress path
+          # still refuses honestly, which is exactly the state the e2e specs assert.
+          CONNEX_AI_ENABLED: "true"
         run: |
           set -euo pipefail
           WAR=$(find build/libs -name '*.war' ! -name '*-plain.war' | head -1)
@@ -348,7 +352,30 @@ jobs:
           fi
       - name: Install Playwright Chromium
         working-directory: frontend
-        run: node_modules/.bin/playwright install --with-deps chromium
+        # The Azure apt mirror behind --with-deps intermittently hangs apt-get with no
+        # timeout, eating the whole 60-minute job (three consecutive occurrences on one
+        # PR, 2026-08-19), and a killed apt-get leaves dpkg locks that fail fast retries.
+        # Bound the with-deps attempt; on failure, clear apt state and retry browser-only —
+        # the ubuntu-24.04 runner image already ships Chromium's OS libraries (Chrome is
+        # preinstalled), so the fallback needs no apt at all.
+        run: |
+          if timeout 8m node_modules/.bin/playwright install --with-deps chromium; then
+            exit 0
+          fi
+          echo "with-deps install failed or timed out; clearing apt state and retrying browser-only"
+          sudo pkill -9 -x apt-get 2>/dev/null || true
+          sudo pkill -9 -x dpkg 2>/dev/null || true
+          sudo rm -f /var/lib/apt/lists/lock /var/cache/apt/archives/lock \
+            /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock 2>/dev/null || true
+          sudo dpkg --configure -a 2>/dev/null || true
+          for attempt in 1 2; do
+            if timeout 8m node_modules/.bin/playwright install chromium; then
+              exit 0
+            fi
+            echo "browser-only install attempt ${attempt} failed or timed out; retrying"
+          done
+          echo "::error::playwright install failed after bounded attempts"
+          exit 1
       - name: E2E tests (Playwright)
         working-directory: frontend
         run: node_modules/.bin/playwright test

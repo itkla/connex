@@ -34,7 +34,8 @@ import { SnoozeCustomDialog, SnoozeSubmenu } from "@/app/components/notification
 import { isNotificationSnoozedAt } from "@/app/components/notifications/notificationSnooze";
 import { useNotificationWorkspaceActions } from "@/app/components/notifications/useNotificationWorkspaceActions";
 import { cn } from "@/lib/utils";
-import { FilterBar, MultiSelectFilter, RadioFilter, SegmentedToggle } from "@/app/components/filters";
+import { FilterBar, MultiSelectFilter, RadioFilter } from "@/app/components/filters";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import Rise from "@/app/components/motion/Rise";
 import { PageHeader } from "@/app/components/PageHeader";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
@@ -688,7 +689,7 @@ export default function NotificationsInbox() {
         ?? t("filterWorkspace");
 
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <Rise>
                     <PageHeader
                         className="px-4 sm:px-6"
@@ -713,7 +714,7 @@ export default function NotificationsInbox() {
                             clearAllLabel={tf("clearAll")}
                             reduce={reduce}
                         >
-                        <SegmentedToggle<NotificationState>
+                        <SegmentedControl<NotificationState>
                             ariaLabel={t("filterAria")}
                             value={state}
                             onChange={(value) => {

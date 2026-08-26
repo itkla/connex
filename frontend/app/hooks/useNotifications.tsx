@@ -3,7 +3,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 
 import { useLocale, useTranslations } from "next-intl";
-import { type ExternalToast } from "sonner";
 
 import { notificationContent, safeNotificationUrl } from "@/app/components/notifications/notificationContent";
 import { notificationSnoozeDelayMs } from "@/app/components/notifications/notificationSnooze";
@@ -22,7 +21,7 @@ import {
     createNotificationSocket,
     type RealtimeNotificationFrame,
 } from "@/app/lib/realtime";
-import { toastError, toastInfo, toastWarn } from "@/app/lib/toast";
+import { toastError, toastInfo, toastWarn, type ToastOptions } from "@/app/lib/toast";
 import { type Notification } from "@/app/lib/types";
 
 const POLL_INTERVAL_MS = 45_000;
@@ -187,7 +186,7 @@ export function NotificationProvider({
         (notification: Notification) => {
             const content = notificationContent(notification, t, locale);
             const url = safeNotificationUrl(notification.actionUrl);
-            const options: ExternalToast = {
+            const options: ToastOptions = {
                 description: content.body,
                 ...(url ? {
                     action: {

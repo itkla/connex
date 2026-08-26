@@ -11,12 +11,21 @@ import { Loader2Icon } from 'lucide-react';
 import { CommandGroup, CommandItem, CommandList, CommandSeparator, CommandShortcut } from '@/components/ui/command';
 import { easeOut, instant, springJiggle, springSmooth, springSnappy } from '@/app/lib/motion';
 import { useActions, useAvailableActions } from '@/app/hooks/useActions';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { useShortcutPlatform } from '@/app/hooks/useShortcutPlatform';
 import { ACTION_GROUPS, type ActionGroup, type AppAction } from '@/app/lib/actions/types';
+import { actionLabel, actionSearchText, type MessageResolver } from '@/app/lib/actions/actionLabels';
 import { formatShortcut } from '@/app/lib/actions/shortcut';
 import { search as searchApi } from '@/app/lib/api';
-import type { SearchResults } from '@/app/lib/types';
 import { buildSearchGroups, openResult, type ResultGroup } from '@/app/lib/search/resultGroups';
+import {
+    EMPTY_SEARCH_CACHE,
+    entriesForWorkspace,
+    isFresh,
+    nearestPrefixResults,
+    rememberSearch,
+    type ScopedSearchCache,
+} from '@/app/lib/search/queryCache';
 import { cn } from '@/lib/utils';
 
 const MIN_QUERY_LENGTH = 2;
@@ -50,22 +59,14 @@ const PILL_INPUT =
     'w-full rounded-full bg-transparent py-2.5 pr-16 pl-11 text-base text-foreground placeholder:text-muted-foreground outline-none';
 
 type Mode = 'inline' | 'palette';
-type ScopedResults = { query: string; data: SearchResults };
 
-function actionLabel(action: AppAction, t: (key: string) => string): string {
-    return action.label ?? t(action.labelKey);
-}
-
-function actionSearchText(action: AppAction, t: (key: string) => string): string {
-    const parts = [actionLabel(action, t)];
-    if (action.descriptionKey) parts.push(t(action.descriptionKey));
-    if (action.keywords) parts.push(...action.keywords);
-    if (action.keywordsKey) parts.push(t(action.keywordsKey));
-    return parts.join(' ').toLowerCase();
-}
-
-function rankAction(action: AppAction, lowerQuery: string, t: (key: string) => string): number {
-    return actionLabel(action, t).toLowerCase().startsWith(lowerQuery) ? 0 : 1;
+function rankAction(
+    action: AppAction,
+    lowerQuery: string,
+    t: MessageResolver,
+    tMessage: MessageResolver,
+): number {
+    return actionLabel(action, t, tMessage).toLowerCase().startsWith(lowerQuery) ? 0 : 1;
 }
 
 function subscribeToViewport(onChange: () => void): () => void {
@@ -84,29 +85,18 @@ function viewportSnapshot(): string {
     return `${viewport?.offsetLeft ?? 0}:${viewport?.offsetTop ?? 0}:${viewport?.width ?? window.innerWidth}:${viewport?.height ?? window.innerHeight}`;
 }
 
-const EMPTY_RESULTS: SearchResults = {
-    users: [],
-    companies: [],
-    people: [],
-    deals: [],
-    pipelines: [],
-    tags: [],
-    activities: [],
-    notes: [],
-    tasks: [],
-    attachments: [],
-};
-
 /**
  * The unified global search surface. As an inline field in the app header it runs the debounced
  * record-search dropdown; pressing `Cmd/Ctrl+K` opens a centred command palette with permission-aware
  * registry commands and record search while carrying the query across. The panel expands to a larger
  * scrollable window on hover while the centred field stays anchored and focused. Escape, outside-click,
- * or selecting a result returns focus to the element that opened the palette.
+ * or selecting a result returns focus to the element that opened the palette. Queries already searched
+ * in this session render from cache with no debounce and no request, and revalidate once they age out.
  */
 export default function GlobalSearch() {
     const tSearch = useTranslations('CommonSearchBar');
     const tActions = useTranslations('Actions');
+    const tMessage = useTranslations();
     const router = useRouter();
     const searchParams = useSearchParams();
     const urlQuery = searchParams.get('query') ?? '';
@@ -117,12 +107,16 @@ export default function GlobalSearch() {
 
     const { run, pendingIds } = useActions();
     const available = useAvailableActions();
+    const { activeWorkspaceId } = useWorkspace();
 
     const [mode, setMode] = useState<Mode>('inline');
     const [query, setQuery] = useState(urlQuery);
     const [inlineOpen, setInlineOpen] = useState(false);
     const [expanded, setExpanded] = useState(false);
-    const [results, setResults] = useState<ScopedResults | null>(null);
+    const [scopedCache, setScopedCache] = useState<ScopedSearchCache>(
+        () => ({ workspaceId: activeWorkspaceId, entries: EMPTY_SEARCH_CACHE }),
+    );
+    const [failedQuery, setFailedQuery] = useState<string | null>(null);
     const [activeIndex, setActiveIndex] = useState(-1);
 
     const containerRef = useRef<HTMLDivElement>(null);
@@ -148,47 +142,64 @@ export default function GlobalSearch() {
         if (urlQuery) setQuery(urlQuery);
     }, [urlQuery]);
 
+    const searchCache = entriesForWorkspace(scopedCache, activeWorkspaceId);
+    const cached = shouldSearch ? searchCache.get(trimmed) ?? null : null;
+
     useEffect(() => {
         if (!shouldSearch) return;
         const controller = new AbortController();
         const timer = setTimeout(() => {
+            if (cached !== null && isFresh(cached, Date.now())) return;
+            setFailedQuery((current) => (current === trimmed ? null : current));
             searchApi(trimmed, { signal: controller.signal })
-                .then((data) => setResults({ query: trimmed, data }))
+                .then((data) => setScopedCache((current) => ({
+                    workspaceId: activeWorkspaceId,
+                    entries: rememberSearch(entriesForWorkspace(current, activeWorkspaceId), trimmed, data, Date.now()),
+                })))
                 .catch(() => {
-                    if (!controller.signal.aborted) setResults({ query: trimmed, data: EMPTY_RESULTS });
+                    if (!controller.signal.aborted) setFailedQuery(trimmed);
                 });
         }, DEBOUNCE_MS);
         return () => {
             controller.abort();
             clearTimeout(timer);
         };
-    }, [trimmed, shouldSearch]);
+    }, [trimmed, shouldSearch, cached, activeWorkspaceId]);
 
-    const paletteData = results?.query === trimmed ? results.data : null;
+    const searchFailed = shouldSearch && cached === null && failedQuery === trimmed;
+    const paletteData = cached?.data ?? null;
+    const inlineData = cached?.data
+        ?? (searchFailed ? null : nearestPrefixResults(searchCache, trimmed, MIN_QUERY_LENGTH));
     const paletteRecordGroups = useMemo<ResultGroup[]>(
         () => (trimmed.length >= MIN_QUERY_LENGTH ? buildSearchGroups(paletteData, tSearch) : []),
         [paletteData, trimmed, tSearch],
     );
     const inlineGroups = useMemo<ResultGroup[]>(
-        () => (trimmed.length >= MIN_QUERY_LENGTH ? buildSearchGroups(results?.data ?? null, tSearch) : []),
-        [results, trimmed, tSearch],
+        () => (trimmed.length >= MIN_QUERY_LENGTH ? buildSearchGroups(inlineData, tSearch) : []),
+        [inlineData, trimmed, tSearch],
     );
     const flatRows = useMemo(() => inlineGroups.flatMap((group) => group.rows), [inlineGroups]);
-    const searching = shouldSearch && results?.query !== trimmed;
+    const searching = shouldSearch && cached === null && !searchFailed;
 
     const commandGroups = useMemo(() => {
         const groupsToScan = lowerQuery ? ACTION_GROUPS : EMPTY_GROUP_ORDER;
         return groupsToScan.flatMap((group) => {
             const actions = available.filter(
-                (action) => action.group === group && (!lowerQuery || actionSearchText(action, tActions).includes(lowerQuery)),
+                (action) => action.group === group
+                    && (!lowerQuery || actionSearchText(action, tActions, tMessage).includes(lowerQuery)),
             );
-            if (lowerQuery) actions.sort((a, b) => rankAction(a, lowerQuery, tActions) - rankAction(b, lowerQuery, tActions));
+            if (lowerQuery) {
+                actions.sort(
+                    (a, b) => rankAction(a, lowerQuery, tActions, tMessage)
+                        - rankAction(b, lowerQuery, tActions, tMessage),
+                );
+            }
             const visible = lowerQuery
                 ? actions
                 : limitSeededActionsKeepingUserContext(actions, SEEDED_ACTION_LIMITS_WHEN_QUERY_EMPTY[group]);
             return visible.length > 0 ? [{ group, actions: visible }] : [];
         });
-    }, [available, lowerQuery, tActions]);
+    }, [available, lowerQuery, tActions, tMessage]);
 
     const closePalette = useCallback(() => {
         setMode('inline');
@@ -333,7 +344,7 @@ export default function GlobalSearch() {
     const inlineRecordCount = flatRows.length;
     const paletteRecordCount = paletteRecordGroups.reduce((sum, group) => sum + group.rows.length, 0);
     const commandCount = commandGroups.reduce((sum, entry) => sum + entry.actions.length, 0);
-    const showNoResults = trimmed.length > 0 && !searching && commandCount + paletteRecordCount === 0;
+    const showNoResults = trimmed.length > 0 && !searching && !searchFailed && commandCount + paletteRecordCount === 0;
     const availablePanelHeight = Math.max(0, Math.floor(currentViewportHeight / 2 - PANEL_VIEWPORT_CLEARANCE));
     const collapsedPanelHeight = Math.min(PANEL_COLLAPSED, availablePanelHeight);
     const expandedPanelHeight = Math.min(PANEL_EXPANDED, availablePanelHeight);
@@ -395,7 +406,10 @@ export default function GlobalSearch() {
                                     <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
                                 </div>
                             ) : null}
-                            {!searching && inlineRecordCount === 0 ? (
+                            {searchFailed ? (
+                                <p className="px-3 py-2 text-sm text-muted-foreground">{tSearch('searchFailed')}</p>
+                            ) : null}
+                            {!searching && !searchFailed && inlineRecordCount === 0 ? (
                                 <p className="px-3 py-2 text-sm text-muted-foreground">{tSearch('noResults', { query: trimmed })}</p>
                             ) : null}
                             {inlineGroups.map((group) => (
@@ -530,7 +544,7 @@ export default function GlobalSearch() {
                                                                 <Icon className="size-4 text-muted-foreground" />
                                                             ) : null}
                                                             <span className="min-w-0 flex-1">
-                                                                <span className="block truncate">{action.label ?? tActions(action.labelKey)}</span>
+                                                                <span className="block truncate">{actionLabel(action, tActions, tMessage)}</span>
                                                                 {action.descriptionKey ? (
                                                                     <span className="block truncate text-xs text-muted-foreground">
                                                                         {tActions(action.descriptionKey)}
@@ -587,6 +601,10 @@ export default function GlobalSearch() {
                                                 <Loader2Icon className="size-4 animate-spin" />
                                                 {tActions('palette.loading')}
                                             </div>
+                                        ) : null}
+
+                                        {searchFailed ? (
+                                            <div className="py-8 text-center text-sm text-muted-foreground">{tActions('palette.failed')}</div>
                                         ) : null}
 
                                         {showNoResults ? (

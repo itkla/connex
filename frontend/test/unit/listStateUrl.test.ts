@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
     MAX_URL_PAGE_SIZE,
@@ -37,9 +39,9 @@ describe("parseListInt", () => {
 describe("URL writers (multi-writer coexistence contract)", () => {
     const replaceState = vi.fn();
 
-    function stubLocation(search: string, state: unknown = null): void {
+    function stubLocation(search: string, state: unknown = null, hash = ""): void {
         vi.stubGlobal("window", {
-            location: { search },
+            location: { search, hash },
             history: { replaceState, state },
         });
     }
@@ -47,8 +49,72 @@ describe("URL writers (multi-writer coexistence contract)", () => {
     beforeEach(() => replaceState.mockClear());
     afterEach(() => vi.unstubAllGlobals());
 
+    it("carries the reader's fragment through every writer, so a deep link survives a list-state write", () => {
+        const writers: ReadonlyArray<[string, () => void]> = [
+            ["writeListStateToUrl", () => writeListStateToUrl("/settings/workspace/people", { q: "a", sort: null, dir: "asc", page: 1, size: 25 }, 25)],
+            ["writeListQueryToUrl", () => writeListQueryToUrl("/settings/workspace/people", "a")],
+            ["writeSavedViewToUrl", () => writeSavedViewToUrl("/settings/workspace/people", "1:2")],
+            ["writeOwnedParamsToUrl", () => writeOwnedParamsToUrl("/settings/workspace/people", { task: "7" })],
+        ];
+
+        for (const [name, write] of writers) {
+            replaceState.mockClear();
+            stubLocation("?view=table", null, "#directory");
+            write();
+            expect(replaceState, `${name} wrote nothing to assert on`).toHaveBeenCalledTimes(1);
+            expect(
+                String(replaceState.mock.calls[0][2]),
+                `${name} dropped the fragment the reader arrived with`,
+            ).toContain("#directory");
+        }
+    });
+
+    it("routes every writer in the app through the shared address builder", () => {
+        const writers = [
+            "app/hooks/listStateUrl.ts",
+            "app/hooks/useRecordsBrowser.ts",
+            "app/hooks/useRecordPeek.ts",
+            "app/components/map/MapView.tsx",
+        ];
+        const rebuilt: string[] = [];
+
+        for (const file of writers) {
+            const source = readFileSync(path.join(process.cwd(), file), "utf8");
+            for (const line of source.split("\n")) {
+                const code = line.trim();
+                if (code.startsWith("*") || code.startsWith("//")) continue;
+                if (!code.includes("history.replaceState")) continue;
+                if (!code.includes("listStateAddress(")) rebuilt.push(`${file}: ${code}`);
+            }
+        }
+
+        expect(
+            rebuilt,
+            "a writer rebuilding the address from a pathname and a query string drops the reader's fragment",
+        ).toEqual([]);
+        const calls = writers.flatMap((file) =>
+            readFileSync(path.join(process.cwd(), file), "utf8")
+                .split("\n")
+                .filter((line) => line.includes("listStateAddress(") && line.includes("replaceState")),
+        );
+        expect(calls.length, "the scan must be finding real writers, not an empty file set").toBe(8);
+    });
+
+    it("writes no fragment when the reader carries none", () => {
+        stubLocation("?view=table");
+        writeListQueryToUrl("/records/contacts", "acme");
+
+        expect(String(replaceState.mock.calls[0][2])).toBe("/records/contacts?view=table&q=acme");
+    });
+
     it("declares exactly the keys the server-records writer owns", () => {
         expect([...SERVER_RECORDS_URL_KEYS]).toEqual(["q", "sort", "dir", "page", "size"]);
+    });
+
+    it("reserves the pipeline edit deep link from generic facet ownership", () => {
+        const browser = readFileSync(path.join(process.cwd(), "app/hooks/useRecordsBrowser.ts"), "utf8");
+        expect(browser).toContain("PIPELINE_EDIT_URL_KEY,");
+        expect(browser).toMatch(/RESERVED_PARAM_KEYS = new Set<string>\(\[[\s\S]*PIPELINE_EDIT_URL_KEY/);
     });
 
     it("preserves params owned by other writers when writing list state", () => {
@@ -160,22 +226,27 @@ describe("parseDeepLinkId", () => {
 });
 
 describe("shared-link survival across a browser session", () => {
-    function mountUrl(initial: string): { search: () => string } {
-        const state = { search: initial };
+    function mountUrl(initial: string, fragment = ""): { search: () => string; hash: () => string } {
+        const state = { search: initial, hash: fragment };
         vi.stubGlobal("window", {
             location: {
                 get search() {
                     return state.search;
                 },
+                get hash() {
+                    return state.hash;
+                },
             },
             history: {
                 state: null,
                 replaceState: (_data: unknown, _title: string, url: string) => {
-                    state.search = new URL(`http://x${url}`).search;
+                    const parsed = new URL(`http://x${url}`);
+                    state.search = parsed.search;
+                    state.hash = parsed.hash;
                 },
             },
         });
-        return { search: () => state.search };
+        return { search: () => state.search, hash: () => state.hash };
     }
 
     afterEach(() => vi.unstubAllGlobals());
@@ -293,7 +364,7 @@ describe("shared-link survival across a browser session", () => {
     it("clears only the analytics writer's own keys when they return to defaults", () => {
         const url = mountUrl("?range=30d&granularity=week&currency=JPY&owner=me&peek=deal%3A4");
 
-        writeOwnedParamsToUrl("/overview/analytics", {
+        writeOwnedParamsToUrl("/insights/analytics", {
             range: undefined,
             granularity: undefined,
             currency: undefined,

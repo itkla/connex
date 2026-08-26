@@ -357,7 +357,7 @@ public class ScoringService {
     @Transactional(readOnly = true)
     public RelationshipEvidenceDto contactEvidence(int workspaceId, int personId, int currentUserId) {
         if (!personMapper.getProcessablePersonIds(workspaceId, List.of(personId)).contains(personId)) {
-            throw new ResourceNotFoundException("Person not found with id: " + personId);
+            throw new ResourceNotFoundException("Contact not found");
         }
         Instant asOf = scoringInstant(Instant.now(clock));
         LocalDateTime reference = LocalDateTime.ofInstant(asOf, ZoneOffset.UTC);
@@ -597,7 +597,7 @@ public class ScoringService {
      */
     public List<RelationshipTemperatureDto> scoreCompaniesForMap(int workspaceId) {
         long companyCount = companyMapper.countCompanies(
-            workspaceId, null, null, false, null, MemberScope.allTeam(), false);
+            workspaceId, null, null, false, null, MemberScope.allTeam(), false, null);
         if (companyCount > MAX_BATCH_COMPANIES) {
             throw new BadRequestException(
                 "Relationship map supports at most " + MAX_BATCH_COMPANIES + " companies");
@@ -634,7 +634,7 @@ public class ScoringService {
     public RelationshipEvidenceDto companyEvidence(int workspaceId, int companyId, int currentUserId) {
         if (companyMapper.getByIds(workspaceId, List.of(companyId)).stream()
                 .noneMatch(company -> company.getId() == companyId)) {
-            throw new ResourceNotFoundException("Company not found with id: " + companyId);
+            throw new ResourceNotFoundException("Company not found");
         }
         Instant asOf = scoringInstant(Instant.now(clock));
         LocalDateTime reference = LocalDateTime.ofInstant(asOf, ZoneOffset.UTC);

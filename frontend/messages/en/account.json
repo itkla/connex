@@ -1,16 +1,11 @@
 {
   "Account": {
-    "title": "Account",
-    "subtitle": "Manage your profile, security, and how Connex works for you.",
     "tabProfile": "Profile",
     "tabSecurity": "Security",
-    "tabConnections": "Connections",
     "tabNotifications": "Notifications",
     "tabInvites": "Invites"
   },
   "AccountProfile": {
-    "title": "Profile",
-    "subtitle": "Your personal details. This is how you appear to teammates across every workspace.",
     "photoHint": "A square JPEG, PNG, or WebP image works best.",
     "changePhoto": "Change photo",
     "photoAlt": "Your profile photo",
@@ -88,18 +83,12 @@
     "status_error": "Needs attention",
     "status_revoked": "Revoked",
     "status_disconnecting": "Disconnecting",
-    "status_purge_failed": "Purge failed",
-    "connect": "Connect",
+    "status_purge_failed": "Erase didn't finish",
     "reconnect": "Reconnect",
     "pause": "Pause",
     "resume": "Resume",
     "disconnect": "Disconnect",
-    "actions": "Actions",
-    "connectedAs": "Connected as {email}",
     "connectedNoEmail": "Connected",
-    "notConnected": "Not connected",
-    "lastSync": "Synced {time}",
-    "neverSynced": "Sync not yet available",
     "connectedToast": "{provider} account connected",
     "pausedToast": "Connection paused",
     "resumedToast": "Connection resumed",
@@ -109,38 +98,109 @@
     "retry": "Retry",
     "unavailableTitle": "Connected accounts aren't available",
     "unavailableBody": "This Connex instance has no connected-account providers configured. Ask your administrator to enable Google or Microsoft connections.",
-    "privacyNote": "Connecting an account does not start capture. Capture begins only after you save a policy, and you can review or purge captured workspace data at any time.",
+    "privacyNote": "Connecting an account does not start capture. Capture begins only after you save a policy, and you can review or erase this workspace's captured data at any time.",
     "error_state": "The connection attempt expired or was invalid. Please try again.",
     "error_denied": "The connection was cancelled at the provider.",
     "error_exchange": "The provider rejected the connection. Please try again.",
     "error_no_offline_access": "The provider didn't grant ongoing access. Please try again and approve all requested permissions.",
-    "entityLabel": "connection"
+    "error_retained_data_reset_required": "This provider account doesn't match the account tied to retained capture. Erase the old provider data before connecting a different account.",
+    "entityLabel": "connection",
+    "managedUnavailableTitle": "Connex-managed connections aren't ready yet",
+    "managedUnavailableBody": "This instance is set to use the Connex-managed {provider} application, which is still completing provider verification, so connecting is switched off. An administrator can supply custom (bring-your-own) credentials in the meantime.",
+    "managedUnavailableLink": "Read the operator guide",
+    "value_google": "Connect Gmail and Google Calendar to keep selected relationship activity and meetings up to date.",
+    "value_microsoft": "Connect Outlook mail and calendar to keep selected relationship activity and meetings up to date.",
+    "connectProvider": "Connect {provider}",
+    "manage": "Manage",
+    "tryAgain": "Try again",
+    "retryReset": "Retry account reset",
+    "eraseRetainedData": "Erase old provider data",
+    "retainedDataNote": "Captured relationship evidence remains in this workspace until you erase it.",
+    "resetProviderAccount": "Reset provider account",
+    "accountResetNote": "Connex keeps the previous provider account association so reconnecting the same account can reuse retained evidence. Reset it only before connecting a different account.",
+    "stream": {
+      "mail": "Mail",
+      "calendar": "Calendar"
+    },
+    "streamState_active": "Active",
+    "streamState_off": "Off",
+    "lastSyncLabel": "Last sync",
+    "lastSyncNever": "Not yet",
+    "streamState_working": "Syncing",
+    "streamState_paused": "Paused",
+    "streamState_attention": "Needs attention"
+  },
+  "AccountManagedConnect": {
+    "title": "Connect {provider}",
+    "description": "You authorize on this computer. Connex never sees your provider password, and the connection is completed by this installation, not by Connex the company.",
+    "whatHappens": "What you're approving",
+    "scopeMail": "Read-only access to your mail, so Connex can record who you have been talking to.",
+    "scopeCalendar": "Read-only access to your calendar, so Connex can record the meetings you attend.",
+    "scopeIdentity": "Your basic sign-in profile (OpenID), so the connection can show which account it belongs to.",
+    "localStorage": "The resulting credentials are encrypted and stored on this Connex installation only.",
+    "noVendorData": "No data is sent to Connex the company — this installation talks to {provider} directly.",
+    "personalConnection": "The connection belongs to you alone. No one else can use it, and administrators never receive your credentials.",
+    "codeExpiry": "The pairing code you receive is valid for 10 minutes.",
+    "start": "Continue",
+    "starting": "Preparing…",
+    "cancel": "Cancel",
+    "cancelFailed": "The pairing could not be cancelled, so it may still be usable until it expires. Check your connection and try again.",
+    "close": "Close",
+    "done": "Done",
+    "retry": "Start again",
+    "eraseRetainedData": "Erase old provider data",
+    "stepCodeTitle": "1. Your pairing code",
+    "stepCodeBody": "Keep this window open. The code expires in {time}.",
+    "stepHelperTitle": "2. Run the helper on this computer",
+    "stepHelperBody": "The helper opens a port on your own machine, sends you to {provider} to approve the request, and hands the result back to this installation. Node.js 18 or newer is required.",
+    "downloadHelper": "Download helper script",
+    "copyCode": "Copy code",
+    "copyCommand": "Copy command",
+    "copied": "Copied",
+    "copyFailed": "Couldn't copy to the clipboard. Select the text and copy it manually.",
+    "stepStatusTitle": "3. Waiting for authorization",
+    "status": {
+      "pending": "Waiting for the helper to claim the pairing code…",
+      "prepared": "Approve the request in the browser window the helper opened.",
+      "exchanging": "Finishing the connection…"
+    },
+    "completedTitle": "Connected",
+    "completedBody": "{provider} is connected. Capture stays off until you save a capture policy.",
+    "failedTitle": "Connection not completed",
+    "unavailableTitle": "Connex-managed connections aren't ready yet",
+    "unavailableBody": "The Connex-managed {provider} application is still completing provider verification, so managed connections are switched off in this build. An administrator can supply custom (bring-your-own) credentials in the meantime.",
+    "docLink": "Read the operator guide",
+    "error": {
+      "managed_identity_unavailable": "Connex-managed connections are switched off in this build.",
+      "invalid_redirect_uri": "The helper asked for a callback address this installation won't accept. Download the helper script from this page and run that copy.",
+      "state": "The connection attempt expired or didn't match. Please start again.",
+      "denied": "The connection was cancelled at the provider.",
+      "exchange": "The provider rejected the connection. Please start again.",
+      "no_offline_access": "The provider didn't grant ongoing access. Start again and approve every requested permission.",
+      "connection_conflict": "The connection changed while authorization was in progress. Check its current state, then start again if needed.",
+      "retained_data_reset_required": "This provider account doesn't match the account tied to retained capture. Erase the old provider data before connecting a different account.",
+      "superseded": "Another connect attempt replaced this one. Start again if you still want to connect.",
+      "expired": "The pairing code expired before the helper finished. Start again to get a new code.",
+      "unknown": "The connection couldn't be completed. Please start again."
+    }
   },
   "AccountCaptureProvider": {
     "title": "Relationship capture",
-    "connectFirst": "Connect this account before choosing capture sources or starting a sync.",
     "loading": "Loading capture status",
     "loadFailed": "Capture status could not be loaded.",
     "retry": "Retry",
-    "state": {
-      "ready": "Ready",
-      "configured": "Configured",
-      "notIngesting": "Not ingesting",
-      "notConfigured": "Not configured"
-    },
     "stateDescription": {
-      "ready": "Capture is configured and has produced relationship evidence.",
       "configured": "Your policy is saved. Run a sync to begin or continue capture.",
-      "notIngesting": "Your policy is saved, but ingestion is not authorized for this deployment.",
       "notConfigured": "No mail or calendar data is captured until you save a policy."
     },
     "configure": "Configure",
     "editPolicy": "Edit policy",
-    "workspacePolicy": "Workspace policy",
-    "purge": "Purge captured data",
+    "purge": "Erase captured data",
     "reviews": "{count, plural, one {Review # item} other {Review # items}}",
     "syncNow": "Sync now",
-    "syncStarted": "Capture sync started"
+    "syncStarted": "Capture sync started",
+    "captureOff": "This instance does not capture mail or calendar for this provider. The connection is used for sign-in and access only.",
+    "stalledSource": "A source stopped and Connex could not restart it. Open Manage to see which one and why."
   },
   "AccountCapturePolicy": {
     "title": "Configure relationship capture",
@@ -163,7 +223,7 @@
       "hint": "Choose 1 to {max} days. New policies default to 90 days."
     },
     "includeBodies": "Include message bodies",
-    "includeBodiesHint": "Off by default. Bodies are admitted only when both you and the workspace allow them.",
+    "includeBodiesHint": "Off by default. Message bodies are captured only when both you and the workspace allow it.",
     "exclusions": {
       "people": "Excluded people",
       "peoplePlaceholder": "person@example.com",
@@ -180,7 +240,7 @@
       "hint": {
         "manual": "Connex runs only when you choose Sync now, then holds evidence for review.",
         "review": "Scheduled sync holds evidence for your approval before it appears in relationship history.",
-        "automatic": "Scheduled sync admits exact matches. Ambiguous identities always remain in review."
+        "automatic": "Scheduled sync captures exact matches on its own. Anyone it can't identify with certainty still waits for your review."
       }
     },
     "effectiveRestriction": "Workspace restrictions apply",
@@ -247,7 +307,7 @@
       "rate_limited": "Provider rate limit",
       "reauthorization_required": "Reconnect required",
       "intervention_required": "Action required",
-      "purging": "Purging"
+      "purging": "Erasing"
     },
     "progressKnown": "{processed} of {total} items",
     "progressUnknown": "{processed} items processed. The provider did not supply a total.",
@@ -260,7 +320,7 @@
       "cursorInvalid": "The provider changed its sync position. Start a new sync.",
       "providerUnavailable": "The provider is temporarily unavailable.",
       "interventionRequired": "Review the provider connection before syncing again.",
-      "purgeFailed": "The last purge did not complete. Try again.",
+      "purgeFailed": "The last erase didn't finish. Try again.",
       "generic": "Capture needs attention before it can continue."
     }
   },
@@ -282,7 +342,7 @@
       "no_match": "No exact contact",
       "multiple_matches": "Multiple exact contacts",
       "invalid_identity": "Invalid or missing identity",
-      "restricted_person": "Contact is archived or processing-restricted",
+      "restricted_person": "Contact is archived or on privacy hold",
       "approval_required": "Approval required"
     },
     "untitled": "Captured interaction",
@@ -299,11 +359,11 @@
     "approve": "Approve capture",
     "approved": "Captured evidence approved",
     "attachTitle": "Attach to an existing contact",
-    "attachDescription": "Choose the canonical contact this exact participant represents.",
+    "attachDescription": "Choose the contact this participant is.",
     "candidateLabel": "Matching contacts",
     "attach": "Attach",
     "createTitle": "Create a contact",
-    "createDescription": "Creation uses the same duplicate preflight as every other contact workflow.",
+    "createDescription": "Connex checks for duplicates first, the same way it does anywhere else you create a contact.",
     "field": {
       "name": "Name",
       "title": "Title",
@@ -314,12 +374,14 @@
     "create": "Create and attach",
     "rememberExact": "Remember this decision only for the same exact, active, unique identity.",
     "ignore": "Ignore this participant",
-    "resolved": "Capture review resolved"
+    "resolved": "Capture review resolved",
+    "drawerLabel": "Items to review",
+    "drawerDescription": "Captured items waiting for you to confirm who they belong to."
   },
   "AccountCaptureDisclosure": {
     "summary": "Review scope, data, visibility, and retention",
     "scope": "Provider scopes",
-    "data": "Admitted fields",
+    "data": "Captured fields",
     "excluded": "Always excluded",
     "visibility": {
       "ownerOnly": "Visible only to the connected account owner",
@@ -328,14 +390,14 @@
       "unknown": "Visibility rule: {code}"
     },
     "retention": {
-      "untilPurged": "Retained until you purge captured workspace data",
-      "untilPurgedOrDisconnected": "Retained until purge or provider disconnect",
-      "purgedOnDisconnect": "Purged when the provider account is disconnected",
-      "purgedOnAccountDeletion": "Purged when the connected account owner is deleted",
+      "untilPurged": "Kept until you erase this workspace's captured data",
+      "retainedOnDisconnect": "Kept when you disconnect the provider",
+      "erasedOnRequest": "Erased only when you request erasure",
+      "purgedOnAccountDeletion": "Erased when the connected account's owner is deleted",
       "unknown": "Retention rule: {code}"
     },
     "admittedField": {
-      "providerSourceId": "Opaque provider source identifier",
+      "providerSourceId": "The provider's own ID for this item",
       "occurredAt": "Interaction date and time",
       "eventTime": "Event date and time",
       "title": "Event title",
@@ -353,8 +415,8 @@
       "attachments": "Attachments",
       "rawMime": "Raw MIME data",
       "remoteImages": "Remote images",
-      "arbitraryFolders": "Folders outside the admitted mail streams",
-      "arbitraryCalendars": "Calendars outside the admitted calendar stream",
+      "arbitraryFolders": "Folders outside the mail sources you chose",
+      "arbitraryCalendars": "Calendars other than the one you chose",
       "privateEvents": "Private event contents",
       "unmatchedParticipants": "Participants that have not been resolved",
       "fullSearch": "Full provider search",
@@ -365,21 +427,32 @@
     }
   },
   "AccountCaptureLifecycle": {
-    "purgeTitle": "Purge {provider} captured data?",
+    "purgeTitle": "Erase the data captured from {provider}?",
     "purgeDescription": "Delete captured content and derived relationship evidence from the active workspace.",
     "disconnectTitle": "Disconnect {provider}?",
-    "disconnectDescription": "Remove provider access from your Connex account.",
+    "disconnectDescription": "Stop future syncing and remove provider access from your Connex account.",
+    "resetTitle": "Erase all data captured from {provider} and reset the account?",
+    "resetDescription": "This is required before a different provider account can replace the account tied to retained capture.",
     "activeWorkspaceTitle": "This affects the active workspace",
     "activeWorkspaceDescription": "Captured content, participants, reviews, sync state, and derived activities are removed. Metadata-only audit records remain.",
-    "allWorkspacesTitle": "Captured data is purged before disconnect",
-    "allWorkspacesDescription": "Connex removes this provider's captured data from every workspace before deleting the credential. This cannot be undone.",
+    "disconnectRetentionTitle": "Captured data stays in Connex",
+    "disconnectRetentionDescription": "Captured provider content and relationship evidence remain available until you erase them separately.",
+    "allWorkspacesTitle": "This affects every workspace",
+    "allWorkspacesDescription": "Connex permanently removes this provider's captured content, participants, reviews, sync state, policy, and derived activities from every workspace. This cannot be undone.",
     "acknowledge": "I understand which captured data will be removed.",
+    "resetAcknowledge": "I understand that data captured from {provider} will be permanently erased from every workspace.",
     "cancel": "Cancel",
-    "confirmPurge": "Purge captured data",
+    "confirmPurge": "Erase captured data",
     "confirmDisconnect": "Disconnect account",
-    "purging": "Starting purge",
+    "confirmReset": "Erase data and reset account",
+    "purging": "Erasing",
     "disconnecting": "Disconnecting",
-    "purgeStarted": "Captured-data purge started"
+    "resetting": "Starting reset",
+    "purgeStarted": "Erasing captured data",
+    "resetStarted": "Provider data erasure and account reset started",
+    "disconnectRetained": "Your contacts, companies, deals, notes, and tasks stay exactly as they are.",
+    "purgeRetained": "The connection itself stays, and your contacts, companies, deals, notes, and tasks stay exactly as they are.",
+    "resetRetained": "Your contacts, companies, deals, notes, and tasks stay exactly as they are. The provider connection and its retained capture identity are removed."
   },
   "AccountChangeEmail": {
     "title": "Change your email",
@@ -392,7 +465,7 @@
     "successTitle": "Check your inbox",
     "successBody": "We sent a confirmation link to {email}. Open it to finish changing your email. Your current email stays active until then.",
     "close": "Close",
-    "genericError": "Something went wrong"
+    "genericError": "Couldn't send the confirmation link"
   },
   "PasskeyStepUp": {
     "canceled": "Passkey verification was canceled.",
@@ -426,8 +499,12 @@
     "dealMentionDescription": "When a teammate @-mentions you in a deal's close reason.",
     "approvalRequestTitle": "Approval requests",
     "approvalRequestDescription": "When a document is sent for your approval.",
+    "approvalReminderTitle": "Approval reminders",
+    "approvalReminderDescription": "When a document awaiting your approval nears or passes its deadline.",
     "approvalDecisionTitle": "Approval decisions",
     "approvalDecisionDescription": "When your approval request is approved, rejected, or withdrawn.",
+    "approvalTerminatedTitle": "Ended approval requests",
+    "approvalTerminatedDescription": "When a policy change or unavailable approver ends an approval request.",
     "loadFailed": "Your notification preferences couldn't be loaded.",
     "saveFailed": "Your change couldn't be saved. Try again.",
     "retry": "Try again"
@@ -463,10 +540,10 @@
     "accept": "Accept",
     "decline": "Decline",
     "accepted": "Joined {workspace}",
-    "acceptFailed": "Could not accept the invitation.",
+    "acceptFailed": "Couldn't accept the invitation",
     "declined": "Invitation declined",
-    "declineFailed": "Could not decline the invitation.",
-    "loadFailed": "Could not load invitations.",
+    "declineFailed": "Couldn't decline the invitation",
+    "loadFailed": "Couldn't load your invitations",
     "leaveTitle": "Leave workspace",
     "leaveSubtitle": "Leave {workspace} and lose access to its data.",
     "leave": "Leave workspace",
@@ -474,10 +551,39 @@
     "leaveConfirmBody": "You'll lose access to this workspace. Your assigned tasks become unassigned and deals you own lose their owner.",
     "cancel": "Cancel",
     "left": "You left the workspace",
-    "leaveFailed": "Could not leave the workspace."
+    "leaveFailed": "Couldn't leave the workspace"
   },
-  "AccountLayout": {
-    "title": "Account settings",
-    "description": "Manage your profile, security, and how Connex works for you"
+  "AccountConnectionConsent": {
+    "title": "Connect {provider}",
+    "expectationAuthorization": "You approve the access on {provider}'s own sign-in page. Your password never reaches Connex.",
+    "expectationNoCaptureYet": "Connecting reads nothing on its own. Mail and calendar capture starts only after you save a capture policy.",
+    "expectationReversible": "You can pause or disconnect this account at any time.",
+    "cancel": "Cancel",
+    "continue": "Continue to {provider}",
+    "continuing": "Opening {provider}"
+  },
+  "AccountManageConnection": {
+    "title": "{provider} connection",
+    "sectionConnection": "Connection",
+    "sectionActivity": "What Connex is capturing",
+    "sectionPreferences": "Your preferences",
+    "sectionWorkspaceDefaults": "Workspace defaults",
+    "sectionEnding": "Ending this connection",
+    "statusLabel": "Status",
+    "pausedNote": "Nothing new is captured while this connection is paused. What Connex already captured stays in place.",
+    "workspaceDefaultsNote": "These limits are set for the whole workspace. Your own preferences can narrow them, never widen them.",
+    "workspaceCaptureLabel": "Capture in this workspace",
+    "workspaceBodiesLabel": "Message bodies",
+    "workspaceReviewLabel": "Review before capture",
+    "workspaceReviewRequired": "Required",
+    "workspaceReviewOptional": "Your choice",
+    "editWorkspaceDefaults": "Edit workspace defaults",
+    "workspaceDefaultsAskAdmin": "Ask a workspace administrator to change these limits.",
+    "allowed": "Allowed",
+    "notAllowed": "Not allowed",
+    "days": "{count, plural, one {# day} other {# days}}",
+    "advanced": "Advanced",
+    "disconnectNote": "Disconnecting stops future syncing and removes Connex's access. Captured mail and meeting activity stays in Connex until you erase it separately. Your contacts, companies, deals, notes, and tasks stay exactly as they are.",
+    "purgeNote": "Erasing removes the mail and meeting activity captured from this provider in this workspace, without touching the connection itself. This cannot be undone."
   }
 }

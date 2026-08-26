@@ -391,12 +391,105 @@
     LIMIT #{limit}
   </select>
 
+  <!-- Decayed relationship warmth for the browser's sort, band facet, and decay horizon. This
+       reuses the same attributed touch union and model parameters as getRelationshipScoreAggregates,
+       including its de-duplicating GROUP BY, so the browser and the smart-segment warmth predicates
+       can never read two different scores. The join is emitted only when a warmth sort or filter was
+       requested. Binding `model` and `reference` here lets the shared touch-source fragment resolve
+       its parameters unchanged. -->
+  <sql id="warmthAggregate">
+      <bind name="model" value="warmth.model"/>
+      <bind name="reference" value="warmth.reference"/>
+      LEFT JOIN (
+        SELECT aged.company_id,
+               SUM(aged.weight
+                 * POW(#{model.decayBase}, -aged.age_days / #{model.halfLifeDays})) AS raw_weight,
+               MAX(aged.touched_at) AS last_touch_at
+        FROM (
+          SELECT attributed.company_id, attributed.touched_at, attributed.weight,
+                 GREATEST(0.0,
+                   TIMESTAMPDIFF(MICROSECOND, attributed.touched_at, #{reference})
+                     / #{model.microsecondsPerDay}) AS age_days
+          FROM (
+            SELECT source.source_type,
+                   source.source_id,
+                   source.company_id,
+                   source.interaction_type,
+                   source.touched_at,
+                   source.weight
+            FROM (
+              <include refid="relationshipTouchSources"/>
+            ) source
+            WHERE source.touched_at IS NOT NULL AND source.touched_at &lt;= #{reference}
+            GROUP BY source.source_type,
+                     source.source_id,
+                     source.company_id,
+                     source.interaction_type,
+                     source.touched_at,
+                     source.weight
+          ) attributed
+        ) aged
+        GROUP BY aged.company_id
+      ) w ON w.company_id = c.id
+  </sql>
+
+  <!-- Emitted wherever the aggregate column itself is projected or ordered on. -->
+  <sql id="warmthJoin">
+    <if test="warmth != null">
+      <include refid="warmthAggregate"/>
+    </if>
+  </sql>
+
+  <!-- A warmth sort cannot change which rows match, so counts, id selections, and exports join the
+       aggregate only when a band, the no-history bucket, or a decay horizon actually narrows them. -->
+  <sql id="warmthFilterJoin">
+    <if test="warmth != null and warmth.restrictsRows()">
+      <include refid="warmthAggregate"/>
+    </if>
+  </sql>
+
+  <!-- One bucket per company: the model's band, or __none__ when nothing has ever been logged.
+       The score is strictly increasing in raw weight, so comparing raw weight against the model's
+       published boundaries selects exactly the rows the Java band classifier would. -->
+  <sql id="warmthBandKey">
+    CASE
+      WHEN w.last_touch_at IS NULL THEN '__none__'
+      WHEN w.raw_weight &gt;= #{model.hotMinimumRawWeight} THEN 'hot'
+      WHEN w.raw_weight &gt;= #{model.warmMinimumRawWeight} THEN 'warm'
+      WHEN w.raw_weight &gt;= #{model.coolMinimumRawWeight} THEN 'cool'
+      ELSE 'cold'
+    END
+  </sql>
+
+  <sql id="warmthWhere">
+    <if test="warmth != null">
+      <if test="warmth.bands.size() > 0 or warmth.noWarmth">
+        AND (
+          <trim prefixOverrides="OR ">
+            <if test="warmth.bands.size() > 0">
+              <include refid="warmthBandKey"/> IN
+              <foreach item="band" collection="warmth.bands" open="(" separator="," close=")">#{band}</foreach>
+            </if>
+            <if test="warmth.noWarmth">OR w.last_touch_at IS NULL</if>
+          </trim>
+        )
+      </if>
+      <if test="warmth.goesColdWithinDays != null">
+        AND w.raw_weight &gt; #{model.coldRawWeight}
+        AND ROUND(#{model.halfLifeDays}
+          * LOG(#{model.decayBase}, w.raw_weight / #{model.coldRawWeight}))
+          &lt;= #{warmth.goesColdWithinDays}
+      </if>
+    </if>
+  </sql>
+
   <sql id="pageWhere">
     <where>
       <choose>
         <when test="archived">AND c.workspace_id = #{workspaceId} AND c.archived_at IS NOT NULL</when>
         <otherwise>AND <include refid="visible"/></otherwise>
       </choose>
+      <include refid="warmthWhere"/>
       <if test="query != null">
         AND (c.name LIKE #{query} OR c.website LIKE #{query} OR c.industry LIKE #{query}
           OR c.phone LIKE #{query} OR c.address LIKE #{query})
@@ -444,6 +537,26 @@
       <when test="sort == 'address'">c.address</when>
       <when test="sort == 'createdAt'">c.created_at</when>
       <when test="sort == 'updatedAt'">c.updated_at</when>
+      <when test="sort == 'warmth'">COALESCE(w.raw_weight, 0.0)</when>
+      <otherwise>c.name</otherwise>
+    </choose>
+    <choose><when test="dir == 'desc'">DESC</when><otherwise>ASC</otherwise></choose>
+    , c.id ASC
+  </sql>
+
+  <!-- The smart-segment page has no warmth aggregate joined and takes no warmth parameter, so it
+       keeps its own whitelist without the warmth column: an unsupported sort falls through to name
+       exactly as it does for any other unknown key. -->
+  <sql id="segmentPageOrderBy">
+    ORDER BY
+    <choose>
+      <when test="sort == 'name'">c.name</when>
+      <when test="sort == 'website'">c.website</when>
+      <when test="sort == 'industry'">c.industry</when>
+      <when test="sort == 'phone'">c.phone</when>
+      <when test="sort == 'address'">c.address</when>
+      <when test="sort == 'createdAt'">c.created_at</when>
+      <when test="sort == 'updatedAt'">c.updated_at</when>
       <otherwise>c.name</otherwise>
     </choose>
     <choose><when test="dir == 'desc'">DESC</when><otherwise>ASC</otherwise></choose>
@@ -474,6 +587,7 @@
   <select id="getCompaniesPage" resultType="Company">
     SELECT <include refid="qualifiedCompanyColumns"/>
     FROM company c
+    <include refid="warmthJoin"/>
     <include refid="pageWhere"/>
     <include refid="memberScopePredicate"/>
     <include refid="pageOrderBy"/>
@@ -483,6 +597,7 @@
   <select id="countCompanies" resultType="long">
     SELECT COUNT(*)
     FROM company c
+    <include refid="warmthFilterJoin"/>
     <include refid="pageWhere"/>
     <include refid="memberScopePredicate"/>
   </select>
@@ -628,7 +743,7 @@
     JOIN JSON_TABLE(#{segmentIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) segment_ids
       ON segment_ids.id = c.id
     <include refid="segmentPageWhere"/>
-    <include refid="pageOrderBy"/>
+    <include refid="segmentPageOrderBy"/>
     LIMIT #{limit} OFFSET #{offset}
   </select>
 
@@ -653,6 +768,7 @@
   <select id="getCompanyIdsFiltered" resultType="int">
     SELECT c.id
     FROM company c
+    <include refid="warmthFilterJoin"/>
     <include refid="pageWhere"/>
     <include refid="memberScopePredicate"/>
     ORDER BY c.id
@@ -662,9 +778,22 @@
   <select id="getCompaniesFiltered" resultType="Company">
     SELECT <include refid="qualifiedCompanyColumns"/>
     FROM company c
+    <include refid="warmthFilterJoin"/>
     <include refid="pageWhere"/>
     <include refid="memberScopePredicate"/>
     ORDER BY c.name, c.id
+  </select>
+
+  <!-- Aggregates every visible company's attributed decayed touch history, so it costs a full
+       workspace scan of activity, note, and task rows. It is opt-in on the facets endpoint. -->
+  <select id="countsByWarmthBand" timeout="10"
+          resultType="ooo.klae.connex.backend.dto.FacetCount">
+    SELECT <include refid="warmthBandKey"/> AS `key`,
+           COUNT(*) AS count, NULL AS label
+    FROM company c
+    <include refid="warmthJoin"/>
+    WHERE <include refid="visible"/>
+    GROUP BY `key`
   </select>
 
   <select id="distinctIndustries" resultType="string">
@@ -753,6 +882,15 @@
       SELECT 1 FROM company c WHERE <include refid="visible"/> AND c.id = #{id}
     )
   </select>
+
+  <select id="getVisibleIdsIn" resultType="int">
+    SELECT c.id
+    FROM company c
+    WHERE <include refid="visible"/>
+      AND c.id IN
+      <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    ORDER BY c.id
+  </select>
   <select id="existsOwned" resultType="boolean">
     SELECT EXISTS(SELECT 1 FROM company
       WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NULL)
@@ -776,6 +914,13 @@
     WHERE <include refid="visible"/>
       AND c.name IS NOT NULL
       AND c.name != ''
+      AND (TRIM(c.name) = TRIM(#{text})
+        OR (TRIM(c.name) REGEXP '^[A-Za-z0-9_]+([[:space:]][A-Za-z0-9_]+)*$'
+          AND REGEXP_LIKE(
+            #{text},
+            CONCAT('(^|[^A-Za-z0-9_])', TRIM(c.name), '([^A-Za-z0-9_]|$)'),
+            'i'))
+        OR LENGTH(TRIM(c.name)) &gt; CHAR_LENGTH(TRIM(c.name)))
       AND LOCATE(c.name, #{text}) &gt; 0
     ORDER BY CHAR_LENGTH(c.name) DESC, c.id
     LIMIT #{limit}

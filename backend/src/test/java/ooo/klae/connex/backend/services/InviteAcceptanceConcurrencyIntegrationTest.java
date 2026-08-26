@@ -13,10 +13,12 @@ import static org.mockito.Mockito.verify;
 
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
@@ -49,7 +52,7 @@ class InviteAcceptanceConcurrencyIntegrationTest {
 
     @Autowired private InviteService inviteService;
     @Autowired private OrganizationMapper organizationMapper;
-    @Autowired private UserMapper userMapper;
+    @MockitoSpyBean private UserMapper userMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private SqlSessionTemplate sqlSessionTemplate;
@@ -80,6 +83,7 @@ class InviteAcceptanceConcurrencyIntegrationTest {
 
         inviter = user("invite-owner-" + unique, "owner-" + unique + "@example.com");
         recipient = user("invite-recipient-" + unique, "recipient-" + unique + "@example.com");
+        workspaceMapper.addMember(workspace.getId(), inviter.getId(), "owner");
 
         invite = new WorkspaceInvite();
         invite.setWorkspaceId(workspace.getId());
@@ -111,33 +115,32 @@ class InviteAcceptanceConcurrencyIntegrationTest {
     @Test
     void committedRevocationMakesWaitingAcceptanceFailWithoutMembership() throws Exception {
         InviteMapper realMapper = sqlSessionTemplate.getMapper(InviteMapper.class);
-        CountDownLatch claimReached = new CountDownLatch(1);
-        CountDownLatch releaseClaim = new CountDownLatch(1);
+        UserMapper realUserMapper = sqlSessionTemplate.getMapper(UserMapper.class);
+        CountDownLatch creatorLockReached = new CountDownLatch(1);
+        CountDownLatch releaseCreatorLock = new CountDownLatch(1);
         doAnswer(invocation -> {
-            claimReached.countDown();
-            if (!releaseClaim.await(10, TimeUnit.SECONDS)) {
-                throw new IllegalStateException("Acceptance claim was not released");
+            creatorLockReached.countDown();
+            if (!releaseCreatorLock.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Creator lock was not released");
             }
-            return realMapper.claimAcceptance(
-                invite.getId(), invite.getToken(), workspace.getId(), recipient.getId());
-        }).when(inviteMapper).claimAcceptance(
-            invite.getId(), invite.getToken(), workspace.getId(), recipient.getId());
+            return realUserMapper.lockById(inviter.getId());
+        }).when(userMapper).lockById(inviter.getId());
 
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
             Future<BadRequestException> acceptance = executor.submit(() -> assertThrows(
                 BadRequestException.class,
                 () -> inviteService.acceptInvite(invite.getToken(), recipient)));
-            assertTrue(claimReached.await(10, TimeUnit.SECONDS));
+            assertTrue(creatorLockReached.await(10, TimeUnit.SECONDS));
 
             assertEquals(1, realMapper.markRevoked(invite.getId(), workspace.getId()));
-            releaseClaim.countDown();
+            releaseCreatorLock.countDown();
 
             assertEquals(
                 "This invite is no longer available",
                 acceptance.get(20, TimeUnit.SECONDS).getMessage());
         } finally {
-            releaseClaim.countDown();
+            releaseCreatorLock.countDown();
             executor.shutdownNow();
             assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
         }
@@ -209,7 +212,7 @@ class InviteAcceptanceConcurrencyIntegrationTest {
     }
 
     @Test
-    void membershipRemovedAfterSnapshotIsRestoredAfterClaim() throws Exception {
+    void membershipRemovalWaitsForTheLockedAuthorizationSnapshot() throws Exception {
         workspaceMapper.addMember(workspace.getId(), recipient.getId(), "member");
         InviteMapper realMapper = sqlSessionTemplate.getMapper(InviteMapper.class);
         CountDownLatch claimReached = new CountDownLatch(1);
@@ -224,16 +227,19 @@ class InviteAcceptanceConcurrencyIntegrationTest {
         }).when(inviteMapper).claimAcceptance(
             invite.getId(), invite.getToken(), workspace.getId(), recipient.getId());
 
-        ExecutorService executor = Executors.newSingleThreadExecutor();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
             Future<WorkspaceMembershipDto> acceptance = executor.submit(
                 () -> inviteService.acceptInvite(invite.getToken(), recipient));
             assertTrue(claimReached.await(10, TimeUnit.SECONDS));
 
-            assertEquals(1, workspaceMapper.removeMember(workspace.getId(), recipient.getId()));
+            Future<Integer> removal = executor.submit(
+                () -> workspaceMapper.removeMember(workspace.getId(), recipient.getId()));
+            assertThrows(TimeoutException.class, () -> removal.get(500, TimeUnit.MILLISECONDS));
             releaseClaim.countDown();
 
             assertEquals(workspace.getId(), acceptance.get(20, TimeUnit.SECONDS).getId());
+            assertEquals(1, removal.get(20, TimeUnit.SECONDS));
         } finally {
             releaseClaim.countDown();
             executor.shutdownNow();
@@ -243,13 +249,14 @@ class InviteAcceptanceConcurrencyIntegrationTest {
         WorkspaceInvite accepted = realMapper.findByToken(invite.getToken());
         assertEquals("accepted", accepted.getStatus());
         assertEquals(recipient.getId(), accepted.getAcceptedById());
-        assertTrue(workspaceMapper.isMember(workspace.getId(), recipient.getId()));
-        verify(userOffboardingService).prepareFreshMembership(workspace.getId(), recipient.getId());
-        verify(notificationStateVersionService).markChanged(recipient.getId());
+        assertFalse(workspaceMapper.isMember(workspace.getId(), recipient.getId()));
+        verify(userOffboardingService, never())
+            .prepareFreshMembership(workspace.getId(), recipient.getId());
+        verify(notificationStateVersionService, never()).markChanged(recipient.getId());
     }
 
     @Test
-    void membershipAddedAfterSnapshotIsReturnedAfterClaim() throws Exception {
+    void membershipAdditionWaitsForTheLockedAuthorizationSnapshot() throws Exception {
         InviteMapper realMapper = sqlSessionTemplate.getMapper(InviteMapper.class);
         CountDownLatch claimReached = new CountDownLatch(1);
         CountDownLatch releaseClaim = new CountDownLatch(1);
@@ -263,16 +270,22 @@ class InviteAcceptanceConcurrencyIntegrationTest {
         }).when(inviteMapper).claimAcceptance(
             invite.getId(), invite.getToken(), workspace.getId(), recipient.getId());
 
-        ExecutorService executor = Executors.newSingleThreadExecutor();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
             Future<WorkspaceMembershipDto> acceptance = executor.submit(
                 () -> inviteService.acceptInvite(invite.getToken(), recipient));
             assertTrue(claimReached.await(10, TimeUnit.SECONDS));
 
-            assertEquals(1, workspaceMapper.addMember(workspace.getId(), recipient.getId(), "member"));
+            Future<Integer> addition = executor.submit(
+                () -> workspaceMapper.addMember(workspace.getId(), recipient.getId(), "member"));
+            assertThrows(TimeoutException.class, () -> addition.get(500, TimeUnit.MILLISECONDS));
             releaseClaim.countDown();
 
             assertEquals(workspace.getId(), acceptance.get(20, TimeUnit.SECONDS).getId());
+            ExecutionException duplicate = assertThrows(
+                ExecutionException.class,
+                () -> addition.get(20, TimeUnit.SECONDS));
+            assertTrue(duplicate.getCause() instanceof DuplicateKeyException);
         } finally {
             releaseClaim.countDown();
             executor.shutdownNow();
@@ -283,9 +296,8 @@ class InviteAcceptanceConcurrencyIntegrationTest {
         assertEquals("accepted", accepted.getStatus());
         assertEquals(recipient.getId(), accepted.getAcceptedById());
         assertTrue(workspaceMapper.isMember(workspace.getId(), recipient.getId()));
-        verify(userOffboardingService, never())
-            .prepareFreshMembership(workspace.getId(), recipient.getId());
-        verify(notificationStateVersionService, never()).markChanged(recipient.getId());
+        verify(userOffboardingService).prepareFreshMembership(workspace.getId(), recipient.getId());
+        verify(notificationStateVersionService).markChanged(recipient.getId());
     }
 
     @Test

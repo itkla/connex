@@ -34,6 +34,10 @@
                 <when test="recordType == 'deal'">
                     SELECT 1 FROM deal WHERE workspace_id = #{workspaceId} AND id = #{entityId}
                 </when>
+                <when test="recordType == 'document'">
+                    SELECT 1 FROM deal_document
+                    WHERE workspace_id = #{workspaceId} AND id = #{entityId}
+                </when>
                 <otherwise>
                     SELECT 1 WHERE 1 = 0
                 </otherwise>

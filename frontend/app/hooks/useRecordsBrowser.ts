@@ -11,17 +11,28 @@ import {
 } from '../components/records/types';
 import { PEEK_PARAM } from './useRecordPeek';
 import { SERVER_RECORDS_URL_KEYS } from './useServerRecords';
-import { parseListQuery, SAVED_VIEW_URL_KEY } from './listStateUrl';
+import {
+    listStateAddress,
+    parseListQuery,
+    PIPELINE_EDIT_URL_KEY,
+    SAVED_VIEW_URL_KEY,
+} from './listStateUrl';
 import { useActions } from './useActions';
 import { useIsMobile } from './useIsMobile';
 import { useScopedViewPreference } from './useScopedViewPreference';
 import { effectiveListView } from './viewPreference';
 import { useWorkspace } from './useWorkspace';
 
-/** Query keys the browser writer must never treat as a facet filter or wipe: the view mode, the peek
- * deep link, the saved-view pointer ({@link SAVED_VIEW_URL_KEY}), and the server-list state
+/** Query keys the browser writer must never treat as a facet filter or wipe: the view mode, record
+ * deep links, the saved-view pointer ({@link SAVED_VIEW_URL_KEY}), and the server-list state
  * ({@link SERVER_RECORDS_URL_KEYS}) owned by other writers. */
-const RESERVED_PARAM_KEYS = new Set<string>(['view', PEEK_PARAM, SAVED_VIEW_URL_KEY, ...SERVER_RECORDS_URL_KEYS]);
+const RESERVED_PARAM_KEYS = new Set<string>([
+    'view',
+    PEEK_PARAM,
+    PIPELINE_EDIT_URL_KEY,
+    SAVED_VIEW_URL_KEY,
+    ...SERVER_RECORDS_URL_KEYS,
+]);
 
 interface UseRecordsBrowserOptions<T extends { id: SelectionId }> {
     items: T[];
@@ -95,7 +106,7 @@ export function useRecordsBrowser<T extends { id: SelectionId }>(
         }
         const next = params.toString();
         if (next === window.location.search.replace(/^\?/, '')) return;
-        window.history.replaceState(null, '', next ? `${pathname}?${next}` : pathname);
+        window.history.replaceState(null, '', listStateAddress(pathname, next));
     }, [displayMode, filterState, pathname, searchParams]);
 
     const effectiveDisplayMode: DisplayMode = effectiveListView(displayMode, isMobile);

@@ -44,6 +44,8 @@ public enum Permission {
     TAG_MANAGE,
     PRODUCT_MANAGE,
     DOCUMENT_MANAGE,
+    /** Required to send, resend, or void an external document-delivery envelope. */
+    DOCUMENT_SEND,
     /**
      * Permission to approve or reject generated deal documents that an approval
      * policy has routed for review. Requesting approval only needs

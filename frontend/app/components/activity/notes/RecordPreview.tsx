@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BriefcaseIcon, BuildingOffice2Icon, EnvelopeIcon, GlobeAltIcon, UserIcon } from "@heroicons/react/24/outline";
+import { useLocale, useTranslations } from "next-intl";
 
 import { getCompanyById, getContactById, getDealSummary } from "@/app/lib/api";
+import { formatShortDate } from "@/app/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 type RecordType = "person" | "deal" | "company";
@@ -40,22 +42,11 @@ export function PreviewSkeleton() {
     );
 }
 
-function formatCurrency(value: number, currency: string): string {
-    try {
-        return new Intl.NumberFormat(undefined, {
-            style: "currency",
-            currency: currency || "USD",
-            maximumFractionDigits: 0,
-        }).format(value);
-    } catch {
-        return `${value}`;
-    }
-}
-
 function ContactPreview({ id }: { id: number }) {
+    const t = useTranslations("ActivityNotesReferencePreview");
     const { data, loading } = useRecord(getContactById, id);
     if (loading) return <PreviewSkeleton />;
-    if (!data) return <p className="text-sm text-muted-foreground">Contact unavailable</p>;
+    if (!data) return <p className="text-sm text-muted-foreground">{t("contactUnavailable")}</p>;
     return (
         <div className="flex gap-3">
             <Avatar size="lg" className="ring-1 ring-border">
@@ -88,10 +79,22 @@ function ContactPreview({ id }: { id: number }) {
 }
 
 function DealPreview({ id }: { id: number }) {
+    const locale = useLocale();
+    const t = useTranslations("ActivityNotesReferencePreview");
     const { data, loading } = useRecord(getDealSummary, id);
+    const currencyFormatter = useMemo(() => {
+        try {
+            return new Intl.NumberFormat(locale, {
+                style: "currency",
+                currency: data?.currency || "USD",
+                maximumFractionDigits: 0,
+            });
+        } catch {
+            return null;
+        }
+    }, [data?.currency, locale]);
     if (loading) return <PreviewSkeleton />;
-    if (!data) return <p className="text-sm text-muted-foreground">Deal unavailable</p>;
-    const status = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+    if (!data) return <p className="text-sm text-muted-foreground">{t("dealUnavailable")}</p>;
     const stage = [data.pipelineName, data.stageName].filter(Boolean).join(" · ");
     return (
         <div>
@@ -103,29 +106,33 @@ function DealPreview({ id }: { id: number }) {
             </div>
             <dl className="mt-2 space-y-1 text-xs text-muted-foreground">
                 <div className="flex justify-between gap-2">
-                    <dt>Value</dt>
-                    <dd className="font-medium tabular-nums text-foreground">{formatCurrency(data.value, data.currency)}</dd>
+                    <dt>{t("value")}</dt>
+                    <dd className="font-medium tabular-nums text-foreground">
+                        {currencyFormatter?.format(data.value) ?? `${data.value}`}
+                    </dd>
                 </div>
                 {data.companyName ? (
                     <div className="flex justify-between gap-2">
-                        <dt>Company</dt>
+                        <dt>{t("company")}</dt>
                         <dd className="ml-2 truncate font-medium text-foreground">{data.companyName}</dd>
                     </div>
                 ) : null}
                 {stage ? (
                     <div className="flex justify-between gap-2">
-                        <dt>Stage</dt>
+                        <dt>{t("stage")}</dt>
                         <dd className="ml-2 truncate font-medium text-foreground">{stage}</dd>
                     </div>
                 ) : null}
                 <div className="flex justify-between gap-2">
-                    <dt>Status</dt>
-                    <dd className="font-medium text-foreground">{status}</dd>
+                    <dt>{t("status")}</dt>
+                    <dd className="font-medium capitalize text-foreground">{data.status}</dd>
                 </div>
                 {data.expectedCloseDate ? (
                     <div className="flex justify-between gap-2">
-                        <dt>Expected close</dt>
-                        <dd className="font-medium text-foreground">{data.expectedCloseDate}</dd>
+                        <dt>{t("expectedClose")}</dt>
+                        <dd className="font-medium text-foreground">
+                            {formatShortDate(data.expectedCloseDate, locale)}
+                        </dd>
                     </div>
                 ) : null}
             </dl>
@@ -134,9 +141,10 @@ function DealPreview({ id }: { id: number }) {
 }
 
 function CompanyPreview({ id }: { id: number }) {
+    const t = useTranslations("ActivityNotesReferencePreview");
     const { data, loading } = useRecord(getCompanyById, id);
     if (loading) return <PreviewSkeleton />;
-    if (!data) return <p className="text-sm text-muted-foreground">Company unavailable</p>;
+    if (!data) return <p className="text-sm text-muted-foreground">{t("companyUnavailable")}</p>;
     return (
         <div className="flex gap-3">
             <Avatar size="lg" className="ring-1 ring-border">

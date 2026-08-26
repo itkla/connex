@@ -29,28 +29,40 @@ import org.springframework.web.context.request.RequestContextHolder;
 
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Attachment;
+import ooo.klae.connex.backend.beans.Campaign;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.DealDocument;
+import ooo.klae.connex.backend.beans.DocumentTemplate;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
+import ooo.klae.connex.backend.beans.Product;
+import ooo.klae.connex.backend.beans.ReportDefinition;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
+import ooo.klae.connex.backend.mappers.CampaignMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
+import ooo.klae.connex.backend.mappers.DealDocumentMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.DocumentTemplateMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
+import ooo.klae.connex.backend.mappers.ProductMapper;
+import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 
 /** Full HTTP search isolation for sibling workspaces and foreign organizations. */
@@ -61,21 +73,28 @@ class SearchTenantIsolationTest {
     private static final String PASSWORD = "Search-Tenant-Pw1!";
     private static final List<String> RESULT_COLLECTIONS = List.of(
             "companies", "people", "deals", "pipelines", "tags",
-            "activities", "notes", "tasks", "users", "attachments");
+            "activities", "notes", "tasks", "users", "attachments",
+            "products", "campaigns", "reports", "documentTemplates", "documents", "workflows");
 
     @Autowired private WebApplicationContext context;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
     @Autowired private ActivityMapper activityMapper;
     @Autowired private AttachmentMapper attachmentMapper;
+    @Autowired private CampaignMapper campaignMapper;
     @Autowired private CompanyMapper companyMapper;
+    @Autowired private DealDocumentMapper dealDocumentMapper;
     @Autowired private DealMapper dealMapper;
+    @Autowired private DocumentTemplateMapper documentTemplateMapper;
     @Autowired private NoteMapper noteMapper;
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private PersonMapper personMapper;
     @Autowired private PipelineMapper pipelineMapper;
+    @Autowired private ProductMapper productMapper;
+    @Autowired private ReportMapper reportMapper;
     @Autowired private TagMapper tagMapper;
     @Autowired private TaskMapper taskMapper;
     @Autowired private UserMapper userMapper;
+    @Autowired private WorkflowMapper workflowMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private PasswordEncoder passwordEncoder;
 
@@ -110,6 +129,15 @@ class SearchTenantIsolationTest {
         Task task = newTask(ownerWorkspace, actor, sentinel);
         User searchableMember = newSearchableMember(ownerWorkspace, sentinel);
         Attachment attachment = newAttachment(ownerWorkspace, company, actor, sentinel);
+        Product product = newProduct(ownerWorkspace, sentinel);
+        Campaign campaign = newCampaign(ownerWorkspace, sentinel);
+        ReportDefinition report = newReportDefinition(ownerWorkspace, sentinel);
+        DocumentTemplate template = newDocumentTemplate(ownerWorkspace, sentinel);
+        DealDocument document = newDealDocument(ownerWorkspace, deal, sentinel);
+        Workflow workflow = newWorkflow(ownerWorkspace, sentinel);
+        workspaceMapper.updateMemberRole(ownerWorkspace.getId(), actor.getId(), "owner");
+        workspaceMapper.updateMemberRole(siblingWorkspace.getId(), actor.getId(), "owner");
+        workspaceMapper.updateMemberRole(foreignWorkspace.getId(), actor.getId(), "owner");
         MockHttpSession session = login(actor.getUsername());
 
         mockMvc.perform(get("/api/search")
@@ -126,7 +154,13 @@ class SearchTenantIsolationTest {
                 .andExpect(jsonPath("$.notes[0].id").value(note.getId()))
                 .andExpect(jsonPath("$.tasks[0].id").value(task.getId()))
                 .andExpect(jsonPath("$.users[0].id").value(searchableMember.getId()))
-                .andExpect(jsonPath("$.attachments[0].id").value(attachment.getId()));
+                .andExpect(jsonPath("$.attachments[0].id").value(attachment.getId()))
+                .andExpect(jsonPath("$.products[0].id").value(product.getId()))
+                .andExpect(jsonPath("$.campaigns[0].id").value(campaign.getId()))
+                .andExpect(jsonPath("$.reports[0].id").value(report.getId()))
+                .andExpect(jsonPath("$.documentTemplates[0].id").value(template.getId()))
+                .andExpect(jsonPath("$.documents[0].id").value(document.getId()))
+                .andExpect(jsonPath("$.workflows[0].id").value(workflow.getId()));
 
         for (Workspace unauthorized : List.of(siblingWorkspace, foreignWorkspace)) {
             var result = mockMvc.perform(get("/api/search")
@@ -138,6 +172,80 @@ class SearchTenantIsolationTest {
                 result.andExpect(jsonPath("$." + collection + ".length()").value(0));
             }
         }
+    }
+
+    private Product newProduct(Workspace workspace, String sentinel) {
+        Product product = new Product();
+        product.setWorkspaceId(workspace.getId());
+        product.setName(sentinel + " Product");
+        product.setSku("SKU-" + unique());
+        product.setActive(true);
+        product.setUnitPrice(BigDecimal.ONE);
+        product.setCurrency("USD");
+        product.setBillingFrequency("one_time");
+        productMapper.insert(product);
+        return product;
+    }
+
+    private Campaign newCampaign(Workspace workspace, String sentinel) {
+        Campaign campaign = new Campaign();
+        campaign.setWorkspaceId(workspace.getId());
+        campaign.setName(sentinel + " Campaign");
+        campaign.setType("email");
+        campaign.setStatus("draft");
+        campaignMapper.insertCampaign(campaign);
+        return campaign;
+    }
+
+    private ReportDefinition newReportDefinition(Workspace workspace, String sentinel) {
+        ReportDefinition definition = new ReportDefinition();
+        definition.setWorkspaceId(workspace.getId());
+        definition.setName(sentinel + " Report");
+        definition.setCadence("monthly");
+        definition.setConfigJson("{}");
+        reportMapper.insertDefinition(definition);
+        return definition;
+    }
+
+    private DocumentTemplate newDocumentTemplate(Workspace workspace, String sentinel) {
+        DocumentTemplate template = new DocumentTemplate();
+        template.setWorkspaceId(workspace.getId());
+        template.setName(sentinel + " Template");
+        template.setType("quote");
+        template.setLocale("en");
+        template.setActive(true);
+        documentTemplateMapper.insert(template);
+        return template;
+    }
+
+    private DealDocument newDealDocument(Workspace workspace, Deal deal, String sentinel) {
+        DealDocument document = new DealDocument();
+        document.setWorkspaceId(workspace.getId());
+        document.setDealId(deal.getId());
+        document.setType("quote");
+        document.setLocale("en");
+        document.setStatus("draft");
+        document.setVersion(1);
+        document.setTitle(sentinel + " Document");
+        document.setContent("{}");
+        document.setCurrency("USD");
+        dealDocumentMapper.insert(document);
+        return document;
+    }
+
+    private Workflow newWorkflow(Workspace workspace, String sentinel) {
+        Workflow workflow = new Workflow();
+        workflow.setWorkspaceId(workspace.getId());
+        workflow.setName(sentinel + " Workflow");
+        workflow.setEnabled(false);
+        workflow.setRuntimeOwner("legacy");
+        workflow.setDraftRevision(0);
+        workflow.setDraftRecordType("company");
+        workflow.setDraftExecutionMode("user");
+        workflow.setDraftDefinitionJson("{\"schemaVersion\":1}");
+        workflow.setDraftCanvasJson("{}");
+        workflowMapper.insert(workflow);
+        return workflow;
     }
 
     private Company newCompany(Workspace workspace, String sentinel) {

@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.beans.ProviderConnection;
 import ooo.klae.connex.backend.connectedaccounts.ConnectedCaptureProperties;
 import ooo.klae.connex.backend.mappers.ProviderCaptureMapper;
 import ooo.klae.connex.backend.mappers.ProviderConnectionMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -35,6 +36,7 @@ public class ProviderCaptureConnectionStateService {
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS");
 
     private final ProviderConnectionMapper connectionMapper;
+    private final UserMapper userMapper;
     private final WorkspaceMapper workspaceMapper;
     private final ProviderCaptureMapper captureMapper;
     private final WorkspaceService workspaceService;
@@ -121,6 +123,10 @@ public class ProviderCaptureConnectionStateService {
 
     private void reconcileWorkspace(
             int workspaceId, ProviderConnection connection, String owner) {
+        if (userMapper.lockByIdForShare(connection.getUserId()) == null) {
+            throw new IllegalStateException(
+                "Provider connection owner no longer exists");
+        }
         ProviderConnection current =
             connectionMapper.getByIdForShare(connection.getId());
         if (current == null

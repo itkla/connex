@@ -3,7 +3,7 @@ import { PageShell } from '@/app/components/PageShell';
 
 export default function DealsLoading() {
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <div className="flex items-center justify-between">
                     <Skeleton className="h-10 w-40" />
                     <div className="flex items-center gap-2">

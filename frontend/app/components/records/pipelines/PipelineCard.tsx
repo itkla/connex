@@ -2,10 +2,8 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ChevronRightIcon } from '@heroicons/react/24/solid';
 import {
     EllipsisHorizontalIcon,
-    EyeIcon,
     PencilIcon,
     TrashIcon,
 } from '@heroicons/react/24/outline';
@@ -27,6 +25,7 @@ import {
 } from '@/components/ui/avatar';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { LoadStatus, Pipeline, PipelineMetrics, Stage, User } from '@/app/lib/types';
+import { pipelineDealsHref } from '@/app/components/records/deals/dealLinks';
 import Chip from '@/app/components/Chip';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
@@ -49,11 +48,9 @@ export default function PipelineCard({
     onQuickEdit,
     onDelete,
 }: PipelineCardProps) {
-    const router = useRouter();
     const t = useTranslations('PipelinesCard');
     const [isExpanded, setIsExpanded] = useState(false);
 
-    const open = () => router.push(`/records/pipelines/${pipeline.id}`);
     const toggleExpand = () => {
         if (!isExpanded) onFirstExpand?.();
         setIsExpanded((prev) => !prev);
@@ -95,10 +92,6 @@ export default function PipelineCard({
                         className="w-44"
                         onClick={(e) => e.stopPropagation()}
                     >
-                        {/* <DropdownMenuItem onSelect={open}>
-                            <EyeIcon className="size-4 text-neutral-500" />
-                            View
-                        </DropdownMenuItem> */}
                         {onQuickEdit && (
                             <DropdownMenuItem
                                 onSelect={(e) => {
@@ -127,19 +120,6 @@ export default function PipelineCard({
                         )}
                     </DropdownMenuContent>
                 </DropdownMenu>
-
-                {/* <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        open();
-                    }}
-                    aria-label="Open pipeline page"
-                    className="w-12 h-12 shrink-0 bg-neutral-200 hover:bg-neutral-300 outline-none border-none shadow-none"
-                >
-                    <ChevronRightIcon className="size-4" />
-                </Button> */}
             </div>
 
             {isExpanded && (
@@ -170,7 +150,7 @@ export default function PipelineCard({
                     {metricsStatus === 'ready' && metrics && (
                         <div className="flex flex-wrap items-start gap-8">
                             <CountTile label={t('stages')} value={metrics.numStages} />
-                            <Link href={`/records/deals?pipelineId=${pipeline.id}`} className=""><CountTile className="hover:text-brand transition-colors duration-300 transition-ease-in-out" label={t('deals')} value={metrics.numDeals} /></Link>
+                            <Link href={pipelineDealsHref(pipeline.id)} className=""><CountTile className="hover:text-brand transition-colors duration-300 transition-ease-in-out" label={t('deals')} value={metrics.numDeals} /></Link>
                             <RelatedUsersSection users={metrics.relatedUsers} />
                             <AssociatedStagesSection stages={stages} />
                         </div>

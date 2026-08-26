@@ -9,6 +9,7 @@ import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
@@ -272,6 +273,33 @@ public class ManagedObjectService implements ApplicationRunner {
             UploadSource.from(fileName, contentType, bytes));
     }
 
+    /** Stores one byte-exact immutable document-delivery artifact in managed tenant storage. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public StoredArtifact storeDocumentArtifact(
+            int workspaceId,
+            int deliveryId,
+            String kind,
+            String contentType,
+            byte[] bytes) {
+        if (deliveryId <= 0 || bytes == null || bytes.length == 0
+                || !("signed_document".equals(kind) || "certificate".equals(kind))
+                || !("application/json".equals(contentType) || "application/pdf".equals(contentType))) {
+            throw new BadRequestException("Document-delivery artifact is invalid");
+        }
+        String extension = "application/pdf".equals(contentType) ? "pdf" : "json";
+        String key = documentArtifactKey(
+            workspaceId, deliveryId, kind + "-" + UUID.randomUUID() + "." + extension);
+        byte[] checksum = sha256Digest().digest(bytes);
+        storeTenant(
+            workspaceId,
+            key,
+            UploadSource.from(kind + "." + extension, contentType, bytes),
+            contentType,
+            checksum);
+        return new StoredArtifact(
+            key, contentType, bytes.length, HexFormat.of().formatHex(checksum));
+    }
+
     @Transactional(propagation = Propagation.MANDATORY)
     public StoredImage storePersonImage(int workspaceId, int personId, UploadSource source) {
         ValidatedImage image = imageUploadValidator.validate(source);
@@ -511,6 +539,10 @@ public class ManagedObjectService implements ApplicationRunner {
                     positive(reference.ownerId()),
                     reference.persistedUrl())
                 .orElseThrow(() -> new IllegalStateException("Company image object reference is invalid"));
+            case "document_delivery_artifact" -> requireDocumentArtifactKey(
+                workspaceId,
+                positive(reference.ownerId()),
+                reference.persistedUrl());
             default -> throw new IllegalStateException("Active managed object category is invalid");
         };
         if (!expectedKey.equals(reference.objectKey())) {
@@ -561,6 +593,13 @@ public class ManagedObjectService implements ApplicationRunner {
             .ifPresent(key -> deleteTenantAfterCommit(workspaceId, key));
     }
 
+    /** Enqueues one exact document-delivery artifact for managed deletion after metadata commit. */
+    public void deleteDocumentArtifactAfterCommit(
+            int workspaceId, int deliveryId, String objectKey) {
+        deleteTenantAfterCommit(
+            workspaceId, requireDocumentArtifactKey(workspaceId, deliveryId, objectKey));
+    }
+
     public void deletePersonImageAfterCommit(int workspaceId, int personId, String url) {
         managedPersonImageKey(workspaceId, personId, url)
             .ifPresent(key -> deleteTenantAfterCommit(workspaceId, key));
@@ -578,6 +617,22 @@ public class ManagedObjectService implements ApplicationRunner {
     public void deleteAttachment(int workspaceId, String url) {
         managedAttachmentKey(workspaceId, url)
             .ifPresent(key -> deleteTenantOnRollback(workspaceId, key));
+    }
+
+    /** Opens an authorized document-delivery artifact through managed read admission. */
+    public ManagedContent openDocumentArtifact(
+            int workspaceId,
+            int deliveryId,
+            String kind,
+            String objectKey,
+            String contentType) {
+        String key = requireDocumentArtifactKey(workspaceId, deliveryId, objectKey);
+        String safeContentType = "application/pdf".equals(contentType)
+            ? "application/pdf"
+            : "application/json";
+        String extension = "application/pdf".equals(safeContentType) ? "pdf" : "json";
+        return new ManagedContent(
+            getForResponse(key), safeContentType, "document-" + kind + "." + extension);
     }
 
     private void storeTenant(int workspaceId, String key, UploadSource source, String contentType) {
@@ -861,6 +916,22 @@ public class ManagedObjectService implements ApplicationRunner {
         return "workspaces/" + positive(workspaceId) + "/attachments/" + requireToken(token);
     }
 
+    private static String documentArtifactKey(int workspaceId, int deliveryId, String token) {
+        return "workspaces/" + positive(workspaceId) + "/document-deliveries/"
+            + positive(deliveryId) + "/" + ObjectStorageKey.requireValid(token);
+    }
+
+    private static String requireDocumentArtifactKey(
+            int workspaceId, int deliveryId, String objectKey) {
+        String validKey = ObjectStorageKey.requireValid(objectKey);
+        String prefix = "workspaces/" + positive(workspaceId) + "/document-deliveries/"
+            + positive(deliveryId) + "/";
+        if (!validKey.startsWith(prefix) || validKey.length() == prefix.length()) {
+            throw new IllegalStateException("Document-delivery artifact key is invalid");
+        }
+        return validKey;
+    }
+
     private static String personImageKey(int workspaceId, int personId, String token) {
         return "workspaces/" + positive(workspaceId) + "/person-images/" + positive(personId) + "/" + requireToken(token);
     }
@@ -967,6 +1038,11 @@ public class ManagedObjectService implements ApplicationRunner {
      * @param size stored byte length
      */
     public record StoredBinary(String url, String fileName, String contentType, long size) {}
+
+    /** Immutable managed artifact metadata returned from a successful byte-exact store. */
+    public record StoredArtifact(
+            String objectKey, String contentType, long byteLength, String sha256) {
+    }
 
     /**
      * Public managed image reference safe to persist in its owning record.

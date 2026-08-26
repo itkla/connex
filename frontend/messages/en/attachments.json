@@ -19,8 +19,7 @@
     "title": "Files",
     "subtitle": "Every file attached across your companies, contacts, deals, and team, in one place.",
     "searchPlaceholder": "Search files, people, or types",
-    "count": "{count, plural, =1 {# file} other {# files}}",
-    "totalSize": "{size} total",
+    "countAndSize": "{count, plural, =1 {# file} other {# files}} · {size} in total",
     "entityLabel": "file",
     "columnName": "Name",
     "typeLabel": "Type",
@@ -52,6 +51,7 @@
     "sortLargest": "Largest",
     "viewList": "List view",
     "viewGrid": "Grid view",
+    "displayMode": "Display mode",
     "by": "by {name}",
     "unknownUser": "Unknown",
     "unknownRecord": "Unknown record",
@@ -74,10 +74,6 @@
     "noResultsTitle": "No files match your filters",
     "noResultsBody": "Try a different search, or clear the filters to see everything.",
     "clearFilters": "Clear filters",
-    "deleteTitle": "Delete file",
-    "deleteBody": "\"{name}\" will be permanently removed. This can't be undone.",
-    "cancel": "Cancel",
-    "confirmDelete": "Delete file",
     "toastDeleted": "File deleted",
     "toastDeleteFailed": "Couldn't delete the file",
     "unlinked": "Unlinked",
@@ -89,8 +85,6 @@
     "selectAll": "Select all",
     "selectNone": "Select none",
     "tagAction": "Tag",
-    "bulkDeleteTitle": "Delete files",
-    "bulkDeleteBody": "{count, plural, =1 {# file} other {# files}} will be permanently removed. This can't be undone.",
     "toastDeletedCount": "{count, plural, =1 {# file deleted} other {# files deleted}}",
     "toastTagged": "{count, plural, =1 {# file tagged} other {# files tagged}}",
     "toastTagFailed": "Couldn't tag the files",
@@ -98,6 +92,6 @@
   },
   "LibraryFilesLayout": {
     "title": "Library / Files",
-    "description": "Manage your organization's files"
+    "description": "Manage your workspace's files"
   }
 }

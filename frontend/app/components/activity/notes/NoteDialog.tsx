@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
 import { BriefcaseIcon, LockClosedIcon, UserIcon, UsersIcon, XMarkIcon } from '@heroicons/react/24/outline';
 
@@ -28,13 +28,14 @@ import {
 } from '@/components/ui/combobox';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { SegmentedToggle } from '@/app/components/filters';
+import { SegmentedControl } from '@/components/ui/segmented-control';
 import RichNoteEditor from './RichNoteEditor';
 import { InputGroupAddon } from '@/components/ui/input-group';
 import { DialogStatusCover, resolveDialogStatus } from '@/components/ui/dialog-status-cover';
 import { cn } from '@/lib/utils';
 
-import { ApiError, createNote, updateNote, isFieldError } from '@/app/lib/api';
+import { createNote, updateNote, isFieldError } from '@/app/lib/api';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { isSubmitShortcut } from '@/app/lib/submitShortcut';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { DRAFT_VERSIONS } from '@/app/lib/formDrafts';
@@ -146,6 +147,8 @@ type Props = {
     onDealQueryChange?: (query: string) => void;
     personOptionsLoading?: boolean;
     dealOptionsLoading?: boolean;
+    /** Runs after a successful create or update so list consumers can reload their current page. */
+    onSaved?: () => void;
 };
 
 export default function NoteDialog(props: Props) {
@@ -178,6 +181,7 @@ function ScopedNoteDialog({
     onDealQueryChange,
     personOptionsLoading = false,
     dealOptionsLoading = false,
+    onSaved,
     activeWorkspaceId,
 }: Props & { activeWorkspaceId: number | null }) {
     const t = useTranslations('ActivityNotesDialog');
@@ -224,9 +228,9 @@ function ScopedNoteDialog({
                 <DrawerContent
                     showCloseButton={false}
                     className={cn(
-                        'gap-0 p-0 pt-[env(safe-area-inset-top)] transition-[transform,height,max-height,width,max-width,border-radius] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none',
+                        'gap-0 p-0 pt-[env(safe-area-inset-top)] transition-[transform,height,max-height,width,max-width,border-radius] duration-(--motion-standard) ease-calm motion-reduce:transition-none',
                         expanded
-                            ? 'h-[100dvh] max-h-[100dvh] w-full max-w-none rounded-none'
+                            ? 'h-[100dvh] max-h-[100dvh] w-full max-w-none rounded-none data-ending-style:duration-(--motion-standard)'
                             : 'h-[min(82dvh,48rem)] max-h-[min(82dvh,48rem)] w-full sm:max-w-6xl',
                     )}
                 >
@@ -268,6 +272,7 @@ function ScopedNoteDialog({
                             onDealQueryChange={onDealQueryChange}
                             personOptionsLoading={personOptionsLoading}
                             dealOptionsLoading={dealOptionsLoading}
+                            onSaved={onSaved}
                             onSubmittingChange={(value) => {
                                 submittingRef.current = value;
                             }}
@@ -312,6 +317,8 @@ type FormProps = {
     onDealQueryChange?: (query: string) => void;
     personOptionsLoading?: boolean;
     dealOptionsLoading?: boolean;
+    /** Runs after a successful create or update. */
+    onSaved?: () => void;
     onSubmittingChange: (value: boolean) => void;
     /** Reports whether the form holds unsaved edits, so a wrapper can guard against accidental discard. */
     onDirtyChange?: (dirty: boolean) => void;
@@ -465,6 +472,7 @@ export function NoteDialogForm({
     onDealQueryChange,
     personOptionsLoading = false,
     dealOptionsLoading = false,
+    onSaved,
     onSubmittingChange,
     onDirtyChange,
     onPersistDraft,
@@ -474,6 +482,7 @@ export function NoteDialogForm({
 }: FormProps) {
     const router = useRouter();
     const t = useTranslations('ActivityNotesDialog');
+    const showApiError = useApiErrorToast('ActivityNotesDialog');
     const isEdit = note !== null;
 
     const [title, setTitle] = useState(() => note?.title ?? defaultTitle);
@@ -642,6 +651,7 @@ export function NoteDialogForm({
                 toastSuccess(t('toastCreated'));
             }
             setSucceeded(true);
+            onSaved?.();
             router.refresh();
             setTimeout(() => onClose(), 900);
         } catch (err) {
@@ -655,11 +665,7 @@ export function NoteDialogForm({
                 }
                 return;
             }
-            const message =
-                err instanceof ApiError ? err.message :
-                err instanceof Error ? err.message :
-                isEdit ? t('toastFailedSave') : t('toastFailedCreate');
-            toastError(message);
+            showApiError(err, isEdit ? 'toastFailedSave' : 'toastFailedCreate');
         } finally {
             if (!requestInit?.signal?.aborted) {
                 setSubmitting(false);
@@ -696,7 +702,7 @@ export function NoteDialogForm({
                         compact
                             ? 'gap-5'
                             : cn(
-                                'mx-auto w-full gap-6 transition-[max-width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none',
+                                'mx-auto w-full gap-6 transition-[max-width] duration-(--motion-standard) ease-calm motion-reduce:transition-none',
                                 contentWidth === 'wide' ? 'max-w-5xl' : 'max-w-3xl',
                             ),
                     )}
@@ -736,7 +742,7 @@ export function NoteDialogForm({
                                 dealOptionsLoading={dealOptionsLoading}
                                 documentStyle
                             />
-                            <SegmentedToggle<NoteVisibility>
+                            <SegmentedControl<NoteVisibility>
                                 value={visibility}
                                 onChange={setVisibility}
                                 ariaLabel={t('visibilityAria')}

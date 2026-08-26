@@ -219,6 +219,23 @@ public interface AiChatMapper {
 
     int insertTurn(AiChatTurn turn);
 
+    /**
+     * Records which declared skill a running turn routed to.
+     *
+     * @param workspaceId active workspace
+     * @param sessionId owning session
+     * @param turnId running turn
+     * @param skillKey stable catalog key
+     * @param skillVersion semantic version of the declaration that ran
+     * @return rows updated, zero when the turn is no longer running
+     */
+    int applyTurnSkill(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("turnId") int turnId,
+        @Param("skillKey") String skillKey,
+        @Param("skillVersion") String skillVersion);
+
     AiChatTurn getTurnById(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
@@ -237,6 +254,10 @@ public interface AiChatMapper {
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
         @Param("ids") List<Integer> ids);
+
+    AiChatTurn getLatestActiveTurnBySession(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId);
 
     int markTurnRunning(
         @Param("workspaceId") int workspaceId,
@@ -302,6 +323,12 @@ public interface AiChatMapper {
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,
         @Param("pendingOnly") boolean pendingOnly,
+        @Param("limit") int limit);
+
+    List<AiChatToolCall> listToolCallsByTurn(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("idempotencyPrefix") String idempotencyPrefix,
         @Param("limit") int limit);
 
     AiChatToolCall getToolCallBySessionForUpdate(

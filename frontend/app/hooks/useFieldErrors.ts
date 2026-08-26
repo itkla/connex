@@ -31,3 +31,7 @@ export function useFieldErrors() {
 
     return { fieldErrors, setFieldErrors, reset, clearError, captureFieldErrors };
 }
+/** The id a field's inline validation message renders under, for the control's `aria-describedby`. */
+export function quickEditErrorId(htmlFor: string): string {
+    return `${htmlFor}-error`;
+}

@@ -48,7 +48,7 @@ public class MailProperties {
      */
     private String secretKey;
 
-    /** Frontend origin used to build workspace invite links (never derived from a request header). */
+    /** Frontend origin for workspace invite and acceptance links, never from a request header. */
     private String appBaseUrl = "http://localhost:3000";
 
     /**

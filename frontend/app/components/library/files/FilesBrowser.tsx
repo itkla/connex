@@ -25,15 +25,6 @@ import { Button } from '@/components/ui/button';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
-    Dialog,
-    DialogClose,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
-import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
@@ -67,6 +58,7 @@ import {
 import { parseDeepLinkId } from '@/app/hooks/listStateUrl';
 import { useOwnedUrlParams } from '@/app/hooks/useOwnedUrlParams';
 import Rise from '@/app/components/motion/Rise';
+import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
 import { type ColumnDef } from '@/app/components/records/types';
 import {
@@ -74,10 +66,11 @@ import {
     FilterBar,
     MultiSelectFilter,
     RadioFilter,
-    SegmentedToggle,
-    pillClass,
+    FilterTrigger,
     type FilterChipData,
 } from '@/app/components/filters';
+import { SegmentedControl } from '@/components/ui/segmented-control';
+import { IconButton } from '@/components/ui/icon-button';
 import FileActionsMenu from '@/app/components/library/files/FileActionsMenu';
 import FileGlyph from '@/app/components/library/files/FileGlyph';
 import OwnerChip from '@/app/components/library/files/OwnerChip';
@@ -232,6 +225,18 @@ export default function FilesBrowser() {
         setTagIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
     const isEmptyLibrary = facets !== null && facets.total === 0;
+    const libraryEmptyState = (
+        <EmptyState
+            icon={FolderOpenIcon}
+            title={t('emptyTitle')}
+            body={t('emptyBody')}
+            action={
+                <Button asChild variant="brand">
+                    <Link href="/records/companies">{t('emptyCta')}</Link>
+                </Button>
+            }
+        />
+    );
     const filtersActive =
         query.trim() !== '' || kind !== 'all' || source !== 'all' || tagIds.length > 0 || orphaned;
 
@@ -371,15 +376,15 @@ export default function FilesBrowser() {
                     >
                         <IconLink href={a.url} label={t('open')} Icon={ArrowTopRightOnSquareIcon} openInNewTab />
                         <IconLink href={a.url} label={t('download')} Icon={ArrowDownTrayIcon} download={a.fileName} />
-                        <button
-                            type="button"
+                        <IconButton
+                            variant="ghost"
+                            size="icon-toolbar"
+                            label={t('delete')}
                             onClick={() => setDeleting(a)}
-                            title={t('delete')}
-                            aria-label={t('delete')}
-                            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                            className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive dark:hover:bg-destructive/20"
                         >
                             <TrashIcon className="size-4" />
-                        </button>
+                        </IconButton>
                     </span>
                 ),
                 widthClass: 'w-28',
@@ -393,7 +398,7 @@ export default function FilesBrowser() {
             {allTags.length > 0 && (
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="sm" disabled={bulkBusy}>
+                        <Button variant="outline" size="toolbar" menu disabled={bulkBusy}>
                             <TagIcon className="size-4" />
                             {t('tagAction')}
                         </Button>
@@ -415,18 +420,18 @@ export default function FilesBrowser() {
             )}
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                    <Button
+                    <IconButton
                         variant="outline"
-                        size="sm"
+                        size="icon-toolbar"
                         disabled={bulkBusy}
-                        aria-label={t('actionsAria', { name: t('selectedCount', { count: selectedIds.size }) })}
+                        label={t('actionsAria', { name: t('selectedCount', { count: selectedIds.size }) })}
                     >
                         {bulkBusy ? (
                             <Loader2Icon className="size-4 animate-spin" />
                         ) : (
                             <EllipsisVerticalIcon className="size-4" />
                         )}
-                    </Button>
+                    </IconButton>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent side="top" align="end">
                     <DropdownMenuItem
@@ -455,37 +460,23 @@ export default function FilesBrowser() {
     );
 
     return (
-        <PageShell tier="wide">
+        <PageShell>
             <Rise>
-                <PageHeader
-                    title={t('title')}
-                    description={t('subtitle')}
-                    actions={
-                        facets && facets.total > 0 ? (
-                            <div className="text-right tabular-nums">
-                                <div className="text-sm font-medium text-foreground">{t('count', { count: facets.total })}</div>
-                                <div className="text-xs text-muted-foreground">
-                                    {t('totalSize', { size: formatFileSize(facets.totalSize) })}
-                                </div>
-                            </div>
-                        ) : undefined
-                    }
-                />
+                <div className="flex flex-col gap-3">
+                    <PageHeader title={t('title')} description={t('subtitle')} />
+                    {facets && facets.total > 0 ? (
+                        <p className="text-xs tabular-nums text-muted-foreground">
+                            {t('countAndSize', {
+                                count: facets.total,
+                                size: formatFileSize(facets.totalSize),
+                            })}
+                        </p>
+                    ) : null}
+                </div>
             </Rise>
 
             {isEmptyLibrary ? (
-                <Rise delay={0.06}>
-                    <EmptyState
-                        icon={FolderOpenIcon}
-                        title={t('emptyTitle')}
-                        body={t('emptyBody')}
-                        action={
-                            <Button asChild variant="brand">
-                                <Link href="/records/companies">{t('emptyCta')}</Link>
-                            </Button>
-                        }
-                    />
-                </Rise>
+                <Rise delay={0.06}>{libraryEmptyState}</Rise>
             ) : (
                 <>
                     <Rise delay={0.06}>
@@ -514,8 +505,8 @@ export default function FilesBrowser() {
                                     onValueChange={(v) => setSort(v as SortKey)}
                                     options={SORT_KEYS.map((key) => ({ value: key, label: t(SORT_LABEL_KEY[key]) }))}
                                 />
-                                <SegmentedToggle
-                                    ariaLabel={t('viewGrid')}
+                                <SegmentedControl
+                                    ariaLabel={t('displayMode')}
                                     value={view}
                                     onChange={setView}
                                     options={[
@@ -563,17 +554,16 @@ export default function FilesBrowser() {
                             />
                         )}
                         {facets && facets.orphaned > 0 && (
-                            <button
+                            <FilterTrigger
                                 type="button"
                                 onClick={() => setOrphaned((o) => !o)}
-                                aria-pressed={orphaned}
+                                active={orphaned}
                                 title={t('unlinkedHint')}
-                                className={pillClass(orphaned)}
                             >
                                 <LinkSlashIcon className="size-3.5" />
                                 {t('unlinked')}
                                 <span className="tabular-nums">{facets.orphaned}</span>
-                            </button>
+                            </FilterTrigger>
                         )}
                     </FilterBar>
                     </Rise>
@@ -606,6 +596,7 @@ export default function FilesBrowser() {
                         entityLabel={t('entityLabel')}
                         selectionActions={selectionActions}
                         loading={loading}
+                        emptyState={libraryEmptyState}
                         filtersActive={filtersActive}
                         onClearFilters={clearFilters}
                         pagination={{
@@ -620,54 +611,37 @@ export default function FilesBrowser() {
                 </>
             )}
 
-            <Dialog open={!!deleting} onOpenChange={(open) => !open && setDeleting(null)}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>{t('deleteTitle')}</DialogTitle>
-                        <DialogDescription>{t('deleteBody', { name: deleting?.fileName ?? '' })}</DialogDescription>
-                    </DialogHeader>
-                    {deleting && (
-                        <div className="flex items-center gap-3 rounded-xl bg-muted px-4 py-3 ring-1 ring-border">
-                            <FileGlyph attachment={deleting} kind={classifyKind(deleting.contentType, deleting.fileName)} />
-                            <div className="min-w-0">
-                                <p className="truncate text-sm font-medium text-foreground">{deleting.fileName}</p>
-                                <p className="truncate text-xs tabular-nums text-muted-foreground">
-                                    {formatFileSize(deleting.size)}
-                                </p>
-                            </div>
+            <DeleteRecordDialog
+                open={!!deleting}
+                onOpenChange={(open) => !open && setDeleting(null)}
+                selectedIds={new Set(deleting ? [deleting.id] : [])}
+                selectedItems={deleting ? [deleting] : []}
+                entityLabel={t('entityLabel')}
+                getDisplayName={(item) => item.fileName}
+                details={deleting ? (
+                    <div className="flex items-center gap-3 rounded-xl bg-muted px-4 py-3 ring-1 ring-border">
+                        <FileGlyph attachment={deleting} kind={classifyKind(deleting.contentType, deleting.fileName)} />
+                        <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-foreground">{deleting.fileName}</p>
+                            <p className="truncate text-xs tabular-nums text-muted-foreground">
+                                {formatFileSize(deleting.size)}
+                            </p>
                         </div>
-                    )}
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button type="button" variant="outline" disabled={busy}>
-                                {t('cancel')}
-                            </Button>
-                        </DialogClose>
-                        <Button type="button" variant="destructive" onClick={handleDelete} disabled={busy}>
-                            {busy ? <Loader2Icon className="size-4 animate-spin" /> : t('confirmDelete')}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+                    </div>
+                ) : undefined}
+                isDeleting={busy}
+                confirmDelete={handleDelete}
+            />
 
-            <Dialog open={bulkDeleting} onOpenChange={(open) => !open && !bulkBusy && setBulkDeleting(false)}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>{t('bulkDeleteTitle')}</DialogTitle>
-                        <DialogDescription>{t('bulkDeleteBody', { count: selectedIds.size })}</DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button type="button" variant="outline" disabled={bulkBusy}>
-                                {t('cancel')}
-                            </Button>
-                        </DialogClose>
-                        <Button type="button" variant="destructive" onClick={bulkDelete} disabled={bulkBusy}>
-                            {bulkBusy ? <Loader2Icon className="size-4 animate-spin" /> : t('confirmDelete')}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            <DeleteRecordDialog
+                open={bulkDeleting}
+                onOpenChange={(open) => !open && !bulkBusy && setBulkDeleting(false)}
+                selectedIds={selectedIds}
+                selectedItems={[]}
+                entityLabel={t('entityLabel')}
+                isDeleting={bulkBusy}
+                confirmDelete={bulkDelete}
+            />
 
             <FileDetailSheet
                 attachment={detailFile}

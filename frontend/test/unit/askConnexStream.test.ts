@@ -2,19 +2,23 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
     ASK_CONNEX_STREAM_HYDRATION_LIMIT,
+    absorbAskConnexStreamPartial,
     applyAskConnexStreamDelta,
     createAskConnexFrameCoalescer,
     createAskConnexStream,
     createAskConnexStreamStore,
     failAskConnexStreamHydration,
+    reconcileAskConnexSettledStream,
     requestAskConnexTurnCancel,
     settleAskConnexStreamHydration,
+    shouldDropAskConnexStream,
+    shouldResetAskConnexStream,
     type AskConnexStreamState,
 } from '@/app/lib/askConnexStream';
-import type { AiChatDeltaFrame } from '@/app/lib/types';
+import type { AiChatDeltaFrame, AiChatRealtimeFrame } from '@/app/lib/types';
 
 function delta(seq: number, text: string, turnId = 9): AiChatDeltaFrame {
-    return { turnId, seq, kind: 'delta', text };
+    return { workspaceId: 7, sessionId: 4, turnId, seq, kind: 'delta', text };
 }
 
 function applyAll(state: AskConnexStreamState, frames: AiChatDeltaFrame[]): AskConnexStreamState {
@@ -24,7 +28,111 @@ function applyAll(state: AskConnexStreamState, frames: AiChatDeltaFrame[]): AskC
     );
 }
 
+describe('settled answer retention', () => {
+    it('drops the streamed tail only for the answer that finished', () => {
+        expect(shouldDropAskConnexStream('resolved', null)).toBe(true);
+        for (const status of ['failed', 'cancelled', 'timed_out']) {
+            expect(shouldDropAskConnexStream(status, null)).toBe(false);
+            expect(shouldDropAskConnexStream(status, 'request_failed')).toBe(false);
+        }
+    });
+
+    it('keeps the tail while the answer is still being produced', () => {
+        for (const status of ['accepted', 'queued', 'running']) {
+            expect(shouldDropAskConnexStream(status, null)).toBe(false);
+        }
+    });
+
+    it('drops a partial the member is no longer entitled to, as the server already has', () => {
+        for (const reason of ['access_revoked', 'restrictions_changed']) {
+            expect(shouldDropAskConnexStream('failed', reason)).toBe(true);
+            expect(shouldDropAskConnexStream('timed_out', reason)).toBe(true);
+        }
+    });
+});
+
+describe('settled answer reconciliation', () => {
+    function withdrawnStore(): {
+        store: ReturnType<typeof createAskConnexStreamStore>;
+        drop: () => void;
+    } {
+        const store = createAskConnexStreamStore();
+        store.publish({ turnId: 9, text: 'Text this member may no longer read' });
+        return { store, drop: () => store.publish(null) };
+    }
+
+    for (const reason of ['access_revoked', 'restrictions_changed']) {
+        it(`clears a ${reason} tail before the transcript request, not after it`, async () => {
+            const { store, drop } = withdrawnStore();
+            let duringRefresh: unknown = 'unobserved';
+
+            await reconcileAskConnexSettledStream('failed', reason, drop, async () => {
+                duringRefresh = store.getSnapshot();
+            });
+
+            expect(duringRefresh).toBeNull();
+            expect(store.getSnapshot()).toBeNull();
+        });
+
+        it(`keeps a ${reason} tail cleared when the transcript request fails`, async () => {
+            const { store, drop } = withdrawnStore();
+            const failure = new Error('transcript unavailable');
+
+            await expect(reconcileAskConnexSettledStream('failed', reason, drop, async () => {
+                expect(store.getSnapshot()).toBeNull();
+                throw failure;
+            })).rejects.toBe(failure);
+
+            expect(store.getSnapshot()).toBeNull();
+        });
+    }
+
+    it('keeps a resolved tail on screen until the transcript carrying it has arrived', async () => {
+        const store = createAskConnexStreamStore();
+        const tail = { turnId: 9, text: 'The finished answer' };
+        store.publish(tail);
+        let duringRefresh: unknown = 'unobserved';
+
+        await reconcileAskConnexSettledStream('resolved', null, () => store.publish(null), async () => {
+            duringRefresh = store.getSnapshot();
+        });
+
+        expect(duringRefresh).toEqual(tail);
+        expect(store.getSnapshot()).toBeNull();
+    });
+
+    it('leaves a stopped answer its own words, which no transcript message repeats', async () => {
+        const store = createAskConnexStreamStore();
+        const tail = { turnId: 9, text: 'As far as it got' };
+        store.publish(tail);
+
+        await reconcileAskConnexSettledStream('cancelled', null, () => store.publish(null), async () => {});
+
+        expect(store.getSnapshot()).toEqual(tail);
+    });
+});
+
 describe('Ask Connex stream reassembly', () => {
+    it('recognizes only the durable reset frame that invalidates an existing stream', () => {
+        const state = applyAll(createAskConnexStream(9), [delta(0, 'Abandoned')]);
+        const reset: AiChatRealtimeFrame = {
+            workspaceId: 7,
+            sessionId: 4,
+            turnId: 9,
+            seq: 0,
+            kind: 'reset',
+            tool: null,
+            status: 'running',
+            reason: null,
+        };
+
+        expect(shouldResetAskConnexStream(state, reset)).toBe(true);
+        expect(shouldResetAskConnexStream(null, reset)).toBe(false);
+        expect(shouldResetAskConnexStream(state, { ...reset, turnId: 10 })).toBe(false);
+        expect(shouldResetAskConnexStream(state, { ...reset, kind: 'step' })).toBe(false);
+        expect(shouldResetAskConnexStream(state, { ...reset, kind: 'state' })).toBe(false);
+    });
+
     it('reassembles contiguous offset frames and drops replayed overlap', () => {
         const state = applyAll(createAskConnexStream(9), [
             delta(0, 'Hel'),
@@ -83,6 +191,22 @@ describe('Ask Connex stream reassembly', () => {
         expect(settled.state.pending).toHaveLength(1);
         expect(settled.state.hydrating).toBe(true);
         expect(settled.hydrate).toBe(true);
+    });
+
+    it('keeps one in-flight hydration authoritative when polling absorbs a short partial', () => {
+        const gapped = applyAskConnexStreamDelta(createAskConnexStream(9), delta(9, 'rld!'));
+        const absorbed = absorbAskConnexStreamPartial(gapped.state, 'Hel');
+
+        expect(absorbed.state.text).toBe('Hel');
+        expect(absorbed.state.pending).toHaveLength(1);
+        expect(absorbed.state.hydrating).toBe(true);
+        expect(absorbed.state.hydrations).toBe(1);
+        expect(absorbed.hydrate).toBe(false);
+
+        const settled = settleAskConnexStreamHydration(absorbed.state, 'Hello, wo');
+        expect(settled.state.text).toBe('Hello, world!');
+        expect(settled.state.pending).toHaveLength(0);
+        expect(settled.state.hydrating).toBe(false);
     });
 
     it('dedupes live frames against a late-join hydrated partial by character offset', () => {

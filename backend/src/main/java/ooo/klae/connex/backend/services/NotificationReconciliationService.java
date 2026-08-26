@@ -793,7 +793,7 @@ public class NotificationReconciliationService {
         notification.setTitle("Introduction opportunity");
         notification.setBody("You could introduce " + suggestion.getPersonAName()
             + " to " + suggestion.getPersonBName());
-        notification.setActionUrl("/overview/introductions");
+        notification.setActionUrl("/intelligence/introductions");
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("personAId", suggestion.getPersonAId());
         data.put("personAName", suggestion.getPersonAName());
@@ -1070,7 +1070,7 @@ public class NotificationReconciliationService {
         }
         notification.setTitle(CRITICAL.equals(severity) ? "Task overdue" : "Task due soon");
         notification.setBody(candidate.getTaskLabel() + " — Due " + candidate.getDueDate());
-        notification.setActionUrl("/activity/tasks?taskId=" + candidate.getTaskId());
+        notification.setActionUrl("/activity/tasks?task=" + candidate.getTaskId());
         notification.setData(json(Map.of(
             "taskId", candidate.getTaskId(),
             "task", candidate.getTaskLabel(),

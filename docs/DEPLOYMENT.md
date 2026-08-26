@@ -123,6 +123,10 @@ report narratives, or provider-backed business-card extraction with
 `CONNEX_AI_FEATURES_INTRO_RATIONALE=false`, `CONNEX_AI_FEATURES_REPORT_NARRATIVE=false`, or
 `CONNEX_AI_FEATURES_BUSINESS_CARD_EXTRACTION=false`. An absent per-feature setting defaults on, but
 the master switch, `AI_USE`, and organization-provider readiness remain mandatory.
+The Ask Connex assistant requires a model with a context window of at least 65,536 tokens; an
+organization configured with a smaller model gets a per-turn "model too small" refusal for the
+assistant only, while deal briefs, risk rationales, and report narratives keep working. Choose
+assistant models accordingly when provisioning provider configurations.
 Unmasked AI disclosure remains independently disabled unless
 `CONNEX_AI_UNMASKED_MODE_ENABLED=true`. Even with that deployment flag, an organization stays in
 masked mode until an org admin completes recent-authentication step-up and attests that its exact
@@ -141,6 +145,55 @@ and active flights are each bounded by `CONNEX_AI_INVOCATION_QUOTA_MAX_ORGANIZAT
 defaulting to 10,000. The 300-attempt quota, refresh throttle, and single-flight registries are per
 JVM backend replica, so the effective organization quota multiplies across replicas; multi-replica
 deployments need a shared coordinator for cluster-wide enforcement.
+
+### Model capability overrides
+
+Model context windows, output ceilings, input modalities, and prices are declared once in
+`AiModelCatalog` from dated vendor documentation. A model the catalog does not recognize keeps a
+conservative 4,096-token fallback rather than a guessed limit, so Ask Connex under-uses an unlisted
+model instead of over-filling it. Two cases need operator input: an Azure provider configuration
+whose configured model id does not carry its model family, and an OpenAI-compatible endpoint
+serving an arbitrary self-hosted model. Overrides key on the configured **model id** only — the
+Azure deployment name is a separate field the capability lookup never reads, so an override keyed
+by a deployment name matches nothing.
+
+Set `connex.ai.model-overrides[N]` to patch a declared entry without waiting for a release. Matching
+is exact and case-insensitive against the model id as configured (for `openai_compatible`, after any
+`vendor/` namespace prefix is stripped); only the fields present are applied, and an override always
+wins over the declaration.
+
+```yaml
+connex:
+  ai:
+    model-overrides:
+      - provider: azure_openai          # bedrock | azure_openai | vertex | openai_compatible
+        model-id: team-model-a          # the exact configured model id (never the Azure deployment name)
+        context-window-tokens: 400000
+        max-output-tokens: 128000
+      - provider: openai_compatible
+        model-id: llama3.3:70b
+        context-window-tokens: 131072
+        max-output-tokens: 8192
+        image-input: false
+        input-price-per-m-tok: 0.60     # data only; no cost enforcement reads this yet
+        output-price-per-m-tok: 0.60
+        currency: USD
+        pricing-as-of: 2026-08-25
+```
+
+Declare a context window the provider will actually honor. The value is not a request the provider
+validates — it is the number every Ask Connex budget is derived from, so overstating it produces
+provider-side rejections once a conversation grows, and understating it truncates answers that would
+have fit. Prices are recorded for future cost reporting and are not charged, enforced, or displayed
+by this release. Declared pricing is first-party only; Amazon Bedrock and Google Vertex AI bill Claude
+at their own partner rates, which the catalog deliberately leaves unset rather than guess.
+
+Commercial-document delivery is independently fail-closed. It remains unavailable unless the
+operator sets `CONNEX_SIGNATURE_ENABLED=true`; the deployment capability and the sender's
+`DOCUMENT_SEND` workspace permission must also allow it. Enabling the switch activates the built-in
+`in_app` acceptance provider and its bounded expiry scheduler. It does not install a third-party
+signature vendor or a server-side PDF renderer. Review the evidence, recovery, and support contract
+in [ESIGNATURE.md](ESIGNATURE.md) before opting in.
 Paddle's current CPU wheel requires AVX support, and the default sidecar reserves up to two CPUs and
 2 GiB of memory. A deployment that lacks AVX or cannot spare those resources must set both
 `COMPOSE_PROFILES=` and `CONNEX_BUSINESS_CARD_SCANNING_ENABLED=false`; the empty profile omits the

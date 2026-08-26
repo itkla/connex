@@ -16,6 +16,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantSessionReadAudit;
 import ooo.klae.connex.backend.ai.assistant.AiChatCitationProjector;
 import ooo.klae.connex.backend.ai.assistant.AiChatPresenceRegistry;
+import ooo.klae.connex.backend.ai.assistant.AiChatProgressService;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatParticipant;
 import ooo.klae.connex.backend.beans.AiChatSession;
@@ -29,6 +30,7 @@ import ooo.klae.connex.backend.dto.AiChatSessionDetailDto;
 import ooo.klae.connex.backend.dto.AiChatSessionDto;
 import ooo.klae.connex.backend.dto.AiChatSessionUpdateRequest;
 import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
+import ooo.klae.connex.backend.dto.AiChatTurnDto;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.UserDisplayNameDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -67,6 +69,7 @@ public class AiAssistantService {
     private final UserMapper userMapper;
     private final AiChatPresenceRegistry presenceRegistry;
     private final AiChatRealtimeDispatcher realtimeDispatcher;
+    private final AiChatProgressService progressService;
 
     /** Returns an ordered page of caller-owned and explicitly shared sessions. */
     @Transactional
@@ -190,25 +193,41 @@ public class AiAssistantService {
             AiChatSession session) {
         List<AiChatMessage> storedMessages = chatMapper.listMessages(
             workspaceId, id, messageSize, offset);
-        var citations = citationProjector.project(workspaceId, storedMessages);
+        var projection = citationProjector.project(workspaceId, storedMessages);
         Map<Integer, String> authorNames = authorNames(storedMessages);
         var suggestions = citationProjector.suggestions(
                 workspaceId, id, userId, storedMessages);
-        var reasoning = citationProjector.reasoning(
+        var requestedMessageIds = citationProjector.requestedMessageIds(
                 workspaceId, id, userId, storedMessages);
         List<AiChatMessageDto> messages = storedMessages.stream()
-            .map(message -> AiChatMessageDto.from(
-                    message,
-                    citations.getOrDefault(message.getId(), List.of()),
-                    suggestions.getOrDefault(message.getId(), List.of()),
-                    message.getAuthorUserId() == null
-                            ? null
-                            : authorNames.get(message.getAuthorUserId()),
-                    reasoning.get(message.getId())))
+            .map(message -> {
+                var citations = projection.citationsByMessage().getOrDefault(
+                        message.getId(), List.of());
+                boolean contentWithheld = projection.withheldMessageIds().contains(message.getId());
+                return AiChatMessageDto.from(
+                        message,
+                        citations,
+                        suggestions.getOrDefault(message.getId(), List.of()),
+                        message.getAuthorUserId() == null
+                                ? null
+                                : authorNames.get(message.getAuthorUserId()),
+                        contentWithheld
+                                ? null
+                                : citationProjector.answerDocument(
+                                        message,
+                                        citations,
+                                        requestedMessageIds.contains(message.getId())),
+                        contentWithheld);
+            })
             .toList();
+        var activeTurn = chatMapper.getLatestActiveTurnBySession(workspaceId, id);
         return new AiChatSessionDetailDto(
             AiChatSessionDto.from(session),
-            new PageResponse<>(messages, chatMapper.countMessages(workspaceId, id)));
+            new PageResponse<>(messages, chatMapper.countMessages(workspaceId, id)),
+            activeTurn == null
+                    ? null
+                    : AiChatTurnDto.from(
+                            activeTurn, progressService.project(activeTurn), userId));
     }
 
     /** Applies an owner-only title change and/or one-way archive transition. */
@@ -357,10 +376,12 @@ public class AiAssistantService {
         workspaceService.lockAndRequirePermissions(
                 workspaceId, Map.of(userId, Set.of(Permission.AI_USE)));
         AiChatSession session = requireLocked(workspaceId, userId, id);
-        requireSharedActive(session);
         AiChatParticipant invitation = chatMapper.getParticipant(workspaceId, id, userId);
-        if (invitation == null || !"invited".equals(invitation.getStatus())
-                || chatMapper.joinParticipant(workspaceId, id, userId) != 1) {
+        if (invitation == null || !"invited".equals(invitation.getStatus())) {
+            throw inaccessible();
+        }
+        requireSharedActive(session);
+        if (chatMapper.joinParticipant(workspaceId, id, userId) != 1) {
             throw inaccessible();
         }
         realtimeDispatcher.sessionAfterCommit(

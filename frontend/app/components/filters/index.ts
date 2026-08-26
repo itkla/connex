@@ -1,9 +1,10 @@
 export { default as SearchField } from "./SearchField";
 export { default as FilterBar, FilterChip, type FilterChipData } from "./FilterBar";
 export {
+    FilterTrigger,
     MultiSelectFilter,
     RadioFilter,
-    pillClass,
+    type FilterTriggerProps,
     type MultiSelectOption,
     type RadioOption,
 } from "./FilterPill";
@@ -17,4 +18,3 @@ export {
     MEMBER_SCOPE_UNASSIGNED,
 } from "./MemberScopeFilter";
 export { default as SortToggle, type SortToggleOption } from "./SortToggle";
-export { default as SegmentedToggle, type Segment } from "./SegmentedToggle";

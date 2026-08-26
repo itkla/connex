@@ -14,7 +14,7 @@ function activityCsv(email: string, sourceId: string, subject: string): Buffer {
 }
 
 async function openHistoryImport(page: Page, locale: "en" | "ja") {
-    await page.goto("/settings/data");
+    await page.goto("/settings/workspace/data-privacy");
     await page.getByRole("button", {
         name: message(locale, "workspace", "WorkspaceData.historyAction"),
     }).click();
@@ -131,17 +131,17 @@ for (const locale of ["en", "ja"] as const) {
         await expect(evidence).toBeHidden();
 
         await page.getByRole("button", {
-            name: message(locale, "contacts", "ContactsNewActivityDialog.triggerSr"),
+            name: message(locale, "activity", "ActivityCreateDialog.triggerAdd"),
         }).first().click();
         await page.getByLabel(
-            message(locale, "contacts", "ContactsNewActivityDialog.subject"),
+            message(locale, "activity", "ActivityCreateDialog.subjectLabel"),
         ).fill(actionSubject);
         await page.getByRole("button", {
-            name: message(locale, "contacts", "ContactsNewActivityDialog.log"),
+            name: message(locale, "activity", "ActivityCreateDialog.create"),
             exact: true,
         }).click();
         await expect(page.getByText(
-            message(locale, "contacts", "ContactsNewActivityDialog.toastActivityLogged"),
+            message(locale, "activity", "ActivityCreateDialog.toastCreated"),
         ).first()).toBeVisible();
         await expect(page.getByText(actionSubject).first()).toBeVisible({ timeout: 15_000 });
 

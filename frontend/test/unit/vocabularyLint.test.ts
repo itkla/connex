@@ -1,0 +1,277 @@
+import { describe, expect, it } from "vitest";
+
+import {
+    AT_A_GLANCE_SURFACES,
+    ALLOWED_SURFACES,
+    atAGlanceEntries,
+    BASELINE_HIGH_WATER_MARK,
+    baselineEntries,
+    describeViolation,
+    isAllowedSurface,
+    isSearchAlias,
+    isWorkflowSurface,
+    loadBaseline,
+    loadVocabularyModel,
+    messageEntries,
+    namespaceOf,
+    parseBaselineEntry,
+    scanMessageCatalogs,
+    scopeCovers,
+    SEARCH_ALIAS_KEYS,
+    termApplies,
+} from "@/lint/vocabulary.mjs";
+
+const model = loadVocabularyModel();
+const violations = scanMessageCatalogs(model);
+const current = baselineEntries(violations);
+const baseline = loadBaseline();
+
+const REGENERATE = "Regenerate it with `node scripts/generate-vocabulary.mjs` after editing docs/PRODUCT.md §4.";
+const BURN_DOWN = "The baseline only shrinks: fix the copy and delete its entry from frontend/lint/vocabulary-baseline.json.";
+
+/**
+ * The banned-term matches a surface filter removes from the gate, proving the filter is
+ * load-bearing rather than decorative.
+ */
+function suppressedMatches(
+    inScope: (entry: { file: string; namespace: string; keyPath: string }) => boolean,
+    terms = model.terms,
+): string[] {
+    const compiled = terms.map((term) => ({ term, expression: new RegExp(term.pattern.source, term.pattern.flags) }));
+    const found: string[] = [];
+    for (const entry of messageEntries()) {
+        if (!inScope(entry)) continue;
+        for (const { term, expression } of compiled) {
+            if (term.locale === "ja" && entry.locale !== "ja") continue;
+            if (!scopeCovers(term.scope, entry.file, entry.namespace)) continue;
+            if (!expression.test(entry.value)) continue;
+            found.push(`${entry.locale}/${entry.file}:${entry.keyPath}#${term.term}`);
+        }
+    }
+    return found;
+}
+
+/**
+ * Runs the production scanner over the real catalogs with a synthetic model, so a probe asserts
+ * what {@link scanMessageCatalogs} and {@link baselineEntries} actually do rather than what the
+ * committed baseline happens to contain — a baseline burned to zero can no longer supply examples.
+ * Every named term matches the same everyday word, so one string flags once per term.
+ * @param names the term names to scan under
+ * @returns the baseline entries the scan produces
+ */
+function probeEntries(names: string[]): string[] {
+    const terms = names.map((term) => ({
+        id: `en:${term}`,
+        term,
+        locale: "en" as const,
+        scope: "global" as const,
+        allowFiles: [],
+        canonicalExceptions: [],
+        narrowed: false,
+        pattern: { source: "\\bthe\\b", flags: "iu" },
+        sources: ["probe"],
+    }));
+    return baselineEntries(scanMessageCatalogs({ terms, skipped: [] }));
+}
+
+describe("message catalogue vocabulary", () => {
+    it("reports no banned term outside the committed baseline", () => {
+        const known = new Set(baseline);
+        const added = violations
+            .filter((violation) => !known.has(violation.entry))
+            .map(describeViolation);
+
+        expect(added, `${added.length} new banned term(s). ${BURN_DOWN} ${REGENERATE}`).toEqual([]);
+    });
+
+    it("holds no baseline entry that no longer violates", () => {
+        const remaining = new Set(current);
+        const stale = baseline.filter((entry) => !remaining.has(entry));
+
+        expect(stale, `${stale.length} baseline entry(s) are fixed. ${BURN_DOWN}`).toEqual([]);
+    });
+
+    it("keeps the baseline sorted, deduplicated, and scoped to real message keys", () => {
+        expect(baseline).toEqual([...new Set(baseline)].sort());
+
+        const keys = new Set(messageEntries().map((entry) => `${entry.locale}/${entry.file}:${entry.keyPath}`));
+        const orphaned = baseline
+            .map(parseBaselineEntry)
+            .filter((entry) => !keys.has(`${entry.locale}/${entry.file}:${entry.keyPath}`))
+            .map((entry) => entry.keyPath);
+
+        expect(orphaned).toEqual([]);
+    });
+
+    it("never grows past the committed high-water mark", () => {
+        expect(baseline.length, `raise BASELINE_HIGH_WATER_MARK only in the commit that widens the rules. ${BURN_DOWN}`)
+            .toBeLessThanOrEqual(BASELINE_HIGH_WATER_MARK);
+    });
+
+    it("scans the strings inside arrays, not only the object leaves", () => {
+        const inArrays = messageEntries().filter((entry) => entry.keyPath.includes("["));
+
+        expect(inArrays.length).toBeGreaterThan(1000);
+
+        const nested = probeEntries(["nested"]).filter((entry) => entry.includes("["));
+
+        expect(nested.length).toBeGreaterThan(0);
+
+        const parsed = parseBaselineEntry(nested[0]);
+
+        expect(parsed.keyPath).toContain("[");
+        expect(parsed.term).toBe("nested");
+    });
+
+    it("lets the phrase §4 restricts to one surface only shrink", () => {
+        const glances = atAGlanceEntries();
+        const added = glances.filter((entry) => !AT_A_GLANCE_SURFACES.includes(entry));
+        const removed = AT_A_GLANCE_SURFACES.filter((entry) => !glances.includes(entry));
+
+        expect(added, "§4 allows \"at a glance\" on one surface; do not add another").toEqual([]);
+        expect(removed, "rewritten copy: drop these from AT_A_GLANCE_SURFACES").toEqual([]);
+    });
+
+    it("scans the workflow seam and holds it at an empty baseline", () => {
+        const scanned = messageEntries().filter((entry) => isWorkflowSurface(entry.file, entry.namespace));
+        const flagged = violations
+            .filter((violation) => isWorkflowSurface(violation.file, namespaceOf(violation.keyPath)))
+            .map(describeViolation);
+        const baselined = baseline
+            .map(parseBaselineEntry)
+            .filter((entry) => isWorkflowSurface(entry.file, entry.namespace))
+            .map((entry) => `${entry.locale}/${entry.file}:${entry.keyPath}`);
+
+        expect(scanned.length).toBeGreaterThan(0);
+        expect(flagged, "the workflow seam is swept, never baselined").toEqual([]);
+        expect(baselined).toEqual([]);
+    });
+
+    it("exempts a compliance surface only for the terms §4 notes there", () => {
+        const carveOuts = new Set(
+            model.terms.filter((term) => term.allowFiles.length > 0).map((term) => term.term),
+        );
+        const onComplianceSurfaces = baseline
+            .map(parseBaselineEntry)
+            .filter((entry) => isAllowedSurface(entry.file, entry.namespace));
+
+        expect(ALLOWED_SURFACES).toEqual(["legal.json", "organization.json#OrgDataRequests"]);
+        expect(carveOuts.size).toBeGreaterThan(0);
+        expect(onComplianceSurfaces.filter((entry) => carveOuts.has(entry.term)).map((entry) => entry.term)).toEqual([]);
+
+        const noted = model.terms.find((term) => term.term === "取引先");
+        const unnoted = model.terms.find((term) => term.term === "suppression");
+        if (!noted || !unnoted) throw new Error("docs/PRODUCT.md §4 no longer bans 取引先 and suppression");
+
+        expect(noted.allowFiles).toEqual(["legal.json"]);
+        expect(unnoted.allowFiles).toEqual([]);
+        expect(termApplies(noted, { locale: "ja", file: "legal.json", namespace: "Legal" })).toBe(false);
+        expect(termApplies(noted, { locale: "ja", file: "companies.json", namespace: "CompaniesCard" })).toBe(true);
+        expect(termApplies(unnoted, { locale: "en", file: "legal.json", namespace: "Legal" })).toBe(true);
+    });
+
+    it("allows the multi-tenancy vocabulary of the contracts on the legal pages only", () => {
+        const flagged = new Set(violations.map((violation) => `${violation.file}:${violation.term}`));
+
+        for (const id of ["en:tenant", "ja:テナント"]) {
+            const term = model.terms.find((candidate) => candidate.id === id);
+            if (!term) throw new Error(`docs/PRODUCT.md §4 no longer bans ${id}`);
+
+            expect(term.allowFiles).toEqual(["legal.json"]);
+            expect(termApplies(term, { locale: term.locale, file: "legal.json", namespace: "Legal" })).toBe(false);
+            expect(termApplies(term, { locale: term.locale, file: "organization.json", namespace: "OrgDataRequests" })).toBe(true);
+        }
+        expect(flagged.has("legal.json:tenant")).toBe(false);
+        expect(flagged.has("legal.json:テナント")).toBe(false);
+    });
+
+    it("leaves the command palette's search aliases out of the scan", () => {
+        const aliases = messageEntries().filter((entry) => isSearchAlias(entry.file, entry.keyPath));
+        const suppressed = suppressedMatches((entry) => isSearchAlias(entry.file, entry.keyPath));
+        const reported = new Set(violations.map((violation) => violation.entry));
+
+        expect(SEARCH_ALIAS_KEYS).toEqual(["actions.json:Actions.keywords"]);
+        expect(aliases.length).toBeGreaterThan(0);
+        expect(aliases.every((entry) => entry.keyPath.startsWith("Actions.keywords."))).toBe(true);
+        expect(isSearchAlias("actions.json", "Actions.create.company.label")).toBe(false);
+        expect(suppressed.length).toBeGreaterThan(0);
+        expect(suppressed.filter((entry) => reported.has(entry))).toEqual([]);
+    });
+
+    it("suppresses the statutory carve-out terms that a compliance surface really carries", () => {
+        const carveOuts = model.terms.filter((term) => term.allowFiles.length > 0);
+        const suppressed = suppressedMatches((entry) => isAllowedSurface(entry.file, entry.namespace), carveOuts);
+        const reported = new Set(violations.map((violation) => violation.entry));
+
+        expect(suppressed.length).toBeGreaterThan(0);
+        expect(suppressed.filter((entry) => reported.has(entry))).toEqual([]);
+    });
+
+    it("runs the Latin-script bans against the Japanese catalog too", () => {
+        const esp = model.terms.find((term) => term.term === "ESP");
+        if (!esp) throw new Error("docs/PRODUCT.md §4 no longer bans ESP");
+
+        expect(esp.locale).toBe("en");
+        expect(termApplies(esp, { locale: "ja", file: "workspace.json", namespace: "WorkspaceDelivery" })).toBe(true);
+        expect(new RegExp(esp.pattern.source, esp.pattern.flags).test("メール配信サービス（ESP）経由で送信します。")).toBe(true);
+    });
+
+    it("bans the automation object's former name on the workflow seam only", () => {
+        const named = model.terms.filter((term) => term.term === "rule" || term.term === "ルール");
+
+        expect(named.map((term) => term.id).sort()).toEqual(["en:rule", "ja:ルール"]);
+        for (const term of named) {
+            expect(scopeCovers(term.scope, "workflow-operations.json", "WorkflowOperations"), term.id).toBe(true);
+            expect(scopeCovers(term.scope, "workspace.json", "WorkflowAuthoring"), term.id).toBe(true);
+            expect(scopeCovers(term.scope, "workspace.json", "WorkspaceWorkflows"), term.id).toBe(true);
+            expect(scopeCovers(term.scope, "settings.json", "SettingsRetention"), term.id).toBe(false);
+        }
+    });
+
+    it("baselines each banned term separately, so a second term on a flagged string still fails", () => {
+        const entries = probeEntries(["first", "second"]);
+        const terms = new Map<string, Set<string>>();
+        for (const entry of entries.map(parseBaselineEntry)) {
+            const key = `${entry.locale}/${entry.file}:${entry.keyPath}`;
+            terms.set(key, (terms.get(key) ?? new Set()).add(entry.term));
+        }
+        const carryingBoth = [...terms.values()].filter((flagged) => flagged.size > 1);
+
+        expect(entries.every((entry) => entry.includes("#"))).toBe(true);
+        expect(carryingBoth.length, "one string matching two terms must yield two baseline entries").toBeGreaterThan(0);
+        expect(baseline.every((entry) => entry.includes("#"))).toBe(true);
+    });
+
+    it("states the file, key path, term, and §4 row of every violation", () => {
+        for (const violation of violations) {
+            const described = describeViolation(violation);
+            expect(described).toContain(violation.file);
+            expect(described).toContain(violation.keyPath);
+            expect(described).toContain(violation.term);
+            expect(described).toContain("docs/PRODUCT.md §4");
+        }
+    });
+
+    it("says nothing false about where records are shared", () => {
+        const shared = new Map(messageEntries().map((entry) => [`${entry.locale}/${entry.file}:${entry.keyPath}`, entry.value]));
+        const scopeClaims = [
+            "contacts.json:ContactsNewContactDialog.description",
+            "companies.json:CompaniesNewDialog.description",
+            "deals.json:DealsNewDialog.description",
+            "pipelines.json:PipelinesNewDialog.description",
+        ];
+
+        for (const key of scopeClaims) {
+            expect(shared.get(`en/${key}`)).toContain("shared with everyone in this workspace");
+            expect(shared.get(`ja/${key}`)).toContain("このワークスペースのメンバー全員と共有されます");
+        }
+        expect(shared.get("en/attachments.json:LibraryFilesLayout.description")).toBe("Manage your workspace's files");
+        expect(shared.get("ja/attachments.json:LibraryFilesLayout.description")).toBe("ワークスペースのファイルを管理");
+        expect(shared.get("en/dashboard.json:DashboardLayout.description")).toBe("Your workspace at a glance");
+        expect(shared.get("ja/dashboard.json:DashboardLayout.description")).toBe("ワークスペースの状況をひと目で確認");
+
+        for (const [key, value] of shared) {
+            expect(value, key).not.toContain("all users of this organization");
+        }
+    });
+});

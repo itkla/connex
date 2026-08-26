@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import AccessDeniedPage from '@/app/components/AccessDeniedPage';
 import PermissionsUnavailablePage from '@/app/components/PermissionsUnavailablePage';
 import ReportDocumentBoard from '@/app/components/reports/ReportDocumentBoard';
-import ReportSnapshotPage from '@/app/(app)/overview/reports/[id]/snapshots/[snapshotId]/page';
+import ReportSnapshotPage from '@/app/(app)/insights/reports/[id]/snapshots/[snapshotId]/page';
 
 vi.mock('next/headers', () => ({
     headers: () => Promise.resolve(new Headers({ cookie: 'JSESSIONID=session; connex_workspace=1' })),
@@ -17,9 +17,9 @@ vi.mock('next-intl/server', () => ({
     getLocale: () => Promise.resolve('en'),
 }));
 
-const CONNECTIONS_PAGE = 'app/(app)/account/connections/page.tsx';
+const CONNECTIONS_PAGE = 'app/(app)/settings/personal/connected-accounts/page.tsx';
 const CONNECTIONS_PANEL = 'app/components/account/ConnectionsPanel.tsx';
-const SNAPSHOT_PAGE = 'app/(app)/overview/reports/[id]/snapshots/[snapshotId]/page.tsx';
+const SNAPSHOT_PAGE = 'app/(app)/insights/reports/[id]/snapshots/[snapshotId]/page.tsx';
 
 function source(relativePath: string): string {
     return readFileSync(path.resolve(process.cwd(), relativePath), 'utf8');
@@ -135,7 +135,7 @@ describe('an attainment snapshot separates a refusal from a failed check', () =>
 
         expect(page).toContain('getEffectivePermissionsResultFromCookie(cookie)');
         expect(page).not.toContain('getEffectivePermissionsFromCookie');
-        expect(page).not.toMatch(/redirect\('\/overview\/reports'\)/);
+        expect(page).not.toMatch(/redirect\('\/insights\/reports'\)/);
     });
 });
 

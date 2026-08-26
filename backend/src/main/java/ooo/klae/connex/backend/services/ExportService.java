@@ -14,8 +14,12 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.PersonFirstResponseState;
+import ooo.klae.connex.backend.beans.PersonLeadSource;
+import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.beans.Product;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
@@ -23,6 +27,7 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.ProductMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
+import ooo.klae.connex.backend.util.CsvFormulaGuard;
 
 /**
  * Builds RFC-4180 CSV exports for contacts, companies, deals, and products, scoped to the active
@@ -50,10 +55,15 @@ public class ExportService {
      * unfiltered). Archived contacts are never exported: an export is the active working set.
      */
     public String exportPersons(String query, List<String> companies, List<String> titles, boolean noCompany,
-            MemberScope memberScope) {
+            MemberScope memberScope, List<PersonLifecycleStage> lifecycleStages, boolean noLifecycle,
+            List<PersonLeadSource> leadSources, boolean noLeadSource,
+            List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
+            WarmthFilter warmth) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Person> people = personMapper.getPersonsFiltered(
-            workspaceId, query, companies, titles, noCompany, memberScope, false);
+            workspaceId, query, companies, titles, noCompany, memberScope,
+            lifecycleStages, noLifecycle, leadSources, noLeadSource,
+            firstResponseStates, noFirstResponse, false, warmth);
         List<CustomFieldDefinition> defs = activeDefinitions(workspaceId, "person");
         Map<Integer, Map<Integer, Object>> custom =
             customFieldValueService.getForEntities("person", people.stream().map(Person::getId).toList());
@@ -80,10 +90,10 @@ public class ExportService {
      * CSV of companies matching the given list filters and member scope (all companies when unfiltered).
      */
     public String exportCompanies(String query, List<String> industry, boolean noIndustry, List<Integer> ids,
-            MemberScope memberScope) {
+            MemberScope memberScope, WarmthFilter warmth) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Company> companies = companyMapper.getCompaniesFiltered(
-            workspaceId, query, industry, noIndustry, ids, memberScope, false);
+            workspaceId, query, industry, noIndustry, ids, memberScope, false, warmth);
         List<CustomFieldDefinition> defs = activeDefinitions(workspaceId, "company");
         Map<Integer, Map<Integer, Object>> custom =
             customFieldValueService.getForEntities("company", companies.stream().map(Company::getId).toList());
@@ -137,19 +147,22 @@ public class ExportService {
      * CSV of deals matching the given list filters and member scope (all deals when unfiltered).
      */
     public String exportDeals(String query, String currency, List<Integer> pipelineIds, List<Integer> stageIds,
-            List<Integer> companyIds, boolean noCompany, List<String> statuses, List<String> risks,
+            List<Integer> companyIds, List<Integer> personIds, boolean noCompany,
+            List<String> statuses, List<String> risks,
             MemberScope memberScope) {
         List<Deal> deals = dealService.queryDealsForExport(
-            query, currency, pipelineIds, stageIds, companyIds, noCompany, statuses, risks, memberScope);
+            query, currency, pipelineIds, stageIds, companyIds, personIds,
+            noCompany, statuses, risks, memberScope);
         return renderDeals(deals);
     }
 
     /** CSV of deals matching both a Smart Segment and the complete native list filter. */
     public String exportSegmentDeals(SegmentDefinition definition, String query, String currency,
             List<Integer> pipelineIds, List<Integer> stageIds, List<Integer> companyIds,
-            boolean noCompany, List<String> statuses, List<String> risks, MemberScope memberScope) {
+            List<Integer> personIds, boolean noCompany, List<String> statuses,
+            List<String> risks, MemberScope memberScope) {
         List<Deal> deals = dealService.querySegmentDealsForExport(
-            definition, query, currency, pipelineIds, stageIds, companyIds,
+            definition, query, currency, pipelineIds, stageIds, companyIds, personIds,
             noCompany, statuses, risks, memberScope);
         return renderDeals(deals);
     }
@@ -255,13 +268,7 @@ public class ExportService {
 
     private static String escape(String value) {
         if (value == null || value.isEmpty()) return "";
-        String s = value;
-        char first = s.charAt(0);
-        if (first == '=' || first == '+' || first == '-' || first == '@'
-                || first == '\t' || first == '\r' || first == '\n'
-                || first == '＝' || first == '＋' || first == '－' || first == '＠') {
-            s = "'" + s;
-        }
+        String s = CsvFormulaGuard.guard(value);
         if (s.indexOf(',') >= 0 || s.indexOf('"') >= 0 || s.indexOf('\n') >= 0 || s.indexOf('\r') >= 0) {
             s = "\"" + s.replace("\"", "\"\"") + "\"";
         }

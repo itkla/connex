@@ -6,7 +6,7 @@ import { message } from './support/messages';
 test.describe('calendar', () => {
     test('uses the canonical page header and an in-flow create action @mobile', async ({ page }) => {
         await useLocale(page, 'en');
-        await page.goto('/overview/calendar');
+        await page.goto('/activity/calendar');
 
         const heading = page.getByRole('heading', {
             level: 1,

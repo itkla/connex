@@ -14,6 +14,9 @@ import {
     WORKFLOW_RUN_STATUS_CLASS,
     WorkflowRunStatusIcon,
 } from "@/app/components/settings/workflows/workflowRunStatus";
+import { RECORD_TYPES } from "@/app/components/settings/workflows/vocabulary";
+import WorkflowRunReference from "@/app/components/settings/workflows/WorkflowRunReference";
+import { workflowRunReferenceParts } from "@/app/components/settings/workflows/workflowRunKey";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,7 +33,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 type LoadState = "loading" | "success" | "error";
 type PendingState = "idle" | "loading";
 
-/** Merged canonical and legacy workflow run history with canonical step detail. */
+/** A workflow's full run history, with step detail wherever it was recorded. */
 export default function WorkflowRunsDialog({
     open,
     onOpenChange,
@@ -47,7 +50,7 @@ export default function WorkflowRunsDialog({
     onSelectRun?: (run: WorkflowRunDetail) => void;
 }) {
     const t = useTranslations("WorkspaceWorkflows");
-    const tr = useTranslations("WorkspaceRules");
+    const tr = useTranslations("WorkflowAuthoring");
     const locale = useLocale();
     const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
     const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -100,7 +103,7 @@ export default function WorkflowRunsDialog({
             });
             if (!controller.signal.aborted) setSelected(detail);
         } catch {
-            if (!controller.signal.aborted) toastError(t("runs.detailFailed"));
+            if (!controller.signal.aborted) toastError(t("runs.detailFailed"), { description: t("runs.detailFailedBody") });
         } finally {
             if (!controller.signal.aborted) setDetailLoadState("idle");
         }
@@ -114,7 +117,7 @@ export default function WorkflowRunsDialog({
             setRuns((current) => [...current, ...page.items]);
             setNextCursor(page.nextCursor);
         } catch {
-            toastError(t("runs.moreFailed"));
+            toastError(t("runs.moreFailed"), { description: t("runs.moreFailedBody") });
         } finally {
             setMoreLoading(false);
         }
@@ -123,7 +126,7 @@ export default function WorkflowRunsDialog({
     const targetLabel = (run: WorkflowRunSummary) => {
         if (!run.trigger || run.trigger.recordId == null) return t("runs.scheduledTarget");
         const type = run.trigger.recordType;
-        const record = type === "company" || type === "person" || type === "deal" || type === "task"
+        const record = type != null && RECORD_TYPES.includes(type)
             ? tr(`record.${type}`)
             : t("runs.recordFallback");
         return t("runs.target", { record, id: run.trigger.recordId });
@@ -139,7 +142,14 @@ export default function WorkflowRunsDialog({
                 <DialogHeader className="border-b border-border px-6 py-5">
                     <DialogTitle>{selected ? t("runs.detailTitle") : t("runs.title")}</DialogTitle>
                     <DialogDescription>
-                        {selected ? t("runs.detailDescription", { runKey: selected.runKey }) : t("runs.description", { name: workflowName })}
+                        {selected
+                            ? t(
+                                workflowRunReferenceParts(selected.runKey).earlier
+                                    ? "runs.legacyDetailDescription"
+                                    : "runs.detailDescription",
+                                { run: workflowRunReferenceParts(selected.runKey).number },
+                            )
+                            : t("runs.description", { name: workflowName })}
                     </DialogDescription>
                 </DialogHeader>
 
@@ -185,7 +195,7 @@ export default function WorkflowRunsDialog({
                                         </div>
                                         <div className="min-w-0 space-y-1">
                                             <dt className="text-muted-foreground">{t("runs.idLabel")}</dt>
-                                            <dd className="font-mono text-foreground">{run.runKey}</dd>
+                                            <dd className="-ml-2 text-foreground"><WorkflowRunReference runKey={run.runKey} /></dd>
                                         </div>
                                         <div className="min-w-0 space-y-1">
                                             <dt className="text-muted-foreground">{t("runs.versionLabel")}</dt>
@@ -271,7 +281,7 @@ function RunDetail({
                             </span>
                         </div>
                         {step.failure ? (
-                            <p className="mt-2 text-xs text-destructive">{t("runs.failureAtNode", { node: step.nodeId })}</p>
+                            <p className="mt-2 text-xs text-destructive">{t("runs.failureAtNode")}</p>
                         ) : null}
                     </li>
                 ))}

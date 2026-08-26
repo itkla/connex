@@ -243,9 +243,15 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("campaign_message", 90));
         raw.add(direct("campaign", 100, nullify("parent_campaign_id")));
         raw.add(direct("document_approval_decision", 104));
+        raw.add(direct("document_approval_step_assignment", 105));
         raw.add(direct("document_approval_step_approver", 106));
         raw.add(direct("document_approval_step", 108));
         raw.add(direct("document_approval", 110));
+        raw.add(direct("document_delivery_request", 111));
+        raw.add(direct("document_delivery_event", 112));
+        raw.add(direct("document_delivery_artifact", 114));
+        raw.add(direct("document_delivery_recipient", 116));
+        raw.add(direct("document_delivery", 118));
         raw.add(direct("deal_document", 120));
         raw.add(direct("deal_line_item", 130));
         raw.add(direct("deal_stage_history", 140));
@@ -281,6 +287,10 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("saved_view", 330));
         raw.add(direct("person_edge", 340));
         raw.add(direct("person_employment", 350));
+        raw.add(direct("person_lifecycle_history", 355));
+        raw.add(direct("person_lifecycle_pass", 354));
+        raw.add(direct("person_qualification_answer", 356));
+        raw.add(direct("qualification_criterion", 357));
         raw.add(direct("person_share", 360));
         raw.add(direct("introduction", 370));
         raw.add(direct("warm_path_dismissal", 380));
@@ -303,6 +313,8 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("attachment", 460));
         raw.add(direct("ai_chat_session", 465));
         raw.add(direct("ai_workspace_governance", 466));
+        raw.add(direct("ai_brief_schedule", 467));
+        raw.add(direct("ai_watch", 468));
         raw.add(direct("ai_output_cache", 470));
         raw.add(direct("approval_policy_step_approver", 476));
         raw.add(direct("approval_policy_step", 478));

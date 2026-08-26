@@ -163,7 +163,7 @@ export default function MeHero({ user, greeting, nodes, distribution, coolingCou
                     <div className="max-w-md">
                         <p className="text-base text-pretty text-foreground/90">{signalRead}</p>
                         <Link
-                            href="/overview/map"
+                            href="/intelligence/map"
                             className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-brand transition-colors hover:text-brand-hover"
                         >
                             {t("exploreNetwork")}

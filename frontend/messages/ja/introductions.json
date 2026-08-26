@@ -17,7 +17,7 @@
         "emptyMissingEvidenceTitle": "関係性の根拠が不足しています",
         "emptyMissingEvidenceHint": "信頼できる紹介ルートを特定できるよう、直接のつながりや職歴を追加してください。",
         "emptyPolicyExclusionTitle": "紹介ポリシーにより利用可能なルートが除外されています",
-        "emptyPolicyExclusionHint": "利用可能な連絡先またはルートは、制限、非表示、記録済み、または紹介対象外に設定されています。",
+        "emptyPolicyExclusionHint": "対象となる連絡先やルートが、プライバシー保護のため利用停止中、非表示、記録済み、または紹介対象外になっています。",
         "emptyInsufficientStrengthTitle": "十分に強いルートがまだありません",
         "emptyInsufficientStrengthHint": "関係性のシグナルはありますが、現在は紹介候補の適格性と強度の基準を満たしていません。",
         "emptyUnavailableTitle": "紹介データを利用できません",
@@ -49,8 +49,8 @@
         "recordedManualToast": "紹介を記録しました",
         "recordFailed": "紹介を記録できませんでした",
         "dismissFailed": "候補を非表示にできませんでした",
-        "dashboardEmpty": "現在、紹介のチャンスはありません。",
-        "topOpportunity": "注目の候補",
+        "dashboardEmpty": "現在、紹介の候補はありません。",
+        "topOpportunity": "注目の紹介候補",
         "statOpportunities": "紹介の候補",
         "statOpportunitiesHint": "紹介できる組み合わせ",
         "statStrong": "有力な候補",
@@ -67,6 +67,8 @@
         "reachRewarm": "関係の再加温",
         "reachNew": "新規リーチ",
         "askIntro": "紹介を依頼",
+        "askIntroVia": "{name} さんに紹介を依頼",
+        "introAsked": "紹介を依頼済み",
         "evidenceConnection": "直接のつながり",
         "evidenceColleagues": "{company} の同僚",
         "evidenceColleaguesUnnamed": "現在の同僚",
@@ -95,7 +97,7 @@
         "rateLimited": "リクエストが集中しているため、AIインサイトは一時的に利用できません。"
     },
     "IntroductionsLayout": {
-        "title": "概要 / 紹介",
+        "title": "紹介",
         "description": "お互いに紹介する価値のあるネットワーク内の人物"
     }
 }

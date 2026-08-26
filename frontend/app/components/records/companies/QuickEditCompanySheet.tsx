@@ -35,6 +35,8 @@ type Props = {
     updateLogoFile?: (id: number, file: File | null) => void;
     isSaving: boolean;
     saveEdits: () => void;
+    /** Unsaved state owned by `customFieldsSlot`, folded into the sheet's discard guard. */
+    customFieldsDirty?: boolean;
     customFieldsSlot?: ReactNode;
 };
 
@@ -48,6 +50,7 @@ export default function QuickEditCompanySheet({
     updateLogoFile,
     isSaving,
     saveEdits,
+    customFieldsDirty,
     customFieldsSlot,
 }: Props) {
     const t = useTranslations('CompaniesQuickEditSheet');
@@ -82,6 +85,7 @@ export default function QuickEditCompanySheet({
             }}
             saveLabel={t('save')}
             cancelLabel={t('cancel')}
+            dirtySnapshot={{ drafts, customFieldsDirty }}
         >
             {selectedCompanies.map((c, idx) => {
                 const draft = drafts[c.id];

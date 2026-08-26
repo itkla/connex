@@ -29,7 +29,13 @@ public class ReportPermissionPolicy {
             "coverage_gap_count", "coverage_gap_open_pipeline_value", "company_count",
             "warm_intro_opportunity_value", "warm_intro_reachable_account_count",
             "reverse_intro_weighted_opportunities", "employment_departure_count",
-            "employment_arrival_count");
+            "employment_arrival_count",
+            "effective_discount_percent", "open_discount_percent",
+            "quote_count", "quote_issue_rate", "document_to_win_rate",
+            "approval_decision_count", "approval_cycle_days",
+            "lead_count", "qualified_count", "converted_count", "disqualified_count",
+            "qualification_rate", "conversion_rate", "time_to_convert_days",
+            "first_response_hours", "first_response_breach_rate");
     private static final Set<String> MAPPED_MEASURES = mappedMeasureCatalog();
 
     private final ObjectMapper objectMapper;

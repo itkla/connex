@@ -96,6 +96,32 @@ class DealMapperXmlTest {
     }
 
     @Test
+    void contactFiltersRenderTheVisibleWorkspaceScopedPersonBoundaryForEveryReadShape()
+            throws Exception {
+        Configuration configuration = configuration();
+
+        for (String statement : SCOPED_STATEMENTS) {
+            String sql = sql(
+                configuration, statement, MemberScope.allTeam(), null, List.of(31, 37));
+
+            assertTrue(sql.contains("FROM deal_person filtered_dp"));
+            assertTrue(sql.contains("JOIN person filtered_person ON filtered_person.id = filtered_dp.person_id"));
+            assertTrue(sql.contains("filtered_person.workspace_id = ?"));
+            assertTrue(sql.contains("filtered_person.archived_at IS NULL"));
+            assertTrue(sql.contains("filtered_person.suspended_at IS NULL"));
+            assertTrue(sql.contains("filtered_person.provision_ceased_at IS NULL"));
+            assertTrue(sql.contains("filtered_dp.deal_id = d.id"));
+            assertTrue(sql.matches(
+                ".*filtered_dp\\.person_id IN \\(\\s*\\?\\s*,\\s*\\?\\s*\\).*"));
+        }
+
+        String facetSql = sql(configuration, "countsByPerson", MemberScope.allTeam());
+        assertTrue(facetSql.contains("d.workspace_id = ?"));
+        assertTrue(facetSql.contains("filtered_person.workspace_id = ?"));
+        assertTrue(facetSql.contains("COUNT(DISTINCT dp.deal_id)"));
+    }
+
+    @Test
     void analyticsPeriodQueriesUseBoundaryJoinsAndGroupedAggregation() throws Exception {
         Configuration configuration = configuration();
 
@@ -134,6 +160,15 @@ class DealMapperXmlTest {
 
     private static String sql(
             Configuration configuration, String statement, MemberScope scope, String segmentIdsJson) {
+        return sql(configuration, statement, scope, segmentIdsJson, null);
+    }
+
+    private static String sql(
+            Configuration configuration,
+            String statement,
+            MemberScope scope,
+            String segmentIdsJson,
+            List<Integer> personIds) {
         Map<String, Object> parameters = new HashMap<>();
         parameters.put("workspaceId", 11);
         parameters.put("segmentIdsJson", segmentIdsJson);
@@ -157,6 +192,7 @@ class DealMapperXmlTest {
             LocalDateTime.of(2026, 1, 1, 0, 0),
             LocalDateTime.of(2026, 1, 2, 0, 0))));
         parameters.put("noCompany", false);
+        parameters.put("personIds", personIds);
         parameters.put("limit", 25);
         parameters.put("offset", 0);
         return configuration.getMappedStatement(DealMapper.class.getName() + "." + statement)

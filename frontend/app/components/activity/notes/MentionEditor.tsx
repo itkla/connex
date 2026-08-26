@@ -295,6 +295,13 @@ export type MentionEditorHandle = {
      * next input's serialization includes the appended text.
      */
     appendParagraph: (text: string) => void;
+    /**
+     * Moves keyboard focus into the editable content and puts the caret at its end. Used by owners
+     * that hand a composition back to the writer — a recovery affordance that pre-fills a message,
+     * for example — so the writer lands where they can keep typing rather than on the control they
+     * just pressed.
+     */
+    focus: () => void;
 };
 
 type Props = {
@@ -544,6 +551,18 @@ export default function MentionEditor({
                 const gap = serialize(el).trim().length > 0 ? '\n\n' : '';
                 el.appendChild(document.createTextNode(gap + text));
                 emit();
+            },
+            focus: () => {
+                const el = editorRef.current;
+                if (!el) return;
+                el.focus();
+                const selection = window.getSelection();
+                if (!selection) return;
+                const range = document.createRange();
+                range.selectNodeContents(el);
+                range.collapse(false);
+                selection.removeAllRanges();
+                selection.addRange(range);
             },
         }),
         [emit],

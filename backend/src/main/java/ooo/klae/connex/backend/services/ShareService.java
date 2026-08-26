@@ -12,6 +12,7 @@ import ooo.klae.connex.backend.dto.ShareDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.ShareBlockedPrivacyHoldException;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
@@ -144,7 +145,7 @@ public class ShareService {
             throw new ResourceNotFoundException("Record not found in this workspace");
         }
         if (person.getProvisionCeasedAt() != null) {
-            throw new BadRequestException("Third-party provision has been ceased for this contact");
+            throw new ShareBlockedPrivacyHoldException();
         }
     }
 

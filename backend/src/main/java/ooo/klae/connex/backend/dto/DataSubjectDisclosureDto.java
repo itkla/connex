@@ -24,6 +24,9 @@ public class DataSubjectDisclosureDto {
     private List<TaskDto> tasks;
     private List<AttachmentDto> attachments;
     private List<EmploymentDto> employmentHistory;
+    private List<LifecycleTransitionDto> lifecycleHistory;
+    private List<QualificationAnswerDto> qualificationAnswers;
+    private List<LifecyclePassDto> lifecyclePasses;
     private List<RelationshipEdgeDto> relationshipEdges;
     private List<DealAssociationDto> dealAssociations;
     private List<IntroductionDto> introductions;
@@ -46,6 +49,17 @@ public class DataSubjectDisclosureDto {
         private boolean introExcluded;
         private LocalDateTime suspendedAt;
         private LocalDateTime provisionCeasedAt;
+        private String lifecycleStage;
+        private LocalDateTime lifecycleChangedAt;
+        private String disqualifiedReason;
+        private String qualificationNotes;
+        private String leadSource;
+        private String leadSourceDetail;
+        private Integer referrerPersonId;
+        private LocalDateTime firstResponseDueAt;
+        private LocalDateTime firstResponseStartedAt;
+        private LocalDateTime firstRespondedAt;
+        private LocalDateTime firstResponseBreachedAt;
         private LocalDateTime createdAt;
         private LocalDateTime updatedAt;
     }
@@ -214,6 +228,58 @@ public class DataSubjectDisclosureDto {
         private LocalDateTime startedAt;
         private LocalDateTime endedAt;
         private LocalDateTime createdAt;
+    }
+
+    @Data
+    public static class LifecycleTransitionDto {
+        private long id;
+        private int workspaceId;
+        private int personId;
+        private String fromStage;
+        private String toStage;
+        private String reason;
+        private String note;
+        private Integer changedById;
+        private LocalDateTime changedAt;
+    }
+
+    /**
+     * One qualification answer recorded about the subject (#559). The criterion's own question text
+     * travels with the answer, because "MET" discloses nothing on its own — the subject is entitled
+     * to know what was asked as well as what was concluded.
+     */
+    /**
+     * One lead-lifecycle pass recorded about the subject (#559). The pass retains its response and
+     * breach timestamps after those values are cleared from the contact, so disclosing only the
+     * live person fields would omit the subject's historical response record entirely.
+     */
+    @Data
+    public static class LifecyclePassDto {
+        private long id;
+        private int workspaceId;
+        private int personId;
+        private LocalDateTime enteredAt;
+        private LocalDateTime qualifiedAt;
+        private LocalDateTime convertedAt;
+        private LocalDateTime disqualifiedAt;
+        private LocalDateTime endedAt;
+        private LocalDateTime firstResponseStartedAt;
+        private LocalDateTime firstRespondedAt;
+        private LocalDateTime firstResponseDueAt;
+        private LocalDateTime firstResponseBreachedAt;
+        private Integer ownerId;
+    }
+
+    @Data
+    public static class QualificationAnswerDto {
+        private int workspaceId;
+        private int personId;
+        private int criterionId;
+        private String criterionLabel;
+        private String dimension;
+        private String answer;
+        private Integer answeredById;
+        private LocalDateTime answeredAt;
     }
 
     @Data

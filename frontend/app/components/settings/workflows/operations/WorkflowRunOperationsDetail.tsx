@@ -39,6 +39,7 @@ import type {
     WorkflowRunDetail,
 } from "@/app/lib/types";
 import { offeredWorkflowRetryStep } from "@/app/lib/workflowOperations";
+import WorkflowRunReference from "@/app/components/settings/workflows/WorkflowRunReference";
 import {
     formatWorkflowRunDateTime,
     normalizeWorkflowRunDateTime,
@@ -56,7 +57,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
+import WorkflowRunDetailSkeleton from "@/app/components/settings/workflows/operations/WorkflowRunDetailSkeleton";
 
 const ACTIVE_RUN_STATUSES = new Set(["queued", "running", "waiting"]);
 const OPERATIONS_REASON_CODES = new Set([
@@ -138,7 +139,7 @@ function operationsDetailReducer(
     }
 }
 
-/** Canonical and legacy run evidence with operational state and bounded intervention controls. */
+/** One run's recorded path, the workflow's operational state, and bounded intervention controls. */
 export default function WorkflowRunOperationsDetail({ workflowId, runKey }: { workflowId: number; runKey: string }) {
     const t = useTranslations("WorkflowOperations");
     const tw = useTranslations("WorkspaceWorkflows");
@@ -205,7 +206,7 @@ export default function WorkflowRunOperationsDetail({ workflowId, runKey }: { wo
             />
         );
     }
-    if (!run || !operations || switching) return <DetailSkeleton />;
+    if (!run || !operations || switching) return <WorkflowRunDetailSkeleton />;
 
     const normalizedStatus = normalizeWorkflowRunStatus(run.status);
     const retryStep = offeredWorkflowRetryStep(run);
@@ -232,7 +233,7 @@ export default function WorkflowRunOperationsDetail({ workflowId, runKey }: { wo
                                 {run.status === "partial" ? tw("runs.legacyPartial") : tw(`runs.status.${normalizedStatus}`)}
                             </Badge>
                             {run.version ? <Badge variant="outline">{tw("versionShort", { number: run.version.number })}</Badge> : null}
-                            <Badge variant="outline" className="font-mono">{run.runKey}</Badge>
+                            <WorkflowRunReference runKey={run.runKey} />
                         </div>
                         <h1 className="text-3xl font-bold tracking-tight text-foreground">{workflow.name}</h1>
                         <p className="text-sm text-muted-foreground">
@@ -464,17 +465,11 @@ function WorkflowHealth({ operations }: { operations: WorkflowOperationsDetail }
                     </li>
                 ))}
             </ul>
-            <dl className="grid grid-cols-2 gap-3 border-t border-border pt-3 text-xs">
-                <div>
-                    <dt className="text-muted-foreground">{t("health.activeVersion")}</dt>
-                    <dd className="mt-1 font-medium text-foreground">
-                        {operations.activeVersion ? t("health.version", { number: operations.activeVersion.number }) : t("health.none")}
-                    </dd>
-                </div>
-                <div>
-                    <dt className="text-muted-foreground">{t("health.runtimeOwner")}</dt>
-                    <dd className="mt-1 font-medium text-foreground">{t(`runtimeOwner.${operations.workflow.runtimeOwner}`)}</dd>
-                </div>
+            <dl className="border-t border-border pt-3 text-xs">
+                <dt className="text-muted-foreground">{t("health.activeVersion")}</dt>
+                <dd className="mt-1 font-medium text-foreground">
+                    {operations.activeVersion ? t("health.version", { number: operations.activeVersion.number }) : t("health.none")}
+                </dd>
             </dl>
         </section>
     );
@@ -610,25 +605,6 @@ function EvidenceUnavailable({ title, body, action }: { title: string; body: str
             <h1 className="mt-4 text-lg font-semibold text-foreground">{title}</h1>
             <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">{body}</p>
             {action ? <div className="mt-5 flex justify-center">{action}</div> : null}
-        </div>
-    );
-}
-
-function DetailSkeleton() {
-    return (
-        <div className="space-y-8" aria-busy="true">
-            <div className="space-y-3">
-                <Skeleton className="h-8 w-24" />
-                <Skeleton className="h-9 w-72 max-w-full" />
-                <Skeleton className="h-4 w-56" />
-            </div>
-            <div className="grid gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(18rem,1fr)]">
-                <Skeleton className="h-96 rounded-2xl" />
-                <div className="space-y-4">
-                    <Skeleton className="h-48 rounded-2xl" />
-                    <Skeleton className="h-40 rounded-2xl" />
-                </div>
-            </div>
         </div>
     );
 }

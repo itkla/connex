@@ -499,7 +499,7 @@ class ScoringServiceTest {
     void mapCompanyScoringRejectsOversizedWorkspacesBeforeScanning() {
         CompanyMapper companyMapper = mock(CompanyMapper.class);
         when(companyMapper.countCompanies(
-            WS, null, null, false, null, MemberScope.allTeam(), false)).thenReturn(2_001L);
+            WS, null, null, false, null, MemberScope.allTeam(), false, null)).thenReturn(2_001L);
         PersonMapper personMapper = mock(PersonMapper.class);
         ScoringService service = new ScoringService(
             personMapper, companyMapper, mock(DealMapper.class), mock(ActivityMapper.class),
@@ -812,7 +812,7 @@ class ScoringServiceTest {
         CompanyMapper companyMapper = mock(CompanyMapper.class);
         LocalDateTime reference = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
         when(companyMapper.countCompanies(
-            WS, null, null, false, null, MemberScope.allTeam(), false)).thenReturn(1L);
+            WS, null, null, false, null, MemberScope.allTeam(), false, null)).thenReturn(1L);
         when(companyMapper.getRelationshipScoreAggregates(
                 WS, reference, RelationshipWarmthModel.current().sqlParameters())).thenReturn(List.of(
             new RelationshipScoreAggregateDto(

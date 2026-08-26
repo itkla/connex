@@ -1,17 +1,20 @@
 "use client";
 
 import { useMemo } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
-import { Squares2X2Icon, TableCellsIcon } from "@heroicons/react/24/outline";
+import { Squares2X2Icon, TableCellsIcon, UserGroupIcon } from "@heroicons/react/24/outline";
 import { EyeIcon } from "@heroicons/react/24/solid";
 import { useReducedMotion } from "motion/react";
 import { Button } from "@/components/ui/button";
 
 import RecordsRenderView from "@/app/components/records/RecordsRenderView";
+import { EmptyState } from "@/app/components/EmptyState";
 import Rise from "@/app/components/motion/Rise";
 import RecordsSortMenu from "@/app/components/records/RecordsSortMenu";
-import { SearchField, FilterBar, SegmentedToggle, type FilterChipData } from "@/app/components/filters";
+import { SearchField, FilterBar, type FilterChipData } from "@/app/components/filters";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import UserAvatar from "@/app/components/records/users/UserAvatar";
 import UserCard from "@/app/components/records/users/UserCard";
 import NewUserDialog from "@/app/components/records/users/NewUserDialog";
@@ -20,12 +23,37 @@ import { useRecordsSort } from "@/app/hooks/useRecordsSort";
 import { type ColumnDef } from "@/app/components/records/types";
 import { PageHeader } from "@/app/components/PageHeader";
 import { PageShell } from "@/app/components/PageShell";
+import { peopleSectionHref } from "@/app/lib/peopleSections";
 import { formatDate, formatDateTime } from "@/app/lib/utils";
 import { type User } from "@/app/lib/types";
 
 const searchFields = (u: User) => [u.displayName, u.username, u.email];
 
-export default function UsersBrowser({ users }: { users: User[] }) {
+/**
+ * Where the browser is rendering, so one component serves both of its homes while #1340 migrates
+ * the workspace destinations.
+ *
+ * - `page` is `/users` exactly as it ships: the browser owns the page shell, the page header, and
+ *   the create affordance beside it.
+ * - `section` is the member directory inside People & access, where the page shell and the heading
+ *   belong to the page and the one way of adding a member is the Invite member journey above.
+ */
+export type UsersBrowserPresentation = "page" | "section";
+
+/**
+ * The workspace's members, browsable as records: filter, sort, switch between the grid and the
+ * table, and open a member's own page.
+ *
+ * @param users - the members to browse
+ * @param presentation - which of the browser's two homes is rendering it; defaults to its own page
+ */
+export default function UsersBrowser({
+    users,
+    presentation = "page",
+}: {
+    users: User[];
+    presentation?: UsersBrowserPresentation;
+}) {
     const router = useRouter();
     const t = useTranslations("UsersBrowser");
     const tf = useTranslations("Filters");
@@ -100,18 +128,16 @@ export default function UsersBrowser({ users }: { users: User[] }) {
     };
 
     const selectionActions = (
-        <Button variant="outline" size="sm" onClick={viewSelected}>
+        <Button variant="outline" size="toolbar" onClick={viewSelected}>
             <EyeIcon className="size-4" />
             {t("view")}
         </Button>
     );
 
-    return (
-        <PageShell tier="wide">
-                <Rise>
-                    <PageHeader title={t("heading")} actions={<NewUserDialog />} />
-                </Rise>
+    const embedded = presentation === "section";
 
+    const browser = (
+        <>
                 <Rise delay={0.06}>
                     <FilterBar
                         reduce={reduce}
@@ -139,7 +165,7 @@ export default function UsersBrowser({ users }: { users: User[] }) {
                                         onSortChange={onSortChange}
                                     />
                                 )}
-                                <SegmentedToggle
+                                <SegmentedControl
                                     ariaLabel={t("displayModeAria")}
                                     value={displayMode}
                                     onChange={setDisplayMode}
@@ -165,11 +191,38 @@ export default function UsersBrowser({ users }: { users: User[] }) {
                         onSelectedIdsChange={setSelectedIds}
                         entityLabel={t("entityLabel")}
                         selectionActions={selectionActions}
+                        emptyState={
+                            <EmptyState
+                                icon={UserGroupIcon}
+                                title={t("emptyTitle")}
+                                body={t("emptyBody")}
+                                action={
+                                    <Button asChild variant="brand">
+                                        <Link href={embedded ? peopleSectionHref("members") : "/settings/members"}>
+                                            {t("emptyCta")}
+                                        </Link>
+                                    </Button>
+                                }
+                            />
+                        }
                         filtersActive={hasActiveFilters}
                         onClearFilters={clearAll}
                         sortState={sortState}
                     />
                 </Rise>
+        </>
+    );
+
+    if (embedded) {
+        return <div className="flex flex-col gap-4">{browser}</div>;
+    }
+
+    return (
+        <PageShell>
+            <Rise>
+                <PageHeader title={t("heading")} actions={<NewUserDialog />} />
+            </Rise>
+            {browser}
         </PageShell>
     );
 }

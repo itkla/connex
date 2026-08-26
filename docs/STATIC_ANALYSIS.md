@@ -101,6 +101,10 @@ one retains its first detection timestamp, is acknowledged by the Security Owner
 owner and deadline as a new finding measured from acknowledgement, and is remediated or placed under
 a fixed-term exception. The first scan's tracking issues and CodeQL run are the audit inventory.
 
+That first baseline is triaged in [SAST_TRIAGE_LOG.md](SAST_TRIAGE_LOG.md), which records the
+per-rule disposition, evidence, owner, approver, expiry, and re-review date for every alert it
+covers. Add later baselines or batch triages to that log rather than starting a new untracked one.
+
 ## False positives and suppressions
 
 Suppressions are exceptional, and source-level ignore comments are not permitted. Prefer fixing the

@@ -3,13 +3,13 @@
 import { motion, useReducedMotion } from 'motion/react';
 import type { ReactNode } from 'react';
 
-const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
+import { durationExpressive, easeOut } from '@/app/lib/motion';
 
 /**
- * Staggered fade-up entrance shared across app pages. Content fades in from a small
- * downward offset and honors `prefers-reduced-motion` by rendering a plain wrapper
- * with no motion. Pass an explicit `delay`, or an `index` to stagger a list of
- * siblings at roughly 60ms per item.
+ * Staggered fade-up entrance shared across app pages — the expressive speed, spent on the one
+ * memorable moment a page gets. Content fades in from a small downward offset and honors
+ * `prefers-reduced-motion` by rendering a plain wrapper with no motion. Pass an explicit `delay`,
+ * or an `index` to stagger a list of siblings at roughly 60ms per item.
  */
 export default function Rise({
     children,
@@ -30,7 +30,7 @@ export default function Rise({
             className={className}
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: resolvedDelay, ease: EASE_OUT }}
+            transition={{ duration: durationExpressive, delay: resolvedDelay, ease: easeOut }}
         >
             {children}
         </motion.div>

@@ -836,7 +836,11 @@ class PersonServiceTest extends AbstractServiceTest {
 
     @Test
     void getDealsByPersonId_throwsWhenPersonMissing() {
-        assertThrows(ResourceNotFoundException.class, () -> personService.getDealsByPersonId(-1));
+        ResourceNotFoundException failure = assertThrows(
+            ResourceNotFoundException.class,
+            () -> personService.getDealsByPersonId(-1));
+
+        assertEquals("Contact not found", failure.getMessage());
     }
 
     @Test
@@ -871,13 +875,17 @@ class PersonServiceTest extends AbstractServiceTest {
         );
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(mapper.countPersons(
-            7, "Security", null, null, false, MemberScope.allTeam(), false)).thenReturn(1001L);
+            7, "Security", null, null, false, MemberScope.allTeam(),
+            null, false, null, false, null, false, false, null)).thenReturn(1001L);
 
         assertThrows(BadRequestException.class,
-            () -> service.getMatchingPersonIds("Security", null, null, false, MemberScope.allTeam(), false));
+            () -> service.getMatchingPersonIds(
+                "Security", null, null, false, MemberScope.allTeam(), null, false, null, false,
+                null, false, false, null));
 
         verify(mapper, never()).getPersonIdsFiltered(
-            7, "Security", null, null, false, MemberScope.allTeam(), false, 1000);
+            7, "Security", null, null, false, MemberScope.allTeam(), null, false, null, false,
+            null, false, false, null, 1000);
     }
 
     @Test

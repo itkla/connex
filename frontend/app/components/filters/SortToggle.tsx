@@ -1,6 +1,6 @@
 "use client";
 
-import SegmentedToggle from "./SegmentedToggle";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 
 export type SortToggleOption<T extends string> = {
     value: T;
@@ -8,6 +8,11 @@ export type SortToggleOption<T extends string> = {
     icon?: React.ReactNode;
 };
 
+/**
+ * Sort-order switch for a browser toolbar. A thin naming layer over the canonical
+ * {@link SegmentedControl}: sorting is mode switching, so it uses the same control as every other
+ * mode switch in the product.
+ */
 export default function SortToggle<T extends string>({
     value,
     onChange,
@@ -20,7 +25,7 @@ export default function SortToggle<T extends string>({
     className?: string;
 }) {
     return (
-        <SegmentedToggle
+        <SegmentedControl
             value={value}
             onChange={onChange}
             className={className}

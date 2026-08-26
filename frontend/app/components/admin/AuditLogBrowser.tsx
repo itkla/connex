@@ -6,6 +6,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
     ClipboardDocumentListIcon,
     FunnelIcon,
+    MagnifyingGlassIcon,
 } from "@heroicons/react/24/outline";
 import {
     PlusIcon,
@@ -25,10 +26,13 @@ import {
     ArrowPathIcon,
 } from "@heroicons/react/20/solid";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/app/components/EmptyState";
 import { getAuditLogs } from "@/app/lib/api";
 import Rise from "@/app/components/motion/Rise";
 import { PageHeader } from "@/app/components/PageHeader";
 import { PageShell } from "@/app/components/PageShell";
+import { SettingsSection } from "@/app/components/settings/SettingsSection";
 import {
     SearchField,
     FilterBar,
@@ -77,6 +81,35 @@ const VERB_META: Record<string, VerbMeta> = {
     removePerson: { tone: "update", icon: UserMinusIcon, verbKey: "verbRemovedPerson" },
     updatePersonRole: { tone: "update", icon: PencilSquareIcon, verbKey: "verbUpdatedRole" },
     replacePeople: { tone: "update", icon: UserPlusIcon, verbKey: "verbUpdatedPeople" },
+    read: { tone: "view", icon: EyeIcon, verbKey: "verbViewed" },
+    use: { tone: "view", icon: EyeIcon, verbKey: "verbUsed" },
+    use_failed: { tone: "view", icon: EyeIcon, verbKey: "verbUsedFailed" },
+    rewrap: { tone: "update", icon: ArrowPathIcon, verbKey: "verbReencrypted" },
+    rewrap_failed: { tone: "update", icon: ArrowPathIcon, verbKey: "verbReencryptedFailed" },
+    call: { tone: "default", icon: BoltIcon, verbKey: "verbCalled" },
+    operation: { tone: "default", icon: BoltIcon, verbKey: "verbActedOn" },
+};
+
+const PROVIDER_LABEL_KEYS: Record<string, string> = {
+    bedrock: "providerBedrock",
+    azure_openai: "providerAzureOpenAi",
+    vertex: "providerVertex",
+    openai_compatible: "providerOpenAiCompatible",
+    unresolved: "providerUnresolved",
+};
+
+const TARGET_LABEL_KEYS: Record<string, string> = {
+    "workspace.smtp.password": "targetSmtpPassword",
+    "workspace.delivery.provider_credential": "targetDeliveryCredential",
+    "workspace.delivery.webhook_secret": "targetDeliveryWebhookSecret",
+    "workspace.connector.credential": "targetConnectorCredential",
+    "org.sso.oidc_client_secret": "targetSsoClientSecret",
+    "org.sso.saml_sp_private_key": "targetSsoSigningKey",
+    "org.ai.provider_credential": "targetAiCredential",
+    "user.provider.google_token": "targetGoogleConnection",
+    "user.provider.microsoft_token": "targetMicrosoftConnection",
+    secret_store: "targetStoredCredential",
+    ai_call: "targetAiProvider",
 };
 
 const PLAIN_VERBS = new Set<string>(["login", "logout", "updateAvatar"]);
@@ -142,12 +175,39 @@ function isSuccessful(e: AuditLogEntry): boolean {
     return auditOutcome(e) === "success";
 }
 
+/**
+ * Which of the browser's two homes is rendering it while #1340 migrates the workspace destinations.
+ *
+ * - `page` is `/admin/logs` exactly as it ships: its own route, its own shell, its own page header.
+ * - `section` is the audit section of Audit & diagnostics. The settings layout owns the shell, and
+ *   the page is one outline of section headings, so the browser trades its page header for a
+ *   section heading of the same name and keeps the stat cluster beside it.
+ */
+export type AuditLogPresentation = "page" | "section";
+
+/**
+ * The shell the browser stands in: its own on its own route, and none inside a settings page whose
+ * layout already supplies one.
+ */
+function AuditShell({
+    presentation,
+    children,
+}: {
+    presentation: AuditLogPresentation;
+    children: React.ReactNode;
+}) {
+    if (presentation === "section") return <div className="flex flex-col gap-6">{children}</div>;
+    return <PageShell>{children}</PageShell>;
+}
+
 export default function AuditLogBrowser({
     initialEntries,
     pageSize,
+    presentation = "page",
 }: {
     initialEntries: AuditLogEntry[];
     pageSize: number;
+    presentation?: AuditLogPresentation;
 }) {
     const t = useTranslations("AdminAuditLog");
     const locale = useLocale();
@@ -478,24 +538,32 @@ export default function AuditLogBrowser({
         return chips;
     })();
 
+    const statCluster = entries.length > 0 ? (
+        <StatCluster
+            stats={stats}
+            lastMs={stats.lastMs === -Infinity ? null : stats.lastMs}
+            now={now}
+            locale={locale}
+            t={t}
+        />
+    ) : undefined;
+
     return (
-        <PageShell tier="wide">
+        <AuditShell presentation={presentation}>
                 <Rise delay={0}>
-                    <PageHeader
-                        title={t("heading")}
-                        description={t("subtitle")}
-                        actions={
-                            entries.length > 0 ? (
-                                <StatCluster
-                                    stats={stats}
-                                    lastMs={stats.lastMs === -Infinity ? null : stats.lastMs}
-                                    now={now}
-                                    locale={locale}
-                                    t={t}
-                                />
-                            ) : undefined
-                        }
-                    />
+                    {presentation === "section" ? (
+                        <SettingsSection
+                            title={t("heading")}
+                            description={t("subtitle")}
+                            action={statCluster}
+                        />
+                    ) : (
+                        <PageHeader
+                            title={t("heading")}
+                            description={t("subtitle")}
+                            actions={statCluster}
+                        />
+                    )}
                 </Rise>
 
                 {entries.length > 0 && (
@@ -505,7 +573,7 @@ export default function AuditLogBrowser({
                 )}
 
                 {entries.length === 0 ? (
-                    <EmptyState title={t("emptyAllTitle")} body={t("emptyAllBody")} />
+                    <EmptyState icon={ClipboardDocumentListIcon} title={t("emptyAllTitle")} body={t("emptyAllBody")} />
                 ) : (
                     <Rise delay={0.12} className="flex flex-col gap-6">
                     <FilterBar
@@ -599,17 +667,23 @@ export default function AuditLogBrowser({
                     {filtered.length === 0 ? (
                         hasActiveFilters && hasMore ? (
                             <EmptyState
+                                tone="muted"
+                                icon={MagnifyingGlassIcon}
                                 title={t("noMatchesTitle")}
                                 body={t("noMatchesMoreBody", { loaded: entries.length })}
-                                muted
                             />
                         ) : (
                             <EmptyState
+                                tone="muted"
+                                icon={MagnifyingGlassIcon}
                                 title={t("noMatchesTitle")}
                                 body={t("noMatchesBody")}
-                                muted
-                                actionLabel={t("clearAll")}
-                                onAction={clearAll}
+                                action={
+                                    <Button variant="outline" onClick={clearAll}>
+                                        <FunnelIcon className="size-4" />
+                                        {t("clearAll")}
+                                    </Button>
+                                }
                             />
                         )
                     ) : (
@@ -655,7 +729,7 @@ export default function AuditLogBrowser({
                     )}
                     </Rise>
                 )}
-        </PageShell>
+        </AuditShell>
     );
 }
 
@@ -842,6 +916,14 @@ function PulseStrip({
 
 type Translator = ReturnType<typeof useTranslations>;
 
+function targetText(label: string | null, t: Translator): string | null {
+    if (label === null) return null;
+    const key = TARGET_LABEL_KEYS[label];
+    if (key !== undefined) return t(key);
+    const providerKey = PROVIDER_LABEL_KEYS[label.split("/")[0]];
+    return providerKey === undefined ? label : t(providerKey);
+}
+
 function auditMetadataValue(row: AuditMetadataRow, t: Translator): string {
     if (row.value == null) return t("valueUnknown");
     if (typeof row.value === "boolean") return t(row.value ? "valueYes" : "valueNo");
@@ -850,6 +932,14 @@ function auditMetadataValue(row: AuditMetadataRow, t: Translator): string {
         if (row.value === "failure") return t("outcomeFailed");
         if (row.value === "attempt") return t("outcomeAttempt");
         if (row.value === "blocked") return t("outcomeBlocked");
+    }
+    if (row.key === "target" || row.key === "purpose") {
+        const key = TARGET_LABEL_KEYS[String(row.value)];
+        if (key !== undefined) return t(key);
+    }
+    if (row.key === "provider") {
+        const key = PROVIDER_LABEL_KEYS[String(row.value)];
+        if (key !== undefined) return t(key);
     }
     return String(row.value);
 }
@@ -933,7 +1023,7 @@ function AuditRow({
     const verbText = meta ? t(meta.verbKey) : verb;
     const actorTag = (chunks: React.ReactNode) => <span className="font-semibold text-foreground">{chunks}</span>;
     const targetTag = (chunks: React.ReactNode) => <span className="font-medium text-foreground">{chunks}</span>;
-    const targetLabel = auditTargetLabel(entry);
+    const targetLabel = targetText(auditTargetLabel(entry), t);
     const summary = auditSummary(entry);
     const actionLine = targetLabel && !PLAIN_VERBS.has(verb)
         ? t.rich("actionEntity", {
@@ -1105,44 +1195,5 @@ function ValueChip({ value, tone, empty }: { value: unknown; tone: "old" | "new"
         >
             {text}
         </span>
-    );
-}
-
-function EmptyState({
-    title,
-    body,
-    muted,
-    actionLabel,
-    onAction,
-}: {
-    title: string;
-    body: string;
-    muted?: boolean;
-    actionLabel?: string;
-    onAction?: () => void;
-}) {
-    return (
-        <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border/70 bg-card/40 py-20 text-center">
-            <span
-                className={cn(
-                    "grid size-12 place-items-center rounded-full",
-                    muted ? "bg-muted text-muted-foreground" : "bg-brand-light text-brand-dark",
-                )}
-            >
-                <ClipboardDocumentListIcon className="size-6" />
-            </span>
-            <p className="mt-4 text-sm font-medium text-foreground">{title}</p>
-            <p className="mt-1 max-w-xs text-sm text-muted-foreground">{body}</p>
-            {actionLabel && onAction && (
-                <button
-                    type="button"
-                    onClick={onAction}
-                    className="mt-4 inline-flex h-8 items-center gap-1.5 rounded-full bg-muted px-3.5 text-xs font-medium text-foreground ring-1 ring-border outline-none transition hover:bg-accent active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-brand/40"
-                >
-                    <FunnelIcon className="size-3.5" />
-                    {actionLabel}
-                </button>
-            )}
-        </div>
     );
 }

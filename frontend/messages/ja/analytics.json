@@ -44,7 +44,7 @@
     "agingTitle": "進行中の案件の経過",
     "topDealsTitle": "主要な案件",
     "infoAria": "計算方法",
-    "revenueInfo": "受注済みの売上（実績）と、全案件の予定額（予想売上）を月別に比較します。",
+    "revenueInfo": "受注済みの売上（実績）と、全案件の予測金額を月別に比較します。",
     "stageInfo": "選択中のパイプラインの進行中案件をステージ別に表示。バー＝予定額、数値＝件数。",
     "winRateInfo": "今期間にクローズした案件の受注・失注。中央は成約率（受注 ÷（受注＋失注））。",
     "activityInfo": "今期間の活動を種類別・タイムスタンプ順に表示します。",
@@ -56,9 +56,9 @@
     "emptyBody": "案件を追加し、活動を記録すると、売上の推移・成約率・パイプラインの価値・チームの勢いがここに表示されます。",
     "emptyCreateDeal": "案件を作成",
     "emptySetupPipeline": "パイプラインを設定",
-    "warmthTitle": "関係の温度",
-    "warmthSubtitle": "バンド別の分布（現在）",
-    "warmthInfo": "連絡先と会社を温度バンド（ホット／ウォーム／クール／コールド）で分類。やり取りの新しさと頻度から算出します。トレンドは上昇・横ばい・低下の連絡先数です。",
+    "warmthTitle": "温度感",
+    "warmthSubtitle": "温度帯別の分布（現在）",
+    "warmthInfo": "連絡先と会社を温度帯（ホット／ウォーム／クール／コールド）ごとに分類します。やり取りの新しさと頻度から算出しています。トレンドは、上昇・横ばい・低下している連絡先の数です。",
     "decayTitle": "まもなく冷え込み",
     "decayInfo": "接触がないと冷え込むと予測される、まだ温かい連絡先を時期別に表示します。案件ではなく減衰予測に基づきます。",
     "dealRiskTitle": "リスクのある案件",
@@ -67,7 +67,7 @@
     "taskStatusSubtitle": "すべての未完了・完了タスク",
     "taskStatusInfo": "タスクをカンバンの列（未着手・進行中・完了）別に表示。中央は完了の割合です。",
     "introsTitle": "ウォーム紹介",
-    "introsSubtitle": "可能な紹介と実施した紹介",
+    "introsSubtitle": "紹介の候補と実施した紹介",
     "introsInfo": "あなたが橋渡しできる紹介の候補と、選択期間中に実際に記録された紹介です。",
     "movesTitle": "最近の異動",
     "movesInfo": "最近転職した連絡先です。キーパーソンの異動は、新しい会社での有力なリードになります。"
@@ -94,21 +94,22 @@
     "activityTooltip": "選択期間に記録された電話、メール、打ち合わせ、メモ、その他のやり取り。"
   },
   "AnalyticsRevenue": {
-    "subtitle": "実績と予想の推移",
+    "subtitle": "実績と予測の推移",
     "openPipeline": "進行中のパイプライン",
     "actual": "受注",
-    "projected": "予想",
+    "projected": "予測",
     "today": "今日",
     "empty": "表示できる売上データがまだありません",
     "actualAmount": "受注 · {amount}",
-    "projectedAmount": "予想 · {amount}"
+    "projectedAmount": "予測 · {amount}"
   },
   "AnalyticsStageFunnel": {
     "selectPipeline": "パイプラインを選択",
     "subtitle": "{pipeline} の進行中の案件",
     "morePipelines": "他 {count} 件",
     "deals": "{count} 件の案件",
-    "empty": "表示できる進行中の案件がありません"
+    "empty": "表示できる進行中の案件がありません",
+    "stageDrillThrough": "{stage}：進行中の案件 {count} 件を案件一覧で開く"
   },
   "AnalyticsWinRate": {
     "subtitle": "今期間にクローズした案件",
@@ -143,19 +144,19 @@
     "warmShare": "温かい連絡先",
     "cooling": "冷え込み中",
     "pipelineAtRisk": "リスクのある案件額",
-    "introOpportunities": "紹介の機会",
+    "introOpportunities": "紹介の候補",
     "warmShareCaption": "{count} 件中",
     "coolingCaption": "勢いが低下中",
     "pipelineAtRiskCaption": "{count} 件の案件",
     "introOpportunitiesCaption": "実施可能",
     "infoAria": "計算方法",
     "warmShareTooltip": "スコア済み連絡先のうち、現在ホットまたはウォームの割合。",
-    "coolingTooltip": "温度トレンドが低下している連絡先。今は温かいが勢いを失っています。",
+    "coolingTooltip": "温度感が下がってきている連絡先です。今はまだ温かいものの、勢いが落ちています。",
     "pipelineAtRiskTooltip": "リスクエンジンが検知した進行中案件の予定額合計（選択中の通貨）。",
     "introOpportunitiesTooltip": "双方を知っているため橋渡しできる紹介の候補です。"
   },
   "AnalyticsWarmth": {
-    "empty": "関係スコアがまだありません",
+    "empty": "温度感のデータはまだありません",
     "contacts": "連絡先",
     "companies": "会社",
     "trendLabel": "トレンド",
@@ -167,8 +168,10 @@
     "empty": "冷え込むと予測される温かい関係はありません。",
     "summary": "90日以内に冷え込むと予測される連絡先",
     "bucket_soon": "30日以内",
-    "bucket_mid": "31〜60日",
-    "bucket_later": "61〜90日"
+    "bucket_mid": "60日以内",
+    "bucket_later": "90日以内",
+    "bucketDrillThrough": "{horizon}：該当する連絡先 {count} 件を連絡先一覧で開く",
+    "openCoolingInRadar": "レーダーで対応する"
   },
   "AnalyticsDealRisk": {
     "empty": "現在リスクのある進行中案件はありません。",
@@ -179,7 +182,8 @@
     "factor_closing_soon_quiet": "クローズ間近だが静か",
     "factor_stalled": "停滞",
     "factor_stakeholder_cold": "関係者が冷え込み",
-    "factor_no_stakeholders": "関係者なし"
+    "factor_no_stakeholders": "関係者なし",
+    "levelDrillThrough": "{level}：該当する案件 {count} 件を案件一覧で開く"
   },
   "AnalyticsTaskStatus": {
     "empty": "タスクがまだありません",
@@ -189,13 +193,13 @@
     "count": "{count} 件"
   },
   "AnalyticsIntros": {
-    "opportunities": "実施可能な紹介",
+    "opportunities": "紹介の候補",
     "made": "実施した紹介",
     "madeInPeriod": "今期間の実施数",
     "emptyMade": "今期間に記録された紹介はありません"
   },
   "AnalyticsLayout": {
-    "title": "概要 / 分析",
+    "title": "分析",
     "description": "売上・パイプライン・チームの活動をひと目で確認"
   }
 }

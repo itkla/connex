@@ -4,18 +4,25 @@ import {
     BoltIcon,
     BriefcaseIcon,
     CheckCircleIcon,
+    CubeIcon,
+    DocumentCheckIcon,
+    DocumentDuplicateIcon,
     DocumentTextIcon,
     FunnelIcon,
+    MegaphoneIcon,
     PaperClipIcon,
+    PresentationChartLineIcon,
     TagIcon,
     UserIcon,
 } from "@heroicons/react/24/outline";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import CompanyAvatar from "@/app/components/records/companies/CompanyAvatar";
+import { dealDocumentsHref } from "@/app/components/records/deals/dealLinks";
+import { pipelineEditHref } from "@/app/components/records/pipelines/pipelineLinks";
 import UserAvatar from "@/app/components/records/users/UserAvatar";
+import { deriveNoteTitle, noteSnippet } from "@/app/lib/noteText";
 import { formatFileSize } from "@/app/lib/utils";
-import { noteContentToPlainText } from "@/app/lib/references";
 import type { SearchResults } from "@/app/lib/types";
 
 /** A leading-icon component compatible with the sidebar/action icon contract. */
@@ -121,9 +128,16 @@ export function buildSearchGroups(results: SearchResults | null, t: SearchTransl
     }));
     addGroup("pipelines", t("groupPipelines"), results.pipelines, (p) => ({
         key: `pipeline-${p.id}`,
-        href: `/records/pipelines/${p.id}`,
+        href: pipelineEditHref(p.id),
         icon: FunnelIcon,
         label: p.name,
+    }));
+    addGroup("products", t("groupProducts"), results.products, (p) => ({
+        key: `product-${p.id}`,
+        href: "/records/products",
+        icon: CubeIcon,
+        label: p.name,
+        subtitle: p.sku || undefined,
     }));
     addGroup("tags", t("groupTags"), results.tags, (tag) => ({
         key: `tag-${tag.id}`,
@@ -139,17 +153,22 @@ export function buildSearchGroups(results: SearchResults | null, t: SearchTransl
         label: a.subject,
         subtitle: a.type || undefined,
     }));
-    addGroup("notes", t("groupNotes"), results.notes, (n) => ({
-        key: `note-${n.id}`,
-        href: `/activity/notes/${n.id}`,
-        icon: DocumentTextIcon,
-        label: truncate(noteContentToPlainText(n.content)),
-    }));
+    addGroup("notes", t("groupNotes"), results.notes, (note) => {
+        const snippet = noteSnippet(note.content, 70);
+        const title = deriveNoteTitle(note, snippet);
+        return {
+            key: `note-${note.id}`,
+            href: `/activity/notes/${note.id}`,
+            icon: DocumentTextIcon,
+            label: truncate(title),
+            subtitle: snippet && snippet !== title ? snippet : undefined,
+        };
+    });
     addGroup("tasks", t("groupTasks"), results.tasks, (task) => ({
         key: `task-${task.id}`,
         href: `/activity/tasks/${task.id}`,
         icon: CheckCircleIcon,
-        label: truncate(noteContentToPlainText(task.description)),
+        label: noteSnippet(task.description, 70),
     }));
     addGroup("attachments", t("groupAttachments"), results.attachments, (a) => ({
         key: `attachment-${a.id}`,
@@ -157,6 +176,40 @@ export function buildSearchGroups(results: SearchResults | null, t: SearchTransl
         icon: PaperClipIcon,
         label: a.fileName,
         subtitle: typeof a.size === "number" ? formatFileSize(a.size) : undefined,
+    }));
+    addGroup("reports", t("groupReports"), results.reports, (r) => ({
+        key: `report-${r.id}`,
+        href: `/insights/reports/${r.id}`,
+        icon: PresentationChartLineIcon,
+        label: r.name,
+        subtitle: r.description ? truncate(r.description) : undefined,
+    }));
+    addGroup("campaigns", t("groupCampaigns"), results.campaigns, (c) => ({
+        key: `campaign-${c.id}`,
+        href: `/marketing/campaigns/${c.id}`,
+        icon: MegaphoneIcon,
+        label: c.name,
+    }));
+    addGroup("documents", t("groupDocuments"), results.documents, (d) => ({
+        key: `document-${d.id}`,
+        href: dealDocumentsHref(d.dealId),
+        icon: DocumentCheckIcon,
+        label: d.title || d.dealName || "",
+        subtitle: d.dealName || undefined,
+    }));
+    addGroup("documentTemplates", t("groupDocumentTemplates"), results.documentTemplates, (tpl) => ({
+        key: `document-template-${tpl.id}`,
+        href: `/library/documents/${tpl.id}`,
+        icon: DocumentDuplicateIcon,
+        label: tpl.name,
+        subtitle: tpl.locale ? tpl.locale.toUpperCase() : undefined,
+    }));
+    addGroup("workflows", t("groupWorkflows"), results.workflows, (w) => ({
+        key: `workflow-${w.id}`,
+        href: `/workflows/${w.id}`,
+        icon: BoltIcon,
+        label: w.name,
+        subtitle: w.description ? truncate(w.description) : undefined,
     }));
 
     return built;

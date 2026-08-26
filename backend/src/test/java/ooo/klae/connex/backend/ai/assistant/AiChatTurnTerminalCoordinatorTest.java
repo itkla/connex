@@ -2,17 +2,16 @@ package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -41,19 +40,22 @@ class AiChatTurnTerminalCoordinatorTest {
                 tenantWorkScope,
                 persistenceService,
                 dispatcher);
+        AtomicReference<AiChatDurableTerminal> durable = new AtomicReference<>(
+                new AiChatDurableTerminal("resolved", null, 31));
         when(tenantWorkScope.inWorkspace(
                 eq(TURN.workspaceId()),
-                org.mockito.ArgumentMatchers.<Supplier<Boolean>>any()))
+                org.mockito.ArgumentMatchers.<Supplier<Object>>any()))
                 .thenAnswer(invocation -> {
-                    Supplier<Boolean> work = invocation.getArgument(1);
+                    Supplier<?> work = invocation.getArgument(1);
                     return work.get();
                 });
-        when(persistenceService.markTerminal(
-                TURN, "failed", "generation_capacity")).thenReturn(true);
-        when(persistenceService.markTerminal(
-                TURN, "timed_out", "generation_timeout")).thenReturn(true);
-        when(persistenceService.markTerminal(
-                TURN, "timed_out", "turn_deadline_exceeded")).thenReturn(true);
+        when(persistenceService.markTerminal(eq(TURN), anyString(), anyString()))
+                .thenAnswer(invocation -> {
+                    durable.set(new AiChatDurableTerminal(
+                            invocation.getArgument(1), invocation.getArgument(2), 31));
+                    return true;
+                });
+        when(persistenceService.terminalState(TURN)).thenAnswer(invocation -> durable.get());
     }
 
     @Test
@@ -65,15 +67,17 @@ class AiChatTurnTerminalCoordinatorTest {
         InOrder order = inOrder(persistenceService, dispatcher);
         order.verify(persistenceService).markTerminal(
                 TURN, "failed", "generation_capacity");
+        order.verify(persistenceService).terminalState(TURN);
         order.verify(dispatcher).sessionNow(
                 TURN.workspaceId(), TURN.sessionId(), new AiChatStepFrameDto(
-                TURN.workspaceId(), TURN.sessionId(), TURN.turnId(), 0,
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId(), 31,
                 "terminal", null, "failed", "generation_capacity"));
         order.verify(persistenceService).markTerminal(
                 TURN, "timed_out", "turn_deadline_exceeded");
+        order.verify(persistenceService).terminalState(TURN);
         order.verify(dispatcher).sessionNow(
                 TURN.workspaceId(), TURN.sessionId(), new AiChatStepFrameDto(
-                TURN.workspaceId(), TURN.sessionId(), TURN.turnId(), 0,
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId(), 31,
                 "terminal", null, "timed_out", "turn_deadline_exceeded"));
     }
 
@@ -97,6 +101,7 @@ class AiChatTurnTerminalCoordinatorTest {
                 "agent_backstop_exceeded",
                 "step_cap_exceeded",
                 "workspace_disabled",
+                AiAssistantTerminalReasons.CONTEXT_WINDOW_TOO_SMALL,
                 "internal_error")) {
             coordinator.listener(TURN).onTerminal(
                     AiGenerationTaskResult.Outcome.FAILED, reason);
@@ -114,15 +119,18 @@ class AiChatTurnTerminalCoordinatorTest {
     }
 
     @Test
-    void rejectedDurableTimeoutDoesNotPublishOrWinTheGenerationTerminal() {
-        when(persistenceService.markTerminal(
-                TURN, "timed_out", "generation_timeout")).thenReturn(false);
+    void rejectedDurableTimeoutPublishesTheSupersedingResolution() {
+        org.mockito.Mockito.doReturn(false).when(persistenceService).markTerminal(
+                TURN, "timed_out", "generation_timeout");
 
         boolean claimed = coordinator.listener(TURN).onTerminal(
                 AiGenerationTaskResult.Outcome.TIMED_OUT, "generation_timeout");
 
         assertFalse(claimed);
-        verify(dispatcher, never()).sessionNow(eq(TURN.workspaceId()), eq(TURN.sessionId()), any());
+        verify(dispatcher).sessionNow(
+                TURN.workspaceId(), TURN.sessionId(), new AiChatStepFrameDto(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId(), 31,
+                "terminal", null, "resolved", null));
     }
 
     @Test
@@ -131,10 +139,10 @@ class AiChatTurnTerminalCoordinatorTest {
                 AiGenerationTaskResult.Outcome.RESOLVED, null);
 
         assertTrue(claimed);
-        verify(persistenceService).terminalOffset(TURN);
+        verify(persistenceService).terminalState(TURN);
         verify(dispatcher).sessionNow(
                 TURN.workspaceId(), TURN.sessionId(), new AiChatStepFrameDto(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId(),
-                0, "terminal", null, "resolved", null));
+                31, "terminal", null, "resolved", null));
     }
 }

@@ -1,0 +1,245 @@
+{
+    "highWaterMark": 48,
+    "exceptions": [
+        {
+            "route": "/account",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: redirects straight to /settings/personal/profile, which owns the skeleton the reader actually sees."
+        },
+        {
+            "route": "/account/connections",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the canonical Connected accounts destination. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/account/connections/reviews",
+            "kind": "resolver-redirect",
+            "reason": "A stable address for the capture review queue. It resolves the reader's own connected provider and redirects into /settings/personal/connected-accounts, whose skeleton already stands in for the panel it lands on; its only non-redirect outcome is CapabilityUnavailablePage, a terminal explanation that no skeleton should promise."
+        },
+        {
+            "route": "/account/invites",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the canonical Workspaces & invitations destination. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/account/notifications",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the canonical Notification preferences destination. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/account/profile",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the canonical personal Profile destination. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/account/security",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the canonical personal Security destination. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/admin/logs",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the `audit` section of Audit & diagnostics. The consolidated destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/insights/reports/[id]/snapshots",
+            "kind": "redirect-only",
+            "reason": "The bare snapshots path has no surface of its own; it redirects to the report, which lists every snapshot and owns the skeleton."
+        },
+        {
+            "route": "/insights/reports/[id]/snapshots/[snapshotId]",
+            "kind": "shares-parent-skeleton",
+            "reason": "A frozen snapshot renders the same report document board as /insights/reports/[id]; that parent skeleton is already the correct mirror, and a second copy would only drift from it."
+        },
+        {
+            "route": "/organization",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: redirects straight to /settings/organization/general, which owns the skeleton."
+        },
+        {
+            "route": "/organization/ai",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the `ai-provider` section of AI & data governance. The consolidated destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/organization/allowed-domains",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the `allowed-domains` section of Identity & administrators. The consolidated destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/organization/audit",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the `audit` section of the organization Audit & diagnostics page. The consolidated destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/organization/data-requests",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the `requests` section of Data requests. The consolidated destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/organization/diagnostics",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the `diagnostics` section of the organization Audit & diagnostics page. The consolidated destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/organization/members",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the `administrators` section of Identity & administrators. The consolidated destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/organization/overview",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the `identity` section of organization General. The consolidated destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/organization/sso",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the `sso` section of Identity & administrators. The consolidated destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/overview/analytics",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1323 WS4 moved this surface out of the dissolved Overview area, and this address now forwards permanently to /insights/analytics. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/overview/calendar",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1323 WS4 moved this surface out of the dissolved Overview area, and this address now forwards permanently to /activity/calendar. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/overview/introductions",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1323 WS4 moved this surface out of the dissolved Overview area, and this address now forwards permanently to /intelligence/introductions. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/overview/map",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1323 WS4 moved this surface out of the dissolved Overview area, and this address now forwards permanently to /intelligence/map. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/overview/reports",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1323 WS4 moved this surface out of the dissolved Overview area, and this address now forwards permanently to /insights/reports. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/overview/reports/[id]",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1323 WS4 moved this surface out of the dissolved Overview area, and this address now forwards permanently to /insights/reports/[id]. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/overview/reports/[id]/edit",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1323 WS4 moved this surface out of the dissolved Overview area, and this address now forwards permanently to /insights/reports/[id]/edit. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/overview/reports/[id]/snapshots",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1323 WS4 moved this surface out of the dissolved Overview area, and this address now forwards permanently to /insights/reports/[id]/snapshots. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/overview/reports/[id]/snapshots/[snapshotId]",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1323 WS4 moved this surface out of the dissolved Overview area, and this address now forwards permanently to /insights/reports/[id]/snapshots/[snapshotId]. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/overview/reports/goals",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1323 WS4 moved this surface out of the dissolved Overview area, and this address now forwards permanently to /insights/reports/goals. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/overview/reports/new",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1323 WS4 moved this surface out of the dissolved Overview area, and this address now forwards permanently to /insights/reports/new. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/radar",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1323 WS4 moved this surface out of the dissolved Overview area, and this address now forwards permanently to /intelligence/radar. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/records/approval-policies",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the `approval-policies` section of CRM configuration. The consolidated destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/settings/custom-fields",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the `custom-fields` section of CRM configuration. The consolidated destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/settings/data",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the canonical Data & privacy destination. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/settings/delivery",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the `delivery` section of Communications. The consolidated destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/settings/diagnostics",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the `diagnostics` section of Audit & diagnostics. The consolidated destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/settings/email",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the `email` section of Communications. The consolidated destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/settings/general",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the canonical workspace General destination. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/settings/members",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the `members` section of People & access. The consolidated destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/settings/membership",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: redirects to /settings/personal/workspaces, the canonical destination for the membership job."
+        },
+        {
+            "route": "/settings/notifications",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: redirects to /settings/personal/notifications, the canonical destination for notification preferences."
+        },
+        {
+            "route": "/settings/qualification",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the `qualification` section of CRM configuration. The consolidated destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/settings/roles",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the `roles` section of People & access. The consolidated destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/settings/rules",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: forwards permanently to /workflows, which owns the skeleton. Rules is absent from the product vocabulary; only the address survives, for old bookmarks."
+        },
+        {
+            "route": "/settings/security",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: redirects to /settings/personal/security, the canonical destination for the security job."
+        },
+        {
+            "route": "/settings/sso",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the `sso` section of Identity & administrators. The consolidated destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/settings/workflows/[legacyRuleId]",
+            "kind": "resolver-redirect",
+            "reason": "The permanent redirect from an old automation link. It resolves the workflow id and forwards to /workflows/[workflowId], whose editor shell owns the skeleton."
+        },
+        {
+            "route": "/users",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the `directory` section of People & access. The consolidated destination owns the skeleton the reader actually waits on."
+        }
+    ]
+}

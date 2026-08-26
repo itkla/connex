@@ -33,9 +33,11 @@ import { SearchField, FilterBar, MultiSelectFilter, type FilterChipData } from '
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
+import { SegmentedControl } from '@/components/ui/segmented-control';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
+import { EmptyState } from '@/app/components/EmptyState';
 import {
     RecordActionMenuTrigger,
     RecordContextMenu,
@@ -53,13 +55,14 @@ import Rise from '@/app/components/motion/Rise';
 import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import { deleteTask, getTaskById, updateTask } from '@/app/lib/api';
-import { parseDeepLinkId } from '@/app/hooks/listStateUrl';
+import { parseDeepLinkId, TASK_URL_KEY } from '@/app/hooks/listStateUrl';
 import { useOwnedUrlParams } from '@/app/hooks/useOwnedUrlParams';
 import { useIsMobile } from '@/app/hooks/useIsMobile';
 import { useScopedViewPreference } from '@/app/hooks/useScopedViewPreference';
 import { effectiveListView } from '@/app/hooks/viewPreference';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { toastSuccess } from '@/app/lib/toast';
 import { noteSnippet } from '@/app/lib/noteText';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
@@ -183,6 +186,7 @@ export default function TasksBrowser({
 }: Props) {
     const t = useTranslations('ActivityTasks');
     const tf = useTranslations('Filters');
+    const showApiError = useApiErrorToast('ActivityTasks');
     const locale = useLocale();
     const router = useRouter();
     const pathname = usePathname() ?? '';
@@ -288,10 +292,10 @@ export default function TasksBrowser({
 
     const searchParams = useSearchParams();
     const [deepLinkSettled, setDeepLinkSettled] = useState(
-        () => parseDeepLinkId(searchParams.get('task')) === null,
+        () => parseDeepLinkId(searchParams.get(TASK_URL_KEY)) === null,
     );
     useEffect(() => {
-        const taskId = parseDeepLinkId(searchParams.get('task'));
+        const taskId = parseDeepLinkId(searchParams.get(TASK_URL_KEY));
         if (taskId === null) return;
         getTaskById(taskId)
             .then(setEditingTask)
@@ -299,7 +303,10 @@ export default function TasksBrowser({
             .finally(() => setDeepLinkSettled(true));
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
-    useOwnedUrlParams({ task: editingTask ? String(editingTask.id) : undefined }, deepLinkSettled);
+    useOwnedUrlParams(
+        { [TASK_URL_KEY]: editingTask ? String(editingTask.id) : undefined },
+        deepLinkSettled,
+    );
 
     useEffect(() => () => timers.current.forEach((id) => window.clearTimeout(id)), []);
 
@@ -599,7 +606,7 @@ export default function TasksBrowser({
                 optimisticTimerId = null;
             }
             timerSettled = true;
-            toastError(err instanceof Error ? err.message : t('toastFailedUpdate'));
+            showApiError(err, 'toastFailedUpdate');
             setTaskCompleted(task.id, !next);
             setCompleting((prev) => {
                 const n = new Set(prev);
@@ -654,7 +661,7 @@ export default function TasksBrowser({
             router.refresh();
         } catch (error) {
             if (controller.signal.aborted || !scopeCurrent()) return;
-            toastError(error instanceof Error ? error.message : t('toastFailedDelete'));
+            showApiError(error, 'toastFailedDelete');
         } finally {
             if (deleteControllerRef.current === controller) {
                 deleteControllerRef.current = null;
@@ -673,8 +680,7 @@ export default function TasksBrowser({
     const isCompletedQueue = queue === 'completed';
     const dimensionsActive =
         assigneeFilter.size > 0 || personFilter.size > 0 || dealFilter.size > 0 || companyFilter.size > 0;
-    const emptyMessage = query.trim() || dimensionsActive ? t('emptyFiltered') : t(`emptyQueue_${queue}` as 'emptyQueue_myOpen');
-
+    const filteredEmpty = query.trim() !== '' || dimensionsActive;
     const labelFor = (options: { value: string; label: string }[], value: string) =>
         options.find((o) => o.value === value)?.label ?? value;
     const chips: FilterChipData[] = [
@@ -691,6 +697,43 @@ export default function TasksBrowser({
         setDealFilter(new Set());
         setCompanyFilter(new Set());
     };
+    const taskEmptyState = filteredEmpty ? (
+        <EmptyState
+            tone="muted"
+            icon={MagnifyingGlassIcon}
+            title={t('emptyFilteredTitle')}
+            body={t('emptyFiltered')}
+            action={
+                <Button variant="outline" onClick={clearAllFilters}>
+                    {tf('clearAll')}
+                </Button>
+            }
+        />
+    ) : !hasAnyTasks ? (
+        <EmptyState
+            icon={CheckCircleIcon}
+            title={t('emptyFirstRunTitle')}
+            body={t('emptyFirstRunBody')}
+            action={
+                <Button variant="brand" onClick={() => setCreating(true)}>
+                    <PlusIcon strokeWidth={2.5} />
+                    {t('new')}
+                </Button>
+            }
+        />
+    ) : (
+        <EmptyState
+            tone="muted"
+            icon={isCompletedQueue ? CheckCircleIcon : CheckIcon}
+            title={t(`emptyQueue_${queue}` as 'emptyQueue_myOpen')}
+            body={t('emptyQueueBody')}
+            action={
+                <Button variant="outline" onClick={() => setQueue(queue === 'allOpen' ? 'completed' : 'allOpen')}>
+                    {queue === 'allOpen' ? t('emptyQueueShowCompleted') : t('emptyQueueShowAllOpen')}
+                </Button>
+            }
+        />
+    );
     const activeDimensionCount =
         assigneeFilter.size + personFilter.size + dealFilter.size + companyFilter.size;
     const taskFilterSections: TaskFilterSheetSection[] = [
@@ -764,46 +807,26 @@ export default function TasksBrowser({
 
     return (
         <>
-            <PageShell tier="wide">
+            <PageShell>
                 <Rise>
                     <PageHeader
                         title={t('title')}
                         description={t('subtitle')}
                         actions={
                             <>
-                                <div
-                                    role="group"
-                                    aria-label={t('displayMode')}
-                                    className="hidden rounded-full bg-muted p-0.5 ring-1 ring-border md:inline-flex"
-                                >
-                                    <button
-                                        type="button"
-                                        onClick={() => setView('list')}
-                                        aria-label={t('viewList')}
-                                        aria-pressed={view === 'list'}
-                                        className={cn(
-                                            'flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97]',
-                                            view === 'list' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground',
-                                        )}
-                                    >
-                                        <QueueListIcon className="size-4" />
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setView('board')}
-                                        aria-label={t('viewBoard')}
-                                        aria-pressed={view === 'board'}
-                                        className={cn(
-                                            'flex h-8 w-8 items-center justify-center rounded-full transition active:scale-[0.97]',
-                                            view === 'board' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground',
-                                        )}
-                                    >
-                                        <ViewColumnsIcon className="size-4" />
-                                    </button>
-                                </div>
+                                <SegmentedControl
+                                    ariaLabel={t('displayMode')}
+                                    className="hidden md:inline-flex"
+                                    value={view}
+                                    onChange={setView}
+                                    options={[
+                                        { value: 'list', icon: <QueueListIcon className="size-4" />, ariaLabel: t('viewList') },
+                                        { value: 'board', icon: <ViewColumnsIcon className="size-4" />, ariaLabel: t('viewBoard') },
+                                    ]}
+                                />
                                 <Button
                                     variant="brand"
-                                    className="shadow-sm transition-transform active:scale-[0.98]"
+                                    size="page"
                                     aria-label={t('newAria')}
                                     onClick={() => setCreating(true)}
                                 >
@@ -970,11 +993,7 @@ export default function TasksBrowser({
                                 </FilterBar>
 
                                 {isEmpty ? (
-                                    <TaskEmptyState
-                                        filtered={!!query.trim()}
-                                        completed={isCompletedQueue}
-                                        message={emptyMessage}
-                                    />
+                                    taskEmptyState
                                 ) : isCompletedQueue ? (
                                     <div className="overflow-hidden rounded-2xl border border-border bg-card">
                                         <ul className="divide-y divide-border">
@@ -1395,17 +1414,5 @@ function TaskRow({
                 </div>
             </motion.li>
         </RecordContextMenu>
-    );
-}
-
-function TaskEmptyState({ filtered, completed, message }: { filtered: boolean; completed: boolean; message: string }) {
-    const Icon = completed ? CheckCircleIcon : filtered ? MagnifyingGlassIcon : CheckIcon;
-    return (
-        <div className="rounded-2xl border border-border bg-card px-6 py-20 text-center">
-            <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-brand-light text-brand-dark">
-                <Icon className="size-7" strokeWidth={1.75} />
-            </div>
-            <p className="mx-auto mt-5 max-w-sm text-sm font-medium text-foreground">{message}</p>
-        </div>
     );
 }

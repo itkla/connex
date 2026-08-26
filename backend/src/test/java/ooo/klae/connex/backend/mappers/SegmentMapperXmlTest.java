@@ -97,6 +97,9 @@ class SegmentMapperXmlTest {
         parameters.put("recordType", "deal");
         assertTrue(sql(configuration, "entityIdInWorkspace", parameters).contains(
             "SELECT 1 FROM deal WHERE workspace_id = ? AND id = ?"));
+        parameters.put("recordType", "document");
+        assertTrue(sql(configuration, "entityIdInWorkspace", parameters).contains(
+            "SELECT 1 FROM deal_document WHERE workspace_id = ? AND id = ?"));
     }
 
     private static String sql(Configuration configuration, String statement, String predicate) {

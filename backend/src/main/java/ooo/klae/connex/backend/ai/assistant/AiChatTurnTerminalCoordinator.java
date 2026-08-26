@@ -30,10 +30,13 @@ public class AiChatTurnTerminalCoordinator {
             "no_progress",
             "agent_backstop_exceeded",
             "step_cap_exceeded",
+            "skill_budget_exceeded",
+            "tool_outside_skill_authority",
             "workspace_disabled",
             "generation_capacity",
-            "restrictions_changed",
-            "access_revoked",
+            AiAssistantTerminalReasons.CONTEXT_WINDOW_TOO_SMALL,
+            AiAssistantTerminalReasons.RESTRICTIONS_CHANGED,
+            AiAssistantTerminalReasons.ACCESS_REVOKED,
             INTERNAL_ERROR);
     private static final Set<String> TIMED_OUT_REASONS = Set.of(
             "generation_timeout",
@@ -56,7 +59,8 @@ public class AiChatTurnTerminalCoordinator {
 
     /** Marks a committed turn failed when its prepared restriction epoch is no longer current. */
     public void restrictionsChanged(AiChatQueuedTurn turn) {
-        complete(turn, AiGenerationTaskResult.Outcome.FAILED, "restrictions_changed");
+        complete(turn, AiGenerationTaskResult.Outcome.FAILED,
+                AiAssistantTerminalReasons.RESTRICTIONS_CHANGED);
     }
 
     private boolean complete(
@@ -64,12 +68,9 @@ public class AiChatTurnTerminalCoordinator {
             AiGenerationTaskResult.Outcome outcome,
             String reason) {
         if (outcome == AiGenerationTaskResult.Outcome.RESOLVED) {
-            int terminalOffset = tenantWorkScope.inWorkspace(
-                    turn.workspaceId(), () -> persistenceService.terminalOffset(turn));
-            publish(turn, new AiChatStepFrameDto(
-                    turn.workspaceId(), turn.sessionId(), turn.turnId(),
-                    terminalOffset, "terminal", null, "resolved", null));
-            return true;
+            AiChatDurableTerminal terminal = durableTerminal(turn);
+            publish(turn, terminalFrame(turn, terminal));
+            return "resolved".equals(terminal.status());
         }
         String status = outcome == AiGenerationTaskResult.Outcome.TIMED_OUT
                 ? "timed_out"
@@ -78,14 +79,21 @@ public class AiChatTurnTerminalCoordinator {
         boolean changed = tenantWorkScope.inWorkspace(
                 turn.workspaceId(),
                 () -> persistenceService.markTerminal(turn, status, stableReason));
-        if (changed) {
-            int terminalOffset = tenantWorkScope.inWorkspace(
-                    turn.workspaceId(), () -> persistenceService.terminalOffset(turn));
-            publish(turn, new AiChatStepFrameDto(
-                    turn.workspaceId(), turn.sessionId(), turn.turnId(),
-                    terminalOffset, "terminal", null, status, stableReason));
-        }
+        AiChatDurableTerminal terminal = durableTerminal(turn);
+        publish(turn, terminalFrame(turn, terminal));
         return changed;
+    }
+
+    private AiChatDurableTerminal durableTerminal(AiChatQueuedTurn turn) {
+        return tenantWorkScope.inWorkspace(
+                turn.workspaceId(), () -> persistenceService.terminalState(turn));
+    }
+
+    private static AiChatStepFrameDto terminalFrame(
+            AiChatQueuedTurn turn, AiChatDurableTerminal terminal) {
+        return new AiChatStepFrameDto(
+                turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                terminal.offset(), "terminal", null, terminal.status(), terminal.reason());
     }
 
     private static String stableReason(

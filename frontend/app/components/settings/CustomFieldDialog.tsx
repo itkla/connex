@@ -33,7 +33,8 @@ import {
 } from "@/components/ui/dialog-status-cover";
 
 import { cn } from "@/lib/utils";
-import { ApiError, createCustomField, updateCustomField } from "@/app/lib/api";
+import { createCustomField, updateCustomField } from "@/app/lib/api";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import type {
     CustomFieldDataClassification,
@@ -133,6 +134,7 @@ function CustomFieldForm({
     setSubmitting: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
     const t = useTranslations("WorkspaceCustomFields");
+    const showApiError = useApiErrorToast("WorkspaceCustomFields");
     const reduce = useReducedMotion() ?? false;
 
     const [label, setLabel] = useState(field?.label ?? "");
@@ -237,9 +239,7 @@ function CustomFieldForm({
                 onClose();
             }, 900);
         } catch (err) {
-            const message =
-                err instanceof ApiError ? err.message : err instanceof Error ? err.message : t("saveFailed");
-            toastError(message);
+            showApiError(err, "saveFailed");
             setSubmitting(false);
         }
     };

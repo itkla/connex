@@ -71,7 +71,6 @@ import ooo.klae.connex.backend.webauthn.WebAuthnService;
 @WebMvcTest(
     controllers = DealController.class,
     properties = {
-        "connex.security.csrf-enabled=true",
         "connex.sso.enabled=false"
     }
 )
@@ -160,7 +159,7 @@ class DealControllerTest {
                     }
                     """))
             .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.duplicateReviewToken").exists());
+            .andExpect(jsonPath("$.fieldErrors.duplicateReviewToken").exists());
 
         verifyNoInteractions(dealService);
     }
@@ -244,7 +243,7 @@ class DealControllerTest {
                     {"won":false,"reason":"cancelled","actualValue":-12.34}
                     """))
             .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.actualValue").exists());
+            .andExpect(jsonPath("$.fieldErrors.actualValue").exists());
 
         verifyNoInteractions(dealService);
     }
@@ -274,7 +273,7 @@ class DealControllerTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(body))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.name").exists());
+                .andExpect(jsonPath("$.fieldErrors.name").exists());
         }
 
         verifyNoInteractions(dealService);
@@ -293,7 +292,7 @@ class DealControllerTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(body))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.value").exists());
+                .andExpect(jsonPath("$.fieldErrors.value").exists());
         }
 
         verifyNoInteractions(dealService);
@@ -312,9 +311,9 @@ class DealControllerTest {
     }
 
     @Test
-    void missingDealReturnsExistingPlainTextNotFoundResponse() throws Exception {
+    void missingDealReturnsStructuredNotFoundResponse() throws Exception {
         when(dealService.updateName(42, "Missing"))
-            .thenThrow(new ResourceNotFoundException("Deal not found with id: 42"));
+            .thenThrow(new ResourceNotFoundException("Deal not found"));
 
         mockMvc.perform(put("/api/deals/42/name")
                 .with(csrf().asHeader())
@@ -323,7 +322,8 @@ class DealControllerTest {
                     {"name":"Missing"}
                     """))
             .andExpect(status().isNotFound())
-            .andExpect(content().string("Deal not found with id: 42"));
+            .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"))
+            .andExpect(jsonPath("$.message").value("Deal not found"));
     }
 
     @Test

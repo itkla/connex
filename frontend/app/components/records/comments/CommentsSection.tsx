@@ -23,6 +23,7 @@ import {
 } from '@/app/lib/api';
 import { normalizeNoteImageSource } from '@/app/components/activity/notes/editor/noteImageSource';
 import type { DraftKeyParts } from '@/app/lib/formDrafts';
+import { COMMENT_URL_KEY } from '@/app/hooks/listStateUrl';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import type {
     RecordComment,
@@ -33,7 +34,7 @@ import type {
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { commentPlainText } from '@/app/components/records/comments/commentText';
 import CommentComposer from '@/app/components/records/comments/CommentComposer';
-import CommentDeleteDialog from '@/app/components/records/comments/CommentDeleteDialog';
+import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import CommentThread, {
     type CommentAuthorIdentity,
 } from '@/app/components/records/comments/CommentThread';
@@ -90,7 +91,7 @@ export default function CommentsSection({
     const fetchGeneration = useRef(0);
     const reactionBusyIds = useRef<Set<number>>(new Set());
 
-    const highlightedCommentId = searchParams.get('comment');
+    const highlightedCommentId = searchParams.get(COMMENT_URL_KEY);
     const linkedThreadParam = searchParams.get('thread');
     const linkedThreadFetched = useRef(false);
     const appendedThreadId = useRef<number | null>(null);
@@ -133,6 +134,10 @@ export default function CommentsSection({
             })
             .catch(() => undefined);
     }, [loaded, loadError, threads, linkedThreadParam, targetType, targetId]);
+
+    useEffect(() => {
+        highlightScrolled.current = false;
+    }, [highlightedCommentId]);
 
     useEffect(() => {
         if (!loaded || !highlightedCommentId || highlightScrolled.current) return;
@@ -587,12 +592,20 @@ export default function CommentsSection({
                 )}
             </div>
 
-            <CommentDeleteDialog
-                open={pendingDelete != null}
-                deleting={deleting}
-                onCancel={() => setPendingDelete(null)}
-                onConfirm={confirmDelete}
-            />
+            {pendingDelete && (
+                <DeleteRecordDialog<RecordComment>
+                    open
+                    onOpenChange={(open) => {
+                        if (!open && !deleting) setPendingDelete(null);
+                    }}
+                    selectedIds={new Set([pendingDelete.id])}
+                    selectedItems={[pendingDelete]}
+                    entityLabel={t('entityLabel')}
+                    details={<p className="text-sm text-muted-foreground">{t('deleteConsequence')}</p>}
+                    isDeleting={deleting}
+                    confirmDelete={confirmDelete}
+                />
+            )}
         </div>
     );
 }

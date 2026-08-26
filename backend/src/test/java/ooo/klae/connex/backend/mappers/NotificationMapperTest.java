@@ -797,7 +797,7 @@ class NotificationMapperTest extends AbstractMapperTest {
         notification.setTitle("Task due");
         notification.setBody("Task body");
         notification.setSourceLabel("Send proposal");
-        notification.setActionUrl("/activity/tasks?taskId=" + sourceId);
+        notification.setActionUrl("/activity/tasks?task=" + sourceId);
         notification.setData("{\"taskId\":" + sourceId + "}");
         notification.setDedupeKey("task.due:" + sourceId);
         notification.setTriggeredAt(triggeredAt);

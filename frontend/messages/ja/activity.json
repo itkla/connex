@@ -70,7 +70,12 @@
     "followUp_today": "今日",
     "followUp_tomorrow": "明日",
     "followUp_inThreeDays": "3日後",
-    "followUp_nextWeek": "来週"
+    "followUp_nextWeek": "来週",
+    "triggerAdd": "アクティビティを記録",
+    "toastLinkFailed": "アクティビティを記録しましたが、連絡先を案件に追加できませんでした",
+    "toastFailedLoadLinks": "関連付けできるレコードを読み込めませんでした",
+    "noCompanyForDeals": "この連絡先にはまだ会社が設定されていないため、関連付けられる案件がありません。",
+    "noCompanyForPeople": "この案件にはまだ会社が設定されていないため、関連付けられる連絡先がありません。"
   },
   "ActivityNotes": {
     "title": "メモ",
@@ -112,7 +117,7 @@
     "toastFailedDelete": "メモを削除できませんでした",
     "groupRecord": "レコード別",
     "sortBy": "並び替え",
-    "sortByAria": "ノートを並び替え",
+    "sortByAria": "メモを並び替え",
     "sortUpdated": "更新順",
     "sortCreated": "作成順",
     "sortTitle": "タイトル順",
@@ -120,8 +125,13 @@
     "untitled": "無題",
     "open": "開く",
     "edit": "編集",
-    "actionsAria": "ノートの操作",
-    "showMore": "さらにノートを表示",
+    "actionsAria": "メモの操作",
+    "loading": "メモを読み込み中",
+    "paginationLabel": "メモのページ",
+    "previousPage": "前のメモページ",
+    "nextPage": "次のメモページ",
+    "pageStatus": "{total}ページ中{page}ページ",
+    "showMore": "さらにメモを表示",
     "showingCount": "{total} 件中 {shown} 件を表示"
   },
   "NotesQuickEditSheet": {
@@ -214,6 +224,12 @@
     "queue_unassigned": "未割り当て",
     "queue_allOpen": "未完了すべて",
     "queue_completed": "完了済み",
+    "emptyFirstRunTitle": "タスクはまだありません",
+    "emptyFilteredTitle": "一致するタスクはありません",
+    "emptyQueueBody": "いまこのキューに該当するタスクはありません。ほかのキューには作業が残っているかもしれません。",
+    "emptyQueueShowAllOpen": "未完了すべてを表示",
+    "emptyQueueShowCompleted": "完了済みを表示",
+    "emptyFirstRunBody": "タスクは、連絡先・会社・案件に対して行うフォローアップです。最初の1件を作成すると、キューに表示されます。",
     "emptyFiltered": "検索条件に一致するタスクはありません。",
     "emptyQueue_myOpen": "やることはありません。",
     "emptyQueue_dueToday": "今日が期限のタスクはありません。",
@@ -257,7 +273,12 @@
     "create": "作成",
     "toastDescriptionRequired": "説明は必須です",
     "toastCreated": "タスクを作成しました",
-    "toastFailedCreate": "タスクを作成できませんでした"
+    "toastFailedCreate": "タスクを作成できませんでした",
+    "triggerAdd": "タスクを追加",
+    "toastLinkFailed": "タスクを作成しましたが、連絡先を案件に追加できませんでした",
+    "toastFailedLoadLinks": "関連付けできるレコードを読み込めませんでした",
+    "noCompanyForDeals": "この連絡先にはまだ会社が設定されていないため、関連付けられる案件がありません。",
+    "noCompanyForPeople": "この案件にはまだ会社が設定されていないため、関連付けられる連絡先がありません。"
   },
   "ActivityEditActivitySheet": {
     "title": "アクティビティを編集",
@@ -330,15 +351,14 @@
     "emptyTitle": "タグがまだありません",
     "emptyBody": "タグは連絡先・会社・案件に付けて分類・フィルターできる色分けラベルです。最初のタグを作成しましょう。",
     "createFirst": "最初のタグを作成",
+    "noResultsTitle": "一致するタグはありません",
     "noResults": "「{query}」に一致するタグはありません。",
     "toastHexCopied": "{hex} をコピーしました",
     "toastHexCopyFailed": "色をコピーできませんでした",
     "toastDeleted": "タグ「{name}」を削除しました",
     "toastFailedDelete": "タグを削除できませんでした",
-    "deleteTitle": "このタグを削除しますか？",
-    "deleteBody": "「{name}」が付いているすべての連絡先・会社・案件から削除されます。この操作は取り消せません。",
-    "confirmDelete": "タグを削除",
-    "cancel": "キャンセル"
+    "entityLabel": "タグ",
+    "deleteDetails": "このタグが付いているすべての連絡先・会社・案件からも外れます。"
   },
   "ActivityLibraryTagDialog": {
     "titleCreate": "新規タグ",
@@ -389,6 +409,7 @@
     "taskList": "チェックリスト",
     "taskChecked": "完了したチェックリスト項目",
     "taskUnchecked": "未完了のチェックリスト項目",
+    "unavailableReference": "利用できない参照",
     "blockquote": "引用",
     "codeBlock": "コードブロック",
     "tableInsert": "表を挿入",
@@ -415,18 +436,18 @@
     "imageUnsupportedType": "JPEG・PNG・WebPの画像を使用してください。",
     "imageLoadError": "画像を表示できません",
     "fileTitle": "ファイルをリンク",
-    "fileDescription": "ワークスペース内の既存ファイルを検索し、参照チップを挿入します。ファイル本体はノートに埋め込みません。",
+    "fileDescription": "ワークスペース内の既存ファイルを検索し、参照チップを挿入します。ファイル本体はメモに埋め込みません。",
     "fileSearchLabel": "ファイルを検索",
-    "back": "ノートに戻る",
+    "back": "メモに戻る",
     "saving": "保存中…",
     "saved": "保存しました",
     "saveError": "保存できませんでした",
     "untitled": "無題",
-    "titlePlaceholder": "無題のノート",
+    "titlePlaceholder": "無題のメモ",
     "titleTooLong": "タイトルは{max}文字以内で入力してください。",
     "visibilityPrivate": "非公開",
     "visibilityWorkspace": "ワークスペース",
-    "visibilityAria": "ノートの公開範囲",
+    "visibilityAria": "メモの公開範囲",
     "backlinksTitle": "参照元",
     "slashText": "テキスト",
     "slashTextHint": "通常の段落",
@@ -475,6 +496,17 @@
     "slashPickerRetry": "再試行",
     "slashPickerResults": "{count}件見つかりました"
   },
+  "ActivityNotesReferencePreview": {
+    "memberUnavailable": "利用できないメンバー",
+    "contactUnavailable": "利用できない連絡先",
+    "dealUnavailable": "利用できない案件",
+    "companyUnavailable": "利用できない会社",
+    "value": "金額",
+    "company": "会社",
+    "stage": "ステージ",
+    "status": "ステータス",
+    "expectedClose": "成約予定日"
+  },
   "ActivityTaskDetail": {
     "back": "タスクに戻る",
     "untitled": "無題のタスク",
@@ -497,7 +529,7 @@
   },
   "CapturedEvidence": {
     "title": "プロバイダー取り込みの根拠",
-    "description": "この読み取り専用アクティビティは、実際の取り込みポリシーで許可されたプロバイダーデータから作成されました。",
+    "description": "連携アカウントから、取り込み設定にしたがって自動で記録されました。",
     "capturedBy": "{provider} から取り込み",
     "provider": "プロバイダー",
     "stream": "取り込み元",
@@ -509,7 +541,7 @@
     "sourceId": "プロバイダーのソースID",
     "capturedAt": "取り込み日時",
     "captureAsOf": "根拠の基準日時",
-    "readOnly": "プロバイダーから作成されたアクティビティは Connex で編集・削除できません。"
+    "readOnly": "自動で取り込んだアクティビティは Connex で編集・削除できません。"
   },
   "ActivityAllLayout": {
     "title": "活動記録 / すべて",

@@ -4,7 +4,7 @@ export default function NewDocumentTemplateLoading() {
     return (
         <div className="min-h-full bg-background">
             <div className="sticky top-0 z-20 border-b border-border bg-background/85 backdrop-blur">
-                <div className="mx-auto flex w-full max-w-[100rem] items-center gap-4 px-4 py-3 sm:px-6">
+                <div className="flex w-full items-center gap-4 px-4 py-3 sm:px-6">
                     <Skeleton className="h-8 w-20 rounded-md" />
                     <div className="min-w-0 flex-1">
                         <Skeleton className="h-6 w-56 max-w-full" />
@@ -13,7 +13,7 @@ export default function NewDocumentTemplateLoading() {
                 </div>
             </div>
 
-            <div className="mx-auto grid w-full max-w-[100rem] gap-8 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] lg:gap-10">
+            <div className="grid w-full gap-8 px-4 py-6 sm:px-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] lg:gap-10">
                 <div>
                     <div className="mb-3 flex h-8 items-center px-6">
                         <Skeleton className="h-3 w-24" />

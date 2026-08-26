@@ -13,6 +13,7 @@ function render(content: string, references: NoteReference[] = [], block = true)
                 ActivityNotesEditor: {
                     taskChecked: "Completed checklist item",
                     taskUnchecked: "Incomplete checklist item",
+                    unavailableReference: "Unavailable reference",
                     calloutInfo: "Information callout",
                     calloutSuccess: "Success callout",
                     calloutWarning: "Warning callout",
@@ -46,6 +47,8 @@ describe("NoteContent Markdown rendering", () => {
         expect(html).toContain("<del>stale</del>");
         expect(html).toContain('type="checkbox"');
         expect(html).toContain('aria-label="Completed checklist item"');
+        expect(html).toContain('class="contains-task-list"');
+        expect(html).toContain('class="task-list-item"');
         expect(html).toContain("<table>");
         expect(html).not.toContain("<script");
         expect(html).not.toContain("alert");
@@ -63,11 +66,38 @@ describe("NoteContent Markdown rendering", () => {
         expect(html).not.toContain("Forged");
         expect(html).toContain("Malformed");
         expect(html.match(/records\/companies\/7/g)).toHaveLength(1);
-        expect(html).toContain("Private");
-        expect(html).toContain("@Missing member");
+        expect(html.match(/Unavailable reference/g)).toHaveLength(2);
+        expect(html).not.toContain("Private");
+        expect(html).not.toContain("Missing member");
         expect(html).not.toContain("note:9");
         expect(html).not.toContain("/activity/notes/9");
         expect(html).not.toContain("/users/11");
+    });
+
+    it("resolves references inside rich structure without nesting interactive links", () => {
+        const references: NoteReference[] = [{ type: "company", id: 7, label: "Server Acme" }];
+        const html = render([
+            "**[Forged](company:7)**",
+            "",
+            "| Account |",
+            "| --- |",
+            "| [Forged again](company:7) |",
+        ].join("\n"), references);
+
+        expect(html).toContain("<strong>");
+        expect(html).toContain("<table>");
+        expect(html.match(/href="\/records\/companies\/7"/g)).toHaveLength(2);
+        expect(html.match(/<a /g)).toHaveLength(2);
+        expect(html).not.toContain("Forged");
+        expect(html.match(/Server Acme/g)).toHaveLength(2);
+    });
+
+    it("masks unresolved reference definitions without exposing their frozen labels", () => {
+        const html = render("[Private account][hidden]\n\n[hidden]: note:9");
+
+        expect(html).toContain("Unavailable reference");
+        expect(html).not.toContain("Private account");
+        expect(html).not.toContain("note:9");
     });
 
     it("rejects executable links and unsafe images", () => {
@@ -78,12 +108,18 @@ describe("NoteContent Markdown rendering", () => {
             "",
             "![Insecure](http://example.com/image.png)",
             "",
+            "[Protocol relative](//example.com/private)",
+            "",
+            "![Protocol relative](//example.com/image.png)",
+            "",
             "![No description](https://example.com/image.png)",
         ].join("\n"));
 
         expect(html).not.toContain("javascript:");
         expect(html).not.toContain("data:image");
         expect(html).not.toContain("http://example.com");
+        expect(html).not.toContain('href="//example.com/private"');
+        expect(html).not.toContain('src="//example.com/image.png"');
         expect(html).toContain('src="https://example.com/image.png"');
         expect(html).toContain('alt="No description"');
     });

@@ -10,9 +10,11 @@ import {
     ArrowTrendingUpIcon,
     BriefcaseIcon,
     ChartBarIcon,
+    DocumentCheckIcon,
     DocumentDuplicateIcon,
     EllipsisHorizontalIcon,
     FlagIcon,
+    FunnelIcon,
     HeartIcon,
     PencilSquareIcon,
     PresentationChartLineIcon,
@@ -23,29 +25,22 @@ import {
 } from '@heroicons/react/24/outline';
 
 import Rise from '@/app/components/motion/Rise';
-import { PageShell } from '@/app/components/PageShell';
+import { PageHeader } from '@/app/components/PageHeader';
 import AskConnexComposer from '@/app/components/reports/AskConnexComposer';
 import {
     cloneReportConfig,
     groupReportTemplates,
     reportTemplateMeasures,
 } from '@/app/components/reports/reportConfig';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { createReport, deleteReport } from '@/app/lib/api';
 import { canDeleteOwnedRecord } from '@/app/lib/deletionPolicy';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastSuccess } from '@/app/lib/toast';
 import type { ReportDefinition, ReportTemplate } from '@/app/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-    Dialog,
-    DialogClose,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
+import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -55,10 +50,12 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 const TEMPLATE_ICONS: Record<string, ComponentType<{ className?: string }>> = {
+    'lead-lifecycle': FunnelIcon,
     'sales-performance': ChartBarIcon,
     'pipeline-health': PresentationChartLineIcon,
     'forecasting': ArrowTrendingUpIcon,
     'quota-attainment': FlagIcon,
+    'commercial-documents': DocumentCheckIcon,
     'relationship-coverage': HeartIcon,
     'relationship-health': ShieldExclamationIcon,
     'network-warm-intros': ShareIcon,
@@ -82,6 +79,7 @@ export default function ReportsBoard({
     composerAvailable: boolean;
 }) {
     const t = useTranslations('Reports');
+    const showApiError = useApiErrorToast('Reports');
     const locale = useLocale();
     const router = useRouter();
     const { activeWorkspace } = useWorkspace();
@@ -117,9 +115,9 @@ export default function ReportsBoard({
                     widgets: config.widgets.map((widget) => ({ ...widget, title: t(`measure.${widget.measure}`) })),
                 },
             });
-            router.push(`/overview/reports/${created.id}`);
+            router.push(`/insights/reports/${created.id}`);
         } catch (error) {
-            toastError(error instanceof Error ? error.message : t('common.requestFailed'));
+            showApiError(error, 'landing.createFailed');
             setCreatingKey(null);
         }
     };
@@ -140,7 +138,7 @@ export default function ReportsBoard({
             toastSuccess(t('landing.duplicated', { name: report.name }));
             router.refresh();
         } catch (error) {
-            toastError(error instanceof Error ? error.message : t('common.requestFailed'));
+            showApiError(error, 'landing.duplicateFailed');
         } finally {
             setDuplicatingId(null);
         }
@@ -156,7 +154,7 @@ export default function ReportsBoard({
             setDeleting(null);
             router.refresh();
         } catch (error) {
-            toastError(error instanceof Error ? error.message : t('common.requestFailed'));
+            showApiError(error, 'landing.deleteFailed');
         } finally {
             setBusy(false);
         }
@@ -175,7 +173,7 @@ export default function ReportsBoard({
                 </div>
                 {canCreateReports ? (
                     <Button asChild variant="outline">
-                        <Link href="/overview/reports/new">
+                        <Link href="/insights/reports/new">
                             <PencilSquareIcon />
                             {t('landing.blankBuilder')}
                         </Link>
@@ -260,22 +258,15 @@ export default function ReportsBoard({
 
     return (
         <>
-            <PageShell tier="wide">
-                <Rise>
-                    <header className="flex flex-wrap items-end justify-between gap-5">
-                        <div>
-                            <p className="mb-2 text-xs font-medium uppercase tracking-[0.12em] text-brand-dark">
-                                {t('landing.eyebrow')}
-                            </p>
-                            <h1 className="text-4xl font-extrabold tracking-tight text-foreground">{t('landing.title')}</h1>
-                            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                                {t('landing.subtitle')}
-                            </p>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
+            <Rise>
+                <PageHeader
+                    title={t('landing.title')}
+                    description={t('landing.subtitle')}
+                    actions={(
+                        <>
                             {canReadGoals ? (
                                 <Button asChild variant="outline">
-                                    <Link href="/overview/reports/goals">
+                                    <Link href="/insights/reports/goals">
                                         <FlagIcon />
                                         {t('landing.manageGoals')}
                                     </Link>
@@ -283,26 +274,27 @@ export default function ReportsBoard({
                             ) : null}
                             {!composerAvailable && canCreateReports ? (
                                 <Button asChild variant="brand">
-                                    <Link href="/overview/reports/new">
+                                    <Link href="/insights/reports/new">
                                         <PencilSquareIcon />
                                         {t('landing.newReport')}
                                     </Link>
                                 </Button>
                             ) : null}
-                        </div>
-                    </header>
+                        </>
+                    )}
+                />
+            </Rise>
+
+            {composerAvailable && canCreateReports ? (
+                <Rise delay={0.06}>
+                    <AskConnexComposer />
                 </Rise>
+            ) : null}
 
-                {composerAvailable && canCreateReports ? (
-                    <Rise delay={0.06}>
-                        <AskConnexComposer />
-                    </Rise>
-                ) : null}
-
-                {hasReports ? (
-                    <>
-                        <Rise delay={composerAvailable ? 0.12 : 0.06}>
-                            <section aria-labelledby="your-reports-title">
+            {hasReports ? (
+                <>
+                    <Rise delay={composerAvailable ? 0.12 : 0.06}>
+                        <section aria-labelledby="your-reports-title">
                                 <div className="mb-4">
                                     <h2 id="your-reports-title" className="text-xl font-bold tracking-tight text-foreground">
                                         {t('landing.yourReportsTitle')}
@@ -322,7 +314,7 @@ export default function ReportsBoard({
                                                     <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-light/60 text-brand-dark">
                                                         <Icon className="size-5" />
                                                     </div>
-                                                    <Link href={`/overview/reports/${report.id}`} className="min-w-0 flex-1">
+                                                    <Link href={`/insights/reports/${report.id}`} className="min-w-0 flex-1">
                                                         <div className="flex min-w-0 items-center gap-2">
                                                             <p className="min-w-0 truncate font-medium text-foreground group-hover:text-brand-dark">
                                                                 {report.name}
@@ -348,10 +340,10 @@ export default function ReportsBoard({
                                                         </DropdownMenuTrigger>
                                                         <DropdownMenuContent align="end">
                                                             <DropdownMenuItem asChild>
-                                                                <Link href={`/overview/reports/${report.id}`}>{t('landing.open')}</Link>
+                                                                <Link href={`/insights/reports/${report.id}`}>{t('landing.open')}</Link>
                                                             </DropdownMenuItem>
                                                             <DropdownMenuItem asChild>
-                                                                <Link href={`/overview/reports/${report.id}/edit`}>{t('common.edit')}</Link>
+                                                                <Link href={`/insights/reports/${report.id}/edit`}>{t('common.edit')}</Link>
                                                             </DropdownMenuItem>
                                                             <DropdownMenuItem
                                                                 onSelect={() => duplicateReport(report)}
@@ -377,35 +369,29 @@ export default function ReportsBoard({
                                         })}
                                     </ul>
                                 </div>
-                            </section>
-                        </Rise>
-                        <Rise delay={composerAvailable ? 0.18 : 0.12}>
-                            {progressiveStartSection}
-                        </Rise>
-                    </>
-                ) : (
-                    <Rise delay={composerAvailable ? 0.12 : 0.06}>
+                        </section>
+                    </Rise>
+                    <Rise delay={composerAvailable ? 0.18 : 0.12}>
                         {progressiveStartSection}
                     </Rise>
-                )}
-            </PageShell>
+                </>
+            ) : (
+                <Rise delay={composerAvailable ? 0.12 : 0.06}>
+                    {progressiveStartSection}
+                </Rise>
+            )}
 
-            <Dialog open={deleting !== null} onOpenChange={(open) => !open && setDeleting(null)}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>{t('landing.deleteTitle')}</DialogTitle>
-                        <DialogDescription>{t('landing.deleteBody', { name: deleting?.name ?? '' })}</DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button variant="outline" disabled={busy}>{t('common.cancel')}</Button>
-                        </DialogClose>
-                        <Button variant="destructive" onClick={confirmDelete} disabled={busy}>
-                            {busy ? t('common.deleting') : t('common.delete')}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            <DeleteRecordDialog
+                open={deleting !== null}
+                onOpenChange={(open) => !open && setDeleting(null)}
+                selectedIds={new Set(deleting ? [deleting.id] : [])}
+                selectedItems={deleting ? [deleting] : []}
+                entityLabel={t('landing.entityLabel')}
+                getDisplayName={(report) => report.name}
+                details={<p className="text-sm text-muted-foreground">{t('landing.deleteDetails')}</p>}
+                isDeleting={busy}
+                confirmDelete={confirmDelete}
+            />
         </>
     );
 }

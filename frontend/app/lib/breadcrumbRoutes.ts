@@ -1,9 +1,20 @@
+import { CONNECTED_ACCOUNTS_ROUTE } from "@/app/lib/connectedAccountsSections";
 import type { NavAccess } from "@/app/lib/navAccess";
 import type { RecordCollection } from "@/app/lib/recordReturnPath";
+import { MOVED_ROUTE_PREFIXES } from "@/app/lib/routeMoves";
+import { settingsRouteServed } from "@/app/lib/settingsEntryPoints";
+import {
+    SETTINGS_ENTRIES,
+    SETTINGS_GROUPS,
+    SETTINGS_HOME_ROUTE,
+    type SettingsGroup,
+} from "@/app/lib/settingsManifest";
 import { isWorkflowRecipeKey } from "@/app/lib/workflowOperations";
 
+/** The manifest's groups at their declared type, so a group without gap sections is still one. */
+const MANIFEST_GROUPS: readonly SettingsGroup[] = SETTINGS_GROUPS;
+
 export type BreadcrumbMessageKey =
-    | "account"
     | "activities"
     | "aiProvider"
     | "allowedDomains"
@@ -14,11 +25,9 @@ export type BreadcrumbMessageKey =
     | "campaigns"
     | "captureReviews"
     | "companies"
-    | "connections"
     | "contacts"
     | "customFields"
     | "dashboard"
-    | "data"
     | "dataRequests"
     | "deals"
     | "delivery"
@@ -27,10 +36,8 @@ export type BreadcrumbMessageKey =
     | "edit"
     | "email"
     | "files"
-    | "general"
     | "goals"
     | "introductions"
-    | "invites"
     | "map"
     | "members"
     | "newReport"
@@ -38,17 +45,22 @@ export type BreadcrumbMessageKey =
     | "notifications"
     | "operations"
     | "organization"
-    | "overview"
+    | "peopleAccess"
+    | "communications"
+    | "crmConfiguration"
+    | "auditDiagnostics"
+    | "identityAdministrators"
+    | "aiDataGovernance"
     | "pipelines"
     | "products"
-    | "profile"
+    | "myWork"
+    | "qualification"
     | "radar"
     | "recipes"
     | "reports"
     | "roles"
     | "run"
     | "search"
-    | "security"
     | "settings"
     | "singleSignOn"
     | "snapshot"
@@ -77,6 +89,14 @@ export type BreadcrumbRouteContext = {
     navAccess: NavAccess;
     dynamicLabels: ReadonlyMap<string, string>;
     translate: (key: BreadcrumbMessageKey) => string;
+    /**
+     * Resolves an absolute message key, namespace included.
+     *
+     * The canonical settings destinations are named by the committed settings manifest rather than
+     * by this registry's own closed key union, so their crumbs are translated through here. Every
+     * other route keeps {@link translate}.
+     */
+    translateMessage: (key: string) => string;
 };
 
 export type BreadcrumbDisplayMode = "desktop" | "mobile";
@@ -92,12 +112,12 @@ type StaticWorkspaceRoute = {
 
 const STATIC_WORKSPACE_ROUTES: Readonly<Record<string, StaticWorkspaceRoute>> = {
     "/dashboard": { key: "dashboard" },
-    "/radar": { key: "radar" },
-    "/overview/calendar": { key: "calendar" },
-    "/overview/map": { key: "map" },
-    "/overview/introductions": { key: "introductions" },
-    "/overview/analytics": { key: "analytics" },
-    "/overview/reports": { key: "reports" },
+    "/intelligence/radar": { key: "radar" },
+    "/activity/calendar": { key: "calendar" },
+    "/intelligence/map": { key: "map" },
+    "/intelligence/introductions": { key: "introductions" },
+    "/insights/analytics": { key: "analytics" },
+    "/insights/reports": { key: "reports" },
     "/records/companies": { key: "companies" },
     "/records/contacts": { key: "contacts" },
     "/records/deals": { key: "deals" },
@@ -113,33 +133,41 @@ const STATIC_WORKSPACE_ROUTES: Readonly<Record<string, StaticWorkspaceRoute>> = 
     "/library/files": { key: "files" },
     "/notifications": { key: "notifications" },
     "/search": { key: "search" },
-    "/me": { key: "profile" },
+    "/me": { key: "myWork" },
     "/users": { key: "users" },
     "/workflows": { key: "workflows", access: "workflows" },
     "/admin/logs": { key: "auditLog", access: "auditLog" },
 };
 
 const SETTINGS_ROUTES: Readonly<Record<string, StaticWorkspaceRoute>> = {
-    "/settings/general": { key: "general", access: "diagnostics" },
     "/settings/members": { key: "members" },
     "/settings/roles": { key: "roles" },
     "/settings/custom-fields": { key: "customFields" },
-    "/settings/data": { key: "data" },
+    "/settings/qualification": { key: "qualification" },
     "/settings/email": { key: "email" },
     "/settings/delivery": { key: "delivery" },
     "/settings/diagnostics": { key: "diagnostics", access: "diagnostics" },
 };
 
-const ACCOUNT_ROUTES: Readonly<Record<string, BreadcrumbMessageKey>> = {
-    "/account/profile": "profile",
-    "/account/security": "security",
-    "/account/connections": "connections",
-    "/account/notifications": "notifications",
-    "/account/invites": "invites",
-};
+/**
+ * The canonical settings destinations, indexed by the route each scope group owns (#1340 PR 7).
+ *
+ * Their trails are derived rather than tabulated: the group is the unit of canonical ownership, so
+ * the crumb a reader lands on is the group's own name from the manifest, and its scope decides
+ * whether the trail is rooted in the workspace or in the organization. A group whose route no page
+ * serves is skipped, which leaves the legacy tables below to answer for the addresses that still
+ * do — the same served-or-not fact the settings navigation and the entry points already read.
+ *
+ * The legacy `/settings/*` and `/organization/*` rows keep their shipped trails until their
+ * redirects land; nothing about them moves here.
+ */
+const CANONICAL_SETTINGS_GROUPS: ReadonlyMap<string, SettingsGroup> = new Map(
+    MANIFEST_GROUPS
+        .filter((group) => group.titleKey !== null && settingsRouteServed(group.route))
+        .map((group) => [group.route, group]),
+);
 
 const ORGANIZATION_ROUTES: Readonly<Record<string, BreadcrumbMessageKey>> = {
-    "/organization/overview": "overview",
     "/organization/members": "members",
     "/organization/allowed-domains": "allowedDomains",
     "/organization/sso": "singleSignOn",
@@ -153,41 +181,74 @@ const ORGANIZATION_ROUTES: Readonly<Record<string, BreadcrumbMessageKey>> = {
 export const BREADCRUMB_STATIC_ROUTE_PATHS = [...new Set([
     ...Object.keys(STATIC_WORKSPACE_ROUTES),
     ...Object.keys(SETTINGS_ROUTES),
-    ...Object.keys(ACCOUNT_ROUTES),
+    ...CANONICAL_SETTINGS_GROUPS.keys(),
     ...Object.keys(ORGANIZATION_ROUTES),
     "/account/connections/reviews",
-    "/overview/reports/goals",
-    "/overview/reports/new",
+    "/insights/reports/goals",
+    "/insights/reports/new",
     "/workflows/operations",
     "/workflows/recipes",
 ])].sort();
 
-const REDIRECT_ROUTES = new Set([
-    "/account",
-    "/organization",
-    "/settings",
-    "/settings/membership",
-    "/settings/notifications",
-    "/settings/rules",
-    "/settings/security",
-    "/settings/sso",
-]);
+/**
+ * The one resolver redirect that can also render.
+ *
+ * `/account/connections/reviews` forwards in every ordinary case, but when the deployment has no
+ * capture capability at all it stops and explains that in place instead. A page that can render
+ * needs a trail, so this address stays classified as a shell rather than following the manifest
+ * into {@link REDIRECT_ROUTES}.
+ */
+const RENDERING_RESOLVER_REDIRECTS = new Set(["/account/connections/reviews"]);
+
+/**
+ * The addresses that forward instead of rendering, read from the settings manifest.
+ *
+ * Hand-listing these was workable while there were seven; #1340 PR 8 retired twenty more, and a
+ * list maintained beside the manifest would drift the first time a destination moved — leaving a
+ * redirecting address quietly claiming a breadcrumb trail nobody would ever see. The manifest
+ * already records which addresses forward, so this reads that rather than restating it.
+ *
+ * Parameterized routes are excluded because they are patterns rather than addresses;
+ * `/settings/workflows/[legacyRuleId]` is matched by {@link LEGACY_WORKFLOW_REDIRECT} instead.
+ */
+const REDIRECT_ROUTES = new Set<string>(
+    SETTINGS_ENTRIES.filter(
+        (entry) =>
+            entry.redirectsTo !== null
+            && !entry.currentRoute.includes("[")
+            && !RENDERING_RESOLVER_REDIRECTS.has(entry.currentRoute),
+    ).map((entry) => entry.currentRoute),
+);
+
+/**
+ * Whether a pathname is a retired address that the D13 restructure moved (#1323 WS4).
+ *
+ * The retired prefixes still resolve — every one of them is a permanent redirect — so without this
+ * they would fall through to the tables below and briefly paint a trail for a page that is already
+ * forwarding. Classifying them as redirects keeps the shell quiet on the way through.
+ */
+function isMovedAddress(pathname: string): boolean {
+    return MOVED_ROUTE_PREFIXES.some(
+        (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+    );
+}
 
 const OWNED_ROUTE_PATTERNS = [
     /^\/activity\/notes\/new$/,
+    /^\/ask-connex(?:\/[1-9]\d*)?$/,
     /^\/library\/documents\/(?:new|[1-9]\d*)$/,
     /^\/records\/deals\/[1-9]\d*\/documents\/[1-9]\d*\/print$/,
     /^\/workflows\/(?:new|[1-9]\d*)$/,
 ] as const;
 
 const LEGACY_WORKFLOW_REDIRECT = /^\/settings\/workflows\/[1-9]\d*$/;
-const REPORT_SNAPSHOTS_REDIRECT = /^\/overview\/reports\/[1-9]\d*\/snapshots$/;
+const REPORT_SNAPSHOTS_REDIRECT = /^\/insights\/reports\/[1-9]\d*\/snapshots$/;
 const DYNAMIC_RECORD_ROUTE = /^\/(records\/(contacts|companies|deals)|activity\/(tasks|notes)|activity\/activities)\/([1-9]\d*)$/;
 const USER_ROUTE = /^\/users\/([1-9]\d*)$/;
 const CAMPAIGN_ROUTE = /^\/marketing\/campaigns\/([1-9]\d*)$/;
-const REPORT_ROUTE = /^\/overview\/reports\/([1-9]\d*)$/;
-const REPORT_EDIT_ROUTE = /^\/overview\/reports\/([1-9]\d*)\/edit$/;
-const REPORT_SNAPSHOT_ROUTE = /^\/overview\/reports\/([1-9]\d*)\/snapshots\/([1-9]\d*)$/;
+const REPORT_ROUTE = /^\/insights\/reports\/([1-9]\d*)$/;
+const REPORT_EDIT_ROUTE = /^\/insights\/reports\/([1-9]\d*)\/edit$/;
+const REPORT_SNAPSHOT_ROUTE = /^\/insights\/reports\/([1-9]\d*)\/snapshots\/([1-9]\d*)$/;
 const WORKFLOW_RUN_ROUTE = /^\/workflows\/([1-9]\d*)\/runs\/(?:canonical|legacy)-[1-9]\d*$/;
 const WORKFLOW_RECIPE_ROUTE = /^\/workflows\/recipes\/([^/]+)$/;
 
@@ -285,6 +346,55 @@ function shell(crumbs: BreadcrumbCrumb[]): BreadcrumbResolution {
     return { kind: "shell", crumbs };
 }
 
+/**
+ * The crumb for the Connected accounts destination, as a parent rather than as the current page.
+ *
+ * Its name is the manifest group's, resolved the way {@link canonicalSettingsTrail} resolves every
+ * other canonical destination's, rather than a `CommonBreadcrumb` string of its own. The
+ * capture-review resolver is the only address that needs this destination as a middle crumb, and a
+ * second copy of its name would be one more place for the two to drift.
+ */
+function connectedAccountsCrumb(context: BreadcrumbRouteContext): BreadcrumbCrumb {
+    const group = MANIFEST_GROUPS.find(
+        (candidate) => candidate.id === "personal.connected-accounts",
+    );
+    return literalCrumb(
+        group?.route ?? CONNECTED_ACCOUNTS_ROUTE,
+        context.translateMessage(group?.titleKey ?? ""),
+    );
+}
+
+/**
+ * The trail for a canonical settings destination, or null when the reader may not be there.
+ *
+ * The scope decides the root, exhaustively: an organization destination is rooted in the
+ * organization and refuses a reader holding no role there, exactly as the legacy organization
+ * routes do; a workspace destination is rooted in the active workspace; a personal one is rooted in
+ * Settings alone, because nothing about it belongs to the workspace the reader happens to be in.
+ */
+function canonicalSettingsTrail(
+    pathname: string,
+    group: SettingsGroup,
+    context: BreadcrumbRouteContext,
+): BreadcrumbResolution | null {
+    const current = literalCrumb(pathname, context.translateMessage(group.titleKey ?? ""), true);
+    const settings = translatedCrumb(SETTINGS_HOME_ROUTE, "settings", context);
+    switch (group.scope) {
+        case "organization":
+            return context.organizationAccessible
+                ? shell([organizationRoot(context), settings, current])
+                : null;
+        case "workspace":
+            return shell(withWorkspace(context, [settings, current]));
+        case "personal":
+            return shell([settings, current]);
+        default: {
+            const unreachable: never = group.scope;
+            return unreachable;
+        }
+    }
+}
+
 function empty(kind: Exclude<BreadcrumbResolution["kind"], "shell">): BreadcrumbResolution {
     return { kind, crumbs: [] };
 }
@@ -297,17 +407,22 @@ export function resolveBreadcrumbRoute(
     if (!pathname.startsWith("/") || pathname.includes("?") || pathname.includes("#")) {
         return empty("unknown");
     }
-    if (REDIRECT_ROUTES.has(pathname) || LEGACY_WORKFLOW_REDIRECT.test(pathname) || REPORT_SNAPSHOTS_REDIRECT.test(pathname)) {
+    if (
+        REDIRECT_ROUTES.has(pathname)
+        || LEGACY_WORKFLOW_REDIRECT.test(pathname)
+        || REPORT_SNAPSHOTS_REDIRECT.test(pathname)
+        || isMovedAddress(pathname)
+    ) {
         return empty("redirect");
     }
     if ((pathname === "/workflows" || pathname.startsWith("/workflows/")) && !context.navAccess.workflows) {
         return empty("denied");
     }
     if (OWNED_ROUTE_PATTERNS.some((pattern) => pattern.test(pathname))) return empty("owned");
-    if (pathname === "/overview/reports/goals") {
+    if (pathname === "/insights/reports/goals") {
         if (!context.navAccess.goals) return empty("denied");
         return shell(withWorkspace(context, [
-            translatedCrumb("/overview/reports", "reports", context),
+            translatedCrumb("/insights/reports", "reports", context),
             translatedCrumb(pathname, "goals", context, true),
         ]));
     }
@@ -323,6 +438,19 @@ export function resolveBreadcrumbRoute(
         return shell(withWorkspace(context, [current]));
     }
 
+    if (pathname === SETTINGS_HOME_ROUTE) {
+        return shell(withWorkspace(context, [
+            translatedCrumb(SETTINGS_HOME_ROUTE, "settings", context, true),
+        ]));
+    }
+
+    const canonicalGroup = CANONICAL_SETTINGS_GROUPS.get(pathname);
+    if (canonicalGroup) {
+        const trail = canonicalSettingsTrail(pathname, canonicalGroup, context);
+        if (trail !== null) return trail;
+        return empty("denied");
+    }
+
     const settingsRoute = SETTINGS_ROUTES[pathname];
     if (settingsRoute) {
         if (settingsRoute.access && !context.navAccess[settingsRoute.access]) return empty("denied");
@@ -332,18 +460,11 @@ export function resolveBreadcrumbRoute(
         ]));
     }
 
-    const accountRoute = ACCOUNT_ROUTES[pathname];
-    if (accountRoute) {
-        return shell([
-            translatedCrumb("/account", "account", context),
-            translatedCrumb(pathname, accountRoute, context, true),
-        ]);
-    }
     if (pathname === "/account/connections/reviews") {
         if (context.navAccess.captureReviews === "disabled") return empty("denied");
         return shell([
-            translatedCrumb("/account", "account", context),
-            translatedCrumb("/account/connections", "connections", context),
+            translatedCrumb(SETTINGS_HOME_ROUTE, "settings", context),
+            connectedAccountsCrumb(context),
             translatedCrumb(pathname, "captureReviews", context, true),
         ]);
     }
@@ -395,17 +516,17 @@ export function resolveBreadcrumbRoute(
     if (reportMatch) {
         const report = dynamicCrumb(pathname, context, true);
         return shell(withWorkspace(context, [
-            translatedCrumb("/overview/reports", "reports", context),
+            translatedCrumb("/insights/reports", "reports", context),
             ...(report ? [report] : []),
         ]));
     }
 
     const reportEditMatch = REPORT_EDIT_ROUTE.exec(pathname);
     if (reportEditMatch) {
-        const reportPath = `/overview/reports/${reportEditMatch[1]}`;
+        const reportPath = `/insights/reports/${reportEditMatch[1]}`;
         const report = dynamicCrumb(reportPath, context, false);
         return shell(withWorkspace(context, [
-            translatedCrumb("/overview/reports", "reports", context),
+            translatedCrumb("/insights/reports", "reports", context),
             ...(report ? [report] : []),
             translatedCrumb(pathname, "edit", context, true),
         ]));
@@ -413,10 +534,10 @@ export function resolveBreadcrumbRoute(
 
     const reportSnapshotMatch = REPORT_SNAPSHOT_ROUTE.exec(pathname);
     if (reportSnapshotMatch) {
-        const reportPath = `/overview/reports/${reportSnapshotMatch[1]}`;
+        const reportPath = `/insights/reports/${reportSnapshotMatch[1]}`;
         const report = dynamicCrumb(reportPath, context, false);
         return shell(withWorkspace(context, [
-            translatedCrumb("/overview/reports", "reports", context),
+            translatedCrumb("/insights/reports", "reports", context),
             ...(report ? [report] : []),
             translatedCrumb(pathname, "snapshot", context, true),
         ]));
@@ -456,9 +577,9 @@ export function resolveBreadcrumbRoute(
         ]));
     }
 
-    if (pathname === "/overview/reports/new") {
+    if (pathname === "/insights/reports/new") {
         return shell(withWorkspace(context, [
-            translatedCrumb("/overview/reports", "reports", context),
+            translatedCrumb("/insights/reports", "reports", context),
             translatedCrumb(pathname, "newReport", context, true),
         ]));
     }

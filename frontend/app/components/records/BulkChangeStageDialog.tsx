@@ -26,8 +26,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { DialogStatusCover, resolveDialogStatus } from '@/components/ui/dialog-status-cover';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { notifyBulkResult, type BulkToastMessages } from '@/app/lib/bulkToast';
-import { toastError } from '@/app/lib/toast';
 import { type BulkOperationResult, type Stage } from '@/app/lib/types';
 
 type Props = {
@@ -48,6 +48,7 @@ type Props = {
  */
 export default function BulkChangeStageDialog({ open, onOpenChange, count, stages, mixedPipelines, messages, onApply, onSuccess }: Props) {
     const t = useTranslations('RecordsBulkStageDialog');
+    const showApiError = useApiErrorToast('RecordsBulkStageDialog');
     const [selected, setSelected] = useState<Stage | null>(null);
     const [isSaving, setIsSaving] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
@@ -70,7 +71,7 @@ export default function BulkChangeStageDialog({ open, onOpenChange, count, stage
                 setTimeout(() => { setSucceeded(false); setSelected(null); onOpenChange(false); }, 900);
             }
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('toastFailed'));
+            showApiError(err, 'toastFailed');
         } finally {
             setIsSaving(false);
         }

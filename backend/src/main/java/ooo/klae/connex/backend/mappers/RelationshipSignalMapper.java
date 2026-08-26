@@ -27,6 +27,23 @@ public interface RelationshipSignalMapper {
             @Param("workspaceId") int workspaceId,
             @Param("userId") int userId);
 
+    /**
+     * The actor's unresolved signals for exactly one subject record in the workspace, ordered the
+     * same way as the whole feed so a record-scoped read is a prefix-equivalent narrowing rather
+     * than a second ranking.
+     *
+     * @param workspaceId owning workspace
+     * @param userId actor whose disposition state is joined
+     * @param subjectType subject record type
+     * @param subjectId subject record id
+     * @return the subject's active signals
+     */
+    List<RelationshipSignal> findActiveForActorBySubject(
+            @Param("workspaceId") int workspaceId,
+            @Param("userId") int userId,
+            @Param("subjectType") String subjectType,
+            @Param("subjectId") int subjectId);
+
     RelationshipSignal getActiveForActor(
             @Param("workspaceId") int workspaceId,
             @Param("signalId") long signalId,

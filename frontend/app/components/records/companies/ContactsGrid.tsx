@@ -2,14 +2,16 @@
 
 import { type Contact, type Company, type Tag } from "@/app/lib/types";
 import ContactCard from "@/app/components/records/contacts/ContactCard";
-import { PlusIcon } from "@heroicons/react/24/outline";
+import { EmptyState } from "@/app/components/EmptyState";
+import { Button } from "@/components/ui/button";
+import { PlusIcon, UsersIcon } from "@heroicons/react/24/outline";
 
 import NewContactDialog from "@/app/components/records/contacts/NewContactDialog";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { type BusinessCardImportDraft, CreateContactPayload } from "@/app/lib/types";
 import { createContact, importBusinessCard, isFieldError, uploadContactPicture } from "@/app/lib/api";
-import { toast } from "sonner";
+import { toastError, toastSuccess } from "@/app/lib/toast";
 import { useTranslations } from "next-intl";
 
 function emptyContactPayload(companyId: number): CreateContactPayload {
@@ -74,7 +76,18 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
             </div>
             {contacts.length === 0 ? (
                 <div className="overflow-hidden rounded-2xl bg-muted ring-1 ring-border">
-                    <p className="px-6 py-6 text-sm text-muted-foreground">{t('noContacts')}</p>
+                    <EmptyState
+                        variant="inline"
+                        icon={UsersIcon}
+                        title={t('noContacts')}
+                        body={t('noContactsBody')}
+                        action={
+                            <Button variant="brand" onClick={openNewContactDialog}>
+                                <PlusIcon strokeWidth={2.5} className="size-4" />
+                                {t('newContact')}
+                            </Button>
+                        }
+                    />
                 </div>
             ) : (
                 <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -144,7 +157,7 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                                 finalized = true;
                                 setNewContactPayload(emptyContactPayload(company.id));
                                 setImageFile(null);
-                                toast.success(t(reusedContact ? 'toastCardAttached' : 'toastContactCreated'));
+                                toastSuccess(t(reusedContact ? 'toastCardAttached' : 'toastContactCreated'));
                                 setCreationSucceeded(true);
                                 invalidatePendingClose();
                                 const closeGeneration = closeGenerationRef.current;
@@ -161,7 +174,7 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                         if (isFieldError(error) || businessCard) {
                             throw error;
                         }
-                        toast.error(t('toastCreateContactFailed'));
+                        toastError(t('toastCreateContactFailed'));
                     } finally {
                         if (isCurrent()) setIsCreating(false);
                     }

@@ -11,19 +11,12 @@ import {
 } from '@heroicons/react/24/outline';
 
 import GoalDialog from '@/app/components/reports/GoalDialog';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { createGoal, deleteGoal, updateGoal } from '@/app/lib/api';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastSuccess } from '@/app/lib/toast';
 import type { ReportGoal, ReportGoalInput, WorkspaceMember } from '@/app/lib/types';
 import { Button } from '@/components/ui/button';
-import {
-    Dialog,
-    DialogClose,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
+import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 
 type GoalsBoardProps = {
     initialGoals: ReportGoal[];
@@ -42,6 +35,7 @@ export default function GoalsBoard({
     ownersFailed,
 }: GoalsBoardProps) {
     const t = useTranslations('Reports');
+    const showApiError = useApiErrorToast('Reports');
     const locale = useLocale();
     const router = useRouter();
     const [goals, setGoals] = useState(initialGoals);
@@ -74,7 +68,7 @@ export default function GoalsBoard({
             }
             router.refresh();
         } catch (error) {
-            toastError(error instanceof Error ? error.message : t('common.requestFailed'));
+            showApiError(error, 'goals.saveFailed');
             throw error;
         }
     };
@@ -89,15 +83,15 @@ export default function GoalsBoard({
             setDeleting(null);
             router.refresh();
         } catch (error) {
-            toastError(error instanceof Error ? error.message : t('common.requestFailed'));
+            showApiError(error, 'goals.deleteFailed');
         } finally {
             setDeleteBusy(false);
         }
     };
 
     return (
-        <div className="min-h-full bg-background px-2 pb-12 pt-8">
-            <div className="mx-auto flex w-full max-w-[100rem] flex-col gap-8">
+        <div className="min-h-full bg-background px-2 pb-12 pt-8 2xl:px-6">
+            <div className="flex w-full flex-col gap-8">
                 <header className="flex flex-wrap items-end justify-between gap-5">
                     <div>
                         <p className="mb-2 text-xs font-medium uppercase tracking-[0.12em] text-brand-dark">
@@ -227,24 +221,20 @@ export default function GoalsBoard({
                 />
             ) : null}
 
-            <Dialog open={deleting !== null} onOpenChange={(open) => !open && setDeleting(null)}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>{t('goals.deleteTitle')}</DialogTitle>
-                        <DialogDescription>
-                            {t('goals.deleteBody', { scope: deleting?.ownerLabel ?? t('goals.workspaceWide') })}
-                        </DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button variant="outline" disabled={deleteBusy}>{t('common.cancel')}</Button>
-                        </DialogClose>
-                        <Button variant="destructive" onClick={confirmDelete} disabled={deleteBusy}>
-                            {deleteBusy ? t('common.deleting') : t('common.delete')}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            <DeleteRecordDialog
+                open={deleting !== null}
+                onOpenChange={(open) => !open && setDeleting(null)}
+                selectedIds={new Set(deleting ? [deleting.id] : [])}
+                selectedItems={deleting ? [deleting] : []}
+                entityLabel={t('goals.entityLabel')}
+                details={(
+                    <p className="text-sm text-muted-foreground">
+                        {t('goals.deleteDetails', { scope: deleting?.ownerLabel ?? t('goals.workspaceWide') })}
+                    </p>
+                )}
+                isDeleting={deleteBusy}
+                confirmDelete={confirmDelete}
+            />
         </div>
     );
 }

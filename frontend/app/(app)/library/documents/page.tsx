@@ -1,11 +1,10 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { getDocumentTemplates, getCurrentUserResultFromCookie } from "@/app/lib/api";
-import { type DocumentTemplate } from "@/app/lib/types";
+import { getDocumentTemplates, getCurrentUserResultFromCookie, getUsersFromCookie } from "@/app/lib/api";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
-import DocumentTemplatesBrowser from "@/app/components/library/documents/DocumentTemplatesBrowser";
+import DocumentsLibrary from "@/app/components/library/documents/DocumentsLibrary";
 
-export default async function DocumentTemplatesPage() {
+export default async function DocumentsLibraryPage() {
     const cookie = (await headers()).get('cookie');
     const userResult = await getCurrentUserResultFromCookie(cookie);
 
@@ -18,10 +17,13 @@ export default async function DocumentTemplatesPage() {
         redirect('/auth/login');
     }
 
-    const templates: DocumentTemplate[] = await getDocumentTemplates({
-        headers: { cookie: cookie ?? "" },
-        cache: "no-store",
-    });
+    const [templates, owners] = await Promise.all([
+        getDocumentTemplates({
+            headers: { cookie: cookie ?? "" },
+            cache: "no-store",
+        }),
+        getUsersFromCookie(cookie),
+    ]);
 
-    return <DocumentTemplatesBrowser templates={templates} />;
+    return <DocumentsLibrary templates={templates} owners={owners} />;
 }

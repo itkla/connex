@@ -1,11 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
 import {
-    AtSymbolIcon,
     CheckIcon,
     EllipsisHorizontalIcon,
     EnvelopeIcon,
@@ -23,24 +22,24 @@ import type {
     WorkspaceRole,
 } from "@/app/lib/types";
 import {
-    addWorkspaceAllowedDomain,
     assignMemberCustomRole,
     createWorkspaceInvite,
     createWorkspaceInviteLink,
-    getWorkspaceAllowedDomains,
+    getBuiltInRoles,
     getWorkspaceInviteLinks,
     getWorkspaceInvites,
     getWorkspaceMembers,
     getWorkspaceRoles,
-    removeWorkspaceAllowedDomain,
     removeWorkspaceMember,
     revokeWorkspaceInvite,
     revokeWorkspaceInviteLink,
     updateMemberRole,
 } from "@/app/lib/api";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { useGrantedPermissions, usePermission } from "@/app/hooks/usePermissions";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { useFieldErrors } from "@/app/hooks/useFieldErrors";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -65,18 +64,32 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import DeleteRecordDialog from "@/app/components/records/DeleteRecordDialog";
+import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
 import Rise from "@/app/components/motion/Rise";
+import AllowedDomainsPanel from "@/app/components/settings/AllowedDomainsPanel";
 import { SettingsSection } from "@/app/components/settings/SettingsSection";
-
-const ASSIGNABLE: WorkspaceRole[] = ["member", "admin"];
+import WorkspaceUnavailableRetry from "@/app/components/WorkspaceUnavailableRetry";
+import {
+    EmptyRow,
+    ListCard,
+    TabListHeading,
+    rowActionTrigger,
+} from "@/app/components/settings/SettingsListPrimitives";
 
 const SEARCH_THRESHOLD = 6;
 
-const rowActionTrigger =
-    "flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100";
+type RoleOptionsLoadState = {
+    workspaceId: number | null;
+    status: "loading" | "ready" | "error";
+    roles: CustomRole[];
+};
 
 function initial(name: string) {
     return name.trim().charAt(0).toUpperCase() || "?";
+}
+
+function isWorkspaceRole(role: string): role is WorkspaceRole {
+    return role === "member" || role === "admin" || role === "owner";
 }
 
 function RoleBadge({ role, label }: { role: string; label: string }) {
@@ -87,57 +100,108 @@ function RoleBadge({ role, label }: { role: string; label: string }) {
     );
 }
 
-function ListCard({ children }: { children: React.ReactNode }) {
+function RoleOptionsUnavailable({ onRetry }: { onRetry: () => Promise<void> }) {
+    const t = useTranslations("WorkspaceMembers");
+    const tRetry = useTranslations("CapabilityUnavailable");
     return (
-        <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
-            {children}
-        </ul>
+        <PermissionsUnavailable
+            variant="inline"
+            title={t("roleOptionsLoadFailedTitle")}
+            body={t("roleOptionsLoadFailedBody")}
+            action={(
+                <WorkspaceUnavailableRetry
+                    label={tRetry("retry")}
+                    pendingLabel={tRetry("retrying")}
+                    onRetry={onRetry}
+                    variant="outline"
+                    size="inline"
+                />
+            )}
+        />
     );
 }
 
-function EmptyRow({ children }: { children: React.ReactNode }) {
+function InviteRoleOptionsSkeleton() {
     return (
-        <p className="rounded-2xl border border-dashed border-border bg-card/40 px-4 py-6 text-center text-sm text-muted-foreground">
-            {children}
-        </p>
-    );
-}
-
-/** Small heading for a state list nested inside an invite/access tab, with an optional count. */
-function TabListHeading({ title, count }: { title: string; count?: number }) {
-    return (
-        <div className="flex items-center gap-2">
-            <h3 className="text-sm font-medium text-foreground">{title}</h3>
-            {count != null && count > 0 ? (
-                <span className="text-xs text-muted-foreground tabular-nums">{count}</span>
-            ) : null}
+        <div className="flex flex-col gap-3 sm:flex-row" aria-hidden="true">
+            <Skeleton className="h-9 flex-1 rounded-full" />
+            <Skeleton className="h-9 w-full rounded-full sm:w-36" />
+            <Skeleton className="h-9 w-full rounded-full sm:w-28" />
         </div>
     );
 }
 
 /**
+ * How the panel presents its invite journey, so one component serves both of its homes while
+ * #1340 migrates the workspace destinations.
+ *
+ * - `legacy` is `/settings/members` exactly as it ships: allowed domains is the third tab of the
+ *   invite strip, under the section's own "Invite & access" name.
+ * - `consolidated` is the People & access page, where allowed domains is its own deep-linkable
+ *   section and the strip is left holding only the two ways of inviting a member.
+ */
+export type MembersPresentation = "legacy" | "consolidated";
+
+type MembersPanelProps = {
+    currentUserId: number | null;
+    presentation?: MembersPresentation;
+};
+
+/**
  * Workspace membership administration: roles, invites, invite links and allowed domains.
  *
- * A role change is refreshed from the server rather than only patched into local state. An
- * admin can change their own row here, and the app shell resolves the viewer's effective
+ * A role change is refreshed from the server rather than only patched into local state. A member
+ * manager can change their own row here, and the app shell resolves the viewer's effective
  * permissions once per server render — so without the refresh they would keep the permission
  * gates and navigation of the role they just left until a full page load.
  *
  * @param currentUserId the viewer, so their own row can be handled differently
+ * @param presentation which of the panel's two homes is rendering it; defaults to the legacy route
  */
-export default function MembersPanel({ currentUserId }: { currentUserId: number | null }) {
+export default function MembersPanel({
+    currentUserId,
+    presentation = "legacy",
+}: MembersPanelProps) {
+    const { activeWorkspaceId: workspaceId } = useWorkspace();
+    if (!workspaceId) return null;
+    return (
+        <MembersWorkspacePanel
+            key={workspaceId}
+            workspaceId={workspaceId}
+            currentUserId={currentUserId}
+            presentation={presentation}
+        />
+    );
+}
+
+function MembersWorkspacePanel({
+    workspaceId,
+    currentUserId,
+    presentation,
+}: Omit<MembersPanelProps, "presentation"> & {
+    workspaceId: number;
+    presentation: MembersPresentation;
+}) {
     const t = useTranslations("WorkspaceMembers");
+    const showApiError = useApiErrorToast("WorkspaceMembers");
     const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const router = useRouter();
-    const { activeWorkspaceId, activeWorkspace } = useWorkspace();
-    const workspaceId = activeWorkspaceId;
+    const { activeWorkspace } = useWorkspace();
     const role = activeWorkspace?.role;
-    const isAdmin = role === "admin" || role === "owner";
+    const canManageMembers = usePermission("MEMBER_MANAGE");
+    const canManageRoles = usePermission("ROLE_MANAGE");
+    const grantedPermissions = useGrantedPermissions();
     const isOwner = role === "owner";
 
     const [members, setMembers] = useState<WorkspaceMember[]>([]);
     const [invites, setInvites] = useState<WorkspaceInvite[]>([]);
     const [customRoles, setCustomRoles] = useState<CustomRole[]>([]);
+    const [roleOptionsLoadState, setRoleOptionsLoadState] = useState<RoleOptionsLoadState>({
+        workspaceId: null,
+        status: "loading",
+        roles: [],
+    });
+    const roleOptionsRetry = useRef<Promise<void> | null>(null);
     const [loading, setLoading] = useState(true);
     const [memberSearch, setMemberSearch] = useState("");
 
@@ -159,10 +223,7 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
     const [busyLinkId, setBusyLinkId] = useState<number | null>(null);
     const [copiedLinkId, setCopiedLinkId] = useState<number | null>(null);
 
-    const [allowedDomains, setAllowedDomains] = useState<string[]>([]);
-    const [domainInput, setDomainInput] = useState("");
-    const [addingDomain, setAddingDomain] = useState(false);
-    const [busyDomain, setBusyDomain] = useState<string | null>(null);
+    const showDomains = presentation === "legacy";
 
     const roleLabel = useCallback(
         (r: string) =>
@@ -179,15 +240,13 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                 const loadedMembers = await getWorkspaceMembers(workspaceId);
                 if (cancelled) return;
                 setMembers(loadedMembers);
-                if (isAdmin) {
+                if (canManageMembers) {
                     const loadedInvites = await getWorkspaceInvites(workspaceId);
                     if (!cancelled) setInvites(loadedInvites);
                     const loadedLinks = await getWorkspaceInviteLinks(workspaceId);
                     if (!cancelled) setInviteLinks(loadedLinks);
-                    const loadedDomains = await getWorkspaceAllowedDomains(workspaceId);
-                    if (!cancelled) setAllowedDomains(loadedDomains);
                 }
-                if (isOwner) {
+                if (canManageRoles) {
                     const loadedRoles = await getWorkspaceRoles(workspaceId);
                     if (!cancelled) setCustomRoles(loadedRoles);
                 }
@@ -200,7 +259,39 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
         return () => {
             cancelled = true;
         };
-    }, [workspaceId, isAdmin, isOwner, t]);
+    }, [workspaceId, canManageMembers, canManageRoles, t]);
+
+    useEffect(() => {
+        if (!workspaceId || (!canManageMembers && !canManageRoles)) return;
+        let cancelled = false;
+        void getBuiltInRoles(workspaceId).then((roles) => {
+            if (!cancelled) setRoleOptionsLoadState({ workspaceId, status: "ready", roles });
+        }).catch(() => {
+            if (!cancelled) setRoleOptionsLoadState({ workspaceId, status: "error", roles: [] });
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [workspaceId, canManageMembers, canManageRoles]);
+
+    const retryRoleOptions = useCallback(() => {
+        if (roleOptionsRetry.current) return roleOptionsRetry.current;
+        const requestedWorkspaceId = workspaceId;
+        const request = getBuiltInRoles(requestedWorkspaceId).then((roles) => {
+            setRoleOptionsLoadState((current) => current.workspaceId === requestedWorkspaceId
+                ? { workspaceId: requestedWorkspaceId, status: "ready", roles }
+                : current);
+        }).catch(() => {
+            setRoleOptionsLoadState((current) => current.workspaceId === requestedWorkspaceId
+                ? { workspaceId: requestedWorkspaceId, status: "error", roles: [] }
+                : current);
+        });
+        roleOptionsRetry.current = request;
+        void request.finally(() => {
+            if (roleOptionsRetry.current === request) roleOptionsRetry.current = null;
+        });
+        return request;
+    }, [workspaceId]);
 
     const changeRole = async (userId: number, next: WorkspaceRole) => {
         if (!workspaceId) return;
@@ -212,7 +303,7 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
             toastSuccess(t("roleChanged"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("roleChangeFailed"));
+                showApiError(err, "roleChangeFailed");
             }
         } finally {
             setBusyMemberId(null);
@@ -229,7 +320,7 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
             toastSuccess(t("roleChanged"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("roleChangeFailed"));
+                showApiError(err, "roleChangeFailed");
             }
         } finally {
             setBusyMemberId(null);
@@ -246,7 +337,7 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
             setRemoveTarget(null);
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("removeFailed"));
+                showApiError(err, "removeFailed");
             }
         } finally {
             setIsRemoving(false);
@@ -289,7 +380,7 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
             }
         } catch (err) {
             if (!handlePasskeyStepUpError(err) && !captureFieldErrors(err)) {
-                toastError(err instanceof Error ? err.message : t("inviteFailed"));
+                showApiError(err, "inviteFailed");
             }
         } finally {
             setSending(false);
@@ -305,7 +396,7 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
             toastSuccess(t("revoked"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("revokeFailed"));
+                showApiError(err, "revokeFailed");
             }
         } finally {
             setBusyInviteId(null);
@@ -347,7 +438,7 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
             toastSuccess(t("linkCreated"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("linkCreateFailed"));
+                showApiError(err, "linkCreateFailed");
             }
         } finally {
             setCreatingLink(false);
@@ -363,48 +454,45 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
             toastSuccess(t("linkRevoked"));
         } catch (err) {
             if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("linkRevokeFailed"));
+                showApiError(err, "linkRevokeFailed");
             }
         } finally {
             setBusyLinkId(null);
         }
     };
 
-    const addDomain = async () => {
-        if (!workspaceId || addingDomain) return;
-        resetFieldErrors();
-        setAddingDomain(true);
-        try {
-            const updated = await addWorkspaceAllowedDomain(workspaceId, domainInput.trim());
-            setAllowedDomains(updated);
-            setDomainInput("");
-            toastSuccess(t("domainAdded"));
-        } catch (err) {
-            if (!handlePasskeyStepUpError(err) && !captureFieldErrors(err)) {
-                toastError(err instanceof Error ? err.message : t("domainAddFailed"));
-            }
-        } finally {
-            setAddingDomain(false);
+    const roleOptionsStatus = roleOptionsLoadState.workspaceId === workspaceId
+        ? roleOptionsLoadState.status
+        : "loading";
+    const builtInRoleDefinitions = useMemo(
+        () => roleOptionsLoadState.workspaceId === workspaceId && roleOptionsLoadState.status === "ready"
+            ? roleOptionsLoadState.roles
+            : [],
+        [roleOptionsLoadState, workspaceId],
+    );
+    const grantableBuiltInRoles = useMemo(() => {
+        const roles: WorkspaceRole[] = [];
+        for (const candidate of builtInRoleDefinitions) {
+            if (!candidate.permissions.every((permission) => grantedPermissions.has(permission))) continue;
+            if (!isWorkspaceRole(candidate.name)) continue;
+            if (candidate.name === "owner" && !isOwner) continue;
+            roles.push(candidate.name);
         }
-    };
-
-    const removeDomain = async (domain: string) => {
-        if (!workspaceId) return;
-        setBusyDomain(domain);
-        try {
-            await removeWorkspaceAllowedDomain(workspaceId, domain);
-            setAllowedDomains((prev) => prev.filter((d) => d !== domain));
-            toastSuccess(t("domainRemoved"));
-        } catch (err) {
-            if (!handlePasskeyStepUpError(err)) {
-                toastError(err instanceof Error ? err.message : t("domainRemoveFailed"));
-            }
-        } finally {
-            setBusyDomain(null);
-        }
-    };
-
-    const selectableRoles: WorkspaceRole[] = isOwner ? ["member", "admin", "owner"] : ASSIGNABLE;
+        return roles;
+    }, [builtInRoleDefinitions, grantedPermissions, isOwner]);
+    const grantableBuiltInRoleSet = useMemo(
+        () => new Set(grantableBuiltInRoles),
+        [grantableBuiltInRoles],
+    );
+    const grantableInviteRoles = useMemo<WorkspaceRole[]>(
+        () => grantableBuiltInRoles.filter((candidate) => candidate !== "owner"),
+        [grantableBuiltInRoles],
+    );
+    const grantableCustomRoles = useMemo(
+        () => customRoles.filter((candidate) =>
+            candidate.permissions.every((permission) => grantedPermissions.has(permission))),
+        [customRoles, grantedPermissions],
+    );
 
     const trimmedSearch = memberSearch.trim().toLowerCase();
     const showSearch = !loading && members.length > SEARCH_THRESHOLD;
@@ -457,7 +545,21 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                                 const isSelf = member.id === currentUserId;
                                 const busy = busyMemberId === member.id;
                                 const pending = member.status === "pending";
-                                const editable = isAdmin && (member.roleId == null || isOwner);
+                                const targetIsOwner = member.builtInRole === "owner";
+                                const protectedOwner = targetIsOwner && !isOwner;
+                                const editable = !protectedOwner
+                                    && (
+                                        (canManageMembers && grantableBuiltInRoles.length > 0)
+                                        || (canManageRoles && grantableCustomRoles.length > 0)
+                                    );
+                                const removable = canManageMembers && !isSelf && !protectedOwner;
+                                const currentCustomRoleIsGrantable = member.roleId != null
+                                    && grantableCustomRoles.some((candidate) => candidate.id === member.roleId);
+                                const currentBuiltInRole = member.roleId == null && isWorkspaceRole(member.role)
+                                    ? member.role
+                                    : null;
+                                const currentBuiltInRoleIsGrantable = currentBuiltInRole != null
+                                    && grantableBuiltInRoleSet.has(currentBuiltInRole);
                                 return (
                                     <li key={member.id} className="group flex items-center gap-3 px-4 py-3">
                                         <Avatar>
@@ -485,42 +587,66 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                                             <p className="truncate text-xs text-muted-foreground">{member.email}</p>
                                         </div>
 
-                                        {editable ? (
-                                            <Select
-                                                value={member.roleId ? `custom:${member.roleId}` : member.role}
-                                                disabled={busy}
-                                                onValueChange={(value) => {
-                                                    if (value.startsWith("custom:"))
-                                                        assignCustom(member.id, Number(value.slice(7)));
-                                                    else changeRole(member.id, value as WorkspaceRole);
-                                                }}
-                                            >
-                                                <SelectTrigger size="sm" className="w-auto" aria-label={t("roleLabel")}>
-                                                    <SelectValue />
-                                                </SelectTrigger>
-                                                <SelectContent align="end">
-                                                    {selectableRoles.map((r) => (
-                                                        <SelectItem key={r} value={r}>
-                                                            {roleLabel(r)}
-                                                        </SelectItem>
-                                                    ))}
-                                                    {isOwner && customRoles.length > 0 && (
-                                                        <SelectGroup>
-                                                            <SelectLabel>{t("customRoles")}</SelectLabel>
-                                                            {customRoles.map((r) => (
-                                                                <SelectItem key={r.id} value={`custom:${r.id}`}>
-                                                                    {r.name}
-                                                                </SelectItem>
-                                                            ))}
-                                                        </SelectGroup>
-                                                    )}
-                                                </SelectContent>
-                                            </Select>
-                                        ) : (
-                                            <RoleBadge role={member.role} label={roleLabel(member.role)} />
-                                        )}
+                                        <div className="flex items-center gap-2">
+                                            {editable ? (
+                                                <Select
+                                                    value={member.roleId ? `custom:${member.roleId}` : member.role}
+                                                    disabled={busy}
+                                                    onValueChange={(value) => {
+                                                        if (value.startsWith("custom:")) {
+                                                            assignCustom(member.id, Number(value.slice(7)));
+                                                        } else if (isWorkspaceRole(value)) {
+                                                            changeRole(member.id, value);
+                                                        }
+                                                    }}
+                                                >
+                                                    <SelectTrigger
+                                                        size="sm"
+                                                        className="w-auto"
+                                                        aria-label={t("roleLabel")}
+                                                    >
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent align="end">
+                                                        {member.roleId != null && !currentCustomRoleIsGrantable ? (
+                                                            <SelectItem value={`custom:${member.roleId}`} disabled>
+                                                                {member.role}
+                                                            </SelectItem>
+                                                        ) : null}
+                                                        {currentBuiltInRole != null && !currentBuiltInRoleIsGrantable ? (
+                                                            <SelectItem value={currentBuiltInRole} disabled>
+                                                                {roleLabel(currentBuiltInRole)}
+                                                            </SelectItem>
+                                                        ) : null}
+                                                        {canManageMembers && grantableBuiltInRoles.map((candidate) => (
+                                                            <SelectItem key={candidate} value={candidate}>
+                                                                {roleLabel(candidate)}
+                                                            </SelectItem>
+                                                        ))}
+                                                        {canManageRoles && grantableCustomRoles.length > 0 && (
+                                                            <SelectGroup>
+                                                                <SelectLabel>{t("customRoles")}</SelectLabel>
+                                                                {grantableCustomRoles.map((candidate) => (
+                                                                    <SelectItem
+                                                                        key={candidate.id}
+                                                                        value={`custom:${candidate.id}`}
+                                                                    >
+                                                                        {candidate.name}
+                                                                    </SelectItem>
+                                                                ))}
+                                                            </SelectGroup>
+                                                        )}
+                                                    </SelectContent>
+                                                </Select>
+                                            ) : (
+                                                <RoleBadge role={member.role} label={roleLabel(member.role)} />
+                                            )}
+                                            {member.roleId != null && targetIsOwner ? (
+                                                <RoleBadge role="owner" label={roleLabel("owner")} />
+                                            ) : null}
+                                        </div>
 
-                                        {isAdmin && !isSelf && (
+                                        {removable && (
                                             <DropdownMenu>
                                                 <DropdownMenuTrigger asChild>
                                                     <button
@@ -547,12 +673,18 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                             })}
                         </ListCard>
                     )}
+                    {roleOptionsStatus === "error" && (canManageMembers || canManageRoles) ? (
+                        <RoleOptionsUnavailable onRetry={retryRoleOptions} />
+                    ) : null}
                 </SettingsSection>
             </Rise>
 
-            {isAdmin && (
+            {canManageMembers && (
                 <Rise>
-                    <SettingsSection title={t("inviteAccessTitle")} description={t("inviteAccessSubtitle")}>
+                    <SettingsSection
+                        title={showDomains ? t("inviteAccessTitle") : t("inviteMemberTitle")}
+                        description={showDomains ? t("inviteAccessSubtitle") : t("inviteMemberSubtitle")}
+                    >
                         <Tabs defaultValue="email" className="gap-5">
                             <TabsList className="w-full sm:w-auto">
                                 <TabsTrigger value="email">
@@ -563,63 +695,96 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                                     <LinkIcon />
                                     {t("inviteTabLink")}
                                 </TabsTrigger>
-                                <TabsTrigger value="domains">
-                                    <GlobeAltIcon />
-                                    {t("inviteTabDomains")}
-                                </TabsTrigger>
+                                {showDomains && (
+                                    <TabsTrigger value="domains">
+                                        <GlobeAltIcon />
+                                        {t("inviteTabDomains")}
+                                    </TabsTrigger>
+                                )}
                             </TabsList>
 
                             <TabsContent value="email" className="space-y-5">
                                 <p className="max-w-prose text-sm text-muted-foreground">{t("inviteSubtitle")}</p>
-                                <form
-                                    onSubmit={(e) => {
-                                        e.preventDefault();
-                                        sendInvite();
-                                    }}
-                                    className="flex flex-col gap-3 sm:flex-row sm:items-start"
-                                >
-                                    <div className="flex-1">
-                                        <InputGroup>
-                                            <InputGroupAddon>
-                                                <EnvelopeIcon />
-                                            </InputGroupAddon>
-                                            <InputGroupInput
-                                                type="email"
-                                                value={inviteEmail}
-                                                onChange={(e) => {
-                                                    setInviteEmail(e.target.value);
-                                                    clearError("email");
-                                                }}
-                                                placeholder={t("emailPlaceholder")}
-                                                aria-label={t("emailLabel")}
-                                                aria-invalid={Boolean(fieldErrors.email)}
-                                            />
-                                        </InputGroup>
-                                        {fieldErrors.email && (
-                                            <p className="mt-1.5 text-sm text-destructive">{fieldErrors.email}</p>
-                                        )}
-                                    </div>
-                                    <Select value={inviteRole} onValueChange={(v) => setInviteRole(v as WorkspaceRole)}>
-                                        <SelectTrigger className="w-full sm:w-36" aria-label={t("roleLabel")}>
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent align="end">
-                                            {selectableRoles.map((r) => (
-                                                <SelectItem key={r} value={r}>
-                                                    {roleLabel(r)}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                    <Button
-                                        type="submit"
-                                        variant="brand"
-                                        disabled={sending || inviteEmail.trim().length === 0}
-                                        className="min-w-28"
+                                {roleOptionsStatus === "loading" ? (
+                                    <InviteRoleOptionsSkeleton />
+                                ) : roleOptionsStatus === "error" ? (
+                                    <RoleOptionsUnavailable onRetry={retryRoleOptions} />
+                                ) : grantableInviteRoles.length === 0 ? (
+                                    <PermissionsUnavailable
+                                        variant="inline"
+                                        title={t("inviteRoleUnavailableTitle")}
+                                        body={t("inviteRoleUnavailableBody")}
+                                    />
+                                ) : (
+                                    <form
+                                        onSubmit={(e) => {
+                                            e.preventDefault();
+                                            sendInvite();
+                                        }}
+                                        className="flex flex-col gap-3 sm:flex-row sm:items-start"
                                     >
-                                        {sending ? <Loader2Icon className="size-4 animate-spin" /> : t("sendInvite")}
-                                    </Button>
-                                </form>
+                                        <div className="flex-1">
+                                            <InputGroup>
+                                                <InputGroupAddon>
+                                                    <EnvelopeIcon />
+                                                </InputGroupAddon>
+                                                <InputGroupInput
+                                                    type="email"
+                                                    value={inviteEmail}
+                                                    onChange={(e) => {
+                                                        setInviteEmail(e.target.value);
+                                                        clearError("email");
+                                                    }}
+                                                    placeholder={t("emailPlaceholder")}
+                                                    aria-label={t("emailLabel")}
+                                                    aria-invalid={Boolean(fieldErrors.email)}
+                                                />
+                                            </InputGroup>
+                                            {fieldErrors.email && (
+                                                <p className="mt-1.5 text-sm text-destructive">
+                                                    {fieldErrors.email}
+                                                </p>
+                                            )}
+                                        </div>
+                                        <Select
+                                            value={inviteRole}
+                                            disabled={grantableInviteRoles.length === 0}
+                                            onValueChange={(value) => {
+                                                if (isWorkspaceRole(value) && value !== "owner") setInviteRole(value);
+                                            }}
+                                        >
+                                            <SelectTrigger className="w-full sm:w-36" aria-label={t("roleLabel")}>
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent align="end">
+                                                {!grantableInviteRoles.includes(inviteRole) ? (
+                                                    <SelectItem value={inviteRole} disabled>
+                                                        {roleLabel(inviteRole)}
+                                                    </SelectItem>
+                                                ) : null}
+                                                {grantableInviteRoles.map((candidate) => (
+                                                    <SelectItem key={candidate} value={candidate}>
+                                                        {roleLabel(candidate)}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <Button
+                                            type="submit"
+                                            variant="brand"
+                                            disabled={
+                                                sending
+                                                || inviteEmail.trim().length === 0
+                                                || !grantableInviteRoles.includes(inviteRole)
+                                            }
+                                            className="min-w-28"
+                                        >
+                                            {sending
+                                                ? <Loader2Icon className="size-4 animate-spin" />
+                                                : t("sendInvite")}
+                                        </Button>
+                                    </form>
+                                )}
 
                                 <div className="space-y-2">
                                     <TabListHeading title={t("pendingTitle")} count={invites.length} />
@@ -694,53 +859,81 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
 
                             <TabsContent value="link" className="space-y-5">
                                 <p className="max-w-prose text-sm text-muted-foreground">{t("linkSubtitle")}</p>
-                                <form
-                                    onSubmit={(e) => {
-                                        e.preventDefault();
-                                        createLink();
-                                    }}
-                                    className="flex flex-col gap-3 sm:flex-row sm:items-start"
-                                >
-                                    <Select value={linkRole} onValueChange={(v) => setLinkRole(v as WorkspaceRole)}>
-                                        <SelectTrigger className="w-full sm:w-36" aria-label={t("roleLabel")}>
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent align="start">
-                                            {selectableRoles.map((r) => (
-                                                <SelectItem key={r} value={r}>
-                                                    {roleLabel(r)}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                    <Input
-                                        type="number"
-                                        min={1}
-                                        inputMode="numeric"
-                                        value={linkExpiry}
-                                        onChange={(e) => setLinkExpiry(e.target.value)}
-                                        placeholder={t("linkExpiryPlaceholder")}
-                                        aria-label={t("linkExpiryLabel")}
-                                        className="w-full sm:flex-1"
+                                {roleOptionsStatus === "loading" ? (
+                                    <InviteRoleOptionsSkeleton />
+                                ) : roleOptionsStatus === "error" ? (
+                                    <RoleOptionsUnavailable onRetry={retryRoleOptions} />
+                                ) : grantableInviteRoles.length === 0 ? (
+                                    <PermissionsUnavailable
+                                        variant="inline"
+                                        title={t("inviteRoleUnavailableTitle")}
+                                        body={t("inviteRoleUnavailableBody")}
                                     />
-                                    <Input
-                                        type="number"
-                                        min={1}
-                                        inputMode="numeric"
-                                        value={linkMaxUses}
-                                        onChange={(e) => setLinkMaxUses(e.target.value)}
-                                        placeholder={t("linkMaxUsesPlaceholder")}
-                                        aria-label={t("linkMaxUsesLabel")}
-                                        className="w-full sm:flex-1"
-                                    />
-                                    <Button type="submit" variant="brand" disabled={creatingLink} className="min-w-28">
-                                        {creatingLink ? (
-                                            <Loader2Icon className="size-4 animate-spin" />
-                                        ) : (
-                                            t("createLink")
-                                        )}
-                                    </Button>
-                                </form>
+                                ) : (
+                                    <form
+                                        onSubmit={(e) => {
+                                            e.preventDefault();
+                                            createLink();
+                                        }}
+                                        className="flex flex-col gap-3 sm:flex-row sm:items-start"
+                                    >
+                                        <Select
+                                            value={linkRole}
+                                            disabled={grantableInviteRoles.length === 0}
+                                            onValueChange={(value) => {
+                                                if (isWorkspaceRole(value) && value !== "owner") setLinkRole(value);
+                                            }}
+                                        >
+                                            <SelectTrigger className="w-full sm:w-36" aria-label={t("roleLabel")}>
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent align="start">
+                                                {!grantableInviteRoles.includes(linkRole) ? (
+                                                    <SelectItem value={linkRole} disabled>
+                                                        {roleLabel(linkRole)}
+                                                    </SelectItem>
+                                                ) : null}
+                                                {grantableInviteRoles.map((candidate) => (
+                                                    <SelectItem key={candidate} value={candidate}>
+                                                        {roleLabel(candidate)}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <Input
+                                            type="number"
+                                            min={1}
+                                            inputMode="numeric"
+                                            value={linkExpiry}
+                                            onChange={(e) => setLinkExpiry(e.target.value)}
+                                            placeholder={t("linkExpiryPlaceholder")}
+                                            aria-label={t("linkExpiryLabel")}
+                                            className="w-full sm:flex-1"
+                                        />
+                                        <Input
+                                            type="number"
+                                            min={1}
+                                            inputMode="numeric"
+                                            value={linkMaxUses}
+                                            onChange={(e) => setLinkMaxUses(e.target.value)}
+                                            placeholder={t("linkMaxUsesPlaceholder")}
+                                            aria-label={t("linkMaxUsesLabel")}
+                                            className="w-full sm:flex-1"
+                                        />
+                                        <Button
+                                            type="submit"
+                                            variant="brand"
+                                            disabled={creatingLink || !grantableInviteRoles.includes(linkRole)}
+                                            className="min-w-28"
+                                        >
+                                            {creatingLink ? (
+                                                <Loader2Icon className="size-4 animate-spin" />
+                                            ) : (
+                                                t("createLink")
+                                            )}
+                                        </Button>
+                                    </form>
+                                )}
 
                                 <div className="space-y-2">
                                     <TabListHeading title={t("activeLinksTitle")} count={inviteLinks.length} />
@@ -828,98 +1021,11 @@ export default function MembersPanel({ currentUserId }: { currentUserId: number 
                                 </div>
                             </TabsContent>
 
-                            <TabsContent value="domains" className="space-y-5">
-                                <p className="max-w-prose text-sm text-muted-foreground">{t("domainsSubtitle")}</p>
-                                <form
-                                    onSubmit={(e) => {
-                                        e.preventDefault();
-                                        addDomain();
-                                    }}
-                                    className="flex flex-col gap-3 sm:flex-row sm:items-start"
-                                >
-                                    <div className="flex-1">
-                                        <InputGroup>
-                                            <InputGroupAddon>
-                                                <AtSymbolIcon />
-                                            </InputGroupAddon>
-                                            <InputGroupInput
-                                                value={domainInput}
-                                                onChange={(e) => {
-                                                    setDomainInput(e.target.value);
-                                                    clearError("domain");
-                                                }}
-                                                placeholder={t("domainPlaceholder")}
-                                                aria-label={t("domainLabel")}
-                                                aria-invalid={Boolean(fieldErrors.domain)}
-                                            />
-                                        </InputGroup>
-                                        {fieldErrors.domain && (
-                                            <p className="mt-1.5 text-sm text-destructive">{fieldErrors.domain}</p>
-                                        )}
-                                    </div>
-                                    <Button
-                                        type="submit"
-                                        variant="brand"
-                                        disabled={addingDomain || domainInput.trim().length === 0}
-                                        className="min-w-28"
-                                    >
-                                        {addingDomain ? <Loader2Icon className="size-4 animate-spin" /> : t("addDomain")}
-                                    </Button>
-                                </form>
-
-                                <div className="space-y-2">
-                                    <TabListHeading title={t("domainsTitle")} count={allowedDomains.length} />
-                                    {allowedDomains.length === 0 ? (
-                                        <EmptyRow>{t("domainsEmpty")}</EmptyRow>
-                                    ) : (
-                                        <ListCard>
-                                            {allowedDomains.map((domain) => {
-                                                const busy = busyDomain === domain;
-                                                return (
-                                                    <li
-                                                        key={domain}
-                                                        className="group flex items-center gap-3 px-4 py-3"
-                                                    >
-                                                        <span
-                                                            aria-hidden
-                                                            className="grid size-8 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground"
-                                                        >
-                                                            <GlobeAltIcon className="size-4" />
-                                                        </span>
-                                                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-                                                            {domain}
-                                                        </span>
-                                                        {busy ? (
-                                                            <Loader2Icon className="size-4 animate-spin text-muted-foreground" />
-                                                        ) : (
-                                                            <DropdownMenu>
-                                                                <DropdownMenuTrigger asChild>
-                                                                    <button
-                                                                        type="button"
-                                                                        aria-label={t("removeDomain")}
-                                                                        className={rowActionTrigger}
-                                                                    >
-                                                                        <EllipsisHorizontalIcon className="size-5" />
-                                                                    </button>
-                                                                </DropdownMenuTrigger>
-                                                                <DropdownMenuContent align="end" className="w-44">
-                                                                    <DropdownMenuItem
-                                                                        variant="destructive"
-                                                                        onSelect={() => removeDomain(domain)}
-                                                                    >
-                                                                        <TrashIcon className="size-4" />
-                                                                        {t("removeDomain")}
-                                                                    </DropdownMenuItem>
-                                                                </DropdownMenuContent>
-                                                            </DropdownMenu>
-                                                        )}
-                                                    </li>
-                                                );
-                                            })}
-                                        </ListCard>
-                                    )}
-                                </div>
-                            </TabsContent>
+                            {showDomains && (
+                                <TabsContent value="domains">
+                                    <AllowedDomainsPanel />
+                                </TabsContent>
+                            )}
                         </Tabs>
                     </SettingsSection>
                 </Rise>

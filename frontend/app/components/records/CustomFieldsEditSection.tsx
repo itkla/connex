@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useImperativeHandle, useState } from "react";
+import { useEffect, useImperativeHandle, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { Label } from "@/components/ui/label";
@@ -14,8 +14,8 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ApiError, getEntityCustomFields, updateEntityCustomFields } from "@/app/lib/api";
-import { toastError } from "@/app/lib/toast";
+import { getEntityCustomFields, updateEntityCustomFields } from "@/app/lib/api";
+import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import type { CustomFieldCellValue, CustomFieldEntityType, CustomFieldEntry } from "@/app/lib/types";
 
 /** Imperative handle a record edit sheet uses to commit custom-field edits on Save. */
@@ -33,17 +33,25 @@ function asText(value: CustomFieldCellValue): string {
  * the changed fields when the sheet saves (via the exposed {@link CustomFieldsEditHandle});
  * closing the sheet without saving discards the draft. Renders nothing when the workspace
  * has no fields for the entity type.
+ *
+ * `onDirtyChange` reports the same unsaved state the handle's `hasChanges()` returns, so the
+ * enclosing sheet can guard against discarding it. The guard needs the callback because the
+ * boolean and select controls are buttons, not form controls: they emit no input event for the
+ * sheet to observe, and their values live here rather than in the sheet's own draft.
  */
 export function CustomFieldsEditSection({
     entityType,
     entityId,
+    onDirtyChange,
     ref,
 }: {
     entityType: CustomFieldEntityType;
     entityId: number;
+    onDirtyChange?: (dirty: boolean) => void;
     ref?: React.Ref<CustomFieldsEditHandle>;
 }) {
     const t = useTranslations("RecordCustomFields");
+    const showApiError = useApiErrorToast("RecordCustomFields");
     const [entries, setEntries] = useState<CustomFieldEntry[]>([]);
     const [draft, setDraft] = useState<Record<number, CustomFieldCellValue>>({});
 
@@ -61,10 +69,18 @@ export function CustomFieldsEditSection({
         };
     }, [entityType, entityId]);
 
+    const changed = useMemo(
+        () => entries.filter((entry) => asText(draft[entry.definitionId]) !== asText(entry.value)),
+        [draft, entries],
+    );
+
+    useEffect(() => {
+        onDirtyChange?.(changed.length > 0);
+    }, [changed, onDirtyChange]);
+
     useImperativeHandle(
         ref,
         () => {
-            const changed = entries.filter((entry) => asText(draft[entry.definitionId]) !== asText(entry.value));
             return {
                 hasChanges: () => changed.length > 0,
                 save: async () => {
@@ -78,13 +94,13 @@ export function CustomFieldsEditSection({
                         setEntries(saved);
                         setDraft(Object.fromEntries(saved.map((entry) => [entry.definitionId, entry.value])));
                     } catch (err) {
-                        toastError(err instanceof ApiError ? err.message : t("saveFailed"));
+                        showApiError(err, "saveFailed");
                         throw err;
                     }
                 },
             };
         },
-        [entries, draft, entityType, entityId, t],
+        [changed, draft, entityType, entityId, showApiError],
     );
 
     if (entries.length === 0) return null;

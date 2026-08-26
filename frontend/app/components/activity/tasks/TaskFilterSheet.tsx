@@ -17,7 +17,6 @@ import {
     ResponsiveDialogTitle,
     ResponsiveDialogTrigger,
 } from '@/components/ui/responsive-dialog';
-import { pillClass } from '@/app/components/filters';
 import { cn } from '@/lib/utils';
 
 export interface TaskFilterSheetSection {
@@ -52,10 +51,17 @@ export default function TaskFilterSheet({
     return (
         <ResponsiveDialog>
             <ResponsiveDialogTrigger asChild>
-                <button
+                <Button
                     type="button"
+                    variant="outline"
+                    size="toolbar"
                     aria-label={t('filterAria')}
-                    className={cn(pillClass(activeCount > 0), 'shrink-0 md:hidden')}
+                    aria-pressed={activeCount > 0}
+                    className={cn(
+                        'shrink-0 text-xs md:hidden',
+                        activeCount > 0 &&
+                            'border-brand-dark/20 bg-brand-light/70 text-foreground hover:bg-brand-light/80',
+                    )}
                 >
                     <AdjustmentsHorizontalIcon className="size-4 shrink-0" aria-hidden />
                     <span className="truncate">{t('filter')}</span>
@@ -64,7 +70,7 @@ export default function TaskFilterSheet({
                             {activeCount}
                         </span>
                     )}
-                </button>
+                </Button>
             </ResponsiveDialogTrigger>
             <ResponsiveDialogContent
                 scrollable={false}
@@ -79,7 +85,7 @@ export default function TaskFilterSheet({
                 </ResponsiveDialogHeader>
 
                 <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2">
-                    {sections.filter((section) => section.options.length > 0).map((section) => (
+                    {sections.map((section) => section.options.length > 0 ? (
                         <section key={section.label} className="border-b border-border px-2 py-3 last:border-b-0">
                             <h3 className="px-2 pb-1 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
                                 {section.label}
@@ -88,16 +94,17 @@ export default function TaskFilterSheet({
                                 {section.options.map((option) => {
                                     const selected = section.selected.has(option.value);
                                     return (
-                                        <button
+                                        <Button
                                             key={option.value}
                                             type="button"
                                             aria-pressed={selected}
                                             onClick={() => section.onToggle(option.value)}
+                                            variant={selected ? 'secondary' : 'ghost'}
+                                            size="page"
                                             className={cn(
-                                                'flex min-h-11 w-full items-center gap-2 rounded-lg px-2 text-left text-sm transition-colors motion-reduce:transition-none',
-                                                selected
-                                                    ? 'bg-brand-light/60 font-medium text-brand-dark'
-                                                    : 'text-foreground hover:bg-muted',
+                                                'h-auto min-h-11 w-full justify-start text-left font-normal',
+                                                selected &&
+                                                    'bg-brand-light/60 font-medium text-brand-dark hover:bg-brand-light/70',
                                             )}
                                         >
                                             <span className="min-w-0 flex-1 truncate">{option.label}</span>
@@ -111,12 +118,12 @@ export default function TaskFilterSheet({
                                                 )}
                                                 aria-hidden
                                             />
-                                        </button>
+                                        </Button>
                                     );
                                 })}
                             </div>
                         </section>
-                    ))}
+                    ) : null)}
                 </div>
 
                 <ResponsiveDialogFooter className="shrink-0 flex-row items-center justify-between gap-2 border-t border-border px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">

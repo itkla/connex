@@ -90,10 +90,10 @@ function workflowsPanelReducer(state: WorkflowsPanelState, action: WorkflowsPane
     return { ...state, ...patch };
 }
 
-/** Canonical workflow list with lifecycle, archive, duplication, and merged run continuity. */
+/** The workflow list, with lifecycle, archive, duplication, and each workflow's latest run. */
 export default function WorkflowsPanel() {
     const t = useTranslations("WorkspaceWorkflows");
-    const tr = useTranslations("WorkspaceRules");
+    const tr = useTranslations("WorkflowAuthoring");
     const locale = useLocale();
     const now = useLiveNow();
     const router = useRouter();
@@ -158,7 +158,7 @@ export default function WorkflowsPanel() {
             } catch (error) {
                 if (!active || controller.signal.aborted) return;
                 if (error instanceof ApiError && error.status === 403) updatePanelState({ accessDenied: true });
-                else toastError(t("loadFailed"));
+                else toastError(t("loadFailed"), { description: t("loadFailedBody") });
             } finally {
                 if (active && !controller.signal.aborted && scopeRef.current.activeWorkspaceId === workspaceId) {
                     updatePanelState({ loading: false });
@@ -196,7 +196,7 @@ export default function WorkflowsPanel() {
                     item.id === workflow.id ? { ...item, enabled: workflow.enabled } : item
                 )),
             }));
-            toastError(t("lifecycleFailed"));
+            toastError(t("lifecycleFailed"), { description: t("lifecycleFailedBody") });
         } finally {
             if (isPanelActive(workspaceId)) updatePanelState({ pendingId: null });
         }
@@ -222,7 +222,7 @@ export default function WorkflowsPanel() {
             }));
         } catch {
             if (!isPanelActive(workspaceId)) return;
-            toastError(t("lifecycleFailed"));
+            toastError(t("lifecycleFailed"), { description: t("lifecycleFailedBody") });
         } finally {
             if (isPanelActive(workspaceId)) updatePanelState({ pendingId: null });
         }
@@ -248,7 +248,7 @@ export default function WorkflowsPanel() {
             toastSuccess(t(workflow.intakePausedAt ? "resumed" : "paused"));
         } catch {
             if (!isPanelActive(workspaceId)) return;
-            toastError(t("lifecycleFailed"));
+            toastError(t("lifecycleFailed"), { description: t("lifecycleFailedBody") });
         } finally {
             if (isPanelActive(workspaceId)) updatePanelState({ pendingId: null });
         }
@@ -296,7 +296,7 @@ export default function WorkflowsPanel() {
                         body={t(archived ? "archivedEmptyBody" : "emptyBody")}
                         tone={archived ? "muted" : "brand"}
                         action={!archived ? (
-                            <Button onClick={() => router.push("/workflows/new")} variant="outline">
+                            <Button onClick={() => router.push("/workflows/new")} variant="brand">
                                 <PlusIcon className="size-4" />
                                 {t("newWorkflow")}
                             </Button>
@@ -332,9 +332,6 @@ export default function WorkflowsPanel() {
                                                     ? t("versionShort", { number: workflow.activeVersion.number })
                                                     : t("draftOnly")}
                                             </Badge>
-                                            <Badge variant="outline" className="text-muted-foreground">
-                                                {t(`runtimeOwner.${workflow.runtimeOwner}`)}
-                                            </Badge>
                                             {!workflow.enabled && !archived ? (
                                                 <Badge variant="outline" className="text-muted-foreground">{t("disabledBadge")}</Badge>
                                             ) : null}
@@ -354,7 +351,7 @@ export default function WorkflowsPanel() {
                                         <span className="block truncate text-xs text-muted-foreground">
                                             {t("listSummary", {
                                                 record: tr(`record.${workflow.recordType ?? "deal"}`),
-                                                nodes: workflow.nodeCount,
+                                                steps: workflow.nodeCount,
                                                 actions: workflow.actionCount,
                                             })}
                                         </span>

@@ -16,6 +16,7 @@ import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiInputImage;
 import ooo.klae.connex.backend.ai.provider.AiMessage;
+import ooo.klae.connex.backend.ai.provider.AiModelCatalog;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
 import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
@@ -67,42 +68,29 @@ public class AzureOpenAiAdapter implements AiProvider {
         return AiReasoningMode.TAGGED;
     }
 
+    /**
+     * Resolves the declared Azure OpenAI context window for the configured deployment.
+     *
+     * <p>An Azure deployment name is operator-chosen, so a declaration can only be as accurate as
+     * the name; {@code connex.ai.model-overrides} corrects a deployment whose name does not carry
+     * its underlying model family.
+     *
+     * @see AiModelCatalog
+     */
     @Override
     public int contextWindowTokens(AiProviderTarget target) {
-        String modelId = target == null ? null : target.modelId();
-        if (modelId == null) {
-            return 4_096;
-        }
-        String normalized = modelId.toLowerCase(Locale.ROOT);
-        return normalized.contains("gpt-5") || normalized.contains("gpt-4.1")
-                || normalized.contains("gpt-4o") || normalized.contains("o3")
-                || normalized.contains("o4")
-                ? 128_000
-                : 4_096;
+        return AiModelCatalog.contextWindowTokens(
+                AiModelCatalog.Family.AZURE_OPENAI, target, aiProperties.getModelOverrides());
     }
 
     /**
-     * Resolves documented Azure OpenAI output ceilings for recognized model families.
-     * @see <a href="https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reasoning">Azure reasoning-model limits</a>
-     * @see <a href="https://learn.microsoft.com/en-us/azure/ai-foundry/foundry-models/concepts/models">Azure OpenAI model limits</a>
+     * Resolves the declared Azure OpenAI output ceiling for the configured deployment.
+     * @see AiModelCatalog
      */
     @Override
     public int maxOutputTokens(AiProviderTarget target) {
-        String modelId = target == null ? null : target.modelId();
-        if (modelId == null) {
-            return 4_096;
-        }
-        String normalized = modelId.toLowerCase(Locale.ROOT);
-        if (normalized.contains("gpt-5")) {
-            return 128_000;
-        }
-        if (normalized.contains("o3") || normalized.contains("o4")) {
-            return 100_000;
-        }
-        if (normalized.contains("gpt-4.1")) {
-            return 32_768;
-        }
-        return normalized.contains("gpt-4o") ? 16_384 : 4_096;
+        return AiModelCatalog.maxOutputTokens(
+                AiModelCatalog.Family.AZURE_OPENAI, target, aiProperties.getModelOverrides());
     }
 
     @Override

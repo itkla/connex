@@ -1,18 +1,24 @@
 package ooo.klae.connex.backend.services;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 import lombok.RequiredArgsConstructor;
@@ -135,6 +141,158 @@ public class PipelineService {
             "Updated stage " + stage.getName(),
             auditService.diff(existing, stage, STAGE_AUDIT_FIELDS));
         return stage;
+    }
+
+    /**
+     * Replaces a pipeline's stages with {@code requested} in one transaction: entries carrying an id
+     * are kept and updated, entries without one are created, and a stage the editor had loaded but
+     * left out is removed. Positions are renumbered to the given order.
+     *
+     * <p>Validation runs against the final set rather than each write, so an edit that is only ever
+     * valid as a whole — swapping two stage names, or moving the Won flag from one stage to another —
+     * succeeds here even though the same edit expressed as a sequence of single-stage writes cannot.
+     * A removal that still holds deals is refused up front, in place of the foreign key violation the
+     * per-stage delete surfaces.
+     *
+     * <p>{@code knownStageIds} is what the editor had loaded. Only those may be removed, so a stage
+     * another editor added in the meantime is left alone and moved to the end rather than being
+     * silently deleted by a save that never knew about it.
+     *
+     * <p>Renumbering happens in two passes because {@code (pipeline_id, position)} is unique: a stage
+     * cannot move into a position another one still holds. Every surviving stage is first parked above
+     * the range the final order occupies, then renumbered down into it.
+     */
+    @Transactional
+    @RequirePermission(Permission.PIPELINE_MANAGE)
+    public List<Stage> replaceStages(int pipelineId, List<Integer> knownStageIds, List<Stage> requested) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Pipeline pipeline = requireOwnedPipeline(workspaceId, pipelineId);
+        List<Stage> incoming = requested == null ? List.of() : requested;
+        Set<Integer> known = new HashSet<>(knownStageIds == null ? List.of() : knownStageIds);
+
+        assertNamesDistinct(incoming);
+        assertAtMostOneTerminalPerType(incoming);
+
+        List<Stage> existing = pipelineMapper.getStagesByPipelineId(workspaceId, pipelineId);
+        Map<Integer, Stage> existingById = new HashMap<>();
+        for (Stage stage : existing) existingById.put(stage.getId(), stage);
+
+        Set<Integer> keptIds = new HashSet<>();
+        for (Stage stage : incoming) {
+            if (stage.getId() == 0) continue;
+            if (!existingById.containsKey(stage.getId()))
+                throw new ResourceNotFoundException("Stage not found with id: " + stage.getId());
+            if (!keptIds.add(stage.getId()))
+                throw new BadRequestException("Stage " + stage.getId() + " is listed more than once");
+        }
+
+        List<Stage> removed = new ArrayList<>();
+        List<Stage> untouched = new ArrayList<>();
+        for (Stage stage : existing) {
+            if (keptIds.contains(stage.getId())) continue;
+            if (known.contains(stage.getId())) removed.add(stage);
+            else untouched.add(stage);
+        }
+
+        for (Stage stage : removed) {
+            if (!dealMapper.getDealsByStageId(workspaceId, stage.getId()).isEmpty())
+                throw new BadRequestException(
+                    "Move the deals out of " + stage.getName() + " before removing it");
+        }
+
+        for (Stage stage : removed) {
+            pipelineMapper.deleteStage(workspaceId, stage.getId());
+            auditService.record("stage.delete", "stage", stage.getId(), stage.getName(),
+                "Deleted stage " + stage.getName(),
+                auditService.diff(stage, null, STAGE_AUDIT_FIELDS));
+        }
+
+        int parked = incoming.size() + untouched.size();
+        for (Stage stage : existing) parked = Math.max(parked, stage.getPosition() + 1);
+        for (Stage stage : incoming) {
+            if (stage.getId() == 0) continue;
+            pipelineMapper.updateStage(reposition(existingById.get(stage.getId()), pipeline, workspaceId, parked++));
+        }
+        for (Stage stage : untouched) {
+            pipelineMapper.updateStage(reposition(stage, pipeline, workspaceId, parked++));
+        }
+
+        List<Stage> result = new ArrayList<>();
+        int position = 0;
+        for (Stage stage : incoming) {
+            stage.setWorkspaceId(workspaceId);
+            stage.setPipeline(pipeline);
+            stage.setPosition(position++);
+            if (stage.getId() == 0) {
+                pipelineMapper.insertStage(stage);
+                auditService.record("stage.create", "stage", stage.getId(), stage.getName(),
+                    "Created stage " + stage.getName(),
+                    auditService.diff(null, stage, STAGE_AUDIT_FIELDS));
+            } else {
+                Stage before = existingById.get(stage.getId());
+                pipelineMapper.updateStage(stage);
+                recordStageUpdate(before, stage);
+            }
+            result.add(stage);
+        }
+        for (Stage stage : untouched) {
+            pipelineMapper.updateStage(reposition(stage, pipeline, workspaceId, position++));
+        }
+        return result;
+    }
+
+    /**
+     * Records a stage update only when something the audit trail cares about actually changed, so a
+     * save that merely renumbered positions does not fill the trail with empty diffs.
+     */
+    private void recordStageUpdate(Stage before, Stage after) {
+        var changes = auditService.diff(before, after, STAGE_AUDIT_FIELDS);
+        if (changes == null || changes.isEmpty()) return;
+        auditService.record("stage.update", "stage", after.getId(), after.getName(),
+            "Updated stage " + after.getName(), changes);
+    }
+
+    /**
+     * A copy of {@code stage} parked at {@code position}, leaving the caller's snapshot — which the
+     * audit diff reads as the "before" — untouched.
+     */
+    private Stage reposition(Stage stage, Pipeline pipeline, int workspaceId, int position) {
+        Stage parked = new Stage();
+        parked.setId(stage.getId());
+        parked.setName(stage.getName());
+        parked.setSuccess(stage.isSuccess());
+        parked.setFailure(stage.isFailure());
+        parked.setPipeline(pipeline);
+        parked.setWorkspaceId(workspaceId);
+        parked.setPosition(position);
+        return parked;
+    }
+
+    private void assertNamesDistinct(List<Stage> stages) {
+        Set<String> seen = new HashSet<>();
+        for (Stage stage : stages) {
+            String name = stage.getName() == null ? "" : stage.getName().trim();
+            if (name.isEmpty()) throw new BadRequestException("Every stage needs a name");
+            if (!seen.add(name.toLowerCase(Locale.ROOT)))
+                throw new DuplicateResourceException("name", "A stage with this name already exists in this pipeline");
+        }
+    }
+
+    private void assertAtMostOneTerminalPerType(List<Stage> stages) {
+        boolean success = false;
+        boolean failure = false;
+        for (Stage stage : stages) {
+            if (stage.isSuccess() && stage.isFailure())
+                throw new BadRequestException("A stage cannot be both the Won and the Lost stage");
+            if (stage.isSuccess()) {
+                if (success) throw new DuplicateResourceException("This pipeline already has a Won stage");
+                success = true;
+            }
+            if (stage.isFailure()) {
+                if (failure) throw new DuplicateResourceException("This pipeline already has a Lost stage");
+                failure = true;
+            }
+        }
     }
 
     private void assertUniqueName(int workspaceId, int pipelineId, Stage stage) {

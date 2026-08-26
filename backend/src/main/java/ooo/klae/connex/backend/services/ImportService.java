@@ -35,6 +35,7 @@ import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.IdentityMatchRow;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.PersonLeadSource;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.dto.ColumnMapping;
@@ -276,6 +277,7 @@ public class ImportService {
             Person bean = new Person();
             bean.setWorkspaceId(workspaceId);
             bean.setOwnerId(actorId);
+            bean.setLeadSource(PersonLeadSource.IMPORT);
             bean.setName(row.std.get("name"));
             bean.setEmail(row.std.get("email"));
             bean.setPhone(row.std.get("phone"));
@@ -1617,6 +1619,28 @@ public class ImportService {
         return plan;
     }
 
+    /**
+     * Reports whether a value is address-shaped: exactly one {@code @} with a non-empty local part,
+     * no whitespace, and a domain carrying an interior dot. Scans in linear time so an untrusted
+     * import cell cannot drive quadratic regex backtracking.
+     *
+     * @param email the raw cell value
+     * @return true when the value is address-shaped
+     */
+    private static boolean isEmailShaped(String email) {
+        int at = email.indexOf('@');
+        if (at <= 0 || at != email.lastIndexOf('@') || at == email.length() - 1) {
+            return false;
+        }
+        for (int index = 0; index < email.length(); index++) {
+            if (Character.isWhitespace(email.charAt(index))) {
+                return false;
+            }
+        }
+        int dot = email.indexOf('.', at + 2);
+        return dot >= 0 && dot < email.length() - 1;
+    }
+
     private void validateRequired(PlanRow row) {
         String name = row.std.get("name");
         if (name == null || name.isBlank()) {
@@ -1625,7 +1649,7 @@ public class ImportService {
         }
         if (name.length() > 255) fail(row, "Name exceeds 255 characters");
         String email = row.std.get("email");
-        if (email != null && !email.matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")) {
+        if (email != null && !isEmailShaped(email)) {
             fail(row, "Invalid email: " + email);
         }
         String date = row.std.get("expectedCloseDate");
@@ -2753,7 +2777,16 @@ public class ImportService {
     }
 
     private static String slug(String label) {
-        String s = label.trim().toLowerCase().replaceAll("[^a-z0-9]+", "_").replaceAll("^_+|_+$", "");
+        String collapsed = label.trim().toLowerCase().replaceAll("[^a-z0-9]+", "_");
+        int start = 0;
+        int end = collapsed.length();
+        while (start < end && collapsed.charAt(start) == '_') {
+            start++;
+        }
+        while (end > start && collapsed.charAt(end - 1) == '_') {
+            end--;
+        }
+        String s = collapsed.substring(start, end);
         if (s.isEmpty()) s = "field";
         return s.length() > 64 ? s.substring(0, 64) : s;
     }

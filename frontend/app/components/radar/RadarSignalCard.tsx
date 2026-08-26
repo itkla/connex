@@ -1,28 +1,54 @@
 'use client';
 
+import { useMemo, type ReactNode } from 'react';
+import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import {
     ArrowTopRightOnSquareIcon,
     BellSnoozeIcon,
     BookmarkIcon,
-    BriefcaseIcon,
-    BuildingOffice2Icon,
     CheckCircleIcon,
     ChevronDownIcon,
     ClipboardDocumentCheckIcon,
+    EllipsisHorizontalIcon,
     ExclamationTriangleIcon,
-    UserIcon,
+    UserPlusIcon,
     XMarkIcon,
 } from '@heroicons/react/24/outline';
 
-import type { RadarSignal } from '@/app/lib/types';
+import type { RadarEvidence, RadarSignal } from '@/app/lib/types';
 import type { PermissionCheck } from '@/app/lib/permissionState';
 import { usePermissionCheck, usePermissionsRefresh } from '@/app/hooks/usePermissions';
 import RadarSnoozeDialog from '@/app/components/radar/RadarSnoozeDialog';
-import { FAMILY_DOTS } from '@/app/components/radar/radarFamilyAccent';
-import { RADAR_PRESSABLE_SURFACE } from '@/app/components/radar/radarControlSurface';
+import { RadarMark } from '@/app/components/radar/RadarVocabulary';
+import { radarRecordLabel } from '@/app/components/radar/radarLabels';
+import {
+    radarDecayFacts,
+    radarMarkTone,
+    radarPathBridges,
+    radarRiskFacts,
+} from '@/app/components/radar/radarHorizon';
+import {
+    radarRecordHref,
+    radarReferenceLinks,
+    radarSignalNames,
+    radarSubjectRecordHref,
+} from '@/app/components/radar/radarReferences';
 import { Badge } from '@/components/ui/badge';
+import AskConnexSignalEntry from '@/app/components/ask-connex/AskConnexSignalEntry';
 import { Button } from '@/components/ui/button';
+import { IconButton } from '@/components/ui/icon-button';
+import {
+    Collapsible,
+    CollapsibleContent,
+} from '@/components/ui/collapsible';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
 
@@ -40,21 +66,50 @@ type RadarSignalCardProps = {
     onDismiss: () => void;
     onCreateTask: () => void;
     onRefreshEvidence: () => void;
-    onOpenContext: () => void;
+    /**
+     * Opens the record the signal is about. Omit it on a surface that already *is* that record,
+     * which also removes the action rather than offering a link back to where the user stands.
+     */
+    onOpenContext?: () => void;
 };
 
-const SUBJECT_ICONS = {
-    person: UserIcon,
-    company: BuildingOffice2Icon,
-    deal: BriefcaseIcon,
-} satisfies Record<RadarSignal['subject']['type'], typeof UserIcon>;
+/**
+ * The evidence parameters worth showing: the ones this surface has a product name for.
+ *
+ * An allowlist rather than a denylist, so a parameter the detectors add later stays invisible until
+ * someone writes its label. The alternative fails open — a new raw id or model field would surface
+ * itself under "Additional source value", which is exactly the copy this redesign removed.
+ */
+function evidenceParameters(
+    evidence: RadarEvidence,
+    parameterKeys: Record<string, string>,
+): [string, unknown][] {
+    return Object.entries(evidence.parameters).filter(([key, value]) => (
+        key in parameterKeys
+        && (key !== 'bridgeName' || radarRecordLabel(value) !== null)
+    ));
+}
 
-const PRIORITY_TEXT = {
-    high: 'text-destructive',
-    medium: 'text-warning-foreground',
-    cooling: 'text-warning-foreground',
-    opportunity: 'text-brand-dark',
-} satisfies Record<RadarSignal['priority'], string>;
+/**
+ * Stable render keys for one signal's evidence, derived from what each entry is about rather than
+ * where it sits. Deal risk repeats `stakeholder_cold` once per contact and an intro path repeats
+ * `warm_path` once per connector, so the person the entry names is what tells them apart; a
+ * suffix keeps the keys unique if the detector ever emits a true duplicate.
+ */
+function evidenceKeys(evidence: readonly RadarEvidence[]): string[] {
+    const seen = new Map<string, number>();
+    return evidence.map((item) => {
+        const personId = item.parameters.personId;
+        const bridgePersonId = item.parameters.bridgePersonId;
+        const subject = typeof personId === 'number'
+            ? personId
+            : typeof bridgePersonId === 'number' ? bridgePersonId : '';
+        const base = `${item.type}:${subject}`;
+        const repeat = seen.get(base) ?? 0;
+        seen.set(base, repeat + 1);
+        return repeat === 0 ? base : `${base}#${repeat}`;
+    });
+}
 
 function freshnessLabels(value: string, anchor: number, locale: string): { absolute: string; relative: string } | null {
     const timestamp = parseMysqlDateTime(value);
@@ -87,7 +142,14 @@ function requiredTaskPermission(
     return 'granted';
 }
 
-/** Dense triage row for one ranked Radar signal, with its full evidence behind a disclosure. */
+/**
+ * One ranked signal: what it is, why Radar raised it, and the single thing to do about it.
+ *
+ * The subject is a real anchor rather than a button that navigates, so middle-click, new-tab, and
+ * the browser's own link affordances all work. Exactly one action is promoted — the follow-up the
+ * family calls for — while the dispositions that only change what Radar shows sit behind one menu,
+ * and the full evidence stays one click away behind "Why".
+ */
 export default function RadarSignalCard({
     signal,
     pageAsOf,
@@ -110,17 +172,19 @@ export default function RadarSignalCard({
     const personUpdatePermission = usePermissionCheck('PERSON_UPDATE');
     const refreshPermissions = usePermissionsRefresh();
     const warmPath = signal.family === 'warm_path';
+    const subjectLabel = radarRecordLabel(signal.subject.label)
+        ?? t(`subject.unnamed.${signal.subject.type}`);
+    const displaySignal = subjectLabel === signal.subject.label
+        ? signal
+        : { ...signal, subject: { ...signal.subject, label: subjectLabel } };
     const taskActionPermission = requiredTaskPermission(
         taskPermission, personUpdatePermission, warmPath);
     const canCreateTask = taskActionPermission === 'granted';
-    const SubjectIcon = SUBJECT_ICONS[signal.subject.type];
     const pageTimestamp = parseMysqlDateTime(pageAsOf);
     const stale = signal.stale;
     const freshness = freshnessLabels(signal.evidenceAsOf, pageTimestamp, locale);
-    const hasWarmPathBridge = !warmPath || signal.evidence.some((evidence) => (
-        evidence.type === 'warm_path'
-        && typeof evidence.parameters.bridgePersonId === 'number'
-    ));
+    const bridges = radarPathBridges(signal);
+    const hasWarmPathBridge = !warmPath || bridges.length > 0;
     const taskDisabled = busy
         || !canCreateTask
         || freshnessStatus !== 'current'
@@ -144,21 +208,16 @@ export default function RadarSignalCard({
     const taskBlockingExplanation = taskPermissionExplanation ?? taskFreshnessExplanation;
     const followed = signal.state === 'followed';
     const dismissed = signal.state === 'dismissed';
-    const rankRules: Record<string, string> = {
-        priority_then_source_strength_then_subject: t('rank.rulePriority'),
-    };
-    const rankKeys: Record<string, string> = {
-        priority: t('rank.keyPriority'),
-        daysUntilCold: t('rank.keyDaysUntilCold'),
-        daysSinceTouch: t('rank.keyDaysSinceTouch'),
-        riskScore: t('rank.keyRiskScore'),
-        pathScore: t('rank.keyPathScore'),
-        subject: t('rank.keySubject'),
-    };
-    const rankDirections: Record<string, string> = {
-        ascending: t('rank.directionAscending'),
-        descending: t('rank.directionDescending'),
-    };
+    const numberFormat = useMemo(() => new Intl.NumberFormat(locale), [locale]);
+    const dateFormat = useMemo(
+        () => new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }),
+        [locale],
+    );
+    const names = radarSignalNames(displaySignal);
+    const evidenceRenderKeys = evidenceKeys(signal.evidence);
+    const subjectHref = radarSubjectRecordHref(signal.subject);
+    const detailId = `radar-detail-${signal.id}`;
+
     const evidenceTypes: Record<string, string> = {
         relationship_temperature: t('evidence.typeRelationshipTemperature'),
         close_overdue: t('evidence.typeCloseOverdue'),
@@ -177,9 +236,7 @@ export default function RadarSignalCard({
         goesColdAt: t('evidence.parameterGoesColdAt'),
         daysUntilCold: t('evidence.parameterDaysUntilCold'),
         touchCount: t('evidence.parameterTouchCount'),
-        modelVersion: t('evidence.parameterModelVersion'),
         severity: t('evidence.parameterSeverity'),
-        bridgePersonId: t('evidence.parameterBridgePersonId'),
         bridgeName: t('evidence.parameterBridgeName'),
         reachType: t('evidence.parameterReachType'),
         evidenceType: t('evidence.parameterEvidenceType'),
@@ -189,23 +246,9 @@ export default function RadarSignalCard({
         pathScore: t('evidence.parameterPathScore'),
         daysOverdue: t('evidence.parameterDaysOverdue'),
         daysUntilClose: t('evidence.parameterDaysUntilClose'),
-        personId: t('evidence.parameterPersonId'),
         role: t('evidence.parameterRole'),
     };
-    const referenceTypes: Record<string, string> = {
-        person: t('evidence.referencePerson'),
-        company: t('evidence.referenceCompany'),
-        deal: t('evidence.referenceDeal'),
-        person_edge: t('evidence.referencePersonEdge'),
-    };
     const enumValuesByKey: Record<string, Record<string, string>> = {
-        priority: {
-            cooling: t('value.cooling'),
-            high: t('value.high'),
-            medium: t('value.medium'),
-            low: t('value.low'),
-            opportunity: t('value.opportunity'),
-        },
         band: {
             hot: t('value.hot'),
             warm: t('value.warm'),
@@ -232,15 +275,17 @@ export default function RadarSignalCard({
             rewarm: t('value.rewarm'),
         },
     };
+
     const formatValue = (key: string, value: unknown): string => {
-        if (typeof value === 'number') return new Intl.NumberFormat(locale).format(value);
+        if (typeof value === 'number') return numberFormat.format(value);
         if (typeof value === 'boolean') return value ? t('value.yes') : t('value.no');
         if (typeof value === 'string') {
             const enumValues = enumValuesByKey[key];
             if (enumValues) return enumValues[value] ?? t('value.unavailable');
+            if (key === 'bridgeName') return radarRecordLabel(value) ?? t('value.unavailable');
             if (key === 'lastTouchAt' || key === 'goesColdAt') {
                 const timestamp = parseMysqlDateTime(value);
-                if (Number.isFinite(timestamp)) return new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(timestamp);
+                if (Number.isFinite(timestamp)) return dateFormat.format(timestamp);
             }
             return value;
         }
@@ -251,270 +296,323 @@ export default function RadarSignalCard({
         return t('value.unavailable');
     };
 
-    const summaryEvidence = signal.evidence[0];
-    const summary = summaryEvidence
-        ? [
-            evidenceTypes[summaryEvidence.type] ?? t('evidence.unknownType'),
-            ...Object.entries(summaryEvidence.parameters).map(([key, value]) => t('evidence.parameter', {
-                key: parameterKeys[key] ?? t('evidence.unknownParameter'),
-                value: formatValue(key, value),
-            })),
-        ].join(t('evidence.separator'))
-        : t('rank.rule', { rule: rankRules[signal.rank.rule] ?? t('rank.unknownRule') });
-    const detailId = `radar-detail-${signal.id}`;
+    const decayReading = (): ReactNode => {
+        const facts = radarDecayFacts(signal);
+        if (!facts) return null;
+        const trendLabel = facts.trend === null
+            ? null
+            : t(`reading.trend${facts.trend === 'rising' ? 'Rising' : facts.trend === 'steady' ? 'Steady' : 'Cooling'}`);
+        const lead = facts.band && trendLabel
+            ? t('reading.warmth', { band: t(`value.${facts.band}`), trend: trendLabel })
+            : facts.band
+                ? t('reading.warmthBand', { band: t(`value.${facts.band}`) })
+                : trendLabel
+                    ? t('reading.warmthTrend', { trend: trendLabel })
+                    : null;
+        const tail = facts.band === 'cold'
+            ? t('reading.wentCold')
+            : facts.daysUntilCold !== null && facts.daysUntilCold >= 0
+                ? t('reading.goesColdIn', { days: facts.daysUntilCold })
+                : facts.daysSinceTouch !== null
+                    ? t('reading.sinceContact', { days: facts.daysSinceTouch })
+                    : null;
+        return [lead, tail].filter((part) => part !== null).join(' ');
+    };
+
+    const riskReading = (): ReactNode => {
+        const facts = radarRiskFacts(signal);
+        const first = facts[0];
+        if (!first) return null;
+        const lead = first.code === 'close_overdue' && first.daysOverdue !== null
+            ? t('reading.closeOverdue', { days: first.daysOverdue })
+            : first.code === 'closing_soon_quiet' && first.daysUntilClose !== null
+                ? t('reading.closingSoonQuiet', { days: first.daysUntilClose })
+                : first.code === 'stalled' && first.daysSinceTouch !== null
+                    ? t('reading.stalled', { days: first.daysSinceTouch })
+                    : first.code === 'stakeholder_cold'
+                        ? t('reading.stakeholderCold', {
+                            band: t(`value.${first.band ?? 'cold'}`),
+                        })
+                        : first.code === 'no_stakeholders'
+                            ? t('reading.noStakeholders')
+                            : evidenceTypes[first.code] ?? t('evidence.unknownType');
+        const more = facts.length - 1;
+        return more > 0 ? `${lead} ${t('reading.moreReasons', { count: more })}` : lead;
+    };
+
+    const pathReading = (): ReactNode => {
+        const first = bridges[0];
+        if (!first) return null;
+        const href = radarRecordHref('person', first.bridgePersonId);
+        const bridgeChunk = (chunks: ReactNode) => (
+            href === null ? <>{chunks}</> : (
+                <Link href={href} className="font-medium text-foreground underline-offset-2 hover:underline">
+                    {chunks}
+                </Link>
+            )
+        );
+        const others = bridges.length - 1;
+        return others > 0
+            ? t.rich('reading.pathShared', {
+                name: first.bridgeName,
+                count: others,
+                bridge: bridgeChunk,
+            })
+            : t.rich('reading.path', { name: first.bridgeName, bridge: bridgeChunk });
+    };
+
+    const reading = signal.family === 'relationship_decay'
+        ? decayReading()
+        : signal.family === 'deal_risk'
+            ? riskReading()
+            : pathReading();
+
+    const actionLabel = warmPath ? t('actions.askIntro') : t('actions.followUp');
+    const actionNamedLabel = signal.taskId != null
+        ? t(warmPath ? 'actions.introAskedNamed' : 'actions.followUpDoneNamed', { subject: subjectLabel })
+        : !canCreateTask
+            ? t(taskActionPermission === 'denied'
+                ? warmPath
+                    ? 'actions.createWarmPathTaskDeniedNamed'
+                    : 'actions.createTaskDeniedNamed'
+                : warmPath
+                    ? 'actions.createWarmPathTaskPermissionUnavailableNamed'
+                    : 'actions.createTaskPermissionUnavailableNamed', { subject: subjectLabel })
+            : freshnessStatus !== 'current'
+                ? t(freshnessStatus === 'checking'
+                    ? 'actions.createTaskEvidenceCheckingNamed'
+                    : 'actions.createTaskEvidenceUnavailableNamed', { subject: subjectLabel })
+                : stale
+                    ? t('actions.createTaskStaleNamed', { subject: subjectLabel })
+                    : !hasWarmPathBridge
+                        ? t('actions.createTaskPathUnavailableNamed', { subject: subjectLabel })
+                        : t(warmPath ? 'actions.askIntroNamed' : 'actions.followUpNamed', { subject: subjectLabel });
 
     return (
-        <li className="group/signal border-b border-border/60 last:border-b-0">
-            <article
-                id={`radar-signal-${signal.id}`}
-                tabIndex={-1}
-                aria-busy={busy}
-                className="scroll-mt-24 px-3 py-3 outline-none transition-colors focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring/50 hover:bg-muted/40 sm:px-4"
-            >
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4">
-                    <div className="flex min-w-0 flex-1 items-start gap-3">
-                        <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                            <SubjectIcon className="size-4.5" aria-hidden />
-                        </span>
-                        <div className="min-w-0 flex-1">
-                            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                                <h3 className="min-w-0 truncate text-[0.9375rem] leading-tight font-semibold text-foreground">
-                                    {signal.subject.label}
-                                </h3>
-                                {stale ? (
-                                    <Badge variant="outline" className="border-warning/40 bg-warning/10 text-warning-foreground">
-                                        <ExclamationTriangleIcon aria-hidden />
-                                        {t('freshness.stale')}
-                                    </Badge>
-                                ) : null}
-                                {signal.state !== 'active' ? (
-                                    <Badge variant="secondary">{t(`state.${signal.state}`)}</Badge>
-                                ) : null}
+        <li className="border-b border-border/60 last:border-b-0">
+            <Collapsible open={expanded} onOpenChange={onExpandedChange}>
+                <article
+                    id={`radar-signal-${signal.id}`}
+                    tabIndex={-1}
+                    aria-busy={busy}
+                    className="scroll-mt-24 px-3 py-3 outline-none transition-colors duration-(--motion-micro) focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring/50 hover:bg-muted/40 motion-reduce:transition-none sm:px-4"
+                >
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:gap-4">
+                        <div className="flex min-w-0 flex-1 items-start gap-3">
+                            <RadarMark
+                                tone={radarMarkTone(signal)}
+                                family={signal.family}
+                                className="mt-1.5"
+                            />
+                            <div className="min-w-0 flex-1">
+                                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                                    <h3 className="min-w-0 text-[0.9375rem] leading-tight font-semibold">
+                                        {subjectHref === null ? (
+                                            <span className="truncate text-foreground">{subjectLabel}</span>
+                                        ) : (
+                                            <Link
+                                                href={subjectHref}
+                                                className="truncate text-foreground underline-offset-2 outline-none hover:underline focus-visible:underline"
+                                            >
+                                                {subjectLabel}
+                                            </Link>
+                                        )}
+                                    </h3>
+                                    <span className="text-xs text-muted-foreground">
+                                        {t(`subject.${signal.subject.type}`)}
+                                    </span>
+                                    {stale ? (
+                                        <Badge variant="outline" className="border-warning/40 bg-warning/10 text-warning-foreground">
+                                            <ExclamationTriangleIcon aria-hidden />
+                                            {t('freshness.stale')}
+                                        </Badge>
+                                    ) : null}
+                                    {signal.state !== 'active' ? (
+                                        <Badge variant="secondary">{t(`state.${signal.state}`)}</Badge>
+                                    ) : null}
+                                </div>
+                                <p className="mt-1 text-sm text-foreground/80">{reading}</p>
                             </div>
-                            <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
-                                <span className={cn('size-1.5 shrink-0 rounded-full', FAMILY_DOTS[signal.family])} aria-hidden />
-                                <span>{t(`family.${signal.family}`)}</span>
-                                <span aria-hidden>·</span>
-                                <span>{t(`subject.${signal.subject.type}`)}</span>
-                                <span aria-hidden>·</span>
-                                <span className={cn('font-medium', PRIORITY_TEXT[signal.priority])}>
-                                    {t(`priority.${signal.priority}`)}
-                                </span>
-                            </p>
-                            <p className="mt-1.5 line-clamp-2 text-sm text-foreground/80 lg:truncate">{summary}</p>
                         </div>
-                    </div>
 
-                    <div className="flex shrink-0 flex-col gap-2 lg:flex-row lg:items-center lg:justify-end lg:gap-1">
-                        <span className="mr-1 hidden text-xs text-muted-foreground xl:inline">
-                            {freshness ? (
-                                <time dateTime={signal.evidenceAsOf} title={freshness.absolute}>
-                                    {freshness.relative}
-                                </time>
-                            ) : (
-                                t('freshness.unavailable')
-                            )}
-                        </span>
-                        <div className="flex items-center gap-1 lg:contents">
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="size-11 lg:size-9"
-                                onClick={onFollow}
-                                disabled={busy || followed}
-                                aria-label={t('actions.followNamed', { subject: signal.subject.label })}
-                                title={followed ? t('actions.followed') : t('actions.follow')}
-                            >
-                                {followed ? <CheckCircleIcon aria-hidden /> : <BookmarkIcon aria-hidden />}
-                            </Button>
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="size-11 lg:size-9"
-                                onClick={() => onSnoozeOpenChange(true)}
-                                disabled={busy}
-                                aria-label={t('actions.snoozeNamed', { subject: signal.subject.label })}
-                                title={t('actions.snooze')}
-                            >
-                                <BellSnoozeIcon aria-hidden />
-                            </Button>
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="size-11 lg:size-9"
-                                onClick={onDismiss}
-                                disabled={busy || dismissed}
-                                aria-label={t('actions.dismissNamed', { subject: signal.subject.label })}
-                                title={t('actions.dismiss')}
-                            >
-                                <XMarkIcon aria-hidden />
-                            </Button>
-                        </div>
-                        <div className="grid grid-cols-[1fr_1fr_auto] items-center gap-2 lg:contents">
+                        <div className="flex shrink-0 items-center gap-1 lg:justify-end">
                             <Button
                                 type="button"
                                 variant="secondary"
-                                size="sm"
-                                className={cn('min-h-11 lg:min-h-9', RADAR_PRESSABLE_SURFACE)}
+                                size="toolbar"
+                                className="min-h-11 lg:min-h-9"
                                 onClick={onCreateTask}
                                 disabled={taskDisabled}
-                                aria-label={signal.taskId != null
-                                        ? t('actions.taskCreatedNamed', { subject: signal.subject.label })
-                                        : !canCreateTask
-                                        ? t(taskActionPermission === 'denied'
-                                            ? warmPath
-                                                ? 'actions.createWarmPathTaskDeniedNamed'
-                                                : 'actions.createTaskDeniedNamed'
-                                            : warmPath
-                                                ? 'actions.createWarmPathTaskPermissionUnavailableNamed'
-                                                : 'actions.createTaskPermissionUnavailableNamed', { subject: signal.subject.label })
-                                        : freshnessStatus !== 'current'
-                                            ? t(freshnessStatus === 'checking'
-                                                ? 'actions.createTaskEvidenceCheckingNamed'
-                                                : 'actions.createTaskEvidenceUnavailableNamed', { subject: signal.subject.label })
-                                        : stale
-                                            ? t('actions.createTaskStaleNamed', { subject: signal.subject.label })
-                                            : !hasWarmPathBridge
-                                                ? t('actions.createTaskPathUnavailableNamed', { subject: signal.subject.label })
-                                                : t('actions.createTaskNamed', { subject: signal.subject.label })}
-                                    title={signal.taskId != null
-                                        ? t('actions.taskCreatedNamed', { subject: signal.subject.label })
-                                        : taskBlockingExplanation ?? (stale
-                                            ? t('actions.taskStale')
-                                            : !hasWarmPathBridge
-                                                ? t('actions.taskPathUnavailable')
-                                                : undefined)}
+                                aria-label={actionNamedLabel}
+                                title={signal.taskId != null
+                                    ? t(warmPath ? 'actions.introAsked' : 'actions.followUpDone')
+                                    : taskBlockingExplanation ?? (stale
+                                        ? t('actions.taskStale')
+                                        : !hasWarmPathBridge
+                                            ? t('actions.taskPathUnavailable')
+                                            : undefined)}
                             >
-                                {signal.taskId != null ? <CheckCircleIcon aria-hidden /> : <ClipboardDocumentCheckIcon aria-hidden />}
-                                {signal.taskId != null ? t('actions.taskCreated') : t('actions.createTask')}
+                                {signal.taskId != null
+                                    ? <CheckCircleIcon aria-hidden />
+                                    : warmPath
+                                        ? <UserPlusIcon aria-hidden />
+                                        : <ClipboardDocumentCheckIcon aria-hidden />}
+                                {signal.taskId != null
+                                    ? t(warmPath ? 'actions.introAsked' : 'actions.followUpDone')
+                                    : actionLabel}
                             </Button>
-                            <Button
-                                type="button"
-                                size="sm"
-                                className="min-h-11 lg:min-h-9"
-                                onClick={onOpenContext}
-                                disabled={busy}
-                                aria-label={t('actions.openContextNamed', { subject: signal.subject.label })}
-                            >
-                                <ArrowTopRightOnSquareIcon aria-hidden />
-                                {t('actions.openContext')}
-                            </Button>
+
                             <Button
                                 type="button"
                                 variant="ghost"
-                                size="icon"
-                                className="size-11 lg:size-9"
+                                size="toolbar"
+                                className="min-h-11 lg:min-h-9"
                                 onClick={() => onExpandedChange(!expanded)}
                                 aria-expanded={expanded}
                                 aria-controls={detailId}
-                                aria-label={t(expanded ? 'detail.hideNamed' : 'detail.showNamed', { subject: signal.subject.label })}
-                                title={t(expanded ? 'detail.hide' : 'detail.show')}
+                                aria-label={t(expanded ? 'detail.hideNamed' : 'detail.showNamed', { subject: subjectLabel })}
                             >
-                                <ChevronDownIcon className={cn('transition-transform duration-200 motion-reduce:transition-none', expanded && 'rotate-180')} aria-hidden />
+                                {t('detail.why')}
+                                <ChevronDownIcon
+                                    data-icon="inline-end"
+                                    aria-hidden
+                                    className={cn(
+                                        'transition-transform duration-(--motion-micro) motion-reduce:transition-none',
+                                        expanded && 'rotate-180',
+                                    )}
+                                />
                             </Button>
+
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <IconButton
+                                        label={t('actions.moreNamed', { subject: subjectLabel })}
+                                        variant="ghost"
+                                        className="min-h-11 min-w-11 lg:min-h-9 lg:min-w-9"
+                                        disabled={busy}
+                                    >
+                                        <EllipsisHorizontalIcon aria-hidden />
+                                    </IconButton>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-56">
+                                    {onOpenContext ? (
+                                        <>
+                                            <DropdownMenuItem onClick={onOpenContext}>
+                                                <ArrowTopRightOnSquareIcon aria-hidden />
+                                                {t('actions.openContext')}
+                                            </DropdownMenuItem>
+                                            <DropdownMenuSeparator />
+                                        </>
+                                    ) : null}
+                                    <AskConnexSignalEntry
+                                        family={signal.family}
+                                        subject={{ ...signal.subject, label: subjectLabel }}
+                                    />
+                                    <DropdownMenuItem onClick={onFollow} disabled={followed}>
+                                        {followed ? <CheckCircleIcon aria-hidden /> : <BookmarkIcon aria-hidden />}
+                                        {followed ? t('actions.followed') : t('actions.follow')}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => onSnoozeOpenChange(true)}>
+                                        <BellSnoozeIcon aria-hidden />
+                                        {t('actions.snooze')}
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={onDismiss} disabled={dismissed}>
+                                        <XMarkIcon aria-hidden />
+                                        {t('actions.dismiss')}
+                                    </DropdownMenuItem>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
                         </div>
                     </div>
-                </div>
 
-                {signal.taskId == null && taskBlockingExplanation ? (
-                    <div className="mt-2 flex flex-wrap items-center gap-2 pl-12 text-xs text-muted-foreground" role="status">
-                        <span>{taskBlockingExplanation}</span>
-                        {taskActionPermission === 'unavailable' ? (
-                            <Button
-                                type="button"
-                                variant="link"
-                                size="sm"
-                                className="h-auto shrink-0 p-0 text-xs"
-                                onClick={() => void refreshPermissions()}
-                                disabled={busy}
-                            >
-                                {t('actions.retryPermissionCheck')}
-                            </Button>
-                        ) : freshnessStatus === 'unavailable' ? (
-                            <Button
-                                type="button"
-                                variant="link"
-                                size="sm"
-                                className="h-auto shrink-0 p-0 text-xs"
-                                onClick={onRefreshEvidence}
-                                disabled={busy}
-                            >
-                                {t('actions.retryEvidenceRefresh')}
-                            </Button>
-                        ) : null}
-                    </div>
-                ) : null}
+                    {signal.taskId == null && taskBlockingExplanation ? (
+                        <div className="mt-2 flex flex-wrap items-center gap-2 pl-6 text-xs text-muted-foreground" role="status">
+                            <span>{taskBlockingExplanation}</span>
+                            {taskActionPermission === 'unavailable' ? (
+                                <Button
+                                    type="button"
+                                    variant="link"
+                                    size="inline"
+                                    onClick={() => void refreshPermissions()}
+                                    disabled={busy}
+                                >
+                                    {t('actions.retryPermissionCheck')}
+                                </Button>
+                            ) : freshnessStatus === 'unavailable' ? (
+                                <Button
+                                    type="button"
+                                    variant="link"
+                                    size="inline"
+                                    onClick={onRefreshEvidence}
+                                    disabled={busy}
+                                >
+                                    {t('actions.retryEvidenceRefresh')}
+                                </Button>
+                            ) : null}
+                        </div>
+                    ) : null}
 
-                <div id={detailId} className={cn('mt-4 gap-5 pl-12 sm:grid-cols-2', expanded ? 'grid' : 'hidden')}>
-                    <section aria-labelledby={`radar-evidence-${signal.id}`}>
-                        <p id={`radar-evidence-${signal.id}`} className="text-xs font-medium text-muted-foreground">
-                            {t('evidence.heading')}
-                        </p>
-                        <ul className="mt-2 space-y-2">
-                            {signal.evidence.map((evidence, index) => (
-                                <li key={`${evidence.type}:${index}`} className="text-sm text-foreground">
-                                    <p className="font-medium">{evidenceTypes[evidence.type] ?? t('evidence.unknownType')}</p>
-                                    {Object.entries(evidence.parameters).length > 0 ? (
-                                        <p className="mt-0.5 text-xs text-muted-foreground">
-                                            {Object.entries(evidence.parameters)
-                                                .map(([key, value]) => t('evidence.parameter', {
-                                                    key: parameterKeys[key] ?? t('evidence.unknownParameter'),
-                                                    value: formatValue(key, value),
-                                                }))
-                                                .join(t('evidence.separator'))}
-                                        </p>
-                                    ) : null}
-                                    {evidence.references.length > 0 ? (
-                                        <p className="mt-0.5 text-xs text-muted-foreground">
-                                            {t('evidence.references', {
-                                                references: evidence.references
-                                                    .map((reference) => `${referenceTypes[reference.type] ?? t('evidence.unknownReference')} #${reference.id}`)
-                                                    .join(', '),
-                                            })}
-                                        </p>
-                                    ) : null}
-                                </li>
-                            ))}
-                        </ul>
-                    </section>
-
-                    <section aria-labelledby={`radar-rank-${signal.id}`}>
-                        <p id={`radar-rank-${signal.id}`} className="text-xs font-medium text-muted-foreground">
-                            {t('rank.heading', { position: signal.rank.position })}
-                        </p>
-                        <p className="mt-2 text-sm text-foreground">
-                            {t('rank.rule', { rule: rankRules[signal.rank.rule] ?? t('rank.unknownRule') })}
-                        </p>
-                        <ul className="mt-2 flex flex-wrap gap-1.5">
-                            {signal.rank.factors.map((factor) => (
-                                <li key={`${factor.key}:${factor.direction}`} className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                                    {t('rank.factor', {
-                                        key: rankKeys[factor.key] ?? t('rank.unknownFactor'),
-                                        direction: rankDirections[factor.direction] ?? t('rank.unknownDirection'),
-                                        value: formatValue(factor.key, factor.value),
-                                    })}
-                                </li>
-                            ))}
-                        </ul>
-                        <p className="mt-3 text-xs text-muted-foreground">
-                            {t('freshness.heading')}{' '}
-                            {freshness ? (
-                                <time dateTime={signal.evidenceAsOf} title={freshness.absolute}>
-                                    {freshness.relative}{t('evidence.separator')}{freshness.absolute}
-                                </time>
-                            ) : (
-                                <span>{t('freshness.unavailable')}</span>
-                            )}
-                        </p>
-                    </section>
-                </div>
-            </article>
+                    <CollapsibleContent
+                        id={detailId}
+                        className="overflow-hidden duration-(--motion-standard) ease-calm data-closed:animate-collapsible-up data-closed:duration-(--motion-micro) data-open:animate-collapsible-down motion-reduce:animate-none!"
+                    >
+                        <div className="mt-4 space-y-4 pl-6">
+                            <ul className="space-y-3">
+                                {signal.evidence.map((evidence, index) => {
+                                    const links = radarReferenceLinks(evidence.references, names);
+                                    const parameters = evidenceParameters(evidence, parameterKeys);
+                                    return (
+                                        <li key={evidenceRenderKeys[index]} className="text-sm">
+                                            <p className="font-medium text-foreground">
+                                                {evidenceTypes[evidence.type] ?? t('evidence.unknownType')}
+                                            </p>
+                                            {parameters.length > 0 ? (
+                                                <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+                                                    {parameters.map(([key, value]) => (
+                                                        <div key={key} className="col-span-2 grid grid-cols-subgrid">
+                                                            <dt className="text-muted-foreground">
+                                                                {parameterKeys[key] ?? t('evidence.unknownParameter')}
+                                                            </dt>
+                                                            <dd className="text-foreground/80">{formatValue(key, value)}</dd>
+                                                        </div>
+                                                    ))}
+                                                </dl>
+                                            ) : null}
+                                            {links.length > 0 ? (
+                                                <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                                                    <span>{t('evidence.sources')}</span>
+                                                    {links.map((link) => (
+                                                        <Link
+                                                            key={link.href}
+                                                            href={link.href}
+                                                            className="font-medium text-foreground underline-offset-2 hover:underline"
+                                                        >
+                                                            {link.label}
+                                                        </Link>
+                                                    ))}
+                                                </p>
+                                            ) : null}
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                            <p className="text-xs text-muted-foreground">
+                                {t('freshness.heading')}{' '}
+                                {freshness ? (
+                                    <time dateTime={signal.evidenceAsOf} title={freshness.absolute}>
+                                        {freshness.relative}{t('evidence.separator')}{freshness.absolute}
+                                    </time>
+                                ) : (
+                                    <span>{t('freshness.unavailable')}</span>
+                                )}
+                            </p>
+                        </div>
+                    </CollapsibleContent>
+                </article>
+            </Collapsible>
             {snoozeOpen ? (
                 <RadarSnoozeDialog
-                    signal={signal}
+                    signal={displaySignal}
                     open
                     busy={busy}
                     onOpenChange={onSnoozeOpenChange}

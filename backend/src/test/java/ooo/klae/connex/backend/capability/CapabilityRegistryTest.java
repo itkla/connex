@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.delivery.DeliveryProperties;
 import ooo.klae.connex.backend.mail.MailProperties;
 import ooo.klae.connex.backend.services.BusinessCardService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
+import ooo.klae.connex.backend.signature.SignatureProperties;
 import ooo.klae.connex.backend.sso.SocialLoginClientRegistrations;
 
 @ExtendWith(MockitoExtension.class)
@@ -48,7 +49,8 @@ class CapabilityRegistryTest {
         capabilityRegistry = new CapabilityRegistry(ssoConnectionService,
                 socialLoginClientRegistrations, connectedAccountProviders, connectedCaptureProperties,
                 mailProperties, businessCardService,
-                deploymentProperties, capability -> true, deliveryProperties);
+                deploymentProperties, capability -> true, deliveryProperties,
+                new SignatureProperties());
     }
 
     @Test
@@ -95,6 +97,7 @@ class CapabilityRegistryTest {
                 deploymentProperties,
                 capability -> true,
                 deliveryProperties,
+                new SignatureProperties(),
                 Map.of(Capability.SSO, Set.of(DeploymentProperties.PROFILE_SAAS)));
         when(deploymentProperties.isConfigured()).thenReturn(true);
         when(deploymentProperties.getProfile()).thenReturn(DeploymentProperties.PROFILE_SAAS);
@@ -117,7 +120,8 @@ class CapabilityRegistryTest {
                 businessCardService,
                 new DeploymentProperties(),
                 capability -> capability != Capability.MANAGED_MAIL,
-                new DeliveryProperties());
+                new DeliveryProperties(),
+                new SignatureProperties());
 
         assertFalse(restrictedRegistry.isAvailable(Capability.MANAGED_MAIL));
     }
@@ -161,6 +165,7 @@ class CapabilityRegistryTest {
         expected.put(Capability.BUSINESS_CARD_SCANNING, Set.of());
         expected.put(Capability.BUSINESS_CARD_IMPORT, Set.of());
         expected.put(Capability.CAMPAIGN_DELIVERY, Set.of());
+        expected.put(Capability.DOCUMENT_SIGNATURE, Set.of());
 
         assertEquals(EnumSet.allOf(Capability.class), expected.keySet(),
                 "A capability was added without pinning its deployment-profile policy");

@@ -73,6 +73,7 @@ class RuleServiceTest extends AbstractServiceTest {
             case "add_tag", "remove_tag" -> action.setTagId(1);
             case "create_note" -> action.setBody("Automated note");
             case "assign_owner" -> action.setTargetUserId(1);
+            case "set_response_due" -> action.setDueInHours(4);
             case "change_stage" -> action.setTargetStageId(1);
             default -> { }
         }
@@ -366,6 +367,37 @@ class RuleServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void create_setResponseDueWithoutHours_throws() {
+        RuleAction bare = new RuleAction();
+        bare.setType("set_response_due");
+        assertThrows(BadRequestException.class, () -> ruleService.create(
+            req("person", entityChange("person.created"), "user", bare)));
+    }
+
+    @Test
+    void create_setResponseDueBeyondAYear_throws() {
+        RuleAction tooLong = new RuleAction();
+        tooLong.setType("set_response_due");
+        tooLong.setDueInHours(24 * 365 + 1);
+        assertThrows(BadRequestException.class, () -> ruleService.create(
+            req("person", entityChange("person.created"), "user", tooLong)));
+    }
+
+    @Test
+    void create_setResponseDueOnDealRule_throws() {
+        assertThrows(BadRequestException.class, () -> ruleService.create(
+            req("deal", entityChange("deal.won"), "user", action("set_response_due"))));
+    }
+
+    @Test
+    void create_firstResponseOverdueEscalation_roundTrip() {
+        RuleDto created = ruleService.create(req(
+            "person", entityChange("person.first_response_overdue"), "user",
+            action("notify"), action("assign_owner")));
+        assertEquals(2, created.getActions().size());
+    }
+
+    @Test
     void create_changeStageOnCompanyRule_throws() {
         assertThrows(BadRequestException.class,
             () -> ruleService.create(req("company", entityChange("company.updated"), "user", action("change_stage"))));
@@ -504,6 +536,44 @@ class RuleServiceTest extends AbstractServiceTest {
 
         assertTrue(preview.getMatchCount() >= 1);
         assertTrue(preview.getSample().stream().anyMatch(record -> record.getId() == company.getId()));
+    }
+
+    @Test
+    void create_rejectsUnsupportedActionForDocumentRecordType() {
+        assertThrows(BadRequestException.class,
+            () -> ruleService.create(
+                req("document", entityChange("document.approved"), "user", action("add_tag"))));
+        assertThrows(BadRequestException.class,
+            () -> ruleService.create(
+                req("document", entityChange("document.approved"), "user", action("change_stage"))));
+    }
+
+    @Test
+    void create_documentNotifyRule_allowed() {
+        RuleDto created = ruleService.create(
+            req("document", entityChange("document.approved", "document.rejected"),
+                "user", action("notify")));
+
+        assertEquals("document", created.getRecordType());
+        assertEquals(
+            List.of("document.approved", "document.rejected"), created.getTrigger().getEvents());
+    }
+
+    @Test
+    void preview_documentRecordType_throws() {
+        RulePreviewRequest request = new RulePreviewRequest();
+        request.setRecordType("document");
+        SegmentDefinition documentCondition = new SegmentDefinition();
+        documentCondition.setMatch("all");
+        SegmentCondition byName = new SegmentCondition();
+        byName.setType("field");
+        byName.setField("name");
+        byName.setOp("contains");
+        byName.setValue("anything");
+        documentCondition.setConditions(List.of(byName));
+        request.setCondition(documentCondition);
+
+        assertThrows(BadRequestException.class, () -> ruleService.preview(request));
     }
 
     @Test

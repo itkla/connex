@@ -13,7 +13,9 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.HttpStatus;
 
 import lombok.RequiredArgsConstructor;
 
@@ -61,7 +63,14 @@ public class ProviderConnectionController {
     }
 
     @DeleteMapping("/{provider}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
     public void disconnect(@PathVariable String provider) {
         connectionService.disconnect(provider);
+    }
+
+    @DeleteMapping("/{provider}/retained-data")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public void eraseAllCapturedDataAndReset(@PathVariable String provider) {
+        connectionService.eraseAllCapturedDataAndReset(provider);
     }
 }

@@ -174,6 +174,11 @@ re-derives every claim from the mapper SQL, failing loudly when SQL and declarat
 4. **Owner grouping is current-owner.** Reassigning a deal retroactively moves its historical
    figures to the new owner. Point-in-time ownership is a 1.1 follow-up.
 
+The filtered deal-browser figure also honors the contact facet. When that facet is active, its
+person join uses the same organization share ceiling as person records and excludes archived,
+suspended, or ceased contacts. The unfiltered figure does not join people or traverse person
+shares.
+
 Note also that the Home pipeline chart mixes bases within one row: won value is period-bounded
 while open value is unbounded.
 

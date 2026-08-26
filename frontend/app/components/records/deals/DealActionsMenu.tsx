@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { toastError, toastSuccess } from '@/app/lib/toast';
+import { toastSuccess } from '@/app/lib/toast';
 import { useTranslations } from 'next-intl';
 import { LoaderCircle } from 'lucide-react';
 import {
@@ -30,14 +30,19 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
+import { IconButton } from '@/components/ui/icon-button';
 import { ButtonGroup } from '@/components/ui/button-group';
 
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import DealTeamDialog from '@/app/components/records/deals/DealTeamDialog';
 import EditDealSheet from '@/app/components/records/deals/EditDealSheet';
-import NewDealActivityDialog from '@/app/components/records/deals/NewDealActivityDialog';
-import NewDealTaskDialog from '@/app/components/records/deals/NewDealTaskDialog';
+import {
+    RecordActivityComposer,
+    RecordTaskComposer,
+    type RecordComposerAnchor,
+} from '@/app/components/records/RecordComposers';
 import NoteDialog from '@/app/components/activity/notes/NoteDialog';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import {
     useContactTargetSearch,
     useDealTargetSearch,
@@ -70,6 +75,7 @@ export default function DealActionsMenu({
 }) {
     const router = useRouter();
     const t = useTranslations('DealsActionsMenu');
+    const showApiError = useApiErrorToast('DealsActionsMenu');
     const { inputRef: attachmentInputRef, uploading: attachmentsUploading, openPicker: openAttachmentPicker, onFilesSelected: onAttachmentFilesSelected } = useAttachmentUploader('deal', deal.id);
     const [editOpen, setEditOpen] = useState(false);
     const [teamOpen, setTeamOpen] = useState(false);
@@ -85,6 +91,7 @@ export default function DealActionsMenu({
             : [deal, ...dealSeeds],
         [deal, dealSeeds],
     );
+    const composerAnchor = useMemo<RecordComposerAnchor>(() => ({ kind: 'deal', deal }), [deal]);
     const personSearch = useContactTargetSearch(noteOpen, [], personSeeds);
     const dealSearch = useDealTargetSearch(noteOpen, [deal.id], stableDealSeeds);
 
@@ -98,7 +105,7 @@ export default function DealActionsMenu({
             toastSuccess(won === null ? t('dealReopened') : t('dealClosed'));
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('failedToUpdateStatus'));
+            showApiError(err, 'failedToUpdateStatus');
         } finally {
             setIsUpdatingStatus(false);
         }
@@ -112,7 +119,7 @@ export default function DealActionsMenu({
             router.push('/records/deals');
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('failedToDelete'));
+            showApiError(err, 'failedToDelete');
             setIsDeleting(false);
         }
     };
@@ -120,15 +127,15 @@ export default function DealActionsMenu({
     return (
         <div className="flex flex-row gap-2">
             <ButtonGroup orientation="horizontal">
-                <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
+                <Button variant="outline" size="toolbar" onClick={() => setEditOpen(true)}>
                     <PencilSquareIcon className="size-4" />
                     {t('edit')}
                 </Button>
                 <Button
                     variant="outline"
-                    size="sm"
+                    size="toolbar"
                     disabled={deal.company == null}
-                    onClick={() => deal.company != null && router.push(`/overview/map?companyId=${deal.company}`)}
+                    onClick={() => deal.company != null && router.push(`/intelligence/map?companyId=${deal.company}`)}
                 >
                     <EyeIcon className="size-4" />
                     {t('viewInMap')}
@@ -137,7 +144,7 @@ export default function DealActionsMenu({
             <ButtonGroup orientation="horizontal">
                 <Button
                     variant="outline"
-                    size="sm"
+                    size="toolbar"
                     onClick={openAttachmentPicker}
                     disabled={attachmentsUploading}
                 >
@@ -150,35 +157,26 @@ export default function DealActionsMenu({
                 </Button>
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="sm">
+                        <Button variant="brand" size="toolbar" menu>
                             <PlusIcon className="size-4" />
                             {t('new')}
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
                         <DropdownMenuItem
-                            onSelect={(e) => {
-                                e.preventDefault();
-                                setActivityOpen(true);
-                            }}
+                            onSelect={() => setActivityOpen(true)}
                         >
                             <ChatBubbleLeftRightIcon className="size-4" />
                             <span>{t('addActivity')}</span>
                         </DropdownMenuItem>
                         <DropdownMenuItem
-                            onSelect={(e) => {
-                                e.preventDefault();
-                                setNoteOpen(true);
-                            }}
+                            onSelect={() => setNoteOpen(true)}
                         >
                             <DocumentTextIcon className="size-4" />
                             <span>{t('addNote')}</span>
                         </DropdownMenuItem>
                         <DropdownMenuItem
-                            onSelect={(e) => {
-                                e.preventDefault();
-                                setTaskOpen(true);
-                            }}
+                            onSelect={() => setTaskOpen(true)}
                         >
                             <CheckCircleIcon className="size-4" />
                             <span>{t('addTask')}</span>
@@ -187,9 +185,9 @@ export default function DealActionsMenu({
                 </DropdownMenu>
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="sm">
+                        <IconButton variant="outline" size="icon-toolbar" label={t('moreActions')}>
                             <EllipsisVerticalIcon className="size-4" />
-                        </Button>
+                        </IconButton>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
                         <DropdownMenuItem
@@ -275,19 +273,15 @@ export default function DealActionsMenu({
                 initialCollaborators={collaborators}
             />
 
-            <NewDealActivityDialog
-                dealId={deal.id}
-                dealName={deal.name}
+            <RecordActivityComposer
+                anchor={composerAnchor}
                 currentUserId={currentUserId}
-                deal={deal}
                 open={activityOpen}
                 onOpenChange={setActivityOpen}
             />
 
-            <NewDealTaskDialog
-                dealId={deal.id}
-                dealName={deal.name}
-                deal={deal}
+            <RecordTaskComposer
+                anchor={composerAnchor}
                 currentUserId={currentUserId}
                 open={taskOpen}
                 onOpenChange={setTaskOpen}

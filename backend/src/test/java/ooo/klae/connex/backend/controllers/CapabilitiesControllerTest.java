@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.controllers;
 
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -19,19 +20,26 @@ import org.springframework.web.context.request.RequestContextHolder;
 import ooo.klae.connex.backend.capability.Capability;
 import ooo.klae.connex.backend.capability.CapabilityRegistry;
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
+import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountMode;
+import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountProviders;
 
 @ExtendWith(MockitoExtension.class)
 class CapabilitiesControllerTest {
 
     @Mock private CapabilityRegistry capabilityRegistry;
     @Mock private PrivilegedMfaProperties privilegedMfaProperties;
+    @Mock private ConnectedAccountProviders connectedAccountProviders;
 
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.standaloneSetup(
-                new CapabilitiesController(capabilityRegistry, privilegedMfaProperties)).build();
+        lenient().when(connectedAccountProviders.mode(ConnectedAccountProviders.GOOGLE))
+                .thenReturn(ConnectedAccountMode.CUSTOM);
+        lenient().when(connectedAccountProviders.mode(ConnectedAccountProviders.MICROSOFT))
+                .thenReturn(ConnectedAccountMode.CUSTOM);
+        mockMvc = MockMvcBuilders.standaloneSetup(new CapabilitiesController(
+                capabilityRegistry, privilegedMfaProperties, connectedAccountProviders)).build();
     }
 
     @AfterEach
@@ -52,6 +60,9 @@ class CapabilitiesControllerTest {
         when(capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_SCANNING)).thenReturn(true);
         when(capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_IMPORT)).thenReturn(true);
         when(capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)).thenReturn(true);
+        when(connectedAccountProviders.mode(ConnectedAccountProviders.GOOGLE))
+                .thenReturn(ConnectedAccountMode.MANAGED);
+        when(capabilityRegistry.isAvailable(Capability.DOCUMENT_SIGNATURE)).thenReturn(true);
         when(privilegedMfaProperties.isEnforced()).thenReturn(true);
 
         mockMvc.perform(get("/api/capabilities"))
@@ -61,12 +72,15 @@ class CapabilitiesControllerTest {
                 .andExpect(jsonPath("$.socialLogin.microsoft").value(true))
                 .andExpect(jsonPath("$.connectedAccounts.google").value(true))
                 .andExpect(jsonPath("$.connectedAccounts.microsoft").value(false))
+                .andExpect(jsonPath("$.connectedAccountModes.google").value("managed"))
+                .andExpect(jsonPath("$.connectedAccountModes.microsoft").value("custom"))
                 .andExpect(jsonPath("$.connectedCapture.google").value(true))
                 .andExpect(jsonPath("$.connectedCapture.microsoft").value(false))
                 .andExpect(jsonPath("$.mailManaged").value(false))
                 .andExpect(jsonPath("$.businessCardScanning").value(true))
                 .andExpect(jsonPath("$.businessCardImport").value(true))
                 .andExpect(jsonPath("$.campaignDelivery").value(true))
+                .andExpect(jsonPath("$.documentSignature").value(true))
                 .andExpect(jsonPath("$.privilegedMfaEnforced").value(true));
     }
 
@@ -77,5 +91,6 @@ class CapabilitiesControllerTest {
                 .andExpect(jsonPath("$.campaignDelivery").value(false));
 
         verify(capabilityRegistry).isAvailable(Capability.CAMPAIGN_DELIVERY);
+        verify(capabilityRegistry).isAvailable(Capability.DOCUMENT_SIGNATURE);
     }
 }

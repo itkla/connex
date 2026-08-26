@@ -27,7 +27,7 @@
     "delete": "Delete",
     "actionsAria": "Activity actions",
     "toastDeleted": "Activity deleted",
-    "toastFailedDelete": "Failed to delete activity"
+    "toastFailedDelete": "Couldn't delete the activity"
   },
   "ActivityCreateDialog": {
     "titleCreate": "Log activity",
@@ -55,7 +55,7 @@
     "create": "Create",
     "toastSubjectRequired": "Subject is required",
     "toastCreated": "Activity logged",
-    "toastFailedCreate": "Failed to log activity",
+    "toastFailedCreate": "Couldn't log the activity",
     "toastCreatedWithTask": "Activity logged and follow-up task created",
     "toastFollowUpFailed": "Activity logged, but the follow-up task couldn't be created",
     "createWithTask": "Log activity + task",
@@ -70,7 +70,12 @@
     "followUp_today": "Today",
     "followUp_tomorrow": "Tomorrow",
     "followUp_inThreeDays": "In 3 days",
-    "followUp_nextWeek": "Next week"
+    "followUp_nextWeek": "Next week",
+    "triggerAdd": "Log activity",
+    "toastLinkFailed": "Activity logged, but the contact couldn't be added to the deal",
+    "toastFailedLoadLinks": "Couldn't load the records you can link to",
+    "noCompanyForDeals": "This contact has no company yet, so there are no deals to link.",
+    "noCompanyForPeople": "This deal has no company yet, so there are no contacts to link."
   },
   "ActivityNotes": {
     "title": "Notes",
@@ -106,10 +111,10 @@
     "toastContentRequired": "Content is required",
     "toastNoteUpdated": "Note updated",
     "toastNotesUpdated": "{count} notes updated",
-    "toastFailedSave": "Failed to save note",
+    "toastFailedSave": "Couldn't save the note",
     "toastNoteDeleted": "Note deleted",
     "toastNotesDeleted": "{count} notes deleted",
-    "toastFailedDelete": "Failed to delete note",
+    "toastFailedDelete": "Couldn't delete the note",
     "groupRecord": "By record",
     "sortBy": "Sort",
     "sortByAria": "Sort notes",
@@ -121,6 +126,11 @@
     "open": "Open",
     "edit": "Edit",
     "actionsAria": "Note actions",
+    "loading": "Loading notes",
+    "paginationLabel": "Notes pages",
+    "previousPage": "Previous notes page",
+    "nextPage": "Next notes page",
+    "pageStatus": "Page {page} of {total}",
     "showMore": "Show more notes",
     "showingCount": "Showing {shown} of {total}"
   },
@@ -147,7 +157,7 @@
     "private": "Private",
     "unknownAuthor": "Unknown author",
     "toastContentCopied": "Note copied",
-    "toastFailedCopy": "Failed to copy note"
+    "toastFailedCopy": "Couldn't copy the note"
   },
   "ActivityNotesDialog": {
     "titleCreate": "New note",
@@ -176,8 +186,8 @@
     "toastContentRequired": "Content is required",
     "toastCreated": "Note created",
     "toastUpdated": "Note updated",
-    "toastFailedCreate": "Failed to create note",
-    "toastFailedSave": "Failed to save note"
+    "toastFailedCreate": "Couldn't create the note",
+    "toastFailedSave": "Couldn't save the note"
   },
   "ActivityTasks": {
     "title": "Tasks",
@@ -214,6 +224,12 @@
     "queue_unassigned": "Unassigned",
     "queue_allOpen": "All open",
     "queue_completed": "Completed",
+    "emptyFirstRunTitle": "No tasks yet",
+    "emptyFilteredTitle": "No matching tasks",
+    "emptyQueueBody": "Nothing lands in this queue right now. Another queue may still have work waiting.",
+    "emptyQueueShowAllOpen": "Show all open tasks",
+    "emptyQueueShowCompleted": "Show completed tasks",
+    "emptyFirstRunBody": "Tasks are the follow-ups you owe a contact, company, or deal. Create your first one and it will show up in your queues.",
     "emptyFiltered": "No tasks match your search.",
     "emptyQueue_myOpen": "Nothing on your plate. Nice.",
     "emptyQueue_dueToday": "Nothing due today.",
@@ -231,9 +247,9 @@
     "dueYesterday": "Yesterday",
     "ariaCompleteTask": "Mark task complete",
     "ariaOpenTask": "Open task: {name}",
-    "toastFailedUpdate": "Failed to update task",
+    "toastFailedUpdate": "Couldn't update the task",
     "toastDeleted": "Task deleted",
-    "toastFailedDelete": "Failed to delete task",
+    "toastFailedDelete": "Couldn't delete the task",
     "taskUpdatedSuccess": "Task updated successfully",
     "taskMarkedAsCompleteSuccess": "Task marked as complete",
     "taskMarkedAsIncompleteSuccess": "Task marked as incomplete"
@@ -244,7 +260,7 @@
     "descriptionLabel": "Description",
     "descriptionPlaceholder": "What needs to happen?",
     "dueDateLabel": "Due date",
-    "assignedToLabel": "Assigned to",
+    "assignedToLabel": "Assignee",
     "assignedToPlaceholder": "Pick a teammate",
     "noUserFound": "No user found.",
     "personLabel": "Contact",
@@ -257,7 +273,12 @@
     "create": "Create",
     "toastDescriptionRequired": "Description is required",
     "toastCreated": "Task created",
-    "toastFailedCreate": "Failed to create task"
+    "toastFailedCreate": "Couldn't create the task",
+    "triggerAdd": "Add task",
+    "toastLinkFailed": "Task created, but the contact couldn't be added to the deal",
+    "toastFailedLoadLinks": "Couldn't load the records you can link to",
+    "noCompanyForDeals": "This contact has no company yet, so there are no deals to link.",
+    "noCompanyForPeople": "This deal has no company yet, so there are no contacts to link."
   },
   "ActivityEditActivitySheet": {
     "title": "Edit activity",
@@ -286,13 +307,13 @@
     "save": "Save",
     "subjectRequired": "Subject is required",
     "activityUpdated": "Activity updated",
-    "updateFailed": "Failed to update activity"
+    "updateFailed": "Couldn't update the activity"
   },
   "ActivityEditTaskSheet": {
     "title": "Edit task",
     "description": "Update fields below and save.",
     "descriptionLabel": "Description",
-    "assignedToLabel": "Assigned to",
+    "assignedToLabel": "Assignee",
     "selectUserPlaceholder": "Select user",
     "contactLabel": "Contact",
     "selectContactPlaceholder": "Select contact",
@@ -310,7 +331,7 @@
     "save": "Save",
     "descriptionRequired": "Description is required",
     "taskUpdated": "Task updated",
-    "updateFailed": "Failed to update task"
+    "updateFailed": "Couldn't update the task"
   },
   "ActivityLibraryTags": {
     "title": "Tags",
@@ -330,15 +351,14 @@
     "emptyTitle": "No tags yet",
     "emptyBody": "Tags are color-coded labels you can attach to contacts, companies, and deals to group and filter them. Create your first one to get started.",
     "createFirst": "Create your first tag",
+    "noResultsTitle": "No matching tags",
     "noResults": "No tags match \"{query}\".",
     "toastHexCopied": "Copied {hex}",
     "toastHexCopyFailed": "Couldn't copy color",
     "toastDeleted": "Deleted tag {name}",
-    "toastFailedDelete": "Failed to delete tag",
-    "deleteTitle": "Delete this tag?",
-    "deleteBody": "{name} will be removed from every contact, company, and deal it's on. This can't be undone.",
-    "confirmDelete": "Delete tag",
-    "cancel": "Cancel"
+    "toastFailedDelete": "Couldn't delete the tag",
+    "entityLabel": "tag",
+    "deleteDetails": "It also comes off every contact, company, and deal it is on."
   },
   "ActivityLibraryTagDialog": {
     "titleCreate": "New tag",
@@ -358,7 +378,7 @@
     "toastNameRequired": "Tag name is required",
     "toastCreated": "Tag created",
     "toastUpdated": "Tag updated",
-    "toastFailedSave": "Failed to save tag"
+    "toastFailedSave": "Couldn't save the tag"
   },
   "ActivityNotesEditor": {
     "placeholder": "Start writing… @ to mention people, # to link records.",
@@ -389,6 +409,7 @@
     "taskList": "Checklist",
     "taskChecked": "Completed checklist item",
     "taskUnchecked": "Incomplete checklist item",
+    "unavailableReference": "Unavailable reference",
     "blockquote": "Quote",
     "codeBlock": "Code block",
     "tableInsert": "Insert table",
@@ -475,6 +496,17 @@
     "slashPickerRetry": "Retry",
     "slashPickerResults": "{count, plural, one {# match} other {# matches}}"
   },
+  "ActivityNotesReferencePreview": {
+    "memberUnavailable": "Member unavailable",
+    "contactUnavailable": "Contact unavailable",
+    "dealUnavailable": "Deal unavailable",
+    "companyUnavailable": "Company unavailable",
+    "value": "Value",
+    "company": "Company",
+    "stage": "Stage",
+    "status": "Status",
+    "expectedClose": "Expected close"
+  },
   "ActivityTaskDetail": {
     "back": "Back to tasks",
     "untitled": "Untitled task",
@@ -497,7 +529,7 @@
   },
   "CapturedEvidence": {
     "title": "Provider capture evidence",
-    "description": "This read-only activity was projected from provider data admitted by the effective capture policy.",
+    "description": "This was captured automatically from your connected account, following your capture settings.",
     "capturedBy": "Captured from {provider}",
     "provider": "Provider",
     "stream": "Source stream",
@@ -509,7 +541,7 @@
     "sourceId": "Provider source ID",
     "capturedAt": "Captured",
     "captureAsOf": "Evidence as of",
-    "readOnly": "Provider projections cannot be edited or deleted in Connex."
+    "readOnly": "Automatically captured activities can't be edited or deleted in Connex."
   },
   "ActivityAllLayout": {
     "title": "Activity / All",

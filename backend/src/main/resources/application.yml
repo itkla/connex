@@ -129,9 +129,8 @@ connex:
     metrics:
         scrape-token: ${CONNEX_METRICS_SCRAPE_TOKEN:}
     security:
-        # CSRF protection for state-changing requests. The SPA fetches the token from
-        # GET /api/auth/csrf and echoes it in the X-XSRF-TOKEN header. Kill-switch for cutover.
-        csrf-enabled: ${CONNEX_SECURITY_CSRF_ENABLED:true}
+        # CSRF protection for state-changing requests is unconditional and has no switch.
+        # The SPA fetches the token from GET /api/auth/csrf and echoes it in X-XSRF-TOKEN.
         # Comma-separated trusted sanitizing-proxy IPs / CIDR ranges. X-Forwarded-For is
         # honored only when the direct peer matches one of these and contains exactly one
         # IP literal. Empty (the default) means the header is never trusted. Configure only
@@ -277,12 +276,21 @@ connex:
         # a sign-in client must never hold mail/calendar scopes. Off until configured.
         google:
             enabled: ${CONNEX_CONNECTED_ACCOUNTS_GOOGLE_ENABLED:false}
+            mode: ${CONNEX_CONNECTED_ACCOUNTS_GOOGLE_MODE:CUSTOM}
             client-id: ${CONNEX_CONNECTED_ACCOUNTS_GOOGLE_CLIENT_ID:}
             client-secret: ${CONNEX_CONNECTED_ACCOUNTS_GOOGLE_CLIENT_SECRET:}
         microsoft:
             enabled: ${CONNEX_CONNECTED_ACCOUNTS_MICROSOFT_ENABLED:false}
+            mode: ${CONNEX_CONNECTED_ACCOUNTS_MICROSOFT_MODE:CUSTOM}
             client-id: ${CONNEX_CONNECTED_ACCOUNTS_MICROSOFT_CLIENT_ID:}
             client-secret: ${CONNEX_CONNECTED_ACCOUNTS_MICROSOFT_CLIENT_SECRET:}
+        managed:
+            google:
+                client-id: ${CONNEX_MANAGED_GOOGLE_CLIENT_ID:}
+                client-secret: ${CONNEX_MANAGED_GOOGLE_CLIENT_SECRET:}
+            microsoft:
+                client-id: ${CONNEX_MANAGED_MICROSOFT_CLIENT_ID:}
+                client-secret: ${CONNEX_MANAGED_MICROSOFT_CLIENT_SECRET:}
     connected-capture:
         scheduling-enabled: ${CONNEX_CONNECTED_CAPTURE_SCHEDULING_ENABLED:false}
         google:
@@ -362,7 +370,23 @@ connex:
         scheduling-enabled: ${CONNEX_RULES_SCHEDULING_ENABLED:true}
         evaluation-delay-ms: ${CONNEX_RULES_EVALUATION_DELAY_MS:900000}
         initial-delay-ms: ${CONNEX_RULES_INITIAL_DELAY_MS:900000}
+    # First-response SLA breach sweep. The interval bounds how late a breach is noticed, so it is
+    # deliberately shorter than the rule cadence; batch-size x max-batches caps the work one
+    # workspace can take from a single pass, and a larger backlog drains over subsequent passes.
+    lead-response-sla:
+        sweep-enabled: ${CONNEX_LEAD_RESPONSE_SLA_SWEEP_ENABLED:true}
+        sweep-delay-ms: ${CONNEX_LEAD_RESPONSE_SLA_SWEEP_DELAY_MS:300000}
+        sweep-initial-delay-ms: ${CONNEX_LEAD_RESPONSE_SLA_SWEEP_INITIAL_DELAY_MS:300000}
+        batch-size: ${CONNEX_LEAD_RESPONSE_SLA_BATCH_SIZE:200}
+        max-batches: ${CONNEX_LEAD_RESPONSE_SLA_MAX_BATCHES:10}
     workflows:
+        # Rolling-deployment fence for the `document` automation record type. A binary that predates
+        # document automation would attach a document run's task/activity/note to nothing and fails
+        # every canonical document run closed, so leave this off until every node in the deployment
+        # runs a document-capable binary, then turn it on everywhere. Reverse the order to roll back:
+        # turn it off everywhere first so no document trigger is enqueued, then replace binaries.
+        document-automation:
+            enabled: ${CONNEX_WORKFLOWS_DOCUMENT_AUTOMATION_ENABLED:false}
         runtime:
             enabled: ${CONNEX_WORKFLOWS_RUNTIME_ENABLED:false}
             scheduling-enabled: ${CONNEX_WORKFLOWS_RUNTIME_SCHEDULING_ENABLED:true}
@@ -396,7 +420,8 @@ connex:
         # does NOT start sending reset/verification mail. It is the fallback sender for
         # workspaces without their own SMTP. A workspace can override host/from via
         # Settings → Email; its SMTP password is stored in the central secret store.
-        # app-base-url is the frontend origin used to build invite links (never a request header).
+        # app-base-url is the frontend origin used to build invite and document-acceptance links
+        # (never a request header).
         enabled: ${CONNEX_MAIL_ENABLED:false}
         # When true, per-workspace SMTP overrides are disabled and the instance transport
         # (enabled + host/from below) is authoritative for all workspace mail; if the instance

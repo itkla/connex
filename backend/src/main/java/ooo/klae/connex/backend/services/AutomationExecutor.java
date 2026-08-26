@@ -20,7 +20,8 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
  * The work span also pins the target workspace's catalog explicitly, so a surrounding
  * {@code TenantWorkScope} override (e.g. the rule-trigger listener's) can never mask a
  * cross-workspace {@code runAs} onto the wrong catalog.
- * Used by the rule engine to execute actions as the run-as member or the system actor.
+ * Used by the rule engine to execute actions as the run-as member or the system actor, and by
+ * scheduled system observations through {@link #runAsObserver}.
  */
 @Component
 @RequiredArgsConstructor
@@ -38,11 +39,33 @@ public class AutomationExecutor {
     public <T> T runAs(int workspaceId, User principal, String role, Supplier<T> work) {
         return tenantWorkScope.withWorkspacePlacement(workspaceId,
             (orgId, catalog) -> runWithPinnedPlacement(
-                workspaceId, orgId, catalog, principal, role, work));
+                workspaceId, orgId, catalog, principal, role, work, true));
+    }
+
+    /**
+     * Runs {@code work} exactly like {@link #runAs}, except that the thread is <em>not</em> marked as
+     * executing automation, so mutations the work makes do publish rule triggers.
+     *
+     * <p>This is for scheduled system observations — a first-response SLA breach, for instance —
+     * which are events a workspace's own rules are entitled to escalate, not side effects of a rule
+     * action. Never call it from inside a rule action: the automation marker is the only thing
+     * standing between a rule's mutations and that rule triggering itself again.
+     *
+     * @param <T> work result type
+     * @param workspaceId workspace to install
+     * @param principal principal to run as
+     * @param role role to install in the tenant context
+     * @param work observation to run
+     * @return whatever {@code work} returned
+     */
+    public <T> T runAsObserver(int workspaceId, User principal, String role, Supplier<T> work) {
+        return tenantWorkScope.withWorkspacePlacement(workspaceId,
+            (orgId, catalog) -> runWithPinnedPlacement(
+                workspaceId, orgId, catalog, principal, role, work, false));
     }
 
     private <T> T runWithPinnedPlacement(int workspaceId, int orgId, String catalog,
-            User principal, String role, Supplier<T> work) {
+            User principal, String role, Supplier<T> work, boolean automation) {
         SecurityContext previousSecurity = SecurityContextHolder.getContext();
         boolean hadTenant = tenantContext.isResolved();
         Integer previousWorkspace = hadTenant ? tenantContext.getWorkspaceId() : null;
@@ -55,7 +78,7 @@ public class AutomationExecutor {
         context.setAuthentication(new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
         SecurityContextHolder.setContext(context);
         tenantContext.set(workspaceId, orgId, principal.getId(), role, catalog);
-        boolean previousScope = automationScope.enter();
+        boolean previousScope = automation ? automationScope.enter() : automationScope.isActive();
         try {
             return work.get();
         } finally {

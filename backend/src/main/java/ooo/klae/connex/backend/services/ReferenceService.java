@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -25,6 +26,7 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.EntityReference;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
@@ -33,6 +35,7 @@ import ooo.klae.connex.backend.mappers.EntityReferenceMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 
 import lombok.RequiredArgsConstructor;
 
@@ -59,6 +62,7 @@ public class ReferenceService {
     private final AttachmentMapper attachmentMapper;
     private final TaskMapper taskMapper;
     private final ActivityMapper activityMapper;
+    private final WorkspaceMapper workspaceMapper;
 
     public static final String SOURCE_NOTE = "note";
     public static final String SOURCE_TASK = "task";
@@ -79,17 +83,18 @@ public class ReferenceService {
     private static final int MAX_LABEL_LENGTH = 255;
     private static final int BATCH_SIZE = 500;
     private static final String REFERENCE_SEPARATOR = "(?::|&colon;|\\\\:)";
+    private static final String REFERENCE_TYPE_PATTERN =
+        "(user|person|deal|company|note|file|task|activity)";
     private static final Pattern TOKEN = Pattern.compile(
-        "\\[([^\\]]+)\\]\\((user|person|deal|company|note|file|task|activity)"
+        "\\[([^\\]]+)\\]\\(" + REFERENCE_TYPE_PATTERN
             + REFERENCE_SEPARATOR + "(\\d+)\\)");
-    private static final Pattern NOTE_TOKEN = Pattern.compile(
-        "\\[([^\\]]+)\\]\\(note" + REFERENCE_SEPARATOR + "(\\d+)\\)");
-    private static final Pattern NOTE_REFERENCE_DEFINITION = Pattern.compile(
-        "(?im)^[ \\t]{0,3}\\[(?:\\\\.|[^\\]\\\\])+\\]:[ \\t]*"
-            + "(?:\\r?\\n[ \\t]+)?<?note:(\\d+)>?(?:[ \\t]+.*)?$");
+    private static final Pattern REFERENCE_DEFINITION = Pattern.compile(
+        "(?im)^[ \\t]{0,3}+\\[(?:\\\\.|[^\\]\\\\])++\\]:[ \\t]*+"
+            + "(?:\\r?\\n[ \\t]++)?<?" + REFERENCE_TYPE_PATTERN
+            + ":(\\d+)>?(?:[ \\t].*)?$");
 
     /**
-     * Reader-scoped prose and structured references after private-note targets are removed.
+     * Reader-scoped prose and structured references after invisible targets are removed.
      * @param content reader-safe prose
      * @param references reader-visible structured references
      */
@@ -99,9 +104,21 @@ public class ReferenceService {
         }
     }
 
-    private record MarkdownNoteTargets(List<Integer> ids, boolean hasUnparseableId) {
+    private record ReferenceTarget(String type, int id) {
+    }
+
+    private record MarkdownTargets(List<ReferenceTarget> targets, Set<String> unparseableTypes) {
+        private MarkdownTargets {
+            targets = List.copyOf(targets);
+            unparseableTypes = Set.copyOf(unparseableTypes);
+        }
+
         private boolean isEmpty() {
-            return ids.isEmpty() && !hasUnparseableId;
+            return targets.isEmpty() && unparseableTypes.isEmpty();
+        }
+
+        private boolean hasUnparseableTarget() {
+            return !unparseableTypes.isEmpty();
         }
     }
 
@@ -112,7 +129,8 @@ public class ReferenceService {
      * members referenced for the first time (present now but not before this
      * call), so the caller can notify only newly-added mentions. Excluding the
      * acting author from notification is the caller's responsibility. Scoped to
-     * {@code workspaceId}.
+     * {@code workspaceId}. A first-time sync skips the empty range delete so
+     * concurrent creates do not contend on the index's empty terminal gap.
      *
      * @param workspaceId the owning workspace
      * @param sourceType  the entity type the references belong to ({@code note}, {@code task}, {@code comment})
@@ -122,11 +140,14 @@ public class ReferenceService {
      */
     @Transactional
     public List<Integer> syncReferences(int workspaceId, String sourceType, int sourceId, String content) {
-        Set<Integer> before = mentionedMemberIds(entityReferenceMapper.findBySource(workspaceId, sourceType, sourceId));
+        List<EntityReference> previous = entityReferenceMapper.findBySource(workspaceId, sourceType, sourceId);
+        Set<Integer> before = mentionedMemberIds(previous);
         int currentUserId = workspaceService.getCurrentUserId();
         List<EntityReference> resolved = resolve(workspaceId, sourceType, sourceId, content, currentUserId);
 
-        entityReferenceMapper.deleteBySource(workspaceId, sourceType, sourceId);
+        if (!previous.isEmpty()) {
+            entityReferenceMapper.deleteBySource(workspaceId, sourceType, sourceId);
+        }
         for (EntityReference reference : resolved) {
             entityReferenceMapper.insert(reference);
         }
@@ -214,7 +235,7 @@ public class ReferenceService {
         for (Note note : notes) {
             note.setReferences(bySource.getOrDefault(note.getId(), List.of()));
         }
-        redactInvisibleNoteReferences(workspaceId, notes);
+        redactInvisibleReferences(workspaceId, notes);
         return notes;
     }
 
@@ -236,13 +257,13 @@ public class ReferenceService {
         for (Task task : tasks) {
             task.setReferences(bySource.getOrDefault(task.getId(), List.of()));
         }
-        redactInvisibleNoteTargets(workspaceId, tasks,
+        redactInvisibleTargets(workspaceId, tasks,
             Task::getReferences, Task::setReferences, Task::getDescription, Task::setDescription);
         return tasks;
     }
 
     /**
-     * Attaches reader-visible references to deals and masks private-note targets in their close reasons.
+     * Attaches reader-visible references to deals and masks invisible targets in their close reasons.
      * The references and note visibility are resolved in batches, and the input order is preserved.
      * @param workspaceId the owning workspace
      * @param deals the deals to hydrate
@@ -254,7 +275,7 @@ public class ReferenceService {
         }
         Map<Integer, List<EntityReference>> bySource = referencesBySource(
             workspaceId, SOURCE_DEAL, deals.stream().map(Deal::getId).toList());
-        List<ReaderVisibleContent> visible = redactInvisibleNoteTargets(
+        List<ReaderVisibleContent> visible = redactInvisibleTargets(
             workspaceId,
             deals.stream()
                 .map(deal -> new ReaderVisibleContent(
@@ -287,7 +308,7 @@ public class ReferenceService {
         for (Activity activity : activities) {
             activity.setReferences(bySource.getOrDefault(activity.getId(), List.of()));
         }
-        redactInvisibleNoteTargets(workspaceId, activities,
+        redactInvisibleTargets(workspaceId, activities,
             Activity::getReferences, Activity::setReferences, Activity::getNotes, Activity::setNotes);
         return activities;
     }
@@ -319,43 +340,41 @@ public class ReferenceService {
     }
 
     /**
-     * Removes private-note targets from prose and structured references for the current reader.
+     * Removes every reference target the current reader cannot see from prose and structured references.
      * The input list is resolved in one visibility query and the returned list preserves its order.
      * @param workspaceId the owning workspace
      * @param items prose/reference pairs to scope
      * @return reader-visible pairs in input order
      */
-    public List<ReaderVisibleContent> redactInvisibleNoteTargets(
+    public List<ReaderVisibleContent> redactInvisibleTargets(
             int workspaceId, List<ReaderVisibleContent> items) {
         if (items == null || items.isEmpty()) {
             return List.of();
         }
-        Set<Integer> targetNoteIds = new HashSet<>();
-        boolean containsNoteTarget = false;
+        Set<ReferenceTarget> targets = new HashSet<>();
+        boolean containsTarget = false;
         for (ReaderVisibleContent item : items) {
             for (EntityReference reference : item.references()) {
-                if (TYPE_NOTE.equals(reference.getRefType())) {
-                    containsNoteTarget = true;
-                    targetNoteIds.add(reference.getRefId());
-                }
+                containsTarget = true;
+                targets.add(new ReferenceTarget(reference.getRefType(), reference.getRefId()));
             }
-            MarkdownNoteTargets markdownTargets = markdownNoteTargets(item.content());
+            MarkdownTargets markdownTargets = markdownTargets(item.content());
             if (!markdownTargets.isEmpty()) {
-                containsNoteTarget = true;
-                targetNoteIds.addAll(markdownTargets.ids());
+                containsTarget = true;
+                targets.addAll(markdownTargets.targets());
             }
         }
-        if (!containsNoteTarget) {
+        if (!containsTarget) {
             return List.copyOf(items);
         }
         int currentUserId = workspaceService.getCurrentUserId();
-        Set<Integer> visible = visibleNoteIds(workspaceId, targetNoteIds, currentUserId);
+        Set<ReferenceTarget> visible = visibleTargets(workspaceId, targets, currentUserId);
         return items.stream()
             .map(item -> new ReaderVisibleContent(
-                redactNoteTokens(item.content(), visible),
+                redactTokens(item.content(), visible),
                 item.references().stream()
-                    .filter(reference -> !TYPE_NOTE.equals(reference.getRefType())
-                        || visible.contains(reference.getRefId()))
+                    .filter(reference -> visible.contains(
+                        new ReferenceTarget(reference.getRefType(), reference.getRefId())))
                     .toList()))
             .toList();
     }
@@ -366,7 +385,7 @@ public class ReferenceService {
             return List.of();
         }
         Map<String, EntityReference> unique = new LinkedHashMap<>();
-        Matcher matcher = TOKEN.matcher(content);
+        Matcher matcher = TOKEN.matcher(normalizeReferenceSyntax(content));
         while (matcher.find() && unique.size() < MAX_REFERENCES) {
             String type = matcher.group(2);
             int refId;
@@ -394,7 +413,8 @@ public class ReferenceService {
             case TYPE_DEAL -> dealMapper.exists(workspaceId, refId);
             case TYPE_COMPANY -> companyMapper.exists(workspaceId, refId);
             case TYPE_NOTE -> noteMapper.getVisibleNoteById(workspaceId, refId, currentUserId) != null;
-            case TYPE_FILE -> attachmentMapper.exists(workspaceId, refId);
+            case TYPE_FILE -> !attachmentMapper.getVisibleIdsIn(
+                workspaceId, List.of(refId), currentUserId).isEmpty();
             case TYPE_TASK -> taskMapper.exists(workspaceId, refId);
             case TYPE_ACTIVITY -> activityMapper.exists(workspaceId, refId);
             default -> false;
@@ -402,23 +422,36 @@ public class ReferenceService {
     }
 
     /**
-     * Removes note-type reference targets (and masks their content tokens) that
-     * the current reader cannot see, so a private note's label/existence never
-     * leaks through a more-visible source note's stored references or content.
+     * Requires a supported target to be visible to the current reader before a relational lookup.
+     * @param workspaceId the active workspace
+     * @param type the closed internal reference type
+     * @param refId the target id
+     * @param currentUserId the current reader
+     * @return the canonical reference type
      */
-    private void redactInvisibleNoteReferences(int workspaceId, List<Note> notes) {
-        redactInvisibleNoteTargets(workspaceId, notes,
+    public String requireVisibleTarget(int workspaceId, String type, int refId, int currentUserId) {
+        String canonicalType = canonicalReferenceType(type);
+        if (canonicalType == null || refId <= 0) {
+            throw new ResourceNotFoundException("Reference target not found");
+        }
+        ReferenceTarget target = new ReferenceTarget(canonicalType, refId);
+        if (!visibleTargets(workspaceId, Set.of(target), currentUserId).contains(target)) {
+            throw new ResourceNotFoundException("Reference target not found");
+        }
+        return canonicalType;
+    }
+
+    /**
+     * Removes reference targets and content tokens that the current reader cannot see.
+     */
+    private void redactInvisibleReferences(int workspaceId, List<Note> notes) {
+        redactInvisibleTargets(workspaceId, notes,
             Note::getReferences, Note::setReferences, Note::getContent, Note::setContent);
     }
 
     /**
-     * Generic note-target redaction shared by every source type (note, task,
-     * activity). For each source item it collects the note ids referenced by its
-     * stored references and inline {@code note:} tokens, resolves which of those
-     * notes the current reader may see, then drops the invisible references and
-     * masks their content tokens to {@code (private note)}. A no-op (and no query)
-     * when no note is referenced. Accessors are passed functionally so the same
-     * logic covers each bean's differing reference/content fields.
+     * Generic target redaction shared by every prose-bearing source type. A no-op when no internal
+     * target is referenced. Accessors cover each bean's differing reference and content fields.
      *
      * @param workspaceId   the owning workspace
      * @param items         the source items to redact in place
@@ -428,14 +461,14 @@ public class ReferenceService {
      * @param setContent    writes an item's masked content
      * @param <T>           the source bean type
      */
-    private <T> void redactInvisibleNoteTargets(
+    private <T> void redactInvisibleTargets(
             int workspaceId,
             List<T> items,
             Function<T, List<EntityReference>> getReferences,
             BiConsumer<T, List<EntityReference>> setReferences,
             Function<T, String> getContent,
             BiConsumer<T, String> setContent) {
-        List<ReaderVisibleContent> redacted = redactInvisibleNoteTargets(workspaceId, items.stream()
+        List<ReaderVisibleContent> redacted = redactInvisibleTargets(workspaceId, items.stream()
             .map(item -> new ReaderVisibleContent(getContent.apply(item), getReferences.apply(item)))
             .toList());
         for (int index = 0; index < items.size(); index++) {
@@ -446,51 +479,79 @@ public class ReferenceService {
         }
     }
 
-    private static String redactNoteTokens(String content, Set<Integer> visibleNoteIds) {
+    private static String redactTokens(String content, Set<ReferenceTarget> visibleTargets) {
         if (content == null) {
             return null;
         }
-        String redacted = NOTE_TOKEN.matcher(content).replaceAll(match ->
-            parseNoteId(match.group(2))
-                .filter(visibleNoteIds::contains)
+        String redacted = TOKEN.matcher(content).replaceAll(match ->
+            parseReferenceTarget(match.group(2), match.group(3))
+                .filter(visibleTargets::contains)
                 .map(ignored -> Matcher.quoteReplacement(match.group()))
-                .orElse("(private note)"));
-        MarkdownNoteTargets targets = markdownNoteTargets(redacted);
-        if (targets.hasUnparseableId()
-                || targets.ids().stream().anyMatch(id -> !visibleNoteIds.contains(id))) {
-            return "(private note)";
+                .orElseGet(() -> redactionPlaceholder(match.group(2))));
+        MarkdownTargets targets = markdownTargets(redacted);
+        if (targets.hasUnparseableTarget()) {
+            return "(unavailable reference)";
+        }
+        Optional<ReferenceTarget> invisible = targets.targets().stream()
+            .filter(target -> !visibleTargets.contains(target))
+            .findFirst();
+        if (invisible.isPresent()) {
+            return redactionPlaceholder(invisible.get().type());
         }
         return redacted;
     }
 
-    private static MarkdownNoteTargets markdownNoteTargets(String content) {
-        if (content == null || content.isBlank()) {
-            return new MarkdownNoteTargets(List.of(), false);
-        }
-        String normalized = HtmlUtils.htmlUnescape(content.replace("&colon;", ":")).replace("\\:", ":");
-        List<Integer> ids = new ArrayList<>();
-        boolean hasUnparseableLink = collectInlineNoteTargetIds(normalized, ids);
-        boolean hasUnparseableDefinition = collectNoteTargetIds(
-            NOTE_REFERENCE_DEFINITION.matcher(normalized), ids);
-        return new MarkdownNoteTargets(
-            List.copyOf(ids), hasUnparseableLink || hasUnparseableDefinition);
+    private static String redactionPlaceholder(String type) {
+        return TYPE_NOTE.equals(type) ? "(private note)" : "(unavailable reference)";
     }
 
-    private static boolean collectNoteTargetIds(Matcher matcher, List<Integer> ids) {
-        boolean hasUnparseableId = false;
+    /**
+     * Collects every internal target an untrusted body reaches through inline destinations and
+     * link-reference definitions.
+     *
+     * <p>Every repetition in that pattern is possessive so a hostile body cannot drive backtracking,
+     * and each is unambiguous in context, so refusing to give characters back does not change what
+     * it matches: no label alternative can consume a bare {@code ]}, and no indent run can be
+     * followed by a space or tab that the next required token would accept. Its trailing
+     * description is {@code [ \t].*} rather than {@code [ \t]+.*} because {@code .} already covers
+     * further spaces and tabs.
+     *
+     * @param content the raw reader-visible body
+     * @return the referenced targets and whether any target was unparseable
+     */
+    private static MarkdownTargets markdownTargets(String content) {
+        if (content == null || content.isBlank()) {
+            return new MarkdownTargets(List.of(), Set.of());
+        }
+        String normalized = normalizeReferenceSyntax(content);
+        List<ReferenceTarget> targets = new ArrayList<>();
+        Set<String> unparseableTypes = new HashSet<>();
+        collectInlineTargets(normalized, targets, unparseableTypes);
+        collectReferenceTargets(REFERENCE_DEFINITION.matcher(normalized), targets, unparseableTypes);
+        return new MarkdownTargets(targets, unparseableTypes);
+    }
+
+    private static String normalizeReferenceSyntax(String content) {
+        return HtmlUtils.htmlUnescape(content.replace("&colon;", ":")).replace("\\:", ":");
+    }
+
+    private static void collectReferenceTargets(
+            Matcher matcher, List<ReferenceTarget> targets, Set<String> unparseableTypes) {
         while (matcher.find()) {
-            Optional<Integer> noteId = parseNoteId(matcher.group(1));
-            if (noteId.isPresent()) {
-                ids.add(noteId.get());
+            Optional<ReferenceTarget> target = parseReferenceTarget(matcher.group(1), matcher.group(2));
+            if (target.isPresent()) {
+                targets.add(target.get());
             } else {
-                hasUnparseableId = true;
+                String type = canonicalReferenceType(matcher.group(1));
+                if (type != null) {
+                    unparseableTypes.add(type);
+                }
             }
         }
-        return hasUnparseableId;
     }
 
-    private static boolean collectInlineNoteTargetIds(String content, List<Integer> ids) {
-        boolean hasUnparseableId = false;
+    private static void collectInlineTargets(
+            String content, List<ReferenceTarget> targets, Set<String> unparseableTypes) {
         int[] labelEnds = matchingLabelEnds(content);
         for (int index = 0; index < content.length(); index++) {
             if (content.charAt(index) != '[' || isEscaped(content, index)) {
@@ -509,28 +570,38 @@ public class ReferenceService {
             if (destinationStart < content.length() && content.charAt(destinationStart) == '<') {
                 destinationStart++;
             }
-            if (!content.regionMatches(true, destinationStart, "note:", 0, 5)) {
+            int typeEnd = destinationStart;
+            while (typeEnd < content.length() && Character.isLetter(content.charAt(typeEnd))) {
+                typeEnd++;
+            }
+            if (typeEnd == destinationStart || typeEnd >= content.length()
+                    || content.charAt(typeEnd) != ':') {
                 index = labelEnd;
                 continue;
             }
-            int idStart = destinationStart + 5;
+            String type = canonicalReferenceType(content.substring(destinationStart, typeEnd));
+            if (type == null) {
+                index = labelEnd;
+                continue;
+            }
+            int idStart = typeEnd + 1;
             int idEnd = idStart;
             while (idEnd < content.length() && Character.isDigit(content.charAt(idEnd))) {
                 idEnd++;
             }
             if (idEnd == idStart) {
-                hasUnparseableId = true;
+                unparseableTypes.add(type);
             } else {
-                Optional<Integer> noteId = parseNoteId(content.substring(idStart, idEnd));
-                if (noteId.isPresent()) {
-                    ids.add(noteId.get());
+                Optional<ReferenceTarget> target = parseReferenceTarget(
+                    type, content.substring(idStart, idEnd));
+                if (target.isPresent()) {
+                    targets.add(target.get());
                 } else {
-                    hasUnparseableId = true;
+                    unparseableTypes.add(type);
                 }
             }
             index = labelEnd;
         }
-        return hasUnparseableId;
     }
 
     private static int[] matchingLabelEnds(String content) {
@@ -612,25 +683,73 @@ public class ReferenceService {
         return cursor;
     }
 
-    private Set<Integer> visibleNoteIds(int workspaceId, Set<Integer> targetNoteIds, int currentUserId) {
-        if (targetNoteIds.isEmpty()) {
+    private Set<ReferenceTarget> visibleTargets(
+            int workspaceId, Set<ReferenceTarget> targets, int currentUserId) {
+        if (targets.isEmpty()) {
             return Set.of();
         }
-        List<Integer> ids = new ArrayList<>(targetNoteIds);
-        Set<Integer> visible = new HashSet<>();
-        for (int start = 0; start < ids.size(); start += BATCH_SIZE) {
-            List<Integer> batch = ids.subList(start, Math.min(start + BATCH_SIZE, ids.size()));
-            visible.addAll(noteMapper.getVisibleNoteIdsIn(workspaceId, batch, currentUserId));
+        Map<String, List<Integer>> idsByType = new LinkedHashMap<>();
+        for (ReferenceTarget target : targets) {
+            String type = canonicalReferenceType(target.type());
+            if (type != null && target.id() > 0) {
+                idsByType.computeIfAbsent(type, ignored -> new ArrayList<>()).add(target.id());
+            }
         }
+        Set<ReferenceTarget> visible = new HashSet<>();
+        idsByType.forEach((type, ids) -> {
+            for (int start = 0; start < ids.size(); start += BATCH_SIZE) {
+                List<Integer> batch = ids.subList(start, Math.min(start + BATCH_SIZE, ids.size()));
+                for (int id : visibleIds(workspaceId, type, batch, currentUserId)) {
+                    visible.add(new ReferenceTarget(type, id));
+                }
+            }
+        });
         return visible;
     }
 
-    private static Optional<Integer> parseNoteId(String value) {
+    private List<Integer> visibleIds(
+            int workspaceId, String type, List<Integer> ids, int currentUserId) {
+        return switch (type) {
+            case TYPE_USER -> workspaceMapper.getMemberIdsIncludingPending(workspaceId, ids);
+            case TYPE_PERSON -> personMapper.getVisibleIdsIn(workspaceId, ids);
+            case TYPE_DEAL -> dealMapper.getVisibleIdsIn(workspaceId, ids);
+            case TYPE_COMPANY -> companyMapper.getVisibleIdsIn(workspaceId, ids);
+            case TYPE_NOTE -> noteMapper.getVisibleNoteIdsIn(workspaceId, ids, currentUserId);
+            case TYPE_FILE -> attachmentMapper.getVisibleIdsIn(workspaceId, ids, currentUserId);
+            case TYPE_TASK -> taskMapper.getVisibleIdsIn(workspaceId, ids);
+            case TYPE_ACTIVITY -> activityMapper.getVisibleIdsIn(workspaceId, ids);
+            default -> List.of();
+        };
+    }
+
+    private static Optional<ReferenceTarget> parseReferenceTarget(String type, String value) {
+        String canonicalType = canonicalReferenceType(type);
+        if (canonicalType == null) {
+            return Optional.empty();
+        }
         try {
-            return Optional.of(Integer.parseInt(value));
+            int id = Integer.parseInt(value);
+            return id > 0 ? Optional.of(new ReferenceTarget(canonicalType, id)) : Optional.empty();
         } catch (NumberFormatException exception) {
             return Optional.empty();
         }
+    }
+
+    private static String canonicalReferenceType(String value) {
+        if (value == null) {
+            return null;
+        }
+        return switch (value.toLowerCase(Locale.ROOT)) {
+            case TYPE_USER -> TYPE_USER;
+            case TYPE_PERSON -> TYPE_PERSON;
+            case TYPE_DEAL -> TYPE_DEAL;
+            case TYPE_COMPANY -> TYPE_COMPANY;
+            case TYPE_NOTE -> TYPE_NOTE;
+            case TYPE_FILE -> TYPE_FILE;
+            case TYPE_TASK -> TYPE_TASK;
+            case TYPE_ACTIVITY -> TYPE_ACTIVITY;
+            default -> null;
+        };
     }
 
     private EntityReference build(
@@ -673,6 +792,9 @@ public class ReferenceService {
             TYPE_NOTE.equals(match.group(2))
                 ? "a note"
                 : "@" + Matcher.quoteReplacement(match.group(1)));
-        return markdownNoteTargets(redacted).isEmpty() ? redacted : "a note";
+        MarkdownTargets targets = markdownTargets(redacted);
+        boolean containsNote = targets.targets().stream()
+            .anyMatch(target -> TYPE_NOTE.equals(target.type()));
+        return containsNote || targets.unparseableTypes().contains(TYPE_NOTE) ? "a note" : redacted;
     }
 }

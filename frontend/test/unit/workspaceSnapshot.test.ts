@@ -395,12 +395,13 @@ describe("workspace timezone resolution", () => {
     });
 });
 
-describe("members administration reads a snapshot that can go stale", () => {
+describe("members administration follows effective workspace authority", () => {
     const panel = source(MEMBERS_PANEL);
 
-    it("gates its own chrome on the workspace snapshot this sync keeps fresh", () => {
+    it("gates member and role operations on effective permissions", () => {
         expect(panel).toContain("const role = activeWorkspace?.role;");
-        expect(panel).toContain('const isAdmin = role === "admin" || role === "owner";');
+        expect(panel).toContain('const canManageMembers = usePermission("MEMBER_MANAGE");');
+        expect(panel).toContain('const canManageRoles = usePermission("ROLE_MANAGE");');
         expect(panel).toContain('const isOwner = role === "owner";');
     });
 
@@ -410,12 +411,18 @@ describe("members administration reads a snapshot that can go stale", () => {
         expect(panel).toContain("router.refresh()");
     });
 
-    it("keeps a member's own row editable, because the backend supports stepping down", () => {
-        expect(panel).toContain("const editable = isAdmin && (member.roleId == null || isOwner);");
+    it("protects raw owners while allowing ceiling-checked role changes", () => {
+        expect(panel).toContain('const targetIsOwner = member.builtInRole === "owner";');
+        expect(panel).toContain("const protectedOwner = targetIsOwner && !isOwner;");
+        expect(panel).toContain("const editable = !protectedOwner");
+        expect(panel).toContain("canManageMembers && grantableBuiltInRoles.length > 0");
+        expect(panel).toContain("canManageRoles && grantableCustomRoles.length > 0");
         expect(panel).not.toMatch(/const editable = [^;]*!isSelf/);
     });
 
     it("still withholds removal of one's own row, which is leaving rather than demotion", () => {
-        expect(panel).toContain("{isAdmin && !isSelf && (");
+        expect(panel).toContain(
+            "const removable = canManageMembers && !isSelf && !protectedOwner;",
+        );
     });
 });

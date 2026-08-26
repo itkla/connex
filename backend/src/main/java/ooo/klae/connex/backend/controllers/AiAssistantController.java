@@ -37,6 +37,8 @@ import ooo.klae.connex.backend.dto.AiChatPresenceDto;
 import ooo.klae.connex.backend.dto.AiChatPresenceRequest;
 import ooo.klae.connex.backend.dto.AiChatSessionCreateRequest;
 import ooo.klae.connex.backend.dto.AiChatSessionDetailDto;
+import ooo.klae.connex.backend.dto.AiChatScopePreviewDto;
+import ooo.klae.connex.backend.dto.AiChatScopePreviewRequest;
 import ooo.klae.connex.backend.dto.AiChatSessionDto;
 import ooo.klae.connex.backend.dto.AiChatSessionShareRequest;
 import ooo.klae.connex.backend.dto.AiChatSessionUpdateRequest;
@@ -231,6 +233,18 @@ public class AiAssistantController {
             @PathVariable int id,
             @Valid @RequestBody AiChatTurnCreateRequest request) {
         return ResponseEntity.accepted().body(turnService.start(id, request));
+    }
+
+    /**
+     * Returns the exact interpreted scope and breadth of a request before it is sent.
+     *
+     * <p>Deliberately not bound to a session: the preview evaluates the caller's own declared
+     * filters against the workspace and reads nothing from any transcript.
+     */
+    @PostMapping("/scope-preview")
+    public AiChatScopePreviewDto previewScope(
+            @Valid @RequestBody AiChatScopePreviewRequest request) {
+        return turnService.previewScope(request);
     }
 
     /** Returns one durable turn state after current authorization and lazy expiry. */

@@ -21,6 +21,7 @@ import type {
 } from "@/app/lib/types";
 import type { RecordType } from "@/app/lib/actions/types";
 import { isWorkflowManualScopeValid } from "@/app/lib/workflowOperations";
+import { supportsManualRun } from "@/app/components/settings/workflows/vocabulary";
 import {
     formatWorkflowRunDateTime,
     normalizeWorkflowRunDateTime,
@@ -62,10 +63,17 @@ function scopeCount(scope: WorkflowManualScope | null): number | null {
     return null;
 }
 
+/**
+ * Whether a launcher may offer a workflow. The record-type allowlist is not made redundant by the
+ * caller's filter: search, the command palette, and the Operations "new run" action all pass a null
+ * record type, while `WorkflowManualRunService` refuses every record type outside these three, so
+ * offering one of those would guarantee a failed request.
+ */
 function isRunnableWorkflow(workflow: WorkflowListItem, recordType: RecordType | null): boolean {
     return workflow.activeVersion !== null
         && workflow.runtimeOwner === "canonical"
         && workflow.archivedAt === null
+        && supportsManualRun(workflow.recordType)
         && (recordType === null || workflow.recordType === recordType);
 }
 
@@ -102,7 +110,11 @@ export default function WorkflowManualRunLauncher({
         const controller = new AbortController();
         void getWorkflows(false, { ...requestInit, signal: controller.signal })
             .then((items) => {
-                if (!controller.signal.aborted) setWorkflows(items.filter((item) => isRunnableWorkflow(item, recordType)));
+                if (controller.signal.aborted) return;
+                const runnable = items.filter((item) => isRunnableWorkflow(item, recordType));
+                setWorkflows(runnable);
+                setWorkflowId((current) =>
+                    runnable.some((item) => String(item.id) === current) ? current : "");
             })
             .catch(() => {
                 if (!controller.signal.aborted) setError(t("manual.errors.workflows"));
@@ -256,7 +268,7 @@ export default function WorkflowManualRunLauncher({
                     ) : null}
 
                     {phase === "complete" && result && preparation ? (
-                        <InvocationSummary result={result} workflowId={preparation.workflowId} />
+                        <InvocationSummary result={result} preparation={preparation} />
                     ) : null}
                 </div>
 
@@ -330,7 +342,9 @@ function PreparationSummary({ preparation }: { preparation: WorkflowManualPrepar
                 <div>
                     <dt className="text-muted-foreground">{t("manual.actor")}</dt>
                     <dd className="font-medium text-foreground">
-                        {preparation.actorUserId == null ? t("manual.systemActor") : `#${preparation.actorUserId}`}
+                        {preparation.executionMode === "system"
+                            ? t("manual.systemActor")
+                            : preparation.actorLabel ?? t("manual.actorUnavailable")}
                     </dd>
                 </div>
                 <div>
@@ -371,9 +385,8 @@ function PreparationSummary({ preparation }: { preparation: WorkflowManualPrepar
                     <h3 className="text-sm font-semibold text-foreground">{t("manual.samplesTitle")}</h3>
                     <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border">
                         {preparation.samples.map((sample) => (
-                            <li key={sample.recordId} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                                <span className="truncate text-foreground">{sample.label}</span>
-                                <span className="font-mono text-xs text-muted-foreground">#{sample.recordId}</span>
+                            <li key={sample.recordId} className="truncate px-3 py-2 text-sm text-foreground">
+                                {sample.label}
                             </li>
                         ))}
                     </ul>
@@ -394,8 +407,21 @@ function PreparationSummary({ preparation }: { preparation: WorkflowManualPrepar
     );
 }
 
-function InvocationSummary({ result, workflowId }: { result: WorkflowInvocationResult; workflowId: number }) {
+function InvocationSummary({
+    result,
+    preparation,
+}: {
+    result: WorkflowInvocationResult;
+    preparation: WorkflowManualPreparation;
+}) {
     const t = useTranslations("WorkflowOperations");
+    const sampledLabels = useMemo(
+        () => new Map(
+            [...preparation.samples, ...preparation.skippedSamples]
+                .map((sample) => [sample.recordId, sample.label]),
+        ),
+        [preparation.samples, preparation.skippedSamples],
+    );
     const totals = [
         ["queued", result.queuedCount],
         ["running", result.runningCount],
@@ -436,12 +462,15 @@ function InvocationSummary({ result, workflowId }: { result: WorkflowInvocationR
                     <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border">
                         {exceptionalRecords.slice(0, 50).map((record) => (
                             <li key={record.recordId} className="grid gap-2 px-3 py-2.5 text-sm sm:grid-cols-[auto_minmax(0,1fr)_auto]">
-                                <span className="font-mono text-xs text-muted-foreground">#{record.recordId}</span>
+                                <span className="truncate text-muted-foreground">
+                                    {sampledLabels.get(record.recordId)
+                                        ?? t("manual.recordLabelNotIncluded")}
+                                </span>
                                 <span className="text-foreground">
                                     {record.reasonCode ? <ManualReason code={record.reasonCode} /> : t(`status.${record.status}`)}
                                 </span>
                                 {record.runKey ? (
-                                    <Link className="text-brand hover:text-brand-hover" href={`/workflows/${workflowId}/runs/${encodeURIComponent(record.runKey)}`}>
+                                    <Link className="text-brand hover:text-brand-hover" href={`/workflows/${preparation.workflowId}/runs/${encodeURIComponent(record.runKey)}`}>
                                         {t("manual.viewRun")}
                                     </Link>
                                 ) : null}

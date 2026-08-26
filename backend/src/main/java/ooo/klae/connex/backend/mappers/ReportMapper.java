@@ -11,6 +11,7 @@ import ooo.klae.connex.backend.dto.ReportAggregateRow;
 import ooo.klae.connex.backend.dto.ReportForecastAggregateRow;
 import ooo.klae.connex.backend.dto.ReportNetworkAccountRow;
 import ooo.klae.connex.backend.dto.ReportSnapshotSummaryDto;
+import ooo.klae.connex.backend.dto.ReportSummaryDto;
 import ooo.klae.connex.backend.warmth.RelationshipWarmthModel.SqlParameters;
 
 /**
@@ -21,6 +22,17 @@ import ooo.klae.connex.backend.warmth.RelationshipWarmthModel.SqlParameters;
 public interface ReportMapper {
 
     List<ReportDefinition> getDefinitions(@Param("workspaceId") int workspaceId);
+
+    /**
+     * Bounded global-search slice of saved report definitions, matched on name and description.
+     *
+     * @param workspaceId the resolved tenant
+     * @param query the escaped {@code LIKE} pattern
+     * @return at most ten matching definitions, ordered by name
+     */
+    List<ReportSummaryDto> searchDefinitions(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query);
 
     List<Integer> lockDefinitions(@Param("workspaceId") int workspaceId);
 
@@ -88,6 +100,14 @@ public interface ReportMapper {
 
     List<ReportAggregateRow> aggregateDeals(@Param("query") ReportAggregateQuery query);
 
+    /**
+     * Aggregates the effective line-item discount of the won or open deal cohort. The won cohort is
+     * bounded by {@code d.closed_at}, the open cohort by {@code d.expected_close_date}, and the
+     * group key is partitioned by deal currency so a money-derived ratio never blends currencies.
+     * Deals without priced lines produce no row rather than a fabricated zero.
+     */
+    List<ReportAggregateRow> aggregateDealDiscount(@Param("query") ReportAggregateQuery query);
+
     List<ReportForecastAggregateRow> aggregateForecast(@Param("query") ReportAggregateQuery query);
 
     List<ReportAggregateRow> aggregateActivities(@Param("query") ReportAggregateQuery query);
@@ -98,7 +118,35 @@ public interface ReportMapper {
 
     List<ReportAggregateRow> aggregateEmployment(@Param("query") ReportAggregateQuery query);
 
+    /**
+     * Lead-lifecycle volume, qualification, conversion, and first-response measures (#559).
+     *
+     * @param query aggregate query
+     * @return one row per group
+     */
+    List<ReportAggregateRow> aggregateLeadLifecycle(@Param("query") ReportAggregateQuery query);
+
     List<ReportAggregateRow> aggregateCompanies(@Param("query") ReportAggregateQuery query);
+
+    /**
+     * Aggregates generated quotes whose {@code deal_document.generated_at} falls in the period,
+     * producing either the quote volume or the share of those quotes that reached {@code final}.
+     */
+    List<ReportAggregateRow> aggregateDocuments(@Param("query") ReportAggregateQuery query);
+
+    /**
+     * Aggregates the won share of deals whose earliest document of any type was generated in the
+     * period. The cohort is deal-grained, so re-quoting a deal never inflates its outcome.
+     */
+    List<ReportAggregateRow> aggregateDocumentOutcomes(@Param("query") ReportAggregateQuery query);
+
+    /**
+     * Aggregates approval requests an approver decided in the period, keyed on
+     * {@code document_approval.decided_at} and restricted to the {@code approved} and
+     * {@code rejected} outcomes, producing either the decision volume or the average
+     * request-to-decision latency in days.
+     */
+    List<ReportAggregateRow> aggregateDocumentApprovals(@Param("query") ReportAggregateQuery query);
 
     /**
      * Aggregates coverage immediately before the report period's exclusive end instant.

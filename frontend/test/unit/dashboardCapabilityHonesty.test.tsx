@@ -99,7 +99,7 @@ describe("dashboard activation capability honesty", () => {
         const counts: ActivationCounts = { ...SETUP_COUNTS, ...result.data };
         const steps = buildActivationSteps(counts);
         const connectionStep = steps.find((step) => step.id === "connections");
-        const html = renderToStaticMarkup(<SetupChecklist steps={steps} />);
+        const html = renderToStaticMarkup(<SetupChecklist steps={steps} entry={null} />);
 
         expect(result.data.connectedAccountsAvailability).toBe("unavailable");
         expect(connectionStep?.availability).toBe("unavailable");
@@ -116,7 +116,7 @@ describe("dashboard activation capability honesty", () => {
         if (!result.ok) throw new Error("Activation extras unexpectedly failed as a whole");
         const counts: ActivationCounts = { ...SETUP_COUNTS, ...result.data };
         const steps = buildActivationSteps(counts);
-        const html = renderToStaticMarkup(<SetupChecklist steps={steps} />);
+        const html = renderToStaticMarkup(<SetupChecklist steps={steps} entry={null} />);
 
         expect(result.data.connectedAccountsAvailability).toBe("disabled");
         expect(steps.some((step) => step.id === "connections")).toBe(false);

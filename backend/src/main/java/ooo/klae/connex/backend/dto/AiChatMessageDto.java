@@ -17,11 +17,12 @@ public class AiChatMessageDto {
     private Integer authorUserId;
     private String authorDisplayName;
     private String content;
-    private String reasoning;
+    private boolean contentWithheld;
     private boolean historySummarized;
     private String createdAt;
     private List<AiChatCitationDto> citations = List.of();
     private List<String> suggestions = List.of();
+    private AiChatAnswerDocumentDto answerDocument;
 
     /** Maps a persisted message to its API representation. */
     public static AiChatMessageDto from(AiChatMessage message) {
@@ -57,16 +58,17 @@ public class AiChatMessageDto {
             List<String> suggestions,
             String authorDisplayName) {
         return from(
-                message, citations, suggestions, authorDisplayName, null);
+                message, citations, suggestions, authorDisplayName, null, false);
     }
 
-    /** Maps a persisted message with all viewer-authorized private generated content. */
+    /** Maps a persisted message while withholding content whose live resources are inaccessible. */
     public static AiChatMessageDto from(
             AiChatMessage message,
             List<AiChatCitationDto> citations,
             List<String> suggestions,
             String authorDisplayName,
-            String reasoning) {
+            AiChatAnswerDocumentDto answerDocument,
+            boolean contentWithheld) {
         AiChatMessageDto dto = new AiChatMessageDto();
         dto.setId(message.getId());
         dto.setSessionId(message.getSessionId());
@@ -75,12 +77,13 @@ public class AiChatMessageDto {
         dto.setAuthorUserId(message.getAuthorUserId());
         dto.setAuthorDisplayName(authorDisplayName);
         boolean historySummarized = "system".equals(message.getAuthorKind());
-        dto.setContent(historySummarized ? "" : message.getContent());
-        dto.setReasoning(reasoning);
+        dto.setContent(historySummarized || contentWithheld ? "" : message.getContent());
+        dto.setContentWithheld(contentWithheld);
         dto.setHistorySummarized(historySummarized);
         dto.setCreatedAt(message.getCreatedAt());
-        dto.setCitations(List.copyOf(citations));
-        dto.setSuggestions(List.copyOf(suggestions));
+        dto.setCitations(contentWithheld ? List.of() : List.copyOf(citations));
+        dto.setSuggestions(contentWithheld ? List.of() : List.copyOf(suggestions));
+        dto.setAnswerDocument(contentWithheld ? null : answerDocument);
         return dto;
     }
 }

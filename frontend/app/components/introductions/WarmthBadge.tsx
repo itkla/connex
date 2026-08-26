@@ -8,7 +8,7 @@ import type { TemperatureBand } from '@/app/lib/types';
 
 /**
  * Compact warmth-band chip (dot + label on a tinted surface), reusing the shared warmth tokens.
- * Unlike {@code TemperaturePill} it needs only the band, since reverse-intro suggestions carry the
+ * Unlike {@code WarmthPill} it needs only the band, since reverse-intro suggestions carry the
  * band rather than a full temperature reading.
  */
 export default function WarmthBadge({ band }: { band?: TemperatureBand | null }) {

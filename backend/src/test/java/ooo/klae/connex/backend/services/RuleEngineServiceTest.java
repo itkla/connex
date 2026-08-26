@@ -3,21 +3,28 @@ package ooo.klae.connex.backend.services;
 import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.DocumentTemplate;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.dto.DealDocumentDto;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleDto;
 import ooo.klae.connex.backend.dto.RuleRequest;
@@ -31,6 +38,23 @@ class RuleEngineServiceTest extends AbstractServiceTest {
     @Autowired RuleEngineService ruleEngineService;
     @Autowired RuleService ruleService;
     @Autowired RuleMapper ruleMapper;
+    @Autowired DealDocumentService documentService;
+    @Autowired DocumentTemplateService templateService;
+    @Autowired JdbcTemplate jdbcTemplate;
+
+    private Deal dealForDocument() {
+        Pipeline pipeline = newPipeline();
+        return newDeal(pipeline, newStage(pipeline, 0), newCompany());
+    }
+
+    private DealDocumentDto document(Deal deal) {
+        DocumentTemplate template = new DocumentTemplate();
+        template.setName("Quote template " + unique());
+        template.setType("quote");
+        template.setLocale("en");
+        template.setTitle("Quote");
+        return documentService.generate(deal.getId(), templateService.create(template).getId());
+    }
 
     private static RuleAction addTag(int tagId) {
         RuleAction action = new RuleAction();
@@ -323,6 +347,58 @@ class RuleEngineServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void entityChange_document_fires() {
+        DealDocumentDto document = document(dealForDocument());
+        RuleDto rule = entityChangeRule("document", notifyAction(), null, "document.approved");
+
+        ruleEngineService.onEntityChange(
+            workspace.getId(), "document", document.id(), "document.approved");
+
+        assertEquals(1, matchedExecutions(rule.getId()));
+    }
+
+    @Test
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    void documentCreateTaskActionAttachesTaskToParentDeal() {
+        Deal deal = dealForDocument();
+        DealDocumentDto document = document(deal);
+        RuleAction createTask = new RuleAction();
+        createTask.setType("create_task");
+        createTask.setTitle("Countersign " + unique());
+        RuleDto rule = entityChangeRule("document", createTask, null, "document.finalized");
+
+        ruleEngineService.onEntityChange(
+            workspace.getId(), "document", document.id(), "document.finalized");
+
+        assertEquals(1, matchedExecutions(rule.getId()));
+        List<Task> created = taskMapper.getTasksByDealId(workspace.getId(), deal.getId());
+        assertTrue(created.stream()
+            .anyMatch(task -> createTask.getTitle().equals(task.getDescription())));
+    }
+
+    @Test
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    void documentActionFailsClosedWhenParentDealMissing() {
+        Deal deal = dealForDocument();
+        DealDocumentDto document = document(deal);
+        RuleAction createTask = new RuleAction();
+        createTask.setType("create_task");
+        createTask.setTitle("Orphaned " + unique());
+        RuleDto rule = entityChangeRule("document", createTask, null, "document.finalized");
+        jdbcTemplate.update("DELETE FROM deal_document WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), document.id());
+
+        ruleEngineService.onEntityChange(
+            workspace.getId(), "document", document.id(), "document.finalized");
+
+        assertEquals(0, matchedExecutions(rule.getId()));
+        assertTrue(ruleMapper.getExecutionsByRule(workspace.getId(), rule.getId(), 50).stream()
+            .anyMatch(execution -> "partial".equals(execution.getStatus())));
+        assertTrue(taskMapper.getTasksByDealId(workspace.getId(), deal.getId()).stream()
+            .noneMatch(task -> createTask.getTitle().equals(task.getDescription())));
+    }
+
+    @Test
     void throttle_collapsesRepeatFiresWithinWindow() {
         Company company = newCompany();
         Tag tag = newTag();
@@ -362,6 +438,42 @@ class RuleEngineServiceTest extends AbstractServiceTest {
 
         assertEquals(1, matchedExecutions(rule.getId()));
         assertEquals(newOwner.getId(), dealMapper.getDealById(workspace.getId(), deal.getId()).getOwnerId());
+    }
+
+    @Test
+    void assignOwner_action_routesContact() {
+        Person person = newPerson(newCompany());
+        assertNull(personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
+        User router = newUser();
+        RuleAction assign = new RuleAction();
+        assign.setType("assign_owner");
+        assign.setTargetUserId(router.getId());
+        RuleDto rule = entityChangeRule("person", assign, null, "person.lifecycle_changed");
+
+        ruleEngineService.onEntityChange(
+            workspace.getId(), "person", person.getId(), "person.lifecycle_changed");
+
+        assertEquals(1, matchedExecutions(rule.getId()));
+        assertEquals(router.getId(),
+            personMapper.getPersonById(workspace.getId(), person.getId()).getOwnerId());
+    }
+
+    @Test
+    void setResponseDue_action_startsTheFirstResponseClock() {
+        Person person = newPerson(newCompany());
+        assertNull(personMapper.getPersonById(workspace.getId(), person.getId())
+            .getFirstResponseDueAt());
+        RuleAction sla = new RuleAction();
+        sla.setType("set_response_due");
+        sla.setDueInHours(4);
+        RuleDto rule = entityChangeRule("person", sla, null, "person.lifecycle_changed");
+
+        ruleEngineService.onEntityChange(
+            workspace.getId(), "person", person.getId(), "person.lifecycle_changed");
+
+        assertEquals(1, matchedExecutions(rule.getId()));
+        assertNotNull(personMapper.getPersonById(workspace.getId(), person.getId())
+            .getFirstResponseDueAt());
     }
 
     @Test

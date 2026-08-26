@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type WheelEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+import { isSessionExpired } from '@/app/lib/sessionExpiry';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
 import { ClipboardDocumentCheckIcon, Bars3BottomLeftIcon, CalendarIcon, UserCircleIcon, UserIcon, BriefcaseIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
@@ -35,8 +36,9 @@ import { InputGroupAddon } from '@/components/ui/input-group';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { cn } from '@/lib/utils';
 
-import { ApiError, createTask, isFieldError } from '@/app/lib/api';
+import { createTask, isFieldError } from '@/app/lib/api';
 import { isSubmitShortcut } from '@/app/lib/submitShortcut';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useFieldErrors } from '@/app/hooks/useFieldErrors';
 import { DRAFT_VERSIONS } from '@/app/lib/formDrafts';
 import type { Contact, CreateTaskPayload, Deal, User } from '@/app/lib/types';
@@ -70,6 +72,10 @@ type Props = {
     createRequest?: (payload: CreateTaskPayload, init?: RequestInit) => Promise<unknown>;
     compact?: boolean;
     hideLinks?: boolean;
+    /** Replaces "No contact found." when the surface knows why the list is empty. */
+    personEmptyMessage?: string;
+    /** Replaces "No deal found." when the surface knows why the list is empty. */
+    dealEmptyMessage?: string;
     failureMessage?: string;
     draftPersistence?: boolean;
     preserveDraftOnClose?: boolean;
@@ -108,6 +114,8 @@ function ScopedTaskDialog({
     createRequest,
     compact = false,
     hideLinks = false,
+    personEmptyMessage,
+    dealEmptyMessage,
     failureMessage,
     draftPersistence = true,
     preserveDraftOnClose = false,
@@ -180,6 +188,8 @@ function ScopedTaskDialog({
                         createRequest={createRequest}
                         compact={compact}
                         hideLinks={hideLinks}
+                        personEmptyMessage={personEmptyMessage}
+                        dealEmptyMessage={dealEmptyMessage}
                         failureMessage={failureMessage}
                         submissionBlockedMessage={submissionBlockedMessage}
                         onSubmittingChange={(value) => {
@@ -220,6 +230,8 @@ type TaskDialogFormProps = {
     createRequest?: (payload: CreateTaskPayload, init?: RequestInit) => Promise<unknown>;
     compact?: boolean;
     hideLinks?: boolean;
+    personEmptyMessage?: string;
+    dealEmptyMessage?: string;
     failureMessage?: string;
     submissionBlockedMessage?: string;
     onSubmittingChange: (submitting: boolean) => void;
@@ -239,6 +251,10 @@ type TaskDialogFormProps = {
  * The task-create form body — free of any dialog/drawer shell so it can render inside the standalone
  * {@link TaskDialog} (desktop dialog / mobile drawer) or embedded in the morphing Quick Create drawer.
  * It initializes state fresh from props on mount (callers remount it per open), with no reset effect.
+ * The one exception is the assign-to-me default: callers that load `users` on open mount this form
+ * with an empty list, so on the first render that carries users the form adopts the current user —
+ * once, and only while the field is still untouched — moving its own baseline with it so a pristine
+ * form stays pristine.
  */
 export function TaskDialogForm({
     persons,
@@ -255,6 +271,8 @@ export function TaskDialogForm({
     createRequest = createTask,
     compact = false,
     hideLinks = false,
+    personEmptyMessage,
+    dealEmptyMessage,
     failureMessage,
     submissionBlockedMessage,
     onSubmittingChange,
@@ -266,6 +284,7 @@ export function TaskDialogForm({
 }: TaskDialogFormProps) {
     const router = useRouter();
     const t = useTranslations('ActivityTasksDialog');
+    const showApiError = useApiErrorToast('ActivityTasksDialog');
 
     const [description, setDescription] = useState(() => defaultDescription);
     const [dueDate, setDueDate] = useState(() => defaultDueDate);
@@ -280,13 +299,26 @@ export function TaskDialogForm({
     const hasChangedRef = useRef(false);
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
 
-    const [initial] = useState(() => ({
+    const [initial, setInitial] = useState(() => ({
         description,
         dueDate,
         assigneeId: assignee?.id ?? null,
         personId: selectedPerson?.id ?? null,
         dealId: selectedDeal?.id ?? null,
     }));
+
+    const [sawUsers, setSawUsers] = useState(users.length > 0);
+    if (!sawUsers && users.length > 0) {
+        setSawUsers(true);
+        if (!defaultAssignee && assignee === null) {
+            const self = users.find((u) => u.id === currentUserId);
+            if (self) {
+                setAssignee(self);
+                setInitial((prev) => ({ ...prev, assigneeId: self.id }));
+            }
+        }
+    }
+
     const formChanged =
         description !== initial.description ||
         dueDate !== initial.dueDate ||
@@ -372,13 +404,8 @@ export function TaskDialogForm({
                 }
                 return;
             }
-            const message = failureMessage ?? (
-                err instanceof ApiError
-                    ? err.message
-                    : err instanceof Error
-                      ? err.message
-                      : t('toastFailedCreate'));
-            toastError(message);
+            if (failureMessage && !isSessionExpired(err)) toastError(failureMessage);
+            else showApiError(err, 'toastFailedCreate');
         } finally {
             if (!requestInit?.signal?.aborted) {
                 setSubmitting(false);
@@ -505,7 +532,7 @@ export function TaskDialogForm({
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{t('noPersonFound')}</ComboboxEmpty>
+                                        <ComboboxEmpty>{personEmptyMessage ?? t('noPersonFound')}</ComboboxEmpty>
                                         {persons.map((p) => (
                                             <ComboboxItem key={p.id} value={p}>
                                                 {p.name}
@@ -535,7 +562,7 @@ export function TaskDialogForm({
                                 </ComboboxInput>
                                 <ComboboxContent className="pointer-events-auto">
                                     <ComboboxList onWheel={handleListWheel}>
-                                        <ComboboxEmpty>{t('noDealFound')}</ComboboxEmpty>
+                                        <ComboboxEmpty>{dealEmptyMessage ?? t('noDealFound')}</ComboboxEmpty>
                                         {deals.map((d) => (
                                             <ComboboxItem key={d.id} value={d}>
                                                 {d.name}

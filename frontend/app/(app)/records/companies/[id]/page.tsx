@@ -15,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 import {
     getAttachmentsFromCookie,
+    getCommentThreads,
     getCompanyById,
     getCompanyDeals,
     getCompanyEngagement,
@@ -34,13 +35,16 @@ import { formatDate, formatDateTime } from "@/app/lib/utils";
 import Rise from "@/app/components/motion/Rise";
 import { PageShell } from "@/app/components/PageShell";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
+import AskConnexRecordEntry from "@/app/components/ask-connex/AskConnexRecordEntry";
 import CompanyActionsMenu from "@/app/components/records/companies/CompanyActionsMenu";
 import CompanyAvatar from "@/app/components/records/companies/CompanyAvatar";
 import { EngagementSparkline, RevenueTiles } from "@/app/components/records/companies/CompanyCard";
 import ContactStatCard from "@/app/components/records/contacts/ContactStatCard";
+import { companyDealsHref } from "@/app/components/records/deals/dealLinks";
 import TagEditor from "@/app/components/records/contacts/TagEditor";
 import InfoRow from "@/app/components/me/InfoRow";
 import Timeline from "@/app/components/me/Timeline";
+import { commentsFromThreads, TIMELINE_COMMENT_LIMIT } from "@/app/components/me/timelineEntries";
 import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import ContactsGrid from "@/app/components/records/companies/ContactsGrid";
@@ -48,7 +52,7 @@ import Attachments from "@/app/components/attachments/Attachments";
 import CommentsSection from "@/app/components/records/comments/CommentsSection";
 import CustomFieldRows from "@/app/components/records/CustomFieldRows";
 import RecordDetailSection from "@/app/components/records/RecordDetailSection";
-import TemperatureEvidenceChip from "@/app/components/records/TemperatureEvidenceChip";
+import WarmthEvidenceChip from "@/app/components/records/WarmthEvidenceChip";
 
 type CompanyPageProps = {
     params: Promise<{ id: number }>;
@@ -81,6 +85,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
         customFields,
         evidence,
         effectivePermissions,
+        commentThreads,
     ] = await Promise.all([
         getTranslations("CompaniesDetail"),
         getLocale(),
@@ -95,6 +100,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
         getEntityCustomFieldsFromCookie("company", id, cookie),
         getCompanyEvidence(id, init).catch(() => null),
         getEffectivePermissionsFromCookie(cookie),
+        getCommentThreads("company", id, { limit: TIMELINE_COMMENT_LIMIT }, init).catch(() => []),
     ]);
 
     if (companyAccess.kind === "forbidden") {
@@ -119,7 +125,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
     const interactionUsers = relatedUsers.filter((user) => interactionUserIds.has(user.id));
 
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <Rise>
                     <CrumbLabel value={company.name} />
                     <RecentRecordBridge type="company" id={company.id} label={company.name} />
@@ -152,7 +158,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                                             </Link>
                                         ) : null}
                                         {evidence ? (
-                                            <TemperatureEvidenceChip evidence={evidence} />
+                                            <WarmthEvidenceChip evidence={evidence} />
                                         ) : null}
                                     </h3>
                                 </div>
@@ -195,7 +201,8 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                         </header>
                     </RecordDetailSection>
 
-                    <RecordDetailSection recordKind="company" section="actions" className="mt-4 flex justify-end">
+                    <RecordDetailSection recordKind="company" section="actions" className="mt-4 flex flex-wrap justify-end gap-2">
+                        <AskConnexRecordEntry kind="company" />
                         <CompanyActionsMenu company={company} />
                     </RecordDetailSection>
                 </Rise>
@@ -243,7 +250,7 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                                         label={t("deals")}
                                         value={engagement.numDeals}
                                         subtitle={engagement.numDeals > 0 ? t("dealsSubtitle", { count: engagement.numDeals }) : undefined}
-                                        viewHref={`/activity/deals?companyId=${company.id}`}
+                                        viewHref={companyDealsHref(company.id)}
                                     />
                                 </div>
                             </div>
@@ -299,9 +306,9 @@ export default async function CompanyPage({ params }: CompanyPageProps) {
                                     users={relatedUsers}
                                     persons={people}
                                     deals={deals}
+                                    comments={commentsFromThreads(commentThreads)}
                                     currentUserId={currentUser.id}
                                     companyId={company.id}
-                                    limit={100}
                                 />
                             </div>
                         </div>

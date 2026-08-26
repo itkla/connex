@@ -7,7 +7,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -115,13 +114,17 @@ class TenantLifecycleHttpAuthorizationIntegrationTest {
                 .header("X-Workspace-Id", workspace.getId())
                 .session(session))
             .andExpect(status().isForbidden())
-            .andExpect(content().string("Requires an organization administrator role"));
+            .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+            .andExpect(jsonPath("$.message").value(
+                "Requires an organization administrator role"));
         mockMvc.perform(get(exportPath(orgId, Integer.MAX_VALUE))
                 .cookie(new Cookie("connex_tenant_export_grant", "a".repeat(64)))
                 .header("X-Workspace-Id", workspace.getId())
                 .session(session))
             .andExpect(status().isForbidden())
-            .andExpect(content().string("Requires an organization administrator role"));
+            .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+            .andExpect(jsonPath("$.message").value(
+                "Requires an organization administrator role"));
         mockMvc.perform(delete("/api/orgs/" + orgId + "/workspaces/" + workspace.getId())
                 .header("X-Workspace-Id", workspace.getId())
                 .contentType(MediaType.APPLICATION_JSON)
@@ -207,7 +210,9 @@ class TenantLifecycleHttpAuthorizationIntegrationTest {
                 .cookie(new Cookie(TenantExportGrantCookie.NAME, rawGrant))
                 .session(session))
             .andExpect(status().isForbidden())
-            .andExpect(content().string("Tenant export download grant is invalid or expired"));
+            .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+            .andExpect(jsonPath("$.message").value(
+                "Tenant export download grant is invalid or expired"));
     }
 
     @Test
@@ -234,7 +239,9 @@ class TenantLifecycleHttpAuthorizationIntegrationTest {
                 .cookie(new Cookie(TenantExportGrantCookie.NAME, rawGrant))
                 .session(session))
             .andExpect(status().isForbidden())
-            .andExpect(content().string("Tenant export download grant is invalid or expired"));
+            .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+            .andExpect(jsonPath("$.message").value(
+                "Tenant export download grant is invalid or expired"));
     }
 
     @Test
@@ -253,7 +260,9 @@ class TenantLifecycleHttpAuthorizationIntegrationTest {
         mockMvc.perform(get(exportPath(orgId, workspace.getId()))
                 .session(session))
             .andExpect(status().isForbidden())
-            .andExpect(content().string("Tenant export download grant is invalid or expired"));
+            .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+            .andExpect(jsonPath("$.message").value(
+                "Tenant export download grant is invalid or expired"));
     }
 
     private Workspace newWorkspace() {

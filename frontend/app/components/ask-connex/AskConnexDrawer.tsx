@@ -1,24 +1,41 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import {
+    Fragment,
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+    useSyncExternalStore,
+    type ReactNode,
+} from 'react';
 import {
     ArchiveBoxIcon,
+    ArrowLeftIcon,
+    ArrowPathIcon,
     ArrowRightStartOnRectangleIcon,
     ArrowDownIcon,
     ArrowUpIcon,
+    ArrowsPointingInIcon,
+    Bars3BottomLeftIcon,
     CheckIcon,
-    ChevronRightIcon,
+    ChevronDoubleLeftIcon,
+    ChevronDoubleRightIcon,
     ClockIcon,
     EllipsisHorizontalIcon,
     ExclamationCircleIcon,
+    ExclamationTriangleIcon,
+    FunnelIcon,
+    HandRaisedIcon,
     LinkIcon,
-    MapPinIcon,
-    DocumentTextIcon,
+    LockClosedIcon,
+    MagnifyingGlassIcon,
     PaperClipIcon,
-    PhotoIcon,
     PencilSquareIcon,
     PlusIcon,
     SparklesIcon,
+    ArrowsPointingOutIcon,
     StopCircleIcon,
     StopIcon,
     UserGroupIcon,
@@ -35,41 +52,90 @@ import AccessDenied from '@/app/components/AccessDenied';
 import { EmptyState } from '@/app/components/EmptyState';
 import ErrorState from '@/app/components/ErrorState';
 import SectionBoundary from '@/app/components/SectionBoundary';
-import MentionEditor from '@/app/components/activity/notes/MentionEditor';
+import MentionEditor, {
+    type MentionEditorHandle,
+} from '@/app/components/activity/notes/MentionEditor';
+import AskConnexAnswerDocument, {
+    AskConnexCheckedTrail,
+    type AskConnexAnswerDocumentLabels,
+} from '@/app/components/ask-connex/AskConnexAnswerDocument';
+import {
+    AskConnexContextStrip,
+    AskConnexScopeNotice,
+    hasAskConnexContextInputs,
+    type AskConnexContextLabels,
+} from '@/app/components/ask-connex/AskConnexContextCockpit';
+import AskConnexScopeEditor from '@/app/components/ask-connex/AskConnexScopeEditor';
 import AskConnexTab from '@/app/components/ask-connex/AskConnexTab';
+import AskConnexProposalReview, {
+    AskConnexProposalReviewSummary,
+    type AskConnexProposalReviewLabels,
+} from '@/app/components/ask-connex/AskConnexProposalReview';
 import AskConnexToolCard, {
     type AskConnexToolCardLabels,
 } from '@/app/components/ask-connex/AskConnexToolCard';
 import type {
     AskConnexAttachment,
     AskConnexFileAttachment,
+    AskConnexRequestScope,
+    AskConnexSelectionContext,
     AskConnexToolAction,
     AskConnexToolCardState,
     AskConnexTurnState,
 } from '@/app/lib/askConnex';
 import {
     anchorAskConnexToolCards,
+    appendAskConnexPrompt,
     askConnexCitationHref,
     askConnexCitations,
+    askConnexGroupedToolCallIds,
+    askConnexPromptFocusPending,
+    askConnexProposalGroups,
     askConnexTranscript,
     groupAskConnexMessages,
     hasPendingAskConnexFileOperation,
     latestAskConnexSuggestions,
+    toggleAskConnexProposalExclusion,
 } from '@/app/lib/askConnex';
-import type { AskConnexStreamStore } from '@/app/lib/askConnexStream';
-import { easeOut, instant, springSmooth } from '@/app/lib/motion';
-import { formatFileSize } from '@/app/lib/utils';
 import type {
+    AskConnexScopeChip,
+    AskConnexScopeDraft,
+    AskConnexScopePreviewState,
+} from '@/app/lib/askConnexScope';
+import {
+    ASK_CONNEX_DRAWER_ROW_CAP,
+    ASK_CONNEX_WIDTHS,
+    askConnexRecovery,
+    askConnexSessionActivity,
+    askConnexSessionReaders,
+    askConnexTerminalKind,
+    askConnexTimedOutMessage,
+    askConnexWidthLength,
+    filterAskConnexSessions,
+    groupAskConnexSessions,
+    type AskConnexActiveState,
+    type AskConnexFailureMessage,
+    type AskConnexRecovery,
+    type AskConnexSessionGroupKey,
+    type AskConnexWidth,
+} from '@/app/lib/askConnexSurface';
+import type { AskConnexAnswerBounds } from '@/app/components/ask-connex/answerDocument';
+import type { AskConnexStreamStore } from '@/app/lib/askConnexStream';
+import { durationMicro, easeOut, instant, springSmooth } from '@/app/lib/motion';
+import type {
+    AiAssistantSkill,
     AiChatCitation,
     AiChatMessage,
     AiChatParticipant,
     AiChatPresence,
+    AiChatProgressItem,
     AiChatSession,
     WorkspaceMember,
 } from '@/app/lib/types';
 import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { IconButton } from '@/components/ui/icon-button';
 import {
     Dialog,
     DialogContent,
@@ -80,7 +146,6 @@ import {
 } from '@/components/ui/dialog';
 import {
     Drawer,
-    DrawerClose,
     DrawerContent,
     DrawerDescription,
     DrawerTitle,
@@ -94,6 +159,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { SegmentedControl } from '@/components/ui/segmented-control';
 import {
     Message,
     MessageAvatar,
@@ -117,8 +183,10 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
+import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
+import AskConnexCommandCenter from '@/app/components/ask-connex/AskConnexCommandCenter';
 
 type DrawerLoadState = 'loading' | 'ready' | 'error' | 'forbidden';
 
@@ -132,28 +200,92 @@ type UnavailableState = {
     body: string;
 } | null;
 
-type AskConnexDrawerLabels = {
+const noopRecovery = () => {};
+
+/** A settled answer with no route out: the member stopped it themselves. */
+const NO_RECOVERY: AskConnexRecovery = {
+    retry: false,
+    continueFromPartial: false,
+    narrowScope: false,
+    narrowScopeFirst: false,
+};
+
+/**
+ * The vocabulary the live and settled answer surfaces need: the streamed tail, its partial-answer
+ * disclosure, the status line, and the milestone trail beneath it.
+ */
+export type AskConnexTurnLabels = {
+    answerDocument: AskConnexAnswerDocumentLabels;
     assistantAuthor: string;
+    continueFromPartial: string;
+    narrowScope: string;
+    partialAnswer: string;
+    retry: string;
+    stop: string;
+    stopping: string;
+    /** One sentence per classified failure, so a newly classified reason cannot go unexplained. */
+    terminalMessage: Record<AskConnexFailureMessage, string>;
+    turnAccepted: string;
+    turnCancelled: string;
+    turnResolved: string;
+    turnStreaming: string;
+    turnWorking: string;
+};
+
+/**
+ * One job this surface can offer, already resolved into the member's language.
+ *
+ * Offers come from the server's capability directory, so the list is what Ask Connex can actually
+ * do here rather than a set of prompts this client invented.
+ */
+export type AskConnexJobOffer = {
+    id: string;
+    label: string;
+    prompt: string;
+};
+
+/** The declared-filter surface: what is set, what it turned out to cover, and how to change it. */
+export type AskConnexScopeSurface = {
+    draft: AskConnexScopeDraft;
+    editorOpen: boolean;
+    /** The caller's capability directory, so the preview can name what would run. */
+    skills: readonly AiAssistantSkill[];
+    filterCount: number;
+    chips: AskConnexScopeChip[];
+    preview: AskConnexScopePreviewState;
+    /** A refused scope, already stated in plain language, or null when nothing was refused. */
+    refusal: string | null;
+    /** Whether the filters as set cannot be sent, so the request waits rather than losing them. */
+    blocked: boolean;
+    /** The problem holding the request back, already stated in plain language, or null. */
+    problem: string | null;
+    onDraftChange: (draft: AskConnexScopeDraft) => void;
+    onEditorOpenChange: (open: boolean) => void;
+    /** Takes the question the breadth check should be about, at the moment one is being decided. */
+    onSettle: () => void;
+};
+
+type AskConnexDrawerLabels = AskConnexContextLabels & AskConnexTurnLabels & {
     addContext: string;
     addRecordContext: string;
     archive: string;
+    dismissSuggestions: string;
+    suggestions: string;
     attachFile: string;
-    budgetExhausted: string;
-    toolResultBudgetExhausted: string;
     citations: string;
     disclosureCreation: string;
     disclosureList: string;
     imageDisclosure: string;
     citationKind: (kind: AiChatCitation['kind']) => string;
     close: string;
+    closeWorkspace: string;
     composerAria: string;
     composerHint: string;
     composerPlaceholder: string;
-    context: string;
-    contextLimit: string;
     emptyBody: string;
     emptyTitle: string;
     formerMember: string;
+    contentWithheld: string;
     historySummarized: string;
     invitation: string;
     invitations: string;
@@ -169,12 +301,12 @@ type AskConnexDrawerLabels = {
     messages: string;
     newChat: string;
     noRecentSessions: string;
+    noMatchingSessions: string;
     moreOptions: string;
     participants: string;
     presence: string;
     recentSessions: string;
-    removeContext: (label: string) => string;
-    removeFile: (label: string) => string;
+    searchSessions: string;
     removeParticipant: (name: string) => string;
     rename: string;
     renameCancel: string;
@@ -183,32 +315,53 @@ type AskConnexDrawerLabels = {
     renameSave: string;
     renameSaving: string;
     renameTitle: string;
-    retry: string;
     send: string;
     shareCancel: string;
     shareConfirm: string;
     shareDescription: string;
     shared: string;
     shareTitle: string;
-    stop: string;
-    stopping: string;
     suggestedFollowUps: string;
-    thinking: string;
     title: string;
     tooLong: string;
     typing: (names: string) => string;
     unshare: string;
-    turnAccepted: string;
-    turnCancelled: string;
-    turnFailed: string;
-    turnImageUnsupported: string;
-    turnResolved: string;
-    turnStreaming: string;
-    turnTimedOut: string;
-    turnWorking: string;
-    uploadProgress: (progress: number) => string;
-    uploadRemoving: string;
+    openWorkspace: string;
+    width: string;
+    widthCompact: string;
+    widthComfortable: string;
+    visibilityPrivate: string;
+    visibilityShared: string;
+    stateRunning: string;
+    stateAwaitingApproval: string;
+    stateFailed: string;
+    contextSummary: (count: number) => string;
+    participantCount: (count: number) => string;
+    sessionActivity: (time: string) => string;
+    sessionRail: string;
+    sessionGroup: (key: AskConnexSessionGroupKey) => string;
+    relativeTime: (instant: string) => string;
     toolCard: AskConnexToolCardLabels;
+    proposalReview: AskConnexProposalReviewLabels;
+};
+
+/**
+ * Everything the review surfaces need that is not the cards themselves.
+ *
+ * Carried as one value rather than as a handful of parallel props because the batch, the way it is
+ * changed, and the way it is committed are one contract: a surface that can show the grouped review
+ * can also change and apply it, and a surface that only summarises it can do neither.
+ */
+export type AskConnexToolReview = {
+    /** Whether this mount is the full workspace, which reviews the batch instead of announcing it. */
+    workspace: boolean;
+    excludedToolCallIds: ReadonlySet<number>;
+    labels: AskConnexProposalReviewLabels;
+    formatDeadline: (instant: string) => string;
+    formatRemaining: (instant: string) => string;
+    onToggleInclusion: (toolCallId: number) => void;
+    onApplySelected: (toolCallIds: number[]) => Promise<void>;
+    onOpenFullView: () => void;
 };
 
 type AskConnexDrawerProps = {
@@ -216,6 +369,9 @@ type AskConnexDrawerProps = {
     instantOpen: boolean;
     isMobile: boolean;
     showTab: boolean;
+    workspace: boolean;
+    desktopRoot: HTMLElement | null;
+    workspaceRoot: HTMLElement | null;
     sessions: AiChatSession[];
     invitations: AiChatSession[];
     activeSession: AiChatSession | null;
@@ -229,6 +385,14 @@ type AskConnexDrawerProps = {
     loadError: Error | null;
     composer: string;
     implicitContext: AskConnexAttachment | null;
+    selectionContext: AskConnexSelectionContext | null;
+    unsupportedPageContext: { type: AskConnexSelectionContext['type']; label: string } | null;
+    pinnedContext: readonly AskConnexAttachment[];
+    pageContextPinned: boolean;
+    contextCorrected: boolean;
+    /** Everything the next request will read: the records it carries and the filters it declares. */
+    requestScope: AskConnexRequestScope;
+    scope: AskConnexScopeSurface;
     attachments: AskConnexAttachment[];
     fileAttachments: AskConnexFileAttachment[];
     canAttachFiles: boolean;
@@ -242,12 +406,41 @@ type AskConnexDrawerProps = {
     cancelling: boolean;
     toolCalls: AskConnexToolCardState[];
     actionableToolCallIds: ReadonlySet<number>;
+    canRetryTurn: boolean;
+    /**
+     * The message that continues a stopped answer, already composed from the question that produced
+     * it, or null when nothing was retained to continue from. The surface hands it to the composer
+     * for the member to read and edit rather than sending it, because it is an ordinary question and
+     * the member is the one asking it.
+     */
+    continuePrompt: string | null;
+    width: AskConnexWidth;
+    activeState: AskConnexActiveState;
+    contextCount: number;
+    /** The shared render clock, so every relative time in the rail agrees within one frame. */
+    now: number;
     unavailable: UnavailableState;
-    starterPrompts: string[];
+    /** The jobs this surface offers, from the server's capability directory. */
+    jobs: AskConnexJobOffer[];
+    /**
+     * The outstanding job request, or zero when there is none. Raised whenever a contextual entry
+     * point writes a job into the composer, so the composer takes focus with the caret after it and
+     * the member lands where they can edit and send.
+     */
+    promptRequest: number;
+    /**
+     * Marks the outstanding request as honoured. Owned by the caller rather than the surface, so a
+     * surface that mounts afterwards — a phone reopening a panel it does not keep mounted — has
+     * nothing left to replay.
+     */
+    onPromptConsumed: () => void;
     labels: AskConnexDrawerLabels;
+    onWidthChange: (width: AskConnexWidth) => void;
     onOpenChange: (open: boolean) => void;
     onOpenChangeComplete: (open: boolean) => void;
     onKeyboardClose: () => void;
+    onOpenWorkspace: () => void;
+    onCloseWorkspace: () => void;
     onSelectSession: (session: AiChatSession) => void;
     onNewChat: () => void;
     onRename: (title: string) => Promise<boolean>;
@@ -260,18 +453,45 @@ type AskConnexDrawerProps = {
     onRetry: () => void;
     onComposerChange: (value: string) => void;
     onRemoveAttachment: (attachment: AskConnexAttachment) => void;
+    onTogglePagePin: () => void;
+    onUnpinContext: (attachment: AskConnexAttachment) => void;
+    onRemovePageContext: () => void;
+    onRemoveSelectionContext: () => void;
+    onResetContext: () => void;
     onAttachFiles: (files: File[]) => void;
     onRemoveFileAttachment: (attachment: AskConnexFileAttachment) => void;
     onSend: (content?: string) => void;
     onCancelTurn: () => void;
-    onToolAction: (toolCallId: number, action: AskConnexToolAction) => void;
+    onRetryTurn: () => void;
+    onToolAction: (toolCallId: number, action: AskConnexToolAction) => Promise<void>;
+    /**
+     * Applies a reviewed batch as one decision.
+     *
+     * Held apart from the single-proposal path because a batch is not N independent presses: the
+     * requests are sequenced so each row reports its own outcome against settled state, and the
+     * page behind the conversation is refreshed once at the end rather than once per change.
+     */
+    onToolActions: (
+        toolCallIds: readonly number[],
+        action: AskConnexToolAction,
+    ) => Promise<void>;
 };
 
 type ConversationSurfaceProps = Omit<
     AskConnexDrawerProps,
-    'instantOpen' | 'isMobile' | 'showTab' | 'onOpenChange' | 'onOpenChangeComplete' | 'onKeyboardClose' | 'onRename'
+    'instantOpen'
+    | 'isMobile'
+    | 'showTab'
+    | 'desktopRoot'
+    | 'workspaceRoot'
+    | 'onOpenChange'
+    | 'onOpenChangeComplete'
+    | 'onKeyboardClose'
+    | 'onRename'
 > & {
     closeButton: ReactNode;
+    /** Whether this mount can offer the width control — the routed workspace has no width to pick. */
+    resizable: boolean;
     onBeginRename: () => void;
     onManageSharing: () => void;
 };
@@ -319,6 +539,69 @@ function MessageCitations({
     );
 }
 
+/**
+ * The jobs this page supports, offered where the member is about to type.
+ *
+ * Quiet, bounded, and dismissible: it is a reminder of what Ask Connex can do here, not a gallery
+ * of prompts, so it disappears the moment anything is typed and never stands between the member and
+ * the composer. Choosing one writes the question into the composer and leaves the sending to them.
+ */
+function JobSuggestions({
+    jobs,
+    label,
+    dismissLabel,
+    onUse,
+    onDismiss,
+}: {
+    jobs: AskConnexJobOffer[];
+    label: string;
+    dismissLabel: string;
+    onUse: (job: AskConnexJobOffer) => void;
+    onDismiss: () => void;
+}) {
+    const reduceMotion = useReducedMotion() ?? false;
+    if (jobs.length === 0) return null;
+
+    return (
+        <motion.div
+            role="group"
+            aria-label={label}
+            initial={reduceMotion ? { opacity: 0 } : { opacity: 0, transform: 'translateY(0.25rem)' }}
+            animate={{ opacity: 1, transform: 'translateY(0rem)' }}
+            transition={reduceMotion ? instant : { duration: durationMicro, ease: easeOut }}
+            className="mb-2 flex min-w-0 items-center gap-1.5"
+        >
+            <div
+                data-base-ui-swipe-ignore
+                className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto"
+            >
+                {jobs.map((job) => (
+                    <Button
+                        key={job.id}
+                        type="button"
+                        size="inline"
+                        variant="outline"
+                        className="shrink-0 font-normal"
+                        onClick={() => onUse(job)}
+                    >
+                        {job.label}
+                    </Button>
+                ))}
+            </div>
+            <IconButton
+                type="button"
+                variant="ghost"
+                size="icon-inline"
+                label={dismissLabel}
+                className="shrink-0"
+                onClick={onDismiss}
+            >
+                <XMarkIcon className="size-3" />
+            </IconButton>
+        </motion.div>
+    );
+}
+
 function MessageSuggestions({
     suggestions,
     label,
@@ -337,7 +620,7 @@ function MessageSuggestions({
                     <Button
                         type="button"
                         variant="outline"
-                        size="xs"
+                        size="inline"
                         className="h-auto max-w-72 justify-start whitespace-normal py-1.5 text-left leading-4"
                         onClick={() => onSend(suggestion)}
                     >
@@ -346,23 +629,6 @@ function MessageSuggestions({
                 </li>
             ))}
         </ul>
-    );
-}
-
-function MessageReasoning({ reasoning, label }: { reasoning: string | null | undefined; label: string }) {
-    const content = reasoning?.trim();
-    if (!content) return null;
-
-    return (
-        <details className="group text-xs text-muted-foreground">
-            <summary className="flex min-h-8 cursor-pointer list-none items-center gap-1.5 rounded-md px-1 font-medium outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-                <ChevronRightIcon className="size-3.5 shrink-0 group-open:rotate-90" />
-                <span>{label}</span>
-            </summary>
-            <div className="ml-2 whitespace-pre-wrap break-words border-l border-border py-1 pl-4 leading-relaxed">
-                {content}
-            </div>
-        </details>
     );
 }
 
@@ -399,7 +665,9 @@ function TranscriptMessage({
     suggestions,
     toolCalls,
     actionableToolCallIds,
+    bounds,
     labels,
+    review,
     onSend,
     onToolAction,
 }: {
@@ -410,7 +678,9 @@ function TranscriptMessage({
     suggestions: string[];
     toolCalls: AskConnexToolCardState[];
     actionableToolCallIds: ReadonlySet<number>;
+    bounds: AskConnexAnswerBounds;
     labels: AskConnexDrawerLabels;
+    review: AskConnexToolReview;
     onSend: (content?: string) => void;
     onToolAction: (toolCallId: number, action: AskConnexToolAction) => void;
 }) {
@@ -432,37 +702,58 @@ function TranscriptMessage({
             {lastInGroup
                 ? <SenderAvatar user={user} label={author} />
                 : <MessageAvatar aria-hidden className="bg-transparent" />}
-            <MessageContent className="w-auto max-w-[85%] gap-1.5">
+            <MessageContent className={cn(
+                'w-auto gap-1.5',
+                !user && message.answerDocument ? 'max-w-full' : 'max-w-[85%]',
+            )}>
                 {firstInGroup ? (
                     <MessageHeader className={user ? 'justify-end' : undefined}>
                         {author}
                     </MessageHeader>
                 ) : null}
-                {!user ? <MessageReasoning reasoning={message.reasoning} label={labels.thinking} /> : null}
                 <motion.div
                     initial={animateEntrance ? (reduceMotion ? { opacity: 0 } : { opacity: 0, transform: 'translateY(0.375rem)' }) : false}
                     animate={{ opacity: 1, transform: 'translateY(0rem)' }}
                     transition={reduceMotion ? instant : { duration: 0.2, ease: easeOut }}
                     className={cn(
-                        'whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed',
-                        user
+                        message.answerDocument
+                            ? 'w-full'
+                            : 'whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed',
+                        message.contentWithheld === true
+                            ? 'bg-muted text-muted-foreground italic'
+                            : user
                             ? 'bg-primary text-primary-foreground'
-                            : 'bg-muted text-foreground',
+                            : message.answerDocument
+                                ? null
+                                : 'bg-muted text-foreground',
                     )}
                 >
-                    {message.content}
+                    {message.contentWithheld === true
+                        ? labels.contentWithheld
+                        : !user && message.answerDocument
+                            ? (
+                                <AskConnexAnswerDocument
+                                    document={message.answerDocument}
+                                    bounds={bounds}
+                                    labels={labels.answerDocument}
+                                />
+                            )
+                            : message.content}
                 </motion.div>
-                {!user ? <MessageCitations citations={message.citations} labels={labels} /> : null}
-                {!user ? (
+                {!user && message.contentWithheld !== true && !message.answerDocument
+                    ? <MessageCitations citations={message.citations} labels={labels} />
+                    : null}
+                {!user && message.contentWithheld !== true ? (
                     <ToolCallCards
                         cards={toolCalls}
                         labels={labels.toolCard}
                         actionsDisabled={false}
                         actionableToolCallIds={actionableToolCallIds}
+                        review={review}
                         onAction={onToolAction}
                     />
                 ) : null}
-                {!user ? (
+                {!user && message.contentWithheld !== true ? (
                     <MessageSuggestions
                         suggestions={suggestions}
                         label={labels.suggestedFollowUps}
@@ -479,29 +770,66 @@ function TranscriptMessage({
     );
 }
 
+/**
+ * One answer's write actions, as either a set of cards or one review of several changes.
+ *
+ * An answer that proposes a single change shows that change on its own card, where it belongs.
+ * An answer that proposes several is a different decision — one the member makes about all of
+ * them — so the cards give way to a review that counts them, and the drawer announces that review
+ * rather than trying to hold it. Everything already decided, and everything the member is only
+ * watching, keeps its own card either way.
+ */
 function ToolCallCards({
     cards,
     labels,
     actionsDisabled,
     actionableToolCallIds,
+    review,
     onAction,
 }: {
     cards: AskConnexToolCardState[];
     labels: AskConnexToolCardLabels;
     actionsDisabled: boolean;
     actionableToolCallIds: ReadonlySet<number>;
+    review: AskConnexToolReview;
     onAction: (toolCallId: number, action: AskConnexToolAction) => void;
 }) {
+    const groups = askConnexProposalGroups(
+        cards, actionableToolCallIds, review.excludedToolCallIds,
+    );
+    const grouped = askConnexGroupedToolCallIds(groups);
+    const ungrouped = cards.filter((card) => !grouped.has(card.id));
     if (cards.length === 0) return null;
     return (
         <div className="space-y-2">
-            {cards.map((card) => (
+            {groups.map((group) => (review.workspace ? (
+                <AskConnexProposalReview
+                    key={group.turnId}
+                    group={group}
+                    labels={review.labels}
+                    cardLabels={labels}
+                    actionsDisabled={actionsDisabled}
+                    onToggleInclusion={review.onToggleInclusion}
+                    onAction={onAction}
+                    onApplySelected={review.onApplySelected}
+                />
+            ) : (
+                <AskConnexProposalReviewSummary
+                    key={group.turnId}
+                    group={group}
+                    labels={review.labels}
+                    onOpenFullView={review.onOpenFullView}
+                />
+            )))}
+            {ungrouped.map((card) => (
                 <AskConnexToolCard
                     key={card.id}
                     card={card}
                     labels={labels}
                     actionsDisabled={actionsDisabled || !actionableToolCallIds.has(card.id)}
                     onAction={onAction}
+                    formatDeadline={review.formatDeadline}
+                    formatRemaining={review.formatRemaining}
                 />
             ))}
         </div>
@@ -537,19 +865,117 @@ function PresenceStrip({ presence, labels }: { presence: AiChatPresence; labels:
     );
 }
 
-function TurnActivity({
+/**
+ * A settled answer that produced no transcript message: what happened, what it covered before it
+ * stopped, and the one action worth offering next.
+ *
+ * The milestone trail is repeated here because it otherwise exists only while the answer is still
+ * running — a reader who arrives after it stopped would have no way to learn what was covered. The
+ * announcement is deliberately kept to the one-line outcome: the trail and the retry control sit
+ * outside it so settling does not read a whole list aloud.
+ */
+function SettledTurnActivity({
+    icon,
+    message,
+    destructive,
+    progress,
+    labels,
+    recovery,
+    onRetry,
+    onContinueFromPartial,
+    onNarrowScope,
+}: {
+    icon: ReactNode;
+    message: string;
+    destructive?: boolean;
+    progress: AiChatProgressItem[];
+    labels: AskConnexTurnLabels;
+    recovery: AskConnexRecovery;
+    onRetry: () => void;
+    onContinueFromPartial: () => void;
+    onNarrowScope: () => void;
+}) {
+    const narrow = recovery.narrowScope ? (
+        <Button
+            key="narrow"
+            type="button"
+            variant={recovery.narrowScopeFirst ? 'outline' : 'ghost'}
+            size="inline"
+            onClick={onNarrowScope}
+        >
+            <ArrowsPointingInIcon />
+            {labels.narrowScope}
+        </Button>
+    ) : null;
+    const continueFromPartial = recovery.continueFromPartial ? (
+        <Button key="continue" type="button" variant="ghost" size="inline" onClick={onContinueFromPartial}>
+            <Bars3BottomLeftIcon />
+            {labels.continueFromPartial}
+        </Button>
+    ) : null;
+    const retry = recovery.retry ? (
+        <Button key="retry" type="button" variant="outline" size="inline" onClick={onRetry}>
+            <ArrowPathIcon />
+            {labels.retry}
+        </Button>
+    ) : null;
+    const routes = recovery.narrowScopeFirst
+        ? [narrow, continueFromPartial, retry]
+        : [retry, continueFromPartial, narrow];
+    const offered = routes.filter((route) => route !== null);
+
+    return (
+        <div className="space-y-2 px-4 py-2 text-xs text-muted-foreground">
+            <div
+                role="status"
+                className={cn('flex items-start gap-2', destructive && 'text-destructive')}
+            >
+                <span className="mt-px shrink-0">{icon}</span>
+                <span className="leading-relaxed">{message}</span>
+            </div>
+            <AskConnexCheckedTrail progress={progress} labels={labels.answerDocument} />
+            {offered.length > 0 ? (
+                <div className="flex flex-wrap items-center gap-1.5">{offered}</div>
+            ) : null}
+        </div>
+    );
+}
+
+/**
+ * The live and settled state of the answer in progress.
+ *
+ * While the answer runs, the whole region is the announced status so each new milestone is spoken
+ * as it lands rather than only the overall phase; the streamed words themselves are never announced.
+ *
+ * The stop control appears only for the member who asked. A participant who opened a shared session
+ * mid-turn adopts that turn into the same state, and the cancellation endpoint rejects anyone but
+ * its requester, so offering the control to them would be a button that can only fail.
+ */
+export function TurnActivity({
     turn,
     streaming,
     cancelling,
+    canRetry,
+    hasPartial = false,
     labels,
     onCancel,
+    onRetry,
+    onContinueFromPartial = noopRecovery,
+    onNarrowScope = noopRecovery,
 }: {
     turn: AskConnexTurnState;
     streaming: boolean;
     cancelling: boolean;
-    labels: AskConnexDrawerLabels;
+    canRetry: boolean;
+    /** Whether words were retained from this answer before it stopped. */
+    hasPartial?: boolean;
+    labels: AskConnexTurnLabels;
     onCancel: () => void;
+    onRetry: () => void;
+    onContinueFromPartial?: () => void;
+    onNarrowScope?: () => void;
 }) {
+    const recovery = askConnexRecovery(turn.phase, turn.reason, canRetry, hasPartial);
     if (turn.phase === 'idle') return null;
     if (turn.phase === 'resolved') {
         return (
@@ -561,66 +987,96 @@ function TurnActivity({
     }
     if (turn.phase === 'failed') {
         return (
-            <div role="status" className="flex items-center gap-2 px-4 py-2 text-xs text-destructive">
-                <ExclamationCircleIcon className="size-3.5" />
-                <span>{turn.reason === 'image_input_unsupported'
-                    ? labels.turnImageUnsupported
-                    : turn.reason === 'tool_result_budget_exhausted'
-                        ? labels.toolResultBudgetExhausted
-                        : turn.reason === 'budget_exhausted'
-                            ? labels.budgetExhausted
-                            : labels.turnFailed}</span>
-            </div>
+            <SettledTurnActivity
+                icon={<ExclamationCircleIcon className="size-3.5" />}
+                destructive
+                message={labels.terminalMessage[askConnexTerminalKind(turn.reason).message]}
+                progress={turn.progress}
+                labels={labels}
+                recovery={recovery}
+                onRetry={onRetry}
+                onContinueFromPartial={onContinueFromPartial}
+                onNarrowScope={onNarrowScope}
+            />
         );
     }
     if (turn.phase === 'timed_out') {
         return (
-            <div role="status" className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground">
-                <ClockIcon className="size-3.5" />
-                <span>{labels.turnTimedOut}</span>
-            </div>
+            <SettledTurnActivity
+                icon={<ClockIcon className="size-3.5" />}
+                message={labels.terminalMessage[askConnexTimedOutMessage(turn.reason)]}
+                progress={turn.progress}
+                labels={labels}
+                recovery={recovery}
+                onRetry={onRetry}
+                onContinueFromPartial={onContinueFromPartial}
+                onNarrowScope={onNarrowScope}
+            />
         );
     }
     if (turn.phase === 'cancelled') {
         return (
-            <div role="status" className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground">
-                <StopCircleIcon className="size-3.5" />
-                <span>{labels.turnCancelled}</span>
-            </div>
+            <SettledTurnActivity
+                icon={<StopCircleIcon className="size-3.5" />}
+                message={labels.turnCancelled}
+                progress={turn.progress}
+                labels={labels}
+                recovery={NO_RECOVERY}
+                onRetry={onRetry}
+                onContinueFromPartial={onContinueFromPartial}
+                onNarrowScope={onNarrowScope}
+            />
         );
     }
     return (
-        <div role="status" className="flex items-center gap-2 px-4 py-1 text-xs text-muted-foreground">
-            <SparklesIcon className="size-3.5" />
-            <span>{cancelling
-                ? labels.stopping
-                : turn.phase === 'accepted'
-                    ? labels.turnAccepted
-                    : streaming
-                        ? labels.turnStreaming
-                        : labels.turnWorking}</span>
-            <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-label={labels.stop}
-                disabled={cancelling}
-                onClick={onCancel}
-            >
-                <StopIcon className="size-3.5" />
-            </Button>
+        <div role="status" className="space-y-2 px-4 py-2 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2">
+                <SparklesIcon className="size-3.5" />
+                <span>{cancelling
+                    ? labels.stopping
+                    : turn.phase === 'accepted'
+                        ? labels.turnAccepted
+                        : streaming
+                            ? labels.turnStreaming
+                            : labels.turnWorking}</span>
+                {turn.cancellable ? (
+                    <IconButton
+                        type="button"
+                        variant="ghost"
+                        size="icon-toolbar"
+                        label={labels.stop}
+                        disabled={cancelling}
+                        onClick={onCancel}
+                    >
+                        <StopIcon className="size-3.5" />
+                    </IconButton>
+                ) : null}
+            </div>
+            <AskConnexCheckedTrail
+                progress={turn.progress}
+                labels={labels.answerDocument}
+                expanded
+            />
         </div>
     );
 }
 
-function StreamingTail({
+/**
+ * The words the assistant has written so far, and — once the answer stops without resolving — the
+ * words it had written when it stopped.
+ *
+ * A settled answer that never resolved leaves no transcript message behind, so this tail is the
+ * only place its partial text exists. It stays on screen and says plainly that it is unfinished
+ * rather than disappearing and leaving a one-line failure where an answer had been forming.
+ */
+export function StreamingTail({
     store,
     turn,
     labels,
 }: {
     store: AskConnexStreamStore;
     turn: AskConnexTurnState;
-    labels: AskConnexDrawerLabels;
+    labels: AskConnexTurnLabels;
 }) {
     const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, () => null);
     if (snapshot === null || snapshot.text.length === 0 || snapshot.turnId !== turn.turnId) {
@@ -644,6 +1100,12 @@ function StreamingTail({
                                 />
                             ) : null}
                         </div>
+                        {live ? null : (
+                            <p className="flex items-start gap-1.5 px-1 text-xs text-muted-foreground">
+                                <ExclamationTriangleIcon aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+                                <span>{labels.partialAnswer}</span>
+                            </p>
+                        )}
                     </MessageContent>
                 </Message>
             </MessageGroup>
@@ -651,101 +1113,6 @@ function StreamingTail({
     );
 }
 
-function ContextChips({
-    implicitContext,
-    attachments,
-    fileAttachments,
-    canRemoveFiles,
-    fileOperationPending,
-    overflow,
-    labels,
-    onRemove,
-    onRemoveFile,
-}: {
-    implicitContext: AskConnexAttachment | null;
-    attachments: AskConnexAttachment[];
-    fileAttachments: AskConnexFileAttachment[];
-    canRemoveFiles: boolean;
-    fileOperationPending: boolean;
-    overflow: boolean;
-    labels: AskConnexDrawerLabels;
-    onRemove: (attachment: AskConnexAttachment) => void;
-    onRemoveFile: (attachment: AskConnexFileAttachment) => void;
-}) {
-    if (!implicitContext && attachments.length === 0 && fileAttachments.length === 0 && !overflow) return null;
-
-    return (
-        <div role="group" className="mb-2" aria-label={labels.context}>
-            <div className="flex min-w-0 items-center gap-1.5 overflow-x-auto">
-                {implicitContext ? (
-                    <Badge variant="outline" className="max-w-44 shrink-0 text-muted-foreground">
-                        <MapPinIcon />
-                        <span className="truncate">{implicitContext.label}</span>
-                    </Badge>
-                ) : null}
-                {attachments.map((attachment) => (
-                    <Badge key={`${attachment.kind}:${attachment.id}`} variant="secondary" className="max-w-44 shrink-0 pr-1">
-                        <span className="truncate">{attachment.label}</span>
-                        <button
-                            type="button"
-                            aria-label={labels.removeContext(attachment.label)}
-                            onClick={() => onRemove(attachment)}
-                            className="rounded-full p-0.5 outline-none hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring"
-                        >
-                            <XMarkIcon className="size-3" />
-                        </button>
-                    </Badge>
-                ))}
-                {fileAttachments.map((attachment) => {
-                    const FileIcon = attachment.kind === 'image' ? PhotoIcon : DocumentTextIcon;
-                    const detail = attachment.status === 'uploading'
-                        ? labels.uploadProgress(attachment.progress)
-                        : attachment.status === 'removing'
-                            ? labels.uploadRemoving
-                        : attachment.status === 'failed'
-                            ? attachment.error
-                            : formatFileSize(attachment.size);
-                    return (
-                        <Badge
-                            key={attachment.clientId}
-                            variant={attachment.status === 'failed' ? 'destructive' : 'outline'}
-                            aria-invalid={attachment.status === 'failed' || undefined}
-                            className="h-auto max-w-56 shrink-0 py-1 pr-1"
-                        >
-                            <FileIcon />
-                            <span className="min-w-0">
-                                <span className="block truncate">{attachment.fileName}</span>
-                                <span
-                                    role={attachment.status === 'failed'
-                                        ? 'alert'
-                                        : attachment.status === 'uploading' || attachment.status === 'removing'
-                                            ? 'status'
-                                            : undefined}
-                                    className="block truncate text-[10px] font-normal opacity-70"
-                                >
-                                    {detail}
-                                </span>
-                            </span>
-                            <button
-                                type="button"
-                                aria-label={labels.removeFile(attachment.fileName)}
-                                disabled={!canRemoveFiles
-                                    || fileOperationPending
-                                    || attachment.status === 'uploading'
-                                    || attachment.status === 'removing'}
-                                onClick={() => onRemoveFile(attachment)}
-                                className="rounded-full p-0.5 outline-none hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring"
-                            >
-                                <XMarkIcon className="size-3" />
-                            </button>
-                        </Badge>
-                    );
-                })}
-            </div>
-            {overflow ? <p role="alert" className="mt-1.5 text-xs text-destructive">{labels.contextLimit}</p> : null}
-        </div>
-    );
-}
 
 function SessionMenu({
     sessions,
@@ -779,9 +1146,9 @@ function SessionMenu({
     return (
         <DropdownMenu>
             <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon-sm" aria-label={labels.moreOptions}>
+                <IconButton variant="ghost" size="icon-toolbar" label={labels.moreOptions}>
                     <EllipsisHorizontalIcon className="size-4" />
-                </Button>
+                </IconButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-72">
                 <DropdownMenuLabel>{labels.recentSessions}</DropdownMenuLabel>
@@ -855,6 +1222,202 @@ function SessionMenu({
     );
 }
 
+const ACTIVE_STATE_ICONS = {
+    running: SparklesIcon,
+    awaitingApproval: HandRaisedIcon,
+    failed: ExclamationCircleIcon,
+} as const;
+
+/**
+ * One fact about the chat, stated as a word and an icon.
+ *
+ * Every chip in the metadata row carries both channels, so nothing here is legible only to a reader
+ * who can tell the hues apart, and the row reads the same at the drawer's narrowest width as it
+ * does across the workspace.
+ */
+function HeaderChip({
+    icon: Icon,
+    label,
+    tone,
+    arrives,
+}: {
+    icon: typeof SparklesIcon;
+    label: string;
+    tone?: 'destructive';
+    /**
+     * Whether this chip comes and goes with the chat's state. One that does arrives rather than
+     * appears, so a row that gains a chip mid-read does not look like the header changed shape on
+     * its own; one that is always there has no arrival to show.
+     */
+    arrives?: boolean;
+}) {
+    const reduceMotion = useReducedMotion() ?? false;
+    const chip = (
+        <Badge
+            variant="outline"
+            className={cn('shrink-0 font-normal', tone === 'destructive' && 'text-destructive')}
+        >
+            <Icon aria-hidden />
+            {label}
+        </Badge>
+    );
+    if (!arrives) return chip;
+    return (
+        <motion.span
+            className="inline-flex shrink-0"
+            initial={reduceMotion
+                ? { opacity: 0 }
+                : { opacity: 0, transform: 'translateY(-0.125rem)' }}
+            animate={{ opacity: 1, transform: 'translateY(0rem)' }}
+            transition={reduceMotion ? instant : { duration: durationMicro, ease: easeOut }}
+        >
+            {chip}
+        </motion.span>
+    );
+}
+
+/**
+ * The header both Ask Connex surfaces wear.
+ *
+ * Two tiers, in the order a reader needs them: what this chat is, then everything about it that
+ * changes — who can see it, whether it is doing something right now, and how much it is carrying.
+ * The state tier exists because none of those facts were previously readable without opening a
+ * menu, scrolling the transcript, or both, and a member glancing at the header has to be able to
+ * tell a private chat from a shared one and a working answer from a settled one.
+ *
+ * The width control and the handoff into the full workspace sit on the state tier rather than
+ * beside the close control: both change which surface you are reading in, and neither belongs in
+ * the row where a mis-aimed click closes the panel.
+ *
+ * The access line counts the members reading the chat rather than everyone the participants
+ * endpoint returns; pending invitations stay in the sharing dialog, which names them as pending and
+ * offers the controls that act on them.
+ */
+function SurfaceHeader({
+    workspace,
+    resizable,
+    activeSession,
+    participants,
+    activeState,
+    contextCount,
+    width,
+    labels,
+    closeButton,
+    sessionMenu,
+    onWidthChange,
+    onOpenWorkspace,
+}: {
+    workspace: boolean;
+    resizable: boolean;
+    activeSession: AiChatSession | null;
+    participants: AiChatParticipant[];
+    activeState: AskConnexActiveState;
+    contextCount: number;
+    width: AskConnexWidth;
+    labels: AskConnexDrawerLabels;
+    closeButton: ReactNode;
+    sessionMenu: ReactNode;
+    onWidthChange: (width: AskConnexWidth) => void;
+    onOpenWorkspace: () => void;
+}) {
+    const shared = activeSession?.visibility === 'shared';
+    const readers = askConnexSessionReaders(participants);
+    const title = activeSession?.title ?? labels.newChat;
+    const StateIcon = activeState === null ? null : ACTIVE_STATE_ICONS[activeState];
+    const stateLabel = activeState === 'running'
+        ? labels.stateRunning
+        : activeState === 'awaitingApproval'
+            ? labels.stateAwaitingApproval
+            : labels.stateFailed;
+
+    return (
+        <header className="flex shrink-0 flex-col gap-1 border-b border-border px-3 py-2">
+            <div className="flex min-h-8 items-center gap-1">
+                {workspace ? (
+                    <h1 className="min-w-0 flex-1 truncate px-2 text-sm font-medium text-foreground">
+                        {title}
+                    </h1>
+                ) : (
+                    <p className="min-w-0 flex-1 truncate px-2 text-sm font-medium text-foreground">
+                        {title}
+                    </p>
+                )}
+                {sessionMenu}
+                {closeButton}
+            </div>
+            <div className="flex min-w-0 items-center gap-2 px-2">
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                    <HeaderChip
+                        icon={shared ? UserGroupIcon : LockClosedIcon}
+                        label={shared ? labels.visibilityShared : labels.visibilityPrivate}
+                    />
+                    {StateIcon !== null ? (
+                        <HeaderChip
+                            key={activeState}
+                            icon={StateIcon}
+                            label={stateLabel}
+                            tone={activeState === 'failed' ? 'destructive' : undefined}
+                            arrives
+                        />
+                    ) : null}
+                    {contextCount > 0 ? (
+                        <span className="truncate">{labels.contextSummary(contextCount)}</span>
+                    ) : null}
+                    {workspace && shared && readers.length > 0 ? (
+                        <span className="flex min-w-0 items-center gap-1.5">
+                            <AvatarGroup aria-label={labels.participants}>
+                                {readers.map((participant) => (
+                                    <Avatar
+                                        key={participant.userId}
+                                        size="sm"
+                                        title={participant.displayName}
+                                    >
+                                        <AvatarImage src={participant.profilePictureUrl ?? undefined} alt="" />
+                                        <AvatarFallback>
+                                            {participant.displayName.slice(0, 1).toUpperCase()}
+                                        </AvatarFallback>
+                                    </Avatar>
+                                ))}
+                            </AvatarGroup>
+                            <span className="truncate">{labels.participantCount(readers.length)}</span>
+                        </span>
+                    ) : null}
+                </div>
+                {resizable ? (
+                    <>
+                        <SegmentedControl
+                            className="shrink-0"
+                            size="inline"
+                            ariaLabel={labels.width}
+                            value={width}
+                            onChange={onWidthChange}
+                            options={ASK_CONNEX_WIDTHS.map((option) => ({
+                                value: option,
+                                icon: option === 'compact'
+                                    ? <ChevronDoubleRightIcon />
+                                    : <ChevronDoubleLeftIcon />,
+                                ariaLabel: option === 'compact'
+                                    ? labels.widthCompact
+                                    : labels.widthComfortable,
+                            }))}
+                        />
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="inline"
+                            className="shrink-0"
+                            onClick={onOpenWorkspace}
+                        >
+                            <ArrowsPointingOutIcon />
+                            {labels.openWorkspace}
+                        </Button>
+                    </>
+                ) : null}
+            </div>
+        </header>
+    );
+}
+
 function ConversationSurface({
     sessions,
     invitations,
@@ -867,6 +1430,13 @@ function ConversationSurface({
     loadError,
     composer,
     implicitContext,
+    selectionContext,
+    unsupportedPageContext,
+    pinnedContext,
+    pageContextPinned,
+    contextCorrected,
+    requestScope,
+    scope,
     attachments,
     fileAttachments,
     canAttachFiles,
@@ -880,10 +1450,21 @@ function ConversationSurface({
     cancelling,
     toolCalls,
     actionableToolCallIds,
+    canRetryTurn,
+    continuePrompt,
+    width,
+    activeState,
+    contextCount,
+    participants,
+    now,
     unavailable,
-    starterPrompts,
+    jobs,
+    promptRequest,
+    onPromptConsumed,
     labels,
     closeButton,
+    resizable,
+    onWidthChange,
     onSelectSession,
     onNewChat,
     onBeginRename,
@@ -894,12 +1475,21 @@ function ConversationSurface({
     onRetry,
     onComposerChange,
     onRemoveAttachment,
+    onTogglePagePin,
+    onUnpinContext,
+    onRemovePageContext,
+    onRemoveSelectionContext,
+    onResetContext,
     onAttachFiles,
     onRemoveFileAttachment,
     onSend,
     onCancelTurn,
+    onRetryTurn,
     onToolAction,
+    onToolActions,
+    onOpenWorkspace,
     open,
+    workspace,
 }: ConversationSurfaceProps) {
     const transcript = useMemo(
         () => askConnexTranscript(messages, activeSession?.historySummarized === true),
@@ -919,46 +1509,256 @@ function ConversationSurface({
         [toolCardInsertionIds, visibleMessages],
     );
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const composerRef = useRef<MentionEditorHandle>(null);
     const [recordPickerRequest, setRecordPickerRequest] = useState(0);
     const fileOperationPending = hasPendingAskConnexFileOperation(fileAttachments);
     const busy = working || fileOperationPending;
+    /**
+     * The workspace renders every row of an answer; the drawer bounds long lists and offers the
+     * workspace for the rest, so a forty-row timeline is never squeezed into the panel or turned
+     * into a sideways scroll.
+     */
+    const bounds = useMemo<AskConnexAnswerBounds>(
+        () => workspace
+            ? { cap: null, onOpenFullView: null }
+            : { cap: ASK_CONNEX_DRAWER_ROW_CAP, onOpenFullView: onOpenWorkspace },
+        [onOpenWorkspace, workspace],
+    );
+    /**
+     * Proposals the member has taken out of a grouped review.
+     *
+     * Held here, beside the transcript, rather than inside the review: the cards are re-read
+     * whenever the session refreshes, and a proposal the member deliberately took out of the batch
+     * must stay out while that happens rather than quietly rejoining it.
+     */
+    const [excludedProposals, setExcludedProposals] = useState<ReadonlySet<number>>(
+        () => new Set<number>(),
+    );
+    const surfaceFormat = useFormatter();
+    const toolReview = useMemo<AskConnexToolReview>(() => ({
+        workspace,
+        excludedToolCallIds: excludedProposals,
+        labels: labels.proposalReview,
+        formatDeadline: (instant: string) => {
+            const deadline = new Date(instant);
+            return Number.isNaN(deadline.getTime())
+                ? instant
+                : surfaceFormat.dateTime(deadline, { hour: 'numeric', minute: '2-digit' });
+        },
+        formatRemaining: (instant: string) => {
+            const deadline = new Date(instant);
+            return Number.isNaN(deadline.getTime())
+                ? instant
+                : surfaceFormat.relativeTime(deadline, now);
+        },
+        onToggleInclusion: (toolCallId: number) => setExcludedProposals(
+            (current) => toggleAskConnexProposalExclusion(current, toolCallId),
+        ),
+        onApplySelected: (toolCallIds: number[]) => onToolActions(toolCallIds, 'approve'),
+        onOpenFullView: onOpenWorkspace,
+    }), [
+        excludedProposals,
+        labels.proposalReview,
+        now,
+        onOpenWorkspace,
+        onToolActions,
+        surfaceFormat,
+        workspace,
+    ]);
+    /**
+     * Whether this answer left words behind when it stopped.
+     *
+     * Read from the streaming flag rather than by subscribing to the stream store: the store
+     * publishes at animation-frame cadence while an answer is being written, and a subscription here
+     * would re-render the whole transcript on every frame. The flag carries the same fact — it is
+     * raised the first time text is published and lowered when the stream is discarded, which
+     * happens for a resolved answer, whose words are the transcript, and for a turn that ended by
+     * withdrawing this member's authority to read what it wrote.
+     */
+    const hasPartialAnswer = streaming;
     const suggestions = useMemo(
         () => latestAskConnexSuggestions(messages, busy),
         [busy, messages],
     );
     const latestMessageId = visibleMessages.at(-1)?.id ?? null;
     const historySummarized = transcript.historySummarized;
+    /**
+     * Whether to offer this page's jobs above the composer.
+     *
+     * Only once a conversation is under way — an empty chat already lists them in its empty state,
+     * and showing both would be the same offer twice. They appear between questions, when the
+     * composer is empty and the member has not just started typing, and are dismissed per set of
+     * jobs, so moving to a record that supports different work offers the new ones rather than
+     * staying silent because an earlier set was waved away.
+     */
+    const jobsKey = `${activeSession?.id ?? 'new'}|${jobs.map((job) => job.id).join(',')}`;
+    const [dismissedJobsKey, setDismissedJobsKey] = useState<string | null>(null);
+    const offeringJobs = jobs.length > 0
+        && visibleMessages.length > 0
+        && composer.trim().length === 0
+        && loadState === 'ready'
+        && unavailable === null
+        && !working
+        && dismissedJobsKey !== jobsKey;
     const canSend = composer.trim().length > 0
         && loadState === 'ready'
         && !contextOverflow
         && !contentTooLong
         && !fileOperationPending
+        && !scope.blocked
         && !busy
         && unavailable === null;
+    const contextGroupRef = useRef<HTMLDivElement>(null);
+    const [pendingScope, setPendingScope] = useState<{ content?: string } | null>(null);
+    const scopeKey = requestScope.identity;
+    /**
+     * A held request keeps its notice until the member acts on it, not until its breadth changes.
+     *
+     * The breadth is still being measured while the notice is up, and the answer may well be that it
+     * needed no review — dropping the notice the moment that lands would take the member's own Send
+     * with it. What does close it is there being nothing left to announce: a request that no longer
+     * carries records or declares filters has no breadth to state, so the notice goes and Send is
+     * the member's to press again.
+     */
+    const asking = pendingScope !== null
+        && (requestScope.records !== null || requestScope.declared !== null);
+
+    /**
+     * Lands the member in the composer after a contextual entry point wrote a job into it.
+     *
+     * The job arrives as ordinary text they may want to change before sending, so focus goes to the
+     * end of it rather than to whatever control opened the panel. Exactly once per entry point, and
+     * only once the panel is actually on screen: an entry point pressed from a record opens the panel
+     * and writes the job in the same moment, while opening the panel by itself later must not take
+     * focus — on a phone that would raise the keyboard over the conversation. Consuming the request
+     * is what makes that hold: the mark belongs to the caller, not to this surface, which a phone
+     * unmounts with the panel.
+     */
+    useEffect(() => {
+        if (!askConnexPromptFocusPending(open, promptRequest)) return;
+        onPromptConsumed();
+        composerRef.current?.focus();
+    }, [onPromptConsumed, open, promptRequest]);
+
+    /**
+     * Offers one job to the composer, wherever it was offered from.
+     *
+     * The empty state and the strip above the composer hand a job over on the same terms a record's
+     * entry point does: a half-written question is the member's work, so an offer joins it rather
+     * than replacing it, and focus lands after it so the next thing they type continues the message.
+     */
+    const offerJob = (job: AskConnexJobOffer) => {
+        onComposerChange(appendAskConnexPrompt(composer, job.prompt));
+        composerRef.current?.focus();
+    };
+
+    /**
+     * Asks for one question to be sent, announcing its breadth first whenever it has one.
+     *
+     * Every broad request is announced, including the second one against filters that were already
+     * agreed to once: agreement is given to a question, not to a set of filters left in the form, and
+     * a notice that only ever appears once would let every later question inherit a review nobody
+     * performed on it. Settling the breadth check comes first, so what the notice states is measured
+     * against the question actually about to go out rather than an earlier one.
+     */
+    const requestSend = (content?: string) => {
+        if (!canSend) return;
+        scope.onSettle();
+        if (scopeKey !== null) {
+            setPendingScope({ content });
+            return;
+        }
+        setPendingScope(null);
+        onSend(content);
+    };
+
+    /**
+     * Hands a stopped answer back to the member as an ordinary question they can read and edit.
+     *
+     * The message is appended through the composer rather than sent, because continuing is a new
+     * question and Ask Connex does not ask questions on the member's behalf. Appending also keeps
+     * anything already typed instead of replacing it.
+     */
+    const continueFromPartial = () => {
+        if (continuePrompt === null) return;
+        composerRef.current?.appendParagraph(continuePrompt);
+        composerRef.current?.focus();
+    };
+
+    const carryingContext = hasAskConnexContextInputs({
+        implicitContext,
+        pinnedContext,
+        selectionContext,
+        unsupportedPageContext,
+        attachments,
+        fileAttachments,
+        scopeChips: scope.chips,
+    });
+
+    /**
+     * Returns the member to the inputs that decide breadth, and makes the move visible.
+     *
+     * Where that is depends on what made the request broad: carried records are removed in the
+     * context strip, and a question that was broad on its own words is narrowed in the composer, so
+     * a request with no carried records lands in the composer rather than on an empty strip. The
+     * strip takes focus as a group and shows a ring while it holds it, because focus arrives here
+     * from a click and nothing else would tell the member the press did anything.
+     */
+    const focusBreadthInputs = () => {
+        const group = carryingContext ? contextGroupRef.current : null;
+        if (group !== null) {
+            group.focus();
+            return;
+        }
+        composerRef.current?.focus();
+    };
+
+    /**
+     * Puts the held request down and hands the member back the inputs that decide breadth.
+     *
+     * Nothing is sent and nothing is agreed to: the next send announces whatever breadth the request
+     * has by then, so narrowing it here is a change of mind rather than a step on the way out.
+     */
+    const narrowScope = () => {
+        setPendingScope(null);
+        focusBreadthInputs();
+    };
 
     return (
-        <div className="flex h-full min-h-0 flex-col bg-popover text-popover-foreground">
-            <header className="flex shrink-0 items-center gap-1 border-b border-border px-3 py-2">
-                <p className="min-w-0 flex-1 truncate px-2 text-sm font-medium text-foreground">
-                    {activeSession?.title ?? labels.newChat}
-                </p>
-                <SessionMenu
-                    sessions={sessions}
-                    invitations={invitations}
-                    activeSession={activeSession}
-                    canShare={canShare}
-                    working={busy}
-                    labels={labels}
-                    onSelectSession={onSelectSession}
-                    onNewChat={onNewChat}
-                    onBeginRename={onBeginRename}
-                    onArchive={onArchive}
-                    onJoinInvitation={onJoinInvitation}
-                    onManageSharing={onManageSharing}
-                    onLeave={onLeave}
-                />
-                {closeButton}
-            </header>
+        <div className={cn(
+            'flex h-full min-h-0 flex-col text-popover-foreground',
+            workspace ? 'bg-background' : 'bg-popover',
+        )}>
+            <SurfaceHeader
+                workspace={workspace}
+                resizable={resizable}
+                activeSession={activeSession}
+                participants={participants}
+                activeState={activeState}
+                contextCount={contextCount}
+                width={width}
+                labels={labels}
+                closeButton={closeButton}
+                onWidthChange={onWidthChange}
+                onOpenWorkspace={onOpenWorkspace}
+                sessionMenu={(
+                    <SessionMenu
+                        sessions={sessions}
+                        invitations={invitations}
+                        activeSession={activeSession}
+                        canShare={canShare}
+                        working={busy}
+                        labels={labels}
+                        onSelectSession={onSelectSession}
+                        onNewChat={onNewChat}
+                        onBeginRename={onBeginRename}
+                        onArchive={onArchive}
+                        onJoinInvitation={onJoinInvitation}
+                        onManageSharing={onManageSharing}
+                        onLeave={onLeave}
+                    />
+                )}
+            />
 
             {activeSession?.visibility === 'shared' && presence ? (
                 <PresenceStrip presence={presence} labels={labels} />
@@ -972,7 +1772,10 @@ function ConversationSurface({
             >
                 <MessageScroller className="min-h-0 flex-1">
                     <MessageScrollerViewport aria-label={labels.messages}>
-                        <MessageScrollerContent aria-busy={busy}>
+                        <MessageScrollerContent
+                            aria-busy={busy}
+                            className={workspace ? 'mx-auto w-full max-w-4xl' : undefined}
+                        >
                             {loadState === 'loading' ? (
                                 <MessageScrollerItem messageId="loading">
                                     <TranscriptSkeleton />
@@ -1010,21 +1813,32 @@ function ConversationSurface({
                                         tone="brand"
                                         className="border-0 bg-transparent px-4 py-12"
                                         action={(
-                                            <div className="flex w-full max-w-sm flex-col gap-1.5">
-                                                {starterPrompts.map((prompt) => (
+                                            <div
+                                                className={cn(
+                                                    'flex w-full flex-col gap-1.5',
+                                                    workspace ? 'max-w-xl' : 'max-w-sm',
+                                                )}
+                                            >
+                                                {jobs.map((job) => (
                                                     <Button
-                                                        key={prompt}
+                                                        key={job.id}
                                                         type="button"
                                                         variant="ghost"
                                                         className="h-auto justify-start whitespace-normal bg-muted/60 py-2 text-left"
-                                                        onClick={() => onComposerChange(prompt)}
+                                                        onClick={() => offerJob(job)}
                                                     >
-                                                        {prompt}
+                                                        {job.label}
                                                     </Button>
                                                 ))}
                                                 <p className="pt-3 text-xs leading-relaxed text-muted-foreground">
                                                     {labels.disclosureCreation}
                                                 </p>
+                                                {workspace ? (
+                                                    <>
+                                                        <Separator className="my-4" />
+                                                        <AskConnexCommandCenter />
+                                                    </>
+                                                ) : null}
                                             </div>
                                         )}
                                     />
@@ -1041,6 +1855,7 @@ function ConversationSurface({
                                             labels={labels.toolCard}
                                             actionsDisabled={activeSession === null}
                                             actionableToolCallIds={actionableToolCallIds}
+                                            review={toolReview}
                                             onAction={onToolAction}
                                         />
                                     </div>
@@ -1072,8 +1887,10 @@ function ConversationSurface({
                                                                 suggestions={message.id === latestMessageId ? suggestions : []}
                                                                 toolCalls={toolCardAnchors.byMessageId.get(message.id) ?? []}
                                                                 actionableToolCallIds={actionableToolCallIds}
+                                                                bounds={bounds}
                                                                 labels={labels}
-                                                                onSend={onSend}
+                                                                review={toolReview}
+                                                                onSend={requestSend}
                                                                 onToolAction={onToolAction}
                                                             />
                                                         ))}
@@ -1090,6 +1907,7 @@ function ConversationSurface({
                                                                 labels={labels.toolCard}
                                                                 actionsDisabled={activeSession === null}
                                                                 actionableToolCallIds={actionableToolCallIds}
+                                                                review={toolReview}
                                                                 onAction={onToolAction}
                                                             />
                                                         </div>
@@ -1109,8 +1927,13 @@ function ConversationSurface({
                                         turn={turn}
                                         streaming={streaming}
                                         cancelling={cancelling}
+                                        canRetry={canRetryTurn}
+                                        hasPartial={hasPartialAnswer}
                                         labels={labels}
                                         onCancel={onCancelTurn}
+                                        onRetry={onRetryTurn}
+                                        onContinueFromPartial={continueFromPartial}
+                                        onNarrowScope={narrowScope}
                                     />
                                 </MessageScrollerItem>
                             ) : null}
@@ -1134,20 +1957,58 @@ function ConversationSurface({
                     className="shrink-0 border-t border-border p-3"
                     onSubmit={(event) => {
                         event.preventDefault();
-                        if (canSend) onSend();
+                        requestSend();
                     }}
                 >
-                    <ContextChips
+                    {offeringJobs ? (
+                        <JobSuggestions
+                            jobs={jobs}
+                            label={labels.suggestions}
+                            dismissLabel={labels.dismissSuggestions}
+                            onUse={offerJob}
+                            onDismiss={() => setDismissedJobsKey(jobsKey)}
+                        />
+                    ) : null}
+                    <AskConnexContextStrip
+                        groupRef={contextGroupRef}
                         implicitContext={implicitContext}
+                        pinnedContext={pinnedContext}
+                        pageContextPinned={pageContextPinned}
+                        selectionContext={selectionContext}
+                        unsupportedPageContext={unsupportedPageContext}
                         attachments={attachments}
                         fileAttachments={fileAttachments}
+                        scopeChips={scope.chips}
+                        scopeRefusal={scope.refusal}
                         canRemoveFiles={canRemoveFiles}
                         fileOperationPending={fileOperationPending}
                         overflow={contextOverflow}
+                        corrected={contextCorrected}
                         labels={labels}
                         onRemove={onRemoveAttachment}
                         onRemoveFile={onRemoveFileAttachment}
+                        onTogglePagePin={onTogglePagePin}
+                        onUnpin={onUnpinContext}
+                        onRemovePage={onRemovePageContext}
+                        onRemoveSelection={onRemoveSelectionContext}
+                        onEditScope={() => scope.onEditorOpenChange(true)}
+                        onReset={onResetContext}
                     />
+                    {asking ? (
+                        <AskConnexScopeNotice
+                            scope={requestScope}
+                            labels={labels}
+                            onConfirm={() => {
+                                const content = pendingScope?.content;
+                                setPendingScope(null);
+                                onSend(content);
+                            }}
+                            onEdit={() => {
+                                setPendingScope(null);
+                                focusBreadthInputs();
+                            }}
+                        />
+                    ) : null}
                     {fileAttachments.some((attachment) => attachment.kind === 'image') ? (
                         <p className="mb-2 text-xs leading-relaxed text-muted-foreground">
                             {labels.imageDisclosure}
@@ -1155,11 +2016,10 @@ function ConversationSurface({
                     ) : null}
                     <div data-base-ui-swipe-ignore className="rounded-2xl border border-input bg-background p-2 focus-within:ring-2 focus-within:ring-ring/50">
                         <MentionEditor
+                            handleRef={composerRef}
                             value={composer}
                             onChange={onComposerChange}
-                            onSubmit={() => {
-                                if (canSend) onSend();
-                            }}
+                            onSubmit={() => requestSend()}
                             placeholder={labels.composerPlaceholder}
                             ariaLabel={labels.composerAria}
                             mentionTypes={ASK_CONNEX_MENTION_TYPES}
@@ -1185,15 +2045,15 @@ function ConversationSurface({
                             ) : null}
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                    <Button
+                                    <IconButton
                                         type="button"
                                         variant="ghost"
-                                        size="icon-sm"
-                                        aria-label={labels.addContext}
+                                        size="icon-toolbar"
+                                        label={labels.addContext}
                                         disabled={busy || loadState !== 'ready' || unavailable !== null}
                                     >
                                         <PlusIcon className="size-4" />
-                                    </Button>
+                                    </IconButton>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="start" side="top" className="w-52">
                                     <DropdownMenuItem
@@ -1209,31 +2069,267 @@ function ConversationSurface({
                                     </DropdownMenuItem>
                                 </DropdownMenuContent>
                             </DropdownMenu>
+                            <Button
+                                type="button"
+                                variant={scope.filterCount > 0 ? 'secondary' : 'ghost'}
+                                size="inline"
+                                className="shrink-0 font-normal"
+                                disabled={busy || loadState !== 'ready' || unavailable !== null}
+                                onClick={() => scope.onEditorOpenChange(true)}
+                            >
+                                <FunnelIcon className="size-3.5" />
+                                {scope.filterCount > 0
+                                    ? labels.scopeFiltersSet(scope.filterCount)
+                                    : labels.scopeFilters}
+                            </Button>
                             <div className="min-w-0 text-xs text-muted-foreground">
                                 {contentTooLong ? (
                                     <p role="alert" className="text-destructive">{labels.tooLong}</p>
+                                ) : scope.blocked && scope.problem !== null ? (
+                                    <p role="alert" className="truncate text-destructive">{scope.problem}</p>
                                 ) : (
-                                    <p>{labels.composerHint}</p>
+                                    <p className="hidden sm:block">{labels.composerHint}</p>
                                 )}
                             </div>
-                            <Button className="ml-auto" type="submit" size="icon-sm" aria-label={labels.send} disabled={!canSend}>
+                            <IconButton
+                                className="ml-auto"
+                                type="submit"
+                                size="icon-toolbar"
+                                label={labels.send}
+                                disabled={!canSend}
+                            >
                                 <ArrowUpIcon className="size-4" />
-                            </Button>
+                            </IconButton>
                         </div>
                     </div>
+                    <AskConnexScopeEditor
+                        open={scope.editorOpen}
+                        draft={scope.draft}
+                        preview={scope.preview}
+                        skills={scope.skills}
+                        onOpenChange={scope.onEditorOpenChange}
+                        onDraftChange={scope.onDraftChange}
+                    />
                 </form>
             )}
         </div>
     );
 }
 
-/** Responsive Ask Connex session, transcript, context, and composer surface. */
+/**
+ * One destination in the workspace session rail. Invitations and chats are the same navigation
+ * item — both land the user in a session — so they share one row rather than one row and a
+ * look-alike, and both declare the current-page state the rail's `<nav>` implies.
+ */
+function SessionRailRow({
+    title,
+    meta,
+    current,
+    disabled,
+    leading,
+    trailing,
+    onSelect,
+}: {
+    title: string;
+    meta?: ReactNode;
+    current: boolean;
+    disabled: boolean;
+    leading?: ReactNode;
+    trailing?: ReactNode;
+    onSelect: () => void;
+}) {
+    return (
+        <button
+            type="button"
+            disabled={disabled}
+            aria-current={current ? 'page' : undefined}
+            onClick={onSelect}
+            className={cn(
+                'flex min-h-11 w-full items-start gap-2 rounded-lg px-3 py-2 text-left text-sm outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50',
+                current && 'bg-muted font-medium text-foreground',
+            )}
+        >
+            {leading ? <span className="mt-0.5 shrink-0">{leading}</span> : null}
+            <span className="min-w-0 flex-1">
+                <span className="block truncate">{title}</span>
+                {meta ? (
+                    <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs font-normal text-muted-foreground">
+                        {meta}
+                    </span>
+                ) : null}
+            </span>
+            {trailing ? <span className="mt-0.5 shrink-0">{trailing}</span> : null}
+        </button>
+    );
+}
+
+/**
+ * The workspace's session rail.
+ *
+ * Chats are banded by when they were last active rather than listed flat, because "the one I was in
+ * this morning" is how a member looks for a chat and a title alone does not answer it. Each row
+ * says when it was last active and whether other members can see it; the chat currently open also
+ * says what it is doing, which is the one row whose live state this client actually follows.
+ *
+ * Bands the list cannot support honestly are absent rather than approximated: the session list
+ * carries no running, failed, or pending-approval flag for any chat but the open one, and a band
+ * derived from data the client does not have would be right only by accident.
+ */
+function WorkspaceSessionRail({
+    sessions,
+    invitations,
+    activeSession,
+    activeState,
+    working,
+    now,
+    labels,
+    onSelectSession,
+    onJoinInvitation,
+    onNewChat,
+}: {
+    sessions: AiChatSession[];
+    invitations: AiChatSession[];
+    activeSession: AiChatSession | null;
+    activeState: AskConnexActiveState;
+    working: boolean;
+    now: number;
+    labels: AskConnexDrawerLabels;
+    onSelectSession: (session: AiChatSession) => void;
+    onJoinInvitation: (session: AiChatSession) => void;
+    onNewChat: () => void;
+}) {
+    const [query, setQuery] = useState('');
+    const filtered = useMemo(() => filterAskConnexSessions(sessions, query), [query, sessions]);
+    const filteredInvitations = useMemo(
+        () => filterAskConnexSessions(invitations, query),
+        [invitations, query],
+    );
+    const groups = useMemo(
+        () => groupAskConnexSessions(filtered, filteredInvitations, now),
+        [filtered, filteredInvitations, now],
+    );
+    const stateLabel = activeState === 'running'
+        ? labels.stateRunning
+        : activeState === 'awaitingApproval'
+            ? labels.stateAwaitingApproval
+            : activeState === 'failed'
+                ? labels.stateFailed
+                : null;
+
+    return (
+        <aside className="hidden min-h-0 w-72 shrink-0 flex-col border-r border-border bg-muted/30 md:flex">
+            <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+                <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-foreground">{labels.title}</p>
+                    <p className="truncate text-xs text-muted-foreground">{labels.sessionRail}</p>
+                </div>
+                <IconButton
+                    type="button"
+                    variant="ghost"
+                    size="icon-toolbar"
+                    label={labels.newChat}
+                    disabled={working}
+                    onClick={onNewChat}
+                >
+                    <PlusIcon className="size-4" />
+                </IconButton>
+            </div>
+            <div className="p-3">
+                <div className="relative">
+                    <MagnifyingGlassIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                        value={query}
+                        onChange={(event) => setQuery(event.target.value)}
+                        placeholder={labels.searchSessions}
+                        aria-label={labels.searchSessions}
+                        className="pl-9"
+                    />
+                </div>
+            </div>
+            <nav aria-label={labels.sessionRail} className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+                {groups.length === 0 ? (
+                    <p className="px-3 py-8 text-center text-xs text-muted-foreground">
+                        {query.trim().length > 0 ? labels.noMatchingSessions : labels.noRecentSessions}
+                    </p>
+                ) : groups.map((group) => (
+                    <section key={group.key} aria-labelledby={`ask-connex-rail-${group.key}`}>
+                        <h2
+                            id={`ask-connex-rail-${group.key}`}
+                            className="px-3 pt-3 pb-1 text-xs font-medium text-muted-foreground"
+                        >
+                            {labels.sessionGroup(group.key)}
+                        </h2>
+                        {group.sessions.map((session) => {
+                            const invitation = group.key === 'invitations';
+                            const current = !invitation && activeSession?.id === session.id;
+                            const lastActive = session.lastMessageAt ?? session.updatedAt;
+                            const activity = askConnexSessionActivity(session);
+                            return (
+                                <SessionRailRow
+                                    key={`${group.key}:${session.id}`}
+                                    title={session.title}
+                                    current={current}
+                                    disabled={working}
+                                    leading={invitation
+                                        ? <UserPlusIcon className="size-4 text-muted-foreground" />
+                                        : null}
+                                    meta={(
+                                        <>
+                                            {session.visibility === 'shared' ? (
+                                                <UserGroupIcon aria-hidden className="size-3.5 shrink-0" />
+                                            ) : null}
+                                            {activity > 0 ? (
+                                                <time
+                                                    dateTime={new Date(activity).toISOString()}
+                                                    className="truncate"
+                                                >
+                                                    {labels.sessionActivity(labels.relativeTime(lastActive))}
+                                                </time>
+                                            ) : null}
+                                            {current && stateLabel !== null ? (
+                                                <span className="truncate">{stateLabel}</span>
+                                            ) : null}
+                                        </>
+                                    )}
+                                    trailing={invitation
+                                        ? <span className="text-xs text-muted-foreground">{labels.join}</span>
+                                        : null}
+                                    onSelect={() => invitation
+                                        ? onJoinInvitation(session)
+                                        : onSelectSession(session)}
+                                />
+                            );
+                        })}
+                    </section>
+                ))}
+            </nav>
+            <p className="border-t border-border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
+                {labels.disclosureList}
+            </p>
+        </aside>
+    );
+}
+
+/**
+ * Responsive Ask Connex session, transcript, context, and composer surface.
+ *
+ * The desktop panel animates its transform and nothing else. Its width is the width the member
+ * chose, applied as a plain style: a panel that reached a new width over a spring would relayout its
+ * whole transcript on every frame of that spring, and it could not be kept in step with the shell
+ * column the page reflows into without the shell paying the same cost again. Resizing is therefore
+ * a discrete change on both surfaces at once; opening and closing stays animated, and there the
+ * panel only translates.
+ */
 export default function AskConnexDrawer(props: AskConnexDrawerProps) {
     const {
         open,
         instantOpen,
         isMobile,
         showTab,
+        workspace,
+        width,
+        desktopRoot,
+        workspaceRoot,
         activeSession,
         labels,
         onOpenChange,
@@ -1243,7 +2339,6 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
     } = props;
     const reduceMotion = useReducedMotion() ?? false;
     const desktopTriggerRef = useRef<HTMLButtonElement>(null);
-    const [desktopRoot, setDesktopRoot] = useState<HTMLElement | null>(null);
     const [renameOpen, setRenameOpen] = useState(false);
     const [renameValue, setRenameValue] = useState('');
     const [renaming, setRenaming] = useState(false);
@@ -1254,13 +2349,6 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
     const availableMembers = props.members.filter((member) => (
         member.id !== activeSession?.createdByUserId && !participantIds.has(member.id)
     ));
-
-    useEffect(() => {
-        const frame = requestAnimationFrame(() => {
-            setDesktopRoot(document.getElementById('ask-connex-desktop-root'));
-        });
-        return () => cancelAnimationFrame(frame);
-    }, []);
 
     useEffect(() => {
         if (isMobile || !open) return;
@@ -1334,6 +2422,13 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         loadError: props.loadError,
         composer: props.composer,
         implicitContext: props.implicitContext,
+        selectionContext: props.selectionContext,
+        unsupportedPageContext: props.unsupportedPageContext,
+        pinnedContext: props.pinnedContext,
+        pageContextPinned: props.pageContextPinned,
+        contextCorrected: props.contextCorrected,
+        requestScope: props.requestScope,
+        scope: props.scope,
         attachments: props.attachments,
         fileAttachments: props.fileAttachments,
         canAttachFiles: props.canAttachFiles,
@@ -1347,10 +2442,21 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         cancelling: props.cancelling,
         toolCalls: props.toolCalls,
         actionableToolCallIds: props.actionableToolCallIds,
+        canRetryTurn: props.canRetryTurn,
+        continuePrompt: props.continuePrompt,
+        width: props.width,
+        activeState: props.activeState,
+        contextCount: props.contextCount,
+        now: props.now,
         unavailable: props.unavailable,
-        starterPrompts: props.starterPrompts,
+        jobs: props.jobs,
+        promptRequest: props.promptRequest,
+        onPromptConsumed: props.onPromptConsumed,
         labels: props.labels,
+        workspace: props.workspace,
         closeButton: null,
+        resizable: false,
+        onWidthChange: props.onWidthChange,
         onSelectSession: props.onSelectSession,
         onNewChat: props.onNewChat,
         onBeginRename: beginRename,
@@ -1364,14 +2470,23 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         onRetry: props.onRetry,
         onComposerChange: props.onComposerChange,
         onRemoveAttachment: props.onRemoveAttachment,
+        onTogglePagePin: props.onTogglePagePin,
+        onUnpinContext: props.onUnpinContext,
+        onRemovePageContext: props.onRemovePageContext,
+        onRemoveSelectionContext: props.onRemoveSelectionContext,
+        onResetContext: props.onResetContext,
         onAttachFiles: props.onAttachFiles,
         onRemoveFileAttachment: props.onRemoveFileAttachment,
         onSend: props.onSend,
         onCancelTurn: props.onCancelTurn,
+        onRetryTurn: props.onRetryTurn,
         onToolAction: props.onToolAction,
+        onToolActions: props.onToolActions,
+        onOpenWorkspace: props.onOpenWorkspace,
+        onCloseWorkspace: props.onCloseWorkspace,
     };
 
-    const desktopPanel = !isMobile && desktopRoot ? createPortal(
+    const desktopPanel = !workspace && !isMobile && desktopRoot ? createPortal(
         <>
             {showTab ? (
                 <AskConnexTab
@@ -1390,27 +2505,29 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
                 aria-hidden={!open}
                 inert={!open}
                 initial={false}
+                style={{ width: askConnexWidthLength(width) }}
                 animate={{ transform: open ? 'translateX(0%)' : 'translateX(100%)' }}
                 transition={instantOpen || reduceMotion ? instant : springSmooth}
                 onAnimationComplete={() => onOpenChangeComplete(open)}
                 className={cn(
-                    'absolute inset-y-0 right-0 w-96 border-l border-border bg-popover',
+                    'absolute inset-y-0 right-0 border-l border-border bg-popover',
                     open ? 'pointer-events-auto' : 'pointer-events-none',
                 )}
             >
                 <ConversationSurface
                     {...surfaceProps}
                     open={open}
+                    resizable
                     closeButton={(
-                        <Button
+                        <IconButton
                             type="button"
                             variant="ghost"
-                            size="icon-sm"
-                            aria-label={labels.close}
+                            size="icon-toolbar"
+                            label={labels.close}
                             onClick={closeDesktopPanel}
                         >
                             <XMarkIcon className="size-4" />
-                        </Button>
+                        </IconButton>
                     )}
                 />
             </motion.aside>
@@ -1418,10 +2535,47 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         desktopRoot,
     ) : null;
 
+    const workspacePanel = workspace && workspaceRoot ? createPortal(
+        <div className="flex h-full min-h-0 bg-background text-foreground">
+            <WorkspaceSessionRail
+                sessions={props.sessions}
+                invitations={props.invitations}
+                activeSession={props.activeSession}
+                activeState={props.activeState}
+                working={props.working}
+                now={props.now}
+                labels={labels}
+                onSelectSession={props.onSelectSession}
+                onJoinInvitation={props.onJoinInvitation}
+                onNewChat={props.onNewChat}
+            />
+            <div className="min-w-0 flex-1">
+                <ConversationSurface
+                    {...surfaceProps}
+                    open
+                    workspace
+                    closeButton={(
+                        <IconButton
+                            type="button"
+                            variant="ghost"
+                            size="icon-toolbar"
+                            label={labels.closeWorkspace}
+                            onClick={props.onCloseWorkspace}
+                        >
+                            <ArrowLeftIcon className="size-4" />
+                        </IconButton>
+                    )}
+                />
+            </div>
+        </div>,
+        workspaceRoot,
+    ) : null;
+
     return (
         <>
             {desktopPanel}
-            {isMobile ? (
+            {workspacePanel}
+            {isMobile && !workspace ? (
                 <Drawer
                     open={open}
                     onOpenChange={onOpenChange}
@@ -1447,9 +2601,15 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
                             {...surfaceProps}
                             open
                             closeButton={(
-                                <DrawerClose render={<Button variant="ghost" size="icon-sm" aria-label={labels.close} />}>
+                                <IconButton
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon-toolbar"
+                                    label={labels.close}
+                                    onClick={() => onOpenChange(false)}
+                                >
                                     <XMarkIcon className="size-4" />
-                                </DrawerClose>
+                                </IconButton>
                             )}
                         />
                     </DrawerContent>
@@ -1526,16 +2686,16 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
                                                 {participant.status === 'invited' ? labels.invitePending : labels.shared}
                                             </span>
                                             {participant.role === 'participant' ? (
-                                                <Button
+                                                <IconButton
                                                     type="button"
                                                     variant="ghost"
-                                                    size="icon-sm"
-                                                    aria-label={labels.removeParticipant(participant.displayName)}
+                                                    size="icon-toolbar"
+                                                    label={labels.removeParticipant(participant.displayName)}
                                                     onClick={() => props.onRemoveParticipant(participant.userId)}
                                                     disabled={sharing}
                                                 >
                                                     <XMarkIcon className="size-4" />
-                                                </Button>
+                                                </IconButton>
                                             ) : null}
                                         </li>
                                     ))}

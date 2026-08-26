@@ -16,6 +16,7 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
+import { IconButton } from '@/components/ui/icon-button';
 import { ButtonGroup } from '@/components/ui/button-group';
 
 import ArchiveRecordDialog from '@/app/components/records/ArchiveRecordDialog';
@@ -27,6 +28,7 @@ import NewDealDialog from '@/app/components/records/deals/NewDealDialog';
 
 import { archiveCompany, restoreCompany, createContact, createDeal, getActiveWorkspaceMembers, getPipelines, getStagesByPipelineId, importBusinessCard, isFieldError, updateCompanyOwner, uploadContactPicture } from '@/app/lib/api';
 import { type BusinessCardImportDraft, CreateContactPayload, type Company, type CreateDealPayload, type Pipeline, type Stage, type WorkspaceMember } from '@/app/lib/types';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 
 function emptyContactPayload(companyId: number): CreateContactPayload {
@@ -59,6 +61,7 @@ export default function CompanyActionsMenu({
 }) {
     const router = useRouter();
     const t = useTranslations('CompaniesActionsMenu');
+    const showApiError = useApiErrorToast('CompaniesActionsMenu');
     const { activeWorkspaceId } = useWorkspace();
     const owned = company.workspaceId == null || company.workspaceId === activeWorkspaceId;
     const { inputRef: attachmentInputRef, uploading: attachmentsUploading, openPicker: openAttachmentPicker, onFilesSelected: onAttachmentFilesSelected } = useAttachmentUploader('company', company.id);
@@ -168,7 +171,7 @@ export default function CompanyActionsMenu({
                 router.refresh();
             }
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t(archived ? 'toastRestoreFailed' : 'toastArchiveFailed'));
+            showApiError(err, archived ? 'toastRestoreFailed' : 'toastArchiveFailed');
         } finally {
             setIsArchiving(false);
         }
@@ -261,7 +264,7 @@ export default function CompanyActionsMenu({
             if (isFieldError(err)) {
                 throw err;
             }
-            toastError(err instanceof Error ? err.message : t('toastCreateDealFailed'));
+            showApiError(err, 'toastCreateDealFailed');
         } finally {
             setIsCreatingDeal(false);
         }
@@ -270,14 +273,14 @@ export default function CompanyActionsMenu({
     return (
         <div className="flex flex-row gap-2">
             <ButtonGroup orientation="horizontal">
-                <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
+                <Button variant="outline" size="toolbar" onClick={() => setEditOpen(true)}>
                     <PencilSquareIcon className="size-4" />
                     {t('edit')}
                 </Button>
                 <Button
                     variant="outline"
-                    size="sm"
-                    onClick={() => router.push(`/overview/map?companyId=${company.id}`)}
+                    size="toolbar"
+                    onClick={() => router.push(`/intelligence/map?companyId=${company.id}`)}
                 >
                     <EyeIcon className="size-4" />
                     {t('viewInMap')}
@@ -286,7 +289,7 @@ export default function CompanyActionsMenu({
             <ButtonGroup orientation="horizontal">
                 <Button
                     variant="outline"
-                    size="sm"
+                    size="toolbar"
                     onClick={openAttachmentPicker}
                     disabled={attachmentsUploading}
                 >
@@ -299,23 +302,17 @@ export default function CompanyActionsMenu({
                 </Button>
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="sm">
+                        <Button variant="brand" size="toolbar" menu>
                             <PlusIcon className="size-4" />
                             {t('new')}
                         </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
-                        <DropdownMenuItem onSelect={(e) => {
-                            e.preventDefault();
-                            showNewContactDialog();
-                        }}>
+                        <DropdownMenuItem onSelect={showNewContactDialog}>
                             <UserIcon className="size-4" />
                             {t('newContact')}
                         </DropdownMenuItem>
-                        <DropdownMenuItem onSelect={(e) => {
-                            e.preventDefault();
-                            showNewDealDialog();
-                        }}>
+                        <DropdownMenuItem onSelect={showNewDealDialog}>
                             <BriefcaseIcon className="size-4" />
                             {t('newDeal')}
                         </DropdownMenuItem>
@@ -323,9 +320,9 @@ export default function CompanyActionsMenu({
                 </DropdownMenu>
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button variant="outline" size="sm">
+                        <IconButton variant="outline" size="icon-toolbar" label={t('moreActions')}>
                             <EllipsisVerticalIcon className="size-4" />
-                        </Button>
+                        </IconButton>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
                         {owned && (

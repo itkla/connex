@@ -112,12 +112,42 @@ public class ReportService {
     private static final Set<String> BUCKETS = Set.of("day", "week", "month");
     private static final Set<String> CHART_TYPES = Set.of("bar", "line-area", "donut", "funnel", "table", "kpi");
     private static final Set<String> DATA_SOURCES = Set.of(
-            "deals", "people", "companies", "activities", "tasks", "relationships");
+            "deals", "people", "companies", "activities", "tasks", "relationships", "documents",
+            "leads");
+    /**
+     * Lead-lifecycle measures (#559 increment 6). Volume, qualification, and conversion read the
+     * append-only transition history rather than the contact's current stage, which cannot say a
+     * contact was ever qualified — only where it ended up.
+     */
+    private static final Set<String> LEAD_MEASURES = Set.of(
+            "lead_count", "qualified_count", "converted_count", "disqualified_count",
+            "qualification_rate", "conversion_rate", "time_to_convert_days",
+            "first_response_hours", "first_response_breach_rate");
+    private static final Set<String> LEAD_GROUPS = Set.of("none", "date", "owner", "lead_source");
     private static final Set<String> DEAL_MEASURES = Set.of(
             "count", "new_pipeline_value", "won_revenue", "win_rate", "avg_cycle_days",
             "open_pipeline_value", "open_deal_count", "at_risk_revenue",
             "single_threaded_deal_count", "single_threaded_deal_value",
-            "forecast_best", "forecast_weighted", "forecast_worst", "attainment");
+            "forecast_best", "forecast_weighted", "forecast_worst", "attainment",
+            "effective_discount_percent", "open_discount_percent");
+    private static final Set<String> DISCOUNT_MEASURES = Set.of(
+            "effective_discount_percent", "open_discount_percent");
+    private static final Set<String> DOCUMENT_MEASURES = Set.of(
+            "quote_count", "quote_issue_rate", "document_to_win_rate",
+            "approval_decision_count", "approval_cycle_days");
+    private static final Set<String> DOCUMENT_APPROVAL_MEASURES = Set.of(
+            "approval_decision_count", "approval_cycle_days");
+    private static final Set<String> DOCUMENT_OUTCOME_MEASURES = Set.of("document_to_win_rate");
+    private static final Set<String> NON_ADDITIVE_MEASURES = Set.of(
+            "win_rate", "avg_cycle_days", "quote_issue_rate", "document_to_win_rate",
+            "approval_cycle_days",
+            "qualification_rate", "conversion_rate", "time_to_convert_days",
+            "first_response_hours", "first_response_breach_rate");
+    private static final Set<String> UNDEFINED_WHEN_EMPTY_MEASURES = Set.of(
+            "quote_issue_rate", "document_to_win_rate", "approval_cycle_days",
+            "effective_discount_percent", "open_discount_percent",
+            "qualification_rate", "conversion_rate", "time_to_convert_days",
+            "first_response_hours", "first_response_breach_rate");
     private static final Set<String> FORECAST_MEASURES = Set.of(
             "forecast_best", "forecast_weighted", "forecast_worst");
     private static final Set<String> COMPANY_MEASURES = Set.of(
@@ -141,12 +171,16 @@ public class ReportService {
     private static final Set<String> EMPLOYMENT_GROUPS = Set.of("none", "date", "company", "person");
     private static final Set<String> COMPANY_GROUPS = Set.of("none", "industry", "company", "connector");
     private static final Set<String> RELATIONSHIP_GROUPS = Set.of("none", "warmth_band", "trend", "pair");
+    private static final Set<String> DOCUMENT_GROUPS = Set.of("none", "date", "owner", "company");
+    private static final Set<String> DISCOUNT_GROUPS = Set.of(
+            "none", "date", "pipeline", "stage", "owner", "company");
     private static final Set<String> DEAL_STATUSES = Set.of("open", "won", "lost");
     private static final Set<String> TASK_STATUSES = Set.of("todo", "in_progress", "done");
     private static final Set<String> WARMTH_BANDS = Set.of("hot", "warm", "cool", "cold");
     private static final Set<String> TEMPLATE_KEYS = Set.of(
             "sales-performance", "pipeline-health", "relationship-coverage", "relationship-health",
-            "forecasting", "quota-attainment", "activity-team", "network-warm-intros", "employment-moves");
+            "forecasting", "quota-attainment", "activity-team", "network-warm-intros", "employment-moves",
+            "commercial-documents", "lead-lifecycle");
 
     private final ReportMapper reportMapper;
     private final ScheduleMapper scheduleMapper;
@@ -192,7 +226,7 @@ public class ReportService {
         return toDefinitionDto(requireDefinition(id));
     }
 
-    /** Returns the nine built-in report starting points. */
+    /** Returns the ten built-in report starting points. */
     @RequirePermission(Permission.REPORT_READ)
     public List<ReportTemplateDto> templates() {
         return List.of(
@@ -281,6 +315,43 @@ public class ReportService {
                                         "employment_departure_count", "person", "table"),
                                 widget("arrival-contacts", "Employment arrivals", "people",
                                         "employment_arrival_count", "person", "table"))),
+                template("commercial-documents", "Quotes & Approvals",
+                        "Quote volume, approval turnaround, and the discount actually conceded.",
+                        "monthly", "month", List.of(
+                                widget("quote-volume", "Quote volume", "documents",
+                                        "quote_count", "date", "line-area"),
+                                widget("issue-rate", "Quote issue rate", "documents",
+                                        "quote_issue_rate", "none", "kpi"),
+                                widget("doc-to-win", "Document-to-win rate", "documents",
+                                        "document_to_win_rate", "none", "kpi"),
+                                widget("approval-cycle", "Approval cycle days", "documents",
+                                        "approval_cycle_days", "none", "kpi"),
+                                widget("approval-volume", "Approval decisions by owner", "documents",
+                                        "approval_decision_count", "owner", "bar"),
+                                widget("won-discount", "Effective discount (won)", "deals",
+                                        "effective_discount_percent", "none", "bar"),
+                                widget("open-discount", "Effective discount (open)", "deals",
+                                        "open_discount_percent", "pipeline", "table"))),
+                template("lead-lifecycle", "Lead Lifecycle",
+                        "Where leads come from, how many qualify, how fast they are answered, "
+                            + "and what converts.",
+                        "monthly", "month", List.of(
+                                widget("lead-volume", "Leads entered", "leads",
+                                        "lead_count", "date", "line-area"),
+                                widget("lead-by-source", "Leads by source", "leads",
+                                        "lead_count", "lead_source", "donut"),
+                                widget("qualification-rate", "Qualification rate", "leads",
+                                        "qualification_rate", "none", "kpi"),
+                                widget("conversion-rate", "Conversion rate", "leads",
+                                        "conversion_rate", "none", "kpi"),
+                                widget("time-to-convert", "Time to convert", "leads",
+                                        "time_to_convert_days", "none", "kpi"),
+                                widget("first-response", "Time to first response", "leads",
+                                        "first_response_hours", "none", "kpi"),
+                                widget("breach-rate", "First-response breach rate", "leads",
+                                        "first_response_breach_rate", "date", "bar"),
+                                widget("qualified-by-owner", "Qualified by owner", "leads",
+                                        "qualified_count", "owner", "table"))),
                 template("activity-team", "Activity & Team", "Team activity and task execution.",
                         "weekly", List.of(
                                 widget("activity", "Activity volume", "activities", "count", "date", "line-area"),
@@ -827,6 +898,15 @@ public class ReportService {
                 hydrateOwnerLabels(prior, widget, inputs.ownerLabels()));
     }
 
+    /**
+     * Builds one widget's points, appendix rows, and scalars.
+     *
+     * <p>Current-period and prior-period emptiness are tracked separately. A rate, average, or
+     * discount has no value at all without a cohort, so an absent prior row stays undefined instead
+     * of collapsing to a measured zero — otherwise a period that simply had no quotes, decisions, or
+     * discounted deals would be published as a real figure and turn every current value into a
+     * fabricated change against it.
+     */
     private WidgetResult widgetResult(
             ReportWidgetConfig widget,
             int widgetIndex,
@@ -840,18 +920,18 @@ public class ReportService {
         for (ReportAggregateRow row : prior) {
             priorByKey.put(comparisonKey(row, widget, bucket, period.priorStart()), row);
         }
+        boolean undefinedWhenEmpty = undefinedWhenEmpty(widget);
         List<ReportDataPointDto> points = new ArrayList<>();
         List<ReportAppendixRowDto> appendix = new ArrayList<>();
         Set<String> units = new LinkedHashSet<>();
         BigDecimal total = BigDecimal.ZERO;
         BigDecimal priorTotal = BigDecimal.ZERO;
+        boolean priorTotalDefined = priorComparable && !(undefinedWhenEmpty && prior.isEmpty());
         int pointIndex = 0;
         for (ReportAggregateRow row : current) {
             ReportAggregateRow priorRow = priorByKey.remove(
                     comparisonKey(row, widget, bucket, period.start()));
-            BigDecimal priorValue = priorComparable
-                    ? priorRow == null ? BigDecimal.ZERO : safe(priorRow.value())
-                    : null;
+            BigDecimal priorValue = priorPointValue(priorRow, priorComparable, undefinedWhenEmpty);
             BigDecimal value = safe(row.value());
             String sourceId = "metric." + widgetIndex + "." + pointIndex++;
             String unit = normalizedUnit(row.unit());
@@ -860,7 +940,9 @@ public class ReportService {
                     widget.measure() + " · " + row.groupLabel(), value, priorValue, unit));
             units.add(unit);
             total = total.add(value);
-            if (priorValue != null) {
+            if (priorValue == null) {
+                priorTotalDefined = false;
+            } else {
                 priorTotal = priorTotal.add(priorValue);
             }
         }
@@ -883,9 +965,11 @@ public class ReportService {
                     .thenComparing(ReportDataPointDto::key));
         }
         String unit = units.size() == 1 ? units.iterator().next() : "mixed";
-        boolean additive = !Set.of("win_rate", "avg_cycle_days").contains(widget.measure())
-                || "none".equals(normalizeGroup(widget.groupBy()));
-        boolean emptyAttainment = "attainment".equals(widget.measure()) && current.isEmpty();
+        boolean additive = DISCOUNT_MEASURES.contains(widget.measure())
+                ? points.size() <= 1
+                : !NON_ADDITIVE_MEASURES.contains(widget.measure())
+                        || "none".equals(normalizeGroup(widget.groupBy()));
+        boolean undefinedCurrent = undefinedWhenEmpty && current.isEmpty();
         BigDecimal scalarTotal = total;
         Set<String> scalarUnits = units;
         if (authoritativeTotalRows != null) {
@@ -896,10 +980,8 @@ public class ReportService {
                 scalarUnits.add(normalizedUnit(row.unit()));
             }
         }
-        BigDecimal publicTotal = scalarUnits.size() <= 1 && additive && !emptyAttainment ? scalarTotal : null;
-        BigDecimal publicPrior = units.size() <= 1 && additive && priorComparable && !emptyAttainment
-                ? priorTotal
-                : null;
+        BigDecimal publicTotal = scalarUnits.size() <= 1 && additive && !undefinedCurrent ? scalarTotal : null;
+        BigDecimal publicPrior = units.size() <= 1 && additive && priorTotalDefined ? priorTotal : null;
         BigDecimal change = "attainment".equals(widget.measure())
                 ? attainmentPercent(publicTotal, publicPrior)
                 : percentChange(publicTotal, publicPrior);
@@ -909,15 +991,45 @@ public class ReportService {
         return new WidgetResult(data, List.copyOf(appendix));
     }
 
+    /**
+     * Whether the measure is a ratio, average, or attainment figure that has no value on an empty
+     * cohort, so an absent row means undefined rather than zero.
+     */
+    private static boolean undefinedWhenEmpty(ReportWidgetConfig widget) {
+        return "attainment".equals(widget.measure())
+                || UNDEFINED_WHEN_EMPTY_MEASURES.contains(widget.measure());
+    }
+
+    /**
+     * The prior-period value aligned to one current-period group, or {@code null} when the periods
+     * are not comparable or the prior period has no cohort for a measure that is undefined without
+     * one. A zero here would be published as a measured prior figure and as a real change.
+     */
+    private static BigDecimal priorPointValue(
+            ReportAggregateRow priorRow, boolean priorComparable, boolean undefinedWhenEmpty) {
+        if (!priorComparable || (priorRow == null && undefinedWhenEmpty)) {
+            return null;
+        }
+        return priorRow == null ? BigDecimal.ZERO : safe(priorRow.value());
+    }
+
     private List<ReportAggregateRow> aggregate(String dataSource, ReportAggregateQuery query) {
         return switch (dataSource) {
-            case "deals" -> reportMapper.aggregateDeals(query);
+            case "deals" -> DISCOUNT_MEASURES.contains(query.measure())
+                    ? reportMapper.aggregateDealDiscount(query)
+                    : reportMapper.aggregateDeals(query);
             case "activities" -> reportMapper.aggregateActivities(query);
             case "tasks" -> reportMapper.aggregateTasks(query);
             case "people" -> EMPLOYMENT_MEASURES.contains(query.measure())
                     ? reportMapper.aggregateEmployment(query)
                     : reportMapper.aggregatePeople(query);
+            case "leads" -> reportMapper.aggregateLeadLifecycle(query);
             case "companies" -> reportMapper.aggregateCompanies(query);
+            case "documents" -> DOCUMENT_APPROVAL_MEASURES.contains(query.measure())
+                    ? reportMapper.aggregateDocumentApprovals(query)
+                    : DOCUMENT_OUTCOME_MEASURES.contains(query.measure())
+                            ? reportMapper.aggregateDocumentOutcomes(query)
+                            : reportMapper.aggregateDocuments(query);
             default -> throw new BadRequestException("Unsupported report data source: " + dataSource);
         };
     }
@@ -1369,9 +1481,11 @@ public class ReportService {
 
     private static Set<String> supportedMeasureCatalog() {
         Set<String> measures = new HashSet<>(DEAL_MEASURES);
+        measures.addAll(LEAD_MEASURES);
         measures.addAll(COMPANY_MEASURES);
         measures.addAll(RELATIONSHIP_MEASURES);
         measures.addAll(EMPLOYMENT_MEASURES);
+        measures.addAll(DOCUMENT_MEASURES);
         measures.addAll(COUNT_MEASURES);
         return Set.copyOf(measures);
     }
@@ -1400,6 +1514,8 @@ public class ReportService {
             case "people" -> supportedPeopleMeasures();
             case "companies" -> COMPANY_MEASURES;
             case "relationships" -> RELATIONSHIP_MEASURES;
+            case "documents" -> DOCUMENT_MEASURES;
+            case "leads" -> LEAD_MEASURES;
             default -> COUNT_MEASURES;
         };
         Set<String> groups = switch (source) {
@@ -1409,6 +1525,8 @@ public class ReportService {
             case "people" -> PEOPLE_GROUPS;
             case "companies" -> COMPANY_GROUPS;
             case "relationships" -> RELATIONSHIP_GROUPS;
+            case "documents" -> DOCUMENT_GROUPS;
+            case "leads" -> LEAD_GROUPS;
             default -> Set.of();
         };
         if (!measures.contains(measure) || !groups.contains(group)
@@ -1432,7 +1550,11 @@ public class ReportService {
                 || "reverse_intro_weighted_opportunities".equals(measure)
                         && !Set.of("none", "pair").contains(group)
                 || "pair".equals(group) && !REVERSE_INTRO_MEASURES.contains(measure)
+                || DISCOUNT_MEASURES.contains(measure) && !DISCOUNT_GROUPS.contains(group)
+                || DOCUMENT_MEASURES.contains(measure) && !DOCUMENT_GROUPS.contains(group)
                 || EMPLOYMENT_MEASURES.contains(measure) && !EMPLOYMENT_GROUPS.contains(group)
+                || LEAD_MEASURES.contains(measure) && !"leads".equals(source)
+                || "leads".equals(source) && !LEAD_MEASURES.contains(measure)
                 || "people".equals(source) && "count".equals(measure)
                         && !Set.of("none", "company").contains(group)
                 || FORECAST_MEASURES.contains(measure)
@@ -1750,7 +1872,13 @@ public class ReportService {
             case "month" -> ChronoUnit.MONTHS.between(periodAnchor, bucketDate);
             default -> throw new BadRequestException("Invalid report bucket: " + bucket);
         };
-        return position + "\u0000" + normalizedUnit(row.unit());
+        return position + "\u0000" + dateGroupPartition(row.groupKey())
+                + "\u0000" + normalizedUnit(row.unit());
+    }
+
+    private static String dateGroupPartition(String groupKey) {
+        int separator = groupKey.lastIndexOf(':');
+        return separator >= 0 ? groupKey.substring(0, separator) : "";
     }
 
     private static ReportAggregateRow alignPriorDateRow(

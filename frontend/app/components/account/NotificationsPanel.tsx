@@ -39,10 +39,22 @@ const TYPES = [
         descriptionKey: "approvalRequestDescription",
     },
     {
+        type: "document.approval_reminder",
+        icon: ShieldCheckIcon,
+        titleKey: "approvalReminderTitle",
+        descriptionKey: "approvalReminderDescription",
+    },
+    {
         type: "document.approval_decision",
         icon: ShieldCheckIcon,
         titleKey: "approvalDecisionTitle",
         descriptionKey: "approvalDecisionDescription",
+    },
+    {
+        type: "document.approval_terminated",
+        icon: ShieldCheckIcon,
+        titleKey: "approvalTerminatedTitle",
+        descriptionKey: "approvalTerminatedDescription",
     },
 ] as const;
 

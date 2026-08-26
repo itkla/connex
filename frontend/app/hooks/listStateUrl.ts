@@ -12,9 +12,56 @@ export const MAX_URL_PAGE_SIZE = 100;
  * SavedViewsBar — a third list-state writer alongside the query/sort and facet-filter writers. */
 export const SAVED_VIEW_URL_KEY = 'sv';
 
+/** URL query key that deep-links one task, read by the tasks browser and the record timelines. */
+export const TASK_URL_KEY = 'task';
+
+/** URL query key that deep-links one note, read by the notes browser and the record timelines. */
+export const NOTE_URL_KEY = 'note';
+
+/** URL query key that deep-links one activity, read by the activities browser and the record timelines. */
+export const ACTIVITY_URL_KEY = 'activity';
+
+/** URL query key that deep-links one record comment, read by the record comments section. */
+export const COMMENT_URL_KEY = 'comment';
+
+/** URL query key that opens one pipeline in the pipelines browser's edit sheet. */
+export const PIPELINE_EDIT_URL_KEY = 'edit';
+
+/**
+ * The canonical record deep-link query keys, keyed by the record kind each one addresses. Every
+ * producer — a backend notification `actionUrl`, a calendar event href, an in-app link — emits these
+ * exact keys, because they are what the consuming browser or record surface reads. Mirrored by the
+ * shared route fixture in `backend/src/test/resources/frontend-route-manifest.json` so both planes
+ * fail loudly when a producer and its consumer drift apart (#1338).
+ */
+export const DEEP_LINK_URL_KEYS = {
+    task: TASK_URL_KEY,
+    note: NOTE_URL_KEY,
+    activity: ACTIVITY_URL_KEY,
+    comment: COMMENT_URL_KEY,
+    pipelineEdit: PIPELINE_EDIT_URL_KEY,
+} as const;
+
 /** Normalizes a URL-supplied list query so empty and whitespace-only values share one canonical form. */
 export function parseListQuery(value: string | null): string {
     return value?.trim() ?? '';
+}
+
+/**
+ * Rebuilds the address a list-state writer is about to replace, carrying the fragment through.
+ *
+ * A writer that rebuilds the URL from a pathname and a query string silently drops whatever fragment
+ * the reader arrived with. That did not show while every browser owned a whole page and nothing
+ * addressed a part of one, but a browser embedded as a section of a consolidated settings
+ * destination (#1340) is reached at `#section` — and the first list-state write after mount would
+ * throw that fragment away, leaving a URL the reader could no longer share or reload back into.
+ *
+ * @param pathname - the current path
+ * @param search - the query string this writer produced, without its leading `?`
+ * @returns the address to hand `history.replaceState`
+ */
+export function listStateAddress(pathname: string, search: string): string {
+    return `${pathname}${search ? `?${search}` : ''}${window.location.hash}`;
 }
 
 /**
@@ -33,7 +80,7 @@ export function writeSavedViewToUrl(pathname: string, sv: string | null): void {
     else params.delete(SAVED_VIEW_URL_KEY);
     const next = params.toString();
     if (next === window.location.search.replace(/^\?/, '')) return;
-    window.history.replaceState(null, '', next ? `${pathname}?${next}` : pathname);
+    window.history.replaceState(null, '', listStateAddress(pathname, next));
 }
 
 /**
@@ -61,7 +108,7 @@ export function writeOwnedParamsToUrl(
     }
     const next = params.toString();
     if (next === window.location.search.replace(/^\?/, '')) return;
-    window.history.replaceState(window.history.state, '', next ? `${pathname}?${next}` : pathname);
+    window.history.replaceState(window.history.state, '', listStateAddress(pathname, next));
 }
 
 /** Reflects only the query owner into the URL while preserving sort, pagination, filters, and deep links. */
@@ -71,7 +118,7 @@ export function writeListQueryToUrl(pathname: string, query: string): void {
     else params.delete('q');
     const next = params.toString();
     if (next === window.location.search.replace(/^\?/, '')) return;
-    window.history.replaceState(null, '', next ? `${pathname}?${next}` : pathname);
+    window.history.replaceState(null, '', listStateAddress(pathname, next));
 }
 
 /**
@@ -86,7 +133,7 @@ export function writeWorkspaceSavedViewToUrl(pathname: string, sv: string): void
     const params = new URLSearchParams({ [SAVED_VIEW_URL_KEY]: sv });
     const next = params.toString();
     if (next === window.location.search.replace(/^\?/, '')) return;
-    window.history.replaceState(null, '', `${pathname}?${next}`);
+    window.history.replaceState(null, '', listStateAddress(pathname, next));
 }
 
 /**
@@ -140,5 +187,5 @@ export function writeListStateToUrl(pathname: string, state: ListUrlState, defau
     set('size', state.size !== defaultSize ? String(state.size) : '');
     const next = params.toString();
     if (next === window.location.search.replace(/^\?/, '')) return;
-    window.history.replaceState(null, '', next ? `${pathname}?${next}` : pathname);
+    window.history.replaceState(null, '', listStateAddress(pathname, next));
 }

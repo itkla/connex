@@ -21,6 +21,8 @@ const SANITIZE_SCHEMA: SanitizeOptions = {
     attributes: {
         ...defaultSchema.attributes,
         input: [...(defaultSchema.attributes?.input ?? []), ["checked", true]],
+        li: [...(defaultSchema.attributes?.li ?? []), ["className", "task-list-item"]],
+        ul: [...(defaultSchema.attributes?.ul ?? []), ["className", "contains-task-list"]],
     },
     protocols: {
         ...defaultSchema.protocols,
@@ -36,6 +38,7 @@ type Admonition =
 type MarkdownLabels = {
     checkbox: { checked: string; unchecked: string };
     callout: Record<CalloutVariant, string>;
+    unavailableReference: string;
 };
 
 const CALLOUT_ICONS: Record<CalloutVariant, LucideIcon> = {
@@ -137,8 +140,7 @@ function createMarkdownComponents(
             if (parsed) {
                 const reference = resolved.get(`${parsed.type}:${parsed.id}`);
                 if (!reference) {
-                    const label = textFromChildren(children);
-                    return <>{parsed.type === "user" ? `@${label}` : label}</>;
+                    return <>{labels.unavailableReference}</>;
                 }
                 if (parsed.type === "user") {
                     return <MentionChip id={parsed.id} label={reference.label} />;
@@ -308,6 +310,7 @@ export default function NoteContent({
                     warn: t("calloutWarning"),
                     danger: t("calloutDanger"),
                 },
+                unavailableReference: t("unavailableReference"),
             })}
             skipHtml
         >

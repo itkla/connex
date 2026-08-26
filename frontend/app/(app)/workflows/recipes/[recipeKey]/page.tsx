@@ -13,7 +13,7 @@ export default async function WorkflowRecipePage({ params }: { params: Promise<{
     const { recipeKey } = await params;
     if (!RECIPE_KEYS.has(recipeKey)) notFound();
     return (
-        <PageShell tier="wide">
+        <PageShell>
             <WorkflowRecipeDetail recipeKey={recipeKey} />
         </PageShell>
     );

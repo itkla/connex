@@ -49,6 +49,37 @@ class ReportPermissionPolicyTest {
     }
 
     @Test
+    void commercialMeasuresRequireOnlyReportRead() throws JacksonException {
+        List<ReportWidgetConfig> widgets = List.of(
+                new ReportWidgetConfig(
+                        "quotes", "Quotes", "documents", "quote_count", "date", "line-area"),
+                new ReportWidgetConfig(
+                        "issue-rate", "Issue rate", "documents", "quote_issue_rate", "none", "kpi"),
+                new ReportWidgetConfig(
+                        "doc-to-win", "Doc to win", "documents", "document_to_win_rate", "none", "kpi"),
+                new ReportWidgetConfig(
+                        "decisions", "Decisions", "documents", "approval_decision_count", "owner", "bar"),
+                new ReportWidgetConfig(
+                        "cycle", "Cycle", "documents", "approval_cycle_days", "none", "kpi"),
+                new ReportWidgetConfig(
+                        "won-discount", "Won discount", "deals",
+                        "effective_discount_percent", "none", "bar"),
+                new ReportWidgetConfig(
+                        "open-discount", "Open discount", "deals",
+                        "open_discount_percent", "pipeline", "table"));
+        List<ReportLayoutItem> layout = new java.util.ArrayList<>();
+        for (int index = 0; index < widgets.size(); index++) {
+            layout.add(new ReportLayoutItem(
+                    widgets.get(index).id(), index % 2 * 6, index / 2 * 4, 6, 4));
+        }
+        ReportConfig config = new ReportConfig(
+                widgets, new ReportFilters(null, null, null, null, null), null, "month", layout);
+
+        assertEquals(Set.of(Permission.REPORT_READ), policy.requiredFor(definition(config)));
+        assertEquals(Set.of(Permission.REPORT_READ), policy.requiredFor(document(config)));
+    }
+
+    @Test
     void networkContentRequiresReportReadAndValidatesCanonicalGroups() throws JacksonException {
         List<ReportWidgetConfig> widgets = List.of(
                 new ReportWidgetConfig(

@@ -1,18 +1,19 @@
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
+import { permanentRedirect } from "next/navigation";
 
-import CapabilityUnavailablePage from "@/app/components/CapabilityUnavailablePage";
-import EmailPanel from "@/app/components/settings/EmailPanel";
-import { getCapabilitiesResultFromCookie } from "@/app/lib/api";
+import { settingsRedirectTarget, type RouteSearchParams } from "@/app/lib/settingsRedirects";
 
-export default async function EmailSettingsPage() {
-    const cookie = (await headers()).get("cookie");
-    const capabilitiesResult = await getCapabilitiesResultFromCookie(cookie);
-    if (!capabilitiesResult.ok) {
-        return <CapabilityUnavailablePage />;
-    }
-    if (capabilitiesResult.data.mailManaged) {
-        redirect("/settings/members");
-    }
-    return <EmailPanel />;
+/**
+ * The retired address for workspace mail configuration (#1340 WS4.6).
+ *
+ * The job now lives at the `email` section of Communications, and this path forwards there permanently rather than 404ing an
+ * address readers have bookmarked and linked. The target is the manifest’s, not this file’s, so a
+ * destination that moves again takes its redirect with it; the query string is the reader’s and
+ * survives the hop whole.
+ */
+export default async function EmailSettingsPage({
+    searchParams,
+}: {
+    searchParams: Promise<RouteSearchParams>;
+}) {
+    permanentRedirect(settingsRedirectTarget("workspace.email", await searchParams));
 }

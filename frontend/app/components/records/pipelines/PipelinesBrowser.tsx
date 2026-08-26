@@ -1,36 +1,41 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
+import { IconButton } from '@/components/ui/icon-button';
+import { SegmentedControl } from '@/components/ui/segmented-control';
 import { ButtonGroup } from '@/components/ui/button-group';
 import { toastError, toastInfo, toastSuccess } from '@/app/lib/toast';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { PlusIcon, TrashIcon, PencilIcon, EllipsisVerticalIcon, ShareIcon } from '@heroicons/react/24/solid';
 import {
     Squares2X2Icon,
+    ViewColumnsIcon,
 } from '@heroicons/react/24/outline';
 import { useReducedMotion } from 'motion/react';
 
 import RecordsRenderView from '@/app/components/records/RecordsRenderView';
+import { EmptyState } from '@/app/components/EmptyState';
 import Rise from '@/app/components/motion/Rise';
 import { SearchField, FilterBar, type FilterChipData } from '@/app/components/filters';
 import DeleteRecordDialog from '@/app/components/records/DeleteRecordDialog';
 import ShareDialog from '@/app/components/records/ShareDialog';
+import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { useRecordsBrowser } from '@/app/hooks/useRecordsBrowser';
 import { type ColumnDef } from '@/app/components/records/types';
 import PipelineCard from '@/app/components/records/pipelines/PipelineCard';
 import NewPipelineDialog from '@/app/components/records/pipelines/NewPipelineDialog';
 import QuickEditPipelineSheet, { type PipelineDraft, type StageKind } from '@/app/components/records/pipelines/QuickEditPipelineSheet';
+import { parsePipelineEditId } from '@/app/components/records/pipelines/pipelineLinks';
 import { PageHeader } from '@/app/components/PageHeader';
 import { PageShell } from '@/app/components/PageShell';
 import {
     createPipeline,
     createStage,
     deletePipeline,
-    deleteStage,
     getActivities,
     getDeals,
     getWorkspaceNotes,
@@ -38,10 +43,11 @@ import {
     getTasks,
     getUsers,
     isFieldError,
+    replacePipelineStages,
     updatePipeline,
-    updateStage,
 } from '@/app/lib/api';
 import { parseMysqlDateTime } from '@/app/lib/utils';
+import { PIPELINE_EDIT_URL_KEY, writeOwnedParamsToUrl } from '@/app/hooks/listStateUrl';
 import type {
     Activity,
     CreatePipelinePayload,
@@ -83,7 +89,10 @@ const EMPTY_PIPELINE_DRAFT: CreatePipelinePayload = { name: '' };
 
 export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] }) {
     const router = useRouter();
+    const pathname = usePathname();
+    const searchParams = useSearchParams();
     const t = useTranslations('PipelinesBrowser');
+    const showApiError = useApiErrorToast('PipelinesBrowser');
     const tf = useTranslations('Filters');
     const reduce = useReducedMotion() ?? false;
     const {
@@ -107,8 +116,17 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
     const [shareOpen, setShareOpen] = useState(false);
     const { activeWorkspaceId } = useWorkspace();
     const [editSheetOpen, setEditSheetOpen] = useState(false);
+    const openedDeepLinkRef = useRef<number | null>(null);
     const [drafts, setDrafts] = useState<Record<number, PipelineDraft>>({});
     const [isSaving, setIsSaving] = useState(false);
+    const clearPipelineEditDeepLink = useCallback(() => {
+        openedDeepLinkRef.current = null;
+        writeOwnedParamsToUrl(pathname, { [PIPELINE_EDIT_URL_KEY]: undefined });
+    }, [pathname]);
+    const changeEditSheetOpen = useCallback((open: boolean) => {
+        setEditSheetOpen(open);
+        if (!open) clearPipelineEditDeepLink();
+    }, [clearPipelineEditDeepLink]);
 
     const [newPipelineDialogOpen, setNewPipelineDialogOpen] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
@@ -283,7 +301,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
 
         if (changed.length === 0) {
             toastInfo(t('noChangesToSave'));
-            setEditSheetOpen(false);
+            changeEditSheetOpen(false);
             return;
         }
 
@@ -316,52 +334,29 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                 changed.map(async (p) => {
                     const draft = drafts[p.id];
                     const original = toDraft(p, stagesByPipeline.get(p.id) ?? []);
-                    const originalStages = stagesByPipeline.get(p.id) ?? [];
 
                     if (original.name !== draft.name) {
                         const payload: UpdatePipelinePayload = { name: draft.name.trim() };
                         await updatePipeline(p.id, payload);
                     }
 
-                    const draftIds = new Set(
-                        draft.stages.filter((s) => s.id !== null).map((s) => s.id as number),
-                    );
-                    const toDelete = originalStages.filter((s) => !draftIds.has(s.id));
-                    const originalById = new Map(originalStages.map((s) => [s.id, s]));
-
-                    for (const stage of toDelete) {
-                        await deleteStage(stage.id);
-                    }
-
-                    const maxOriginalPosition = originalStages.reduce(
-                        (max, s) => Math.max(max, s.position),
-                        -1,
-                    );
-                    let nextNewPosition = maxOriginalPosition + 1;
-
-                    for (const s of draft.stages) {
-                        const name = s.name.trim();
-                        if (s.id !== null) {
-                            const orig = originalById.get(s.id);
-                            if (orig && (orig.name !== name || orig.success !== s.success || orig.failure !== s.failure)) {
-                                await updateStage(s.id, { name, position: orig.position, success: s.success, failure: s.failure });
-                            }
-                        } else {
-                            await createStage(p.id, { name, position: nextNewPosition, success: s.success, failure: s.failure });
-                            nextNewPosition++;
-                        }
-                    }
+                    await replacePipelineStages(p.id, (stagesByPipeline.get(p.id) ?? []).map((s) => s.id), draft.stages.map((s) => ({
+                        id: s.id ?? undefined,
+                        name: s.name.trim(),
+                        success: s.success,
+                        failure: s.failure,
+                    })));
                 }),
             );
             toastSuccess(
                 changed.length === 1 ? t('pipelineUpdated') : t('pipelinesUpdated', { count: changed.length }),
             );
-            setEditSheetOpen(false);
+            changeEditSheetOpen(false);
             setMetricsStatus('idle');
             setStagesByPipeline(new Map());
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('failedToSave'));
+            showApiError(err, 'failedToSave');
         } finally {
             setIsSaving(false);
         }
@@ -373,6 +368,24 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
         setDrafts({ [pipeline.id]: toDraft(pipeline, map.get(pipeline.id) ?? []) });
         setEditSheetOpen(true);
     }, [fetchStagesIfMissing, setSelectedIds]);
+
+    useEffect(() => {
+        const pipelineId = parsePipelineEditId(searchParams.get(PIPELINE_EDIT_URL_KEY));
+        if (pipelineId === null || openedDeepLinkRef.current === pipelineId) return;
+        openedDeepLinkRef.current = pipelineId;
+        const pipeline = pipelines.find((candidate) => candidate.id === pipelineId);
+        if (!pipeline) {
+            toastError(t('pipelineUnavailable'));
+            clearPipelineEditDeepLink();
+            return;
+        }
+        void Promise.resolve()
+            .then(() => quickEditOne(pipeline))
+            .catch(() => {
+                toastError(t('failedToOpen'));
+                clearPipelineEditDeepLink();
+            });
+    }, [clearPipelineEditDeepLink, pipelines, quickEditOne, searchParams, t]);
 
     const deleteOne = useCallback((pipeline: Pipeline) => {
         setSelectedIds(new Set([pipeline.id]));
@@ -391,7 +404,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
             setDeleteDialogOpen(false);
             router.refresh();
         } catch (err) {
-            toastError(err instanceof Error ? err.message : t('failedToDelete'));
+            showApiError(err, 'failedToDelete');
         } finally {
             setIsDeleting(false);
         }
@@ -493,15 +506,15 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
 
     const selectionActions = (
         <ButtonGroup className="rounded-full bg-muted">
-            <Button variant="outline" size="sm" onClick={openEditSheet}>
+            <Button variant="outline" size="toolbar" onClick={openEditSheet}>
                 <PencilIcon className="size-4" />
                 {t('quickEdit')}
             </Button>
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm">
+                    <IconButton variant="outline" size="icon-toolbar" label={t('moreActions')}>
                         <EllipsisVerticalIcon className="size-4" />
-                    </Button>
+                    </IconButton>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent>
                     {selectedPipelines.length === 1 &&
@@ -521,7 +534,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
     );
 
     return (
-        <PageShell tier="wide">
+        <PageShell>
                 <Rise>
                     <PageHeader
                         title={t('title')}
@@ -552,21 +565,14 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                             />
                         }
                         trailing={
-                            <div
-                                role="group"
-                                aria-label={t('displayModeAriaLabel')}
-                                className="inline-flex rounded-full bg-muted p-0.5 ring-1 ring-border"
-                            >
-                                <button
-                                    type="button"
-                                    onClick={() => setDisplayMode('grid')}
-                                    aria-label={t('gridViewAriaLabel')}
-                                    aria-pressed={displayMode === 'grid'}
-                                    className={`flex h-8 w-8 items-center justify-center rounded-full transition ${displayMode === 'grid' ? 'bg-background text-foreground shadow' : 'text-muted-foreground hover:text-foreground'}`}
-                                >
-                                    <Squares2X2Icon className="size-4" />
-                                </button>
-                            </div>
+                            <SegmentedControl
+                                ariaLabel={t('displayModeAriaLabel')}
+                                value={displayMode}
+                                onChange={setDisplayMode}
+                                options={[
+                                    { value: 'grid', icon: <Squares2X2Icon className="size-4" />, ariaLabel: t('gridViewAriaLabel') },
+                                ]}
+                            />
                         }
                     />
                 </Rise>
@@ -585,7 +591,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                                 onDelete={onDelete ? () => onDelete(item) : undefined}
                             />
                         )}
-                        detailPath={(item) => `/records/pipelines/${item.id}`}
+                        onRowClick={quickEditOne}
                         displayMode={displayMode}
                         selectedIds={selectedIds}
                         onSelectedIdsChange={setSelectedIds}
@@ -594,6 +600,19 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
                         gridClassName="grid grid-cols-1 gap-3"
                         entityLabel={t('entityLabel')}
                         selectionActions={selectionActions}
+                        emptyState={
+                            <EmptyState
+                                icon={ViewColumnsIcon}
+                                title={t('emptyTitle')}
+                                body={t('emptyBody')}
+                                action={
+                                    <Button variant="brand" onClick={() => setNewPipelineDialogOpen(true)}>
+                                        <PlusIcon strokeWidth={2.5} />
+                                        {t('emptyCta')}
+                                    </Button>
+                                }
+                            />
+                        }
                         filtersActive={hasActiveFilters}
                         onClearFilters={clearAll}
                     />
@@ -601,7 +620,7 @@ export default function PipelinesBrowser({ pipelines }: { pipelines: Pipeline[] 
 
                 <QuickEditPipelineSheet
                     open={editSheetOpen}
-                    onOpenChange={setEditSheetOpen}
+                    onOpenChange={changeEditSheetOpen}
                     selectedIds={selectedIds}
                     selectedPipelines={selectedPipelines}
                     drafts={drafts}

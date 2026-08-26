@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.services.InteractionHistoryImportService;
+import ooo.klae.connex.backend.services.ProductImportService;
 import ooo.klae.connex.backend.services.WorkflowRunReadService;
 import ooo.klae.connex.backend.services.WorkflowRunOperationService;
 import ooo.klae.connex.backend.services.WorkflowInterventionService;
@@ -55,7 +56,7 @@ class RbacEnforcementArchTest {
      * of scope for this rule.
      */
     private static final List<String> ENTITY_SERVICES = List.of(
-        "CompanyService", "PersonService", "DealService", "ActivityService",
+        "CompanyService", "PersonService", "PersonLifecycleService", "DealService", "ActivityService",
         "NoteService", "TaskService", "TagService", "PipelineService", "AttachmentService",
         "ProductService", "DealLineItemService",
         "DocumentTemplateService", "DealDocumentService",
@@ -63,11 +64,13 @@ class RbacEnforcementArchTest {
         "ConnectionService", "CustomFieldDefinitionService", "BulkOperationService",
         "IntroductionService", "RecordCommentService", "ReportService", "GoalService", "ScheduleService",
         "BusinessCardService", "CampaignService", "CampaignSendService", "ConsentService",
-        "SuppressionService", "WarmPathService", "InteractionHistoryImportService");
+        "SuppressionService", "WarmPathService", "InteractionHistoryImportService",
+        "ProductImportService",
+        "PersonQualificationService", "QualificationCriterionService");
 
     /** Verb prefixes that denote a state-changing public method in these services. */
     private static final Pattern MUTATOR = Pattern.compile(
-        "^(create|update|delete|add|remove|replace|close|reopen|resolve|reply|complete|commit|assign|change|reschedule|scan|import|dismiss|accept|request|decide|cancel)[A-Z]?\\w*");
+        "^(create|update|delete|add|remove|replace|close|reopen|resolve|reply|complete|commit|assign|change|reschedule|scan|import|dismiss|accept|request|decide|cancel|withdraw)[A-Z]?\\w*");
 
     @Test
     void every_mutating_entity_service_method_is_permission_guarded() throws Exception {
@@ -219,6 +222,62 @@ class RbacEnforcementArchTest {
                     && transaction.isolation() == Isolation.READ_COMMITTED,
                 methodName + " must claim its proof and write inside READ_COMMITTED");
         }
+    }
+
+    @Test
+    void productImportSurfaceRequiresProductManage() {
+        Set<String> expected = Set.of("previewProducts", "commitProducts");
+        List<String> violations = new ArrayList<>();
+        int publicMethods = 0;
+        for (Method method : ProductImportService.class.getDeclaredMethods()) {
+            if (!Modifier.isPublic(method.getModifiers())
+                    || method.isSynthetic()
+                    || method.isBridge()) {
+                continue;
+            }
+            publicMethods++;
+            RequirePermission permission = method.getAnnotation(RequirePermission.class);
+            if (!expected.contains(method.getName())
+                    || permission == null
+                    || permission.value() != Permission.PRODUCT_MANAGE) {
+                violations.add(method.getName());
+            }
+        }
+        assertEquals(2, publicMethods,
+            "Product-catalog import surface changed without updating the RBAC guard");
+        assertTrue(violations.isEmpty(),
+            "Catalog import methods must require PRODUCT_MANAGE: " + violations);
+    }
+
+    @Test
+    void productImportCommitUsesReadCommittedTransaction() throws Exception {
+        Method method = ProductImportService.class.getDeclaredMethod(
+            "commitProducts",
+            ooo.klae.connex.backend.dto.ProductImportRequest.class);
+        Transactional transaction = method.getAnnotation(Transactional.class);
+        assertTrue(transaction != null
+                && transaction.isolation() == Isolation.READ_COMMITTED,
+            "commitProducts must claim its proof and write inside READ_COMMITTED");
+    }
+
+    @Test
+    void productImportsUseDirectMappersWithoutSideEffectPublishers() {
+        Set<String> dependencies = java.util.Arrays.stream(
+                ProductImportService.class.getDeclaredFields())
+            .filter(field -> !Modifier.isStatic(field.getModifiers()))
+            .map(field -> field.getType().getSimpleName())
+            .collect(java.util.stream.Collectors.toSet());
+
+        assertTrue(dependencies.contains("ProductMapper"),
+            "Catalog imports must write through ProductMapper: " + dependencies);
+        Set<String> forbidden = Set.of(
+            "ProductService",
+            "DealLineItemMapper",
+            "DealLineItemService",
+            "RuleTriggerPublisher",
+            "NotificationChangePublisher");
+        assertTrue(java.util.Collections.disjoint(dependencies, forbidden),
+            "Catalog imports must bypass per-row mutation side effects: " + dependencies);
     }
 
     @Test
