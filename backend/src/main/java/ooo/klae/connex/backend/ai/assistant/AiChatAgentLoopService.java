@@ -14,6 +14,7 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.ai.AiGenerationTaskResult;
 import ooo.klae.connex.backend.ai.AiInvocation;
@@ -63,6 +64,7 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 /** Executes the bounded masked assistant loop and commits only authorized durable outcomes. */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AiChatAgentLoopService {
@@ -449,8 +451,6 @@ public class AiChatAgentLoopService {
                         return AiGenerationTaskResult.timedOut("turn_deadline_exceeded");
                     }
                     requireCurrentAccess(turn);
-                    toolExecutor.validateReferences(
-                            step.tool().name(), step.tool().args(), resources);
                     String argumentsJson = serialize(step.tool().args());
                     String toolCallKey = step.tool().name() + "\n"
                             + serialize(canonicalize(step.tool().args()));
@@ -460,6 +460,43 @@ public class AiChatAgentLoopService {
                     String thoughtSignature = nativeProviderCall
                             .map(AiToolCall::thoughtSignature)
                             .orElse(null);
+                    try {
+                        toolExecutor.validateReferences(
+                                step.tool().name(), step.tool().args(), resources);
+                    } catch (AiAssistantLoopException exception) {
+                        if (!exception.recoverable()) {
+                            throw exception;
+                        }
+                        int refusedCallId = thoughtSignature == null
+                                ? persistenceService.proposeTool(
+                                        turn, stepNumber, step.tool().name(), argumentsJson)
+                                : persistenceService.proposeTool(
+                                        turn, stepNumber, step.tool().name(), argumentsJson,
+                                        thoughtSignature);
+                        failTool(turn, refusedCallId, exception.detailReason());
+                        publish(turn, new AiChatStepFrameDto(
+                                turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                                stepNumber, "step", step.tool().name(),
+                                "failed", exception.detailReason()));
+                        noProgressSteps++;
+                        if (noProgressSteps >= MAX_CONSECUTIVE_NO_PROGRESS_STEPS) {
+                            if (closingAttempted) {
+                                return AiGenerationTaskResult.failed("no_progress");
+                            }
+                            closingAttempted = true;
+                            closingPending = true;
+                            closingReason = "no_progress";
+                            continue steps;
+                        }
+                        ToolTurn refusedTurn = new ToolTurn(
+                                stepNumber, step.tool().name(),
+                                refusedToolResult(exception.detailReason()));
+                        toolBudgetAudit = requireAdditionalToolCapacity(
+                                nativeTools, toolTurns, refusedTurn, nativeCalls,
+                                maskingContext, memory.budget());
+                        toolTurns.add(refusedTurn);
+                        continue;
+                    }
                     AiAssistantToolResult cachedResult = toolResultCache.get(toolCallKey);
                     if (cachedResult != null) {
                         noProgressSteps++;
@@ -686,6 +723,26 @@ public class AiChatAgentLoopService {
                                 turn.workspaceId(), turn.sessionId(), turn.turnId(),
                                 stepNumber, "step", step.tool().name(),
                                 "failed", exception.detailReason()));
+                        if (exception.recoverable()) {
+                            noProgressSteps++;
+                            if (noProgressSteps >= MAX_CONSECUTIVE_NO_PROGRESS_STEPS) {
+                                if (closingAttempted) {
+                                    return AiGenerationTaskResult.failed("no_progress");
+                                }
+                                closingAttempted = true;
+                                closingPending = true;
+                                closingReason = "no_progress";
+                                continue steps;
+                            }
+                            ToolTurn refusedTurn = new ToolTurn(
+                                    stepNumber, step.tool().name(),
+                                    refusedToolResult(exception.detailReason()));
+                            toolBudgetAudit = requireAdditionalToolCapacity(
+                                    nativeTools, toolTurns, refusedTurn, nativeCalls,
+                                    maskingContext, memory.budget());
+                            toolTurns.add(refusedTurn);
+                            continue;
+                        }
                         if (!closingAttempted
                                 && CLOSABLE_REASONS.contains(exception.terminalReason())) {
                             closingAttempted = true;
@@ -817,22 +874,16 @@ public class AiChatAgentLoopService {
             if (Thread.currentThread().isInterrupted()) {
                 return AiGenerationTaskResult.timedOut("turn_deadline_exceeded");
             }
+            log.warn("Assistant turn failed exceptionClass={}",
+                    exception.getClass().getName());
             return AiGenerationTaskResult.failed(INTERNAL_ERROR);
         }
     }
 
     /**
-     * Refuses a synthesis-step tool a routed skill never declared.
-     *
-     * <p>{@code allowedTools} and {@code authority} bound the whole turn, not just the server-owned
-     * plan. Once a skill has run, the model's remaining steps exist to synthesize its evidence: a
-     * read-authority skill must not be able to reach a write tool, and no skill may cause a tool it
-     * never declared to run, however the model phrases the request.
-     */
-    /**
      * Refuses a synthesis-step tool that would exceed the routed skill's write authority.
      *
-     * The invariant this guard exists for is that a routed turn cannot gain WRITE authority its
+     * <p>The invariant this guard exists for is that a routed turn cannot gain WRITE authority its
      * skill never declared: a write tool runs only when the skill both lists it in
      * {@code allowedTools} and carries an authority above {@code READ}. Read tools always pass —
      * they grant nothing the caller's own generic loop would not, and their scope honesty is
@@ -1050,7 +1101,22 @@ public class AiChatAgentLoopService {
         if (exception instanceof ForbiddenException) {
             return "access_revoked";
         }
+        log.warn("Assistant tool step failed exceptionClass={}",
+                exception.getClass().getName());
         return INTERNAL_ERROR;
+    }
+
+    /**
+     * The correctable error result the loop feeds back after a recoverable argument refusal.
+     *
+     * <p>Carries only the stable refusal reason: no CRM data was read and no provider content is
+     * echoed, so the model learns exactly why the call was refused and nothing else.
+     *
+     * @param detailReason stable argument-refusal detail
+     * @return tool result naming the refusal
+     */
+    private static AiAssistantToolResult refusedToolResult(String detailReason) {
+        return new AiAssistantToolResult(Map.of("error", detailReason), List.of());
     }
 
     private static int inputTokens(AiStructuredOutcome<?> outcome) {

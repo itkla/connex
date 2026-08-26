@@ -6,9 +6,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -781,6 +783,110 @@ class AiChatAgentLoopServiceTest {
         assertEquals("no_progress", result.reason());
         verify(persistenceService, never()).resolve(
                 eq(TURN), any(), any(), anyInt(), anyInt());
+    }
+
+    /**
+     * An argument refusal is handed back to the model as a correctable error result instead of
+     * ending the turn. This replays staging turn 87 — a warmth filter proposed for a deal cohort —
+     * as recovery: the refused call fails durably, the corrected retry executes, and the turn
+     * resolves.
+     */
+    @Test
+    void aRefusedArgumentBecomesAnErrorResultTheModelCanCorrect() throws Exception {
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class), any()))
+                .thenThrow(AiAssistantLoopException.refusedArguments(
+                        "warmth_unsupported_for_deals"))
+                .thenReturn(new AiAssistantToolResult(
+                        Map.of("matchedRecords", 1), List.of()));
+        AiAssistantStep finalStep = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer("Deal activity summarized.", List.of()));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(toolStep(
+                        "list_scope_activities",
+                        "{\"records\":\"deal\",\"warmth\":[\"cold\"]}")),
+                        parsed(toolStep(
+                                "list_scope_activities", "{\"records\":\"deal\"}")),
+                        parsed(finalStep));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        verify(toolExecutor, times(2)).execute(
+                eq("list_scope_activities"), any(JsonNode.class), any(), eq(true), any());
+        verify(persistenceService).failTool(
+                eq(TURN), anyInt(), contains("warmth_unsupported_for_deals"));
+        verify(persistenceService).resolve(
+                eq(TURN), eq("Deal activity summarized."), any(), anyInt(), anyInt());
+    }
+
+    /**
+     * Recoverable refusals never count as progress: a model that keeps fumbling arguments spends
+     * the no-progress allowance and lands in the closing step rather than looping until the step
+     * cap.
+     */
+    @Test
+    void repeatedArgumentRefusalsSpendAClosingStepInsteadOfLoopingForever() throws Exception {
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class), any()))
+                .thenThrow(AiAssistantLoopException.refusedArguments("unknown_metric"));
+        AiAssistantStep finalStep = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer(
+                        "I could not compute that metric.", List.of()));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(toolStep(
+                        "aggregate_metric", "{\"metric\":\"pipeline_velocity\"}")),
+                        parsed(toolStep(
+                                "aggregate_metric", "{\"metric\":\"deal_momentum\"}")),
+                        parsed(finalStep));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        verify(persistenceService).resolve(
+                eq(TURN), eq("I could not compute that metric."), any(), anyInt(), anyInt());
+    }
+
+    /**
+     * An argument shape refused before the durable proposal still recovers: the refusal is
+     * persisted as a failed call so the transcript stays honest, and the corrected retry runs.
+     */
+    @Test
+    void anArgumentShapeRefusedBeforeProposalStillRecovers() throws Exception {
+        doThrow(AiAssistantLoopException.refusedArguments("invalid_tool_arguments"))
+                .doNothing()
+                .when(toolExecutor).validateReferences(eq("search_records"), any(), any());
+        AiAssistantStep finalStep = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer("Found the records.", List.of()));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(toolStep("search_records", "{\"query\":\"\"}")),
+                        parsed(toolStep(
+                                "search_records",
+                                "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}")),
+                        parsed(finalStep));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        verify(persistenceService, times(2)).proposeTool(
+                eq(TURN), anyInt(), eq("search_records"), any());
+        verify(persistenceService).failTool(
+                eq(TURN), anyInt(), contains("invalid_tool_arguments"));
+        verify(toolExecutor).execute(
+                eq("search_records"), any(JsonNode.class), any(), eq(true), any());
     }
 
     @Test
@@ -2274,8 +2380,12 @@ class AiChatAgentLoopServiceTest {
                 eq(TURN), any(), any(), anyInt(), anyInt());
     }
 
+    /**
+     * A hallucinated handle is refused back to the model and never reaches domain execution. An
+     * uncorrected model then ends in no-progress rather than a terminal schema failure.
+     */
     @Test
-    void unknownToolHandleFailsBeforeDurableProposalOrDomainExecution() throws Exception {
+    void aHallucinatedHandleNeverExecutesAndAnUncorrectedModelEndsInNoProgress() throws Exception {
         var catalog = new AiAssistantToolCatalog();
         AiAssistantToolExecutor realExecutor = new AiAssistantToolExecutor(
                 catalog,
@@ -2323,9 +2433,12 @@ class AiChatAgentLoopServiceTest {
                                 "get_record", objectMapper.readTree("{\"handle\":\"r9\"}")),
                         null)));
 
-        assertTerminal("malformed_output");
+        assertTerminal("no_progress");
 
-        verify(persistenceService, never()).proposeTool(eq(TURN), anyInt(), any(), any());
+        verify(persistenceService, atLeastOnce()).failTool(
+                eq(TURN), anyInt(), contains("unknown_handle"));
+        verify(persistenceService, never()).finishTool(
+                eq(TURN), anyInt(), eq("executed"), any());
     }
 
     @Test

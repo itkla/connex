@@ -44,7 +44,7 @@ final class AiChatScopedToolPolicy {
      */
     static void requireHonorsDeclaredScope(String toolName, AiChatQueryScope scope) {
         if (scope.declared() && REFUSED_UNDER_DECLARED_SCOPE.contains(toolName)) {
-            throw AiAssistantLoopException.malformed(CANNOT_HONOR_DECLARED_SCOPE);
+            throw AiAssistantLoopException.refusedArguments(CANNOT_HONOR_DECLARED_SCOPE);
         }
     }
 

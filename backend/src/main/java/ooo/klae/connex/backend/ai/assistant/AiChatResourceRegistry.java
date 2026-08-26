@@ -52,7 +52,7 @@ public final class AiChatResourceRegistry {
     public ResourceRef resolve(String handle) {
         ResourceRef resource = resources.get(handle);
         if (resource == null) {
-            throw AiAssistantLoopException.malformed("unknown_handle");
+            throw AiAssistantLoopException.refusedArguments("unknown_handle");
         }
         return resource;
     }
@@ -61,7 +61,7 @@ public final class AiChatResourceRegistry {
     public ResourceRef resolve(String handle, Set<String> acceptedKinds) {
         ResourceRef resource = resolve(handle);
         if (!acceptedKinds.contains(resource.kind())) {
-            throw AiAssistantLoopException.malformed("wrong_handle_kind");
+            throw AiAssistantLoopException.refusedArguments("wrong_handle_kind");
         }
         return resource;
     }

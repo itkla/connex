@@ -1329,7 +1329,7 @@ public class AiAssistantPromptAssembler {
 
                 Use only catalog tools. Finish with the fewest tool steps that retrieve enough evidence to answer well. Reuse CRM data already present in this turn, never repeat the same tool arguments, and batch record kinds in one search_records call when possible. Answer directly when no CRM read is needed. Tool-call efficiency must never make the final answer brief or incomplete.
 
-                List-style tool results are capped. Prefer targeted top-N and filtered queries over broad fan-out. When a result contains a [truncated: ...] marker, narrow the next call instead of repeating the same broad call.
+                List-style tool results are capped. Prefer targeted top-N and filtered queries over broad fan-out. When a result contains a [truncated: ...] marker, narrow the next call instead of repeating the same broad call. A tool result of {"error": reason} means that call was refused and nothing was read; correct the arguments or use a different tool, and never repeat a refused call unchanged.
 
                 AUTO write tools execute immediately and are undoable. CONFIRM write tools only create a proposal and never execute until a human explicitly approves the card.
 
@@ -1363,7 +1363,7 @@ public class AiAssistantPromptAssembler {
 
                 Finish with the fewest tool steps that retrieve enough evidence to answer well. Reuse CRM data already present in this turn, never repeat the same tool arguments, and batch record kinds in one search_records call when possible. Answer directly when no CRM read is needed. Tool-call efficiency must never make the final answer brief or incomplete.
 
-                List-style tool results are capped. Prefer targeted top-N and filtered queries over broad fan-out. When a result contains a [truncated: ...] marker, narrow the next call instead of repeating the same broad call.
+                List-style tool results are capped. Prefer targeted top-N and filtered queries over broad fan-out. When a result contains a [truncated: ...] marker, narrow the next call instead of repeating the same broad call. A tool result of {"error": reason} means that call was refused and nothing was read; correct the arguments or use a different tool, and never repeat a refused call unchanged.
 
                 AUTO write tools execute immediately and are undoable. CONFIRM write tools only create a proposal and never execute until a human explicitly approves the card.
 
