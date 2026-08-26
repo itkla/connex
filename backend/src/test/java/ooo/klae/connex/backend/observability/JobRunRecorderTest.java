@@ -31,6 +31,29 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 class JobRunRecorderTest {
+
+    /**
+     * Every declared job-name constant must be admitted by the allowlist the recorder validates
+     * against. The two lists live forty lines apart in one file and drifted once — the Wave-5
+     * schedulers logged an IllegalArgumentException warning on every sweep because their
+     * constants existed while the allowlist entries did not.
+     */
+    @org.junit.jupiter.api.Test
+    void everyDeclaredJobNameConstantIsAdmittedByTheAllowlist() throws Exception {
+        java.lang.reflect.Field allowlistField = JobRunRecorder.class.getDeclaredField("JOB_NAMES");
+        allowlistField.setAccessible(true);
+        java.util.Set<?> allowlist = (java.util.Set<?>) allowlistField.get(null);
+        for (java.lang.reflect.Field field : JobRunRecorder.class.getDeclaredFields()) {
+            if (java.lang.reflect.Modifier.isPublic(field.getModifiers())
+                    && java.lang.reflect.Modifier.isStatic(field.getModifiers())
+                    && field.getType() == String.class) {
+                String constant = (String) field.get(null);
+                org.junit.jupiter.api.Assertions.assertTrue(allowlist.contains(constant),
+                        "Job-name constant '" + constant + "' is missing from JOB_NAMES");
+            }
+        }
+    }
+
     private static final Clock CLOCK = Clock.fixed(
             Instant.parse("2026-07-20T12:00:00Z"), ZoneOffset.UTC);
 

@@ -96,9 +96,9 @@ public class AiBriefScheduler {
                 workspaceId,
                 failed == 0 ? JobRunStatus.SUCCEEDED : JobRunStatus.FAILED,
                 new JobRunDetail(started.startedAt(), Map.of(
-                        "started", startedRuns,
-                        "delivered", delivered,
-                        "failed", failed)));
+                        "startedCount", startedRuns,
+                        "deliveredCount", delivered,
+                        "failedCount", failed)));
     }
 
     private AiBriefRunService.Outcome safeDeliver(AiBriefSchedule schedule) {
