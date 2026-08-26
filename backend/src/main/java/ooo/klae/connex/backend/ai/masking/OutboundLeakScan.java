@@ -40,6 +40,31 @@ public final class OutboundLeakScan {
      * @throws MaskingLeakException when a raw identifier is present
      */
     public static void assertNoLeak(String serializedOutboundPayload, MaskingContext ctx, ObjectMapper objectMapper) {
+        assertNoLeak(serializedOutboundPayload, ctx, objectMapper, true);
+    }
+
+    /**
+     * Strict variant that ignores trusted-text collisions.
+     *
+     * <p>Provider-authored output — reasoning being normalized for return — is not the server's
+     * own prompt: a raw identifier there is a leak regardless of which words the request envelope
+     * happens to contain, so the trusted-text exemption must not apply.
+     *
+     * @param serializedOutboundPayload provider-authored text under validation
+     * @param ctx request-local masking context
+     * @param objectMapper payload JSON decoder
+     * @throws MaskingLeakException when a raw identifier is present
+     */
+    public static void assertNoLeakStrict(
+            String serializedOutboundPayload, MaskingContext ctx, ObjectMapper objectMapper) {
+        assertNoLeak(serializedOutboundPayload, ctx, objectMapper, false);
+    }
+
+    private static void assertNoLeak(
+            String serializedOutboundPayload,
+            MaskingContext ctx,
+            ObjectMapper objectMapper,
+            boolean honorTrustedText) {
         Objects.requireNonNull(serializedOutboundPayload, "serializedOutboundPayload");
         Objects.requireNonNull(ctx, "ctx");
         Objects.requireNonNull(objectMapper, "objectMapper");
@@ -51,7 +76,7 @@ public final class OutboundLeakScan {
             String normalizedIdentifier = normalizeForScan(entry.rawValue());
             if (normalizedIdentifier.length() >= MIN_IDENTIFIER_LENGTH
                     && (rawPayload.contains(normalizedIdentifier) || decodedPayload.contains(normalizedIdentifier))
-                    && !ctx.isTrustedTextCollision(entry.rawValue())) {
+                    && !(honorTrustedText && ctx.isTrustedTextCollision(entry.rawValue()))) {
                 leakedTokens.add(entry.token());
                 leakedKinds.add(entry.kind());
             }

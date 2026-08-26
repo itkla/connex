@@ -31,7 +31,7 @@ public final class MaskingContext {
     private final Map<String, String> canonicalValueToToken = new LinkedHashMap<>();
     private final Map<String, String> rawIdentifierToToken = new LinkedHashMap<>();
     private final Set<String> identifierDictionary = new LinkedHashSet<>();
-    private final StringBuilder trustedStaticText = new StringBuilder();
+    private final Set<String> trustedStaticTexts = new LinkedHashSet<>();
     private final EnumMap<EntityKind, Integer> tokenCounts = new EnumMap<>(EntityKind.class);
     private final AiPrivacyMode privacyMode;
 
@@ -90,7 +90,7 @@ public final class MaskingContext {
      */
     public void addTrustedStaticText(String text) {
         if (text != null && !text.isBlank()) {
-            trustedStaticText.append('\n').append(text);
+            trustedStaticTexts.add(OutboundLeakScan.normalizeForScan(text));
         }
     }
 
@@ -102,9 +102,42 @@ public final class MaskingContext {
      * @return true when the server's own prompt text contains the value
      */
     public boolean isTrustedTextCollision(String rawValue) {
-        return trustedStaticText.length() > 0
-                && MaskingEngine.trustedStaticTextContainsIdentifier(
-                        trustedStaticText.toString(), rawValue);
+        if (trustedStaticTexts.isEmpty()) {
+            return false;
+        }
+        String candidate = OutboundLeakScan.normalizeForScan(rawValue);
+        if (candidate.length() < OutboundLeakScan.MIN_IDENTIFIER_LENGTH) {
+            return false;
+        }
+        for (String segment : trustedStaticTexts) {
+            if (segment.contains(candidate)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether this exact value is a seeded identifier under the leak scan's normalization.
+     *
+     * <p>Exists so structural preservation rules — a valid ISO temporal is normally passed through
+     * unchanged — can refuse to preserve a value that is actually a tenant record's display name,
+     * which must tokenize like any other identifier occurrence.
+     *
+     * @param value candidate string about to be preserved verbatim
+     * @return true when a seeded identifier has the same normalized value
+     */
+    public boolean isSeededIdentifierValue(String value) {
+        String candidate = OutboundLeakScan.normalizeForScan(value);
+        if (candidate.length() < OutboundLeakScan.MIN_IDENTIFIER_LENGTH) {
+            return false;
+        }
+        for (String raw : identifierDictionary) {
+            if (OutboundLeakScan.normalizeForScan(raw).equals(candidate)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public Set<String> identifierDictionary() {

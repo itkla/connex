@@ -267,7 +267,8 @@ public final class MaskingEngine {
             return "";
         }
         String normalized = normalizeSeparators(Normalizer.normalize(value, Normalizer.Form.NFKC)).strip();
-        if (ISO_TEMPORAL.matcher(normalized).matches() && isValidIsoTemporal(normalized)) {
+        if (ISO_TEMPORAL.matcher(normalized).matches() && isValidIsoTemporal(normalized)
+                && !ctx.isSeededIdentifierValue(normalized)) {
             return normalized;
         }
         return maskFreeText(normalized, ctx);
