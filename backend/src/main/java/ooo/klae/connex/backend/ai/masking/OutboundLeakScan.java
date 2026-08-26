@@ -17,7 +17,11 @@ import tools.jackson.databind.ObjectMapper;
  * a per-request invariant immediately before send.
  */
 public final class OutboundLeakScan {
-    private static final int MIN_IDENTIFIER_LENGTH = 4;
+    /**
+     * Shortest normalized identifier the scan flags, shared with the masking engine's residual
+     * replacement pass so the replacer always covers at least what this scan can refuse.
+     */
+    static final int MIN_IDENTIFIER_LENGTH = 4;
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
 
     private OutboundLeakScan() {
@@ -82,7 +86,11 @@ public final class OutboundLeakScan {
         }
     }
 
-    private static String normalizeForScan(String value) {
+    /**
+     * The exact canonicalization this scan matches with, shared with the masking engine's residual
+     * replacement pass so replacement coverage is measured the same way scan coverage is.
+     */
+    static String normalizeForScan(String value) {
         String normalized = Normalizer.normalize(value.trim(), Normalizer.Form.NFKC).toLowerCase(Locale.ROOT);
         return WHITESPACE.matcher(normalized).replaceAll(" ");
     }

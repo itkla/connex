@@ -239,6 +239,114 @@ class MaskingEngineTest {
         assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx, objectMapper));
     }
 
+    /**
+     * Japanese runs Latin names straight into particles — "Ferrariの担当者" has no space — so the
+     * ASCII word boundary must not treat a CJK neighbor as a word continuation. The leak scan
+     * checks raw containment with no boundary at all, so any occurrence the replacer skips is a
+     * blocked provider call, which is how staging's daily brief died on every question naming a
+     * company.
+     */
+    @Test
+    void maskFreeText_masksAsciiIdentifiersAdjacentToCjkText() {
+        MaskingContext ctx = new MaskingContext();
+        String company = MaskingEngine.maskField(EntityKind.COMPANY, "Ferrari", ctx);
+        String person = MaskingEngine.maskField(EntityKind.PERSON, "Lucius Fox", ctx);
+
+        String masked = MaskingEngine.maskFreeText(
+                "Ferrariの担当者はLucius Foxさんです。Ferrariとの取引を確認して。", ctx);
+
+        assertEquals(company + "の担当者は" + person + "さんです。"
+                + company + "との取引を確認して。", masked);
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx, objectMapper));
+    }
+
+    /**
+     * The replacer must cover every occurrence the outbound leak scan can flag: the scan does raw
+     * normalized containment, so an identifier embedded inside a longer ASCII word must still be
+     * covered rather than left to fail the whole provider call closed. An embedded occurrence is
+     * not an entity reference, so the whole containing word is redacted — never tokenized, which
+     * would fabricate an entity mention inside an unrelated word.
+     */
+    @Test
+    void maskFreeText_redactsWordsEmbeddingAnIdentifierRatherThanBlockingOrTokenizing() {
+        MaskingContext ctx = new MaskingContext();
+        String token = MaskingEngine.maskField(EntityKind.PERSON, "Mark", ctx);
+
+        String masked = MaskingEngine.maskFreeText("Market notes remarked on Mark.", ctx);
+
+        assertEquals("[redacted] notes [redacted] on " + token + ".", masked);
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx, objectMapper));
+    }
+
+    /**
+     * The ASCII boundary distinguishes scripts, not just the ASCII range: an accented letter
+     * continues a Latin word, so a seeded short name must not shred ordinary French or German
+     * prose, while a CJK neighbor still counts as a boundary.
+     */
+    @Test
+    void maskFreeText_leavesAccentedLatinWordsContainingAShortIdentifierIntact() {
+        MaskingContext ctx = new MaskingContext();
+        String token = MaskingEngine.maskField(EntityKind.PERSON, "Ann", ctx);
+
+        String masked = MaskingEngine.maskFreeText("Une année importante pour Ann.", ctx);
+
+        assertEquals("Une année importante pour " + token + ".", masked);
+    }
+
+    /**
+     * Redaction sentinels must survive re-masking even when a seeded name is a substring of the
+     * sentinel text itself; corrupting {@code [redacted]} would break every downstream consumer,
+     * and the scan already fails such payloads closed.
+     */
+    @Test
+    void maskFreeText_neverCorruptsRedactionSentinelsWithResidualReplacement() {
+        MaskingContext ctx = new MaskingContext();
+        String token = MaskingEngine.maskField(EntityKind.COMPANY, "Acted", ctx);
+
+        String masked = MaskingEngine.maskFreeText(
+                "Email someone@example.com about Acted.", ctx);
+
+        assertEquals("Email [redacted] about " + token + ".", masked);
+    }
+
+    /**
+     * Contact-data redaction must run before identifier replacement: a token spliced into the
+     * middle of an email or phone number would defeat the redaction regexes, egressing the raw
+     * local part, domain, and digit fragments around it — data the leak scan cannot flag because
+     * only the seeded name itself is in the dictionary.
+     */
+    @Test
+    void maskFreeText_redactsContactDataBeforeIdentifierTokensCanSpliceIt() {
+        MaskingContext ctx = new MaskingContext();
+        MaskingEngine.maskField(EntityKind.PERSON, "Nakagawa", ctx);
+
+        String masked = MaskingEngine.maskFreeText(
+                "Contact hunternakagawa@gmail.com or call 09012345678.", ctx);
+
+        assertEquals("Contact [redacted] or call [redacted].", masked);
+        assertFalse(containsIgnoreCase(masked, "gmail"));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx, objectMapper));
+    }
+
+    /**
+     * Longest-first precedence must hold across the boundary and residual matching strategies: a
+     * shorter identifier matching at a CJK-adjacent position inside a longer identifier's
+     * ASCII-embedded occurrence would otherwise fragment it, and the surviving raw fragment would
+     * egress because the leak scan checks whole identifiers only.
+     */
+    @Test
+    void maskFreeText_longestIdentifierWinsAcrossBoundaryAndResidualMatching() {
+        MaskingContext ctx = new MaskingContext();
+        MaskingEngine.maskField(EntityKind.COMPANY, "Acme楽天Corp", ctx);
+        MaskingEngine.maskField(EntityKind.COMPANY, "Corp", ctx);
+
+        String masked = MaskingEngine.maskFreeText("XAcme楽天Corpの件", ctx);
+
+        assertEquals("[redacted]の件", masked);
+        assertFalse(masked.contains("Acme楽天"));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx, objectMapper));
+    }
+
     @Test
     void unmaskedModeKeepsIdentifiersWhileUniversalScreensStillApply() {
         MaskingContext context = new MaskingContext(AiPrivacyMode.UNMASKED);

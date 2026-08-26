@@ -93,12 +93,11 @@ public final class MaskingEngine {
         if (ctx.privacyMode() == ooo.klae.connex.backend.ai.AiPrivacyMode.UNMASKED) {
             return redactContactData(screened);
         }
-        String redacted = screened;
+        String redacted = redactContactData(screened);
         for (MaskingContext.IdentifierEntry entry : ctx.identifierEntriesByLongestRawValue()) {
-            redacted = identifierPattern(entry.rawValue()).matcher(redacted)
-                    .replaceAll(Matcher.quoteReplacement(REDACTED));
+            redacted = replaceIdentifierEverywhere(redacted, entry, REDACTED);
         }
-        return redactContactData(redacted);
+        return redacted;
     }
 
     private static String screenCompleteFreeText(String text) {
@@ -197,12 +196,11 @@ public final class MaskingEngine {
     }
 
     private static String maskSanitizedFreeText(String sanitizedText, MaskingContext ctx) {
-        String masked = sanitizedText;
+        String masked = redactContactData(sanitizedText);
         for (MaskingContext.IdentifierEntry entry : ctx.identifierEntriesByLongestRawValue()) {
-            masked = identifierPattern(entry.rawValue()).matcher(masked)
-                    .replaceAll(Matcher.quoteReplacement(entry.token()));
+            masked = replaceIdentifierEverywhere(masked, entry, entry.token());
         }
-        return redactContactData(masked);
+        return masked;
     }
 
     private static String redactContactData(String text) {
@@ -225,6 +223,13 @@ public final class MaskingEngine {
         }
         for (MaskingContext.IdentifierEntry entry : ctx.identifierEntriesByLongestRawValue()) {
             if (hasCrossingMatch(identifierPattern(entry.rawValue()), text, issuedPlaceholderOffsets)) {
+                return true;
+            }
+            if (residualEligible(entry.rawValue())
+                    && hasCrossingMatch(
+                            identifierResidualPattern(Normalizer.normalize(
+                                    entry.rawValue(), Normalizer.Form.NFKC).trim()),
+                            text, issuedPlaceholderOffsets)) {
                 return true;
             }
         }
@@ -308,14 +313,82 @@ public final class MaskingEngine {
 
     private static Pattern identifierPattern(String rawValue) {
         String normalizedValue = Normalizer.normalize(rawValue, Normalizer.Form.NFKC).trim();
-        String quoted = Arrays.stream(WHITESPACE.split(normalizedValue))
-                .map(Pattern::quote)
-                .collect(Collectors.joining("\\s+"));
+        String quoted = quotedIdentifier(normalizedValue);
         if (usesAsciiWordBoundary(normalizedValue)) {
-            return Pattern.compile("(?<![\\p{L}\\p{N}_])" + quoted + "(?![\\p{L}\\p{N}_])",
+            return Pattern.compile(
+                    "(?<![\\p{sc=Latin}\\p{N}_])" + quoted + "(?![\\p{sc=Latin}\\p{N}_])",
                     Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
         }
         return Pattern.compile(quoted, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    }
+
+    /**
+     * Matches every occurrence the outbound leak scan can flag, with no boundary at all.
+     *
+     * <p>The boundary-respecting pattern above is the preferred replacement, but the scan checks
+     * raw normalized containment: any occurrence the replacer declines that the scan would still
+     * find fails the whole provider call closed. This residual pattern restores the invariant that
+     * the replacer covers at least the scanner, at the scanner's own minimum identifier length.
+     * It consumes the whole surrounding ASCII word so its redaction reads as a removed word, and
+     * refuses to start after {@code '{'} or end before {@code '}'} so an issued placeholder token
+     * whose body happens to contain an identifier is never corrupted.
+     */
+    private static Pattern identifierResidualPattern(String normalizedValue) {
+        return Pattern.compile(
+                "(?<!\\{)[A-Za-z0-9_]*" + quotedIdentifier(normalizedValue)
+                        + "[A-Za-z0-9_]*(?!\\})",
+                Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    }
+
+    private static String quotedIdentifier(String normalizedValue) {
+        return Arrays.stream(WHITESPACE.split(normalizedValue))
+                .map(Pattern::quote)
+                .collect(Collectors.joining("\\s+"));
+    }
+
+    /**
+     * Replaces one identifier's occurrences with boundary preference and residual coverage in one
+     * step, so longest-first precedence holds across both matching strategies.
+     *
+     * <p>The boundary match is the entity reference and receives the caller's replacement (the
+     * entity token, or a redaction marker on the screening path). A residual occurrence — the
+     * identifier embedded inside a longer word — is not an entity reference, so it is always
+     * redacted rather than tokenized: issuing the token there would tell the model that an
+     * unrelated word mentions the entity. Redacting still beats the alternative, because the
+     * outbound leak scan checks raw normalized containment and would otherwise fail the whole
+     * provider call closed on the embedded occurrence.
+     *
+     * <p>Interleaving both patterns per entry, longest first, also keeps a shorter identifier from
+     * fragmenting a longer identifier's embedded occurrence before it is covered — the surviving
+     * raw fragment would egress unseen, because the scan checks whole identifiers only.
+     *
+     * <p>An identifier the redaction sentinels themselves contain is skipped by the residual
+     * pattern: replacing it would corrupt {@code [redacted]} or {@code [omitted by policy]} text,
+     * and the scan fails such a payload closed exactly as it always has.
+     */
+    private static String replaceIdentifierEverywhere(
+            String text, MaskingContext.IdentifierEntry entry, String replacement) {
+        String replaced = identifierPattern(entry.rawValue()).matcher(text)
+                .replaceAll(Matcher.quoteReplacement(replacement));
+        if (!residualEligible(entry.rawValue())) {
+            return replaced;
+        }
+        String normalizedValue =
+                Normalizer.normalize(entry.rawValue(), Normalizer.Form.NFKC).trim();
+        return identifierResidualPattern(normalizedValue).matcher(replaced)
+                .replaceAll(Matcher.quoteReplacement(REDACTED));
+    }
+
+    /**
+     * Whether the residual pattern may run for an identifier: measured with the outbound leak
+     * scan's own normalization so replacement coverage and scan coverage cannot drift, and never
+     * for a value the redaction sentinels themselves contain.
+     */
+    private static boolean residualEligible(String rawValue) {
+        String scanNormalized = OutboundLeakScan.normalizeForScan(rawValue);
+        return scanNormalized.length() >= OutboundLeakScan.MIN_IDENTIFIER_LENGTH
+                && !OutboundLeakScan.normalizeForScan(REDACTED).contains(scanNormalized)
+                && !OutboundLeakScan.normalizeForScan(OMITTED_BY_POLICY).contains(scanNormalized);
     }
 
     private static boolean usesAsciiWordBoundary(String value) {
