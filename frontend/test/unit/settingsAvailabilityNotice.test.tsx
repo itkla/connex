@@ -133,8 +133,8 @@ describe("the availability notice states every posture the manifest names", () =
     });
 
     it("speaks the epic's own lines, so the postures are recognizable as the ones it named", () => {
-        expect(message("en", "SettingsAvailability.managedTitle")).toBe("Managed by your Connex instance");
-        expect(message("en", "SettingsAvailability.notEnabledTitle")).toBe("Not enabled for this deployment");
+        expect(message("en", "SettingsAvailability.managedTitle")).toBe("Set up for everyone here");
+        expect(message("en", "SettingsAvailability.notEnabledTitle")).toBe("This isn't turned on");
         expect(message("en", "SettingsAvailability.askAdminTitle")).toBe("Ask a workspace administrator");
     });
 });

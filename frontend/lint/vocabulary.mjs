@@ -335,7 +335,8 @@ export const CURATED_DECISIONS = {
     "turn": {
         decision: "ban",
         scope: { namespaces: ASSISTANT_SURFACES },
-        reason: "§4 bans turn in the assistant, where the word for a reply is \"answer\"; elsewhere turn is an ordinary English verb.",
+        pattern: { source: "\\bturn(?:s|ed|ing)?\\b(?!\\s+(?:\\w+\\s+){0,2}(?:on|off|into|over|out|back|down|up|away)\\b)", flags: "iu" },
+        reason: "§4 bans turn as the assistant's word for a reply, where the word is \"answer\". The phrasal verb means something else entirely — an admin turns AI on and off on these same surfaces — so the pattern excepts a particle, with or without its object between.",
     },
     "Assigned to": {
         decision: "ban",

@@ -27,9 +27,9 @@
     "notifications": "通知",
     "quickActions": "クイックアクション",
     "captureAttention": {
-      "title": "連携データの取り込みに対応が必要です",
-      "description": "優先度の高い人物確認またはプロバイダーの問題を解決し、関係性の根拠を最新に保ちます。",
-      "action": "{provider}: 確認 {reviews}件 · 対応 {interventions}件"
+      "title": "連携中のアカウントに確認事項があります",
+      "description": "メールや予定の自動記録を続けるために、いくつか確認をお願いします。",
+      "action": "{provider}：確認 {reviews}件 · 対応 {interventions}件"
     },
     "analyticsKpis": "主要指標",
     "revenueTrend": "売上トレンド",
@@ -50,8 +50,8 @@
   },
   "AtRiskDeals": {
     "empty": "現在、対応が必要な案件はありません。",
-    "truncated": "一部の結果のみ表示しています。優先度の高い進行中案件 1,000 件をリスク評価しました。",
-    "truncatedEmpty": "評価した 1,000 件にはリスクが見つかりませんでした。未評価の案件が残っています。"
+    "truncated": "リスクを確認したのは、優先度の高い進行中の案件1,000件のみです。",
+    "truncatedEmpty": "確認した1,000件にリスクはありませんでした。残りの案件は確認していません。"
   },
   "CoolingRelationships": {
     "empty": "現在、冷え込みつつある関係はありません。",
@@ -64,7 +64,7 @@
     "scheduleFailed": "フォローアップタスクを作成できませんでした"
   },
   "RecentMoves": {
-    "empty": "ワークスペースの連絡先に最近の転職はありません。",
+    "empty": "最近、転職された方はいません。",
     "unknown": "不明"
   },
   "DashboardActivation": {
@@ -73,7 +73,7 @@
     "checklistProgress": "{done} / {total}",
     "optionalLabel": "任意",
     "doneLabel": "完了:",
-    "evidenceTitle": "根拠",
+    "evidenceTitle": "理由",
     "followUp": "フォローアップを予約",
     "steps": {
       "contacts": {
@@ -85,13 +85,13 @@
       },
       "companies": {
         "title": "所属する会社を追加する",
-        "body": "同じ会社を介した紹介は、このつながりから導き出されます。",
+        "body": "どこで働いているかがわかると、誰に紹介を頼めるかが見えてきます。",
         "cta": "会社をインポート",
         "done": "{count}社"
       },
       "interactions": {
         "title": "接点を記録する",
-        "body": "アクティビティ、共有メモ、紐づけたタスクを根拠として、Connex が関係の温度感を読み取ります。",
+        "body": "記録した電話・メール・打ち合わせに加えて、共有メモや紐づけたタスクも温度感に反映されます。",
         "cta": "アクティビティを記録",
         "done": "接点を記録済み"
       },
@@ -136,18 +136,18 @@
       "sharedCompany": "どちらも {company} とつながりがあります"
     },
     "missing": {
-      "title": "まだ根拠が足りません",
+      "title": "まだ記録がありません",
       "body": "Connex は記録された接点から関係の温度感を算出します。今はその材料がなく、根拠のないスコアは作られた判断でしかないため、ここにはスコアを表示しません。",
       "noSignalTitle": "関係のシグナルはまだありません",
-      "noSignalBody": "関係の根拠は記録されていますが、今すぐ対応が必要な兆候や、有用な紹介につながる材料はありません。",
+      "noSignalBody": "いま対応が必要なものはなく、頼める紹介もまだありません。",
       "unavailableTitle": "関係のシグナルを読み込めませんでした",
-      "unavailableBody": "チェックリストとインサイトは一時的に利用できません。ワークスペースのデータは変更されていません。",
+      "unavailableBody": "いま読み込めませんでした。少し時間をおいてお試しください。",
       "retry": "もう一度試す",
       "gapsTitle": "足りないもの",
       "gap": {
         "contacts": "連絡先がまだありません",
         "interactions": "接点が記録されていません",
-        "noSignal": "連絡先と接点はありますが、示すに足るシグナルにはまだ達していません。"
+        "noSignal": "連絡先とやり取りは登録されています。いま対応が必要なものはありません。"
       }
     }
   },
@@ -155,8 +155,8 @@
     "newContact": "新規連絡先",
     "warmth": {
       "title": "最初の温度感",
-      "body": "記録された接点をもとに、Connex が読み取った現在の関係の温度感です。",
-      "readings": "記録された接点から読み取っています",
+      "body": "いまの関係の温度感です。",
+      "readings": "記録したやり取りから",
       "bandCount": "{count}件の連絡先",
       "cta": "温度感を見る"
     }
@@ -183,10 +183,10 @@
     "summary": "オープン {openCount} 件 · 今後 {months} か月で {scheduled} 件予定",
     "profit": "実績",
     "projections": "予測",
-    "chartDescription": "実績と予測の比較",
+    "chartDescription": "受注売上と予測の比較",
     "currency": "通貨",
-    "profitTooltip": "成約した案件から得られた実績売上。",
-    "projectionsTooltip": "オープン案件の予測値（予定成約日ベース）。"
+    "profitTooltip": "すでに受注した案件の売上です。",
+    "projectionsTooltip": "進行中の案件の金額を、決着予定日に置いたものです。"
   },
   "DashboardTaskSummary": {
     "openTasks": "オープンなタスク",

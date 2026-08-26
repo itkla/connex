@@ -1,9 +1,9 @@
 {
   "Assistant": {
     "disclosure": {
-      "sessionCreation": "Assistant sessions are workspace data. If you leave this workspace or delete your account, your sessions are retained and become accessible to workspace administrators.",
-      "sessionList": "Assistant sessions are workspace data. If you leave this workspace or delete your account, your sessions are retained and become accessible to workspace administrators.",
-      "imageProvider": "Image contents cannot be masked. When you send this message, a metadata-free copy is sent to your organization's configured AI provider. Review every result."
+      "sessionCreation": "Chats here belong to this workspace — its admins can see them, even after you leave or delete your account.",
+      "sessionList": "Chats here belong to this workspace — its admins can see them, even after you leave or delete your account.",
+      "imageProvider": "Connex can't hide names or details you can see in a picture — the image itself goes to the AI, with only the hidden camera data like location removed. Check anything it reads back."
     }
   }
 }

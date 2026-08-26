@@ -20,14 +20,14 @@
     "errorNoRows": "このファイルにデータ行が見つかりません。",
     "errorTooManyRows": "このファイルは{count}行あります（上限{max}行）。分割してください。",
     "errorParse": "ファイルを読み込めませんでした。有効なCSVか確認してください。",
-    "errorPreview": "インポートを解析できませんでした。もう一度お試しください。",
-    "errorImport": "インポートに失敗しました。もう一度お試しください。",
-    "errorExport": "エクスポートに失敗しました。もう一度お試しください。",
+    "errorPreview": "ファイルを確認できませんでした。もう一度お試しください。",
+    "errorImport": "インポートを完了できませんでした。もう一度お試しください。",
+    "errorExport": "エクスポートを完了できませんでした。もう一度お試しください。",
     "back": "戻る",
     "next": "次へ",
     "import": "インポート",
     "refreshReview": "確認内容を更新",
-    "reviewStale": "一致時の操作または行のリンクが変更されました。インポート前に確認内容を更新してください。",
+    "reviewStale": "このプレビューを作成したあとに変更がありました。インポート前に更新してください。",
     "done": "完了",
     "mapHint": "{total}列中{mapped}列を対応付け済み。「名前」は必須です。",
     "ignore": "— 取り込まない —",
@@ -64,7 +64,7 @@
     },
     "countNew": "新規",
     "rowMergeRepresentative": "{count} 行のデータを 1 件のレコードに統合します。",
-    "rowMergeContributor": "参照を作成する前に行 #{row} へ統合します。",
+    "rowMergeContributor": "行 #{row} に統合されます。",
     "countUpdate": "更新",
     "countSkip": "スキップ",
     "countInvalid": "エラー",
@@ -90,11 +90,11 @@
     "rowColStatus": "ステータス",
     "rowColDetail": "詳細",
     "rowColLink": "リンク",
-    "reviewLinkHint": "処理対象{total}行のうち{shown}行を表示しています。重複候補がある{candidates}行はすべて含まれます。別のレコードを指定するには「リンク」を使用してください。",
+    "reviewLinkHint": "対応が必要な{total}行のうち{shown}行を表示しています（候補がある{candidates}行はすべて含まれます）。別のレコードを選ぶには「リンク」を使ってください。",
     "candidateListLabel": "既存レコードの候補",
     "candidateStrength": {
-      "STRONG": "識別情報が完全一致",
-      "WEAK": "名前が完全一致"
+      "STRONG": "同一の可能性が高い",
+      "WEAK": "名前だけ一致"
     },
     "candidateRecordType": {
       "person": "連絡先",
@@ -105,7 +105,7 @@
       "PHONE": "電話番号が一致",
       "DOMAIN": "ドメインが一致",
       "EXTERNAL_ID": "参照元IDが一致",
-      "NAME": "正規化した名前が一致"
+      "NAME": "名前が一致"
     },
     "candidateShared": "共有・確認のみ",
     "candidateUse": "このレコードを使用",
@@ -144,12 +144,12 @@
         "noColumns": "列が見つかりませんでした。",
         "noRows": "データ行が見つかりませんでした。",
         "tooManyRows": "{count}行あります。5,000行以下のファイルに分割してください。",
-        "parse": "CSVを読み込めませんでした。",
-        "preview": "履歴インポートを解析できませんでした。",
-        "commit": "履歴インポートを完了できませんでした。"
+        "parse": "このCSVを読み込めませんでした。CSV形式のファイルかご確認ください。",
+        "preview": "このファイルを確認できませんでした。",
+        "commit": "インポートを完了できませんでした。"
       },
-      "mapReady": "必須項目が割り当てられました。各行はサーバーでも検証されます。",
-      "mapRequired": "必須項目と参加者の識別情報を1つ以上割り当ててください。",
+      "mapReady": "必須項目は設定済みです。インポート前に各行を確認します。",
+      "mapRequired": "必須項目に加えて、連絡先と照合するためのメールアドレスか電話番号を設定してください。",
       "emptySample": "サンプル値なし",
       "mapColumn": "{column}を割り当て",
       "ignore": "— 無視 —",
@@ -198,7 +198,7 @@
         "PHONE": "電話番号が一致",
         "DOMAIN": "ドメインが一致",
         "EXTERNAL_ID": "参照元IDが一致",
-        "NAME": "正規化した名前が一致"
+        "NAME": "名前が一致"
       },
       "shared": "共有・確認のみ",
       "selected": "選択済み",

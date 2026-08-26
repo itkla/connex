@@ -2,11 +2,11 @@
   "EngineEvaluation": {
     "title": "Insights",
     "contactRiskLabel": "Risk & cooling signals",
-    "contactRiskHint": "Cooling nudges for this contact, and their warmth counting toward deal risk",
+    "contactRiskHint": "Tell me when this contact cools off, and count their warmth toward deal risk",
     "contactIntroLabel": "Intro suggestions",
-    "contactIntroHint": "Offer this contact as an introduction candidate",
+    "contactIntroHint": "Suggest introductions through this contact",
     "dealRiskLabel": "Risk evaluation",
-    "dealRiskHint": "Assess this deal for risk signals and alerts. Close-date reminders stay on",
+    "dealRiskHint": "Watch this deal for risk. Close-date reminders stay on either way",
     "updateFailed": "Couldn't update the setting"
   },
   "SmartSegments": {
@@ -165,7 +165,7 @@
     "going_cold": {
       "label": "Going cold soon",
       "labelNot": "Not going cold soon",
-      "description": "Predicted to reach cold within the chosen window."
+      "description": "Will go cold within the time you choose."
     },
     "at_risk": {
       "label": "At risk",
@@ -381,19 +381,19 @@
   },
   "RelationshipEvidence": {
     "title": "Relationship evidence",
-    "subtitle": "The dated interactions behind this relationship signal.",
-    "unavailable": "Evidence is temporarily unavailable. No relationship claim is shown.",
-    "noHistory": "No eligible interaction history is available for this relationship yet.",
+    "subtitle": "Everything you logged that shaped this reading.",
+    "unavailable": "Couldn't load this right now. Try again in a moment.",
+    "noHistory": "Nothing has been logged here yet.",
     "chipHint": "Click to open full evidence",
     "openEvidence": "Open relationship evidence",
     "openEvidenceNamed": "{band}: open relationship evidence",
     "lastTouch": "Last eligible touch",
-    "sourceCount": "Evidence sources",
+    "sourceCount": "Based on",
     "sourceCountValue": "{count, plural, one {# source} other {# sources}}",
-    "decay": "Predicted decay",
+    "decay": "Goes cold",
     "goesColdAt": "Cold by {date}",
-    "noDecayDate": "No active decay date",
-    "sources": "Strongest sources",
+    "noDecayDate": "Not cooling right now",
+    "sources": "What counted most",
     "sourceType": {
       "note": "Workspace note",
       "task": "Task"
@@ -407,15 +407,14 @@
       "other": "Other"
     },
     "attribution": {
-      "directPerson": "Sources are linked directly to this contact.",
-      "presentDayCompany": "Company evidence includes contacts currently at this company and deals currently linked to it.",
-      "touchTimeCompany": "Company evidence uses the contact’s employer at touch time and each deal’s current company."
+      "directPerson": "Everything here is linked straight to this contact.",
+      "presentDayCompany": "This counts everyone working here now, and the deals linked to this company now.",
+      "touchTimeCompany": "For people, this counts where they worked at the time. For deals, it counts the company they belong to now."
     },
-    "omitted": "{count, plural, one {# additional eligible source is included in the score} other {# additional eligible sources are included in the score}}.",
-    "limited": "Limited evidence. At least {minimum} eligible sources are required for a higher-confidence reading.",
+    "omitted": "{count, plural, one {# more interaction counted toward this} other {# more interactions counted toward this}}.",
+    "limited": "Not much to go on yet. This reading firms up once there are {minimum} interactions.",
     "privateNotesExcluded": "{count, plural, one {# of your private notes is excluded} other {# of your private notes are excluded}} from this score.",
-    "asOf": "Calculated {date} with model {version}.",
-    "unknownModel": "unknown",
+    "asOf": "Last worked out {date}.",
     "actionsTitle": "What to do next",
     "actionLogInteraction": "Log an interaction",
     "actionScheduleFollowUp": "Schedule a follow-up",
@@ -425,7 +424,7 @@
     "title": "Signals",
     "openInRadar": "Open in Radar",
     "empty": "No signals about this record right now. Radar watches warmth, deal risk, and intro paths, and anything worth acting on shows up here.",
-    "unavailable": "Signals are temporarily unavailable. Nothing about this record has changed — try again in a moment.",
+    "unavailable": "Couldn't load signals right now. Try again in a moment.",
     "evaluationHeading": "What Radar watches here"
   },
   "RecordPeek": {

@@ -110,6 +110,8 @@ Generator note (this paragraph names terms in prose rather than in backticks: th
 
 Connex sounds like a competent, calm colleague: plain, direct, specific, never bureaucratic and never cute. Both languages are written natively — Japanese is composed as Japanese business prose, not translated word-for-word from English.
 
+**The test, before any rule below.** Read the string once, at speed, as someone who has never seen this product and does not know what a database is. If there is any doubt what it means, or any word you would not say to a friend, it fails. Short beats long. Deleting beats shortening. A screen earns trust by being right, never by saying it is right.
+
 **Rules, with the before → after pattern each enforces:**
 
 1. **Lead with the consequence, not the mechanism or statute.** Say what it means for the user first; the why is a secondary line at most.
@@ -134,6 +136,17 @@ Connex sounds like a competent, calm colleague: plain, direct, specific, never b
    - ✗ "…your sessions are retained and become accessible to workspace administrators." → ✓ "Chats here belong to this workspace — its admins can see them, even after you leave."
 
 7. **JA register: 丁寧だが役所的でない.** です・ます throughout product copy; native words over katakana loans wherever a native word reads naturally (紹介ルート not ウォームパス; メモ not ノート; 削除・消去 not パージ) — the glossary's katakana entries (ワークスペース, メンバー, レーダーなど) are the settled exceptions; statutory compounds (利用停止, 第三者提供停止) only on compliance surfaces or in parentheses after the plain phrasing. Use 削除 for deleting records and 消去 for erasing captured data — both are sanctioned, in their own contexts. Translate meaning, not words: JA is re-authored from the meaning of the final English, never patched word-by-word — and if the EN source is engineering prose, fix the EN first, then write the JA fresh.
+
+9. **Never label your own integrity.** Copy that advertises how honest, transparent, accurate, or trustworthy the product is does the opposite of what it intends — if a screen has to say it is honest, it reads as a screen with something to prove. State the fact; let it be the proof.
+   - ✗ "Resolve unmatched participants and approve held evidence before it enters relationship history." → ✓ "Tell Connex who these people are, and approve what should be saved."
+   - ✗ "You authorize on this computer. Connex never sees your provider password, and the connection is completed by this installation, not by Connex the company." → ✓ "Connecting takes a couple of steps on this computer. Here's what you'll approve."
+   - **The corollary, which outranks this rule: removing the register never removes the fact.** If a screen genuinely cannot do something, if data is genuinely partial, or if an action genuinely destroys something, the plain copy still says so. Plainness is not vagueness, and smoothing away a real limitation is a worse defect than the jargon it replaced.
+
+10. **Never write from inside the system.** No word survives into product copy because it is what the code calls the thing. Scope, payload, shape, schema, parse, bounded, withheld, admitted, evidence block, model version, and the name of any runtime dependency are engineering vocabulary — they belong in code, logs, and engineering docs, and nowhere a user can read them.
+   - ✗ "Set the request scope" → ✓ "Understood the question"
+   - ✗ "The answer came back in a shape Connex couldn't read, so none of it was kept." → ✓ "The answer didn't come through, so nothing was kept."
+   - ✗ "The helper opens a port on your own machine… Node.js 18 or newer is required." → ✓ delete it; a user cannot act on it
+   - A progress trace, a step list, or a coverage breakdown is engineering output. Show the result; put the working behind a disclosure for the rare reader who wants it.
 
 8. **Create verbs are positional.** "New \<object\>" for page-level creation, "Add \<object\>" for attaching to the current record. JA: 「新規〜」／「〜を追加」. Settings panels save with "Save changes"; dialogs with "Save"; settings toasts say "\<Object\> saved", record toasts "\<Object\> created/deleted".
 

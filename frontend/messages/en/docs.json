@@ -1131,7 +1131,7 @@
                             ],
                             [
                                 "The deal is lost",
-                                "The realised value is set to zero when you lose the deal through the close dialog. Other routes to a lost stage do not currently clear a realised value that was already recorded, so a deal won and later marked lost can keep its won figure; this is a known defect rather than the intended contract."
+                                "Marking the deal lost through the close dialog sets the realised value to zero. Moving it to a lost stage another way doesn't clear a realised value that was already recorded, so a deal that was won and later marked lost can keep its won figure. That's a bug we know about."
                             ]
                         ]
                     },
@@ -1157,7 +1157,7 @@
                             },
                             {
                                 "question": "Our historical deal values changed. Why?",
-                                "answer": "When derived values were introduced, every deal that already had line items had its value recalculated from those lines. That is a one-off correction, and the new figures are the ones that agree with the lines."
+                                "answer": "When Connex started calculating deal value from line items, every deal that already had lines was recalculated once. The new figures are the ones that match the lines."
                             },
                             {
                                 "question": "Someone deleted a product we had quoted. Did we lose the quote?",
@@ -1325,41 +1325,41 @@
             },
             "ai-insights": {
                 "title": "AI insights",
-                "description": "What the optional AI features write, what grounds them, and what leaves your workspace.",
+                "description": "What the AI features write, where their facts come from, and what gets sent outside your workspace.",
                 "blocks": [
                     {
                         "type": "prose",
                         "text": [
                             "Connex can use an AI model to explain what it already knows. It writes a short brief on a deal, says why a deal looks at risk, says why an introduction is worth making, drafts the summary at the top of a report, and reads a business card when the built-in reader cannot.",
-                            "Everything AI writes sits on top of figures Connex computed itself. The numbers, risk factors and warmth scores are never produced by a model, and they remain the authority if the two ever disagree."
+                            "Everything the AI writes sits on top of numbers Connex worked out itself. Warmth, risk factors and totals never come from an AI model. If the writing and the numbers ever disagree, the numbers are right."
                         ]
                     },
                     {
                         "type": "callout",
                         "variant": "warning",
                         "title": "AI is off until someone turns it on",
-                        "body": "AI is switched off for the whole instance by default. Your organisation also has to connect its own AI provider, and the permission to use AI is given to administrators rather than ordinary members by default. Until all three line up, the AI panels simply do not appear, which is the expected state rather than a fault."
+                        "body": "AI is off unless three things line up: it has to be turned on for your whole Connex, your organisation has to connect its own AI provider, and you need permission to use it — which starts with administrators only. Until all three are in place, the AI panels don't appear at all."
                     },
                     {
                         "type": "featureList",
-                        "title": "What keeps it honest",
+                        "title": "What the AI is allowed to say",
                         "columns": 1,
                         "items": [
                             {
-                                "title": "A brief has to cite what it used",
-                                "description": "Every section names the records it drew on, and the citations are checked against the records that were actually supplied. A brief that cites something it was not given is discarded rather than shown."
+                                "title": "It has to name its sources",
+                                "description": "Every section names the records it drew on. If a brief names something it wasn't shown, Connex throws the whole brief away instead of showing it to you."
                             },
                             {
-                                "title": "It refuses when there is too little to go on",
-                                "description": "If a deal has almost no history, Connex says there is not enough activity yet to write a reliable brief instead of producing something confident and empty."
+                                "title": "It won't guess",
+                                "description": "If a deal has almost no history, Connex tells you there isn't enough to work with, instead of writing something that sounds confident and says nothing."
                             },
                             {
-                                "title": "It tells you when it was working blind",
-                                "description": "If part of the surrounding context could not be gathered, the brief says so underneath rather than quietly leaving it out."
+                                "title": "It says when something was missing",
+                                "description": "If Connex couldn't pull in part of the background, the brief says so at the bottom."
                             },
                             {
-                                "title": "Explanations are tied to the real signals",
-                                "description": "The risk write-up may only refer to the risk factors Connex actually calculated for that deal, and an introduction write-up only to the reasons behind that suggestion. Anything else is rejected."
+                                "title": "It can only explain what Connex measured",
+                                "description": "A risk write-up can only mention the risk factors Connex worked out for that deal, and an intro write-up only the reasons behind that suggestion. Anything else is thrown out."
                             }
                         ]
                     },
@@ -1373,28 +1373,28 @@
                         "columns": 1,
                         "items": [
                             {
-                                "title": "Known identifiers are replaced first",
+                                "title": "Details are swapped out first",
                                 "description": "Structured identifiers are tokenized. Free text is screened for special-care data, pattern-redacted for email addresses, URLs, phone numbers, and long identifiers, and tokenized for identifiers matched to CRM records. Names, postal addresses, and other identifiers in free text that do not match a CRM record may be sent as written."
                             },
                             {
-                                "title": "Sensitive free text is withheld, not masked",
-                                "description": "Text that looks like it might touch a specially protected category is left out of the request entirely rather than being sent in a disguised form. Connex errs towards withholding too much."
+                                "title": "The most sensitive notes are not sent at all",
+                                "description": "If a note looks like it touches something highly personal, Connex leaves it out of the request completely rather than disguising it. It leaves out more than it strictly needs to."
                             },
                             {
                                 "title": "A final check runs before anything is sent",
-                                "description": "The exact outgoing request is inspected for any raw identifier that should have been replaced. If one is found the request is abandoned and recorded, rather than sent."
+                                "description": "Just before sending, Connex re-reads the whole request looking for anything that should have been swapped out. If it finds one, the request is cancelled and recorded instead of sent."
                             },
                             {
-                                "title": "Only metadata is recorded",
-                                "description": "The audit trail keeps which feature ran, which provider and model, and whether it succeeded. It never stores the text sent or the text returned."
+                                "title": "What gets logged",
+                                "description": "The audit log records which feature ran, which AI provider and model it used, and whether it worked. The text sent and the text that came back are never stored."
                             }
                         ]
                     },
                     {
                         "type": "callout",
                         "variant": "note",
-                        "title": "Two honest limits",
-                        "body": "Replacing identifiers reduces what your AI provider sees, but Connex still holds the mapping and can read the result, so this is not anonymisation. And an image cannot be masked at all, so a business card sent to a provider goes as the picture it is."
+                        "title": "Two things this doesn't do",
+                        "body": "Swapping in stand-ins limits what your AI provider sees, but Connex keeps the key and can read the answer, so this is not anonymisation. And a picture can't be edited this way, so a business card sent to a provider goes as the photo it is."
                     },
                     {
                         "type": "featureList",
@@ -1403,11 +1403,11 @@
                         "items": [
                             {
                                 "title": "The built-in reader goes first",
-                                "description": "Where card reading is available on your instance it is used first, and nothing leaves your deployment. A provider is only involved if that reader is unavailable."
+                                "description": "If your Connex can read cards on its own, it does, and the image never leaves. An AI provider is only used when that reader isn't available."
                             },
                             {
                                 "title": "You are told which fields came from AI",
-                                "description": "Fields filled by a provider are named for you to check, and are shown without the confidence figures that accompany the built-in reader. Nothing is saved until you confirm it."
+                                "description": "Fields an AI provider filled in are marked so you can check them, and unlike the built-in reader it doesn't tell you how sure it is. Nothing is saved until you confirm it."
                             }
                         ]
                     },
@@ -1425,7 +1425,7 @@
                             },
                             {
                                 "question": "Does it write in Japanese?",
-                                "answer": "Connex asks the model to answer in your language, and the interface around it is fully translated. The wording itself comes from your provider's model, so treat the language of the answer as a strong request rather than a guarantee."
+                                "answer": "Connex asks the model to write in your language, and everything around it is translated. The wording itself comes from your AI provider, so now and then an answer may come back in the other language."
                             }
                         ]
                     },
@@ -1435,7 +1435,7 @@
                         "items": [
                             {
                                 "title": "Warmth",
-                                "description": "The computed signals the AI explanations sit on top of.",
+                                "description": "The numbers the AI explanations are built on.",
                                 "href": "/docs/relationship-intelligence/warmth"
                             },
                             {
@@ -1651,7 +1651,7 @@
                         "type": "callout",
                         "variant": "note",
                         "title": "How the map stays fresh",
-                        "body": "To keep things quick, most of the map loads instantly from what your browser already has, while relationship warmth is always pulled fresh so it stays accurate. Website links on the cards open safely in a new tab."
+                        "body": "The map draws instantly from what your browser has already loaded, and warmth is always fetched fresh. Website links on the cards open in a new tab."
                     },
                     {
                         "type": "cards",
@@ -1750,7 +1750,7 @@
                             },
                             {
                                 "question": "Is the page available in Japanese?",
-                                "answer": "Yes. Every card, form, label, and message is fully translated."
+                                "answer": "Yes. Switch language from the sidebar and this page changes with the rest of Connex."
                             }
                         ]
                     }
@@ -1758,7 +1758,7 @@
             },
             "warm-intro-paths": {
                 "title": "Intro paths",
-                "description": "Reverse-introduction search for the strongest path to any target.",
+                "description": "Working backwards from someone you want to reach, to the person best placed to introduce you.",
                 "blocks": [
                     {
                         "type": "prose",
@@ -1814,8 +1814,8 @@
                     {
                         "type": "callout",
                         "variant": "tip",
-                        "title": "A tidy, trustworthy history",
-                        "body": "Your intro history is built to stay clean. Introducing the same two people again just updates the existing entry instead of duplicating it, and once an intro is recorded it stays recorded. Dismissing only affects pairs you haven't introduced yet, so your history is always accurate and never rewritten."
+                        "title": "Recording the same intro twice won't duplicate it",
+                        "body": "Recording the same two people again updates the entry you already have instead of adding a second one, and once an intro is recorded it stays. Dismiss only affects pairs you haven't introduced yet, so it never removes anything from your history."
                     },
                     {
                         "type": "callout",
@@ -1863,15 +1863,15 @@
                             },
                             {
                                 "title": "An executive summary",
-                                "description": "A written opening, when AI is available on your instance. Every claim in it is checked against the figures below before it is shown."
+                                "description": "A written opening, if your organisation has AI turned on. Connex checks everything it says against the numbers below before showing it."
                             },
                             {
                                 "title": "Figures and charts",
                                 "description": "One card per measure you chose, with the total and how it moved against the previous period or its target."
                             },
                             {
-                                "title": "An appendix you can check",
-                                "description": "Every number in the report listed as a plain table, with numbered citations, so a reader can verify any claim."
+                                "title": "An appendix with every number",
+                                "description": "Every number in the report listed as a plain table, with numbered references, so a reader can look up where each figure came from."
                             }
                         ]
                     },
@@ -1885,7 +1885,7 @@
                             },
                             {
                                 "title": "Choose who receives it",
-                                "description": "Any active members of your workspace. Each recipient has to independently have permission to see everything in the report: if one of them does not, saving the schedule fails and tells you so, rather than quietly sending them less. Members who have left the workspace are dropped from the list for you."
+                                "description": "Any current member of your workspace. Everyone on the list has to be allowed to see everything in the report; if one of them isn't, Connex won't save the schedule and tells you. People who have left the workspace are taken off the list for you."
                             },
                             {
                                 "title": "Let it run",
@@ -1897,7 +1897,7 @@
                         "type": "callout",
                         "variant": "note",
                         "title": "Snapshots are kept, but not forever",
-                        "body": "Scheduled deliveries keep the most recent copies per schedule, and older ones are cleared away. A link from an old email may eventually tell you the frozen copy is no longer available and offer you the live report instead. That is expected: you get a page offering you the live report, rather than an error."
+                        "body": "Scheduled deliveries keep only the most recent copies, and older ones are cleared away. A link in an old email may tell you that copy is gone and offer you the live report instead."
                     },
                     {
                         "type": "callout",
@@ -1924,13 +1924,13 @@
                             },
                             {
                                 "title": "Print or PDF",
-                                "description": "Opens your browser's print dialog, where you can save to PDF. There is no separate server-generated file."
+                                "description": "Opens your browser's print dialog, where you can save it as a PDF."
                             }
                         ]
                     },
                     {
                         "type": "prose",
-                        "text": "A goal is a revenue target for one month or quarter, set for a single owner or for the whole workspace. The goals page is where you record targets; progress against them appears inside monthly and quarterly reports as an attainment figure, computed from won revenue in the same period and currency."
+                        "text": "A goal is a revenue target for one month or quarter, set for one person or for the whole workspace. The goals page is where you set targets; how you're doing against them appears inside monthly and quarterly reports, as a percentage worked out from the revenue you won in the same period and currency."
                     },
                     {
                         "type": "faq",
@@ -1946,7 +1946,7 @@
                             },
                             {
                                 "question": "Why does the goals page not show progress?",
-                                "answer": "It is a register of targets. Attainment is calculated inside a monthly or quarterly report, which is where you can see it against the rest of the figures."
+                                "answer": "The goals page is just where you set targets. How you're doing appears inside a monthly or quarterly report, next to the rest of the figures."
                             }
                         ]
                     },
@@ -2534,7 +2534,7 @@
                             },
                             {
                                 "title": "Filter",
-                                "description": "Narrow the list by file type, by the kind of record it's attached to, or by tag. You can also surface unlinked files, whose owning record was deleted."
+                                "description": "Narrow the list by file type, by the kind of record it's attached to, or by tag. You can also show files whose record was deleted."
                             }
                         ]
                     },
@@ -2754,7 +2754,7 @@
                         "type": "callout",
                         "variant": "warning",
                         "title": "A generated document never changes again",
-                        "body": "Generating freezes everything: the resolved wording, the deal's line items and its totals as they were at that moment. There is no way to edit a document afterwards, by design. To correct one, generate a new version and mark the old one superseded. Later edits to the template or to the deal's line items never reach back into it."
+                        "body": "Generating locks it: the wording, the deal's line items and its totals, exactly as they were at that moment. A document can't be edited afterwards. To correct one, generate a new version and mark the old one superseded. Later changes to the template or to the deal never reach back into it."
                     },
                     {
                         "type": "table",
@@ -2788,7 +2788,7 @@
                     },
                     {
                         "type": "prose",
-                        "text": "An approval policy describes when sign-off is required, for example above a certain total in a given currency, or beyond a certain discount. Policies are matched against the document's frozen figures, and the first active policy that matches is the one that applies."
+                        "text": "An approval policy describes when sign-off is required — above a certain total in a given currency, say, or beyond a certain discount. Connex checks each policy against the numbers locked into the document, and the first one that matches is the one that applies."
                     },
                     {
                         "type": "featureList",
@@ -2797,7 +2797,7 @@
                         "items": [
                             {
                                 "title": "You cannot finalise around it",
-                                "description": "If an active policy matches a draft, finalising is refused until the document has been approved. The approved and pending states can only ever be set by the approval process itself, never requested directly."
+                                "description": "If a policy applies to a draft, you can't finalise it until someone has approved it."
                             },
                             {
                                 "title": "You cannot approve your own work",
@@ -2816,8 +2816,8 @@
                     {
                         "type": "callout",
                         "variant": "note",
-                        "title": "The approve action is offered more widely than it is allowed",
-                        "body": "If you generated a document that a colleague then sent for approval, the approve and reject actions still appear to you. Choosing one is refused with a message explaining why. The rule is enforced properly; it is only the menu that has not caught up."
+                        "title": "You may see Approve when you can't use it",
+                        "body": "If you generated a document that a colleague then sent for approval, Approve and Reject still show up in your menu. Choosing one won't work, and Connex tells you why."
                     },
                     {
                         "type": "faq",
@@ -3871,13 +3871,13 @@
             },
             "connected-capture": {
                 "title": "Connected account capture",
-                "description": "Control which provider interactions become relationship evidence.",
+                "description": "Choose what Connex picks up from your connected email and calendar.",
                 "blocks": [
                     {
                         "type": "prose",
                         "text": [
-                            "Connecting Google or Microsoft gives Connex custody of a read-only provider connection. It does not start capture. Open Account, then Connections, and save a capture policy for each provider you want to use.",
-                            "Policies are scoped to the active workspace. Your policy can be narrowed by workspace and operator controls, but those controls can never be widened from the account page."
+                            "Connecting Google or Microsoft only gives Connex read access. It doesn't start picking anything up. Open Account, then Connections, and choose what Connex should pick up from each account.",
+                            "What you choose applies to the workspace you're in. Your admin can narrow what may be picked up; nothing you set here can go wider than that."
                         ]
                     },
                     {
@@ -3886,20 +3886,20 @@
                         "columns": 2,
                         "items": [
                             {
-                                "title": "Sources and history",
-                                "description": "Choose calendar, received mail, sent mail, and a history window up to 180 days. New policies start at 90 days."
+                                "title": "What to pick up, and how far back",
+                                "description": "Choose your calendar, mail you received, mail you sent, and how far back to go — up to 180 days. It starts at 90."
                             },
                             {
-                                "title": "Metadata and bodies",
-                                "description": "Metadata-only capture is the default. Message bodies require both workspace permission and your explicit choice."
+                                "title": "Just the details, or the whole message",
+                                "description": "By default Connex picks up only who, when, and the subject line. To include the text of a message, your workspace has to allow it and you have to turn it on."
                             },
                             {
-                                "title": "Participant review",
-                                "description": "Unmatched or ambiguous participants stay in a review queue. Attach them to a contact, create a new contact after the usual duplicate check, or ignore them."
+                                "title": "People Connex isn't sure about",
+                                "description": "When Connex can't tell who someone is, it sets them aside for you. Link them to a contact, create a new contact, or ignore them."
                             },
                             {
-                                "title": "Approval and evidence",
-                                "description": "Review-first policies hold resolved items for approval. Captured activities show provider provenance and remain read-only."
+                                "title": "Checking things before they land",
+                                "description": "If you ask to review first, nothing appears on a record until you approve it. Anything Connex picked up says where it came from, and can't be edited."
                             }
                         ]
                     },
@@ -3907,19 +3907,19 @@
                         "type": "callout",
                         "variant": "warning",
                         "title": "Erasing and disconnecting cover different things",
-                        "body": "Erasing removes captured content and derived evidence from the active workspace. Disconnecting erases this provider's captured data from every workspace before deleting the credential. Metadata-only audit records remain."
+                        "body": "Erasing clears what Connex picked up from the workspace you're in. Disconnecting clears it from every workspace, then removes the connection itself. Either way, the audit log still shows that it happened."
                     }
                 ]
             },
             "audit-logs": {
                 "title": "Audit logs",
-                "description": "A tamper-evident history of actions taken in the workspace.",
+                "description": "A record of everything that happened in your workspace.",
                 "blocks": [
                     {
                         "type": "prose",
                         "text": [
                             "The audit log is a complete, unchangeable history of everything that happens in your workspace. You'll find it under Workspace in the sidebar, and in settings under Audit & diagnostics, laid out as a timeline with the newest events first.",
-                            "Connex records events on its own as people work, so nothing depends on anyone remembering to write it down. Once an event is recorded, it can never be edited or deleted, which makes the log a record you can trust when you need to look back."
+                            "Connex records events on its own as people work, so nothing depends on someone remembering to write it down. Once an event is recorded, it can never be edited or deleted."
                         ]
                     },
                     {
@@ -3935,7 +3935,7 @@
                         "items": [
                             {
                                 "title": "Who",
-                                "description": "The person who did it, with their name saved as it was at the time, so history stays accurate even if they're renamed later. Automated actions show up as System."
+                                "description": "The person who did it, under the name they had at the time — so an old entry still reads correctly if they change their name later. Things Connex did on its own show up as System."
                             },
                             {
                                 "title": "What",
@@ -3989,7 +3989,7 @@
                             },
                             {
                                 "title": "The finer details",
-                                "description": "The expanded entry also shows technical context, like the address and device the action came from."
+                                "description": "It also shows where the action came from — the network address and the device."
                             }
                         ]
                     },
@@ -4142,7 +4142,7 @@
                         "type": "callout",
                         "variant": "warning",
                         "title": "Connecting on its own does nothing",
-                        "body": "Linking an account does not start reading anything. Connex only begins looking at your mail or calendar after you have chosen which sources to allow and saved that choice, and only if capture is switched on for your deployment at all. Nothing is selected for you."
+                        "body": "Linking an account doesn't start reading anything. Connex only begins looking at your mail or calendar after you choose what it may read and save that choice — and only if your organisation has turned that on. Nothing is chosen for you."
                     },
                     {
                         "type": "steps",
@@ -4154,10 +4154,10 @@
                             },
                             {
                                 "title": "Approve at the provider",
-                                "description": "You are sent to Google or Microsoft to approve. Approve everything asked for: if ongoing access is not granted, Connex refuses the connection rather than storing one that will stop working."
+                                "description": "You're sent to Google or Microsoft to approve. Approve everything it asks for — if you leave something out, the connection won't keep working, so Connex won't save it."
                             },
                             {
-                                "title": "Decide what may be looked at",
+                                "title": "Choose what Connex may read",
                                 "description": "Choose the sources you want considered, within any ceiling your workspace administrator has set. If you skip this, nothing happens."
                             }
                         ]
@@ -4169,7 +4169,7 @@
                         "items": [
                             {
                                 "title": "Your administrator sets the outer limit",
-                                "description": "A workspace administrator can cap what anybody may allow, for example excluding message bodies. Your own choice can be narrower than that ceiling but never wider."
+                                "description": "A workspace administrator can limit what anyone may allow — for example, keeping message text out. You can choose less than they allow, never more."
                             },
                             {
                                 "title": "Pausing keeps the connection",
@@ -4189,7 +4189,7 @@
                         "type": "callout",
                         "variant": "note",
                         "title": "Capture is an internal preview",
-                        "body": "Reading mail and calendar to capture relationship signals is not yet generally available. It stays behind provider verification that is still in progress, so on most deployments the option to connect exists while capture itself is unavailable."
+                        "body": "Reading mail and calendar to pick up relationship signals isn't generally available yet. Google and Microsoft are still reviewing Connex, so on most setups you can connect an account but nothing will be read."
                     },
                     {
                         "type": "cards",
@@ -4238,8 +4238,8 @@
                                 "description": "Putting a contact on privacy hold stops scoring, automation, suggestions, AI features and exports for them. Stopping sharing blocks new shares with other workspaces and keeps them out of AI entirely."
                             },
                             {
-                                "title": "An audit trail you cannot rewrite",
-                                "description": "Actions are recorded in an append-only log with integrity protection, which is what lets you demonstrate afterwards that you did what you say you did."
+                                "title": "A record you can't change",
+                                "description": "Every action is recorded, and nothing can edit or remove it afterwards, so you can show what you did and when."
                             }
                         ]
                     },
@@ -4276,7 +4276,7 @@
                         "type": "callout",
                         "variant": "warning",
                         "title": "Finish outstanding requests before removing a workspace",
-                        "body": "Deleting a workspace or an organisation is refused while a privacy request against it is still open. That is deliberate: it stops a request being made unanswerable by deleting the evidence. Close the request out first, then delete."
+                        "body": "You can't delete a workspace or an organisation while a privacy request against it is still open. Close the request out first, then delete."
                     },
                     {
                         "type": "faq",
@@ -4394,7 +4394,7 @@
                     {
                         "type": "prose",
                         "text": [
-                            "Connex speaks both English and Japanese, and it's a full translation, not just a few labels. Switch languages and the entire app changes, including dates and messages.",
+                            "Connex speaks English and Japanese. Switch languages and the whole app changes, including dates and messages.",
                             "You can change the language from the sign-in pages or from inside the app, and your choice sticks the next time you come back."
                         ]
                     },
@@ -4699,7 +4699,7 @@
                             },
                             {
                                 "question": "Does the work history update itself?",
-                                "answer": "Yes. When you add a person to a company or move them later, Connex records the change for you and marks their current role, so their history stays accurate on its own."
+                                "answer": "Yes. When you add a person to a company, or move them later, Connex records the change and marks their current role for you."
                             }
                         ]
                     },
@@ -4915,7 +4915,7 @@
                             },
                             {
                                 "title": "Read the intro path",
-                                "description": "Every suggestion shows a match strength, either Strong, Good, or Fair, along with a short reason such as shared connections or a shared employer. That reason is the intro path itself, the honest answer to why these two belong together."
+                                "description": "Every suggestion shows a match strength — Strong, Good, or Fair — with a short reason, like shared connections or a shared employer. That reason is the intro path: why these two belong together."
                             },
                             {
                                 "title": "Search for a specific person",
@@ -4931,7 +4931,7 @@
                         "type": "callout",
                         "variant": "tip",
                         "title": "Dismiss the pairs that do not fit",
-                        "body": "If a suggested pair is not right, choose Dismiss. It sets the pair aside without recording anything and quietly steers future suggestions toward better matches. Dismissing only affects pairs you have not introduced yet, so your history stays accurate and is never rewritten."
+                        "body": "If a suggested pair isn't right, choose Dismiss. It sets the pair aside without recording anything, and steers future suggestions toward better matches. Dismiss only affects pairs you haven't introduced yet, so it never removes anything from your history."
                     },
                     {
                         "type": "faq",
@@ -5051,7 +5051,7 @@
     "DocsMarketing": {
         "title": "Marketing",
         "description": "Campaigns, audiences, and the delivery rules Connex applies on your behalf.",
-        "lead": "Connex can send an email or SMS campaign to a frozen audience of your contacts. The rules around consent, frequency, and measurement are deliberately conservative, and this section is honest about what is and is not counted.",
+        "lead": "Connex can send an email or SMS campaign to a fixed list of your contacts. These pages cover how the list is built, when Connex holds a message back, and which numbers you actually get.",
         "articles": {
             "campaigns": {
                 "title": "Campaigns",
@@ -5083,7 +5083,7 @@
                             },
                             {
                                 "title": "Freeze a snapshot",
-                                "description": "Freezing captures the audience as a numbered version. Sends always run against a frozen snapshot, so the group cannot change between the moment you review it and the moment it goes out."
+                                "description": "Freezing saves the list as a numbered version. Every send uses a frozen list, so the group can't change between the moment you check it and the moment it goes out."
                             },
                             {
                                 "title": "Write a message",
@@ -5099,7 +5099,7 @@
                         "type": "callout",
                         "variant": "warning",
                         "title": "Sending has to be switched on for the whole instance",
-                        "body": "Campaigns are visible to everyone, but delivering them depends on two separate instance-level settings your administrator controls, and both are off unless they turn them on. One allows a send to be queued at all; the other allows queued sends to actually go out. With only the first enabled, queueing appears to succeed and nothing is ever delivered, so ask your administrator to confirm both. Until it is on, you can build campaigns, audiences and messages normally, and queueing a send is refused with a message saying so. A working email or SMS transport also has to be configured before a send can be queued."
+                        "body": "Anyone can build a campaign, but sending needs two separate switches that your administrator controls, and both start off. One lets a send be queued; the other lets queued sends actually go out. With only the first one on, queueing looks like it worked and nothing is ever delivered — so ask your administrator to check both. You also need a working email or SMS setup before a send can be queued."
                     },
                     {
                         "type": "featureList",
@@ -5107,16 +5107,16 @@
                         "columns": 2,
                         "items": [
                             {
-                                "title": "Only people, and only the willing",
+                                "title": "Only contacts, and only those who haven't opted out",
                                 "description": "Only contact audiences can be sent to. Anyone who has unsubscribed, is marked do not contact, or is on privacy hold is excluded, and the estimate tells you how many that was."
                             },
                             {
                                 "title": "One message per person per day",
-                                "description": "A person receives at most one message on a channel in any 24 hours, counted across campaigns. Anyone caught by that cap is reported as skipped rather than silently dropped."
+                                "description": "A person gets at most one message on a channel in any 24 hours, counted across all your campaigns. Anyone held back by that limit shows up as skipped on the send."
                             },
                             {
                                 "title": "Unsubscribes are automatic",
-                                "description": "Connex gives every recipient their own unsubscribe token, but it only reaches them if the message body includes the unsubscribe placeholder, so put it in every template you write. Unsubscribing marks that contact do not contact and withdraws their consent immediately, and it applies to future campaigns too."
+                                "description": "Every recipient gets their own unsubscribe link, but it only reaches them if you put the unsubscribe placeholder in the message — so add it to every template you write. Unsubscribing marks that contact do not contact straight away, and it covers future campaigns too."
                             },
                             {
                                 "title": "Bounces and complaints stop future sends",
@@ -5128,7 +5128,7 @@
                         "type": "callout",
                         "variant": "note",
                         "title": "Opens and clicks are never tracked",
-                        "body": "Connex does not put a tracking pixel in your email and does not rewrite your links. That is a deliberate choice, not a missing feature, so there are no open or click figures anywhere and there never will be from Connex itself."
+                        "body": "Connex doesn't put a tracking pixel in your email and doesn't rewrite your links, so there are no open or click figures anywhere in Connex."
                     },
                     {
                         "type": "table",
@@ -5140,7 +5140,7 @@
                         "rows": [
                             [
                                 "Dispatched, skipped, failed",
-                                "Connex itself, as it hands each message to your transport. Always available."
+                                "Connex itself, as it hands each message to your mail or SMS service. Always available."
                             ],
                             [
                                 "Unsubscribed",
@@ -5166,7 +5166,7 @@
                             },
                             {
                                 "question": "Is the Exports tab a download?",
-                                "answer": "No. It pushes a frozen audience to an external list service your administrator has connected. Nothing is downloaded to your computer."
+                                "answer": "No. It sends a frozen list to an outside mailing service your administrator has connected. Nothing is downloaded to your computer."
                             }
                         ]
                     },
@@ -5193,11 +5193,11 @@
     "DocsOperations": {
         "title": "Running Connex",
         "description": "What ships today, how Connex is deployed, where the boundaries sit, and how support works.",
-        "lead": "This section is for the people who have to trust Connex, not just use it. It sets out plainly what is finished and what is still early, how the different deployment shapes differ, what Connex can and cannot reach, and how to get help when something breaks.",
+        "lead": "This section is for whoever is responsible for Connex, not just for using it. It covers what is finished and what is still early, how the three ways of running Connex differ, what Connex can and cannot reach, and how to get help when something breaks.",
         "articles": {
             "what-connex-is-today": {
                 "title": "What Connex is today",
-                "description": "An honest picture of the product's scope, maturity, and intended use.",
+                "description": "What is finished, what is still early, and what Connex is meant for.",
                 "blocks": [
                     {
                         "type": "prose",
@@ -5212,20 +5212,20 @@
                         "columns": 2,
                         "items": [
                             {
-                                "title": "One workspace, one boundary",
-                                "description": "Every record, file, tag and setting belongs to exactly one workspace and never appears in another. That separation is enforced in the database layer, not just in the interface."
+                                "title": "Nothing crosses between workspaces",
+                                "description": "Every record, file, tag and setting belongs to exactly one workspace, and never shows up in another."
                             },
                             {
-                                "title": "Figures you can trace",
-                                "description": "Warmth, risk, pipeline and report figures are computed from your data by rules you can reason about. Where AI is involved it explains those figures, it does not produce them."
+                                "title": "Where the numbers come from",
+                                "description": "Warmth, risk, pipeline and report figures are calculated from your own data. AI can explain those numbers, but it never produces them."
                             },
                             {
-                                "title": "Fail closed",
-                                "description": "When a check cannot be completed, Connex refuses rather than guesses. Optional features generally stay hidden when they are not configured, rather than appearing and then failing. Campaign delivery says so in place rather than hiding, because the rest of the campaign surface still works without it."
+                                "title": "When Connex can't be sure, it stops",
+                                "description": "If Connex can't confirm something, it stops instead of guessing. Features that haven't been set up usually don't appear at all, rather than appearing and then failing. Campaign sending is the exception: it says so on the page, because the rest of the campaign screens still work."
                             },
                             {
                                 "title": "Japanese as a first language",
-                                "description": "The whole interface, and this documentation, ship in Japanese and English. Japanese is not an afterthought translation layer."
+                                "description": "The whole app, and this documentation, are written in both Japanese and English."
                             }
                         ]
                     },
@@ -5233,7 +5233,7 @@
                         "type": "callout",
                         "variant": "note",
                         "title": "Connex is pre-1.0",
-                        "body": "Some surfaces are complete and in daily use, some are deliberately switched off until an external gate clears, and a few exist as groundwork for later work. The next article says exactly which is which, per surface, so you never have to guess from the interface alone."
+                        "body": "Some parts are finished and in daily use, some are switched off for now, and a few are groundwork for later. The next page says which is which, one screen at a time."
                     },
                     {
                         "type": "prose",
@@ -5391,7 +5391,7 @@
                         "type": "callout",
                         "variant": "note",
                         "title": "Where a feature is off, it usually just is not there",
-                        "body": "Connex hides what it cannot deliver rather than showing a control that fails. That means an absent panel is often the correct signal that something is not configured, rather than a fault. There are two exceptions, and both announce themselves in place. Reports always render their figures, and only the written summary reports itself as unavailable. Campaigns keep their planning, audience and message screens live whether or not sending is enabled, because those genuinely work without it; the delivery and export panels say up front when sending is not enabled on this instance, and the queue control stays disabled."
+                        "body": "When a feature is off, Connex hides it rather than showing a control that won't work — so a missing panel usually means it isn't set up, not that something is broken. Two things behave differently and say so on the page. Reports always show their figures; only the written summary says when it isn't available. Campaign planning, audiences and messages work whether or not sending is on, so those screens stay; the delivery and export panels say when sending is off, and the queue button stays greyed out."
                     },
                     {
                         "type": "cards",
@@ -5417,7 +5417,7 @@
                 "blocks": [
                     {
                         "type": "prose",
-                        "text": "Every Connex deployment declares which shape it is. That declaration is required, and an instance that does not set it refuses to start rather than guessing. The shape decides who operates the environment, who holds the keys, and which settings are allowed at all."
+                        "text": "Every Connex has to be told which of the three shapes it is, and it won't start until you do. The shape decides who runs the environment, who holds the keys, and which settings are allowed at all."
                     },
                     {
                         "type": "illustration",
@@ -5436,7 +5436,7 @@
                             [
                                 "Cloud (saas)",
                                 "Connex",
-                                "A shared, hardened environment run by Connex. The internal escape hatches an operator might use in their own network are refused outright."
+                                "A shared environment run by Connex. Settings meant for a private network are blocked here."
                             ],
                             [
                                 "Dedicated (silo)",
@@ -5461,11 +5461,11 @@
                             },
                             {
                                 "title": "Who holds the keys",
-                                "description": "A self-hosted deployment generates and holds its own encryption and audit-integrity secrets, and they never leave your environment. A Connex-operated shape is operated by Connex, so it does not carry that guarantee."
+                                "description": "If you run Connex yourself, its encryption keys are created in your environment and never leave it. If Connex runs it for you, Connex holds those keys."
                             },
                             {
                                 "title": "Which mail path is available",
-                                "description": "Connex-managed email is only possible where Connex operates the environment. A self-hosted deployment configures its own mail server, and enabling managed mail there is refused at startup rather than quietly ignored."
+                                "description": "Connex can only handle your email where Connex runs the environment. If you run Connex yourself, you point it at your own mail server. Turning on Connex-managed mail there won't work, and Connex says so when it starts instead of ignoring it."
                             },
                             {
                                 "title": "Which optional features are permitted",
@@ -5518,20 +5518,20 @@
                                 "description": "Connex has no remote access to it and nothing in the product reports usage or content back to Connex. The keys are generated in your environment and stay there."
                             },
                             {
-                                "title": "The service processes your data to provide the service",
-                                "description": "Connex is not end-to-end encrypted. To score relationships, run searches and render reports, the application works with your CRM content in the clear. What differs between deployment shapes is who operates that application, not whether it can read the data."
+                                "title": "Connex can read your data",
+                                "description": "Connex is not end-to-end encrypted. To measure warmth, run searches and build reports, it has to read what is in your records. What changes between the three shapes is who runs the software, not whether the software can read your data."
                             },
                             {
-                                "title": "Administrative surfaces are closed by default",
-                                "description": "The general-purpose management endpoints are switched off entirely. The health check is deliberately minimal, and the metrics endpoint requires a token before it will answer anyone."
+                                "title": "Nothing extra is left open",
+                                "description": "The built-in management and monitoring pages are switched off. The one that stays on says only whether Connex is running; anything more detailed needs a key."
                             },
                             {
-                                "title": "The audit log is append-only",
-                                "description": "Audit entries are chained with an integrity secret and protected at the database level so the application cannot rewrite history."
+                                "title": "The audit log can only be added to",
+                                "description": "Entries can be read, and nothing in Connex can edit one or delete one. Deleting a workspace is the one thing that touches them: the entries stay, but their links to that workspace and to the people in it are removed."
                             },
                             {
-                                "title": "Diagnostic state moves by bundle, not by access",
-                                "description": "When a ticket needs more than a reference code, an organisation administrator downloads a redacted bundle and hands it over deliberately. It carries readiness, configuration and an audit slice, never secrets, hosts, record values or people's names, and it collects no log content at all."
+                                "title": "Support gets a file, not a way in",
+                                "description": "When a reference code isn't enough, an organisation administrator downloads a file and sends it over. It holds settings, health information and part of the audit log — never passwords, server names, record contents or people's names, and no log text at all."
                             }
                         ]
                     },
@@ -5613,7 +5613,7 @@
                         "items": [
                             {
                                 "title": "Deployment and capabilities",
-                                "description": "Which edition this instance runs as, and for each capability whether the edition forbids it or it is simply not configured. Those are different problems with different fixes."
+                                "description": "Which of the three shapes this Connex runs as, and for each optional feature whether the shape doesn't allow it or it simply hasn't been set up. Those need different fixes."
                             },
                             {
                                 "title": "Provider readiness",
@@ -5649,7 +5649,7 @@
                             },
                             {
                                 "title": "Read the result",
-                                "description": "You get the sending identity and the transport outcome. On a workspace that supplies its own mail server you also get an advisory note on whether SPF and DMARC records exist for that domain."
+                                "description": "You see which address it was sent from and whether the mail server accepted it. If your workspace uses its own mail server, you also get a note on whether SPF and DMARC records exist for that domain."
                             }
                         ]
                     },
@@ -5657,7 +5657,7 @@
                         "type": "callout",
                         "variant": "warning",
                         "title": "Three tests in five minutes, and the fourth says Failed",
-                        "body": "The test is limited to three sends every five minutes for each person in each workspace. Going over that limit does not produce a special message: the result comes back as Failed, looking exactly like a broken mail server, with a rate-limited reason code. If you have been testing repeatedly and suddenly everything fails, wait five minutes before believing it."
+                        "body": "The test is limited to three sends every five minutes, per person per workspace. Going over that doesn't get its own message: the result just says Failed, exactly like a broken mail server. If you have been testing repeatedly and everything suddenly fails, wait five minutes before believing it."
                     },
                     {
                         "type": "featureList",
@@ -5694,7 +5694,7 @@
                         "items": [
                             {
                                 "title": "Readiness and configuration",
-                                "description": "The same health picture the diagnostics page shows, plus allowlisted configuration and migration history."
+                                "description": "The same health information the diagnostics page shows, plus the settings that are safe to share and a list of the database updates that have been applied."
                             },
                             {
                                 "title": "An audit slice",
@@ -5706,7 +5706,7 @@
                             },
                             {
                                 "title": "No logs at all",
-                                "description": "The bundle collects no log or journal content. Server logs cannot be narrowed to one workspace, so collecting them was deliberately left out rather than shipped unsafe."
+                                "description": "No log text at all. Server logs can't be narrowed down to a single workspace, so Connex leaves them out rather than include other people's data."
                             }
                         ]
                     },
@@ -5714,7 +5714,7 @@
                         "type": "callout",
                         "variant": "note",
                         "title": "Ask for a narrower window, not a bigger bundle",
-                        "body": "Assembly stops rather than trimming: there is a size ceiling and a time budget, and exceeding either is refused outright with a message asking you to shorten the period or narrow it to one record. If a bundle is refused, make the request smaller rather than trying again unchanged."
+                        "body": "There is a size limit and a time limit, and going over either stops the file being made — you get a message asking you to shorten the period or narrow it to one record. If that happens, ask for less rather than trying the same request again."
                     },
                     {
                         "type": "cards",
@@ -5780,7 +5780,7 @@
                             },
                             {
                                 "title": "Send yourself a test",
-                                "description": "The test uses exactly the settings you saved, with no fallback, and reports the transport result. It only ever sends to your own address."
+                                "description": "The test uses exactly the settings you saved, with nothing filled in behind the scenes, and tells you whether the mail server accepted it. It only ever sends to your own address."
                             },
                             {
                                 "title": "Read what it proves",

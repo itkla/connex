@@ -146,7 +146,7 @@ describe('a campaign engagement count opens the contacts behind it', () => {
             expect(catalog[descriptionKey(counter)], `${counter} must not claim it reached anyone`)
                 .not.toMatch(/\bit reached\b|\bcampaign reached\b/);
         }
-        expect(catalog[descriptionKey('skipped')]).toMatch(/withheld/);
+        expect(catalog[descriptionKey('skipped')]).toMatch(/withheld|held it back/);
     });
 
     it('states no count until the roster is actually loaded', () => {

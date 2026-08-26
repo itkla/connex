@@ -1,7 +1,7 @@
 {
     "SettingsHome": {
         "title": "Settings",
-        "description": "Everything you can configure, grouped by what it applies to.",
+        "description": "Everything you can change — for you, for this workspace, and for your organization.",
         "navLabel": "Settings",
         "sectionsLabel": "Settings sections",
         "searchLabel": "Search settings",
@@ -32,12 +32,12 @@
         "groupAiDataGovernance": "AI & data governance"
     },
     "SettingsAvailability": {
-        "managedTitle": "Managed by your Connex instance",
-        "managedBody": "This is set up once for everyone on this instance, so there's nothing to change here. Ask your administrator if it needs to be different.",
-        "notEnabledTitle": "Not enabled for this deployment",
-        "notEnabledBody": "This Connex instance doesn't have this switched on, so there's nothing to set up yet. Ask your administrator if you need it.",
+        "managedTitle": "Set up for everyone here",
+        "managedBody": "Your administrator sets this once, for everyone. Ask them if it needs to change.",
+        "notEnabledTitle": "This isn't turned on",
+        "notEnabledBody": "Your administrator hasn't turned this on. Ask them if you need it.",
         "askAdminTitle": "Ask a workspace administrator",
-        "askAdminBody": "Your role doesn't include this setting. A workspace admin can change it for you, or give you access to it."
+        "askAdminBody": "You can't change this yourself. A workspace admin can change it for you, or give you access."
     },
     "SettingsPersonalProfile": {
         "description": "Your personal details, and how you appear to the people you work with in every workspace.",
@@ -48,7 +48,7 @@
         "metaDescription": "Manage the passkeys you sign in with."
     },
     "SettingsPersonalConnections": {
-        "metaDescription": "Connect your mailbox and calendar, choose what Connex may capture, and review what it held back.",
+        "metaDescription": "Connect your email and calendar, choose what Connex saves, and check anything it left out.",
         "reviewsTitle": "Capture reviews"
     },
     "SettingsPersonalNotifications": {
@@ -60,15 +60,15 @@
         "metaDescription": "Accept or decline workspace invitations, and leave a workspace you no longer need."
     },
     "SettingsWorkspaceGeneral": {
-        "description": "What {workspace} is called, and the time boundary its shared reporting is measured against.",
+        "description": "The name of {workspace}, and the time zone its shared reports use.",
         "metaDescription": "Rename this workspace and set the time zone its shared reporting uses."
     },
     "SettingsPeople": {
-        "accessCheckFailedBody": "This is a problem reading your permissions, not a decision about them. Try again in a moment.",
+        "accessCheckFailedBody": "Try again in a moment.",
         "accessCheckFailedTitle": "Couldn't check your access",
         "description": "Who belongs to {workspace}, what each role can do, and who may join without an invite.",
-        "directoryDescription": "Look someone up, then open their page to see their work. Only members who have accepted their invitation appear here; anyone still pending is listed under Members, above.",
-        "directoryFailedBody": "Nobody's access changed. The list itself didn't load, so try again in a moment.",
+        "directoryDescription": "Look someone up to see what they're working on. People who haven't accepted their invitation yet are listed under Members, above.",
+        "directoryFailedBody": "Try again in a moment.",
         "directoryFailedTitle": "Couldn't load the member directory",
         "directoryTitle": "Member directory",
         "metaDescription": "Manage members, roles, allowed domains, and the member directory for this workspace."
@@ -77,53 +77,53 @@
         "title": "Not available here"
     },
     "SettingsCommunications": {
-        "accessCheckFailedBody": "This is a problem reading your permissions, not a decision about them. Try again in a moment.",
+        "accessCheckFailedBody": "Try again in a moment.",
         "accessCheckFailedTitle": "Couldn't check your access",
-        "description": "How {workspace} sends mail: the server behind its own messages, the service behind its campaigns, and what it decides on its members' behalf.",
+        "description": "How {workspace} sends email — its own messages, and its campaigns.",
         "metaDescription": "Set up this workspace's mail server, campaign delivery, and notification defaults.",
-        "notificationDefaultsDescription": "The notification settings this workspace would choose for its members before they change their own.",
+        "notificationDefaultsDescription": "The notifications new members would start with.",
         "notificationDefaultsGapAction": "Notification preferences",
-        "notificationDefaultsGapBody": "A workspace can't set notification defaults for its members yet — everyone chooses their own, and nothing here overrides them. Yours are on your notification preferences.",
+        "notificationDefaultsGapBody": "Not available yet. Everyone chooses their own notifications, and nothing here changes them.",
         "notificationDefaultsTitle": "Notification defaults"
     },
     "SettingsWorkspaceDataPrivacy": {
-        "description": "How relationship history that already exists elsewhere gets into {workspace}.",
+        "description": "Bring history from another tool into {workspace}.",
         "metaDescription": "Import existing relationship history into this workspace."
     },
     "SettingsCrm": {
-        "accessCheckFailedBody": "This is a problem reading your permissions, not a decision about them. Try again in a moment.",
+        "accessCheckFailedBody": "Try again in a moment.",
         "accessCheckFailedTitle": "Couldn't check your access",
         "approvalPoliciesFailedBody": "No policy changed. The list itself didn't load, so try again in a moment.",
         "approvalPoliciesFailedTitle": "Couldn't load approval policies",
-        "customFieldsDescription": "Extra details this workspace records on its companies, contacts, and deals, beyond the fields Connex ships with.",
-        "description": "How {workspace} shapes its records: the details they carry, how a contact is judged, what needs approval, and what runs on its own.",
+        "customFieldsDescription": "Your own fields on companies, contacts, and deals, on top of the ones Connex includes.",
+        "description": "The details {workspace} keeps on its records, how contacts are scored, what needs approval, and what runs automatically.",
         "metaDescription": "Set up custom fields, qualification criteria, approval policies, and automation for this workspace.",
-        "workflowsDescription": "The automation that acts on these records when something changes or on a schedule.",
+        "workflowsDescription": "What happens automatically when a record changes, or on a schedule.",
         "workflowsGapAction": "Go to Workflows",
-        "workflowsGapBody": "Workflows are built and turned on from their own surface, not from settings. There is nothing to configure here yet.",
+        "workflowsGapBody": "Workflows have their own page. There's nothing to set here.",
         "workflowsTitle": "Workflow configuration"
     },
     "SettingsAuditDiagnostics": {
-        "accessCheckFailedBody": "This is a problem reading your permissions, not a decision about them. Try again in a moment.",
+        "accessCheckFailedBody": "Try again in a moment.",
         "accessCheckFailedTitle": "Couldn't check your access",
-        "auditFailedBody": "Nothing was hidden from you and nothing was lost. The log itself didn't load, so try again in a moment.",
+        "auditFailedBody": "Try again in a moment.",
         "auditFailedTitle": "Couldn't load the audit log",
-        "description": "What has happened in {workspace}, and whether the services it depends on are healthy.",
-        "diagnosticsDescription": "The state of this workspace's mail, background jobs, and stored credentials, with the deployment settings behind them.",
+        "description": "What's happened in {workspace}, and whether everything behind it is working.",
+        "diagnosticsDescription": "Whether this workspace's email, scheduled jobs, and saved keys are working.",
         "metaDescription": "Review this workspace's audit log and check the health of the services behind it."
     },
     "SettingsOrgGeneral": {
-        "description": "What {organization} is called, the workspaces beneath it, and how either of them ends.",
+        "description": "The name of {organization}, the workspaces inside it, and how to export or delete them.",
         "metaDescription": "Rename your organization, see the workspaces under it, and export or delete them."
     },
     "SettingsOrgIdentity": {
         "description": "Who administers {organization}, who may be invited into its workspaces, and how they sign in.",
         "metaDescription": "Manage organization administrators, allowed email domains, and single sign-on.",
         "ssoCheckFailedTitle": "Couldn't check single sign-on",
-        "ssoCheckFailedBody": "Nothing changed and nothing is switched off. We couldn't read whether this instance has single sign-on, so try again in a moment."
+        "ssoCheckFailedBody": "Try again in a moment."
     },
     "SettingsOrgAi": {
-        "description": "The AI provider {organization} brings, what its workspaces may do with it, and how much it may spend in a day.",
+        "description": "Which AI service {organization} uses, which workspaces can use it, and how much they can use each day.",
         "metaDescription": "Configure your organization's AI provider, workspace controls, and daily limit."
     },
     "SettingsOrgDataRequests": {
@@ -131,8 +131,8 @@
         "metaDescription": "Track requests to see, correct, or stop the use of personal data, and assemble disclosure exports."
     },
     "SettingsOrgAuditDiagnostics": {
-        "description": "What has happened above {organization}'s workspaces, and whether the services behind them are healthy.",
+        "description": "What's happened across {organization}, and whether everything behind it is working.",
         "metaDescription": "Review the organization audit log and check the health of the services behind it.",
-        "diagnosticsDescription": "The state of this organization's background jobs, stored credentials, and provider readiness, with the deployment settings behind them."
+        "diagnosticsDescription": "Whether this organization's scheduled jobs, saved keys, and connected services are working."
     }
 }

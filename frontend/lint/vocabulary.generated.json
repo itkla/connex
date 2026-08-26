@@ -839,9 +839,9 @@
             },
             "allowFiles": [],
             "canonicalExceptions": [],
-            "narrowed": false,
+            "narrowed": true,
             "pattern": {
-                "source": "\\b(?:turning|turned|turnes|turns|turn)\\b",
+                "source": "\\bturn(?:s|ed|ing)?\\b(?!\\s+(?:\\w+\\s+){0,2}(?:on|off|into|over|out|back|down|up|away)\\b)",
                 "flags": "iu"
             },
             "sources": [
