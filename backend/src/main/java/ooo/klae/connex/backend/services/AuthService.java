@@ -23,6 +23,8 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.SsoEnforcedException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.password.PasswordCredentialService;
+import ooo.klae.connex.backend.password.PasswordScreeningFlow;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 import ooo.klae.connex.backend.util.ClientIpResolver;
 import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
@@ -42,6 +44,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class AuthService {
     private final UserMapper userMapper;
+    private final PasswordCredentialService passwordCredentialService;
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
     private final AuditService auditService;
@@ -73,7 +76,7 @@ public class AuthService {
         // their address; when it is off they are verified by fiat, so turning the feature on later
         // never retroactively gates accounts created while it was off.
         boolean verificationEnabled = registrationVerificationService.isEnabled();
-        User user = register(request, !verificationEnabled);
+        User user = register(request, !verificationEnabled, PasswordScreeningFlow.SELF_REGISTRATION);
         if (verificationEnabled) {
             registrationVerificationService.issue(user, requestIp);
         }
@@ -89,6 +92,10 @@ public class AuthService {
      */
     @Transactional
     public User register(RegisterDto request, boolean emailVerified) {
+        return register(request, emailVerified, PasswordScreeningFlow.ADMIN_ACCOUNT_CREATION);
+    }
+
+    private User register(RegisterDto request, boolean emailVerified, PasswordScreeningFlow flow) {
         try {
             if (userMapper.getUserByUsername(request.getUsername()) != null
                     || userMapper.getUserByEmail(request.getEmail()) != null) {
@@ -101,7 +108,7 @@ public class AuthService {
             user.setEmail(request.getEmail());
             user.setEmailVerified(emailVerified);
             user.setTimezone(TimezoneSupport.validateIana(request.getTimezone(), "UTC"));
-            user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+            user.setPasswordHash(passwordCredentialService.encode(request.getPassword(), flow, null));
             userMapper.insert(user);
             // New users get their own owned workspace unless the instance restricts creation
             // (invite-only mode), in which case they onboard by accepting an invite.
@@ -130,7 +137,8 @@ public class AuthService {
         user.setEmail(request.getEmail());
         user.setEmailVerified(true);
         user.setTimezone(TimezoneSupport.validateIana(request.getTimezone(), "UTC"));
-        user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+        user.setPasswordHash(passwordCredentialService.encode(
+                request.getPassword(), PasswordScreeningFlow.BOOTSTRAP_OWNER, null));
         userMapper.insert(user);
         workspaceService.createWorkspaceForBootstrap(user.getDisplayName() + "'s Workspace", user.getId());
         auditService.record("auth.bootstrap", "user", user.getId(), user.getDisplayName(),

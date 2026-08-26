@@ -5081,6 +5081,7 @@ export type InstanceCapabilities = {
     businessCardScanning: boolean;
     businessCardImport: boolean;
     campaignDelivery: boolean;
+    privilegedMfaEnforced: boolean;
 };
 
 export type ConnectedAccountProvider = 'google' | 'microsoft';

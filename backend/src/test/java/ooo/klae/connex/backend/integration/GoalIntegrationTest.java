@@ -49,6 +49,7 @@ import tools.jackson.databind.ObjectMapper;
 /** Full-stack HTTP coverage for report-goal CRUD, RBAC, validation, and tenant isolation. */
 @SpringBootTest
 @Transactional
+@UnenrolledPrivilegedFixture
 class GoalIntegrationTest {
     private static final String PASSWORD = "Goal-Test-Pw1!";
 

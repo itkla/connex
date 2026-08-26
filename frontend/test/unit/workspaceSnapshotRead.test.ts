@@ -128,6 +128,7 @@ function stubAppShellReads(
                 businessCardScanning: false,
                 businessCardImport: false,
                 campaignDelivery: false,
+                privilegedMfaEnforced: true,
             }));
         }
         if (url.endsWith("/api/permissions/effective")) {

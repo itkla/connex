@@ -196,6 +196,32 @@ class GlobalExceptionHandlerTest {
         assertTrue(body.containsKey("message"), "generic message body expected");
     }
 
+    @Test
+    void breachedPassword_mapsStableCodeAndFieldWithoutCandidate() {
+        String candidate = "Password1!";
+
+        ResponseEntity<Map<String, String>> response = handler.breachedPassword(
+                new BreachedPasswordException("newPassword"));
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(BreachedPasswordException.CODE, response.getBody().get("code"));
+        assertEquals(BreachedPasswordException.MESSAGE, response.getBody().get("newPassword"));
+        assertFalse(response.getBody().toString().contains(candidate));
+    }
+
+    @Test
+    void unavailablePasswordCheck_mapsStable503FieldError() {
+        ResponseEntity<Map<String, String>> response = handler.breachedPasswordCheckUnavailable(
+                new BreachedPasswordCheckUnavailableException("password"));
+
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(BreachedPasswordCheckUnavailableException.CODE, response.getBody().get("code"));
+        assertEquals(BreachedPasswordCheckUnavailableException.MESSAGE,
+                response.getBody().get("password"));
+    }
+
     /**
      * A field-less {@link DuplicateResourceException} (what {@code AuthService.register} now throws on
      * any registration conflict) maps to a generic {@code {message}} body — no {@code username}/{@code email}

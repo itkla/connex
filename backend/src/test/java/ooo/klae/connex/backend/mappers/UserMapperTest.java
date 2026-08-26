@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
@@ -15,10 +16,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.UserReferenceDto;
 
 class UserMapperTest extends AbstractMapperTest {
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private RoleMapper roleMapper;
+    @Autowired private OrgMemberMapper orgMemberMapper;
 
     /**
      * Inserts a new user and checks if the generated ID is not zero.
@@ -253,6 +257,35 @@ class UserMapperTest extends AbstractMapperTest {
         assertNotNull(userMapper.getUserByUsername("__connex_system__"));
         assertTrue(userMapper.getAllUsers().size() > userMapper.countUsers(),
             "the seeded system actor is present but excluded from the count");
+    }
+
+    @Test
+    void privilegedAccountQueryTracksCurrentRoleAcrossControlPlaneMemberships() {
+        User user = newUser();
+        assertFalse(userMapper.isPrivilegedAccount(user.getId()));
+
+        workspaceMapper.updateMemberRole(workspace.getId(), user.getId(), "admin");
+        assertTrue(userMapper.isPrivilegedAccount(user.getId()));
+
+        workspaceMapper.updateMemberRole(workspace.getId(), user.getId(), "member");
+        assertFalse(userMapper.isPrivilegedAccount(user.getId()));
+
+        WorkspaceRole role = new WorkspaceRole();
+        role.setWorkspaceId(workspace.getId());
+        role.setName("security-admin-" + unique());
+        roleMapper.insertRole(role);
+        workspaceMapper.setMemberCustomRole(workspace.getId(), user.getId(), role.getId());
+        roleMapper.insertPermissions(workspace.getId(), role.getId(), List.of("MEMBER_MANAGE"));
+        assertTrue(userMapper.isPrivilegedAccount(user.getId()));
+
+        roleMapper.clearPermissions(workspace.getId(), role.getId());
+        roleMapper.insertPermissions(workspace.getId(), role.getId(), List.of("REPORT_READ"));
+        assertFalse(userMapper.isPrivilegedAccount(user.getId()));
+
+        Integer orgId = jdbcTemplate.queryForObject(
+                "SELECT org_id FROM workspace WHERE id = ?", Integer.class, workspace.getId());
+        orgMemberMapper.addMember(orgId, user.getId(), "admin");
+        assertTrue(userMapper.isPrivilegedAccount(user.getId()));
     }
 
     private User newUnassignedUser() {

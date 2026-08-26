@@ -57,6 +57,8 @@
     "emailPlaceholder": "taro@example.com",
     "password": "パスワード",
     "passwordPlaceholder": "8文字以上",
+    "breachedPassword": "このパスワードは既知の情報漏えいで確認されています。他のサービスで使用していない別のパスワードを選んでください。",
+    "passwordScreeningUnavailable": "パスワードの漏えい確認を一時的に利用できません。しばらくしてからもう一度お試しください。",
     "cancel": "キャンセル",
     "create": "作成",
     "toastCreated": "ユーザーを作成しました",

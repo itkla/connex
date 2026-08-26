@@ -35,6 +35,7 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
  */
 @SpringBootTest
 @Transactional
+@UnenrolledPrivilegedFixture
 class DealAnalyticsIntegrationTest {
 
     private static final String PASSWORD = "Analytics-Test-Pw1!";

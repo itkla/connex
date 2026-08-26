@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RestController;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.capability.Capability;
 import ooo.klae.connex.backend.capability.CapabilityRegistry;
+import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountProviders;
 
 /**
@@ -20,6 +21,7 @@ import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountProviders;
 public class CapabilitiesController {
 
     private final CapabilityRegistry capabilityRegistry;
+    private final PrivilegedMfaProperties privilegedMfaProperties;
     private final ConnectedAccountProviders connectedAccountProviders;
 
     /**
@@ -47,7 +49,8 @@ public class CapabilitiesController {
                 capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_SCANNING),
                 capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_IMPORT),
                 capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY),
-                capabilityRegistry.isAvailable(Capability.DOCUMENT_SIGNATURE));
+                capabilityRegistry.isAvailable(Capability.DOCUMENT_SIGNATURE),
+                privilegedMfaProperties.isEnforced());
     }
 
     private String modeOf(String provider) {
@@ -67,6 +70,7 @@ public class CapabilitiesController {
      * @param businessCardImport whether reviewed source-image import and retention are ready
      * @param campaignDelivery whether native email campaign delivery is available
      * @param documentSignature whether commercial-document signature delivery is available
+     * @param privilegedMfaEnforced whether privileged accounts are subject to mandatory MFA
      */
     public record CapabilitiesResponse(
             boolean sso,
@@ -78,7 +82,8 @@ public class CapabilitiesController {
             boolean businessCardScanning,
             boolean businessCardImport,
             boolean campaignDelivery,
-            boolean documentSignature) {
+            boolean documentSignature,
+            boolean privilegedMfaEnforced) {
     }
 
     /**

@@ -51,6 +51,7 @@ const ALL_CAPABILITIES: InstanceCapabilities = {
     businessCardScanning: true,
     businessCardImport: true,
     campaignDelivery: true,
+    privilegedMfaEnforced: true,
 };
 
 /** Every message file of a locale, shallow-merged the way the request-time loader merges them. */
@@ -403,6 +404,7 @@ describe("settings navigation gates on the manifest's visibility bucket", () => 
             businessCardScanning: false,
             businessCardImport: false,
             campaignDelivery: false,
+            privilegedMfaEnforced: true,
         };
         const model = resolveSettingsNavigation(context("en", { capabilities: noCapabilities }));
         const ids = model.flatMap((scope) => scope.groups.flatMap((group) => group.destinations.map((d) => d.id)));

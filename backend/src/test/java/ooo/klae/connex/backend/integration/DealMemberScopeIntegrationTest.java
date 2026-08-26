@@ -46,6 +46,7 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 /** Full-stack HTTP coverage for the canonical deal member-scope contract. */
 @SpringBootTest
 @Transactional
+@UnenrolledPrivilegedFixture
 class DealMemberScopeIntegrationTest {
     private static final String PASSWORD = "Member-Scope-Test-Pw1!";
     private static final int WORKSPACE_DEAL_TOTAL = 5;

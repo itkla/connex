@@ -97,6 +97,15 @@ public class SessionSecurityService {
         markStepUp(request.getSession(), userId, clock.millis());
     }
 
+    /** Clears any WebAuthn step-up proof from the current session. */
+    public void clearRecentAuthentication(HttpServletRequest request) {
+        HttpSession session = request.getSession(false);
+        if (session != null) {
+            session.removeAttribute(WEBAUTHN_STEP_UP_AT_ATTR);
+            session.removeAttribute(WEBAUTHN_STEP_UP_USER_ATTR);
+        }
+    }
+
     public void markFirstPasskeyBootstrap(HttpServletRequest request, int userId) {
         HttpSession session = request.getSession();
         session.setAttribute(FIRST_PASSKEY_BOOTSTRAP_AT_ATTR, clock.millis());
@@ -189,9 +198,12 @@ public class SessionSecurityService {
     }
 
     public boolean hasFreshRecentAuthentication(HttpSession session, int userId) {
+        if (session == null) {
+            return false;
+        }
         Duration window = properties.getRecentAuthenticationWindow();
         if (window == null || window.isZero() || window.isNegative()) {
-            return true;
+            return false;
         }
         Long recentAt = longAttribute(session, WEBAUTHN_STEP_UP_AT_ATTR);
         Integer recentUserId = integerAttribute(session, WEBAUTHN_STEP_UP_USER_ATTR);
@@ -225,7 +237,7 @@ public class SessionSecurityService {
     private boolean isWithinRecentAuthenticationWindow(long timestamp) {
         Duration window = properties.getRecentAuthenticationWindow();
         if (window == null || window.isZero() || window.isNegative()) {
-            return true;
+            return false;
         }
         long age = clock.millis() - timestamp;
         return age >= 0 && age <= window.toMillis();

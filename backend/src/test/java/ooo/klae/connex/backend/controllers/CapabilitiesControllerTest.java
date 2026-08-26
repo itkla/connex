@@ -19,6 +19,7 @@ import org.springframework.web.context.request.RequestContextHolder;
 
 import ooo.klae.connex.backend.capability.Capability;
 import ooo.klae.connex.backend.capability.CapabilityRegistry;
+import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountMode;
 import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountProviders;
 
@@ -26,6 +27,7 @@ import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountProviders;
 class CapabilitiesControllerTest {
 
     @Mock private CapabilityRegistry capabilityRegistry;
+    @Mock private PrivilegedMfaProperties privilegedMfaProperties;
     @Mock private ConnectedAccountProviders connectedAccountProviders;
 
     private MockMvc mockMvc;
@@ -36,8 +38,8 @@ class CapabilitiesControllerTest {
                 .thenReturn(ConnectedAccountMode.CUSTOM);
         lenient().when(connectedAccountProviders.mode(ConnectedAccountProviders.MICROSOFT))
                 .thenReturn(ConnectedAccountMode.CUSTOM);
-        mockMvc = MockMvcBuilders.standaloneSetup(
-                new CapabilitiesController(capabilityRegistry, connectedAccountProviders)).build();
+        mockMvc = MockMvcBuilders.standaloneSetup(new CapabilitiesController(
+                capabilityRegistry, privilegedMfaProperties, connectedAccountProviders)).build();
     }
 
     @AfterEach
@@ -61,6 +63,7 @@ class CapabilitiesControllerTest {
         when(connectedAccountProviders.mode(ConnectedAccountProviders.GOOGLE))
                 .thenReturn(ConnectedAccountMode.MANAGED);
         when(capabilityRegistry.isAvailable(Capability.DOCUMENT_SIGNATURE)).thenReturn(true);
+        when(privilegedMfaProperties.isEnforced()).thenReturn(true);
 
         mockMvc.perform(get("/api/capabilities"))
                 .andExpect(status().isOk())
@@ -77,7 +80,8 @@ class CapabilitiesControllerTest {
                 .andExpect(jsonPath("$.businessCardScanning").value(true))
                 .andExpect(jsonPath("$.businessCardImport").value(true))
                 .andExpect(jsonPath("$.campaignDelivery").value(true))
-                .andExpect(jsonPath("$.documentSignature").value(true));
+                .andExpect(jsonPath("$.documentSignature").value(true))
+                .andExpect(jsonPath("$.privilegedMfaEnforced").value(true));
     }
 
     @Test

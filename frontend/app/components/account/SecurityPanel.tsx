@@ -18,6 +18,7 @@ import type { Passkey } from "@/app/lib/types";
 import {
     ApiError,
     beginPasskeyRegistration,
+    completePrivilegedMfaEnrollment,
     deletePasskey,
     finishPasskeyRegistration,
     getPasskeyRegistrationRequirements,
@@ -160,6 +161,7 @@ export default function SecurityPanel() {
     const finishRegistration = async (optionsJSON: Awaited<ReturnType<typeof beginPasskeyRegistration>>) => {
         const credential = await startRegistration({ optionsJSON });
         await finishPasskeyRegistration(deviceLabel(), credential);
+        completePrivilegedMfaEnrollment();
         setPasskeys(await getPasskeys());
         setCurrentPasswordRequired(false);
         toastSuccess(t("added"));

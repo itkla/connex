@@ -42,6 +42,7 @@ public interface UserMapper {
     User getUserByIdForShare(int id);
     Integer lockById(int id);
     Integer lockByIdForShare(int id);
+    List<Integer> lockAssignedCustomRoleIds(int id);
     boolean isAccountDeletionReserved(int id);
     boolean isAccountDeletionReservationOwner(
         @Param("id") int id, @Param("owner") String owner);
@@ -53,6 +54,8 @@ public interface UserMapper {
         @Param("id") int id, @Param("owner") String owner);
     User getUserByUsername(String username);
     User getUserByEmail(String email);
+    /** Current account-wide administrative privilege from active control-plane memberships. */
+    boolean isPrivilegedAccount(int id);
     /** Count of real accounts, excluding the reserved {@code __connex_system__} actor; gates bootstrap provisioning. */
     int countUsers();
     List<User> search(@Param("workspaceId") int workspaceId, @Param("query") String query);

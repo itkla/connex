@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { activeWorkspaceId, registerUser } from "./support/api";
+import { activeWorkspaceId, csrfBootstrap, registerUser } from "./support/api";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
@@ -22,6 +22,7 @@ async function installVirtualAuthenticator(page: Page): Promise<() => Promise<vo
             },
         });
         return async () => {
+            if (page.isClosed()) return;
             await session.send("WebAuthn.removeVirtualAuthenticator", { authenticatorId });
             await session.send("WebAuthn.disable");
             await session.detach();
@@ -34,6 +35,68 @@ async function installVirtualAuthenticator(page: Page): Promise<() => Promise<vo
 }
 
 test.describe("workspace and organization identity", () => {
+    test("privileged MFA confinement lands on a usable enrolment flow without reloading", async ({ browser }, testInfo) => {
+        test.setTimeout(90_000);
+        const baseURL = testInfo.project.use.baseURL;
+        if (typeof baseURL !== "string") throw new Error("The E2E project requires a base URL");
+        const runId = `mfa${Date.now().toString(36)}${testInfo.retry}`;
+        const password = `MfaEnroll!${runId}A1`;
+        const context = await browser.newContext({
+            baseURL,
+            locale: "en-US",
+            timezoneId: "UTC",
+            reducedMotion: "reduce",
+            storageState: { cookies: [], origins: [] },
+        });
+        let removeVirtualAuthenticator: (() => Promise<void>) | null = null;
+        try {
+            await registerUser(context.request, {
+                username: runId,
+                password,
+                email: `${runId}@example.com`,
+            });
+            await activeWorkspaceId(context.request);
+            await csrfBootstrap(context.request);
+            const page = await context.newPage();
+            removeVirtualAuthenticator = await installVirtualAuthenticator(page);
+            let notificationCountRequests = 0;
+            await page.route("**/api/notifications/counts", async (route) => {
+                notificationCountRequests += 1;
+                if (notificationCountRequests === 1) {
+                    await route.fulfill({
+                        status: 403,
+                        contentType: "application/json",
+                        body: JSON.stringify({
+                            code: "PRIVILEGED_MFA_ENROLLMENT_REQUIRED",
+                            message: "A passkey must be enrolled before this privileged account can continue",
+                        }),
+                    });
+                } else {
+                    await route.fallback();
+                }
+            });
+
+            await page.goto("/settings/personal/security");
+            await expect(page).toHaveURL(/\/settings\/personal\/security\?mfa=enroll$/, { timeout: 20_000 });
+            const addPasskey = page.getByRole("button", { name: "Add a passkey" }).first();
+            await expect(addPasskey).toBeVisible();
+            expect(notificationCountRequests).toBe(1);
+
+            await addPasskey.click();
+            const passwordDialog = page.getByRole("dialog", { name: "Confirm your password" });
+            await passwordDialog.getByLabel("Current password").fill(password);
+            await passwordDialog.getByRole("button", { name: "Continue", exact: true }).click();
+            await expect(page.getByText("Passkey added", { exact: true })).toBeVisible();
+            await expect(page).toHaveURL(/\/settings\/personal\/security$/);
+            await page.getByRole("link", { name: "Dashboard", exact: true }).click();
+            await expect(page).toHaveURL(/\/dashboard$/);
+            await expect.poll(() => notificationCountRequests).toBeGreaterThan(1);
+        } finally {
+            if (removeVirtualAuthenticator) await removeVirtualAuthenticator();
+            await context.close();
+        }
+    });
+
     test("renames both scopes and navigates the authorized organization layout", async ({ browser }, testInfo) => {
         const baseURL = testInfo.project.use.baseURL;
         if (typeof baseURL !== "string") throw new Error("The E2E project requires a base URL");

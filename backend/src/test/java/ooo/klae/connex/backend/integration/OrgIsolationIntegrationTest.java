@@ -50,6 +50,7 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
  */
 @SpringBootTest
 @Transactional
+@UnenrolledPrivilegedFixture
 class OrgIsolationIntegrationTest {
 
     private static final String PASSWORD = "Org-Test-Pw1!";

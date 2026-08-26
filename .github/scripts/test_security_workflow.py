@@ -5,13 +5,17 @@ import yaml
 
 
 WORKFLOW_PATH = Path(__file__).parents[1] / "workflows" / "security.yml"
+CODEQL_CONFIG_PATH = Path(__file__).parents[1] / "codeql" / "codeql-config.yml"
 CODEQL_REVISION = "ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd"
+CODEQL_CONFIG_INPUT = "./.github/codeql/codeql-config.yml"
 
 
 class SecurityWorkflowTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+        cls.codeql_config_text = CODEQL_CONFIG_PATH.read_text(encoding="utf-8")
+        cls.codeql_config = yaml.safe_load(cls.codeql_config_text)
 
     def job(self, name: str) -> dict[str, object]:
         return self.workflow["jobs"][name]
@@ -32,6 +36,31 @@ class SecurityWorkflowTest(unittest.TestCase):
                 )
                 self.assertNotIn("continue-on-error", str(self.job(job_name)))
 
+    def test_codeql_filter_is_exact_and_has_fixed_term_approval_metadata(self) -> None:
+        self.assertEqual(
+            [
+                {
+                    "exclude": {
+                        "id": "java/potentially-weak-cryptographic-algorithm"
+                    }
+                }
+            ],
+            self.codeql_config["query-filters"],
+        )
+        for required_annotation in (
+            "Tracking issue: #1295",
+            "Reason: HIBP k-anonymity Range API mandates SHA-1; index key only, never password storage.",
+            "Owner: Hunter Nakagawa (Founder)",
+            "Approver: Security Owner role",
+            "Expiry: 2027-02-14",
+            "Re-review: 2027-01-14",
+            "Additional re-evaluation triggers: HIBP offers a stronger hash mode; the data flow changes;",
+            "the query is materially updated.",
+        ):
+            with self.subTest(annotation=required_annotation):
+                self.assertIn(required_annotation, self.codeql_config_text)
+        self.assertNotIn("paths-ignore", self.codeql_config)
+
     def test_backend_codeql_uses_manual_java_26_build(self) -> None:
         job = self.job("backend-sast")
         self.assertEqual("needs.classify.outputs.backend_sast == 'true'", job["if"])
@@ -46,7 +75,9 @@ class SecurityWorkflowTest(unittest.TestCase):
         self.assertEqual("java-kotlin", initialize["with"]["languages"])
         self.assertEqual("manual", initialize["with"]["build-mode"])
         self.assertEqual("security-extended", initialize["with"]["queries"])
-        self.assertIn("- backend", initialize["with"]["config"])
+        self.assertEqual(CODEQL_CONFIG_INPUT, initialize["with"]["config-file"])
+        self.assertEqual("backend", initialize["with"]["source-root"])
+        self.assertNotIn("config", initialize["with"])
         build = self.named_step("backend-sast", "Compile backend for CodeQL extraction")
         self.assertEqual("backend", build["working-directory"])
         self.assertIn("compileJava", build["run"])
@@ -60,7 +91,9 @@ class SecurityWorkflowTest(unittest.TestCase):
         self.assertEqual("javascript-typescript", initialize["with"]["languages"])
         self.assertEqual("none", initialize["with"]["build-mode"])
         self.assertEqual("security-extended", initialize["with"]["queries"])
-        self.assertIn("- frontend", initialize["with"]["config"])
+        self.assertEqual(CODEQL_CONFIG_INPUT, initialize["with"]["config-file"])
+        self.assertEqual("frontend", initialize["with"]["source-root"])
+        self.assertNotIn("config", initialize["with"])
 
     def test_pr_alert_gate_waits_for_analysis_and_filters_by_pr(self) -> None:
         for job_name, language in (

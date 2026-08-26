@@ -2,8 +2,11 @@ import importlib.util
 import unittest
 from pathlib import Path
 
+import yaml
+
 
 MODULE_PATH = Path(__file__).with_name("classify-ci-changes.py")
+WORKFLOW_PATH = Path(__file__).parents[1] / "workflows" / "ci.yml"
 SPEC = importlib.util.spec_from_file_location("classify_ci_changes", MODULE_PATH)
 if SPEC is None or SPEC.loader is None:
     raise RuntimeError("Unable to load CI classifier")
@@ -12,6 +15,10 @@ SPEC.loader.exec_module(MODULE)
 
 
 class CiChangeClassificationTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+
     def classify(self, *paths: str, event_name: str = "pull_request") -> dict[str, bool]:
         categories, _ = MODULE.classify_paths(list(paths), event_name)
         return categories
@@ -109,6 +116,30 @@ class CiChangeClassificationTest(unittest.TestCase):
     def test_ci_policy_change_forces_every_category(self) -> None:
         categories = self.classify(".github/workflows/ci.yml")
         self.assertTrue(all(categories.values()))
+
+    def test_e2e_backend_has_a_scoped_privileged_mfa_rollout_override(self) -> None:
+        frontend_tests = self.workflow["jobs"]["frontend-tests"]
+        boot = next(
+            step
+            for step in frontend_tests["steps"]
+            if step.get("name") == "Boot backend (dev profile, fresh schema)"
+        )
+        self.assertEqual("false", boot["env"]["CONNEX_PRIVILEGED_MFA_ENFORCED"])
+        self.assertEqual(
+            "frontend-e2e-suite",
+            boot["env"]["CONNEX_PRIVILEGED_MFA_CHANGE_ACTOR"],
+        )
+        self.assertNotIn(
+            "CONNEX_PRIVILEGED_MFA_ENFORCED",
+            frontend_tests.get("env", {}),
+        )
+        for step in frontend_tests["steps"]:
+            if step is not boot:
+                self.assertNotIn("CONNEX_PRIVILEGED_MFA_ENFORCED", str(step))
+        for job_name, job in self.workflow["jobs"].items():
+            if job_name != "frontend-tests":
+                with self.subTest(job=job_name):
+                    self.assertNotIn("CONNEX_PRIVILEGED_MFA_ENFORCED", str(job))
 
     def test_unknown_path_fails_safe_to_every_category(self) -> None:
         categories = self.classify("benchmark/verify_report.py")

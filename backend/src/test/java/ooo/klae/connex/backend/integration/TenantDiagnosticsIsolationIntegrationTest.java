@@ -48,6 +48,7 @@ import ooo.klae.connex.backend.secrets.StoredSecret;
  */
 @SpringBootTest(properties = "spring.task.scheduling.enabled=false")
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
+@UnenrolledPrivilegedFixture
 class TenantDiagnosticsIsolationIntegrationTest {
     private static final String PASSWORD = "Diagnostics-Test-Pw1!";
     private static final String PLAINTEXT_SENTINEL = "plaintext-credential-sentinel";

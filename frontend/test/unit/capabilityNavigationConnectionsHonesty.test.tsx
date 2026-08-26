@@ -249,6 +249,7 @@ const DISABLED_CAPABILITIES = {
     businessCardScanning: false,
     businessCardImport: false,
     campaignDelivery: false,
+    privilegedMfaEnforced: true,
 } satisfies InstanceCapabilities;
 
 const CAPTURE_ENABLED_CAPABILITIES = {

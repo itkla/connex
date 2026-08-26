@@ -38,6 +38,8 @@ type FieldErrors = Partial<Record<FieldKey, string>>;
 
 const FIELD_KEYS = ["username", "email", "displayName", "password"] as const;
 const SSO_ENFORCED_CODE = "SSO_ENFORCED";
+const BREACHED_PASSWORD_CODE = "BREACHED_PASSWORD";
+const BREACHED_PASSWORD_CHECK_UNAVAILABLE_CODE = "BREACHED_PASSWORD_CHECK_UNAVAILABLE";
 
 const FORM_FIELDS: Record<AuthMode, FieldKey[]> = {
     login: ["username", "password"],
@@ -263,7 +265,13 @@ export function AuthForm({
             toastSuccess(tMode("successMessage"));
             routeAfterAuth();
         } catch (err) {
-            const nextFieldErrors = err instanceof ApiError ? pickFieldErrors(err.fieldErrors) : {};
+            const nextFieldErrors = err instanceof ApiError && err.code === BREACHED_PASSWORD_CODE
+                ? { password: tForm("breachedPassword") }
+                : err instanceof ApiError && err.code === BREACHED_PASSWORD_CHECK_UNAVAILABLE_CODE
+                    ? { password: tForm("passwordScreeningUnavailable") }
+                    : err instanceof ApiError
+                        ? pickFieldErrors(err.fieldErrors)
+                        : {};
             const hasFieldErrors = Object.keys(nextFieldErrors).length > 0;
             const message =
                 err instanceof ApiError

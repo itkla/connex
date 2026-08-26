@@ -4,10 +4,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -66,6 +69,18 @@ class PasswordResetLinkExchangeIntegrationTest {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
             .addFilters(springSecurityFilterChain)
             .build();
+    }
+
+    @Test
+    void resetWithoutAValidGrantNeverReachesBreachScreening() throws Exception {
+        mockMvc.perform(post("/api/auth/reset-password")
+                .session(new MockHttpSession(context.getServletContext()))
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"newPassword\":\"" + NEW_PASSWORD + "\"}"))
+            .andExpect(status().isBadRequest());
+
+        verify(passwordResetService, never()).screenForReset(anyString());
     }
 
     @Test
@@ -138,7 +153,7 @@ class PasswordResetLinkExchangeIntegrationTest {
         doThrow(new IllegalStateException("transient database failure"))
             .doCallRealMethod()
             .when(passwordResetService)
-            .resetPasswordByHash(eq(tokenHash), eq(NEW_PASSWORD));
+            .resetPasswordByHash(eq(tokenHash), eq(NEW_PASSWORD), any());
 
         mockMvc.perform(post("/api/auth/reset-password")
                 .session(session)

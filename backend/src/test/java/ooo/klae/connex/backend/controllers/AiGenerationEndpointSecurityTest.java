@@ -30,17 +30,20 @@ import ooo.klae.connex.backend.config.LogoutAuditHandler;
 import ooo.klae.connex.backend.config.OneTimeLinkFlowCookie;
 import ooo.klae.connex.backend.config.RequestBodySizeProperties;
 import ooo.klae.connex.backend.config.SecurityConfig;
+import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.dto.BusinessCardAvailabilityResponse;
 import ooo.klae.connex.backend.dto.AiGenerationStatusDto;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
 import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
 import ooo.klae.connex.backend.services.BulkOperationService;
+import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.BusinessCardService;
 import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.IntroductionService;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
+import ooo.klae.connex.backend.services.PrivilegedAccountService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.WarmPathService;
 import ooo.klae.connex.backend.services.WorkspaceService;
@@ -53,6 +56,7 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 import ooo.klae.connex.backend.tenant.WorkspaceRequestResolver;
 import ooo.klae.connex.backend.util.ClientIpResolver;
+import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
 @WebMvcTest(
     controllers = {
@@ -91,6 +95,10 @@ class AiGenerationEndpointSecurityTest {
     @MockitoBean private SsoAuthenticationSuccessHandler ssoAuthenticationSuccessHandler;
     @MockitoBean private RequestBodySizeProperties requestBodySizeProperties;
     @MockitoBean private SessionSecurityService sessionSecurityService;
+    @MockitoBean private PrivilegedMfaProperties privilegedMfaProperties;
+    @MockitoBean private PrivilegedAccountService privilegedAccountService;
+    @MockitoBean private WebAuthnService webAuthnService;
+    @MockitoBean private AuditService auditService;
     @MockitoBean private BusinessCardRateLimiter businessCardRateLimiter;
     @MockitoBean private CapabilityEntitlement capabilityEntitlement;
     @MockitoBean private ClientAssertedCorrelationPseudonymizer correlationPseudonymizer;

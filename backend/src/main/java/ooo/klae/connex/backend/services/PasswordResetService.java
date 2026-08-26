@@ -5,8 +5,8 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.session.SessionInformation;
 import org.springframework.security.core.session.SessionRegistry;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
@@ -17,6 +17,9 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.SsoEnforcedException;
 import ooo.klae.connex.backend.mappers.PasswordResetTokenMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.password.PasswordCredentialService;
+import ooo.klae.connex.backend.password.PasswordScreening;
+import ooo.klae.connex.backend.password.PasswordScreeningFlow;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /**
@@ -31,7 +34,7 @@ public class PasswordResetService {
 
     private final UserMapper userMapper;
     private final PasswordResetTokenMapper passwordResetTokenMapper;
-    private final PasswordEncoder passwordEncoder;
+    private final PasswordCredentialService passwordCredentialService;
     private final PasswordResetEmailService passwordResetEmailService;
     private final PasswordResetRateLimiter rateLimiter;
     private final AuditService auditService;
@@ -136,23 +139,48 @@ public class PasswordResetService {
      * @param rawToken the unhashed token from the reset link
      * @param newPassword the already policy-validated new password
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void resetPassword(String rawToken, String newPassword) {
         String tokenHash = rawToken == null ? null : OneTimeTokenDigest.sha256(rawToken);
         resetPasswordByHash(
             exchangeToken(rawToken, programmaticExchangeOwner(tokenHash)), newPassword);
     }
 
-    /** Applies a new password through a purpose-bound browser-flow source digest. */
-    @Transactional
+    /**
+     * Screens a proposed reset password before any flow transaction is opened.
+     *
+     * <p>Under the default {@code REMOTE} source the lookup makes bounded HTTP requests. Callers
+     * enter this flow through {@code OneTimeLinkFlowService}, which claims the grant row in its own
+     * transaction, so screening from inside it would hold that row and a pooled connection for the
+     * duration of an upstream stall.
+     *
+     * @param newPassword the already policy-validated new password
+     * @return the screening to hand back to {@link #resetPasswordByHash(String, String,
+     *         PasswordScreening)}
+     */
+    public PasswordScreening screenForReset(String newPassword) {
+        return passwordCredentialService.screen(newPassword, PasswordScreeningFlow.SELF_SERVICE_RESET);
+    }
+
+    /** Screens and applies a new password through a purpose-bound browser-flow source digest. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void resetPasswordByHash(String tokenHash, String newPassword) {
+        resetPasswordByHash(tokenHash, newPassword, screenForReset(newPassword));
+    }
+
+    /**
+     * Applies a new password using a screening the caller performed outside this transaction.
+     *
+     * @param tokenHash the exchanged source-token digest
+     * @param newPassword the already policy-validated new password
+     * @param screening the result of {@link #screenForReset}
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public void resetPasswordByHash(String tokenHash, String newPassword,
+            PasswordScreening screening) {
         PasswordResetToken token = tokenHash == null ? null
                 : passwordResetTokenMapper.findExchangedRedeemableByHash(tokenHash);
         if (token == null) {
-            throw invalidLink();
-        }
-
-        if (passwordResetTokenMapper.markConsumed(tokenHash) == 0) {
             throw invalidLink();
         }
 
@@ -164,7 +192,17 @@ public class PasswordResetService {
             throw new SsoEnforcedException();
         }
 
-        userMapper.updatePasswordHash(user.getId(), passwordEncoder.encode(newPassword));
+        if (userMapper.lockById(token.getUserId()) == null) {
+            throw invalidLink();
+        }
+        userMapper.lockAssignedCustomRoleIds(token.getUserId());
+        String passwordHash = passwordCredentialService.encodeScreened(
+                screening, newPassword, PasswordScreeningFlow.SELF_SERVICE_RESET, user.getId());
+        if (passwordResetTokenMapper.markConsumed(tokenHash) == 0) {
+            throw new BadRequestException("This reset link is invalid or has expired");
+        }
+
+        userMapper.updatePasswordHash(user.getId(), passwordHash);
         passwordResetTokenMapper.invalidateForUser(user.getId());
         expireSessions(user);
 

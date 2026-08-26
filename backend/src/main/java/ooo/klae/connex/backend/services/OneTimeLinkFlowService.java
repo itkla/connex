@@ -7,6 +7,7 @@ import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.util.WebUtils;
 
@@ -163,6 +164,29 @@ public class OneTimeLinkFlowService {
      */
     @Transactional
     public void consume(
+            HttpServletRequest request,
+            Purpose purpose,
+            String rawGrant,
+            Consumer<String> operation) {
+        consumeClaimed(request, purpose, rawGrant, operation);
+    }
+
+    /**
+     * Runs password-reset completion at READ COMMITTED so privilege revalidation after locking
+     * observes a concurrent promotion that committed while this flow was waiting.
+     * @param request current browser request
+     * @param rawGrant password-reset flow cookie value
+     * @param operation transactional reset operation receiving the source-token digest
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public void consumePasswordReset(
+            HttpServletRequest request,
+            String rawGrant,
+            Consumer<String> operation) {
+        consumeClaimed(request, Purpose.PASSWORD_RESET, rawGrant, operation);
+    }
+
+    private void consumeClaimed(
             HttpServletRequest request,
             Purpose purpose,
             String rawGrant,

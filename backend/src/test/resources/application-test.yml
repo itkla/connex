@@ -1,0 +1,4 @@
+connex:
+  security:
+    privileged-mfa:
+      enforced: true

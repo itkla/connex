@@ -140,6 +140,16 @@ connex:
         session:
             absolute-timeout: ${CONNEX_SESSION_ABSOLUTE_TIMEOUT:12h}
             recent-authentication-window: ${CONNEX_RECENT_AUTHENTICATION_WINDOW:10m}
+        privileged-mfa:
+            enforced: ${CONNEX_PRIVILEGED_MFA_ENFORCED:true}
+            change-actor: ${CONNEX_PRIVILEGED_MFA_CHANGE_ACTOR:configuration-default}
+            recovery-token-sha256: ${CONNEX_PRIVILEGED_MFA_RECOVERY_TOKEN_SHA256:}
+            recovery-expires-at: ${CONNEX_PRIVILEGED_MFA_RECOVERY_EXPIRES_AT:}
+            recovery-actor: ${CONNEX_PRIVILEGED_MFA_RECOVERY_ACTOR:}
+        breached-passwords:
+            source: ${CONNEX_BREACHED_PASSWORD_SOURCE:REMOTE}
+            offline-file: ${CONNEX_BREACHED_PASSWORD_OFFLINE_FILE:}
+            offline-sha256: ${CONNEX_BREACHED_PASSWORD_OFFLINE_SHA256:}
     workspace-cookie:
         same-site: ${CONNEX_WORKSPACE_COOKIE_SAME_SITE:Lax}
         secure: ${CONNEX_WORKSPACE_COOKIE_SECURE:true}

@@ -7,6 +7,7 @@ import { clearAllDrafts } from "@/app/lib/formDrafts";
 import { resolveAiGeneration } from '@/app/lib/aiGeneration';
 import { isProtectedPath } from "@/app/lib/protectedRoutes";
 import { isProtectedMediaPath } from "@/app/lib/protectedMedia";
+import { settingsDestination } from "@/app/lib/settingsEntryPoints";
 
 import type {
     AuthenticationResponseJSON,
@@ -358,14 +359,96 @@ const CSRF_RETRY_EXEMPT_MUTATION_PATHS = new Set([
 
 const RECENT_AUTHENTICATION_REQUIRED_CODE = "RECENT_AUTHENTICATION_REQUIRED";
 export const PASSKEY_ENROLLMENT_REQUIRED_CODE = "PASSKEY_ENROLLMENT_REQUIRED";
+export const PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE = "PRIVILEGED_MFA_ENROLLMENT_REQUIRED";
 export const PASSKEY_STEP_UP_CANCELED_CODE = "PASSKEY_STEP_UP_CANCELED";
 export const PASSKEY_STEP_UP_FAILED_CODE = "PASSKEY_STEP_UP_FAILED";
+const PRIVILEGED_MFA_ENROLLMENT_ROUTE = settingsDestination("personal.security").href;
+const PRIVILEGED_MFA_ENROLLMENT_DESTINATION = `${PRIVILEGED_MFA_ENROLLMENT_ROUTE}?mfa=enroll`;
+const PRIVILEGED_MFA_ENROLLMENT_GET_PATHS = new Set([
+    "/api/auth/me",
+    "/api/auth/csrf",
+    "/api/auth/webauthn/register/requirements",
+    "/api/auth/webauthn/credentials",
+    "/api/capabilities",
+    "/api/workspaces",
+]);
+const PRIVILEGED_MFA_ENROLLMENT_POST_PATHS = new Set([
+    "/api/auth/logout",
+    "/api/auth/webauthn/register/options",
+    "/api/auth/webauthn/register",
+    "/api/auth/webauthn/recover",
+]);
 const PASSKEY_STEP_UP_PATHS = new Set([
     "/api/auth/webauthn/step-up/options",
     "/api/auth/webauthn/step-up",
 ]);
 let passkeyStepUpPromise: Promise<void> | null = null;
 let passkeyStepUpGeneration = 0;
+let privilegedMfaEnrollmentRequired = false;
+let privilegedMfaEnrollmentCompleted = false;
+const privilegedMfaEnrollmentListeners = new Set<(active: boolean) => void>();
+
+/** Returns whether the browser is on the privileged-account passkey enrolment destination. */
+export function isPrivilegedMfaEnrollmentDestination(): boolean {
+    if (typeof window === "undefined") return false;
+    return window.location.pathname === PRIVILEGED_MFA_ENROLLMENT_ROUTE
+        && new URLSearchParams(window.location.search).get("mfa") === "enroll";
+}
+
+/** Returns whether the browser must suppress requests outside the privileged MFA enrolment flow. */
+export function isPrivilegedMfaEnrollmentConfinementActive(): boolean {
+    return typeof window !== "undefined"
+        && (privilegedMfaEnrollmentRequired
+            || (!privilegedMfaEnrollmentCompleted && isPrivilegedMfaEnrollmentDestination()));
+}
+
+/**
+ * The same answer as {@link isPrivilegedMfaEnrollmentConfinementActive}, for a route the caller
+ * observed rather than the one `window.location` currently holds.
+ *
+ * A React surface that lives in a persistent layout re-renders on client navigation but does not
+ * re-read `window.location`, so reading the live URL would strand confinement inferred from a
+ * bookmarked `?mfa=enroll` link long after the reader navigated away. Passing the rendered route
+ * makes the answer change when the route does.
+ *
+ * @param pathname the route currently rendered
+ * @param mfaParam the value of the `mfa` search parameter, or null when absent
+ */
+export function privilegedMfaEnrollmentConfinementFor(
+    pathname: string,
+    mfaParam: string | null,
+): boolean {
+    return privilegedMfaEnrollmentRequired
+        || (!privilegedMfaEnrollmentCompleted
+            && pathname === PRIVILEGED_MFA_ENROLLMENT_ROUTE
+            && mfaParam === "enroll");
+}
+
+/** Subscribes to browser-local privileged MFA confinement state changes. */
+export function subscribePrivilegedMfaEnrollmentConfinement(
+    listener: (active: boolean) => void,
+): () => void {
+    privilegedMfaEnrollmentListeners.add(listener);
+    return () => privilegedMfaEnrollmentListeners.delete(listener);
+}
+
+/** Releases browser-local confinement after the server accepts passkey enrolment. */
+export function completePrivilegedMfaEnrollment(): void {
+    if (isPrivilegedMfaEnrollmentDestination()) {
+        window.history.replaceState(null, "", PRIVILEGED_MFA_ENROLLMENT_ROUTE);
+    }
+    privilegedMfaEnrollmentRequired = false;
+    privilegedMfaEnrollmentCompleted = true;
+    for (const listener of privilegedMfaEnrollmentListeners) listener(false);
+}
+
+function shouldSuppressDuringPrivilegedMfaEnrollment(path: string, method?: string): boolean {
+    if (!isPrivilegedMfaEnrollmentConfinementActive()) return false;
+    const pathname = path.split("?")[0];
+    const normalizedMethod = (method ?? "GET").toUpperCase();
+    return !(normalizedMethod === "GET" && PRIVILEGED_MFA_ENROLLMENT_GET_PATHS.has(pathname))
+        && !(normalizedMethod === "POST" && PRIVILEGED_MFA_ENROLLMENT_POST_PATHS.has(pathname));
+}
 
 function isCsrfRetryExemptMutation(path: string): boolean {
     const pathname = path.split("?")[0];
@@ -378,6 +461,13 @@ async function requestJson<T>(
     init: RequestInit = {},
     workspaceSelectionBody: "standard" | "required" | "optional" = "standard",
 ): Promise<T> {
+    if (shouldSuppressDuringPrivilegedMfaEnrollment(path, init.method)) {
+        throw new ApiError(
+            "A passkey must be enrolled before this privileged account can continue",
+            403,
+            PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE,
+        );
+    }
     const locale = requestLocale(init);
     const workspaceId = clientWorkspaceId();
     const mutating = isMutating(init.method);
@@ -408,7 +498,7 @@ async function requestJson<T>(
     };
 
     let res = await sendWithCsrfRetry();
-    if (await shouldRetryAfterPasskeyStepUp(path, res, mutating)) {
+    if (await shouldRetryAfterPasskeyStepUp(path, res)) {
         if (stepUpGeneration === passkeyStepUpGeneration) {
             await performPasskeyStepUp();
         }
@@ -416,7 +506,7 @@ async function requestJson<T>(
     }
 
     if (!res.ok) {
-        throw await getApiError(res);
+        throw await getAuthenticatedApiError(res);
     }
 
     try {
@@ -504,6 +594,13 @@ async function requestMultipart<T>(
     body: FormData,
     init: RequestInit = {},
 ): Promise<T> {
+    if (shouldSuppressDuringPrivilegedMfaEnrollment(path, method)) {
+        throw new ApiError(
+            "A passkey must be enrolled before this privileged account can continue",
+            403,
+            PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE,
+        );
+    }
     const locale = requestLocale(init);
     const workspaceId = clientWorkspaceId();
     const stepUpGeneration = passkeyStepUpGeneration;
@@ -530,22 +627,22 @@ async function requestMultipart<T>(
         return response;
     };
     let response = await sendWithCsrfRetry();
-    if (await shouldRetryAfterPasskeyStepUp(path, response, true)) {
+    if (await shouldRetryAfterPasskeyStepUp(path, response)) {
         if (stepUpGeneration === passkeyStepUpGeneration) {
             await performPasskeyStepUp();
         }
         response = await sendWithCsrfRetry();
     }
     if (!response.ok) {
-        throw await getApiError(response);
+        throw await getAuthenticatedApiError(response);
     }
     const text = await response.text();
     return text ? JSON.parse(text) as T : undefined as T;
 }
 
-async function shouldRetryAfterPasskeyStepUp(path: string, res: Response, mutating: boolean): Promise<boolean> {
+async function shouldRetryAfterPasskeyStepUp(path: string, res: Response): Promise<boolean> {
     const pathname = path.split("?")[0];
-    if (!mutating || res.status !== 403 || typeof window === "undefined" || PASSKEY_STEP_UP_PATHS.has(pathname)) {
+    if (res.status !== 403 || typeof window === "undefined" || PASSKEY_STEP_UP_PATHS.has(pathname)) {
         return false;
     }
     const text = await res.clone().text().catch(() => "");
@@ -1170,6 +1267,22 @@ async function getApiError(res: Response): Promise<ApiError> {
     }
 }
 
+async function getAuthenticatedApiError(res: Response): Promise<ApiError> {
+    const error = await getApiError(res);
+    if (error.code === PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE
+            && typeof window !== "undefined") {
+        const shouldNavigate = !privilegedMfaEnrollmentRequired
+            && !isPrivilegedMfaEnrollmentDestination();
+        privilegedMfaEnrollmentRequired = true;
+        privilegedMfaEnrollmentCompleted = false;
+        for (const listener of privilegedMfaEnrollmentListeners) listener(true);
+        if (shouldNavigate) {
+            window.location.replace(PRIVILEGED_MFA_ENROLLMENT_DESTINATION);
+        }
+    }
+    return error;
+}
+
 /**
  * Calls a public, unauthenticated endpoint without the workspace header, CSRF token, or credentials
  * the tenant-scoped helpers attach. Used for links a recipient opens with no Connex session.
@@ -1512,6 +1625,7 @@ export const DEFAULT_CAPABILITIES: Types.InstanceCapabilities = {
     businessCardScanning: false,
     businessCardImport: false,
     campaignDelivery: false,
+    privilegedMfaEnforced: true,
 };
 
 export function getProviderConnections(init: RequestInit = {}) {
@@ -2251,8 +2365,12 @@ export async function downloadCsv(path: string, filename: string, init: RequestI
     if (await shouldRetryWithFreshCsrf(path, res, mutating)) {
         res = await send(await csrfHeader(true));
     }
+    if (await shouldRetryAfterPasskeyStepUp(path, res)) {
+        await performPasskeyStepUp();
+        res = await send(mutating ? await csrfHeader() : {});
+    }
     if (!res.ok) {
-        throw await getApiError(res);
+        throw await getAuthenticatedApiError(res);
     }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -5254,7 +5372,7 @@ export async function uploadAiChatAttachment(
     if (await shouldRetryWithFreshCsrf(path, response, true)) {
         response = await send(true);
     }
-    if (!response.ok) throw await getApiError(response);
+    if (!response.ok) throw await getAuthenticatedApiError(response);
     const text = await response.text();
     if (!text) throw new TypeError('Assistant attachment response was empty');
     const attachment: unknown = JSON.parse(text);
@@ -5744,8 +5862,12 @@ async function fetchReportCsv(path: string, init: RequestInit): Promise<Blob> {
         if (await shouldRetryWithFreshCsrf(path, res, mutating)) {
             res = await send(await csrfHeader(true));
         }
+        if (await shouldRetryAfterPasskeyStepUp(path, res)) {
+            await performPasskeyStepUp();
+            res = await send(mutating ? await csrfHeader() : {});
+        }
         if (!res.ok) {
-            throw await getApiError(res);
+            throw await getAuthenticatedApiError(res);
         }
         return res.blob();
     });

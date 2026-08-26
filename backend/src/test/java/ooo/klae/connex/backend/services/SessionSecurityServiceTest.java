@@ -192,6 +192,18 @@ class SessionSecurityServiceTest {
     }
 
     @Test
+    void invalidRecentAuthenticationWindowFailsClosed() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        service.markStepUp(request, 7);
+        properties.setRecentAuthenticationWindow(Duration.ZERO);
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+
+        assertThrows(RecentAuthenticationRequiredException.class,
+                () -> service.requireRecentAuthentication(7));
+        assertFalse(service.hasFreshAuthenticatedSession(request.getSession(), 7));
+    }
+
+    @Test
     void requireFreshAuthenticatedSessionAllowsFreshSameUserSession() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         service.markAuthenticated(request, 7);

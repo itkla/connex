@@ -54,6 +54,7 @@ import ooo.klae.connex.backend.storage.StoredObject;
 /** HTTP metadata, mutation, and private-content isolation across both tenant dimensions. */
 @SpringBootTest
 @Transactional
+@UnenrolledPrivilegedFixture
 class ManagedContentTenantIsolationTest {
 
     private static final String PASSWORD = "Content-Tenant-Pw1!";

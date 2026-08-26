@@ -1,7 +1,16 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import {
+    createContext,
+    useCallback,
+    useContext,
+    useEffect,
+    useRef,
+    useState,
+    useSyncExternalStore,
+} from "react";
 
+import { usePathname, useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 
 import { notificationContent, safeNotificationUrl } from "@/app/components/notifications/notificationContent";
@@ -12,7 +21,11 @@ import {
     onAllNotificationsRead,
     onNotificationStateChanged,
 } from "@/app/components/notifications/notificationEvents";
-import { getNotificationCounts } from "@/app/lib/api";
+import {
+    getNotificationCounts,
+    privilegedMfaEnrollmentConfinementFor,
+    subscribePrivilegedMfaEnrollmentConfinement,
+} from "@/app/lib/api";
 import {
     createNotificationSocket,
     type RealtimeNotificationFrame,
@@ -66,9 +79,18 @@ export function NotificationProvider({
 
     const t = useTranslations("Notifications");
     const locale = useLocale();
+    const pathname = usePathname();
+    const searchParams = useSearchParams();
     const { openNotification } = useNotificationWorkspaceActions();
 
+    const privilegedMfaConfinementActive = useSyncExternalStore(
+        subscribePrivilegedMfaEnrollmentConfinement,
+        () => privilegedMfaEnrollmentConfinementFor(pathname, searchParams.get("mfa")),
+        () => false,
+    );
+
     const refreshUnread = useCallback(async () => {
+        if (privilegedMfaConfinementActive) return;
         if (document.hidden) return;
         if (loadingRef.current) {
             pendingRef.current = true;
@@ -139,7 +161,7 @@ export function NotificationProvider({
         } finally {
             loadingRef.current = false;
         }
-    }, [recipientId]);
+    }, [privilegedMfaConfinementActive, recipientId]);
 
     useEffect(() => {
         const invalidateRequest = () => {
@@ -221,6 +243,7 @@ export function NotificationProvider({
     }, [handleFrame]);
 
     useEffect(() => {
+        if (privilegedMfaConfinementActive) return;
         const initial = window.setTimeout(() => void refreshUnread(), 0);
         const onVisibilityChange = () => {
             if (document.hidden) requestRef.current?.abort();
@@ -236,15 +259,17 @@ export function NotificationProvider({
                 snoozeExpiryTimerRef.current = null;
             }
         };
-    }, [refreshUnread]);
+    }, [privilegedMfaConfinementActive, refreshUnread]);
 
     useEffect(() => {
+        if (privilegedMfaConfinementActive) return;
         const period = connected ? POLL_SAFETY_INTERVAL_MS : POLL_INTERVAL_MS;
         const interval = window.setInterval(() => void refreshUnread(), period);
         return () => window.clearInterval(interval);
-    }, [connected, refreshUnread]);
+    }, [connected, privilegedMfaConfinementActive, refreshUnread]);
 
     useEffect(() => {
+        if (privilegedMfaConfinementActive) return;
         const socket = createNotificationSocket({
             onFrame: (frame) => handleFrameRef.current(frame),
             onStatusChange: (status) => {
@@ -255,7 +280,7 @@ export function NotificationProvider({
         });
         socket.activate();
         return () => socket.deactivate();
-    }, [refreshUnread]);
+    }, [privilegedMfaConfinementActive, refreshUnread]);
 
     return (
         <NotificationContext.Provider value={{ recipientId, unread, snoozed, quietHoursActive, refreshUnread }}>

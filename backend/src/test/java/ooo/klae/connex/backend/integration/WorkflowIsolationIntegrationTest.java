@@ -38,6 +38,7 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 /** Exercises workflow authorization and tenant isolation through the real HTTP stack. */
 @SpringBootTest
 @Transactional
+@UnenrolledPrivilegedFixture
 class WorkflowIsolationIntegrationTest {
 
     private static final String PASSWORD = "Workflow-Test-Pw1!";

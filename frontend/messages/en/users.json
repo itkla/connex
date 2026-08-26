@@ -57,6 +57,8 @@
     "emailPlaceholder": "jane@example.com",
     "password": "Password",
     "passwordPlaceholder": "At least 8 characters",
+    "breachedPassword": "This password appeared in a known data breach. Choose a different password that you don't use anywhere else.",
+    "passwordScreeningUnavailable": "Password breach screening is temporarily unavailable. Please try again.",
     "cancel": "Cancel",
     "create": "Create",
     "toastCreated": "User created",

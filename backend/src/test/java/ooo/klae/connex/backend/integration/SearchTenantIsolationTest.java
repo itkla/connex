@@ -68,6 +68,7 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 /** Full HTTP search isolation for sibling workspaces and foreign organizations. */
 @SpringBootTest
 @Transactional
+@UnenrolledPrivilegedFixture
 class SearchTenantIsolationTest {
 
     private static final String PASSWORD = "Search-Tenant-Pw1!";
