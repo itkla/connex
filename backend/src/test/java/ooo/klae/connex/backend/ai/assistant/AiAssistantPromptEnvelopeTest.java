@@ -25,7 +25,7 @@ import tools.jackson.databind.ObjectMapper;
  * {@link AiAssistantPromptBudget} spends that envelope directly out of the output-token allocation,
  * whose conservative term reduces to {@code contextTokens - fixedEnvelopeBytes - 14,848}. On a 32k
  * window that is {@code 17,920 - fixedEnvelopeBytes}, which is why 32k is refused rather than
- * quietly starved: today's JSON-ReAct envelope would leave it 958 output tokens.
+ * quietly starved: today's JSON-ReAct envelope would leave it 350 output tokens.
  *
  * <p>This test guards the relationship at the floor instead. At
  * {@link AiAssistantPromptBudget#ASSISTANT_MIN_CONTEXT_TOKENS} the envelope must still leave at
@@ -47,7 +47,7 @@ class AiAssistantPromptEnvelopeTest {
      * <p>Twice {@link #CONFIGURED_MAX_OUTPUT_TOKENS}: the floor exists so the envelope is absorbed
      * without competing with the answer, so it may consume at most half of what the window grants
      * beyond the configured ceiling. The JSON-ReAct envelope currently leaves 33,726 tokens, a
-     * margin of 958 — the same figure that was a 32k model's entire answer budget.
+     * margin of 350 — the same figure that was a 32k model's entire answer budget.
      */
     private static final int MINIMUM_FLOOR_OUTPUT_TOKENS = 2 * CONFIGURED_MAX_OUTPUT_TOKENS;
 

@@ -159,7 +159,17 @@ public class AiAssistantToolCatalog {
             return false;
         }
         for (JsonNode item : value) {
-            if (!item.isString() || !argument.values().contains(item.asString())) {
+            if (!item.isString()) {
+                return false;
+            }
+            if (argument.values().isEmpty()) {
+                if (!"handles".equals(argument.name())
+                        || !HANDLE.matcher(item.asString()).matches()) {
+                    return false;
+                }
+                continue;
+            }
+            if (!argument.values().contains(item.asString())) {
                 return false;
             }
         }
@@ -172,6 +182,8 @@ public class AiAssistantToolCatalog {
                 string("query", true, 1, 200, Set.of()),
                 stringList("kinds", false, 1, 3, Set.of("person", "company", "deal"))));
         add(tools, executable("get_record", handle()));
+        add(tools, executable("get_records",
+                stringList("handles", true, 1, 12, Set.of())));
         add(tools, executable("list_activities", handle(), integer("limit", false, 1, 20)));
         add(tools, executable("list_tasks", handle(), integer("limit", false, 1, 20)));
         add(tools, executable("list_scope_activities",
@@ -222,6 +234,8 @@ public class AiAssistantToolCatalog {
         return switch (name) {
             case "search_records" -> "Search visible people, companies, and deals and return reusable handles.";
             case "get_record" -> "Load the visible details for one record handle.";
+            case "get_records" -> "Load the visible details for up to twelve record handles "
+                    + "in one step.";
             case "list_activities" -> "List recent visible activities for one record handle.";
             case "list_tasks" -> "List visible tasks for one record handle.";
             case "list_scope_activities" -> "List recent activity across a bounded set of records "

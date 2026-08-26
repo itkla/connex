@@ -560,7 +560,7 @@ class AiChatAgentLoopServiceTest {
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class),
                 eq(directAdmission), any(Runnable.class));
         AiInvocation firstInvocation = invocations.getAllValues().getFirst();
-        assertEquals(NOW.plusSeconds(70), firstInvocation.callerDeadline());
+        assertEquals(NOW.plusSeconds(180), firstInvocation.callerDeadline());
         assertEquals(
                 firstInvocation.callerDeadline(),
                 invocations.getAllValues().getLast().callerDeadline());
@@ -1656,7 +1656,7 @@ class AiChatAgentLoopServiceTest {
         setUp();
         useNativeMemory(new AiAssistantPromptBudget(
                 64, 64_000, 16_000, 16_000, 16_000, 112_000));
-        when(clock.instant()).thenReturn(NOW, NOW.plusSeconds(70));
+        when(clock.instant()).thenReturn(NOW, NOW.plusSeconds(180));
 
         AiGenerationTaskResult<AiChatTurnGenerationResult> deadlineResult = service.run(TURN);
 
@@ -1896,7 +1896,7 @@ class AiChatAgentLoopServiceTest {
     void wallClockDeadlineHasItsOwnTerminalReason() {
         when(clock.instant()).thenReturn(
                 Instant.parse("2026-08-11T00:00:00Z"),
-                Instant.parse("2026-08-11T00:01:10Z"));
+                Instant.parse("2026-08-11T00:03:00Z"));
 
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
 
@@ -2675,6 +2675,7 @@ class AiChatAgentLoopServiceTest {
 
     @Test
     void aRoutedSkillPreExecutesItsPlanAndLeavesTheModelOnlyTheSynthesisBudget() {
+        when(governanceService.assistantMaxSteps(TURN.workspaceId())).thenReturn(24);
         AiSkillCatalog.SkillSpec digest =
                 new AiSkillCatalog().find("activity_digest_v1").orElseThrow();
         when(skillRouter.route(anyInt(), anyInt(), any(), any(), any()))
@@ -2689,15 +2690,21 @@ class AiChatAgentLoopServiceTest {
                                 "data", Map.of("matchedRecords", 41)))),
                         1,
                         false));
+        java.util.concurrent.atomic.AtomicInteger day = new java.util.concurrent.atomic.AtomicInteger(10);
         when(invocationService.completeStructuredRepairable(
                 any(AiInvocation.class), eq(AiAssistantStep.class),
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class),
                 eq(directAdmission), any(Runnable.class)))
-                .thenReturn(parsed(toolStep("list_scope_activities", "{\"days\":30}")));
+                .thenAnswer(invocation -> parsed(toolStep(
+                        "list_scope_activities", "{\"days\":" + day.incrementAndGet() + "}")));
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class), any()))
+                .thenAnswer(invocation -> new AiAssistantToolResult(
+                        Map.of("matchedRecords", day.get()), List.of()));
 
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
 
         assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("skill_budget_exceeded", result.reason());
         verify(persistenceService).applySkill(
                 TURN, "activity_digest_v1", digest.version());
         // The declared synthesis budget replaces the improvisation budget the governance cap
@@ -2795,20 +2802,18 @@ class AiChatAgentLoopServiceTest {
      */
     @Test
     void aRoutedTurnThatExhaustsItsSynthesisBudgetNamesTheSkillBudgetNotTheStepCap() {
+        when(governanceService.assistantMaxSteps(TURN.workspaceId())).thenReturn(24);
         AiSkillCatalog.SkillSpec digest = routedDigest();
+        java.util.concurrent.atomic.AtomicInteger window = new java.util.concurrent.atomic.AtomicInteger(20);
         when(invocationService.completeStructuredRepairable(
                 any(AiInvocation.class), eq(AiAssistantStep.class),
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class),
                 eq(directAdmission), any(Runnable.class)))
-                .thenReturn(
-                        parsed(toolStep("list_scope_activities", "{\"days\":30}")),
-                        parsed(toolStep("list_scope_activities", "{\"days\":60}")),
-                        parsed(toolStep("list_scope_activities", "{\"days\":90}")));
+                .thenAnswer(invocation -> parsed(toolStep(
+                        "list_scope_activities", "{\"days\":" + window.incrementAndGet() + "}")));
         when(toolExecutor.execute(any(), any(), any(), any(Boolean.class), any()))
-                .thenReturn(
-                        new AiAssistantToolResult(Map.of("matchedRecords", 1), List.of()),
-                        new AiAssistantToolResult(Map.of("matchedRecords", 2), List.of()),
-                        new AiAssistantToolResult(Map.of("matchedRecords", 3), List.of()));
+                .thenAnswer(invocation -> new AiAssistantToolResult(
+                        Map.of("matchedRecords", window.get()), List.of()));
 
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
 

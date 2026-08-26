@@ -110,7 +110,7 @@
     "workspaceEnableTitle": "このワークスペースでAIを有効にする",
     "workspaceEnableDescription": "このワークスペースの緊急停止設定はメンバーのAI権限より優先され、実行中のアシスタントの回答を次の安全確認で停止します。",
     "assistantMaxSteps": "回答ごとのアシスタントステップ数",
-    "assistantMaxStepsDescription": "Ask Connexの各回答を1〜12回のモデルまたはツールステップに制限します。",
+    "assistantMaxStepsDescription": "Ask Connexの各回答を1〜48回のモデルまたはツールステップに制限します。",
     "saveWorkspaceControls": "ワークスペース設定を保存",
     "governanceSaved": "ワークスペースのAI設定を保存しました。",
     "governanceSaveFailed": "ワークスペースのAI設定を保存できませんでした",

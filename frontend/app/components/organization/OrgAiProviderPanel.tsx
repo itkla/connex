@@ -325,7 +325,7 @@ export default function OrgAiProviderPanel({
     const governanceValid = governance != null
         && Number.isInteger(governance.assistantMaxSteps)
         && governance.assistantMaxSteps >= 1
-        && governance.assistantMaxSteps <= 12;
+        && governance.assistantMaxSteps <= 48;
     const budgetValid = budget != null
         && Number.isSafeInteger(budget.dailyUsageLimit)
         && budget.dailyUsageLimit >= 0
@@ -377,7 +377,7 @@ export default function OrgAiProviderPanel({
                                 id="assistant-max-steps"
                                 type="number"
                                 min={1}
-                                max={12}
+                                max={48}
                                 value={governance.assistantMaxSteps}
                                 onChange={(event) => setGovernance((current) => current ? {
                                     ...current,

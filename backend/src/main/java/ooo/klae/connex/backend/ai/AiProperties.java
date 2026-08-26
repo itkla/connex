@@ -151,7 +151,7 @@ public class AiProperties {
     private long generationMaxRetainedResultBytesPerUser = 16777216;
 
     /** Hard non-sliding lifetime for one generation task. */
-    private Duration generationMaxLifetime = Duration.ofSeconds(75);
+    private Duration generationMaxLifetime = Duration.ofSeconds(190);
 
     /** Fixed window in which the initiating client may poll a handle. */
     private Duration generationPollWindow = Duration.ofMinutes(2);

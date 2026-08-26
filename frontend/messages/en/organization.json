@@ -110,7 +110,7 @@
     "workspaceEnableTitle": "Enable AI in this workspace",
     "workspaceEnableDescription": "This workspace switch overrides member AI permissions and stops assistant answers already in progress at the next safety check.",
     "assistantMaxSteps": "Assistant steps per answer",
-    "assistantMaxStepsDescription": "Limit each Ask Connex answer to 1-12 model or tool steps.",
+    "assistantMaxStepsDescription": "Limit each Ask Connex answer to 1-48 model or tool steps.",
     "saveWorkspaceControls": "Save workspace controls",
     "governanceSaved": "Workspace AI controls saved.",
     "governanceSaveFailed": "Couldn't save the workspace AI controls",

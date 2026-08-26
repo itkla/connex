@@ -116,6 +116,7 @@ public class AiAssistantToolExecutor {
             return switch (name) {
                 case "search_records" -> search(args, resources);
                 case "get_record" -> getRecord(args, resources, includePrivateNotes);
+                case "get_records" -> getRecords(args, resources, includePrivateNotes);
                 case "list_activities" -> listActivities(args, resources, scope);
                 case "list_tasks" -> listTasks(args, resources);
                 case "list_scope_activities" -> listScopeActivities(args, resources, scope);
@@ -142,6 +143,12 @@ public class AiAssistantToolExecutor {
 
     private static void requireHandleKind(
             String name, JsonNode args, AiChatResourceRegistry resources) {
+        JsonNode handles = args.get("handles");
+        if (handles != null && handles.isArray()) {
+            for (JsonNode item : handles) {
+                resources.resolve(item.asString(), RECORD_KINDS);
+            }
+        }
         JsonNode handle = args.get("handle");
         if (handle == null || handle.isNull()) {
             return;
@@ -256,6 +263,37 @@ public class AiAssistantToolExecutor {
         RecordResult record = readRecord(
                 resource.kind(), resource.id(), resources, true, includePrivateNotes);
         return result(record.data(), record.identifiers());
+    }
+
+    /**
+     * Reads several already-authorized records in one step.
+     *
+     * <p>The bulk read exists so a model comparing a handful of records does not spend one step
+     * per handle: each handle resolves through the same per-turn registry and the same per-record
+     * read as {@code get_record}, so the bulk form grants nothing the serial crawl did not.
+     */
+    private AiAssistantToolResult getRecords(
+            JsonNode args,
+            AiChatResourceRegistry resources,
+            boolean includePrivateNotes) {
+        JsonNode handles = args.get("handles");
+        List<Map<String, Object>> records = new ArrayList<>();
+        List<Identifier> identifiers = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (JsonNode handle : handles) {
+            if (!seen.add(handle.asString())) {
+                continue;
+            }
+            ResourceRef resource = resources.resolve(handle.asString(), RECORD_KINDS);
+            RecordResult record = readRecord(
+                    resource.kind(), resource.id(), resources, true, includePrivateNotes);
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("handle", handle.asString());
+            entry.putAll(record.data());
+            records.add(entry);
+            identifiers.addAll(record.identifiers());
+        }
+        return result(Map.of("records", records), identifiers);
     }
 
     /**

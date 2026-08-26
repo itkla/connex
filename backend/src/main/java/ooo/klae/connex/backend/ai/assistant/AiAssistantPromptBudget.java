@@ -24,8 +24,8 @@ public record AiAssistantPromptBudget(
      * catalog again as the strict step response schema — is paid out of the output allocation, and
      * the conservative term reduces to {@code outputTokens = 17,920 - fixedEnvelopeBytes} on a 32k
      * window. The measured cliff is therefore {@code 17,919} bytes, where the turn retains a single
-     * output token and cannot start. Today's JSON-ReAct envelope measures {@code 16,962} bytes,
-     * which leaves a 32k model {@code 958} output tokens: enough to begin an answer document and
+     * output token and cannot start. Today's JSON-ReAct envelope measures {@code 17,570} bytes,
+     * which leaves a 32k model {@code 350} output tokens: enough to begin an answer document and
      * not enough to finish one, so the model stops mid-sentence and the reader is shown a truncated
      * answer that looks complete.
      *
