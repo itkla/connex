@@ -115,7 +115,58 @@
                 "blocks": [
                     {
                         "type": "prose",
-                        "text": "The sidebar on the left splits Connex into a few clear areas: Overview, Records, Marketing (when campaigns are enabled), Activity, Library, Workspace, and Help & resources. The bar across the top holds search, along with a button to hide or show the sidebar. The workspace you are in is shown at the top of the sidebar itself. On most detail pages a back button takes you straight to the list you came from."
+                        "text": "The sidebar on the left splits Connex into a few clear areas: Intelligence, Records, Activity, Insights, Marketing (when campaigns are enabled), Library, and Workspace. Dashboard and My Work each have a row of their own above those areas, Workflows has one below them when your workspace uses workflows, and Documentation sits in the menu behind your name at the bottom, beside My Work and Account settings."
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "What sits where",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "Dashboard",
+                                "description": "Your workspace as it stands today: what needs attention, what just moved, and which relationships are cooling."
+                            },
+                            {
+                                "title": "My Work",
+                                "description": "The tasks, records, and mentions waiting on you personally, gathered onto one page."
+                            },
+                            {
+                                "title": "Intelligence",
+                                "description": "Radar, Introductions, and the relationship map: the pages that read how your network connects rather than list it."
+                            },
+                            {
+                                "title": "Records",
+                                "description": "Companies, contacts, deals, pipelines, and products."
+                            },
+                            {
+                                "title": "Activity",
+                                "description": "Activities, tasks, notes, and the calendar."
+                            },
+                            {
+                                "title": "Insights",
+                                "description": "Analytics, reports, and goals: your figures as charts, and as documents you can hand to somebody else."
+                            },
+                            {
+                                "title": "Marketing",
+                                "description": "Campaigns, shown when your workspace has campaigns switched on."
+                            },
+                            {
+                                "title": "Library",
+                                "description": "Documents, tags, and files, with the approval policies that govern them."
+                            },
+                            {
+                                "title": "Workflows",
+                                "description": "The automations that run on your behalf, shown when your workspace has workflows switched on."
+                            },
+                            {
+                                "title": "Workspace",
+                                "description": "The member directory, capture reviews, settings, and the audit log."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "prose",
+                        "text": "The bar across the top holds search, along with a button to hide or show the sidebar. The workspace you are in is shown at the top of the sidebar itself. On most detail pages a back button takes you straight to the list you came from."
                     },
                     {
                         "type": "shortcuts",
@@ -1399,9 +1450,9 @@
         }
     },
     "DocsOverviewSuite": {
-        "title": "Overview suite",
-        "description": "Analytics, the relationship map, calendar, introductions, and intro paths.",
-        "lead": "The overview suite turns your records into insight: charts, a live relationship map, and tools for engineering introductions.",
+        "title": "Intelligence & insights",
+        "description": "Analytics, the relationship map, introductions, and intro paths.",
+        "lead": "These pages turn your records into something you can act on: charts and reports, a live relationship map, and the tools for engineering introductions.",
         "articles": {
             "analytics": {
                 "title": "Analytics",
@@ -1409,7 +1460,7 @@
                 "blocks": [
                     {
                         "type": "prose",
-                        "text": "The analytics dashboard brings your deals, pipelines, and team activity together on one screen, so you can see how the business is doing at a glance: revenue, pipeline health, win rates, and where deals are getting stuck. It's one of the overview pages in Connex, reached from the sidebar, alongside the map, calendar, and introductions."
+                        "text": "The analytics dashboard brings your deals, pipelines, and team activity together on one screen, so you can see how the business is doing at a glance: revenue, pipeline health, win rates, and where deals are getting stuck. You will find it under Insights in the sidebar, next to Reports."
                     },
                     {
                         "type": "featureList",
@@ -1620,79 +1671,6 @@
                     }
                 ]
             },
-            "calendar": {
-                "title": "Calendar",
-                "description": "Your meetings and events tied back to the relationships they involve.",
-                "blocks": [
-                    {
-                        "type": "prose",
-                        "text": "The calendar gathers everything happening across your workspace, tasks, activities, deals, and notes, onto the days they belong to. You can view it by month, week, or day, or as a simple list. It's a clean way to see what's coming and what just happened, all in one place."
-                    },
-                    {
-                        "type": "featureList",
-                        "title": "What shows up",
-                        "columns": 2,
-                        "items": [
-                            {
-                                "title": "Tasks",
-                                "description": "In your brand colour."
-                            },
-                            {
-                                "title": "Activities",
-                                "description": "In blue."
-                            },
-                            {
-                                "title": "Deals",
-                                "description": "In amber."
-                            },
-                            {
-                                "title": "Notes",
-                                "description": "In muted grey."
-                            }
-                        ]
-                    },
-                    {
-                        "type": "featureList",
-                        "title": "Getting around",
-                        "columns": 2,
-                        "items": [
-                            {
-                                "title": "Move back and forward",
-                                "description": "Step back and forward through time with the arrows at the top."
-                            },
-                            {
-                                "title": "Jump to today",
-                                "description": "The Today button brings you back to the current day, and today's date is marked with a circle."
-                            }
-                        ]
-                    },
-                    {
-                        "type": "featureList",
-                        "title": "Working with entries",
-                        "columns": 2,
-                        "items": [
-                            {
-                                "title": "Most important first",
-                                "description": "Within a day, deals sit at the top, then tasks, activities, and notes, so the big items are easy to spot."
-                            },
-                            {
-                                "title": "See the full detail",
-                                "description": "Click any item to open a panel with its full detail, right beside the calendar."
-                            },
-                            {
-                                "title": "Jump to the record",
-                                "description": "From that panel, 'Open record' takes you to the full deal, task, activity, or note behind it."
-                            }
-                        ]
-                    },
-                    {
-                        "type": "callout",
-                        "variant": "tip",
-                        "title": "Packed days stay tidy",
-                        "body": "Every item always lands on the right day. When a day holds more than fits, it shows the first few with a '+ more' link; open the day to see everything, so even a busy week never throws off the layout."
-                    }
-                ]
-            },
             "introductions": {
                 "title": "Introductions",
                 "description": "Request, track, and fulfill warm introductions between contacts.",
@@ -1871,7 +1849,7 @@
                         "type": "prose",
                         "text": [
                             "A report turns your workspace's figures into something you can hand to somebody else. Start from one of the ready-made reports and you get a finished document immediately, or build your own by choosing measures, groupings and charts.",
-                            "Reports live under Overview, alongside analytics."
+                            "Reports live under Insights in the sidebar, next to Analytics."
                         ]
                     },
                     {
@@ -2291,6 +2269,79 @@
                                 "href": "/docs/activity/calendar-events"
                             }
                         ]
+                    }
+                ]
+            },
+            "calendar": {
+                "title": "Calendar",
+                "description": "Your meetings and events tied back to the relationships they involve.",
+                "blocks": [
+                    {
+                        "type": "prose",
+                        "text": "The calendar gathers everything happening across your workspace, tasks, activities, deals, and notes, onto the days they belong to. You can view it by month, week, or day, or as a simple list. It's a clean way to see what's coming and what just happened, all in one place."
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "What shows up",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "Tasks",
+                                "description": "In your brand colour."
+                            },
+                            {
+                                "title": "Activities",
+                                "description": "In blue."
+                            },
+                            {
+                                "title": "Deals",
+                                "description": "In amber."
+                            },
+                            {
+                                "title": "Notes",
+                                "description": "In muted grey."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "Getting around",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "Move back and forward",
+                                "description": "Step back and forward through time with the arrows at the top."
+                            },
+                            {
+                                "title": "Jump to today",
+                                "description": "The Today button brings you back to the current day, and today's date is marked with a circle."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "featureList",
+                        "title": "Working with entries",
+                        "columns": 2,
+                        "items": [
+                            {
+                                "title": "Most important first",
+                                "description": "Within a day, deals sit at the top, then tasks, activities, and notes, so the big items are easy to spot."
+                            },
+                            {
+                                "title": "See the full detail",
+                                "description": "Click any item to open a panel with its full detail, right beside the calendar."
+                            },
+                            {
+                                "title": "Jump to the record",
+                                "description": "From that panel, 'Open record' takes you to the full deal, task, activity, or note behind it."
+                            }
+                        ]
+                    },
+                    {
+                        "type": "callout",
+                        "variant": "tip",
+                        "title": "Packed days stay tidy",
+                        "body": "Every item always lands on the right day. When a day holds more than fits, it shows the first few with a '+ more' link; open the day to see everything, so even a busy week never throws off the layout."
                     }
                 ]
             },
@@ -3867,7 +3918,7 @@
                     {
                         "type": "prose",
                         "text": [
-                            "The audit log is a complete, unchangeable history of everything that happens in your workspace. You'll find it under Admin, then Logs, laid out as a timeline with the newest events first.",
+                            "The audit log is a complete, unchangeable history of everything that happens in your workspace. You'll find it under Workspace in the sidebar, and in settings under Audit & diagnostics, laid out as a timeline with the newest events first.",
                             "Connex records events on its own as people work, so nothing depends on anyone remembering to write it down. Once an event is recorded, it can never be edited or deleted, which makes the log a record you can trust when you need to look back."
                         ]
                     },
@@ -4856,7 +4907,7 @@
                         "items": [
                             {
                                 "title": "Open the Introductions page",
-                                "description": "Head to Introductions in your overview area. You can also open it from the introduction opportunities shown on your dashboard, which link straight through to this page."
+                                "description": "Head to Introductions, under Intelligence in the sidebar. You can also open it from the introduction opportunities shown on your dashboard, which link straight through to this page."
                             },
                             {
                                 "title": "Review your intros to make",

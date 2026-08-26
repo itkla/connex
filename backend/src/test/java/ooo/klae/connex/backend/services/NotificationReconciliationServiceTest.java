@@ -708,7 +708,7 @@ class NotificationReconciliationServiceTest {
         assertEquals(Integer.valueOf(3), opportunity.getSourceId());
         assertEquals("person", opportunity.getContextType());
         assertEquals(Integer.valueOf(8), opportunity.getContextId());
-        assertEquals("/overview/introductions", opportunity.getActionUrl());
+        assertEquals("/intelligence/introductions", opportunity.getActionUrl());
         assertEquals(42, opportunity.getRecipientId());
         assertEquals("relationship.intro_opportunity:3:8", opportunity.getDedupeKey());
     }

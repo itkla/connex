@@ -1,57 +1,20 @@
-import { headers } from 'next/headers';
-import { redirect } from 'next/navigation';
-import { getTranslations } from 'next-intl/server';
+import { permanentRedirect } from "next/navigation";
 
-import ReportBuilderBoard from '@/app/components/reports/ReportBuilderBoard';
-import PermissionsUnavailablePage from '@/app/components/PermissionsUnavailablePage';
-import WorkspaceUnavailablePage from '@/app/components/WorkspaceUnavailablePage';
-import {
-    getActiveWorkspaceMembersResultFromCookie,
-    getCurrentUserResultFromCookie,
-    getEffectivePermissionsResultFromCookie,
-    getPipelines,
-    getReportTemplates,
-    getTags,
-} from '@/app/lib/api';
+import { movedRouteTarget, type RouteSearchParams } from "@/app/lib/routeMoves";
 
-export async function generateMetadata() {
-    const t = await getTranslations('Reports');
-    return { title: t('metadata.newTitle'), description: t('metadata.newDescription') };
-}
-
-export default async function NewReportPage({
+/**
+ * The retired address for the new-report composer, before Reports moved under Insights (#1323 WS4).
+ *
+ * The D13 navigation restructure dissolved the Overview grab-bag, and this address survives only so
+ * that links already sent, bookmarked, or stored keep resolving. It forwards permanently.
+ *
+ * The target is read from the route-move manifest rather than spelled here, so a destination that
+ * moves again takes its redirects with it, and the reader's query string survives the hop whole.
+ */
+export default async function LegacyNewReportPage({
     searchParams,
 }: {
-    searchParams: Promise<{ template?: string }>;
+    searchParams: Promise<RouteSearchParams>;
 }) {
-    const cookie = (await headers()).get('cookie');
-    const userResult = await getCurrentUserResultFromCookie(cookie);
-    if (!userResult.ok) return <WorkspaceUnavailablePage />;
-    const user = userResult.data;
-    if (!user) redirect('/auth/login');
-    const { template: templateKey } = await searchParams;
-    const init = { headers: { cookie: cookie ?? '' } } as const;
-    const [templates, pipelines, ownersResult, tags, permissionsResult] = await Promise.all([
-        getReportTemplates(init),
-        getPipelines(init),
-        getActiveWorkspaceMembersResultFromCookie(cookie),
-        getTags(init),
-        getEffectivePermissionsResultFromCookie(cookie),
-    ]);
-    if (!permissionsResult.ok) return <PermissionsUnavailablePage />;
-    const canReadGoals = permissionsResult.data.includes('GOAL_READ');
-    const template = templateKey
-        ? templates.find((item) => item.key === templateKey && (canReadGoals || item.key !== 'quota-attainment'))
-        : undefined;
-
-    return (
-        <ReportBuilderBoard
-            initialTemplate={template}
-            pipelines={pipelines}
-            owners={ownersResult.ok ? ownersResult.data : []}
-            ownersFailed={!ownersResult.ok}
-            tags={tags}
-            canReadGoals={canReadGoals}
-        />
-    );
+    permanentRedirect(movedRouteTarget("/overview/reports/new", await searchParams));
 }

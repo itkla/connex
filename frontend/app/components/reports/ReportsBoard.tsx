@@ -115,7 +115,7 @@ export default function ReportsBoard({
                     widgets: config.widgets.map((widget) => ({ ...widget, title: t(`measure.${widget.measure}`) })),
                 },
             });
-            router.push(`/overview/reports/${created.id}`);
+            router.push(`/insights/reports/${created.id}`);
         } catch (error) {
             showApiError(error, 'landing.createFailed');
             setCreatingKey(null);
@@ -173,7 +173,7 @@ export default function ReportsBoard({
                 </div>
                 {canCreateReports ? (
                     <Button asChild variant="outline">
-                        <Link href="/overview/reports/new">
+                        <Link href="/insights/reports/new">
                             <PencilSquareIcon />
                             {t('landing.blankBuilder')}
                         </Link>
@@ -266,7 +266,7 @@ export default function ReportsBoard({
                         <>
                             {canReadGoals ? (
                                 <Button asChild variant="outline">
-                                    <Link href="/overview/reports/goals">
+                                    <Link href="/insights/reports/goals">
                                         <FlagIcon />
                                         {t('landing.manageGoals')}
                                     </Link>
@@ -274,7 +274,7 @@ export default function ReportsBoard({
                             ) : null}
                             {!composerAvailable && canCreateReports ? (
                                 <Button asChild variant="brand">
-                                    <Link href="/overview/reports/new">
+                                    <Link href="/insights/reports/new">
                                         <PencilSquareIcon />
                                         {t('landing.newReport')}
                                     </Link>
@@ -314,7 +314,7 @@ export default function ReportsBoard({
                                                     <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-light/60 text-brand-dark">
                                                         <Icon className="size-5" />
                                                     </div>
-                                                    <Link href={`/overview/reports/${report.id}`} className="min-w-0 flex-1">
+                                                    <Link href={`/insights/reports/${report.id}`} className="min-w-0 flex-1">
                                                         <div className="flex min-w-0 items-center gap-2">
                                                             <p className="min-w-0 truncate font-medium text-foreground group-hover:text-brand-dark">
                                                                 {report.name}
@@ -340,10 +340,10 @@ export default function ReportsBoard({
                                                         </DropdownMenuTrigger>
                                                         <DropdownMenuContent align="end">
                                                             <DropdownMenuItem asChild>
-                                                                <Link href={`/overview/reports/${report.id}`}>{t('landing.open')}</Link>
+                                                                <Link href={`/insights/reports/${report.id}`}>{t('landing.open')}</Link>
                                                             </DropdownMenuItem>
                                                             <DropdownMenuItem asChild>
-                                                                <Link href={`/overview/reports/${report.id}/edit`}>{t('common.edit')}</Link>
+                                                                <Link href={`/insights/reports/${report.id}/edit`}>{t('common.edit')}</Link>
                                                             </DropdownMenuItem>
                                                             <DropdownMenuItem
                                                                 onSelect={() => duplicateReport(report)}

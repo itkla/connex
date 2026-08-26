@@ -62,7 +62,6 @@
     },
     "CampaignDetail": {
         "back": "Campaigns",
-        "overview": "Overview",
         "audience": "Audience",
         "objective": "Objective",
         "type": "Type",

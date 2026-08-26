@@ -348,7 +348,7 @@ describe('the Radar deep link other surfaces produce', () => {
         const href = radarFamilyHref('relationship_decay');
         const query = new URLSearchParams(href.slice(href.indexOf('?') + 1));
 
-        expect(resolveShippedRoute(href)).toBe('/radar');
+        expect(resolveShippedRoute(href)).toBe('/intelligence/radar');
         expect(query.get(RADAR_FAMILY_FILTER_KEY)).toBe('relationship_decay');
     });
 

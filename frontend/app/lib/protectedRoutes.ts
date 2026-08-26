@@ -4,6 +4,8 @@ const PROTECTED_PREFIXES = [
     '/admin',
     '/ask-connex',
     '/dashboard',
+    '/insights',
+    '/intelligence',
     '/library',
     '/marketing',
     '/me',

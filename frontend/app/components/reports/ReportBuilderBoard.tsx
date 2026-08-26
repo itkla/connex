@@ -277,7 +277,7 @@ export default function ReportBuilderBoard({
                 ? await updateReport(initialReport.id, payload)
                 : await createReport(payload);
             toastSuccess(t(initialReport ? 'builder.updated' : 'builder.created'));
-            router.push(`/overview/reports/${saved.id}`);
+            router.push(`/insights/reports/${saved.id}`);
             router.refresh();
         } catch (error) {
             showApiError(error, 'builder.saveFailed');

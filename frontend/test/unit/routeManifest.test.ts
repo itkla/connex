@@ -176,8 +176,8 @@ describe("shipped route manifest", () => {
     });
 
     it("prefers a literal segment over a dynamic sibling", () => {
-        expect(resolveShippedRoute("/overview/reports/new")).toBe("/overview/reports/new");
-        expect(resolveShippedRoute("/overview/reports/42")).toBe("/overview/reports/[id]");
+        expect(resolveShippedRoute("/insights/reports/new")).toBe("/insights/reports/new");
+        expect(resolveShippedRoute("/insights/reports/42")).toBe("/insights/reports/[id]");
     });
 
     it("rejects an href no shipped route serves", () => {
@@ -276,12 +276,12 @@ describe("deep-link producers emit the consumers' canonical params", () => {
     it("links a decay figure to Radar filtered to the decay family", () => {
         const href = radarFamilyHref("relationship_decay");
 
-        expect(resolveShippedRoute(href)).toBe("/radar");
+        expect(resolveShippedRoute(href)).toBe("/intelligence/radar");
         expect(queryOf(href).get(RADAR_FAMILY_FILTER_KEY)).toBe("relationship_decay");
     });
 
     it("links a record's intro path to the Introductions surface", () => {
-        expect(resolveShippedRoute(INTRODUCTIONS_PATH)).toBe("/overview/introductions");
+        expect(resolveShippedRoute(INTRODUCTIONS_PATH)).toBe("/intelligence/introductions");
     });
 
     it.each(["company", "person", "deal"] as const)(

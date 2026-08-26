@@ -9,7 +9,7 @@ export default async function ReportsNotFound() {
         <NotFoundState
             title={t('title')}
             body={t('reports.body')}
-            actions={[{ href: '/overview/reports', label: t('reports.all') }]}
+            actions={[{ href: '/insights/reports', label: t('reports.all') }]}
         />
     );
 }

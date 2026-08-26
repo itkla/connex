@@ -97,6 +97,14 @@ type NavSection = {
     label: string;
     items: NavItem[];
     activePaths?: readonly string[];
+    /**
+     * Renders the group as a bare row, with no header and no collapse control.
+     *
+     * A single-destination area names itself: a "DASHBOARD" header above a "Dashboard" row says the
+     * word twice and offers a control that hides one row. The `label` is still the group's
+     * accessible name, so the list is announced the same way a headed group is.
+     */
+    headless?: boolean;
 };
 
 /**
@@ -134,9 +142,6 @@ function useSections(navAccess: NavAccess): NavSection[] {
         && sectionSearchParams.get("panel") === "reviews";
     const workspaceItems: NavItem[] = [
         settingsNavItem(settingsDestination("workspace.people-directory"), UserGroupIcon, tManifest),
-        ...(navAccess.workflows
-            ? [{ label: t("navWorkflows"), href: "/workflows", icon: BoltIcon }]
-            : []),
         ...(navAccess.captureReviews !== "disabled"
             ? [settingsNavItem(settingsDestination("account.capture-reviews"), InboxIcon, tManifest, {
                 active: captureReviewsActive,
@@ -161,23 +166,41 @@ function useSections(navAccess: NavAccess): NavSection[] {
             { label: t("navCampaigns"), href: "/marketing/campaigns", icon: MegaphoneIcon },
         ],
     };
+    const workflowsSection: NavSection = {
+        id: "workflows",
+        label: t("navWorkflows"),
+        headless: true,
+        activePaths: ["/workflows"],
+        items: [
+            { label: t("navWorkflows"), href: "/workflows", icon: BoltIcon },
+        ],
+    };
     return [
         {
-            id: "overview",
-            label: t("sectionOverview"),
-            activePaths: ["/dashboard", "/radar", "/overview"],
+            id: "dashboard",
+            label: t("navDashboard"),
+            headless: true,
             items: [
                 { label: t("navDashboard"), href: "/dashboard", icon: HomeIcon },
-                { label: t("navRadar"), href: "/radar", icon: SignalIcon },
-                { label: t("navCalendar"), href: "/overview/calendar", icon: CalendarIcon },
-                { label: t("navMap"), href: "/overview/map", icon: MapIcon },
-                { label: t("navIntroductions"), href: "/overview/introductions", icon: ArrowsRightLeftIcon },
-                { label: t("navAnalytics"), href: "/overview/analytics", icon: ChartBarIcon },
-                { label: t("navReports"), href: "/overview/reports", icon: PresentationChartLineIcon },
-                ...(navAccess.goals
-                    ? [{ label: t("navGoals"), href: "/overview/reports/goals", icon: FlagIcon }]
-                    : []),
-            ]
+            ],
+        },
+        {
+            id: "my-work",
+            label: t("myWork"),
+            headless: true,
+            items: [
+                { label: t("myWork"), href: "/me", icon: UserCircleIcon },
+            ],
+        },
+        {
+            id: "intelligence",
+            label: t("sectionIntelligence"),
+            activePaths: ["/intelligence"],
+            items: [
+                { label: t("navRadar"), href: "/intelligence/radar", icon: SignalIcon },
+                { label: t("navIntroductions"), href: "/intelligence/introductions", icon: ArrowsRightLeftIcon },
+                { label: t("navMap"), href: "/intelligence/map", icon: MapIcon },
+            ],
         },
         {
             id: "records",
@@ -190,7 +213,6 @@ function useSections(navAccess: NavAccess): NavSection[] {
                 { label: t("navProducts"), href: "/records/products", icon: CubeIcon },
             ],
         },
-        ...(navAccess.campaigns ? [marketingSection] : []),
         {
             id: "activity",
             label: t("sectionActivity"),
@@ -199,8 +221,22 @@ function useSections(navAccess: NavAccess): NavSection[] {
                 { label: t("navActivities"), href: "/activity/all", icon: ChatBubbleLeftRightIcon },
                 { label: t("navTasks"), href: "/activity/tasks", icon: CheckCircleIcon },
                 { label: t("navNotes"), href: "/activity/notes", icon: DocumentTextIcon },
+                { label: t("navCalendar"), href: "/activity/calendar", icon: CalendarIcon },
             ],
         },
+        {
+            id: "insights",
+            label: t("sectionInsights"),
+            activePaths: ["/insights"],
+            items: [
+                { label: t("navAnalytics"), href: "/insights/analytics", icon: ChartBarIcon },
+                { label: t("navReports"), href: "/insights/reports", icon: PresentationChartLineIcon },
+                ...(navAccess.goals
+                    ? [{ label: t("navGoals"), href: "/insights/reports/goals", icon: FlagIcon }]
+                    : []),
+            ],
+        },
+        ...(navAccess.campaigns ? [marketingSection] : []),
         {
             id: "library",
             label: t("sectionLibrary"),
@@ -217,17 +253,12 @@ function useSections(navAccess: NavAccess): NavSection[] {
                 { label: t("navFiles"), href: "/library/files", icon: FolderIcon },
             ],
         },
+        ...(navAccess.workflows ? [workflowsSection] : []),
         {
             id: "workspace",
             label: t("sectionWorkspace"),
-            activePaths: ["/users", "/workflows", "/settings", "/organization", "/admin"],
+            activePaths: ["/users", "/settings", "/organization", "/admin"],
             items: workspaceItems,
-        },
-        {
-            id: "help",
-            label: t("sectionHelp"),
-            activePaths: ["/docs"],
-            items: [{ label: t("navDocs"), href: "/docs", icon: BookOpenIcon }],
         },
     ];
 }
@@ -285,11 +316,22 @@ function NavGroup({
     const open = manualStateCurrent ? !manualState.collapsed : groupActive || !collapsed;
     const sectionId = `nav-group-${section.id}`;
     const reduce = useReducedMotion() ?? false;
-    if (rail) {
+    if (rail || section.headless === true) {
         return (
-            <ul aria-label={section.label} className="flex flex-col items-center gap-1">
+            <ul
+                aria-label={section.label}
+                className={cn(
+                    "flex flex-col gap-0.5",
+                    rail && "items-center gap-1",
+                )}
+            >
                 {section.items.map((item) => (
-                    <NavLink key={item.href} item={item} active={item.active ?? item.href === activeHref} rail />
+                    <NavLink
+                        key={item.href}
+                        item={item}
+                        active={item.active ?? item.href === activeHref}
+                        rail={rail}
+                    />
                 ))}
             </ul>
         );
@@ -520,6 +562,38 @@ function ThemeSubmenu() {
     );
 }
 
+/**
+ * One navigation row in the user menu.
+ *
+ * The rows share a single surface rather than each restating it, so the menu's highlight treatment
+ * lives in one place. `children` carries whatever a row adds after its label — the notification
+ * count is the only one that does.
+ */
+function UserMenuLink({
+    href,
+    icon: Icon,
+    label,
+    children,
+}: {
+    href: string;
+    icon: React.ComponentType<{ className?: string }>;
+    label: string;
+    children?: React.ReactNode;
+}) {
+    return (
+        <DropdownMenu.Item asChild>
+            <Link
+                href={href}
+                className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-brand-light data-[highlighted]:text-brand-dark"
+            >
+                <Icon className="size-4" />
+                {label}
+                {children}
+            </Link>
+        </DropdownMenu.Item>
+    );
+}
+
 function UserMenu({ user, onLogout, rail }: { user: User; onLogout: () => void; rail: boolean }) {
     const t = useTranslations("CommonSidebar");
     const tManifest = useTranslations();
@@ -593,44 +667,26 @@ function UserMenu({ user, onLogout, rail }: { user: User; onLogout: () => void; 
                         </div>
                     </DropdownMenu.Label>
                     <DropdownMenu.Separator className="my-1 h-px bg-sidebar-border" />
-                    <DropdownMenu.Item asChild>
-                        <Link
-                            href="/me"
-                            className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-brand-light data-[highlighted]:text-brand-dark"
-                        >
-                            <UserCircleIcon className="size-4" />
-                            {t("myWork")}
-                        </Link>
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Item asChild>
-                        <Link
-                            href={accountSettings.href}
-                            className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-brand-light data-[highlighted]:text-brand-dark"
-                        >
-                            <Cog6ToothIcon className="size-4" />
-                            {tManifest(accountSettings.titleKey)}
-                        </Link>
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Item asChild>
-                        <Link
-                            href="/notifications"
-                            className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-brand-light data-[highlighted]:text-brand-dark"
-                        >
-                            <BellIcon className="size-4" />
-                            {t("navNotifications")}
-                            {unread > 0 ? (
-                                <>
-                                    <span className="sr-only">{tn("unreadCount", { count: unread })}</span>
-                                    <span
-                                        aria-hidden="true"
-                                        className="ml-auto min-w-5 rounded-full bg-destructive px-1 text-center text-[10px] font-semibold leading-5 text-white"
-                                    >
-                                        {unread > 99 ? "99+" : unread}
-                                    </span>
-                                </>
-                            ) : null}
-                        </Link>
-                    </DropdownMenu.Item>
+                    <UserMenuLink href="/me" icon={UserCircleIcon} label={t("myWork")} />
+                    <UserMenuLink
+                        href={accountSettings.href}
+                        icon={Cog6ToothIcon}
+                        label={tManifest(accountSettings.titleKey)}
+                    />
+                    <UserMenuLink href="/docs" icon={BookOpenIcon} label={t("navDocs")} />
+                    <UserMenuLink href="/notifications" icon={BellIcon} label={t("navNotifications")}>
+                        {unread > 0 ? (
+                            <>
+                                <span className="sr-only">{tn("unreadCount", { count: unread })}</span>
+                                <span
+                                    aria-hidden="true"
+                                    className="ml-auto min-w-5 rounded-full bg-destructive px-1 text-center text-[10px] font-semibold leading-5 text-white"
+                                >
+                                    {unread > 99 ? "99+" : unread}
+                                </span>
+                            </>
+                        ) : null}
+                    </UserMenuLink>
                     <DropdownMenu.Item asChild>
                         <DropdownMenuSub>
                             <DropdownMenuSubTrigger>

@@ -97,7 +97,7 @@
         "rateLimited": "リクエストが集中しているため、AIインサイトは一時的に利用できません。"
     },
     "IntroductionsLayout": {
-        "title": "概要 / 紹介",
+        "title": "紹介",
         "description": "お互いに紹介する価値のあるネットワーク内の人物"
     }
 }

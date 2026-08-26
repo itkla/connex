@@ -327,8 +327,8 @@ export default function ReportDocumentBoard({
      */
     const syncSnapshotUrl = useCallback((snapshotId: number | null) => {
         const path = snapshotId == null
-            ? `/overview/reports/${definition.id}`
-            : `/overview/reports/${definition.id}/snapshots/${snapshotId}`;
+            ? `/insights/reports/${definition.id}`
+            : `/insights/reports/${definition.id}/snapshots/${snapshotId}`;
         if (window.location.pathname === path) return;
         window.history.replaceState(null, '', `${path}${window.location.search}`);
     }, [definition.id]);
@@ -490,7 +490,7 @@ export default function ReportDocumentBoard({
                     </DropdownMenu>
                     {canUpdateReports ? (
                         <Button asChild variant="brand">
-                            <Link href={`/overview/reports/${definition.id}/edit`}>
+                            <Link href={`/insights/reports/${definition.id}/edit`}>
                                 <PencilSquareIcon />
                                 {t('common.edit')}
                             </Link>

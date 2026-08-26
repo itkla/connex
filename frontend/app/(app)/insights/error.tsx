@@ -3,8 +3,8 @@
 import ErrorState, { type SegmentErrorProps } from '@/app/components/ErrorState';
 
 /**
- * Error boundary for the overview segment; renders the shared recovery state.
+ * Error boundary for the insights segment; renders the shared recovery state.
  */
-export default function OverviewError({ error, reset, unstable_retry }: SegmentErrorProps) {
+export default function InsightsError({ error, reset, unstable_retry }: SegmentErrorProps) {
     return <ErrorState error={error} retry={unstable_retry ?? reset} />;
 }

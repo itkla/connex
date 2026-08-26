@@ -1,6 +1,6 @@
 {
     "app/(app)/dashboard/page.tsx": 1,
-    "app/(app)/overview/map/page.tsx": 1,
+    "app/(app)/intelligence/map/page.tsx": 1,
     "app/auth/confirm-email/ConfirmEmailForm.tsx": 3,
     "app/auth/forgot-password/ForgotPasswordForm.tsx": 1,
     "app/auth/reset-password/ResetPasswordForm.tsx": 3,
@@ -8,7 +8,7 @@
     "app/components/AuthForm.tsx": 6,
     "app/components/ContentShell.tsx": 4,
     "app/components/SectionUnavailable.tsx": 1,
-    "app/components/Sidebar.tsx": 5,
+    "app/components/Sidebar.tsx": 3,
     "app/components/account/ConnectionsPanel.tsx": 2,
     "app/components/account/MembershipPanel.tsx": 2,
     "app/components/account/NotificationsPanel.tsx": 1,

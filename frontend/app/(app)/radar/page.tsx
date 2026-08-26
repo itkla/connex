@@ -1,46 +1,20 @@
-import type { Metadata } from 'next';
-import { headers } from 'next/headers';
-import { redirect } from 'next/navigation';
-import { getTranslations } from 'next-intl/server';
+import { permanentRedirect } from "next/navigation";
 
-import AccessDeniedPage from '@/app/components/AccessDeniedPage';
-import { PageHeader } from '@/app/components/PageHeader';
-import { PageShell } from '@/app/components/PageShell';
-import RadarBoard from '@/app/components/radar/RadarBoard';
-import SectionUnavailable from '@/app/components/SectionUnavailable';
-import { getRadarResultFromCookie } from '@/app/lib/api';
-import { classifyRadarReadFailure } from '@/app/lib/radar';
+import { movedRouteTarget, type RouteSearchParams } from "@/app/lib/routeMoves";
 
-export async function generateMetadata(): Promise<Metadata> {
-    const t = await getTranslations('Radar');
-    return {
-        title: t('metadata.title'),
-        description: t('metadata.description'),
-    };
-}
-
-/** Server entry that keeps permission refusal, unavailability, and an empty Radar distinct. */
-export default async function RadarPage() {
-    const cookie = (await headers()).get('cookie');
-    if (!cookie) redirect('/auth/login');
-    const [t, result] = await Promise.all([
-        getTranslations('Radar'),
-        getRadarResultFromCookie(cookie),
-    ]);
-    if (!result.ok) {
-        const failure = classifyRadarReadFailure(result.status);
-        if (failure === 'unauthenticated') redirect('/auth/login');
-        if (failure === 'denied') return <AccessDeniedPage />;
-    }
-
-    return (
-        <PageShell>
-            <PageHeader title={t('title')} description={result.ok ? undefined : t('description')} />
-            {result.ok ? (
-                <RadarBoard key={result.data.asOf} initialPayload={result.data} />
-            ) : (
-                <SectionUnavailable title={t('unavailable.title')} body={t('unavailable.routeBody')} />
-            )}
-        </PageShell>
-    );
+/**
+ * The retired address for Radar, before it moved under Intelligence (#1323 WS4).
+ *
+ * The D13 navigation restructure dissolved the Overview grab-bag, and this address survives only so
+ * that links already sent, bookmarked, or stored keep resolving. It forwards permanently.
+ *
+ * The target is read from the route-move manifest rather than spelled here, so a destination that
+ * moves again takes its redirects with it, and the reader's query string survives the hop whole.
+ */
+export default async function LegacyRadarPage({
+    searchParams,
+}: {
+    searchParams: Promise<RouteSearchParams>;
+}) {
+    permanentRedirect(movedRouteTarget("/radar", await searchParams));
 }

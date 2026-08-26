@@ -181,7 +181,7 @@ export function selectFirstInsight(candidates: ActivationCandidates): Activation
             kind: 'introPath',
             title: `${suggestion.personAName} · ${suggestion.personBName}`,
             subtitle: suggestion.personACompany ?? suggestion.personBCompany ?? null,
-            href: '/overview/introductions',
+            href: '/intelligence/introductions',
             record: null,
             risk: null,
             temperature: null,

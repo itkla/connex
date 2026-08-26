@@ -38,7 +38,7 @@ export default function IntroOpportunities({ items }: { items: IntroSuggestion[]
                     {items.map((suggestion) => (
                         <li key={`${suggestion.personAId}-${suggestion.personBId}`}>
                             <Link
-                                href="/overview/introductions"
+                                href="/intelligence/introductions"
                                 className="flex items-center gap-2.5 px-4 py-2.5 transition-colors hover:bg-muted/50"
                             >
                                 <PartyAvatar imageUrl={suggestion.personAImageUrl} />

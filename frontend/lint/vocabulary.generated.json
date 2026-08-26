@@ -33,6 +33,26 @@
             ]
         },
         {
+            "id": "en:Overview",
+            "term": "Overview",
+            "locale": "en",
+            "scope": {
+                "excludeNamespaces": [
+                    "campaigns.json#CampaignDetail"
+                ]
+            },
+            "allowFiles": [],
+            "canonicalExceptions": [],
+            "narrowed": true,
+            "pattern": {
+                "source": "^Overview$",
+                "flags": "u"
+            },
+            "sources": [
+                "§4 glossary row \"Home / metrics / documents split\""
+            ]
+        },
+        {
             "id": "en:People",
             "term": "People",
             "locale": "en",
@@ -1225,15 +1245,6 @@
             "reason": "Note is the canonical record name; the activity-type fold is a picker and read-time rename, not a string the gate can identify by value.",
             "sources": [
                 "§4 glossary row \"Free-text activity logging\""
-            ]
-        },
-        {
-            "id": "en:Overview",
-            "term": "Overview",
-            "locale": "en",
-            "reason": "Overview is fine in prose; page-name usage is a route decision WS4 owns.",
-            "sources": [
-                "§4 glossary row \"Home / metrics / documents split\""
             ]
         },
         {

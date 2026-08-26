@@ -73,18 +73,30 @@ const ROUTE_CASES = [
     ["/organization/members", "redirect"],
     ["/organization/overview", "redirect"],
     ["/organization/sso", "redirect"],
-    ["/overview/analytics", "shell"],
-    ["/overview/calendar", "shell"],
-    ["/overview/introductions", "shell"],
-    ["/overview/map", "shell"],
-    ["/overview/reports/1/edit", "shell"],
-    ["/overview/reports/1", "shell"],
-    ["/overview/reports/1/snapshots/2", "shell"],
+    ["/activity/calendar", "shell"],
+    ["/insights/analytics", "shell"],
+    ["/insights/reports/1/edit", "shell"],
+    ["/insights/reports/1", "shell"],
+    ["/insights/reports/1/snapshots/2", "shell"],
+    ["/insights/reports/1/snapshots", "redirect"],
+    ["/insights/reports/goals", "shell"],
+    ["/insights/reports/new", "shell"],
+    ["/insights/reports", "shell"],
+    ["/intelligence/introductions", "shell"],
+    ["/intelligence/map", "shell"],
+    ["/intelligence/radar", "shell"],
+    ["/overview/analytics", "redirect"],
+    ["/overview/calendar", "redirect"],
+    ["/overview/introductions", "redirect"],
+    ["/overview/map", "redirect"],
+    ["/overview/reports/1/edit", "redirect"],
+    ["/overview/reports/1", "redirect"],
+    ["/overview/reports/1/snapshots/2", "redirect"],
     ["/overview/reports/1/snapshots", "redirect"],
-    ["/overview/reports/goals", "shell"],
-    ["/overview/reports/new", "shell"],
-    ["/overview/reports", "shell"],
-    ["/radar", "shell"],
+    ["/overview/reports/goals", "redirect"],
+    ["/overview/reports/new", "redirect"],
+    ["/overview/reports", "redirect"],
+    ["/radar", "redirect"],
     ["/records/approval-policies", "redirect"],
     ["/records/companies/1", "shell"],
     ["/records/companies", "shell"],
@@ -221,9 +233,9 @@ describe("breadcrumb route registry", () => {
     });
 
     it("builds report edit and snapshot hierarchies without fabricating a report name", () => {
-        const labels = new Map([["/overview/reports/7", "Pipeline Health"]]);
+        const labels = new Map([["/insights/reports/7", "Pipeline Health"]]);
         expect(resolveBreadcrumbRoute(
-            "/overview/reports/7/edit",
+            "/insights/reports/7/edit",
             context({ dynamicLabels: labels }),
         ).crumbs.map((crumb) => crumb.label)).toEqual([
             "Northstar",
@@ -232,7 +244,7 @@ describe("breadcrumb route registry", () => {
             "edit",
         ]);
         expect(resolveBreadcrumbRoute(
-            "/overview/reports/7/snapshots/9",
+            "/insights/reports/7/snapshots/9",
             context(),
         ).crumbs.map((crumb) => crumb.label)).toEqual([
             "Northstar",
@@ -267,7 +279,7 @@ describe("breadcrumb route registry", () => {
     });
 
     it.each([
-        ["/overview/reports/goals", "goals"],
+        ["/insights/reports/goals", "goals"],
         ["/marketing/campaigns", "campaigns"],
         ["/workflows", "workflows"],
     ] as const)("fails closed for inaccessible route %s", (pathname, access) => {
@@ -419,7 +431,7 @@ describe("breadcrumb route registry", () => {
     it.each([
         "/records/contacts-ish",
         "/records/contacts/42/more",
-        "/overview/reports/not-an-id",
+        "/insights/reports/not-an-id",
         "/workflows/5/runs",
         "/workflows/5/runs/not-a-run",
         "/workflows/recipes/not-a-recipe",

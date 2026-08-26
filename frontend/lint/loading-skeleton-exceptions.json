@@ -1,5 +1,5 @@
 {
-    "highWaterMark": 36,
+    "highWaterMark": 48,
     "exceptions": [
         {
             "route": "/account",
@@ -40,6 +40,16 @@
             "route": "/admin/logs",
             "kind": "redirect-only",
             "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the `audit` section of Audit & diagnostics. The consolidated destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/insights/reports/[id]/snapshots",
+            "kind": "redirect-only",
+            "reason": "The bare snapshots path has no surface of its own; it redirects to the report, which lists every snapshot and owns the skeleton."
+        },
+        {
+            "route": "/insights/reports/[id]/snapshots/[snapshotId]",
+            "kind": "shares-parent-skeleton",
+            "reason": "A frozen snapshot renders the same report document board as /insights/reports/[id]; that parent skeleton is already the correct mirror, and a second copy would only drift from it."
         },
         {
             "route": "/organization",
@@ -87,14 +97,64 @@
             "reason": "Renders nothing: #1340 WS4.6 retired this address, which now forwards permanently to the `sso` section of Identity & administrators. The consolidated destination owns the skeleton the reader actually waits on."
         },
         {
+            "route": "/overview/analytics",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1323 WS4 moved this surface out of the dissolved Overview area, and this address now forwards permanently to /insights/analytics. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/overview/calendar",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1323 WS4 moved this surface out of the dissolved Overview area, and this address now forwards permanently to /activity/calendar. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/overview/introductions",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1323 WS4 moved this surface out of the dissolved Overview area, and this address now forwards permanently to /intelligence/introductions. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/overview/map",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1323 WS4 moved this surface out of the dissolved Overview area, and this address now forwards permanently to /intelligence/map. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/overview/reports",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1323 WS4 moved this surface out of the dissolved Overview area, and this address now forwards permanently to /insights/reports. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/overview/reports/[id]",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1323 WS4 moved this surface out of the dissolved Overview area, and this address now forwards permanently to /insights/reports/[id]. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/overview/reports/[id]/edit",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1323 WS4 moved this surface out of the dissolved Overview area, and this address now forwards permanently to /insights/reports/[id]/edit. That destination owns the skeleton the reader actually waits on."
+        },
+        {
             "route": "/overview/reports/[id]/snapshots",
             "kind": "redirect-only",
-            "reason": "The bare snapshots path has no surface of its own; it redirects to the report, which lists every snapshot and owns the skeleton."
+            "reason": "Renders nothing: #1323 WS4 moved this surface out of the dissolved Overview area, and this address now forwards permanently to /insights/reports/[id]/snapshots. That destination owns the skeleton the reader actually waits on."
         },
         {
             "route": "/overview/reports/[id]/snapshots/[snapshotId]",
-            "kind": "shares-parent-skeleton",
-            "reason": "A frozen snapshot renders the same report document board as /overview/reports/[id]; that parent skeleton is already the correct mirror, and a second copy would only drift from it."
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1323 WS4 moved this surface out of the dissolved Overview area, and this address now forwards permanently to /insights/reports/[id]/snapshots/[snapshotId]. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/overview/reports/goals",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1323 WS4 moved this surface out of the dissolved Overview area, and this address now forwards permanently to /insights/reports/goals. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/overview/reports/new",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1323 WS4 moved this surface out of the dissolved Overview area, and this address now forwards permanently to /insights/reports/new. That destination owns the skeleton the reader actually waits on."
+        },
+        {
+            "route": "/radar",
+            "kind": "redirect-only",
+            "reason": "Renders nothing: #1323 WS4 moved this surface out of the dissolved Overview area, and this address now forwards permanently to /intelligence/radar. That destination owns the skeleton the reader actually waits on."
         },
         {
             "route": "/records/approval-policies",

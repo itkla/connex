@@ -179,7 +179,7 @@ export function buildSearchGroups(results: SearchResults | null, t: SearchTransl
     }));
     addGroup("reports", t("groupReports"), results.reports, (r) => ({
         key: `report-${r.id}`,
-        href: `/overview/reports/${r.id}`,
+        href: `/insights/reports/${r.id}`,
         icon: PresentationChartLineIcon,
         label: r.name,
         subtitle: r.description ? truncate(r.description) : undefined,

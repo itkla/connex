@@ -1,6 +1,7 @@
 import { CONNECTED_ACCOUNTS_ROUTE } from "@/app/lib/connectedAccountsSections";
 import type { NavAccess } from "@/app/lib/navAccess";
 import type { RecordCollection } from "@/app/lib/recordReturnPath";
+import { MOVED_ROUTE_PREFIXES } from "@/app/lib/routeMoves";
 import { settingsRouteServed } from "@/app/lib/settingsEntryPoints";
 import {
     SETTINGS_ENTRIES,
@@ -44,7 +45,6 @@ export type BreadcrumbMessageKey =
     | "notifications"
     | "operations"
     | "organization"
-    | "overview"
     | "peopleAccess"
     | "communications"
     | "crmConfiguration"
@@ -112,12 +112,12 @@ type StaticWorkspaceRoute = {
 
 const STATIC_WORKSPACE_ROUTES: Readonly<Record<string, StaticWorkspaceRoute>> = {
     "/dashboard": { key: "dashboard" },
-    "/radar": { key: "radar" },
-    "/overview/calendar": { key: "calendar" },
-    "/overview/map": { key: "map" },
-    "/overview/introductions": { key: "introductions" },
-    "/overview/analytics": { key: "analytics" },
-    "/overview/reports": { key: "reports" },
+    "/intelligence/radar": { key: "radar" },
+    "/activity/calendar": { key: "calendar" },
+    "/intelligence/map": { key: "map" },
+    "/intelligence/introductions": { key: "introductions" },
+    "/insights/analytics": { key: "analytics" },
+    "/insights/reports": { key: "reports" },
     "/records/companies": { key: "companies" },
     "/records/contacts": { key: "contacts" },
     "/records/deals": { key: "deals" },
@@ -168,7 +168,6 @@ const CANONICAL_SETTINGS_GROUPS: ReadonlyMap<string, SettingsGroup> = new Map(
 );
 
 const ORGANIZATION_ROUTES: Readonly<Record<string, BreadcrumbMessageKey>> = {
-    "/organization/overview": "overview",
     "/organization/members": "members",
     "/organization/allowed-domains": "allowedDomains",
     "/organization/sso": "singleSignOn",
@@ -185,8 +184,8 @@ export const BREADCRUMB_STATIC_ROUTE_PATHS = [...new Set([
     ...CANONICAL_SETTINGS_GROUPS.keys(),
     ...Object.keys(ORGANIZATION_ROUTES),
     "/account/connections/reviews",
-    "/overview/reports/goals",
-    "/overview/reports/new",
+    "/insights/reports/goals",
+    "/insights/reports/new",
     "/workflows/operations",
     "/workflows/recipes",
 ])].sort();
@@ -221,6 +220,19 @@ const REDIRECT_ROUTES = new Set<string>(
     ).map((entry) => entry.currentRoute),
 );
 
+/**
+ * Whether a pathname is a retired address that the D13 restructure moved (#1323 WS4).
+ *
+ * The retired prefixes still resolve — every one of them is a permanent redirect — so without this
+ * they would fall through to the tables below and briefly paint a trail for a page that is already
+ * forwarding. Classifying them as redirects keeps the shell quiet on the way through.
+ */
+function isMovedAddress(pathname: string): boolean {
+    return MOVED_ROUTE_PREFIXES.some(
+        (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+    );
+}
+
 const OWNED_ROUTE_PATTERNS = [
     /^\/activity\/notes\/new$/,
     /^\/ask-connex(?:\/[1-9]\d*)?$/,
@@ -230,13 +242,13 @@ const OWNED_ROUTE_PATTERNS = [
 ] as const;
 
 const LEGACY_WORKFLOW_REDIRECT = /^\/settings\/workflows\/[1-9]\d*$/;
-const REPORT_SNAPSHOTS_REDIRECT = /^\/overview\/reports\/[1-9]\d*\/snapshots$/;
+const REPORT_SNAPSHOTS_REDIRECT = /^\/insights\/reports\/[1-9]\d*\/snapshots$/;
 const DYNAMIC_RECORD_ROUTE = /^\/(records\/(contacts|companies|deals)|activity\/(tasks|notes)|activity\/activities)\/([1-9]\d*)$/;
 const USER_ROUTE = /^\/users\/([1-9]\d*)$/;
 const CAMPAIGN_ROUTE = /^\/marketing\/campaigns\/([1-9]\d*)$/;
-const REPORT_ROUTE = /^\/overview\/reports\/([1-9]\d*)$/;
-const REPORT_EDIT_ROUTE = /^\/overview\/reports\/([1-9]\d*)\/edit$/;
-const REPORT_SNAPSHOT_ROUTE = /^\/overview\/reports\/([1-9]\d*)\/snapshots\/([1-9]\d*)$/;
+const REPORT_ROUTE = /^\/insights\/reports\/([1-9]\d*)$/;
+const REPORT_EDIT_ROUTE = /^\/insights\/reports\/([1-9]\d*)\/edit$/;
+const REPORT_SNAPSHOT_ROUTE = /^\/insights\/reports\/([1-9]\d*)\/snapshots\/([1-9]\d*)$/;
 const WORKFLOW_RUN_ROUTE = /^\/workflows\/([1-9]\d*)\/runs\/(?:canonical|legacy)-[1-9]\d*$/;
 const WORKFLOW_RECIPE_ROUTE = /^\/workflows\/recipes\/([^/]+)$/;
 
@@ -395,17 +407,22 @@ export function resolveBreadcrumbRoute(
     if (!pathname.startsWith("/") || pathname.includes("?") || pathname.includes("#")) {
         return empty("unknown");
     }
-    if (REDIRECT_ROUTES.has(pathname) || LEGACY_WORKFLOW_REDIRECT.test(pathname) || REPORT_SNAPSHOTS_REDIRECT.test(pathname)) {
+    if (
+        REDIRECT_ROUTES.has(pathname)
+        || LEGACY_WORKFLOW_REDIRECT.test(pathname)
+        || REPORT_SNAPSHOTS_REDIRECT.test(pathname)
+        || isMovedAddress(pathname)
+    ) {
         return empty("redirect");
     }
     if ((pathname === "/workflows" || pathname.startsWith("/workflows/")) && !context.navAccess.workflows) {
         return empty("denied");
     }
     if (OWNED_ROUTE_PATTERNS.some((pattern) => pattern.test(pathname))) return empty("owned");
-    if (pathname === "/overview/reports/goals") {
+    if (pathname === "/insights/reports/goals") {
         if (!context.navAccess.goals) return empty("denied");
         return shell(withWorkspace(context, [
-            translatedCrumb("/overview/reports", "reports", context),
+            translatedCrumb("/insights/reports", "reports", context),
             translatedCrumb(pathname, "goals", context, true),
         ]));
     }
@@ -499,17 +516,17 @@ export function resolveBreadcrumbRoute(
     if (reportMatch) {
         const report = dynamicCrumb(pathname, context, true);
         return shell(withWorkspace(context, [
-            translatedCrumb("/overview/reports", "reports", context),
+            translatedCrumb("/insights/reports", "reports", context),
             ...(report ? [report] : []),
         ]));
     }
 
     const reportEditMatch = REPORT_EDIT_ROUTE.exec(pathname);
     if (reportEditMatch) {
-        const reportPath = `/overview/reports/${reportEditMatch[1]}`;
+        const reportPath = `/insights/reports/${reportEditMatch[1]}`;
         const report = dynamicCrumb(reportPath, context, false);
         return shell(withWorkspace(context, [
-            translatedCrumb("/overview/reports", "reports", context),
+            translatedCrumb("/insights/reports", "reports", context),
             ...(report ? [report] : []),
             translatedCrumb(pathname, "edit", context, true),
         ]));
@@ -517,10 +534,10 @@ export function resolveBreadcrumbRoute(
 
     const reportSnapshotMatch = REPORT_SNAPSHOT_ROUTE.exec(pathname);
     if (reportSnapshotMatch) {
-        const reportPath = `/overview/reports/${reportSnapshotMatch[1]}`;
+        const reportPath = `/insights/reports/${reportSnapshotMatch[1]}`;
         const report = dynamicCrumb(reportPath, context, false);
         return shell(withWorkspace(context, [
-            translatedCrumb("/overview/reports", "reports", context),
+            translatedCrumb("/insights/reports", "reports", context),
             ...(report ? [report] : []),
             translatedCrumb(pathname, "snapshot", context, true),
         ]));
@@ -560,9 +577,9 @@ export function resolveBreadcrumbRoute(
         ]));
     }
 
-    if (pathname === "/overview/reports/new") {
+    if (pathname === "/insights/reports/new") {
         return shell(withWorkspace(context, [
-            translatedCrumb("/overview/reports", "reports", context),
+            translatedCrumb("/insights/reports", "reports", context),
             translatedCrumb(pathname, "newReport", context, true),
         ]));
     }

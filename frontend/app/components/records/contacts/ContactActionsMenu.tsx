@@ -136,7 +136,7 @@ export default function ContactActionsMenu({
                     <Button
                         variant="outline"
                         size="toolbar"
-                        onClick={() => router.push(`/overview/map?contactId=${contact.id}`)}
+                        onClick={() => router.push(`/intelligence/map?contactId=${contact.id}`)}
                     >
                         <EyeIcon className="size-4" />
                         {t('viewInMap')}

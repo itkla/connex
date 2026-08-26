@@ -40,7 +40,7 @@ describe("the relationship-decay figure's drill-through", () => {
         const markup = render(decay);
 
         expect(hrefs(markup)).toEqual([
-            "/radar?family=relationship_decay",
+            "/intelligence/radar?family=relationship_decay",
             "/records/contacts?goesColdWithinDays=30",
             "/records/contacts?goesColdWithinDays=60",
             "/records/contacts?goesColdWithinDays=90",

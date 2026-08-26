@@ -98,7 +98,7 @@ describe("global search reaches every first-class sidebar object", () => {
         expect(group.heading).toBe("groupReports");
         expect(group.rows[0]).toMatchObject({
             key: "report-12",
-            href: "/overview/reports/12",
+            href: "/insights/reports/12",
             label: "Quarterly review",
             subtitle: "Won deals by owner",
         });

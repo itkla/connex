@@ -34,6 +34,10 @@ const DOCS_SLUG_REDIRECTS = [
     source: "/docs/relationship-intelligence/warmth-and-temperature",
     destination: "/docs/relationship-intelligence/warmth",
   },
+  {
+    source: "/docs/overview-suite/calendar",
+    destination: "/docs/activity/calendar",
+  },
 ] as const;
 
 const nextConfig: NextConfig = {
