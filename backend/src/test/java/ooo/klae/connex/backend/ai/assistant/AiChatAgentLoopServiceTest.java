@@ -560,7 +560,7 @@ class AiChatAgentLoopServiceTest {
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class),
                 eq(directAdmission), any(Runnable.class));
         AiInvocation firstInvocation = invocations.getAllValues().getFirst();
-        assertEquals(NOW.plusSeconds(70), firstInvocation.callerDeadline());
+        assertEquals(NOW.plusSeconds(180), firstInvocation.callerDeadline());
         assertEquals(
                 firstInvocation.callerDeadline(),
                 invocations.getAllValues().getLast().callerDeadline());
@@ -1656,7 +1656,7 @@ class AiChatAgentLoopServiceTest {
         setUp();
         useNativeMemory(new AiAssistantPromptBudget(
                 64, 64_000, 16_000, 16_000, 16_000, 112_000));
-        when(clock.instant()).thenReturn(NOW, NOW.plusSeconds(70));
+        when(clock.instant()).thenReturn(NOW, NOW.plusSeconds(180));
 
         AiGenerationTaskResult<AiChatTurnGenerationResult> deadlineResult = service.run(TURN);
 
@@ -1896,7 +1896,7 @@ class AiChatAgentLoopServiceTest {
     void wallClockDeadlineHasItsOwnTerminalReason() {
         when(clock.instant()).thenReturn(
                 Instant.parse("2026-08-11T00:00:00Z"),
-                Instant.parse("2026-08-11T00:01:10Z"));
+                Instant.parse("2026-08-11T00:03:00Z"));
 
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
 

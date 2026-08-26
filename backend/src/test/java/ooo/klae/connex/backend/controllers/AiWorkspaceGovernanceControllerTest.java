@@ -61,7 +61,7 @@ class AiWorkspaceGovernanceControllerTest {
                 .andExpect(jsonPath("$.enabled").value(false));
         mockMvc.perform(put("/api/ai/governance?workspaceId=9")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"enabled\":true,\"assistantMaxSteps\":13}"))
+                        .content("{\"enabled\":true,\"assistantMaxSteps\":49}"))
                 .andExpect(status().isBadRequest());
 
         verify(governanceService).getForWorkspace(9, 7);

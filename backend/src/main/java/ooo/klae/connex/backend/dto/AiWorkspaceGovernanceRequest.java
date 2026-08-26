@@ -7,5 +7,5 @@ import jakarta.validation.constraints.NotNull;
 /** Complete replacement for one workspace's AI governance settings. */
 public record AiWorkspaceGovernanceRequest(
         @NotNull Boolean enabled,
-        @NotNull @Min(1) @Max(12) Integer assistantMaxSteps) {
+        @NotNull @Min(1) @Max(48) Integer assistantMaxSteps) {
 }
