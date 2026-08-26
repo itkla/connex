@@ -14,9 +14,11 @@ import tools.jackson.databind.node.ObjectNode;
 public class AiAssistantStepSchema {
     private static final String SCHEMA_NAME = "ask_connex_step";
     private static final String FINAL_SCHEMA_NAME = "ask_connex_final";
+    private static final String CLOSING_SCHEMA_NAME = "ask_connex_closing_step";
 
     private final AiResponseSchema responseSchema;
     private final AiResponseSchema finalResponseSchema;
+    private final AiResponseSchema closingResponseSchema;
 
     public AiAssistantStepSchema(
             ObjectMapper objectMapper,
@@ -31,6 +33,14 @@ public class AiAssistantStepSchema {
         responseSchema = new AiResponseSchema(SCHEMA_NAME, root);
         finalResponseSchema = new AiResponseSchema(
                 FINAL_SCHEMA_NAME, finalAnswerObjectSchema(objectMapper));
+        ObjectNode closingRoot = objectMapper.createObjectNode();
+        closingRoot.put("type", "object");
+        ObjectNode closingProperties = closingRoot.putObject("properties");
+        closingProperties.putObject("tool").put("type", "null");
+        closingProperties.set("final", finalAnswerObjectSchema(objectMapper));
+        closingRoot.putArray("required").add("tool").add("final");
+        closingRoot.put("additionalProperties", false);
+        closingResponseSchema = new AiResponseSchema(CLOSING_SCHEMA_NAME, closingRoot);
     }
 
     /** @return immutable provider-neutral assistant step schema */
@@ -41,6 +51,22 @@ public class AiAssistantStepSchema {
     /** @return strict terminal-answer schema used alongside native provider tools */
     public AiResponseSchema finalResponseSchema() {
         return finalResponseSchema;
+    }
+
+    /**
+     * The closing-step schema: the same step envelope with the tool branch closed to null and the
+     * final answer required.
+     *
+     * <p>The closing step exists to answer from evidence already gathered, but a directive alone
+     * did not stop a model from proposing one more tool and forfeiting the whole turn. Making the
+     * schema itself refuse a tool step turns that forfeit into a structurally guaranteed answer;
+     * the loop's refusal of tools during closing remains only as a backstop for providers that do
+     * not enforce the schema.
+     *
+     * @return immutable closing-step schema that admits only a final answer
+     */
+    public AiResponseSchema closingResponseSchema() {
+        return closingResponseSchema;
     }
 
     private static ObjectNode toolSchema(

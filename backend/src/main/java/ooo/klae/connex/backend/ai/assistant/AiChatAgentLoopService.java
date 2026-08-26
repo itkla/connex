@@ -342,7 +342,8 @@ public class AiChatAgentLoopService {
                             AiNativeToolRequest nativeRequest = new AiNativeToolRequest(
                                     nativeDefinitions,
                                     nativeReplay.exchanges(),
-                                    nativeReplay.repairMessage());
+                                    nativeReplay.repairMessage(),
+                                    closing);
                             nativeProviderAttempts++;
                             NativeStepAttempt nativeAttempt = nativeStepAttempt(
                                     invocationService.completeNativeToolsRepairable(
@@ -365,7 +366,9 @@ public class AiChatAgentLoopService {
                                     invocation,
                                     AiAssistantStep.class,
                                     outputGuard,
-                                    stepSchema.responseSchema(),
+                                    closing
+                                            ? stepSchema.closingResponseSchema()
+                                            : stepSchema.responseSchema(),
                                     admission,
                                     providerGuard);
                         }
@@ -418,8 +421,12 @@ public class AiChatAgentLoopService {
                     }
                     // A repair iteration produced no model decision, so it is not charged to the
                     // step budget. It is still bounded: a second consecutive malformed step ends
-                    // the turn above, and the backstop bounds the step numbers regardless.
+                    // the turn above, and the backstop bounds the step numbers regardless. A
+                    // closing step stays closing across its repair — otherwise the retry would
+                    // run with the ordinary schema and a tool it returned would execute past the
+                    // closing boundary.
                     repair = attempt.repair().orElseThrow();
+                    closingPending = closing;
                     continue;
                 }
                 if (!(outcome instanceof AiStructuredOutcome.Parsed<?> parsed)
