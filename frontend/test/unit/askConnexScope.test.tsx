@@ -412,7 +412,7 @@ describe("what the interpreted scope says", () => {
         };
         const markup = render(<AskConnexScopeSummary preview={preview} skills={[]} />);
 
-        expect(markup).toContain("A period can reach back one year");
+        expect(markup).toContain("Only the last year is covered");
     });
 
     it("states a disclosed reason it has no explanation for in general terms rather than dropping it", () => {
@@ -893,7 +893,7 @@ describe("what the form says about names it could not read", () => {
             />,
         );
 
-        expect(markup).toContain("Loading the names this workspace offers");
+        expect(markup).toContain("Loading the names in this workspace");
         expect(markup).toContain('role="status"');
         expect(markup).not.toContain("Couldn&#x27;t load members, stages, and saved views.");
     });
@@ -925,7 +925,7 @@ describe("what the form says about names it could not read", () => {
             />,
         );
 
-        expect(markup).not.toContain("Loading the names this workspace offers");
+        expect(markup).not.toContain("Loading the names in this workspace");
         expect(markup).not.toContain("Couldn&#x27;t load members, stages, and saved views.");
         expect(markup).not.toContain("Try again");
     });

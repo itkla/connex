@@ -46,7 +46,7 @@
     "filterNoIndustry": "業界なし",
     "emptyTitle": "会社はまだありません",
     "emptyBody": "会社は、連絡先が所属する組織です。最初の1社を追加するか、CSVを取り込んでください。",
-    "emptyContactsFirstBody": "会社は、連絡先が所属する組織です。ここから始めることもできますが、温度感は連絡先から読み取るため、多くの場合はまず人を取り込みます。",
+    "emptyContactsFirstBody": "会社は、連絡先の方が働いている先です。ここから始めても構いませんが、温度感は人から読み取るため、多くのチームはまず人を登録します。",
     "emptyReadOnlyBody": "会社は、連絡先が所属する組織です。このワークスペースにはまだ誰も追加していません。",
     "emptyCta": "新規会社",
     "entityLabel": "会社",
@@ -132,7 +132,7 @@
     "relations": "関係者",
     "labelWithCount": "{label} ({count})",
     "engagement12w": "エンゲージメント · 12週",
-    "noEngagement": "過去12週間のエンゲージメントはありません",
+    "noEngagement": "直近12週間、記録がありません",
     "closedRevenue": "実績の収益",
     "projected": "予測収益",
     "tooltipActivities": "アクティビティ · {count}",
@@ -153,7 +153,7 @@
     "toastNoChanges": "保存する変更はありません",
     "toastNameRequired": "名前は必須です",
     "toastCompanyUpdated": "会社を更新しました",
-    "toastPartiallySaved": "会社の一部の変更は保存されましたが、別の変更に失敗しました。現在の内容を確認して、もう一度お試しください。",
+    "toastPartiallySaved": "一部の変更は保存されましたが、保存できなかった項目があります。内容をご確認のうえ、もう一度お試しください。",
     "toastSaveFailed": "会社を保存できませんでした"
   },
   "CompaniesNewDialog": {

@@ -77,7 +77,7 @@
     "toastDeleted": "File deleted",
     "toastDeleteFailed": "Couldn't delete the file",
     "unlinked": "Unlinked",
-    "unlinkedHint": "Files whose owning record was deleted",
+    "unlinkedHint": "The record these were attached to was deleted",
     "selectAria": "Select {name}",
     "selectedCount": "{count, plural, =1 {# selected} other {# selected}}",
     "selectedLabel": "selected",

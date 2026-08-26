@@ -2,10 +2,10 @@
   "Radar": {
     "metadata": {
       "title": "Radar",
-      "description": "Prioritized relationship signals with their current evidence."
+      "description": "What needs your attention across your relationships."
     },
     "title": "Radar",
-    "description": "Review cooling relationships, deal risk, and intro paths from one ranked, evidence-backed list.",
+    "description": "Relationships going quiet, deals slipping, and introductions you could make — ranked in one list.",
     "summary": {
       "headline": "{count, plural, =0 {Nothing needs your attention right now} one {# signal needs your attention} other {# signals need your attention}}",
       "headlineFiltered": "{count, plural, =0 {No signals match this view} one {# signal in this view} other {# signals in this view}}"
@@ -26,8 +26,8 @@
     },
     "layer": {
       "empty": "Nothing in this group right now.",
-      "emptyUnavailable": "Couldn't refresh this group and nothing was cached, so there is nothing to show yet.",
-      "unavailable": "Couldn't refresh this group. The signals below are the last ones Radar read."
+      "emptyUnavailable": "Couldn't load this group, so there is nothing to show. Try again in a moment.",
+      "unavailable": "Couldn't refresh this group. What is below may be out of date."
     },
     "family": {
       "relationship_decay": "Cooling relationships",
@@ -113,12 +113,12 @@
       "typeWarmPath": "Intro path",
       "parameterBand": "Warmth band",
       "parameterTrend": "Trend",
-      "parameterScore": "Score",
+      "parameterScore": "Warmth reading",
       "parameterLastTouchAt": "Last touch",
-      "parameterDaysSinceTouch": "Days since touch",
-      "parameterGoesColdAt": "Predicted cold date",
+      "parameterDaysSinceTouch": "Days since last contact",
+      "parameterGoesColdAt": "Goes cold on",
       "parameterDaysUntilCold": "Days until cold",
-      "parameterTouchCount": "Touch count",
+      "parameterTouchCount": "Interactions logged",
       "parameterSeverity": "Severity",
       "parameterBridgeName": "Path through",
       "parameterReachType": "Suggestion type",
@@ -130,8 +130,8 @@
       "parameterDaysOverdue": "Days overdue",
       "parameterDaysUntilClose": "Days until close",
       "parameterRole": "Stakeholder role",
-      "unknownType": "Additional relationship evidence",
-      "unknownParameter": "Additional source value"
+      "unknownType": "Something else Connex looked at",
+      "unknownParameter": "Another detail"
     },
     "value": {
       "hot": "Hot",
@@ -144,7 +144,7 @@
       "high": "High",
       "medium": "Medium",
       "low": "Low",
-      "connection": "Verified connection",
+      "connection": "Direct connection",
       "colleagues": "Current colleagues",
       "former_colleagues": "Former colleagues",
       "reach": "Reach a new contact",
@@ -154,8 +154,8 @@
       "unavailable": "Unavailable"
     },
     "freshness": {
-      "heading": "Evidence as of",
-      "stale": "Stale",
+      "heading": "Last checked",
+      "stale": "Out of date",
       "unavailable": "Time unavailable"
     },
     "actions": {
@@ -173,24 +173,24 @@
       "askIntroNamed": "Ask for the intro to {subject}",
       "introAsked": "Intro requested",
       "introAskedNamed": "Intro requested for {subject}",
-      "createTaskDeniedNamed": "Task creation is not permitted for {subject}",
-      "createTaskPermissionUnavailableNamed": "Task permission could not be checked for {subject}",
-      "createWarmPathTaskDeniedNamed": "Intro-path task creation is not permitted for {subject}",
-      "createWarmPathTaskPermissionUnavailableNamed": "Couldn't check intro-path task permissions for {subject}",
-      "createTaskEvidenceCheckingNamed": "Relationship evidence is being refreshed for {subject}",
-      "createTaskEvidenceUnavailableNamed": "Relationship evidence could not be refreshed for {subject}",
-      "createTaskStaleNamed": "Task creation is unavailable because the signal for {subject} is stale",
-      "createTaskPathUnavailableNamed": "Task creation is unavailable because the intro path for {subject} has no connector right now",
-      "taskPermissionDenied": "You do not have permission to create tasks.",
-      "taskPermissionUnavailable": "Task permissions could not be checked. Retry before creating a task.",
+      "createTaskDeniedNamed": "You can't create a task for {subject}",
+      "createTaskPermissionUnavailableNamed": "Couldn't check whether you can create a task for {subject}",
+      "createWarmPathTaskDeniedNamed": "You can't ask for an intro to {subject}",
+      "createWarmPathTaskPermissionUnavailableNamed": "Couldn't check whether you can ask for an intro to {subject}",
+      "createTaskEvidenceCheckingNamed": "Checking the latest on {subject}",
+      "createTaskEvidenceUnavailableNamed": "Couldn't check the latest on {subject}",
+      "createTaskStaleNamed": "{subject} is out of date — refresh before creating a task",
+      "createTaskPathUnavailableNamed": "Nobody can introduce you to {subject} right now",
+      "taskPermissionDenied": "You can't create tasks. Ask a workspace admin if you need to.",
+      "taskPermissionUnavailable": "Couldn't check whether you can create tasks. Try again.",
       "warmPathTaskPermissionDenied": "You need permission to create tasks and update contacts before accepting an intro path.",
-      "warmPathTaskPermissionUnavailable": "Couldn't check intro-path permissions. Try again before creating a task.",
+      "warmPathTaskPermissionUnavailable": "Couldn't check whether you can do this. Try again.",
       "retryPermissionCheck": "Retry check",
-      "taskEvidenceChecking": "Refreshing relationship evidence before task creation.",
-      "taskEvidenceUnavailable": "Relationship evidence could not be refreshed. Retry before creating a task.",
+      "taskEvidenceChecking": "Checking the latest on this first…",
+      "taskEvidenceUnavailable": "Couldn't check the latest. Try again before creating a task.",
       "retryEvidenceRefresh": "Retry refresh",
-      "taskStale": "Refresh this stale signal before creating a task.",
-      "taskPathUnavailable": "The connector on this intro path is unavailable. Refresh before creating a task.",
+      "taskStale": "This is out of date. Refresh it before creating a task.",
+      "taskPathUnavailable": "Nobody can make this introduction right now. Refresh and check again.",
       "cancel": "Cancel",
       "snoozing": "Snoozing…"
     },
@@ -222,12 +222,12 @@
     },
     "partial": {
       "title": "Some signals couldn't be refreshed",
-      "body": "Radar is showing the last it read for {families}. Anything that changed there since isn't here yet."
+      "body": "For {families}, this is the last thing Connex saw. Anything that changed since then isn't here yet."
     },
     "unavailable": {
       "title": "Radar is unavailable",
-      "body": "Current signal data could not be loaded for: {families}.",
-      "routeBody": "Current signal data could not be loaded. Retry to check again."
+      "body": "Couldn't load anything for: {families}.",
+      "routeBody": "Couldn't load your Radar. Try again."
     }
   }
 }

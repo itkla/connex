@@ -46,7 +46,7 @@
     "filterNoIndustry": "No industry",
     "emptyTitle": "No companies yet",
     "emptyBody": "Companies are the organizations your contacts work for — add your first one or import a CSV.",
-    "emptyContactsFirstBody": "Companies are the organizations your contacts work for. You can start here, but contacts are what warmth is read from, so most workspaces bring people in first.",
+    "emptyContactsFirstBody": "Companies are where your contacts work. You can start here, but most teams add people first — that is where warmth comes from.",
     "emptyReadOnlyBody": "Companies are the organizations your contacts work for. Nobody on this workspace has added any yet.",
     "emptyCta": "New company",
     "entityLabel": "company",
@@ -132,7 +132,7 @@
     "relations": "Relations",
     "labelWithCount": "{label} ({count})",
     "engagement12w": "Engagement · 12w",
-    "noEngagement": "No engagement in the last 12 weeks",
+    "noEngagement": "Nothing logged in the last 12 weeks",
     "closedRevenue": "Closed revenue",
     "projected": "Projected",
     "tooltipActivities": "Activities · {count}",
@@ -153,7 +153,7 @@
     "toastNoChanges": "No changes to save",
     "toastNameRequired": "Name is required",
     "toastCompanyUpdated": "Company updated",
-    "toastPartiallySaved": "Some company changes were saved, but another change failed. Review the current values and try again.",
+    "toastPartiallySaved": "Some changes saved, but not all. Check what is there and try again.",
     "toastSaveFailed": "Couldn't save the company"
   },
   "CompaniesNewDialog": {

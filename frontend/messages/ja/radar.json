@@ -2,10 +2,10 @@
   "Radar": {
     "metadata": {
       "title": "レーダー",
-      "description": "現在の根拠とともに優先順位付けされた関係性シグナルを確認できます。"
+      "description": "いま気にかけるべき関係を一覧します。"
     },
     "title": "レーダー",
-    "description": "冷え込みつつある関係、案件リスク、紹介ルートを、根拠に基づく一つの優先リストで確認します。",
+    "description": "静かになりつつある関係、遅れはじめた案件、いま頼める紹介を、一つのリストに優先順で並べます。",
     "summary": {
       "headline": "{count, plural, =0 {対応が必要なシグナルはありません} other {対応が必要なシグナル：#件}}",
       "headlineFiltered": "{count, plural, =0 {この表示に該当するシグナルはありません} other {この表示のシグナル：#件}}"
@@ -26,8 +26,8 @@
     },
     "layer": {
       "empty": "この種別に該当するものはありません。",
-      "emptyUnavailable": "この種別を更新できず、保存されている内容もないため、表示できるものがありません。",
-      "unavailable": "この種別を更新できませんでした。以下は最後に取得できた内容です。"
+      "emptyUnavailable": "この項目を読み込めなかったため、表示できるものがありません。少し時間をおいてお試しください。",
+      "unavailable": "この項目を更新できませんでした。以下の内容は古い可能性があります。"
     },
     "family": {
       "relationship_decay": "冷え込みつつある関係",
@@ -113,12 +113,12 @@
       "typeWarmPath": "紹介ルート",
       "parameterBand": "温度帯",
       "parameterTrend": "傾向",
-      "parameterScore": "スコア",
+      "parameterScore": "温度感の数値",
       "parameterLastTouchAt": "最終接触",
-      "parameterDaysSinceTouch": "最終接触からの日数",
-      "parameterGoesColdAt": "コールド予測日",
+      "parameterDaysSinceTouch": "最後のやり取りからの日数",
+      "parameterGoesColdAt": "コールドになる予測日",
       "parameterDaysUntilCold": "コールドまでの日数",
-      "parameterTouchCount": "接触回数",
+      "parameterTouchCount": "記録されたやり取りの件数",
       "parameterSeverity": "深刻度",
       "parameterBridgeName": "紹介を頼める方",
       "parameterReachType": "候補の種類",
@@ -130,8 +130,8 @@
       "parameterDaysOverdue": "超過日数",
       "parameterDaysUntilClose": "クローズまでの日数",
       "parameterRole": "関係者の役割",
-      "unknownType": "追加の関係性根拠",
-      "unknownParameter": "追加の参照値"
+      "unknownType": "そのほかに参照した内容",
+      "unknownParameter": "そのほかの詳細"
     },
     "value": {
       "hot": "ホット",
@@ -144,7 +144,7 @@
       "high": "高",
       "medium": "中",
       "low": "低",
-      "connection": "確認済みのつながり",
+      "connection": "直接のつながり",
       "colleagues": "現在の同僚",
       "former_colleagues": "以前の同僚",
       "reach": "新しい連絡先へのアプローチ",
@@ -154,8 +154,8 @@
       "unavailable": "確認できません"
     },
     "freshness": {
-      "heading": "根拠の基準時刻",
-      "stale": "情報が古くなっています",
+      "heading": "最終確認",
+      "stale": "情報が古い",
       "unavailable": "時刻を確認できません"
     },
     "actions": {
@@ -173,24 +173,24 @@
       "askIntroNamed": "{subject} への紹介を依頼",
       "introAsked": "紹介を依頼済み",
       "introAskedNamed": "{subject} への紹介はすでに依頼済みです",
-      "createTaskDeniedNamed": "{subject} のタスクを作成する権限がありません",
-      "createTaskPermissionUnavailableNamed": "{subject} のタスク作成権限を確認できませんでした",
-      "createWarmPathTaskDeniedNamed": "{subject} の紹介ルートからタスクを作成する権限がありません",
-      "createWarmPathTaskPermissionUnavailableNamed": "{subject} の紹介ルートのタスクに必要な権限を確認できませんでした",
-      "createTaskEvidenceCheckingNamed": "{subject} の関係性の根拠を更新しています",
-      "createTaskEvidenceUnavailableNamed": "{subject} の関係性の根拠を更新できませんでした",
-      "createTaskStaleNamed": "{subject} のシグナルが古いため、タスクを作成できません",
-      "createTaskPathUnavailableNamed": "{subject} の紹介ルートに橋渡し役が見つからないため、タスクを作成できません",
-      "taskPermissionDenied": "タスクを作成する権限がありません。",
-      "taskPermissionUnavailable": "タスク権限を確認できませんでした。再試行してからタスクを作成してください。",
+      "createTaskDeniedNamed": "{subject} のタスクは作成できません",
+      "createTaskPermissionUnavailableNamed": "{subject} のタスクを作成できるかどうかを確認できませんでした",
+      "createWarmPathTaskDeniedNamed": "{subject} への紹介は依頼できません",
+      "createWarmPathTaskPermissionUnavailableNamed": "{subject} への紹介を依頼できるかどうかを確認できませんでした",
+      "createTaskEvidenceCheckingNamed": "{subject} の最新の内容を確認しています",
+      "createTaskEvidenceUnavailableNamed": "{subject} の最新の内容を確認できませんでした",
+      "createTaskStaleNamed": "{subject} の内容が古いため、更新してからタスクを作成してください",
+      "createTaskPathUnavailableNamed": "いま {subject} を紹介できる方がいません",
+      "taskPermissionDenied": "タスクを作成する権限がありません。必要な場合はワークスペース管理者にご相談ください。",
+      "taskPermissionUnavailable": "タスクを作成できるかどうかを確認できませんでした。もう一度お試しください。",
       "warmPathTaskPermissionDenied": "紹介ルートを受け入れるには、タスク作成と連絡先更新の権限が必要です。",
-      "warmPathTaskPermissionUnavailable": "紹介ルートに必要な権限を確認できませんでした。もう一度お試しください。",
+      "warmPathTaskPermissionUnavailable": "この操作を行えるかどうかを確認できませんでした。もう一度お試しください。",
       "retryPermissionCheck": "再確認",
-      "taskEvidenceChecking": "タスクを作成する前に関係性の根拠を更新しています。",
-      "taskEvidenceUnavailable": "関係性の根拠を更新できませんでした。再試行してからタスクを作成してください。",
+      "taskEvidenceChecking": "最新の内容を確認しています…",
+      "taskEvidenceUnavailable": "最新の内容を確認できませんでした。タスクを作成する前に、もう一度お試しください。",
       "retryEvidenceRefresh": "再読み込み",
-      "taskStale": "タスクを作成する前に、この古いシグナルを更新してください。",
-      "taskPathUnavailable": "この紹介ルートの橋渡し役を確認できません。更新してからタスクを作成してください。",
+      "taskStale": "この内容は古くなっています。更新してからタスクを作成してください。",
+      "taskPathUnavailable": "いまこの紹介を頼める方がいません。更新してもう一度ご確認ください。",
       "cancel": "キャンセル",
       "snoozing": "スヌーズ中…"
     },
@@ -222,12 +222,12 @@
     },
     "partial": {
       "title": "一部のシグナルを更新できませんでした",
-      "body": "{families} は最後に取得できた内容を表示しています。その後の変化はまだ反映されていません。"
+      "body": "{families} は最後に取得できた内容です。その後の変化はまだ反映されていません。"
     },
     "unavailable": {
       "title": "レーダーを利用できません",
-      "body": "現在のシグナルデータを取得できなかった種別：{families}。",
-      "routeBody": "現在のシグナルデータを取得できませんでした。再試行して確認してください。"
+      "body": "次の種別を読み込めませんでした：{families}。",
+      "routeBody": "レーダーを読み込めませんでした。もう一度お試しください。"
     }
   }
 }

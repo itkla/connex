@@ -1,7 +1,7 @@
 {
     "SettingsHome": {
         "title": "設定",
-        "description": "設定できる項目を、適用される範囲ごとにまとめています。",
+        "description": "変更できる設定を、あなた・ワークスペース・組織ごとにまとめています。",
         "navLabel": "設定",
         "sectionsLabel": "設定のセクション",
         "searchLabel": "設定を検索",
@@ -32,12 +32,12 @@
         "groupAiDataGovernance": "AIとデータガバナンス"
     },
     "SettingsAvailability": {
-        "managedTitle": "この Connex インスタンスで管理されています",
-        "managedBody": "この設定はインスタンス全体でまとめて管理されているため、ここで変更する項目はありません。変更が必要な場合は管理者にお問い合わせください。",
-        "notEnabledTitle": "この Connex インスタンスでは有効になっていません",
-        "notEnabledBody": "この Connex インスタンスではこの機能が有効になっていないため、設定できる項目はありません。必要な場合は管理者にお問い合わせください。",
+        "managedTitle": "全員共通の設定です",
+        "managedBody": "この設定は管理者が全員分をまとめて決めています。変更が必要な場合は管理者にご相談ください。",
+        "notEnabledTitle": "ここでは使えません",
+        "notEnabledBody": "管理者がこの機能をオンにしていません。必要な場合は管理者にご相談ください。",
         "askAdminTitle": "ワークスペース管理者にご依頼ください",
-        "askAdminBody": "お使いのロールにはこの設定を変更する権限が含まれていません。ワークスペース管理者に変更または権限の付与をご依頼ください。"
+        "askAdminBody": "この設定はご自身では変更できません。ワークスペース管理者が代わりに変更するか、権限を付与できます。"
     },
     "SettingsPersonalProfile": {
         "description": "あなたの個人情報と、すべてのワークスペースで一緒に働くメンバーからどう見えるかを設定します。",
@@ -48,7 +48,7 @@
         "metaDescription": "ログインに使うパスキーを管理します。"
     },
     "SettingsPersonalConnections": {
-        "metaDescription": "メールとカレンダーを連携し、Connex が取り込める内容を選び、保留された項目を確認します。",
+        "metaDescription": "メールとカレンダーを連携し、Connex が保存する内容を選び、保存しなかった項目を確認します。",
         "reviewsTitle": "取り込みの確認"
     },
     "SettingsPersonalNotifications": {
@@ -60,15 +60,15 @@
         "metaDescription": "ワークスペースの招待を承認・辞退し、不要になったワークスペースから退出します。"
     },
     "SettingsWorkspaceGeneral": {
-        "description": "{workspace} の名称と、共有レポートの基準となる日付境界を設定します。",
+        "description": "{workspace} の名前と、共有レポートで使うタイムゾーンです。",
         "metaDescription": "このワークスペースの名称と、共有レポートで使うタイムゾーンを設定します。"
     },
     "SettingsPeople": {
-        "accessCheckFailedBody": "権限の読み取りに失敗しただけで、権限が変更されたわけではありません。しばらくしてからもう一度お試しください。",
+        "accessCheckFailedBody": "しばらくしてからもう一度お試しください。",
         "accessCheckFailedTitle": "アクセス権を確認できませんでした",
         "description": "{workspace} のメンバー、各ロールでできること、招待なしで参加できる条件をまとめて管理します。",
-        "directoryDescription": "メンバーを探して、その人のページで担当している仕事を確認できます。ここに表示されるのは招待を承諾したメンバーのみです。承諾待ちの方は上の「メンバー」に表示されます。",
-        "directoryFailedBody": "メンバーのアクセス権が変わったわけではありません。一覧を読み込めなかっただけですので、しばらくしてからもう一度お試しください。",
+        "directoryDescription": "メンバーを探して、担当している仕事を確認できます。招待を承諾していない方は、上の「メンバー」に表示されます。",
+        "directoryFailedBody": "しばらくしてからもう一度お試しください。",
         "directoryFailedTitle": "メンバー一覧を読み込めませんでした",
         "directoryTitle": "メンバー一覧",
         "metaDescription": "このワークスペースのメンバー、ロール、許可するドメイン、メンバー一覧を管理します。"
@@ -77,53 +77,53 @@
         "title": "ここではご利用いただけません"
     },
     "SettingsCommunications": {
-        "accessCheckFailedBody": "権限の判定結果ではなく、権限の読み取りに失敗しています。しばらくしてからもう一度お試しください。",
+        "accessCheckFailedBody": "しばらくしてからもう一度お試しください。",
         "accessCheckFailedTitle": "アクセス権を確認できませんでした",
-        "description": "{workspace} のメール送信方法です。自社メールを送るサーバー、キャンペーンを配信するサービス、そしてメンバーに代わって決める設定をまとめています。",
+        "description": "{workspace} がメールを送る方法です。通常のメールとキャンペーンのそれぞれを設定します。",
         "metaDescription": "このワークスペースのメールサーバー、キャンペーン配信、通知の初期設定を管理します。",
-        "notificationDefaultsDescription": "メンバーが自分で変更する前に、このワークスペースが初期値として選ぶ通知設定です。",
+        "notificationDefaultsDescription": "新しいメンバーの通知の初期設定です。",
         "notificationDefaultsGapAction": "通知設定を開く",
-        "notificationDefaultsGapBody": "ワークスペース単位で通知の初期設定を決めることはまだできません。通知はメンバーそれぞれが選ぶ設定に従い、ここから上書きされることはありません。ご自身の設定は通知設定から変更できます。",
+        "notificationDefaultsGapBody": "まだご利用いただけません。通知は各メンバーが自分で選び、ここから変更されることはありません。",
         "notificationDefaultsTitle": "通知の初期設定"
     },
     "SettingsWorkspaceDataPrivacy": {
-        "description": "他所にすでにある関係履歴を、どのように {workspace} へ取り込むかを設定します。",
+        "description": "他のツールにある履歴を {workspace} へ取り込みます。",
         "metaDescription": "既存の関係履歴をこのワークスペースへ取り込みます。"
     },
     "SettingsCrm": {
-        "accessCheckFailedBody": "権限の判定結果ではなく、権限の読み取りに失敗しています。しばらくしてからもう一度お試しください。",
+        "accessCheckFailedBody": "しばらくしてからもう一度お試しください。",
         "accessCheckFailedTitle": "アクセス権を確認できませんでした",
         "approvalPoliciesFailedBody": "ポリシーは変更されていません。一覧の読み込みに失敗しただけですので、しばらくしてからもう一度お試しください。",
         "approvalPoliciesFailedTitle": "承認ポリシーを読み込めませんでした",
-        "customFieldsDescription": "Connex に標準で用意された項目に加えて、このワークスペースが会社・連絡先・案件に記録する独自の項目です。",
-        "description": "{workspace} のレコードの形を決める設定です。記録する項目、連絡先の評価基準、承認が必要な条件、そして自動で動く処理をまとめています。",
+        "customFieldsDescription": "Connex に標準で用意された項目に加えて、会社・連絡先・案件に記録する独自の項目です。",
+        "description": "{workspace} のレコードに記録する項目、連絡先の評価方法、承認が必要なもの、自動で動くものをまとめています。",
         "metaDescription": "このワークスペースのカスタムフィールド、評価基準、承認ポリシー、自動化を設定します。",
-        "workflowsDescription": "レコードの変更時やスケジュールに応じて、これらのレコードを自動で処理する仕組みです。",
+        "workflowsDescription": "レコードが変わったときや、決まった時刻に自動で行う処理です。",
         "workflowsGapAction": "ワークフローを開く",
-        "workflowsGapBody": "ワークフローは設定画面ではなく、専用の画面で作成して有効にします。ここで設定する項目はまだありません。",
+        "workflowsGapBody": "ワークフローは専用のページで作成して有効にします。ここで設定する項目はありません。",
         "workflowsTitle": "ワークフロー設定"
     },
     "SettingsAuditDiagnostics": {
-        "accessCheckFailedBody": "権限の判定結果ではなく、権限の読み取りに失敗しています。しばらくしてからもう一度お試しください。",
+        "accessCheckFailedBody": "しばらくしてからもう一度お試しください。",
         "accessCheckFailedTitle": "アクセス権を確認できませんでした",
-        "auditFailedBody": "情報が隠されたわけでも、失われたわけでもありません。ログの読み込みに失敗しただけですので、しばらくしてからもう一度お試しください。",
+        "auditFailedBody": "しばらくしてからもう一度お試しください。",
         "auditFailedTitle": "監査ログを読み込めませんでした",
-        "description": "{workspace} でこれまでに行われた操作と、依存しているサービスが正常に動いているかを確認できます。",
-        "diagnosticsDescription": "このワークスペースのメール、バックグラウンド処理、保存された認証情報の状態と、その背後にある構成を表示します。",
+        "description": "{workspace} で行われた操作と、その裏側の仕組みが正常に動いているかを確認できます。",
+        "diagnosticsDescription": "このワークスペースのメール、定期処理、保存済みのキーが正常に動いているかを確認できます。",
         "metaDescription": "このワークスペースの監査ログを確認し、背後のサービスの状態を点検します。"
     },
     "SettingsOrgGeneral": {
-        "description": "{organization} の名称、その配下のワークスペース、そしてそれらを終了する方法をまとめています。",
+        "description": "{organization} の名前、その中のワークスペース、そしてエクスポートと削除についてまとめています。",
         "metaDescription": "組織名の変更、配下のワークスペースの確認、エクスポートと削除を行います。"
     },
     "SettingsOrgIdentity": {
         "description": "{organization} を管理するメンバー、ワークスペースに招待できる相手、そしてログイン方法を設定します。",
         "metaDescription": "組織管理者、許可するメールドメイン、シングルサインオンを管理します。",
         "ssoCheckFailedTitle": "シングルサインオンの状態を確認できませんでした",
-        "ssoCheckFailedBody": "設定は変更されておらず、無効になったわけでもありません。このインスタンスでシングルサインオンが利用できるかを読み取れなかっただけですので、しばらくしてからもう一度お試しください。"
+        "ssoCheckFailedBody": "しばらくしてからもう一度お試しください。"
     },
     "SettingsOrgAi": {
-        "description": "{organization} が用意する AI プロバイダーと、各ワークスペースに認める範囲、そして1日あたりの上限を設定します。",
+        "description": "{organization} が利用する AI サービス、利用できるワークスペース、そして 1 日の利用量の上限を設定します。",
         "metaDescription": "組織の AI プロバイダー、ワークスペースの制御、1日あたりの上限を設定します。"
     },
     "SettingsOrgDataRequests": {
@@ -131,8 +131,8 @@
         "metaDescription": "本人からの開示・訂正・利用停止の請求を管理し、開示用のエクスポートを作成します。"
     },
     "SettingsOrgAuditDiagnostics": {
-        "description": "{organization} のワークスペースを越えて行われた操作と、それを支えるサービスが正常に動いているかを確認できます。",
+        "description": "{organization} 全体で行われた操作と、その裏側の仕組みが正常に動いているかを確認できます。",
         "metaDescription": "組織の監査ログを確認し、背後のサービスの状態を点検します。",
-        "diagnosticsDescription": "この組織のバックグラウンド処理、保存された認証情報、プロバイダーの準備状況と、その背後にある構成を表示します。"
+        "diagnosticsDescription": "この組織の定期処理、保存済みのキー、連携サービスが正常に動いているかを確認できます。"
     }
 }

@@ -27,9 +27,9 @@
     "notifications": "Notifications",
     "quickActions": "Quick actions",
     "captureAttention": {
-      "title": "Connected capture needs attention",
-      "description": "Resolve high-priority identity reviews or provider interventions to keep relationship evidence current.",
-      "action": "{provider}: {reviews} reviews · {interventions} interventions"
+      "title": "Your connected account needs you",
+      "description": "A few things need your answer before Connex can keep logging your email and meetings.",
+      "action": "{provider}: {reviews} to check · {interventions} to fix"
     },
     "analyticsKpis": "Key metrics",
     "revenueTrend": "Revenue trend",
@@ -50,8 +50,8 @@
   },
   "AtRiskDeals": {
     "empty": "No deals need attention right now.",
-    "truncated": "Partial results: risk was assessed for the 1,000 highest-priority open deals.",
-    "truncatedEmpty": "No risks found in the 1,000 deals assessed. Additional deals were not assessed."
+    "truncated": "Only your 1,000 most important open deals were checked for risk.",
+    "truncatedEmpty": "No risk in the 1,000 deals checked. The rest weren't checked."
   },
   "CoolingRelationships": {
     "empty": "No cooling relationships right now.",
@@ -64,7 +64,7 @@
     "scheduleFailed": "Couldn't schedule the follow-up"
   },
   "RecentMoves": {
-    "empty": "No recent job changes among workspace contacts.",
+    "empty": "Nobody you know has changed jobs recently.",
     "unknown": "Unknown"
   },
   "DashboardActivation": {
@@ -73,7 +73,7 @@
     "checklistProgress": "{done} of {total}",
     "optionalLabel": "Optional",
     "doneLabel": "Done:",
-    "evidenceTitle": "The evidence",
+    "evidenceTitle": "Why",
     "followUp": "Schedule a follow-up",
     "steps": {
       "contacts": {
@@ -85,13 +85,13 @@
       },
       "companies": {
         "title": "Add the companies they work for",
-        "body": "Shared-company introductions are built from these links.",
+        "body": "Knowing where people work is how Connex finds who can introduce you.",
         "cta": "Import companies",
         "done": "{count, plural, =1 {# company} other {# companies}}"
       },
       "interactions": {
         "title": "Log an interaction",
-        "body": "Activities, shared notes and linked tasks give Connex the evidence it uses to read relationship warmth.",
+        "body": "Every call, email, meeting, shared note, and linked task you log counts toward warmth.",
         "cta": "Log an activity",
         "done": "Interactions logged"
       },
@@ -136,18 +136,18 @@
       "sharedCompany": "Both connected to {company}"
     },
     "missing": {
-      "title": "Not enough evidence yet",
+      "title": "Nothing logged yet",
       "body": "Connex works relationship warmth out from the interactions you log. There is nothing here to work from, and a score without evidence would be a fabricated judgement, so there is no score.",
       "noSignalTitle": "No relationship signal yet",
-      "noSignalBody": "Your relationship evidence is in, but nothing currently needs attention or supports a useful introduction.",
+      "noSignalBody": "Nothing needs attention right now, and there is no introduction to make yet.",
       "unavailableTitle": "Relationship signals could not load",
-      "unavailableBody": "The checklist and insight are temporarily unavailable. Your workspace data is unchanged.",
+      "unavailableBody": "Couldn't load these right now. Try again in a moment.",
       "retry": "Try again",
       "gapsTitle": "What is missing",
       "gap": {
         "contacts": "No contacts yet",
         "interactions": "No interactions logged",
-        "noSignal": "Contacts and interactions are in, but none of them adds up to a signal worth claiming yet."
+        "noSignal": "Your contacts and interactions are in. Nothing needs attention yet."
       }
     }
   },
@@ -155,8 +155,8 @@
     "newContact": "New contact",
     "warmth": {
       "title": "Your first warmth reading",
-      "body": "Connex read the interactions you logged. This is how warm your relationships are right now.",
-      "readings": "Read from the interactions you logged",
+      "body": "Here is how warm your relationships are right now.",
+      "readings": "From what you logged",
       "bandCount": "{count, plural, =1 {# contact} other {# contacts}}",
       "cta": "See warmth"
     }
@@ -183,10 +183,10 @@
     "summary": "{openCount} open · {scheduled} scheduled in next {months} months",
     "profit": "Profit",
     "projections": "Projections",
-    "chartDescription": "Realized revenue vs forecast",
+    "chartDescription": "Won revenue against forecast",
     "currency": "Currency",
-    "profitTooltip": "Realized revenue from deals that have closed.",
-    "projectionsTooltip": "Forecasted value of open deals, by expected close date."
+    "profitTooltip": "Money from deals you have already won.",
+    "projectionsTooltip": "What your open deals are worth, placed on the date they are expected to close."
   },
   "DashboardTaskSummary": {
     "openTasks": "Open tasks",

@@ -289,7 +289,7 @@ describe("people & access tells a failed read apart from an empty workspace", ()
             english.SettingsPeople.directoryDescription,
             "the roster counts pending members and the directory does not; on one page that gap must be explained, not discovered",
         ).toMatch(/accepted their invitation/);
-        expect(english.SettingsPeople.directoryDescription).toMatch(/pending/);
+        expect(english.SettingsPeople.directoryDescription).toMatch(/pending|haven't accepted/);
         expect(japanese.SettingsPeople.directoryDescription).toMatch(/承諾/);
     });
 });
