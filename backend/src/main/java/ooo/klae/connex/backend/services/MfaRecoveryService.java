@@ -3,10 +3,13 @@ package ooo.klae.connex.backend.services;
 import java.time.Clock;
 import java.util.Map;
 
+import org.springframework.security.core.session.SessionInformation;
+import org.springframework.security.core.session.SessionRegistry;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
@@ -27,6 +30,7 @@ public class MfaRecoveryService {
     private final SessionSecurityService sessionSecurityService;
     private final PrivilegedMfaProperties privilegedMfaProperties;
     private final AuditService auditService;
+    private final SessionRegistry sessionRegistry;
     private final Clock clock;
 
     /**
@@ -57,5 +61,27 @@ public class MfaRecoveryService {
                 "Operator-authorized passkey recovery used",
                 Map.of("operator", operator, "credentialsRemoved", removed));
         sessionSecurityService.clearRecentAuthentication(httpRequest);
+        expireOtherSessions(user, httpRequest);
+    }
+
+    /**
+     * Expires every session the account holds apart from the one completing the ceremony.
+     *
+     * <p>A passwordless account proves bootstrap with a fresh authenticated session rather than a
+     * password, so a session that predates recovery would otherwise be able to enroll the
+     * replacement passkey through the confinement-allowed registration endpoints. Only the session
+     * that satisfied the operator-authorized proof survives to do that.
+     *
+     * @param user the recovering account
+     * @param httpRequest the request completing the ceremony
+     */
+    private void expireOtherSessions(User user, HttpServletRequest httpRequest) {
+        HttpSession current = httpRequest.getSession(false);
+        String currentId = current == null ? null : current.getId();
+        for (SessionInformation session : sessionRegistry.getAllSessions(user, false)) {
+            if (!session.getSessionId().equals(currentId)) {
+                session.expireNow();
+            }
+        }
     }
 }

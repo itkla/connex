@@ -138,6 +138,7 @@ public class AuthController {
             @CookieValue(name = OneTimeLinkFlowCookie.PASSWORD_RESET, required = false) String grant,
             HttpServletRequest httpRequest,
             HttpServletResponse response) {
+        oneTimeLinkFlowService.require(httpRequest, Purpose.PASSWORD_RESET, grant);
         PasswordScreening screening = passwordResetService.screenForReset(request.getNewPassword());
         oneTimeLinkFlowService.consumePasswordReset(
             httpRequest,

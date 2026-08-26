@@ -21,6 +21,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.mockito.InOrder;
 import org.springframework.mock.web.MockHttpServletRequest;
 
+import org.springframework.security.core.session.SessionInformation;
+import org.springframework.security.core.session.SessionRegistry;
+
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.dto.PasskeyRecoveryRequest;
@@ -35,6 +38,7 @@ class MfaRecoveryServiceTest {
     private final WebAuthnService webAuthnService = mock(WebAuthnService.class);
     private final SessionSecurityService sessionSecurityService = mock(SessionSecurityService.class);
     private final AuditService auditService = mock(AuditService.class);
+    private final SessionRegistry sessionRegistry = mock(SessionRegistry.class);
     private final PrivilegedMfaProperties properties = properties();
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
     private final MfaRecoveryService service = new MfaRecoveryService(
@@ -44,11 +48,29 @@ class MfaRecoveryServiceTest {
             sessionSecurityService,
             properties,
             auditService,
+            sessionRegistry,
             clock);
 
     @BeforeEach
     void allowUserLock() {
         when(userMapper.lockById(7)).thenReturn(7);
+    }
+
+    @Test
+    void recoveryExpiresEverySessionExceptTheOneCompletingTheCeremony() {
+        User user = user();
+        MockHttpServletRequest httpRequest = new MockHttpServletRequest();
+        String currentId = httpRequest.getSession().getId();
+        SessionInformation current = new SessionInformation(user, currentId, java.util.Date.from(NOW));
+        SessionInformation other = new SessionInformation(user, "another-session", java.util.Date.from(NOW));
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(webAuthnService.recover(7)).thenReturn(1);
+        when(sessionRegistry.getAllSessions(user, false)).thenReturn(java.util.List.of(current, other));
+
+        service.recover(request("operator-proof"), httpRequest);
+
+        org.junit.jupiter.api.Assertions.assertTrue(other.isExpired());
+        org.junit.jupiter.api.Assertions.assertFalse(current.isExpired());
     }
 
     @Test
