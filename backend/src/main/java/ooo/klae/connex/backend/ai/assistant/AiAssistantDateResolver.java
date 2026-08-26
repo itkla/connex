@@ -45,7 +45,7 @@ public class AiAssistantDateResolver {
     /** Resolves an ISO or supported relative timestamp to actor-local and UTC values. */
     public ResolvedDateTime resolveDateTime(String expression) {
         if (expression == null || expression.isBlank()) {
-            throw new BadRequestException("Activity start time is required");
+            throw AiAssistantLoopException.refusedArguments("missing_datetime");
         }
         ZoneId timezone = actorTimezone();
         String value = expression.trim();
@@ -98,7 +98,7 @@ public class AiAssistantDateResolver {
             return resolution(LocalDateTime.of(
                     today.plusDays(1), requireTime(tomorrow.group(1))), timezone);
         }
-        throw new BadRequestException("Unsupported assistant date expression: " + expression);
+        throw AiAssistantLoopException.refusedArguments("unsupported_date_expression");
     }
 
     private ZoneId actorTimezone() {
@@ -125,7 +125,7 @@ public class AiAssistantDateResolver {
 
     private static LocalTime requireTime(String value) {
         if (value == null || value.isBlank()) {
-            throw new BadRequestException("A local time is required for a relative activity date");
+            throw AiAssistantLoopException.refusedArguments("missing_relative_time");
         }
         String compact = value.toLowerCase(Locale.ROOT).replace(" ", "");
         DateTimeFormatter formatter = new DateTimeFormatterBuilder()
@@ -135,7 +135,7 @@ public class AiAssistantDateResolver {
         try {
             return LocalTime.parse(compact, formatter);
         } catch (DateTimeParseException exception) {
-            throw new BadRequestException("Invalid relative activity time: " + value);
+            throw AiAssistantLoopException.refusedArguments("invalid_relative_time");
         }
     }
 
@@ -153,12 +153,10 @@ public class AiAssistantDateResolver {
     private static ResolvedDateTime resolution(LocalDateTime local, ZoneId timezone) {
         List<ZoneOffset> validOffsets = timezone.getRules().getValidOffsets(local);
         if (validOffsets.isEmpty()) {
-            throw new BadRequestException(
-                    "Local activity time does not exist in the authenticated user's timezone");
+            throw AiAssistantLoopException.refusedArguments("nonexistent_local_time");
         }
         if (validOffsets.size() != 1) {
-            throw new BadRequestException(
-                    "Local activity time is ambiguous; include an explicit UTC offset");
+            throw AiAssistantLoopException.refusedArguments("ambiguous_local_time");
         }
         return resolved(local, local.toInstant(validOffsets.getFirst()), timezone);
     }

@@ -169,6 +169,21 @@ class AiChatQueryScopeResolverTest {
                         List.of(3), List.of(), List.of(), null)));
     }
 
+    /**
+     * A warmth filter on a deal-only cohort is refused at admission, not queued: deals carry no
+     * warmth, and no model argument during the turn could cure the declaration, so accepting it
+     * would guarantee a turn that only fails.
+     */
+    @Test
+    void aWarmthFilterOnADealOnlyCohortIsRejectedAtAdmission() {
+        BadRequestException failure = assertThrows(BadRequestException.class,
+                () -> resolver.resolve(new AiChatQueryScopeRequest(
+                        null, null, null, null, List.of(), List.of("cold"), List.of("deal"),
+                        List.of(), List.of(), List.of(), null)));
+
+        assertTrue(failure.getMessage().contains("warmth_unsupported_for_deals"));
+    }
+
     @Test
     void anInaccessibleSavedViewIsRejected() {
         when(savedViewService.getById(17))

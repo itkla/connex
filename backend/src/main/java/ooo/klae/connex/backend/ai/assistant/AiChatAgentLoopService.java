@@ -479,6 +479,24 @@ public class AiChatAgentLoopService {
                                 stepNumber, "step", step.tool().name(),
                                 "failed", exception.detailReason()));
                         noProgressSteps++;
+                        ToolTurn refusedTurn = new ToolTurn(
+                                stepNumber, step.tool().name(),
+                                refusedToolResult(exception.detailReason()));
+                        try {
+                            toolBudgetAudit = requireAdditionalToolCapacity(
+                                    nativeTools, toolTurns, refusedTurn, nativeCalls,
+                                    maskingContext, memory.budget());
+                            toolTurns.add(refusedTurn);
+                        } catch (AiAssistantLoopException capacity) {
+                            if (!closingAttempted && CLOSABLE_REASONS.contains(
+                                    capacity.terminalReason())) {
+                                closingAttempted = true;
+                                closingPending = true;
+                                closingReason = capacity.terminalReason();
+                                continue steps;
+                            }
+                            throw capacity;
+                        }
                         if (noProgressSteps >= MAX_CONSECUTIVE_NO_PROGRESS_STEPS) {
                             if (closingAttempted) {
                                 return AiGenerationTaskResult.failed("no_progress");
@@ -488,13 +506,6 @@ public class AiChatAgentLoopService {
                             closingReason = "no_progress";
                             continue steps;
                         }
-                        ToolTurn refusedTurn = new ToolTurn(
-                                stepNumber, step.tool().name(),
-                                refusedToolResult(exception.detailReason()));
-                        toolBudgetAudit = requireAdditionalToolCapacity(
-                                nativeTools, toolTurns, refusedTurn, nativeCalls,
-                                maskingContext, memory.budget());
-                        toolTurns.add(refusedTurn);
                         continue;
                     }
                     AiAssistantToolResult cachedResult = toolResultCache.get(toolCallKey);
@@ -725,6 +736,24 @@ public class AiChatAgentLoopService {
                                 "failed", exception.detailReason()));
                         if (exception.recoverable()) {
                             noProgressSteps++;
+                            ToolTurn refusedTurn = new ToolTurn(
+                                    stepNumber, step.tool().name(),
+                                    refusedToolResult(exception.detailReason()));
+                            try {
+                                toolBudgetAudit = requireAdditionalToolCapacity(
+                                        nativeTools, toolTurns, refusedTurn, nativeCalls,
+                                        maskingContext, memory.budget());
+                                toolTurns.add(refusedTurn);
+                            } catch (AiAssistantLoopException capacity) {
+                                if (!closingAttempted && CLOSABLE_REASONS.contains(
+                                        capacity.terminalReason())) {
+                                    closingAttempted = true;
+                                    closingPending = true;
+                                    closingReason = capacity.terminalReason();
+                                    continue steps;
+                                }
+                                throw capacity;
+                            }
                             if (noProgressSteps >= MAX_CONSECUTIVE_NO_PROGRESS_STEPS) {
                                 if (closingAttempted) {
                                     return AiGenerationTaskResult.failed("no_progress");
@@ -734,13 +763,6 @@ public class AiChatAgentLoopService {
                                 closingReason = "no_progress";
                                 continue steps;
                             }
-                            ToolTurn refusedTurn = new ToolTurn(
-                                    stepNumber, step.tool().name(),
-                                    refusedToolResult(exception.detailReason()));
-                            toolBudgetAudit = requireAdditionalToolCapacity(
-                                    nativeTools, toolTurns, refusedTurn, nativeCalls,
-                                    maskingContext, memory.budget());
-                            toolTurns.add(refusedTurn);
                             continue;
                         }
                         if (!closingAttempted

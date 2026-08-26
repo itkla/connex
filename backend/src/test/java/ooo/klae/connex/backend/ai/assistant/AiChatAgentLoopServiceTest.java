@@ -822,6 +822,15 @@ class AiChatAgentLoopServiceTest {
                 eq(TURN), anyInt(), contains("warmth_unsupported_for_deals"));
         verify(persistenceService).resolve(
                 eq(TURN), eq("Deal activity summarized."), any(), anyInt(), anyInt());
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(invocationService, times(3)).completeStructuredRepairable(
+                invocations.capture(), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        String retryPrompt = invocations.getAllValues().get(1).prompt().getMessages().stream()
+                .map(message -> message.getContent())
+                .reduce("", (left, right) -> left + "\n" + right);
+        assertTrue(retryPrompt.contains("\"error\":\"warmth_unsupported_for_deals\""));
     }
 
     /**
@@ -887,6 +896,51 @@ class AiChatAgentLoopServiceTest {
                 eq(TURN), anyInt(), contains("invalid_tool_arguments"));
         verify(toolExecutor).execute(
                 eq("search_records"), any(JsonNode.class), any(), eq(true), any());
+    }
+
+    /**
+     * On the native-tools protocol a refused read must stay paired with its recorded provider
+     * call: the recorded call replays with the error result attached, so the next request never
+     * carries an unanswered tool call, and the corrected retry resolves the turn.
+     */
+    @Test
+    void aNativeRefusedReadPairsItsErrorResultWithTheRecordedCall() throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class), any()))
+                .thenThrow(AiAssistantLoopException.refusedArguments("unknown_metric"))
+                .thenReturn(new AiAssistantToolResult(
+                        Map.of("metric", "deal_kpis", "value", 3), List.of()));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(nativeTool(
+                        "call_1", "aggregate_metric", "{\"metric\":\"deal_momentum\"}"))
+                .thenReturn(nativeTool(
+                        "call_2", "aggregate_metric", "{\"metric\":\"deal_kpis\"}"))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
+                        "Three deals matched.", List.of())));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<AiNativeToolRequest> requests =
+                ArgumentCaptor.forClass(AiNativeToolRequest.class);
+        verify(invocationService, times(3)).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), requests.capture(),
+                eq(directAdmission), any(Runnable.class));
+        AiNativeToolRequest retryRequest = requests.getAllValues().get(1);
+        assertEquals(1, retryRequest.exchanges().size());
+        assertTrue(retryRequest.exchanges().getFirst().maskedResult()
+                .contains("\"error\":\"unknown_metric\""));
+        verify(persistenceService).resolve(
+                eq(TURN), eq("Three deals matched."), any(), anyInt(), anyInt());
     }
 
     @Test

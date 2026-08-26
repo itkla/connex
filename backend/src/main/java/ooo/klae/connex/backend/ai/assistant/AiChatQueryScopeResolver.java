@@ -134,6 +134,13 @@ public class AiChatQueryScopeResolver {
                     "Assistant scope stage and status filters require a deal cohort: "
                             + AiChatCohortKind.STAGE_SCOPE_UNSUPPORTED);
         }
+        List<String> warmthBands = normalized(
+                request.warmthBands(), WARMTH_BANDS, "warmthBands");
+        if (!warmthBands.isEmpty() && List.of("deal").equals(recordKinds)) {
+            throw new BadRequestException(
+                    "Assistant scope warmth filters cannot apply to a deal-only cohort: "
+                            + AiChatCohortKind.WARMTH_UNSUPPORTED_FOR_DEALS);
+        }
 
         AiChatQueryScope scope = new AiChatQueryScope(
                 true,
@@ -141,7 +148,7 @@ public class AiChatQueryScopeResolver {
                 periodEnd,
                 periodDays,
                 memberScope,
-                normalized(request.warmthBands(), WARMTH_BANDS, "warmthBands"),
+                warmthBands,
                 recordKinds,
                 stages.stream().map(Stage::getId).toList(),
                 dealStatuses,
