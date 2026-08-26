@@ -1461,7 +1461,7 @@ public class AiAssistantPromptAssembler {
             if (replay == null) {
                 return;
             }
-            String masked = MaskingEngine.maskFreeText(replay.content(), context);
+            String masked = MaskingEngine.maskConversationalFreeText(replay.content(), context);
             prompt.assistantTurn(serialize(Map.of(
                     "content", masked,
                     "citations", replay.citations())));
@@ -1471,7 +1471,7 @@ public class AiAssistantPromptAssembler {
         if (content == null) {
             return;
         }
-        String masked = MaskingEngine.maskFreeText(content, context);
+        String masked = MaskingEngine.maskConversationalFreeText(content, context);
         String serialized = serialize(Map.of("content", masked));
         prompt.userTurn(USER_REQUEST_BEGIN + "\n" + serialized + "\n" + USER_REQUEST_END);
     }

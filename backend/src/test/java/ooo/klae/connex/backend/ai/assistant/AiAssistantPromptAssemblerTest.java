@@ -91,6 +91,8 @@ class AiAssistantPromptAssemblerTest {
 
         assertTrue(context.isTrustedTextCollision("what"));
         assertFalse(context.isTrustedTextCollision("Cyberdyne Systems"));
+        assertTrue(prompt.getMessages().getFirst().getContent()
+                .contains("and what is each one waiting on?"));
         String serialized = prompt.getSystemPrompt() + "\n" + prompt.getMessages().stream()
                 .map(message -> message.getContent())
                 .reduce("", (left, right) -> left + "\n" + right);
