@@ -117,8 +117,9 @@ public class AiSkillCatalog {
      * <p><strong>Enforced by this build:</strong> {@code availability} and {@code permissions} gate
      * routing and are re-asserted before the plan's first step; {@code contextKinds} and
      * {@code contextRequired} decide whether a subject anchors the plan; {@code plan} is executed
-     * verbatim; {@code allowedTools} and {@code authority} bound every tool the model may cause to
-     * run after the plan; {@code budgets.maxModelSteps} clamps the synthesis loop;
+     * verbatim; {@code allowedTools} and {@code authority} together bound the WRITE
+     * tools the model may cause to run after the plan (read tools carry no authority and stay
+     * available to synthesis); {@code budgets.maxModelSteps} clamps the synthesis loop;
      * {@code scopePreviewRecords} drives the preview recommendation; {@code partialBehavior}
      * governs required-versus-optional step failure; {@code evaluation} is gated in CI by the
      * assistant evaluation regression; {@code triggers} and {@code directive} are used per turn.
