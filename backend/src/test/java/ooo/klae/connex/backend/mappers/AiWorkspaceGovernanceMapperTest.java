@@ -29,8 +29,11 @@ class AiWorkspaceGovernanceMapperTest extends AbstractMapperTest {
         assertFalse(disabled.isAiEnabled());
         assertEquals(2, disabled.getAssistantMaxSteps());
 
+        assertEquals(2, governanceMapper.upsert(workspace.getId(), true, 48));
+        assertEquals(48, governanceMapper.get(workspace.getId()).getAssistantMaxSteps());
+
         assertThrows(
                 DataAccessException.class,
-                () -> governanceMapper.upsert(workspace.getId(), true, 13));
+                () -> governanceMapper.upsert(workspace.getId(), true, 49));
     }
 }
