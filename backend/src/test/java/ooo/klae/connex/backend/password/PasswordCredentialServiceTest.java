@@ -81,6 +81,31 @@ class PasswordCredentialServiceTest {
     }
 
     @Test
+    void locallyInducedCapacityRefusalFailsClosedForSelfServiceReset() {
+        when(lookup.isBreached(anyString())).thenThrow(
+                new BreachedPasswordSourceUnavailableException(
+                        BreachedPasswordUnavailableReason.CAPACITY));
+        when(userMapper.isPrivilegedAccount(11)).thenReturn(false);
+
+        assertThrows(BreachedPasswordCheckUnavailableException.class,
+                () -> service.encode(CANDIDATE, PasswordScreeningFlow.SELF_SERVICE_RESET, 11));
+
+        verify(passwordEncoder, never()).encode(anyString());
+    }
+
+    @Test
+    void upstreamOutageStillFailsOpenForAnUnprivilegedSelfServiceReset() {
+        when(lookup.isBreached(anyString())).thenThrow(
+                new BreachedPasswordSourceUnavailableException(
+                        BreachedPasswordUnavailableReason.UPSTREAM));
+        when(userMapper.isPrivilegedAccount(11)).thenReturn(false);
+        when(passwordEncoder.encode(CANDIDATE)).thenReturn(ENCODED);
+
+        assertEquals(ENCODED,
+                service.encode(CANDIDATE, PasswordScreeningFlow.SELF_SERVICE_RESET, 11));
+    }
+
+    @Test
     void screeningReadsNoPrivilegeUntilThePolicyDecision() {
         when(lookup.isBreached(anyString())).thenReturn(false);
 

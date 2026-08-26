@@ -94,11 +94,21 @@ public class PasswordCredentialService {
         return passwordEncoder.encode(candidate);
     }
 
+    /**
+     * Whether the flow may store an unscreened credential because the corpus could not answer.
+     *
+     * <p>Only genuine upstream unavailability qualifies. {@code CAPACITY} does not: it is raised by
+     * this instance's own concurrency permits and minimum request interval, never by the corpus, so
+     * a caller can induce it at will with concurrent public registrations and then reset to a
+     * breached password under the exemption. {@code OFFLINE_SOURCE} and {@code MALFORMED_RESPONSE}
+     * are likewise local or untrustworthy answers rather than evidence the corpus is down.
+     */
     private boolean mayFailOpen(PasswordScreeningFlow flow, Integer userId,
             BreachedPasswordUnavailableReason reason) {
         return flow == PasswordScreeningFlow.SELF_SERVICE_RESET
                 && userId != null
                 && !userMapper.isPrivilegedAccount(userId)
+                && reason != BreachedPasswordUnavailableReason.CAPACITY
                 && reason != BreachedPasswordUnavailableReason.OFFLINE_SOURCE
                 && reason != BreachedPasswordUnavailableReason.MALFORMED_RESPONSE;
     }

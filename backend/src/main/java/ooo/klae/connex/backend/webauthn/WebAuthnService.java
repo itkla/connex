@@ -21,6 +21,7 @@ import org.springframework.security.web.webauthn.management.RelyingPartyPublicKe
 import org.springframework.security.web.webauthn.management.UserCredentialRepository;
 import org.springframework.security.web.webauthn.management.WebAuthnRelyingPartyOperations;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.User;
@@ -201,14 +202,20 @@ public class WebAuthnService {
 
     /**
      * Deletes a passkey the caller owns.
+     *
+     * <p>Runs at READ COMMITTED and locks the account row and its assigned custom roles before the
+     * last-credential privilege check, so a promotion that commits while this transaction is waiting
+     * is observed rather than read from a stale snapshot.
+     *
      * @param callerUserId the authenticated account
      * @param credentialId the target credential (base64url)
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public String delete(int callerUserId, String credentialId) {
         if (userMapper.lockById(callerUserId) == null) {
             throw new ResourceNotFoundException("Passkey not found");
         }
+        userMapper.lockAssignedCustomRoleIds(callerUserId);
         WebauthnUserEntityRow entity = userEntityMapper.findByUserId(callerUserId);
         if (entity == null) {
             throw new ResourceNotFoundException("Passkey not found");

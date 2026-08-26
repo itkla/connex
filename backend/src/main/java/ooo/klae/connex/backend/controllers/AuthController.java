@@ -15,6 +15,7 @@ import ooo.klae.connex.backend.dto.LoginDto;
 import ooo.klae.connex.backend.dto.OneTimeLinkExchangeRequest;
 import ooo.klae.connex.backend.dto.RegisterDto;
 import ooo.klae.connex.backend.dto.ResetPasswordRequest;
+import ooo.klae.connex.backend.password.PasswordScreening;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.PasswordResetService;
 import ooo.klae.connex.backend.services.OneTimeLinkFlowService;
@@ -137,11 +138,12 @@ public class AuthController {
             @CookieValue(name = OneTimeLinkFlowCookie.PASSWORD_RESET, required = false) String grant,
             HttpServletRequest httpRequest,
             HttpServletResponse response) {
+        PasswordScreening screening = passwordResetService.screenForReset(request.getNewPassword());
         oneTimeLinkFlowService.consumePasswordReset(
             httpRequest,
             grant,
             tokenHash -> passwordResetService.resetPasswordByHash(
-                tokenHash, request.getNewPassword()));
+                tokenHash, request.getNewPassword(), screening));
         oneTimeLinkFlowCookie.clear(response, Purpose.PASSWORD_RESET);
         return Map.of("message", "Your password has been reset");
     }

@@ -67,8 +67,8 @@ class PasswordResetServiceLockingTest {
                 () -> service.resetPasswordByHash("token-hash", "Candidate-2026!"));
 
         InOrder lockOrder = inOrder(userMapper, lookup);
-        lockOrder.verify(userMapper).getUserById(41);
         lockOrder.verify(lookup).isBreached(anyString());
+        lockOrder.verify(userMapper).getUserById(41);
         lockOrder.verify(userMapper).lockById(41);
         lockOrder.verify(userMapper).lockAssignedCustomRoleIds(41);
         lockOrder.verify(userMapper).isPrivilegedAccount(41);

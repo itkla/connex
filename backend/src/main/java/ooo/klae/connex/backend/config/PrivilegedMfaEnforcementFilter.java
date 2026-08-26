@@ -39,10 +39,14 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
             "/api/auth/webauthn/recover");
     private static final Set<String> EXACT_EXPORT_PATHS = Set.of(
             "/api/audit/export");
-    private static final Pattern ORG_AUDIT_EXPORT = Pattern.compile("/api/orgs/\\d+/audit/export");
-    private static final Pattern CAMPAIGN_EXPORT = Pattern.compile("/api/campaigns/\\d+/exports");
+    private static final String IDENTIFIER_SEGMENT = "[^/]+";
+    private static final Pattern ORG_AUDIT_EXPORT = Pattern.compile(
+            "/api/orgs/" + IDENTIFIER_SEGMENT + "/audit/export");
+    private static final Pattern CAMPAIGN_EXPORT = Pattern.compile(
+            "/api/campaigns/" + IDENTIFIER_SEGMENT + "/exports");
     private static final Pattern REPORT_EXPORT = Pattern.compile(
-            "/api/reports/\\d+/(?:export\\.csv|snapshots/\\d+/export\\.csv)");
+            "/api/reports/" + IDENTIFIER_SEGMENT + "/(?:export\\.csv|snapshots/"
+                    + IDENTIFIER_SEGMENT + "/export\\.csv)");
     private static final Pattern PATH_PARAMETER_MARKER = Pattern.compile("(?i)(?:;|%(?:25)*3b)");
 
     private final PrivilegedMfaProperties properties;
@@ -105,6 +109,12 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
 
     /**
      * Whether the request is a data-egress operation that must carry a recent WebAuthn assertion.
+     *
+     * <p>Identifier segments match any non-empty segment rather than decimal digits. Spring's
+     * string-to-number conversion accepts {@code 0x1}, {@code #1} and {@code +1} as the integer 1, so
+     * a decimal-only matcher would let {@code /api/orgs/0x1/audit/export} reach the export handler
+     * ungated. A segment that no handler accepts is refused here and would have been rejected
+     * downstream anyway, so matching wider fails closed.
      *
      * <p>Every surface here answers with the exported data itself, except the campaign one: a
      * campaign's exports are created by {@code POST} and their metadata is listed and read by

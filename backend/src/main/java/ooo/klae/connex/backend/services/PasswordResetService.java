@@ -146,9 +146,38 @@ public class PasswordResetService {
             exchangeToken(rawToken, programmaticExchangeOwner(tokenHash)), newPassword);
     }
 
-    /** Applies a new password through a purpose-bound browser-flow source digest. */
+    /**
+     * Screens a proposed reset password before any flow transaction is opened.
+     *
+     * <p>Under the default {@code REMOTE} source the lookup makes bounded HTTP requests. Callers
+     * enter this flow through {@code OneTimeLinkFlowService}, which claims the grant row in its own
+     * transaction, so screening from inside it would hold that row and a pooled connection for the
+     * duration of an upstream stall.
+     *
+     * @param newPassword the already policy-validated new password
+     * @return the screening to hand back to {@link #resetPasswordByHash(String, String,
+     *         PasswordScreening)}
+     */
+    public PasswordScreening screenForReset(String newPassword) {
+        return passwordCredentialService.screen(newPassword, PasswordScreeningFlow.SELF_SERVICE_RESET);
+    }
+
+    /** Screens and applies a new password through a purpose-bound browser-flow source digest. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public void resetPasswordByHash(String tokenHash, String newPassword) {
+        resetPasswordByHash(tokenHash, newPassword, screenForReset(newPassword));
+    }
+
+    /**
+     * Applies a new password using a screening the caller performed outside this transaction.
+     *
+     * @param tokenHash the exchanged source-token digest
+     * @param newPassword the already policy-validated new password
+     * @param screening the result of {@link #screenForReset}
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public void resetPasswordByHash(String tokenHash, String newPassword,
+            PasswordScreening screening) {
         PasswordResetToken token = tokenHash == null ? null
                 : passwordResetTokenMapper.findExchangedRedeemableByHash(tokenHash);
         if (token == null) {
@@ -162,9 +191,6 @@ public class PasswordResetService {
         if (ssoConnectionService.isSsoEnforcedForUser(user.getId())) {
             throw new SsoEnforcedException();
         }
-
-        PasswordScreening screening = passwordCredentialService.screen(
-                newPassword, PasswordScreeningFlow.SELF_SERVICE_RESET);
 
         if (userMapper.lockById(token.getUserId()) == null) {
             throw invalidLink();

@@ -159,6 +159,29 @@ class PrivilegedMfaEnforcementFilterTest {
     }
 
     @Test
+    void nonDecimalIdentifiersSpringAcceptsAreStillGated() {
+        assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp("GET", "/api/orgs/0x1/audit/export"));
+        assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp("GET", "/api/orgs/+1/audit/export"));
+        assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp("GET", "/api/orgs/%231/audit/export"));
+        assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp("POST", "/api/campaigns/0x3/exports"));
+        assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp("POST", "/api/reports/0x4/export.csv"));
+        assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp(
+                "GET", "/api/reports/+4/snapshots/0x8/export.csv"));
+    }
+
+    @Test
+    void nonDecimalIdentifierExportIsRefusedOverTheFilterChain() throws Exception {
+        when(webAuthnService.hasPasskey(7)).thenReturn(true);
+        when(sessionSecurityService.hasFreshRecentAuthentication(isNull(), eq(7))).thenReturn(false);
+
+        MockHttpServletResponse response = execute("GET", "/api/orgs/0x1/audit/export");
+
+        assertEquals(403, response.getStatus());
+        assertTrue(response.getContentAsString().contains("RECENT_AUTHENTICATION_REQUIRED"));
+        verify(filterChain, never()).doFilter(any(), any());
+    }
+
+    @Test
     void campaignExportMetadataReadsAreNotGated() {
         assertFalse(PrivilegedMfaEnforcementFilter.requiresExportStepUp("GET", "/api/campaigns/3/exports"));
         assertFalse(PrivilegedMfaEnforcementFilter.requiresExportStepUp("GET", "/api/campaigns/3/exports/9"));
