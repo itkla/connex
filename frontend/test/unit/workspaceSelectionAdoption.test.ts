@@ -97,6 +97,8 @@ function installMinimalDocument(cookie = ""): HTMLElement {
         document: documentTarget,
         event: undefined,
         HTMLIFrameElement: HtmlIFrameElement,
+        location: { pathname: "/dashboard", search: "", replace: vi.fn() },
+        history: { replaceState: vi.fn() },
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
     };
