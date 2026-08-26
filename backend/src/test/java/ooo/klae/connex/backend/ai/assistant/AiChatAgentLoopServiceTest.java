@@ -952,6 +952,42 @@ class AiChatAgentLoopServiceTest {
     }
 
     /**
+     * A closing step stays closing across its own schema repair: the repair retry carries the
+     * closing schema, and a tool the retry returns is refused rather than executed past the
+     * closing boundary.
+     */
+    @Test
+    void aClosingStepKeepsItsClosingSchemaAcrossASchemaRepair() throws Exception {
+        AiAssistantStep toolStep = toolStep(
+                "search_records", "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}");
+        AiAssistantStep finalStep = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer("From what I gathered.", List.of()));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(toolStep))
+                .thenReturn(parsed(toolStep))
+                .thenReturn(parsed(toolStep))
+                .thenReturn(malformedWithRepair())
+                .thenReturn(parsed(finalStep));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<AiResponseSchema> schemas =
+                ArgumentCaptor.forClass(AiResponseSchema.class);
+        verify(invocationService, times(5)).completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), schemas.capture(),
+                eq(directAdmission), any(Runnable.class));
+        assertEquals("ask_connex_closing_step", schemas.getAllValues().get(3).name());
+        assertEquals("ask_connex_closing_step", schemas.getAllValues().getLast().name());
+    }
+
+    /**
      * On the native protocol the closing step must carry a final-only request: the definitions
      * stay for exchange pairing, but the provider is told it may not call tools, so the closing
      * step is structurally an answer rather than a forfeited turn.
