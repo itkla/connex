@@ -51,7 +51,7 @@ export const WIDGET_META: Record<DashboardWidgetType, WidgetMeta> = {
         titleKey: 'introductions',
         defaultSpan: 2,
         allowedSpans: [1, 2],
-        actionHref: '/overview/introductions',
+        actionHref: '/intelligence/introductions',
         actionLabelKey: 'viewAll',
     },
     recentFiles: {

@@ -84,7 +84,7 @@ export default function AskConnexComposer() {
         try {
             const created = await createReport(localizedDefinition);
             toastSuccess(t('created'));
-            router.push(`/overview/reports/${created.id}`);
+            router.push(`/insights/reports/${created.id}`);
         } catch (error) {
             showApiError(error, 'saveFailed');
         } finally {

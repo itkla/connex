@@ -62,7 +62,6 @@
     },
     "CampaignDetail": {
         "back": "キャンペーン",
-        "overview": "概要",
         "audience": "対象者",
         "objective": "目的",
         "type": "種別",

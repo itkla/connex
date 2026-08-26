@@ -90,7 +90,7 @@
         }
     },
     "CalendarLayout": {
-        "title": "Overview / Calendar",
+        "title": "Calendar",
         "description": "Your schedule at a glance"
     }
 }

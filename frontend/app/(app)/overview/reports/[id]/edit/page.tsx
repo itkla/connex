@@ -1,64 +1,22 @@
-import { headers } from 'next/headers';
-import { notFound, redirect } from 'next/navigation';
-import { getTranslations } from 'next-intl/server';
+import { notFound, permanentRedirect } from "next/navigation";
 
-import ReportBuilderBoard from '@/app/components/reports/ReportBuilderBoard';
-import AccessDeniedPage from '@/app/components/AccessDeniedPage';
-import PermissionsUnavailablePage from '@/app/components/PermissionsUnavailablePage';
-import WorkspaceUnavailablePage from '@/app/components/WorkspaceUnavailablePage';
-import { loadRecord } from '@/app/lib/recordAccess';
-import {
-    getActiveWorkspaceMembersResultFromCookie,
-    getCurrentUserResultFromCookie,
-    getEffectivePermissionsResultFromCookie,
-    getPipelines,
-    getReport,
-    getTags,
-} from '@/app/lib/api';
-import { CrumbLabel } from '@/app/hooks/useNavTrail';
+import { movedRouteTarget, type RouteSearchParams } from "@/app/lib/routeMoves";
 
-export async function generateMetadata() {
-    const t = await getTranslations('Reports');
-    return { title: t('metadata.editTitle'), description: t('metadata.editDescription') };
-}
-
-export default async function EditReportPage({ params }: { params: Promise<{ id: string }> }) {
-    const { id: rawId } = await params;
-    const id = Number(rawId);
-    if (!Number.isInteger(id) || id < 1) notFound();
-    const cookie = (await headers()).get('cookie');
-    const userResult = await getCurrentUserResultFromCookie(cookie);
-    if (!userResult.ok) return <WorkspaceUnavailablePage />;
-    const user = userResult.data;
-    if (!user) redirect('/auth/login');
-    const init = { headers: { cookie: cookie ?? '' } } as const;
-    const [reportAccess, pipelines, ownersResult, tags, permissionsResult] = await Promise.all([
-        loadRecord(() => getReport(id, init)),
-        getPipelines(init),
-        getActiveWorkspaceMembersResultFromCookie(cookie),
-        getTags(init),
-        getEffectivePermissionsResultFromCookie(cookie),
-    ]);
-    if (reportAccess.kind === 'forbidden') return <AccessDeniedPage />;
-    if (reportAccess.kind === 'missing') notFound();
-    if (!permissionsResult.ok) return <PermissionsUnavailablePage />;
-    const report = reportAccess.record;
-    const canReadGoals = permissionsResult.data.includes('GOAL_READ');
-    if (!canReadGoals && report.config.widgets.some((widget) => widget.measure === 'attainment')) {
-        return <AccessDeniedPage />;
-    }
-
-    return (
-        <>
-            <CrumbLabel pathname={`/overview/reports/${id}`} value={report.name} />
-            <ReportBuilderBoard
-                initialReport={report}
-                pipelines={pipelines}
-                owners={ownersResult.ok ? ownersResult.data : []}
-                ownersFailed={!ownersResult.ok}
-                tags={tags}
-                canReadGoals={canReadGoals}
-            />
-        </>
-    );
+/**
+ * The retired address for the report editor (#1323 WS4).
+ *
+ * Reports moved under Insights with the rest of the D13 restructure; this address survives so that
+ * editor links already shared or bookmarked keep resolving. It forwards permanently, with the id
+ * validated before it reaches the `Location` header.
+ */
+export default async function LegacyReportEditPage({
+    params,
+    searchParams,
+}: {
+    params: Promise<{ id: string }>;
+    searchParams: Promise<RouteSearchParams>;
+}) {
+    const { id } = await params;
+    if (!/^\d+$/.test(id)) notFound();
+    permanentRedirect(movedRouteTarget(`/overview/reports/${id}/edit`, await searchParams));
 }

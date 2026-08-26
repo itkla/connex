@@ -364,7 +364,7 @@ describe("shared-link survival across a browser session", () => {
     it("clears only the analytics writer's own keys when they return to defaults", () => {
         const url = mountUrl("?range=30d&granularity=week&currency=JPY&owner=me&peek=deal%3A4");
 
-        writeOwnedParamsToUrl("/overview/analytics", {
+        writeOwnedParamsToUrl("/insights/analytics", {
             range: undefined,
             granularity: undefined,
             currency: undefined,

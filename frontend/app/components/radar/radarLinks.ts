@@ -3,7 +3,7 @@ import type { RadarHorizonBand } from '@/app/components/radar/radarHorizon';
 import type { RadarFamilyFilter, RadarStateFilter } from '@/app/lib/radar';
 
 /** Path of the Radar surface — the workspace's signal triage list. */
-export const RADAR_PATH = '/radar';
+export const RADAR_PATH = '/intelligence/radar';
 
 /** URL query key Radar reads as its signal-family filter (`RadarBoard`). */
 export const RADAR_FAMILY_FILTER_KEY = 'family';

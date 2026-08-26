@@ -793,7 +793,7 @@ public class NotificationReconciliationService {
         notification.setTitle("Introduction opportunity");
         notification.setBody("You could introduce " + suggestion.getPersonAName()
             + " to " + suggestion.getPersonBName());
-        notification.setActionUrl("/overview/introductions");
+        notification.setActionUrl("/intelligence/introductions");
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("personAId", suggestion.getPersonAId());
         data.put("personAName", suggestion.getPersonAName());

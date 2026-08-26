@@ -112,10 +112,10 @@ describe("in-app docs describe the real sidebar", () => {
     it("reads every permanent section the sidebar declares", () => {
         expect([...sidebarSectionLabelKeys()].sort()).toEqual([
             "sectionActivity",
-            "sectionHelp",
+            "sectionInsights",
+            "sectionIntelligence",
             "sectionLibrary",
             "sectionMarketing",
-            "sectionOverview",
             "sectionRecords",
             "sectionWorkspace",
         ]);
@@ -136,9 +136,9 @@ describe("in-app docs describe the real sidebar", () => {
  * The permanent forwards for renamed documentation slugs.
  *
  * A docs slug is a route: it is bookmarked, linked from inside the product, and indexed, so a
- * rename that does not forward the old address breaks all three. Two renames have happened —
- * Rules to Workflows, and the warmth article's slug in #1340 WS4.6 — and both are declared in
- * `next.config.ts` beside each other. This reads that file as text rather than importing it,
+ * rename that does not forward the old address breaks all three. Three renames have happened —
+ * Rules to Workflows, the warmth article's slug in #1340 WS4.6, and the calendar article's move
+ * to the Activity category in #1323 WS4.5 — and all are declared in `next.config.ts` together. This reads that file as text rather than importing it,
  * because the config pulls in the bundler's own types; what matters is the pairing, and the
  * pairing is checkable either way.
  */
@@ -159,6 +159,7 @@ describe("renamed documentation slugs keep their old addresses working", () => {
 
     it("declares every rename this suite knows about", () => {
         expect(pairs.map((pair) => pair.source).sort()).toEqual([
+            "/docs/overview-suite/calendar",
             "/docs/relationship-intelligence/warmth-and-temperature",
             "/docs/settings/rules-and-automation",
         ]);

@@ -71,7 +71,7 @@ export default function UserPerformance({ userId }: { userId: number }) {
                 <StatCard label={t('openTasks')} value={data.openTasks} />
             </div>
             <Link
-                href={`/overview/analytics?owner=${userId}&range=${RANGE}`}
+                href={`/insights/analytics?owner=${userId}&range=${RANGE}`}
                 className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-brand transition-colors hover:text-brand-hover"
             >
                 {t('viewFullAnalytics')}

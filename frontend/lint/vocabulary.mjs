@@ -310,8 +310,10 @@ export const CURATED_DECISIONS = {
         reason: "banned as a repetition across surfaces rather than as a value, so the ratchet over AT_A_GLANCE_SURFACES enforces it instead of a pattern.",
     },
     "Overview as a page name": {
-        decision: "skip",
-        reason: "Overview is fine in prose; page-name usage is a route decision WS4 owns.",
+        decision: "ban",
+        pattern: { source: "^Overview$", flags: "u" },
+        scope: { excludeNamespaces: ["campaigns.json#CampaignDetail"] },
+        reason: "WS4.5 dissolved the Overview section and retired every page-name use, so the ban narrows to a value that is nothing but the label and excepts the campaign detail's first tab — the one shipped first-tab §4 sanctions. Prose stays free.",
     },
     "canonical": {
         decision: "ban",

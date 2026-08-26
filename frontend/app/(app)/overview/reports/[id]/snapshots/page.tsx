@@ -1,17 +1,23 @@
-import { notFound, redirect } from 'next/navigation';
+import { notFound, permanentRedirect } from "next/navigation";
+
+import { movedRouteTarget, type RouteSearchParams } from "@/app/lib/routeMoves";
 
 /**
- * The bare snapshots path has no surface of its own: the report page already lists every frozen
- * snapshot as a chip strip. A reader reaches this path by truncating an emailed snapshot deep link,
- * so it sends them to that report rather than the hard 404 the missing segment produced.
+ * The retired address for a report's bare snapshots path (#1323 WS4).
+ *
+ * A reader reaches this path by truncating an emailed snapshot deep link, so it forwards to the
+ * canonical snapshots path, which in turn sends them on to the report that lists every snapshot.
+ * Two hops is deliberate: keeping every legacy stub a pure prefix swap is what makes the route-move
+ * manifest testable, and the destination already owns the truncated-deep-link rule.
  */
-export default async function ReportSnapshotsPage({
+export default async function LegacyReportSnapshotsPage({
     params,
+    searchParams,
 }: {
     params: Promise<{ id: string }>;
+    searchParams: Promise<RouteSearchParams>;
 }) {
-    const { id: rawId } = await params;
-    const id = Number(rawId);
-    if (!Number.isInteger(id) || id < 1) notFound();
-    redirect(`/overview/reports/${id}`);
+    const { id } = await params;
+    if (!/^\d+$/.test(id)) notFound();
+    permanentRedirect(movedRouteTarget(`/overview/reports/${id}/snapshots`, await searchParams));
 }

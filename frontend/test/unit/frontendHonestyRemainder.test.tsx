@@ -1,7 +1,7 @@
 import { isValidElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import AnalyticsPage from '@/app/(app)/overview/analytics/page';
+import AnalyticsPage from '@/app/(app)/insights/analytics/page';
 
 const { recentMovesUnavailable } = vi.hoisted(() => ({
     recentMovesUnavailable: { current: true },

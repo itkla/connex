@@ -205,7 +205,7 @@ public class ReportDeliveryScheduler {
                 : headlines.getFirst();
         Headline second = headlines.size() < 2 ? new Headline("", "") : headlines.get(1);
         String actionUrl = UriComponentsBuilder.fromUriString(mailProperties.getAppBaseUrl())
-                .path("/overview/reports/")
+                .path("/insights/reports/")
                 .path(String.valueOf(snapshot.reportDefinitionId()))
                 .path("/snapshots/")
                 .path(String.valueOf(snapshot.id()))

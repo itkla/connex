@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test.describe("analytics", () => {
     test("range and granularity switching updates the URL, controls, and panels", async ({ page }) => {
-        await page.goto("/overview/analytics");
+        await page.goto("/insights/analytics");
         await expect(page.getByRole("heading", { name: "Analytics" })).toBeVisible();
         await expect(page.getByRole("heading", { name: "At a glance" })).toBeVisible();
         await expect(page.getByRole("heading", { name: "Trends" })).toBeVisible();

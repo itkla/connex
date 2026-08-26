@@ -1,14 +1,22 @@
-/** Stable, locale-independent identifiers for every collapsible sidebar section. */
+/**
+ * Stable, locale-independent identifiers for every sidebar section, in navigation order.
+ *
+ * The headless single-row sections carry an id like any other so the group they render is keyed and
+ * addressable; they simply never persist a collapsed state, because there is no header to collapse.
+ */
 export const SIDEBAR_SECTION_IDS = [
     "pinned-views",
     "recent-records",
-    "overview",
+    "dashboard",
+    "my-work",
+    "intelligence",
     "records",
-    "marketing",
     "activity",
+    "insights",
+    "marketing",
     "library",
+    "workflows",
     "workspace",
-    "help",
 ] as const;
 
 /** A collapsible sidebar section identifier persisted across sessions. */

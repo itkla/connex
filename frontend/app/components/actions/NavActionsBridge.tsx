@@ -45,7 +45,7 @@ export default function NavActionsBridge({ navAccess }: Props): null {
                 icon: FlagIcon,
                 order: 75,
                 execute: (_context, helpers) => {
-                    helpers.router.push("/overview/reports/goals");
+                    helpers.router.push("/insights/reports/goals");
                 },
             });
         }

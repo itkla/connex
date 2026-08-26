@@ -141,7 +141,7 @@ class ReportDeliverySchedulerTest {
         assertTrue(body.contains("Revenue held above target."));
         assertTrue(body.contains(">Won revenue</p>"));
         assertTrue(body.contains(">$125,000</p>"));
-        assertTrue(body.contains("href=\"https://app.example.com/overview/reports/33/snapshots/55\""));
+        assertTrue(body.contains("href=\"https://app.example.com/insights/reports/33/snapshots/55\""));
         assertTrue(body.contains(">View report</a>"));
         assertFalse(body.contains("{{"));
         verify(auditService).recordScoped(

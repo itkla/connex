@@ -29,6 +29,7 @@ export const SHIPPED_APP_ROUTES = [
     '/account/security',
     '/activity/activities/[id]',
     '/activity/all',
+    '/activity/calendar',
     '/activity/notes',
     '/activity/notes/[id]',
     '/activity/tasks',
@@ -37,6 +38,17 @@ export const SHIPPED_APP_ROUTES = [
     '/ask-connex',
     '/ask-connex/[sessionId]',
     '/dashboard',
+    '/insights/analytics',
+    '/insights/reports',
+    '/insights/reports/[id]',
+    '/insights/reports/[id]/edit',
+    '/insights/reports/[id]/snapshots',
+    '/insights/reports/[id]/snapshots/[snapshotId]',
+    '/insights/reports/goals',
+    '/insights/reports/new',
+    '/intelligence/introductions',
+    '/intelligence/map',
+    '/intelligence/radar',
     '/library/documents',
     '/library/documents/[id]',
     '/library/documents/new',
@@ -155,8 +167,8 @@ function matches(patternSegments: string[], segments: string[]): boolean {
  * Resolves an app-relative href to the shipped route pattern that serves it.
  *
  * Query string and fragment are ignored — they carry deep-link params, not routing. A literal segment
- * always beats a dynamic sibling, mirroring how Next.js itself picks `/overview/reports/new` over
- * `/overview/reports/[id]`.
+ * always beats a dynamic sibling, mirroring how Next.js itself picks `/insights/reports/new` over
+ * `/insights/reports/[id]`.
  *
  * @param href - an app-relative href, with or without a query string
  * @returns the matching pattern, or null when no shipped route serves the href

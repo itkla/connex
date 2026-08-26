@@ -135,7 +135,7 @@ export default function DealActionsMenu({
                     variant="outline"
                     size="toolbar"
                     disabled={deal.company == null}
-                    onClick={() => deal.company != null && router.push(`/overview/map?companyId=${deal.company}`)}
+                    onClick={() => deal.company != null && router.push(`/intelligence/map?companyId=${deal.company}`)}
                 >
                     <EyeIcon className="size-4" />
                     {t('viewInMap')}
