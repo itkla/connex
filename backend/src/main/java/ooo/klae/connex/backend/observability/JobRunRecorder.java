@@ -69,7 +69,9 @@ public class JobRunRecorder {
         RELATIONSHIP_SIGNAL_RECONCILIATION,
         APPROVAL_RECONCILIATION,
         DOCUMENT_DELIVERY_EXPIRY,
-        LEAD_RESPONSE_SLA);
+        LEAD_RESPONSE_SLA,
+        AI_BRIEF_DELIVERY,
+        AI_WATCH_EVALUATION);
     private static final Set<String> METADATA_KEYS = Set.of(
         "phase",
         "purgedCount",
@@ -83,7 +85,11 @@ public class JobRunRecorder {
         "scheduleId",
         "snapshotId",
         "recipientCount",
-        "expiredCount");
+        "expiredCount",
+        "startedCount",
+        "deliveredCount",
+        "evaluatedCount",
+        "firedCount");
 
     private final JobRunMapper mapper;
     private final ObjectMapper objectMapper;

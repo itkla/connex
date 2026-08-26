@@ -96,8 +96,8 @@ public class AiWatchScheduler {
                 workspaceId,
                 failed == 0 ? JobRunStatus.SUCCEEDED : JobRunStatus.FAILED,
                 new JobRunDetail(started.startedAt(), Map.of(
-                        "evaluated", evaluated,
-                        "fired", fired,
-                        "failed", failed)));
+                        "evaluatedCount", evaluated,
+                        "firedCount", fired,
+                        "failedCount", failed)));
     }
 }
