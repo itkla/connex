@@ -98,6 +98,7 @@ public final class MaskingEngine {
             redacted = identifierPattern(entry.rawValue()).matcher(redacted)
                     .replaceAll(Matcher.quoteReplacement(REDACTED));
         }
+        redacted = replaceResidualIdentifiers(redacted, ctx, entry -> REDACTED);
         return redactContactData(redacted);
     }
 
@@ -202,6 +203,8 @@ public final class MaskingEngine {
             masked = identifierPattern(entry.rawValue()).matcher(masked)
                     .replaceAll(Matcher.quoteReplacement(entry.token()));
         }
+        masked = replaceResidualIdentifiers(
+                masked, ctx, MaskingContext.IdentifierEntry::token);
         return redactContactData(masked);
     }
 
@@ -308,14 +311,49 @@ public final class MaskingEngine {
 
     private static Pattern identifierPattern(String rawValue) {
         String normalizedValue = Normalizer.normalize(rawValue, Normalizer.Form.NFKC).trim();
-        String quoted = Arrays.stream(WHITESPACE.split(normalizedValue))
-                .map(Pattern::quote)
-                .collect(Collectors.joining("\\s+"));
+        String quoted = quotedIdentifier(normalizedValue);
         if (usesAsciiWordBoundary(normalizedValue)) {
-            return Pattern.compile("(?<![\\p{L}\\p{N}_])" + quoted + "(?![\\p{L}\\p{N}_])",
+            return Pattern.compile("(?<![A-Za-z0-9_])" + quoted + "(?![A-Za-z0-9_])",
                     Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
         }
         return Pattern.compile(quoted, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    }
+
+    /**
+     * Matches every occurrence the outbound leak scan can flag, with no boundary at all.
+     *
+     * <p>The boundary-respecting pattern above is the preferred replacement, but the scan checks
+     * raw normalized containment: any occurrence the replacer declines that the scan would still
+     * find fails the whole provider call closed. This residual pattern restores the invariant that
+     * the replacer covers at least the scanner, at the scanner's own minimum identifier length —
+     * over-masking a longer word beats blocking the call.
+     */
+    private static Pattern identifierResidualPattern(String normalizedValue) {
+        return Pattern.compile(
+                quotedIdentifier(normalizedValue),
+                Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    }
+
+    private static String quotedIdentifier(String normalizedValue) {
+        return Arrays.stream(WHITESPACE.split(normalizedValue))
+                .map(Pattern::quote)
+                .collect(Collectors.joining("\\s+"));
+    }
+
+    private static String replaceResidualIdentifiers(
+            String text, MaskingContext ctx, java.util.function.Function<
+                    MaskingContext.IdentifierEntry, String> replacement) {
+        String replaced = text;
+        for (MaskingContext.IdentifierEntry entry : ctx.identifierEntriesByLongestRawValue()) {
+            String normalizedValue =
+                    Normalizer.normalize(entry.rawValue(), Normalizer.Form.NFKC).trim();
+            if (normalizedValue.length() < OutboundLeakScan.MIN_IDENTIFIER_LENGTH) {
+                continue;
+            }
+            replaced = identifierResidualPattern(normalizedValue).matcher(replaced)
+                    .replaceAll(Matcher.quoteReplacement(replacement.apply(entry)));
+        }
+        return replaced;
     }
 
     private static boolean usesAsciiWordBoundary(String value) {

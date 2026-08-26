@@ -239,6 +239,42 @@ class MaskingEngineTest {
         assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx, objectMapper));
     }
 
+    /**
+     * Japanese runs Latin names straight into particles — "Ferrariの担当者" has no space — so the
+     * ASCII word boundary must not treat a CJK neighbor as a word continuation. The leak scan
+     * checks raw containment with no boundary at all, so any occurrence the replacer skips is a
+     * blocked provider call, which is how staging's daily brief died on every question naming a
+     * company.
+     */
+    @Test
+    void maskFreeText_masksAsciiIdentifiersAdjacentToCjkText() {
+        MaskingContext ctx = new MaskingContext();
+        String company = MaskingEngine.maskField(EntityKind.COMPANY, "Ferrari", ctx);
+        String person = MaskingEngine.maskField(EntityKind.PERSON, "Lucius Fox", ctx);
+
+        String masked = MaskingEngine.maskFreeText(
+                "Ferrariの担当者はLucius Foxさんです。Ferrariとの取引を確認して。", ctx);
+
+        assertEquals(company + "の担当者は" + person + "さんです。"
+                + company + "との取引を確認して。", masked);
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx, objectMapper));
+    }
+
+    /**
+     * The replacer must cover every occurrence the outbound leak scan can flag: the scan does raw
+     * normalized containment, so an identifier embedded inside a longer ASCII word must still be
+     * masked rather than left to fail the whole provider call closed.
+     */
+    @Test
+    void maskFreeText_masksIdentifiersEmbeddedInLongerWordsRatherThanBlockingTheCall() {
+        MaskingContext ctx = new MaskingContext();
+        MaskingEngine.maskField(EntityKind.COMPANY, "Acme", ctx);
+
+        String masked = MaskingEngine.maskFreeText("Ask the Acmeister about renewal.", ctx);
+
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx, objectMapper));
+    }
+
     @Test
     void unmaskedModeKeepsIdentifiersWhileUniversalScreensStillApply() {
         MaskingContext context = new MaskingContext(AiPrivacyMode.UNMASKED);

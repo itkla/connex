@@ -17,7 +17,11 @@ import tools.jackson.databind.ObjectMapper;
  * a per-request invariant immediately before send.
  */
 public final class OutboundLeakScan {
-    private static final int MIN_IDENTIFIER_LENGTH = 4;
+    /**
+     * Shortest normalized identifier the scan flags, shared with the masking engine's residual
+     * replacement pass so the replacer always covers at least what this scan can refuse.
+     */
+    static final int MIN_IDENTIFIER_LENGTH = 4;
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
 
     private OutboundLeakScan() {
