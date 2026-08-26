@@ -829,13 +829,24 @@ public class AiChatAgentLoopService {
      * read-authority skill must not be able to reach a write tool, and no skill may cause a tool it
      * never declared to run, however the model phrases the request.
      */
+    /**
+     * Refuses a synthesis-step tool that would exceed the routed skill's write authority.
+     *
+     * The invariant this guard exists for is that a routed turn cannot gain WRITE authority its
+     * skill never declared: a write tool runs only when the skill both lists it in
+     * {@code allowedTools} and carries an authority above {@code READ}. Read tools always pass —
+     * they grant nothing the caller's own generic loop would not, and their scope honesty is
+     * governed by the declared-scope tool policy, not by this guard. Refusing reads here made
+     * every synthesis-time lookup fatal for skills whose {@code allowedTools} name only
+     * server-side plan steps, which is how the daily brief failed on its first real question.
+     */
     private void requireSkillAuthority(AiSkillCatalog.SkillSpec skill, String toolName) {
-        if (skill == null) {
+        if (skill == null || !toolCatalog.isWrite(toolName)) {
             return;
         }
-        boolean forbiddenWrite = skill.authority() == AiSkillCatalog.Authority.READ
-                && toolCatalog.isWrite(toolName);
-        if (forbiddenWrite || !skill.allowedTools().contains(toolName)) {
+        boolean writePermitted = skill.authority() != AiSkillCatalog.Authority.READ
+                && skill.allowedTools().contains(toolName);
+        if (!writePermitted) {
             throw new AiAssistantLoopException(
                     TOOL_OUTSIDE_SKILL_AUTHORITY, TOOL_OUTSIDE_SKILL_AUTHORITY);
         }

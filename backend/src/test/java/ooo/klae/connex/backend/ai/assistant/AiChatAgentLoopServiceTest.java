@@ -2467,20 +2467,30 @@ class AiChatAgentLoopServiceTest {
      * Once the plan has run, the model may only re-read inside that declaration.
      */
     @Test
-    void aRoutedSkillRefusesASynthesisToolItNeverDeclared() {
+    void aRoutedSkillMayReadDuringSynthesisBecauseReadsCarryNoAuthority() {
         routedDigest();
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class), any())).thenReturn(
+                new AiAssistantToolResult(
+                        Map.of("records", List.of(Map.of(
+                                "handle", "r1",
+                                "kind", "deal",
+                                "name", "{{D1}}"))),
+                        List.of()));
+        AiAssistantStep finalStep = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer("One deal needs attention.", List.of()));
         when(invocationService.completeStructuredRepairable(
                 any(AiInvocation.class), eq(AiAssistantStep.class),
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class),
                 eq(directAdmission), any(Runnable.class)))
                 .thenReturn(parsed(toolStep(
-                        "search_records", "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}")));
+                        "search_records", "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}")),
+                        parsed(finalStep));
 
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
 
-        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
-        assertEquals("tool_outside_skill_authority", result.reason());
-        verify(persistenceService, never()).proposeTool(eq(TURN), anyInt(), any(), any());
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        verify(toolExecutor).execute(
+                eq("search_records"), any(JsonNode.class), any(), eq(true), any());
     }
 
     /**
@@ -2501,13 +2511,13 @@ class AiChatAgentLoopServiceTest {
                 .thenReturn(parsed(toolStep("list_scope_activities", "{\"limit\":5}")))
                 .thenReturn(parsed(toolStep("list_scope_activities", "{\"limit\":6}")))
                 .thenReturn(parsed(toolStep(
-                        "search_records", "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}")));
+                        "create_task", "{\"handle\":\"r1\",\"title\":\"Follow up\"}")));
 
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
 
         assertEquals("tool_outside_skill_authority", result.reason());
         verify(persistenceService, never()).proposeTool(
-                eq(TURN), anyInt(), eq("search_records"), any());
+                eq(TURN), anyInt(), eq("create_task"), any());
     }
 
     @Test
