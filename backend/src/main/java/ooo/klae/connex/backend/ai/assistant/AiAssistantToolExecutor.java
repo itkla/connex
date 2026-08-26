@@ -131,8 +131,11 @@ public class AiAssistantToolExecutor {
     /** Validates the closed argument shape and every handle before durable tool proposal. */
     public void validateReferences(
             String name, JsonNode args, AiChatResourceRegistry resources) {
-        if (!toolCatalog.isKnown(name) || !toolCatalog.permitsArguments(name, args)) {
-            throw AiAssistantLoopException.malformed("invalid_tool_arguments");
+        if (!toolCatalog.isKnown(name)) {
+            throw AiAssistantLoopException.malformed("unknown_tool");
+        }
+        if (!toolCatalog.permitsArguments(name, args)) {
+            throw AiAssistantLoopException.refusedArguments("invalid_tool_arguments");
         }
         requireHandleKind(name, args, resources);
     }
@@ -297,7 +300,7 @@ public class AiAssistantToolExecutor {
                         Activity::getReferences,
                         resources.maskingContext());
             }
-            default -> throw AiAssistantLoopException.malformed("wrong_handle_kind");
+            default -> throw AiAssistantLoopException.refusedArguments("wrong_handle_kind");
         };
         List<Map<String, Object>> data = activities.stream()
                 .limit(limit)
@@ -341,7 +344,7 @@ public class AiAssistantToolExecutor {
                         Task::getReferences,
                         resources.maskingContext());
             }
-            default -> throw AiAssistantLoopException.malformed("wrong_handle_kind");
+            default -> throw AiAssistantLoopException.refusedArguments("wrong_handle_kind");
         };
         List<Map<String, Object>> data = tasks.stream()
                 .limit(limit)
@@ -370,7 +373,7 @@ public class AiAssistantToolExecutor {
         String currency = optionalText(args, "currency");
         int days = integer(args, "days", 90);
         if (!ANALYTICS_DAYS.contains(days)) {
-            throw AiAssistantLoopException.malformed("unsupported_analytics_range");
+            throw AiAssistantLoopException.refusedArguments("unsupported_analytics_range");
         }
         MemberScope memberScope = MemberScope.fromRequest(
                 optionalText(args, "scope"), null, workspaceService.getCurrentUserId());
@@ -381,7 +384,7 @@ public class AiAssistantToolExecutor {
             case "activity_volume" -> activityService.getActivityVolume(days, memberScope);
             case "task_summary" -> taskService.getTaskSummary(memberScope);
             case "warmth_summary" -> scoringService.summarize(workspaceService.getCurrentWorkspaceId());
-            default -> throw AiAssistantLoopException.malformed("unknown_metric");
+            default -> throw AiAssistantLoopException.refusedArguments("unknown_metric");
         };
         return result(Map.of("metric", metric, "value", value), List.of());
     }
@@ -394,7 +397,7 @@ public class AiAssistantToolExecutor {
         AiAssistantDateResolver.ResolvedDateTime end =
                 dateResolver.resolveDateTime(requiredText(args, "end"));
         if (!end.utc().isAfter(start.utc())) {
-            throw AiAssistantLoopException.malformed("invalid_schedule_window");
+            throw AiAssistantLoopException.refusedArguments("invalid_schedule_window");
         }
         return findScheduleConflicts(
                 resource.id(), start.utc(), end.utc(), resources.maskingContext());
@@ -867,7 +870,7 @@ public class AiAssistantToolExecutor {
     private static String requiredText(JsonNode args, String name) {
         JsonNode value = args.get(name);
         if (value == null || !value.isString() || value.asString().isBlank()) {
-            throw AiAssistantLoopException.malformed("invalid_tool_arguments");
+            throw AiAssistantLoopException.refusedArguments("invalid_tool_arguments");
         }
         return value.asString();
     }

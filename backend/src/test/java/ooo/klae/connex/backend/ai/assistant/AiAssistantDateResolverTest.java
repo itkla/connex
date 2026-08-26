@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -12,7 +13,6 @@ import java.time.ZoneOffset;
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.beans.User;
-import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.AuthService;
 
 class AiAssistantDateResolverTest {
@@ -39,18 +39,22 @@ class AiAssistantDateResolverTest {
     void nonexistentLocalTimeInDstGapIsRejected() {
         AiAssistantDateResolver resolver = resolver("America/New_York");
 
-        assertThrows(
-                BadRequestException.class,
+        AiAssistantLoopException refusal = assertThrows(
+                AiAssistantLoopException.class,
                 () -> resolver.resolveDateTime("2026-03-08T02:30:00"));
+        assertEquals("nonexistent_local_time", refusal.detailReason());
+        assertTrue(refusal.recoverable());
     }
 
     @Test
     void ambiguousLocalTimeInDstOverlapIsRejectedWithoutAnOffset() {
         AiAssistantDateResolver resolver = resolver("America/New_York");
 
-        assertThrows(
-                BadRequestException.class,
+        AiAssistantLoopException refusal = assertThrows(
+                AiAssistantLoopException.class,
                 () -> resolver.resolveDateTime("2026-11-01T01:30:00"));
+        assertEquals("ambiguous_local_time", refusal.detailReason());
+        assertTrue(refusal.recoverable());
         assertEquals(
                 "2026-11-01T05:30",
                 resolver.resolveDateTime("2026-11-01T01:30:00-04:00").utc().toString());

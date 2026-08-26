@@ -75,11 +75,11 @@ final class AiChatCohortKind {
         List<String> bands = bands(scope, requestedBands);
         String kind = kind(scope, requestedKind, contextKind);
         if (DEAL.equals(kind) && !bands.isEmpty()) {
-            throw AiAssistantLoopException.malformed(WARMTH_UNSUPPORTED_FOR_DEALS);
+            throw AiAssistantLoopException.refusedArguments(WARMTH_UNSUPPORTED_FOR_DEALS);
         }
         if (!DEAL.equals(kind)
                 && (!scope.stageIds().isEmpty() || !scope.dealStatuses().isEmpty())) {
-            throw AiAssistantLoopException.malformed(STAGE_SCOPE_UNSUPPORTED);
+            throw AiAssistantLoopException.refusedArguments(STAGE_SCOPE_UNSUPPORTED);
         }
         return new Cohort(kind, bands);
     }
@@ -93,7 +93,7 @@ final class AiChatCohortKind {
         for (String value : requestedBands) {
             String candidate = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
             if (!BANDS.contains(candidate)) {
-                throw AiAssistantLoopException.malformed("invalid_tool_arguments");
+                throw AiAssistantLoopException.refusedArguments("invalid_tool_arguments");
             }
             requested.add(candidate);
         }
@@ -102,7 +102,7 @@ final class AiChatCohortKind {
         }
         List<String> narrowed = declared.stream().filter(requested::contains).toList();
         if (narrowed.isEmpty()) {
-            throw AiAssistantLoopException.malformed(WARMTH_OUTSIDE_SCOPE);
+            throw AiAssistantLoopException.refusedArguments(WARMTH_OUTSIDE_SCOPE);
         }
         return narrowed;
     }
@@ -115,10 +115,10 @@ final class AiChatCohortKind {
         if (requestedKind != null && !requestedKind.isBlank()) {
             String candidate = requestedKind.trim().toLowerCase(Locale.ROOT);
             if (!KINDS.contains(candidate)) {
-                throw AiAssistantLoopException.malformed("invalid_tool_arguments");
+                throw AiAssistantLoopException.refusedArguments("invalid_tool_arguments");
             }
             if (!declared.isEmpty() && !declared.contains(candidate)) {
-                throw AiAssistantLoopException.malformed(RECORD_KIND_OUTSIDE_SCOPE);
+                throw AiAssistantLoopException.refusedArguments(RECORD_KIND_OUTSIDE_SCOPE);
             }
             return candidate;
         }
@@ -138,7 +138,7 @@ final class AiChatCohortKind {
             // argument, read companies — and the confirmed number would describe neither. Counting
             // every declared kind is a different retrieval contract than this one implements, so the
             // honest bound is to require the declaration to resolve to a single kind first.
-            throw AiAssistantLoopException.malformed(RECORD_KIND_AMBIGUOUS);
+            throw AiAssistantLoopException.refusedArguments(RECORD_KIND_AMBIGUOUS);
         }
         return "company";
     }
