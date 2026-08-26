@@ -93,13 +93,11 @@ public final class MaskingEngine {
         if (ctx.privacyMode() == ooo.klae.connex.backend.ai.AiPrivacyMode.UNMASKED) {
             return redactContactData(screened);
         }
-        String redacted = screened;
+        String redacted = redactContactData(screened);
         for (MaskingContext.IdentifierEntry entry : ctx.identifierEntriesByLongestRawValue()) {
-            redacted = identifierPattern(entry.rawValue()).matcher(redacted)
-                    .replaceAll(Matcher.quoteReplacement(REDACTED));
+            redacted = replaceIdentifierEverywhere(redacted, entry, REDACTED);
         }
-        redacted = replaceResidualIdentifiers(redacted, ctx, entry -> REDACTED);
-        return redactContactData(redacted);
+        return redacted;
     }
 
     private static String screenCompleteFreeText(String text) {
@@ -198,14 +196,11 @@ public final class MaskingEngine {
     }
 
     private static String maskSanitizedFreeText(String sanitizedText, MaskingContext ctx) {
-        String masked = sanitizedText;
+        String masked = redactContactData(sanitizedText);
         for (MaskingContext.IdentifierEntry entry : ctx.identifierEntriesByLongestRawValue()) {
-            masked = identifierPattern(entry.rawValue()).matcher(masked)
-                    .replaceAll(Matcher.quoteReplacement(entry.token()));
+            masked = replaceIdentifierEverywhere(masked, entry, entry.token());
         }
-        masked = replaceResidualIdentifiers(
-                masked, ctx, MaskingContext.IdentifierEntry::token);
-        return redactContactData(masked);
+        return masked;
     }
 
     private static String redactContactData(String text) {
@@ -340,20 +335,28 @@ public final class MaskingEngine {
                 .collect(Collectors.joining("\\s+"));
     }
 
-    private static String replaceResidualIdentifiers(
-            String text, MaskingContext ctx, java.util.function.Function<
-                    MaskingContext.IdentifierEntry, String> replacement) {
-        String replaced = text;
-        for (MaskingContext.IdentifierEntry entry : ctx.identifierEntriesByLongestRawValue()) {
-            String normalizedValue =
-                    Normalizer.normalize(entry.rawValue(), Normalizer.Form.NFKC).trim();
-            if (normalizedValue.length() < OutboundLeakScan.MIN_IDENTIFIER_LENGTH) {
-                continue;
-            }
-            replaced = identifierResidualPattern(normalizedValue).matcher(replaced)
-                    .replaceAll(Matcher.quoteReplacement(replacement.apply(entry)));
+    /**
+     * Replaces one identifier's occurrences with boundary preference and residual coverage in one
+     * step, so longest-first precedence holds across both matching strategies.
+     *
+     * <p>Running every boundary replacement before any residual replacement let a shorter seeded
+     * identifier, newly matchable at a CJK-adjacent position inside a longer identifier's
+     * ASCII-embedded occurrence, fragment that occurrence before the residual pass could cover it —
+     * and the surviving raw fragment egressed because the leak scan checks whole identifiers only.
+     * Interleaving the two patterns per entry consumes the longer identifier's occurrences,
+     * boundary-matched or not, before any shorter entry is considered.
+     */
+    private static String replaceIdentifierEverywhere(
+            String text, MaskingContext.IdentifierEntry entry, String replacement) {
+        String replaced = identifierPattern(entry.rawValue()).matcher(text)
+                .replaceAll(Matcher.quoteReplacement(replacement));
+        String normalizedValue =
+                Normalizer.normalize(entry.rawValue(), Normalizer.Form.NFKC).trim();
+        if (normalizedValue.length() < OutboundLeakScan.MIN_IDENTIFIER_LENGTH) {
+            return replaced;
         }
-        return replaced;
+        return identifierResidualPattern(normalizedValue).matcher(replaced)
+                .replaceAll(Matcher.quoteReplacement(replacement));
     }
 
     private static boolean usesAsciiWordBoundary(String value) {

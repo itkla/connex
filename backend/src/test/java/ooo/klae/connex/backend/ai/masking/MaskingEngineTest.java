@@ -275,6 +275,44 @@ class MaskingEngineTest {
         assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx, objectMapper));
     }
 
+    /**
+     * Contact-data redaction must run before identifier replacement: a token spliced into the
+     * middle of an email or phone number would defeat the redaction regexes, egressing the raw
+     * local part, domain, and digit fragments around it — data the leak scan cannot flag because
+     * only the seeded name itself is in the dictionary.
+     */
+    @Test
+    void maskFreeText_redactsContactDataBeforeIdentifierTokensCanSpliceIt() {
+        MaskingContext ctx = new MaskingContext();
+        MaskingEngine.maskField(EntityKind.PERSON, "Nakagawa", ctx);
+
+        String masked = MaskingEngine.maskFreeText(
+                "Contact hunternakagawa@gmail.com or call 09012345678.", ctx);
+
+        assertEquals("Contact [redacted] or call [redacted].", masked);
+        assertFalse(containsIgnoreCase(masked, "gmail"));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx, objectMapper));
+    }
+
+    /**
+     * Longest-first precedence must hold across the boundary and residual matching strategies: a
+     * shorter identifier matching at a CJK-adjacent position inside a longer identifier's
+     * ASCII-embedded occurrence would otherwise fragment it, and the surviving raw fragment would
+     * egress because the leak scan checks whole identifiers only.
+     */
+    @Test
+    void maskFreeText_longestIdentifierWinsAcrossBoundaryAndResidualMatching() {
+        MaskingContext ctx = new MaskingContext();
+        String longer = MaskingEngine.maskField(EntityKind.COMPANY, "Acme楽天Corp", ctx);
+        MaskingEngine.maskField(EntityKind.COMPANY, "Corp", ctx);
+
+        String masked = MaskingEngine.maskFreeText("XAcme楽天Corpの件", ctx);
+
+        assertEquals("X" + longer + "の件", masked);
+        assertFalse(masked.contains("Acme楽天"));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx, objectMapper));
+    }
+
     @Test
     void unmaskedModeKeepsIdentifiersWhileUniversalScreensStillApply() {
         MaskingContext context = new MaskingContext(AiPrivacyMode.UNMASKED);
