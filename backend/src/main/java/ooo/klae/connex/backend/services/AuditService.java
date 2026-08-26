@@ -290,7 +290,7 @@ public class AuditService {
             Integer workspaceId, Integer orgId, String targetLabel, String summary, String reason) {
         Object context = reason == null ? null : Map.of("error", truncate(reason, ERROR_MAX));
         writeUnchecked(action, entityType, entityId, targetLabel, OUTCOME_FAILURE, summary, null,
-                context, true, true, workspaceId, orgId);
+                context, true, true, workspaceId, orgId, true);
     }
 
     /**
