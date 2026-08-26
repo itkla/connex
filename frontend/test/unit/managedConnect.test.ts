@@ -19,6 +19,7 @@ const BASE_CAPABILITIES: InstanceCapabilities = {
     businessCardScanning: false,
     businessCardImport: false,
     campaignDelivery: false,
+    privilegedMfaEnforced: true,
 };
 
 describe('connectedAccountMode', () => {

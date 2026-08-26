@@ -345,6 +345,7 @@ const ALL_CAPABILITIES: InstanceCapabilities = {
     businessCardScanning: true,
     businessCardImport: true,
     campaignDelivery: true,
+    privilegedMfaEnforced: true,
 };
 
 function viewer(overrides: Partial<SettingsNavViewer> = {}): SettingsNavViewer {

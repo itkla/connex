@@ -128,6 +128,8 @@ export function capabilityValue(
             return capabilities.businessCardImport;
         case "campaignDelivery":
             return capabilities.campaignDelivery;
+        case "privilegedMfaEnforced":
+            return capabilities.privilegedMfaEnforced;
         case "socialLogin.google":
             return capabilities.socialLogin.google;
         case "socialLogin.microsoft":

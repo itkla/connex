@@ -42,6 +42,7 @@ const ALL_CAPABILITIES: InstanceCapabilities = {
     businessCardScanning: true,
     businessCardImport: true,
     campaignDelivery: true,
+    privilegedMfaEnforced: true,
 };
 
 function englishCatalog(): Record<string, unknown> {
