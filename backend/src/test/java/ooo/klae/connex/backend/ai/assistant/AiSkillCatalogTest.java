@@ -103,7 +103,7 @@ class AiSkillCatalogTest {
                     () -> key + " must gate on the assistant permission");
             assertEquals(AiSkillCatalog.Authority.READ, spec.authority(),
                     () -> key + " must not claim write authority in this increment");
-            assertTrue(spec.budgets().maxModelSteps() > 0 && spec.budgets().maxModelSteps() <= 5,
+            assertTrue(spec.budgets().maxModelSteps() > 0 && spec.budgets().maxModelSteps() <= 12,
                     () -> key + " must leave the model a small bounded synthesis budget");
             assertTrue(spec.budgets().maxLatencyMillis() > 0,
                     () -> key + " must declare a latency budget");

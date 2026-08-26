@@ -109,7 +109,7 @@ public class AiChatProgressService {
      */
     public static String sourceForTool(String tool) {
         return switch (tool == null ? "" : tool) {
-            case "search_records", "get_record" -> "records";
+            case "search_records", "get_record", "get_records" -> "records";
             case "get_deal_brief" -> "deals";
             case "list_activities", "create_activity", "list_scope_activities" -> "activities";
             case "relationship_metrics" -> "metrics";
@@ -163,7 +163,7 @@ public class AiChatProgressService {
         try {
             JsonNode result = objectMapper.readTree(toolCall.getResultJson());
             Integer count = switch (toolCall.getToolName()) {
-                case "search_records" -> arraySize(result, "records");
+                case "search_records", "get_records" -> arraySize(result, "records");
                 case "get_record", "create_activity", "create_task", "create_note",
                         "add_tag", "change_deal_stage", "assign_owner",
                         "relationship_metrics" -> 1;

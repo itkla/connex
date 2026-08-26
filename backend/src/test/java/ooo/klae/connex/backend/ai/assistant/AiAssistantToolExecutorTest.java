@@ -262,6 +262,40 @@ class AiAssistantToolExecutorTest {
                 privateResult.data().get("notes"));
     }
 
+    /**
+     * The bulk read collapses a record crawl into one step without granting anything the serial
+     * form did not: every handle resolves through the registry, duplicates are read once, and each
+     * record's data flows through the same per-record read as {@code get_record}.
+     */
+    @Test
+    void getRecordsReadsEachDistinctHandleOnceThroughTheSameRecordRead() throws Exception {
+        Person ada = new Person();
+        ada.setId(17);
+        ada.setName("Ada Lovelace");
+        Person grace = new Person();
+        grace.setId(18);
+        grace.setName("Grace Hopper");
+        when(personService.getPersonById(17)).thenReturn(ada);
+        when(personService.getPersonById(18)).thenReturn(grace);
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register("person", 17);
+        resources.register("person", 18);
+
+        AiAssistantToolResult result = executor.execute(
+                "get_records",
+                objectMapper.readTree("{\"handles\":[\"r1\",\"r2\",\"r1\"]}"),
+                resources, false);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> records =
+                (List<Map<String, Object>>) result.data().get("records");
+        assertEquals(2, records.size());
+        assertEquals("r1", records.get(0).get("handle"));
+        assertEquals("r2", records.get(1).get("handle"));
+        assertEquals("Ada Lovelace", records.get(0).get("name"));
+        assertEquals("Grace Hopper", records.get(1).get("name"));
+    }
+
     @Test
     void replayContextUsesOneBoundedBatchInsteadOfHydratingEachPerson() {
         List<Integer> ids = IntStream.rangeClosed(1, 50).boxed().toList();

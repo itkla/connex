@@ -21,7 +21,7 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 @Service
 @RequiredArgsConstructor
 public class AiWorkspaceGovernanceService {
-    public static final int DEFAULT_ASSISTANT_MAX_STEPS = 6;
+    public static final int DEFAULT_ASSISTANT_MAX_STEPS = 24;
 
     private final AiWorkspaceGovernanceMapper governanceMapper;
     private final WorkspaceService workspaceService;
@@ -46,7 +46,7 @@ public class AiWorkspaceGovernanceService {
             AiWorkspaceGovernanceRequest request) {
         int orgId = requireAdministrator(workspaceId, actorId);
         if (request == null || request.enabled() == null || request.assistantMaxSteps() == null
-                || request.assistantMaxSteps() < 1 || request.assistantMaxSteps() > 12) {
+                || request.assistantMaxSteps() < 1 || request.assistantMaxSteps() > 48) {
             throw new BadRequestException("Workspace AI governance is invalid");
         }
         lockAdministrator(workspaceId, orgId, actorId);
