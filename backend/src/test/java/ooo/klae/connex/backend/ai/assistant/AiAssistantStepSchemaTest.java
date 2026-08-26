@@ -12,6 +12,28 @@ import tools.jackson.databind.json.JsonMapper;
 class AiAssistantStepSchemaTest {
     private final JsonMapper objectMapper = JsonMapper.builder().build();
 
+    /**
+     * The closing step's schema forbids a tool step structurally: the tool branch admits only
+     * null and the final answer is a required object, so a provider that enforces the schema
+     * cannot spend the closing step on another read.
+     */
+    @Test
+    void closingSchemaAdmitsOnlyAFinalAnswer() {
+        AiAssistantStepSchema schema = new AiAssistantStepSchema(
+                objectMapper, new AiAssistantToolCatalog());
+
+        JsonNode root = schema.closingResponseSchema().schema();
+        assertEquals("ask_connex_closing_step", schema.closingResponseSchema().name());
+        assertEquals("null", root.path("properties").path("tool").path("type").asString());
+        assertFalse(root.path("properties").path("tool").has("anyOf"));
+        JsonNode finalShape = root.path("properties").path("final");
+        assertEquals("object", finalShape.path("type").asString());
+        assertFalse(finalShape.has("anyOf"));
+        assertEquals(6, finalShape.path("required").size());
+        assertEquals(2, root.path("required").size());
+        assertFalse(root.path("additionalProperties").asBoolean());
+    }
+
     @Test
     void schemaConstrainsExclusiveToolAndFinalShapesFromTheCatalog() {
         AiAssistantStepSchema schema = new AiAssistantStepSchema(

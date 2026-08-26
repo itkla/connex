@@ -342,7 +342,8 @@ public class AiChatAgentLoopService {
                             AiNativeToolRequest nativeRequest = new AiNativeToolRequest(
                                     nativeDefinitions,
                                     nativeReplay.exchanges(),
-                                    nativeReplay.repairMessage());
+                                    nativeReplay.repairMessage(),
+                                    closing);
                             nativeProviderAttempts++;
                             NativeStepAttempt nativeAttempt = nativeStepAttempt(
                                     invocationService.completeNativeToolsRepairable(
@@ -365,7 +366,9 @@ public class AiChatAgentLoopService {
                                     invocation,
                                     AiAssistantStep.class,
                                     outputGuard,
-                                    stepSchema.responseSchema(),
+                                    closing
+                                            ? stepSchema.closingResponseSchema()
+                                            : stepSchema.responseSchema(),
                                     admission,
                                     providerGuard);
                         }

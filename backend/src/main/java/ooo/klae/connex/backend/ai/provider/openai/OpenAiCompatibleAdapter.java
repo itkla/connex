@@ -326,7 +326,7 @@ public class OpenAiCompatibleAdapter implements AiProvider {
             function.put("strict", true);
             function.set("parameters", definition.parametersSchema());
         }
-        root.put("tool_choice", "auto");
+        root.put("tool_choice", nativeTools.finalOnly() ? "none" : "auto");
         root.put("parallel_tool_calls", false);
     }
 

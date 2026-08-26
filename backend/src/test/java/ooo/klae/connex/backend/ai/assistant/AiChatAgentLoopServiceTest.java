@@ -761,6 +761,14 @@ class AiChatAgentLoopServiceTest {
         assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
         verify(persistenceService).resolve(
                 eq(TURN), eq("Here is what I found."), any(), anyInt(), anyInt());
+        ArgumentCaptor<AiResponseSchema> schemas =
+                ArgumentCaptor.forClass(AiResponseSchema.class);
+        verify(invocationService, times(4)).completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), schemas.capture(),
+                eq(directAdmission), any(Runnable.class));
+        assertEquals("ask_connex_step", schemas.getAllValues().get(2).name());
+        assertEquals("ask_connex_closing_step", schemas.getAllValues().getLast().name());
     }
 
     /**
@@ -941,6 +949,44 @@ class AiChatAgentLoopServiceTest {
                 .contains("\"error\":\"unknown_metric\""));
         verify(persistenceService).resolve(
                 eq(TURN), eq("Three deals matched."), any(), anyInt(), anyInt());
+    }
+
+    /**
+     * On the native protocol the closing step must carry a final-only request: the definitions
+     * stay for exchange pairing, but the provider is told it may not call tools, so the closing
+     * step is structurally an answer rather than a forfeited turn.
+     */
+    @Test
+    void aNativeClosingStepForbidsToolCallsViaFinalOnlyRequest() throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        String args = "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}";
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(nativeTool("call_1", "search_records", args))
+                .thenReturn(nativeTool("call_2", "search_records", args))
+                .thenReturn(nativeTool("call_3", "search_records", args))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
+                        "From the evidence already gathered.", List.of())));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<AiNativeToolRequest> requests =
+                ArgumentCaptor.forClass(AiNativeToolRequest.class);
+        verify(invocationService, times(4)).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), requests.capture(),
+                eq(directAdmission), any(Runnable.class));
+        assertFalse(requests.getAllValues().get(2).finalOnly());
+        assertTrue(requests.getAllValues().getLast().finalOnly());
+        assertFalse(requests.getAllValues().getLast().definitions().isEmpty());
     }
 
     @Test

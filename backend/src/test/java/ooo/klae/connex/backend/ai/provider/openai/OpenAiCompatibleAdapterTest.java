@@ -419,6 +419,59 @@ class OpenAiCompatibleAdapterTest {
         assertEquals("tool_calls", result.stopReason());
     }
 
+    /**
+     * A closing-step request keeps its tool definitions so replayed exchanges resolve, but the
+     * provider is told it may not call them: the closing step must produce an answer.
+     */
+    @Test
+    void complete_finalOnlyNativeRequestSendsToolChoiceNone() throws Exception {
+        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
+                .thenReturn("""
+                        {
+                          "choices": [{
+                            "message": {"content": "{\\"text\\":\\"Done.\\"}"},
+                            "finish_reason": "stop"
+                          }],
+                          "usage": {"prompt_tokens": 5, "completion_tokens": 2}
+                        }
+                        """);
+        JsonNode parameters = objectMapper.readTree("""
+                {"type":"object","properties":{"handle":{"type":"string"}},
+                 "required":["handle"],"additionalProperties":false}
+                """);
+        AiNativeToolRequest nativeTools = new AiNativeToolRequest(
+                List.of(new AiToolDefinition(
+                        "get_record", "Load one visible CRM record.", parameters)),
+                List.of(),
+                null,
+                true);
+        AiCompletionRequest base = schemaRequest();
+        AiCompletionRequest request = new AiCompletionRequest(
+                base.target(),
+                base.credentials(),
+                base.systemPrompt(),
+                base.messages(),
+                base.images(),
+                base.outputMode(),
+                base.responseSchema(),
+                nativeTools,
+                AiReasoningMode.NATIVE,
+                base.providerAttemptExecutor(),
+                base.maxTokens(),
+                base.temperature());
+
+        adapter.complete(request);
+
+        ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(openAiCompatibleClient).complete(
+                any(URI.class), anyBoolean(), any(AiCredentials.class), bodyCaptor.capture(),
+                any(AiRequestDeadline.class));
+        JsonNode body = objectMapper.readTree(bodyCaptor.getValue());
+        assertEquals("none", body.path("tool_choice").asString());
+        assertEquals("get_record",
+                body.path("tools").path(0).path("function").path("name").asString());
+    }
+
     @Test
     void complete_leavesAbsentThoughtSignatureNull() throws Exception {
         when(openAiCompatibleClient.complete(
