@@ -1,7 +1,16 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import {
+    createContext,
+    useCallback,
+    useContext,
+    useEffect,
+    useRef,
+    useState,
+    useSyncExternalStore,
+} from "react";
 
+import { usePathname, useSearchParams } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 
 import { notificationContent, safeNotificationUrl } from "@/app/components/notifications/notificationContent";
@@ -14,7 +23,7 @@ import {
 } from "@/app/components/notifications/notificationEvents";
 import {
     getNotificationCounts,
-    isPrivilegedMfaEnrollmentConfinementActive,
+    privilegedMfaEnrollmentConfinementFor,
     subscribePrivilegedMfaEnrollmentConfinement,
 } from "@/app/lib/api";
 import {
@@ -58,9 +67,6 @@ export function NotificationProvider({
     const [snoozed, setSnoozed] = useState(0);
     const [quietHoursActive, setQuietHoursActive] = useState(false);
     const [connected, setConnected] = useState(false);
-    const [privilegedMfaConfinementActive, setPrivilegedMfaConfinementActive] = useState(
-        isPrivilegedMfaEnrollmentConfinementActive,
-    );
     const requestRef = useRef<AbortController | null>(null);
     const loadingRef = useRef(false);
     const pendingRef = useRef(false);
@@ -73,11 +79,15 @@ export function NotificationProvider({
 
     const t = useTranslations("Notifications");
     const locale = useLocale();
+    const pathname = usePathname();
+    const searchParams = useSearchParams();
     const { openNotification } = useNotificationWorkspaceActions();
 
-    useEffect(() => subscribePrivilegedMfaEnrollmentConfinement(
-        setPrivilegedMfaConfinementActive,
-    ), []);
+    const privilegedMfaConfinementActive = useSyncExternalStore(
+        subscribePrivilegedMfaEnrollmentConfinement,
+        () => privilegedMfaEnrollmentConfinementFor(pathname, searchParams.get("mfa")),
+        () => false,
+    );
 
     const refreshUnread = useCallback(async () => {
         if (privilegedMfaConfinementActive) return;

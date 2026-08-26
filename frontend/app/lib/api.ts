@@ -402,6 +402,28 @@ export function isPrivilegedMfaEnrollmentConfinementActive(): boolean {
             || (!privilegedMfaEnrollmentCompleted && isPrivilegedMfaEnrollmentDestination()));
 }
 
+/**
+ * The same answer as {@link isPrivilegedMfaEnrollmentConfinementActive}, for a route the caller
+ * observed rather than the one `window.location` currently holds.
+ *
+ * A React surface that lives in a persistent layout re-renders on client navigation but does not
+ * re-read `window.location`, so reading the live URL would strand confinement inferred from a
+ * bookmarked `?mfa=enroll` link long after the reader navigated away. Passing the rendered route
+ * makes the answer change when the route does.
+ *
+ * @param pathname the route currently rendered
+ * @param mfaParam the value of the `mfa` search parameter, or null when absent
+ */
+export function privilegedMfaEnrollmentConfinementFor(
+    pathname: string,
+    mfaParam: string | null,
+): boolean {
+    return privilegedMfaEnrollmentRequired
+        || (!privilegedMfaEnrollmentCompleted
+            && pathname === PRIVILEGED_MFA_ENROLLMENT_ROUTE
+            && mfaParam === "enroll");
+}
+
 /** Subscribes to browser-local privileged MFA confinement state changes. */
 export function subscribePrivilegedMfaEnrollmentConfinement(
     listener: (active: boolean) => void,

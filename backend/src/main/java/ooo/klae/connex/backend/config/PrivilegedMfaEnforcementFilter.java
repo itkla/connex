@@ -40,7 +40,7 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
     private static final Set<String> EXACT_EXPORT_PATHS = Set.of(
             "/api/audit/export");
     private static final Pattern ORG_AUDIT_EXPORT = Pattern.compile("/api/orgs/\\d+/audit/export");
-    private static final Pattern CAMPAIGN_EXPORT = Pattern.compile("/api/campaigns/\\d+/exports(?:/\\d+)?");
+    private static final Pattern CAMPAIGN_EXPORT = Pattern.compile("/api/campaigns/\\d+/exports");
     private static final Pattern REPORT_EXPORT = Pattern.compile(
             "/api/reports/\\d+/(?:export\\.csv|snapshots/\\d+/export\\.csv)");
     private static final Pattern PATH_PARAMETER_MARKER = Pattern.compile("(?i)(?:;|%(?:25)*3b)");
@@ -83,7 +83,7 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
                     "A passkey must be enrolled before this privileged account can continue");
             return;
         }
-        if (requiresExportStepUp(path)
+        if (requiresExportStepUp(request.getMethod(), path)
                 && !sessionSecurityService.hasFreshRecentAuthentication(request.getSession(false), user.getId())) {
             auditService.recordFailureScoped("auth.mfa.step_up.required", "user", user.getId(), null, null,
                     user.getDisplayName(), "Recent MFA required for data export", "step_up_required");
@@ -103,11 +103,22 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
         return null;
     }
 
-    static boolean requiresExportStepUp(String path) {
+    /**
+     * Whether the request is a data-egress operation that must carry a recent WebAuthn assertion.
+     *
+     * <p>Every surface here answers with the exported data itself, except the campaign one: a
+     * campaign's exports are created by {@code POST} and their metadata is listed and read by
+     * {@code GET} under {@code CAMPAIGN_VIEW}. Gating those reads would leave a viewer who cannot
+     * create an export — and so cannot reach the step-up ceremony — looking at a silently empty
+     * export history, so only the egress operation is gated.
+     */
+    static boolean requiresExportStepUp(String method, String path) {
+        if (CAMPAIGN_EXPORT.matcher(path).matches()) {
+            return "POST".equals(method);
+        }
         return path.startsWith("/api/exports/")
                 || EXACT_EXPORT_PATHS.contains(path)
                 || ORG_AUDIT_EXPORT.matcher(path).matches()
-                || CAMPAIGN_EXPORT.matcher(path).matches()
                 || REPORT_EXPORT.matcher(path).matches();
     }
 

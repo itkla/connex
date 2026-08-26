@@ -34,7 +34,7 @@ import ooo.klae.connex.backend.password.PasswordCredentialService;
 class PasswordResetServiceLockingTest {
 
     @Test
-    void privilegedOutageDecisionIsRevalidatedAfterLockBeforeCredentialWrite() {
+    void remoteScreeningPrecedesTheLocksAndPrivilegeIsRevalidatedUnderThem() {
         UserMapper userMapper = mock(UserMapper.class);
         PasswordResetTokenMapper tokenMapper = mock(PasswordResetTokenMapper.class);
         BreachedPasswordLookup lookup = mock(BreachedPasswordLookup.class);
@@ -66,10 +66,11 @@ class PasswordResetServiceLockingTest {
         assertThrows(BreachedPasswordCheckUnavailableException.class,
                 () -> service.resetPasswordByHash("token-hash", "Candidate-2026!"));
 
-        InOrder lockOrder = inOrder(userMapper);
+        InOrder lockOrder = inOrder(userMapper, lookup);
+        lockOrder.verify(userMapper).getUserById(41);
+        lockOrder.verify(lookup).isBreached(anyString());
         lockOrder.verify(userMapper).lockById(41);
         lockOrder.verify(userMapper).lockAssignedCustomRoleIds(41);
-        lockOrder.verify(userMapper).getUserById(41);
         lockOrder.verify(userMapper).isPrivilegedAccount(41);
         verify(encoder, never()).encode(anyString());
         verify(tokenMapper, never()).markConsumed(anyString());

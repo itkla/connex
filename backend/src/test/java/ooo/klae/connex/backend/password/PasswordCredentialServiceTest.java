@@ -3,7 +3,9 @@ package ooo.klae.connex.backend.password;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -38,6 +40,80 @@ class PasswordCredentialServiceTest {
     @BeforeEach
     void setUp() {
         service = new PasswordCredentialService(lookup, passwordEncoder, userMapper, auditService);
+    }
+
+    @Test
+    void overlongCandidateIsScreenedByTheBytesBcryptActuallyConsumes() {
+        String breachedPrefix = "A".repeat(72);
+        ArgumentCaptor<String> digest = ArgumentCaptor.forClass(String.class);
+        when(lookup.isBreached(anyString())).thenReturn(false);
+        when(passwordEncoder.encode(anyString())).thenReturn(ENCODED);
+
+        service.encode(breachedPrefix + "unique-suffix",
+                PasswordScreeningFlow.SELF_REGISTRATION, null);
+
+        verify(lookup).isBreached(digest.capture());
+        assertEquals(sha1UpperHex(breachedPrefix), digest.getValue());
+    }
+
+    @Test
+    void suffixCannotCarryABreachedSeventyTwoBytePrefixPastScreening() {
+        String breachedPrefix = "A".repeat(72);
+        when(lookup.isBreached(sha1UpperHex(breachedPrefix))).thenReturn(true);
+
+        assertThrows(BreachedPasswordException.class,
+                () -> service.encode(breachedPrefix + "unique-suffix",
+                        PasswordScreeningFlow.SELF_REGISTRATION, null));
+
+        verify(passwordEncoder, never()).encode(anyString());
+    }
+
+    @Test
+    void candidateWithinTheLimitIsScreenedWhole() {
+        ArgumentCaptor<String> digest = ArgumentCaptor.forClass(String.class);
+        when(lookup.isBreached(anyString())).thenReturn(false);
+        when(passwordEncoder.encode(CANDIDATE)).thenReturn(ENCODED);
+
+        service.encode(CANDIDATE, PasswordScreeningFlow.SELF_REGISTRATION, null);
+
+        verify(lookup).isBreached(digest.capture());
+        assertEquals(sha1UpperHex(CANDIDATE), digest.getValue());
+    }
+
+    @Test
+    void screeningReadsNoPrivilegeUntilThePolicyDecision() {
+        when(lookup.isBreached(anyString())).thenReturn(false);
+
+        PasswordScreening screening = service.screen(CANDIDATE, PasswordScreeningFlow.SELF_SERVICE_RESET);
+
+        assertTrue(screening.answered());
+        verify(userMapper, never()).isPrivilegedAccount(anyInt());
+    }
+
+    @Test
+    void unavailableScreeningDefersItsFailOpenDecisionToEncodeScreened() {
+        when(lookup.isBreached(anyString())).thenThrow(
+                new BreachedPasswordSourceUnavailableException(
+                        BreachedPasswordUnavailableReason.TIMEOUT));
+        when(userMapper.isPrivilegedAccount(11)).thenReturn(true);
+
+        PasswordScreening screening = service.screen(CANDIDATE, PasswordScreeningFlow.SELF_SERVICE_RESET);
+        assertFalse(screening.answered());
+        verify(userMapper, never()).isPrivilegedAccount(anyInt());
+
+        assertThrows(BreachedPasswordCheckUnavailableException.class,
+                () -> service.encodeScreened(
+                        screening, CANDIDATE, PasswordScreeningFlow.SELF_SERVICE_RESET, 11));
+    }
+
+    private static String sha1UpperHex(String value) {
+        try {
+            return java.util.HexFormat.of().withUpperCase().formatHex(
+                    java.security.MessageDigest.getInstance("SHA-1")
+                            .digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 
     @Test

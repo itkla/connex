@@ -18,6 +18,7 @@ import ooo.klae.connex.backend.exceptions.SsoEnforcedException;
 import ooo.klae.connex.backend.mappers.PasswordResetTokenMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.password.PasswordCredentialService;
+import ooo.klae.connex.backend.password.PasswordScreening;
 import ooo.klae.connex.backend.password.PasswordScreeningFlow;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
@@ -154,10 +155,6 @@ public class PasswordResetService {
             throw invalidLink();
         }
 
-        if (userMapper.lockById(token.getUserId()) == null) {
-            throw invalidLink();
-        }
-        userMapper.lockAssignedCustomRoleIds(token.getUserId());
         User user = userMapper.getUserById(token.getUserId());
         if (user == null) {
             throw invalidLink();
@@ -166,8 +163,15 @@ public class PasswordResetService {
             throw new SsoEnforcedException();
         }
 
-        String passwordHash = passwordCredentialService.encode(
-                newPassword, PasswordScreeningFlow.SELF_SERVICE_RESET, user.getId());
+        PasswordScreening screening = passwordCredentialService.screen(
+                newPassword, PasswordScreeningFlow.SELF_SERVICE_RESET);
+
+        if (userMapper.lockById(token.getUserId()) == null) {
+            throw invalidLink();
+        }
+        userMapper.lockAssignedCustomRoleIds(token.getUserId());
+        String passwordHash = passwordCredentialService.encodeScreened(
+                screening, newPassword, PasswordScreeningFlow.SELF_SERVICE_RESET, user.getId());
         if (passwordResetTokenMapper.markConsumed(tokenHash) == 0) {
             throw new BadRequestException("This reset link is invalid or has expired");
         }

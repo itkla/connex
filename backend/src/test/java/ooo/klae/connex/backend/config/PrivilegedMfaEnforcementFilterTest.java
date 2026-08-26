@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -147,42 +149,54 @@ class PrivilegedMfaEnforcementFilterTest {
 
     @Test
     void exportMatcherCoversEveryExportSurface() {
-        assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp("/api/exports/deals"));
-        assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp("/api/audit/export"));
-        assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp("/api/orgs/2/audit/export"));
-        assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp("/api/campaigns/3/exports"));
-        assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp("/api/campaigns/3/exports/9"));
-        assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp("/api/reports/4/export.csv"));
+        assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp("GET", "/api/exports/deals"));
+        assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp("GET", "/api/audit/export"));
+        assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp("GET", "/api/orgs/2/audit/export"));
+        assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp("POST", "/api/campaigns/3/exports"));
+        assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp("POST", "/api/reports/4/export.csv"));
         assertTrue(PrivilegedMfaEnforcementFilter.requiresExportStepUp(
-                "/api/reports/4/snapshots/8/export.csv"));
+                "GET", "/api/reports/4/snapshots/8/export.csv"));
+    }
+
+    @Test
+    void campaignExportMetadataReadsAreNotGated() {
+        assertFalse(PrivilegedMfaEnforcementFilter.requiresExportStepUp("GET", "/api/campaigns/3/exports"));
+        assertFalse(PrivilegedMfaEnforcementFilter.requiresExportStepUp("GET", "/api/campaigns/3/exports/9"));
+    }
+
+    @Test
+    void campaignExportMetadataReadReachesTheChainWithoutStepUp() throws Exception {
+        when(webAuthnService.hasPasskey(7)).thenReturn(true);
+
+        MockHttpServletResponse response = execute("GET", "/api/campaigns/3/exports");
+
+        assertEquals(200, response.getStatus());
+        verify(filterChain).doFilter(any(), any());
     }
 
     @ParameterizedTest
     @MethodSource("matrixSuffixedExportPaths")
-    void matrixSuffixedExportPathsStillRequirePasskeyStepUp(String path) throws Exception {
+    void matrixSuffixedExportPathsStillRequirePasskeyStepUp(String method, String path) throws Exception {
         when(webAuthnService.hasPasskey(7)).thenReturn(true);
         when(sessionSecurityService.hasFreshRecentAuthentication(isNull(), eq(7))).thenReturn(false);
 
-        MockHttpServletResponse response = execute("GET", path);
+        MockHttpServletResponse response = execute(method, path);
 
         assertEquals(403, response.getStatus());
         assertTrue(response.getContentAsString().contains("RECENT_AUTHENTICATION_REQUIRED"));
         verify(filterChain, never()).doFilter(any(), any());
     }
 
-    private static Stream<String> matrixSuffixedExportPaths() {
-        List<String> paths = List.of(
-                "/api/exports/deals",
-                "/api/audit/export",
-                "/api/orgs/2/audit/export",
-                "/api/campaigns/3/exports",
-                "/api/campaigns/3/exports/9",
-                "/api/reports/4/export.csv",
-                "/api/reports/4/snapshots/8/export.csv");
-        return paths.stream().flatMap(path -> Stream.of(
-                path + ";x",
-                path + "%3Bx",
-                path + "%253Bx"));
+    private static Stream<Arguments> matrixSuffixedExportPaths() {
+        List<Arguments> surfaces = List.of(
+                Arguments.of("GET", "/api/exports/deals"),
+                Arguments.of("GET", "/api/audit/export"),
+                Arguments.of("GET", "/api/orgs/2/audit/export"),
+                Arguments.of("POST", "/api/campaigns/3/exports"),
+                Arguments.of("POST", "/api/reports/4/export.csv"),
+                Arguments.of("GET", "/api/reports/4/snapshots/8/export.csv"));
+        return surfaces.stream().flatMap(surface -> Stream.of(";x", "%3Bx", "%253Bx")
+                .map(suffix -> Arguments.of(surface.get()[0], surface.get()[1] + suffix)));
     }
 
     private MockHttpServletResponse execute(String method, String path) throws ServletException, IOException {
