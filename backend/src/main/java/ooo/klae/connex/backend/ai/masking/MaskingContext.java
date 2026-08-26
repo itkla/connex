@@ -31,6 +31,7 @@ public final class MaskingContext {
     private final Map<String, String> canonicalValueToToken = new LinkedHashMap<>();
     private final Map<String, String> rawIdentifierToToken = new LinkedHashMap<>();
     private final Set<String> identifierDictionary = new LinkedHashSet<>();
+    private final StringBuilder trustedStaticText = new StringBuilder();
     private final EnumMap<EntityKind, Integer> tokenCounts = new EnumMap<>(EntityKind.class);
     private final AiPrivacyMode privacyMode;
 
@@ -76,6 +77,36 @@ public final class MaskingContext {
      * Raw identifiers collected for request-local leak scanning.
      * @return ordered immutable identifier dictionary
      */
+    /**
+     * Registers server-authored prompt text this request will send verbatim.
+     *
+     * <p>Server text is never identifier-masked, so a tenant record named a common word the
+     * envelope itself uses — a company literally named "what" against a directive containing
+     * "what" — would otherwise make the outbound leak scan refuse every request that seeds it.
+     * The scan consults this corpus to skip identifiers whose raw value the server provably emits
+     * on its own; tenant occurrences of the same value are still tokenized by the replacer.
+     *
+     * @param text server-authored prompt segment about to enter the outbound payload
+     */
+    public void addTrustedStaticText(String text) {
+        if (text != null && !text.isBlank()) {
+            trustedStaticText.append('\n').append(text);
+        }
+    }
+
+    /**
+     * Whether the registered server-authored text contains this identifier under the leak scan's
+     * own normalization.
+     *
+     * @param rawValue seeded identifier raw value
+     * @return true when the server's own prompt text contains the value
+     */
+    public boolean isTrustedTextCollision(String rawValue) {
+        return trustedStaticText.length() > 0
+                && MaskingEngine.trustedStaticTextContainsIdentifier(
+                        trustedStaticText.toString(), rawValue);
+    }
+
     public Set<String> identifierDictionary() {
         return Collections.unmodifiableSet(identifierDictionary);
     }

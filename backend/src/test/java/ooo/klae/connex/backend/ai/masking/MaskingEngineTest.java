@@ -347,6 +347,28 @@ class MaskingEngineTest {
         assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx, objectMapper));
     }
 
+    /**
+     * A record named a common envelope word must not poison the request: once the server-authored
+     * text is registered as trusted, the scan skips the colliding identifier — the server emits
+     * that word regardless of tenant data — while every other identifier keeps failing closed.
+     */
+    @Test
+    void leakScanSkipsIdentifiersTheRegisteredServerTextProvablyContains() {
+        MaskingContext ctx = new MaskingContext();
+        MaskingEngine.maskField(EntityKind.COMPANY, "what", ctx);
+        MaskingEngine.maskField(EntityKind.COMPANY, "Acme Corp", ctx);
+        String payload = "{\"prompt\":\"and what is each one waiting on?\"}";
+
+        assertThrows(MaskingLeakException.class,
+                () -> OutboundLeakScan.assertNoLeak(payload, ctx, objectMapper));
+
+        ctx.addTrustedStaticText("State plainly what is missing before answering.");
+
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(payload, ctx, objectMapper));
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeak(
+                "{\"prompt\":\"met Acme Corp about what\"}", ctx, objectMapper));
+    }
+
     @Test
     void unmaskedModeKeepsIdentifiersWhileUniversalScreensStillApply() {
         MaskingContext context = new MaskingContext(AiPrivacyMode.UNMASKED);

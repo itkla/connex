@@ -318,7 +318,9 @@ public class AiAssistantPromptAssembler {
         for (ToolTurn turn : toolTurns) {
             seedIdentifiers(turn.result().identifiers(), context);
         }
-        PromptAssembly.Builder prompt = PromptAssembly.builder().system(systemPrompt());
+        String system = systemPrompt();
+        context.addTrustedStaticText(system);
+        PromptAssembly.Builder prompt = PromptAssembly.builder().system(system);
         for (AiChatMessage message : history) {
             appendHistory(prompt, message, context, resources);
         }
@@ -375,7 +377,9 @@ public class AiAssistantPromptAssembler {
         for (ToolTurn turn : toolTurns) {
             seedIdentifiers(turn.result().identifiers(), context);
         }
-        PromptAssembly.Builder prompt = PromptAssembly.builder().system(nativeSystemPrompt());
+        String system = nativeSystemPrompt();
+        context.addTrustedStaticText(system);
+        PromptAssembly.Builder prompt = PromptAssembly.builder().system(system);
         for (AiChatMessage message : history) {
             appendHistory(prompt, message, context, resources);
         }
@@ -408,10 +412,12 @@ public class AiAssistantPromptAssembler {
         }
         if (skill.directive() != null && !skill.directive().isBlank()
                 && budget.fits(skill.directive(), AiSkillCatalog.maxDirectiveBytes())) {
+            context.addTrustedStaticText(skill.directive());
             prompt.userTurn(skill.directive());
         }
         if (skill.scopeDirective() != null && !skill.scopeDirective().isBlank()
                 && budget.fits(skill.scopeDirective(), AiSkillCatalog.maxDirectiveBytes())) {
+            context.addTrustedStaticText(skill.scopeDirective());
             prompt.userTurn(skill.scopeDirective());
         }
         if (!skill.evidence().isEmpty()) {
@@ -420,6 +426,7 @@ public class AiAssistantPromptAssembler {
         }
         if (skill.closingDirective() != null && !skill.closingDirective().isBlank()
                 && budget.fits(skill.closingDirective(), AiSkillCatalog.maxDirectiveBytes())) {
+            context.addTrustedStaticText(skill.closingDirective());
             prompt.userTurn(skill.closingDirective());
         }
     }
