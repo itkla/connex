@@ -131,7 +131,10 @@ public class AiAssistantToolExecutor {
     /** Validates the closed argument shape and every handle before durable tool proposal. */
     public void validateReferences(
             String name, JsonNode args, AiChatResourceRegistry resources) {
-        if (!toolCatalog.isKnown(name) || !toolCatalog.permitsArguments(name, args)) {
+        if (!toolCatalog.isKnown(name)) {
+            throw AiAssistantLoopException.malformed("unknown_tool");
+        }
+        if (!toolCatalog.permitsArguments(name, args)) {
             throw AiAssistantLoopException.refusedArguments("invalid_tool_arguments");
         }
         requireHandleKind(name, args, resources);
