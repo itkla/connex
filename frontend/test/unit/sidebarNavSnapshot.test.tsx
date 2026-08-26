@@ -369,11 +369,26 @@ function attribute(attributes: string, name: string): string | null {
 
 function decode(value: string): string {
     return value
-        .replaceAll("&amp;", "&")
         .replaceAll("&lt;", "<")
         .replaceAll("&gt;", ">")
         .replaceAll("&quot;", "\"")
-        .replaceAll("&#x27;", "'");
+        .replaceAll("&#x27;", "'")
+        .replaceAll("&amp;", "&");
+}
+
+/**
+ * The text of a markup fragment with every tag removed. Stripping runs to a fixed point so a
+ * malformed nesting cannot leave a partial tag behind, and entities decode only after the last
+ * tag is gone — the order CodeQL's double-unescape and incomplete-sanitization rules require.
+ */
+function textContent(fragment: string): string {
+    let text = fragment;
+    let previous = "";
+    while (text !== previous) {
+        previous = text;
+        text = text.replaceAll(/<[^>]*>/g, "");
+    }
+    return decode(text).trim();
 }
 
 function sidebarMarkup(locale: Locale): string {
@@ -444,7 +459,7 @@ function renderedUserMenu(locale: Locale): { label: string; href: string }[] {
     return [...menu.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/g)].flatMap((match) => {
         const href = attribute(match[1], "href");
         if (href === null) return [];
-        const label = decode(match[2].replaceAll(/<[^>]*>/g, "")).trim();
+        const label = textContent(match[2]);
         return [{ label, href }];
     });
 }
