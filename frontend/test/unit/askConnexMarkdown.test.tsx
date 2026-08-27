@@ -2,11 +2,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { NextIntlClientProvider } from "next-intl";
 import { describe, expect, it } from "vitest";
 
-import AskConnexMarkdown, {
-    NO_ALLOWED_RECORDS,
-} from "@/app/components/ask-connex/AskConnexMarkdown";
+import AskConnexMarkdown from "@/app/components/ask-connex/AskConnexMarkdown";
+import { EMPTY_ASK_CONNEX_ALLOWED_RECORDS } from "@/app/lib/askConnex";
 
-function render(content: string, allowedRecords: ReadonlySet<string> = NO_ALLOWED_RECORDS): string {
+function render(
+    content: string,
+    allowedRecords: ReadonlySet<string> = EMPTY_ASK_CONNEX_ALLOWED_RECORDS,
+): string {
     return renderToStaticMarkup(
         <NextIntlClientProvider
             locale="en"
@@ -121,6 +123,21 @@ describe("AskConnexMarkdown hostile content", () => {
 });
 
 describe("AskConnexMarkdown structure", () => {
+    it("renders a callout whose marker and body share one paragraph", () => {
+        const html = render([
+            "> [!info]",
+            "> Details about the deal.",
+            ">",
+            "> A second paragraph.",
+        ].join("\n"));
+
+        expect(html).toContain('data-callout="info"');
+        expect(html).toContain("Information callout");
+        expect(html).toContain("Details about the deal.");
+        expect(html).toContain("A second paragraph.");
+        expect(html).not.toContain("[!info]");
+    });
+
     it("renders GFM tables, task lists, and callouts", () => {
         const html = render([
             "> [!warn]",

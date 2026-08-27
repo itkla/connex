@@ -1,7 +1,12 @@
 'use client';
 
 import { Children, isValidElement, type ReactNode } from 'react';
-import { CircleCheck, Info, OctagonAlert, TriangleAlert, type LucideIcon } from 'lucide-react';
+import {
+    CheckCircleIcon,
+    ExclamationCircleIcon,
+    ExclamationTriangleIcon,
+    InformationCircleIcon,
+} from '@heroicons/react/24/outline';
 import { useTranslations } from 'next-intl';
 import Markdown, { type Components } from 'react-markdown';
 import rehypeSanitize, { defaultSchema, type Options as SanitizeOptions } from 'rehype-sanitize';
@@ -35,11 +40,11 @@ type MarkdownLabels = {
     callout: Record<CalloutVariant, string>;
 };
 
-const CALLOUT_ICONS: Record<CalloutVariant, LucideIcon> = {
-    info: Info,
-    success: CircleCheck,
-    warn: TriangleAlert,
-    danger: OctagonAlert,
+const CALLOUT_ICONS: Record<CalloutVariant, typeof InformationCircleIcon> = {
+    info: InformationCircleIcon,
+    success: CheckCircleIcon,
+    warn: ExclamationTriangleIcon,
+    danger: ExclamationCircleIcon,
 };
 
 function toReferenceType(value: string): ReferenceType | null {
@@ -92,13 +97,34 @@ function toCalloutVariant(value: string | undefined): CalloutVariant | null {
     }
 }
 
+/**
+ * Reads a `[!variant]` marker from the first line of a blockquote's first paragraph.
+ *
+ * The marker and the callout's first sentence usually share one paragraph — `> [!info]` followed
+ * directly by `> Details` parses as a single `<p>` whose text starts with the marker line — so the
+ * marker is read from the paragraph's leading text up to its first newline, and whatever follows
+ * stays in the body as its own paragraph alongside any later blocks.
+ */
 function parseCallout(children: ReactNode): Callout | null {
     const items = meaningfulChildren(children);
-    const marker = textFromChildren(items[0]);
-    const callout = marker.match(/^\[!(\w+)]$/);
-    const variant = toCalloutVariant(callout?.[1]);
+    const first = items[0];
+    if (!isValidElement<{ children?: ReactNode }>(first)) return null;
+    const paragraph = Children.toArray(first.props.children);
+    const lead = paragraph[0];
+    if (typeof lead !== 'string') return null;
+    const newline = lead.indexOf('\n');
+    const marker = (newline === -1 ? lead : lead.slice(0, newline)).trim();
+    const variant = toCalloutVariant(marker.match(/^\[!(\w+)]$/)?.[1]);
     if (!variant) return null;
-    return { variant, body: items.slice(1) };
+    const remainderLead = newline === -1 ? '' : lead.slice(newline + 1);
+    const remainder = [
+        ...(remainderLead.length > 0 ? [remainderLead] : []),
+        ...paragraph.slice(1),
+    ];
+    const body = remainder.length > 0
+        ? [<p key="callout-lead">{remainder}</p>, ...items.slice(1)]
+        : items.slice(1);
+    return { variant, body };
 }
 
 function markdownUrlTransform(url: string, key: string): string {
@@ -160,9 +186,6 @@ function createMarkdownComponents(
         },
     };
 }
-
-/** No record references authorized: the allowlist a surface passes when nothing is citable yet. */
-export const NO_ALLOWED_RECORDS: ReadonlySet<string> = new Set();
 
 /**
  * Renders one assistant answer as sanitized Markdown, sized for the chat transcript.

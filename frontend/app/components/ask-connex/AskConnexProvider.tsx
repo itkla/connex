@@ -78,6 +78,7 @@ import {
     askConnexSessionStorageKey,
     askConnexTurnStorageKey,
     completeAskConnexFileUpload,
+    formatAnswerInstant,
     hasPendingAskConnexFileOperation,
     isAskConnexPinned,
     loadAskConnexLatestMessages,
@@ -2326,6 +2327,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         disclosureList: tDisclosure('sessionList'),
         imageDisclosure: tDisclosure('imageProvider'),
         citationKind,
+        citationFreshness: (label: string, instant: string) =>
+            t('citationFreshness', { label, time: formatAnswerInstant(instant, locale) }),
+        citationFreshnessUnknown: (label: string) => t('citationFreshnessUnknown', { label }),
         close: t('close'),
         closeWorkspace: t('closeWorkspace'),
         composerAria: t('composerAria'),

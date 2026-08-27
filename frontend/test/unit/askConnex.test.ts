@@ -2,13 +2,10 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import {
-    ANSWER_ROW_PLACEHOLDER,
-    formatAnswerInstant,
-} from '@/app/components/ask-connex/answerDocument';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 
 import {
+    ANSWER_ROW_PLACEHOLDER,
     EMPTY_ASK_CONNEX_TOOL_CARDS,
     EMPTY_ASK_CONNEX_TURN,
     AskConnexFileRemovalError,
@@ -30,6 +27,7 @@ import {
     askConnexTurnStorageKey,
     completeAskConnexFileUpload,
     extractAskConnexAttachments,
+    formatAnswerInstant,
     groupAskConnexMessages,
     hasPendingAskConnexFileOperation,
     isAskConnexProgressSource,

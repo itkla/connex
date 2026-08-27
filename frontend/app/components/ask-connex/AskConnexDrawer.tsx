@@ -55,9 +55,7 @@ import SectionBoundary from '@/app/components/SectionBoundary';
 import MentionEditor, {
     type MentionEditorHandle,
 } from '@/app/components/activity/notes/MentionEditor';
-import AskConnexMarkdown, {
-    NO_ALLOWED_RECORDS,
-} from '@/app/components/ask-connex/AskConnexMarkdown';
+import AskConnexMarkdown from '@/app/components/ask-connex/AskConnexMarkdown';
 import {
     AskConnexContextStrip,
     AskConnexScopeNotice,
@@ -83,6 +81,7 @@ import type {
     AskConnexTurnState,
 } from '@/app/lib/askConnex';
 import {
+    EMPTY_ASK_CONNEX_ALLOWED_RECORDS,
     anchorAskConnexToolCards,
     appendAskConnexPrompt,
     askConnexCitationHref,
@@ -181,6 +180,7 @@ import {
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import AskConnexCommandCenter from '@/app/components/ask-connex/AskConnexCommandCenter';
 
@@ -272,6 +272,10 @@ type AskConnexDrawerLabels = AskConnexContextLabels & AskConnexTurnLabels & {
     disclosureList: string;
     imageDisclosure: string;
     citationKind: (kind: AiChatCitation['kind']) => string;
+    /** The freshness line a citation pill discloses, from its label and its declared instant. */
+    citationFreshness: (label: string, instant: string) => string;
+    /** The disclosure for a citation whose source carries no timestamp at all. */
+    citationFreshnessUnknown: (label: string) => string;
     close: string;
     closeWorkspace: string;
     composerAria: string;
@@ -519,17 +523,29 @@ function MessageCitations({
 
     return (
         <ul aria-label={labels.citations} className="flex flex-wrap gap-1.5">
-            {visible.map((citation) => (
-                <li key={`${citation.kind}:${citation.id}`}>
-                    <Link
-                        href={askConnexCitationHref(citation)}
-                        className="inline-flex max-w-56 items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                    >
-                        <LinkIcon className="size-3 shrink-0" />
-                        <span className="truncate">{citation.label ?? labels.citationKind(citation.kind)}</span>
-                    </Link>
-                </li>
-            ))}
+            {visible.map((citation) => {
+                const label = citation.label ?? labels.citationKind(citation.kind);
+                return (
+                    <li key={`${citation.kind}:${citation.id}`}>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Link
+                                    href={askConnexCitationHref(citation)}
+                                    className="inline-flex max-w-56 items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                                >
+                                    <LinkIcon className="size-3 shrink-0" />
+                                    <span className="truncate">{label}</span>
+                                </Link>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                                {citation.asOf
+                                    ? labels.citationFreshness(label, citation.asOf)
+                                    : labels.citationFreshnessUnknown(label)}
+                            </TooltipContent>
+                        </Tooltip>
+                    </li>
+                );
+            })}
         </ul>
     );
 }
@@ -1063,7 +1079,10 @@ export function StreamingTail({
                     <MessageContent className="w-auto max-w-[85%] gap-1.5">
                         <MessageHeader>{labels.assistantAuthor}</MessageHeader>
                         <div className="break-words rounded-2xl bg-muted px-3.5 py-2.5 text-sm leading-relaxed text-foreground">
-                            <AskConnexMarkdown content={snapshot.text} allowedRecords={NO_ALLOWED_RECORDS} />
+                            <AskConnexMarkdown
+                                content={snapshot.text}
+                                allowedRecords={EMPTY_ASK_CONNEX_ALLOWED_RECORDS}
+                            />
                             {live ? (
                                 <span
                                     aria-hidden

@@ -623,6 +623,8 @@
     "citationKindPerson": "連絡先",
     "citationKindCompany": "会社",
     "citationKindDeal": "取引",
+    "citationFreshness": "{label} — {time}時点",
+    "citationFreshnessUnknown": "{label} — 情報の鮮度は不明",
     "suggestions": "ここでできること",
     "dismissSuggestions": "これらの候補を隠す",
     "jobs": {

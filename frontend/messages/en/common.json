@@ -623,6 +623,8 @@
     "citationKindPerson": "Contact",
     "citationKindCompany": "Company",
     "citationKindDeal": "Deal",
+    "citationFreshness": "{label} — as of {time}",
+    "citationFreshnessUnknown": "{label} — freshness unknown",
     "suggestions": "Things I can do here",
     "dismissSuggestions": "Hide these suggestions",
     "jobs": {
