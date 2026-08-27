@@ -29,6 +29,8 @@ public class AiAssistantStepGuard implements AiRawOutputGuard {
             "records", "deals", "activities", "tasks", "notes",
             "files", "metrics", "schedule", "actions", "other");
     private static final Pattern HANDLE = Pattern.compile("r[1-9][0-9]*");
+    private static final Pattern DURABLE_RECORD_LINK = Pattern.compile(
+            "\\]\\((?:person|company|deal)\\s*:", Pattern.CASE_INSENSITIVE);
     private static final Pattern HANDLE_REFERENCE = Pattern.compile(
             "(?<![\\p{L}\\p{N}_])r[1-9][0-9]*(?![\\p{L}\\p{N}_])");
     private static final Pattern CONTROL_INSTRUCTION = Pattern.compile(
@@ -161,6 +163,9 @@ public class AiAssistantStepGuard implements AiRawOutputGuard {
                     || !citedHandles.add(citation.asString())) {
                 return "final_citations";
             }
+        }
+        if (DURABLE_RECORD_LINK.matcher(text.asString()).find()) {
+            return "final_links";
         }
         var referencedHandles = HANDLE_REFERENCE.matcher(text.asString()).results()
                 .map(result -> result.group())

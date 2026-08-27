@@ -120,35 +120,6 @@ public class AiChatCitationProjector {
         return Map.copyOf(projected);
     }
 
-    /** Returns assistant messages whose originating turn belongs to the current viewer. */
-    public Set<Integer> requestedMessageIds(
-            int workspaceId,
-            int sessionId,
-            int userId,
-            List<AiChatMessage> messages) {
-        Map<Integer, Integer> turnByMessage = new LinkedHashMap<>();
-        Set<Integer> turnIds = new LinkedHashSet<>();
-        for (AiChatMessage message : messages) {
-            Integer turnId = storedTurnId(message);
-            if (turnId != null) {
-                turnByMessage.put(message.getId(), turnId);
-                turnIds.add(turnId);
-            }
-        }
-        if (turnIds.isEmpty()) {
-            return Set.of();
-        }
-        Map<Integer, Integer> requesterByTurn = requesterByTurn(
-                workspaceId, sessionId, turnIds);
-        Set<Integer> requestedMessageIds = new LinkedHashSet<>();
-        turnByMessage.forEach((messageId, turnId) -> {
-            if (Objects.equals(requesterByTurn.get(turnId), userId)) {
-                requestedMessageIds.add(messageId);
-            }
-        });
-        return Set.copyOf(requestedMessageIds);
-    }
-
     private static boolean text(JsonNode value, int maxLength) {
         return value != null && value.isString()
                 && !value.asString().isBlank() && value.asString().length() <= maxLength;

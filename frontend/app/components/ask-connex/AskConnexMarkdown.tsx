@@ -8,7 +8,6 @@ import rehypeSanitize, { defaultSchema, type Options as SanitizeOptions } from '
 import remarkGfm from 'remark-gfm';
 
 import RecordChip from '@/app/components/activity/notes/RecordChip';
-import { normalizeEditorLinkHref } from '@/app/components/activity/notes/editor/editorLinks';
 import { cn } from '@/lib/utils';
 
 const REFERENCE_TYPES = ['person', 'company', 'deal'] as const;
@@ -104,29 +103,22 @@ function parseCallout(children: ReactNode): Callout | null {
 
 function markdownUrlTransform(url: string, key: string): string {
     if (key === 'src') return '';
-    return parseReferenceHref(url) ? url : normalizeEditorLinkHref(url) ?? '';
+    return parseReferenceHref(url) ? url : '';
 }
 
-function createMarkdownComponents(labels: MarkdownLabels): Components {
+function createMarkdownComponents(
+    labels: MarkdownLabels,
+    allowedRecords: ReadonlySet<string>,
+): Components {
     return {
         a({ href, children }) {
             const parsed = parseReferenceHref(href);
-            if (parsed) {
+            if (parsed && allowedRecords.has(`${parsed.type}:${parsed.id}`)) {
                 const label = textFromChildren(children);
                 if (!label) return <>{children}</>;
                 return <RecordChip type={parsed.type} id={parsed.id} label={label} />;
             }
-            if (!href) return <>{children}</>;
-            return (
-                <a
-                    href={href}
-                    referrerPolicy="no-referrer"
-                    rel="noreferrer"
-                    onClick={(event) => event.stopPropagation()}
-                >
-                    {children}
-                </a>
-            );
+            return <>{children}</>;
         },
         img({ alt }) {
             return alt?.trim() || null;
@@ -169,19 +161,29 @@ function createMarkdownComponents(labels: MarkdownLabels): Components {
     };
 }
 
+/** No record references authorized: the allowlist a surface passes when nothing is citable yet. */
+export const NO_ALLOWED_RECORDS: ReadonlySet<string> = new Set();
+
 /**
  * Renders one assistant answer as sanitized Markdown, sized for the chat transcript.
  *
  * Record references written as `person:`/`company:`/`deal:` links become the same record chips
- * note content uses, mirroring the citation routes; every other link is normalized to the safe
- * protocols the note editor allows. Images never render — assistant answers do not embed them —
- * and raw HTML is dropped by the sanitizer.
+ * note content uses, mirroring the citation routes — but only when `allowedRecords` names them.
+ * The content is model output, so a reference the server did not authorize as a citation proves
+ * nothing about the viewer's access and renders as plain text instead of a live chip. Every other
+ * link renders as its visible text with no anchor at all: tenant URLs are redacted from prompts, so
+ * a URL in an answer is unverifiable model output and a live anchor would be a phishing surface
+ * inside a trusted UI. Images never render — assistant answers do not embed them — and raw HTML is
+ * dropped by the sanitizer.
  */
 export default function AskConnexMarkdown({
     content,
+    allowedRecords,
     className,
 }: {
     content: string;
+    /** The viewer-authorized citations, keyed `kind:id`, that may render as live record chips. */
+    allowedRecords: ReadonlySet<string>;
     className?: string;
 }) {
     const t = useTranslations('ActivityNotesEditor');
@@ -207,7 +209,7 @@ export default function AskConnexMarkdown({
                         warn: t('calloutWarning'),
                         danger: t('calloutDanger'),
                     },
-                })}
+                }, allowedRecords)}
                 skipHtml
             >
                 {content}

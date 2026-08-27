@@ -197,8 +197,6 @@ public class AiAssistantService {
         Map<Integer, String> authorNames = authorNames(storedMessages);
         var suggestions = citationProjector.suggestions(
                 workspaceId, id, userId, storedMessages);
-        var requestedMessageIds = citationProjector.requestedMessageIds(
-                workspaceId, id, userId, storedMessages);
         List<AiChatMessageDto> messages = storedMessages.stream()
             .map(message -> {
                 var citations = projection.citationsByMessage().getOrDefault(

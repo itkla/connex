@@ -100,6 +100,31 @@ class AiAssistantPromptAssemblerTest {
                 serialized, context, new tools.jackson.databind.ObjectMapper()));
     }
 
+    /**
+     * A persisted answer carries durable {@code kind:id} link targets for the renderer; replaying
+     * them to the provider would put raw record ids into a prompt. History replay strips every
+     * record link down to its label before masking.
+     */
+    @Test
+    void replayedHistoryNeverCarriesDurableRecordLinkTargets() {
+        AiChatMessage request = new AiChatMessage();
+        request.setAuthorKind("user");
+        request.setContent("What changed on [the renewal](deal:41)?");
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(request),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(),
+                new MaskingContext(),
+                new AiChatResourceRegistry());
+
+        String serialized = prompt.getMessages().stream()
+                .map(message -> message.getContent())
+                .reduce("", (left, right) -> left + "\n" + right);
+        assertFalse(serialized.contains("deal:41"));
+        assertTrue(serialized.contains("the renewal"));
+    }
+
     @Test
     void replayAndInjectedCrmStringsStayMaskedEscapedAndOutsideSystemPolicy() throws Exception {
         AiChatMessage replayed = new AiChatMessage();

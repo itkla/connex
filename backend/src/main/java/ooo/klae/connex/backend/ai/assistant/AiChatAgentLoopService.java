@@ -829,7 +829,7 @@ public class AiChatAgentLoopService {
                         resources.snapshot();
                 if (!omitted) {
                     persistedText = AiChatRecordLinkRewriter.rewrite(
-                            persistedText, citedResources);
+                            persistedText, citedResources, Set.copyOf(citations));
                 }
                 String metadata = promptAssembler.finalMetadata(
                         turn.turnId(), citations, suggestions, citedResources,

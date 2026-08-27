@@ -158,23 +158,6 @@ class AiChatCitationProjectorTest {
 
 
 
-    @Test
-    void identifiesOnlyMessagesFromTheCurrentViewersTurns() {
-        AiChatMessage own = new AiChatMessage();
-        own.setId(23);
-        own.setAuthorKind("assistant");
-        own.setStructuredJson("{\"turnId\":7}");
-        AiChatMessage shared = new AiChatMessage();
-        shared.setId(24);
-        shared.setAuthorKind("assistant");
-        shared.setStructuredJson("{\"turnId\":8}");
-        when(chatMapper.listTurnsByIds(3, 5, List.of(7, 8)))
-                .thenReturn(List.of(turn(7, 11), turn(8, 12)));
-
-        assertEquals(
-                Set.of(23),
-                projector.requestedMessageIds(3, 5, 11, List.of(own, shared)));
-    }
 
 
 

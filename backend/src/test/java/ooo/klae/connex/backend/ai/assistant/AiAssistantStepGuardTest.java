@@ -42,6 +42,21 @@ class AiAssistantStepGuardTest {
                         + "\"final\":null}")));
     }
 
+    /**
+     * The model may only link records through per-turn handles: a direct durable-scheme link like
+     * {@code [X](person:123)} would smuggle a raw record id past the handle registry and mint an
+     * unauthorized chip, so the guard refuses it outright.
+     */
+    @Test
+    void directDurableRecordLinksAreRejected() throws Exception {
+        assertEquals("final_links", guard.rejectionReason(objectMapper.readTree(
+                finalStep("See [X](person:123)", "[]", "[]", "null"))));
+        assertEquals("final_links", guard.rejectionReason(objectMapper.readTree(
+                finalStep("See [X](deal: 9)", "[]", "[]", "null"))));
+        assertTrue(guard.permits(objectMapper.readTree(
+                finalStep("See [X](record:r1)", "[\"r1\"]", "[]", "null"))));
+    }
+
     @Test
     void issuedPlaceholderGuardRejectsBareBodiesButAcceptsBracedTokens() throws Exception {
         var issuedGuard = guard.forIssuedPlaceholders(Set.of("{{P1}}"));

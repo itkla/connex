@@ -55,7 +55,9 @@ import SectionBoundary from '@/app/components/SectionBoundary';
 import MentionEditor, {
     type MentionEditorHandle,
 } from '@/app/components/activity/notes/MentionEditor';
-import AskConnexMarkdown from '@/app/components/ask-connex/AskConnexMarkdown';
+import AskConnexMarkdown, {
+    NO_ALLOWED_RECORDS,
+} from '@/app/components/ask-connex/AskConnexMarkdown';
 import {
     AskConnexContextStrip,
     AskConnexScopeNotice,
@@ -682,6 +684,12 @@ function TranscriptMessage({
         ? message.authorDisplayName
             ?? (message.authorUserId === null ? labels.formerMember : labels.memberAuthor(message.authorUserId))
         : labels.assistantAuthor;
+    const allowedRecords = useMemo<ReadonlySet<string>>(
+        () => new Set(
+            (message.citations ?? []).map((citation) => `${citation.kind}:${citation.id}`),
+        ),
+        [message.citations],
+    );
     const animateEntrance = fresh && !user;
     const createdAt = new Date(message.createdAt);
     const timestamp = Number.isNaN(createdAt.getTime())
@@ -716,7 +724,7 @@ function TranscriptMessage({
                         ? labels.contentWithheld
                         : user
                             ? message.content
-                            : <AskConnexMarkdown content={message.content} />}
+                            : <AskConnexMarkdown content={message.content} allowedRecords={allowedRecords} />}
                 </motion.div>
                 {!user && message.contentWithheld !== true
                     ? <MessageCitations citations={message.citations} labels={labels} />
@@ -1055,7 +1063,7 @@ export function StreamingTail({
                     <MessageContent className="w-auto max-w-[85%] gap-1.5">
                         <MessageHeader>{labels.assistantAuthor}</MessageHeader>
                         <div className="break-words rounded-2xl bg-muted px-3.5 py-2.5 text-sm leading-relaxed text-foreground">
-                            <AskConnexMarkdown content={snapshot.text} />
+                            <AskConnexMarkdown content={snapshot.text} allowedRecords={NO_ALLOWED_RECORDS} />
                             {live ? (
                                 <span
                                     aria-hidden
