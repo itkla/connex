@@ -13,6 +13,7 @@ import type {
     AiChatProgressSource,
     Page,
 } from '@/app/lib/types';
+import { parseMysqlDateTime } from '@/app/lib/utils';
 import { viewPreferenceStorageKey } from '@/app/hooks/viewPreference';
 
 const REFERENCE_TOKEN = /\[([^\]]+)]\((person|company|deal):([1-9]\d*)\)/g;
@@ -1336,6 +1337,35 @@ export function reduceAskConnexTurn(
         reason: event.reason ?? null,
         progress: event.progress ?? state.progress,
     };
+}
+
+/** The placeholder shown where the server established no value for a structured field. */
+export const ANSWER_ROW_PLACEHOLDER = '—';
+
+/** No record references authorized: the allowlist a surface passes when nothing is citable yet. */
+export const EMPTY_ASK_CONNEX_ALLOWED_RECORDS: ReadonlySet<string> = new Set();
+
+const CALENDAR_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The absolute rendering of an answer timestamp.
+ *
+ * The step guard accepts an offset instant, an offset-less date-time, and a bare calendar date, and
+ * every accepted shape has to read the same way in both halves of a freshness line. This shares
+ * {@link parseMysqlDateTime} with `formatRelativeTime` — so an offset-less value is read as UTC and
+ * a calendar date as that calendar day — rather than handing the raw string to `new Date`, which
+ * reads a bare date as UTC midnight and lands on the previous day west of Greenwich.
+ *
+ * @param value a model-declared timestamp
+ * @param locale BCP-47 locale tag
+ */
+export function formatAnswerInstant(value: string, locale: string): string {
+    const ms = parseMysqlDateTime(value);
+    if (Number.isNaN(ms)) return ANSWER_ROW_PLACEHOLDER;
+    const options: Intl.DateTimeFormatOptions = CALENDAR_DATE.test(value.trim())
+        ? { dateStyle: 'medium' }
+        : { dateStyle: 'medium', timeStyle: 'short' };
+    return new Intl.DateTimeFormat(locale, options).format(new Date(ms));
 }
 
 /** Route for one cited record, matching the records browser's detail paths. */

@@ -16,9 +16,9 @@ import {
 } from '@heroicons/react/24/outline';
 import Link from 'next/link';
 
-import { ANSWER_ROW_PLACEHOLDER } from '@/app/components/ask-connex/answerDocument';
 import { useLiveNow } from '@/app/hooks/useNow';
 import {
+    ANSWER_ROW_PLACEHOLDER,
     askConnexCreatedRecordHref,
     askConnexToolCardAffordances,
     askConnexToolCardStatus,

@@ -78,9 +78,9 @@ class AiAssistantPromptAssemblerTest {
     void assemblyRegistersServerTextSoEnvelopeWordIdentifiersDoNotPoisonTheScan() {
         AiChatMessage request = new AiChatMessage();
         request.setAuthorKind("user");
-        request.setContent("Which deals need attention, and what is each one waiting on?");
+        request.setContent("Which deals need attention, and answer for each one.");
         MaskingContext context = new MaskingContext();
-        MaskingEngine.maskField(EntityKind.COMPANY, "what", context);
+        MaskingEngine.maskField(EntityKind.COMPANY, "answer", context);
 
         MaskedPrompt prompt = assembler.assemble(
                 List.of(request),
@@ -89,15 +89,40 @@ class AiAssistantPromptAssemblerTest {
                 context,
                 new AiChatResourceRegistry());
 
-        assertTrue(context.isTrustedTextCollision("what"));
+        assertTrue(context.isTrustedTextCollision("answer"));
         assertFalse(context.isTrustedTextCollision("Cyberdyne Systems"));
         assertTrue(prompt.getMessages().getFirst().getContent()
-                .contains("and what is each one waiting on?"));
+                .contains("and answer for each one."));
         String serialized = prompt.getSystemPrompt() + "\n" + prompt.getMessages().stream()
                 .map(message -> message.getContent())
                 .reduce("", (left, right) -> left + "\n" + right);
         assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(
                 serialized, context, new tools.jackson.databind.ObjectMapper()));
+    }
+
+    /**
+     * A persisted answer carries durable {@code kind:id} link targets for the renderer; replaying
+     * them to the provider would put raw record ids into a prompt. History replay strips every
+     * record link down to its label before masking.
+     */
+    @Test
+    void replayedHistoryNeverCarriesDurableRecordLinkTargets() {
+        AiChatMessage request = new AiChatMessage();
+        request.setAuthorKind("user");
+        request.setContent("What changed on [the renewal](deal:41)?");
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(request),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(),
+                new MaskingContext(),
+                new AiChatResourceRegistry());
+
+        String serialized = prompt.getMessages().stream()
+                .map(message -> message.getContent())
+                .reduce("", (left, right) -> left + "\n" + right);
+        assertFalse(serialized.contains("deal:41"));
+        assertTrue(serialized.contains("the renewal"));
     }
 
     @Test

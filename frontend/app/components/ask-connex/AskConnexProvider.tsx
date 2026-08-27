@@ -19,7 +19,6 @@ import AskConnexDrawer, {
     type AskConnexJobOffer,
     type AskConnexScopeSurface,
 } from '@/app/components/ask-connex/AskConnexDrawer';
-import { formatAnswerInstant } from '@/app/components/ask-connex/answerDocument';
 import { useActions, useRegisterActions } from '@/app/hooks/useActions';
 import { useAskConnexSkills } from '@/app/hooks/useAskConnexSkills';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
@@ -79,6 +78,7 @@ import {
     askConnexSessionStorageKey,
     askConnexTurnStorageKey,
     completeAskConnexFileUpload,
+    formatAnswerInstant,
     hasPendingAskConnexFileOperation,
     isAskConnexPinned,
     loadAskConnexLatestMessages,
@@ -160,15 +160,12 @@ import { formatDate, formatRelativeTime, formatUtcDateTime } from '@/app/lib/uti
 import type {
     AiAssistantCreatedRecordKind,
     AiChatCitation,
-    AiChatAnswerBlockKind,
     AiChatAttachment,
-    AiChatCoverage,
     AiChatDeltaFrame,
     AiChatMessage,
     AiChatPageContext,
     AiChatParticipant,
     AiChatPresence,
-    AiChatProgressItem,
     AiChatQueryScopeRequest,
     AiChatSession,
     AiChatTurn,
@@ -2322,49 +2319,6 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         return value;
     }, [locale, t]);
     const labels = useMemo(() => ({
-        answerDocument: {
-            absoluteTime: (instant: string) => formatAnswerInstant(instant, locale),
-            blockKind: (kind: AiChatAnswerBlockKind) => t(`answerDocument.blockKinds.${kind}`),
-            boundedRows: (shown: number, total: number) =>
-                t('answerDocument.boundedRows', { shown, total }),
-            viewAll: t('answerDocument.viewAll'),
-            citationKind,
-            comparisonAgainst: t('answerDocument.comparisonAgainst'),
-            comparisonValue: t('answerDocument.comparisonValue'),
-            copyDraft: t('answerDocument.copyDraft'),
-            copyDraftDone: t('answerDocument.copyDraftDone'),
-            coverage: t('answerDocument.coverage'),
-            coverageStatus: (status: AiChatCoverage['status']) =>
-                t(`answerDocument.coverageStatuses.${status}`),
-            diffAfter: t('answerDocument.diffAfter'),
-            diffBefore: t('answerDocument.diffBefore'),
-            dismiss: t('answerDocument.dismiss'),
-            evidence: t('answerDocument.evidence'),
-            evidenceDetail: t('answerDocument.evidenceDetail'),
-            exclusions: t('answerDocument.exclusions'),
-            exclusion: (exclusion: AiChatCoverage['exclusions'][number]) =>
-                t(`answerDocument.exclusionsList.${exclusion}`),
-            freshness: t('answerDocument.freshness'),
-            freshnessCurrent: t('answerDocument.freshnessCurrent'),
-            moreDetail: t('answerDocument.moreDetail'),
-            openRecord: t('answerDocument.openRecord'),
-            period: (start: string, end: string) =>
-                t('answerDocument.period', { start, end }),
-            progressCount: (count: number) => t('answerDocument.progressCount', { count }),
-            progressSource: (source: AiChatProgressItem['source']) =>
-                t(`answerDocument.progressSources.${source}`),
-            progressStatus: (status: AiChatProgressItem['status']) =>
-                t(`answerDocument.progressStatuses.${status}`),
-            relativeTime: (instant: string) => formatRelativeTime(instant, locale, now),
-            sourceLimits: t('answerDocument.sourceLimits'),
-            sources: t('answerDocument.sources'),
-            source: (source: AiChatCoverage['sources'][number]) =>
-                t(`answerDocument.sourcesList.${source}`),
-            truncated: t('answerDocument.truncated'),
-            unsupported: t('answerDocument.unsupported'),
-            whatChecked: t('answerDocument.whatChecked'),
-            withheldEvidence: t('answerDocument.withheldEvidence'),
-        },
         assistantAuthor: t('assistantAuthor'),
         archive: t('archive'),
         terminalMessage: terminalMessages,
@@ -2373,6 +2327,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         disclosureList: tDisclosure('sessionList'),
         imageDisclosure: tDisclosure('imageProvider'),
         citationKind,
+        citationFreshness: (label: string, instant: string) =>
+            t('citationFreshness', { label, time: formatAnswerInstant(instant, locale) }),
+        citationFreshnessUnknown: (label: string) => t('citationFreshnessUnknown', { label }),
         close: t('close'),
         closeWorkspace: t('closeWorkspace'),
         composerAria: t('composerAria'),

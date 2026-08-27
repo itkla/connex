@@ -2,16 +2,10 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import {
-    ANSWER_ROW_PLACEHOLDER,
-    answerBlockSignature,
-    answerListKeys,
-    answerRowSignature,
-    formatAnswerInstant,
-} from '@/app/components/ask-connex/answerDocument';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 
 import {
+    ANSWER_ROW_PLACEHOLDER,
     EMPTY_ASK_CONNEX_TOOL_CARDS,
     EMPTY_ASK_CONNEX_TURN,
     AskConnexFileRemovalError,
@@ -33,6 +27,7 @@ import {
     askConnexTurnStorageKey,
     completeAskConnexFileUpload,
     extractAskConnexAttachments,
+    formatAnswerInstant,
     groupAskConnexMessages,
     hasPendingAskConnexFileOperation,
     isAskConnexProgressSource,
@@ -1252,30 +1247,5 @@ describe('answer timestamps read the same way twice', () => {
 
     it('falls back to the placeholder rather than echoing something it cannot read', () => {
         expect(formatAnswerInstant('the day of the review', 'en-US')).toBe(ANSWER_ROW_PLACEHOLDER);
-    });
-});
-
-describe('answer list keys', () => {
-    it('follows content rather than position', () => {
-        expect(answerListKeys(['b', 'a'])).toEqual(['b', 'a']);
-        expect(answerListKeys(['a', 'b']).toSorted()).toEqual(answerListKeys(['b', 'a']).toSorted());
-    });
-
-    it('never repeats a key when two entries say the same thing', () => {
-        const keys = answerListKeys(['same', 'same', 'other', 'same']);
-        expect(new Set(keys).size).toBe(keys.length);
-    });
-
-    it('signs a row and a block by what they render', () => {
-        expect(answerRowSignature({
-            label: 'Open pipeline', value: '12', detail: null, at: null, evidence: [],
-        })).not.toBe(answerRowSignature({
-            label: 'Open pipeline', value: '13', detail: null, at: null, evidence: [],
-        }));
-        expect(answerBlockSignature({
-            kind: 'fact', title: null, body: 'Atlas is active.', items: [], rows: [], evidence: [],
-        })).not.toBe(answerBlockSignature({
-            kind: 'fact', title: null, body: 'Atlas is closed.', items: [], rows: [], evidence: [],
-        }));
     });
 });

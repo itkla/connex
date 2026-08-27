@@ -815,22 +815,9 @@ public class AiChatAgentLoopService {
                     throw exception;
                 }
                 boolean omitted = MaskingEngine.OMITTED_BY_POLICY.equals(persistedText);
-                Optional<List<AiAssistantStep.AnswerBlock>> screenedBlocks =
-                        screenedAnswerBlocks(finalAnswer.blocks());
-                // The persisted transcript text stays exactly the screened terminal text that was
-                // streamed to the requester. Rendering the blocks here instead would repaint the
-                // answer with different prose the moment the transcript refreshed; the typed
-                // document in structured_json is the surface that carries the blocks.
-                if (screenedBlocks.isEmpty()) {
-                    persistedText = MaskingEngine.OMITTED_BY_POLICY;
-                    omitted = true;
-                }
                 List<String> citations = omitted ? List.of() : finalAnswer.citations();
                 try {
                     resources.requireKnownCitations(citations);
-                    if (!omitted) {
-                        requireBlockCitations(screenedBlocks.orElseThrow(), citations);
-                    }
                 } catch (AiAssistantLoopException exception) {
                     resetMalformedStream(streamingProgress, streamingObserver);
                     throw exception;
@@ -838,21 +825,16 @@ public class AiChatAgentLoopService {
                 List<String> suggestions = omitted
                         ? List.of()
                         : AiAssistantStepGuard.filterSuggestions(finalAnswer.suggestions());
-                List<AiChatProgressItemDto> progress = progressService.project(
-                        turn.workspaceId(), turn.sessionId(), turn.turnId(), "resolved");
-                AiAssistantStep.Coverage coverage = omitted
-                        ? null
-                        : AiChatProgressService.reconcileCoverage(
-                                finalAnswer.coverage(), progress, toolBudgetAudit);
                 Map<String, AiChatResourceRegistry.ResourceRef> citedResources =
                         resources.snapshot();
+                if (!omitted) {
+                    persistedText = AiChatRecordLinkRewriter.rewrite(
+                            persistedText, citedResources, Set.copyOf(citations));
+                }
                 String metadata = promptAssembler.finalMetadata(
                         turn.turnId(), citations, suggestions, citedResources,
                         citationProjector.observe(
                                 turn.workspaceId(), citations, citedResources),
-                        omitted ? List.of() : screenedBlocks.orElseThrow(),
-                        coverage,
-                        progress,
                         toolBudgetAudit,
                         skillReference);
                 requireCurrentAccess(turn);
@@ -974,45 +956,8 @@ public class AiChatAgentLoopService {
                 : text;
     }
 
-    private static Optional<List<AiAssistantStep.AnswerBlock>> screenedAnswerBlocks(
-            List<AiAssistantStep.AnswerBlock> blocks) {
-        if (blocks == null || blocks.isEmpty()) {
-            return Optional.empty();
-        }
-        for (AiAssistantStep.AnswerBlock block : blocks) {
-            // Every free-text field a block can carry is screened, including structured rows:
-            // an unscreened field is durably persisted into the answer document and rendered to
-            // shared-session viewers, and special-care text must be excluded in both privacy modes.
-            if (block == null
-                    || excludedGeneratedText(block.title())
-                    || excludedGeneratedText(block.body())
-                    || block.items().stream().anyMatch(AiChatAgentLoopService::excludedGeneratedText)
-                    || block.rows().stream().anyMatch(AiChatAgentLoopService::excludedGeneratedRow)) {
-                return Optional.empty();
-            }
-        }
-        return Optional.of(List.copyOf(blocks));
-    }
-
-    private static boolean excludedGeneratedRow(AiAssistantStep.Row row) {
-        return row == null
-                || excludedGeneratedText(row.label())
-                || excludedGeneratedText(row.value())
-                || excludedGeneratedText(row.detail())
-                || excludedGeneratedText(row.at());
-    }
-
     private static boolean excludedGeneratedText(String value) {
         return value != null && SpecialCareTextScreen.screen(value).excluded();
-    }
-
-    private static void requireBlockCitations(
-            List<AiAssistantStep.AnswerBlock> blocks, List<String> citations) {
-        Set<String> allowed = Set.copyOf(citations);
-        if (blocks.stream().flatMap(block -> block.citations().stream())
-                .anyMatch(citation -> !allowed.contains(citation))) {
-            throw AiAssistantLoopException.malformed("unknown_citation");
-        }
     }
 
     private boolean restrictionsChanged(AiChatQueuedTurn turn) {

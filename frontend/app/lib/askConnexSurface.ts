@@ -7,7 +7,7 @@ import { parseMysqlDateTime } from '@/app/lib/utils';
  *
  * Two discrete states rather than a drag handle: a freeform width is a preference the user has to
  * re-establish on every screen, and the only two widths that matter are "beside the record I am
- * reading" and "wide enough to read an answer document". Anything wider than comfortable is the
+ * reading" and "wide enough to read a long answer". Anything wider than comfortable is the
  * full workspace's job.
  */
 export type AskConnexWidth = 'compact' | 'comfortable';
@@ -60,39 +60,6 @@ export function askConnexWidthStorageKey(
 /** Parses a persisted width at the browser-storage trust boundary. */
 export function parseStoredAskConnexWidth(value: string | null): AskConnexWidth | null {
     return value === 'compact' || value === 'comfortable' ? value : null;
-}
-
-/**
- * How many structured rows or list items one answer block shows before it stops and offers the
- * full workspace instead.
- *
- * A bounded preview is the honest presentation at drawer width: a forty-row timeline squeezed into
- * a 24rem column is not a timeline, and scrolling it sideways is worse than not showing it. The cap
- * applies to the drawer only — the workspace renders every row.
- */
-export const ASK_CONNEX_DRAWER_ROW_CAP = 5;
-
-/** One bounded list plus the count it withheld. */
-export type BoundedAnswerEntries<T> = {
-    entries: T[];
-    hidden: number;
-};
-
-/**
- * Bounds one answer list to the surface's row cap.
- *
- * A null cap is the full workspace, which withholds nothing. Bounding never applies when it would
- * hide a single entry: replacing one row with a "1 more" affordance costs the reader the row and
- * gives back nothing.
- */
-export function boundedAnswerEntries<T>(
-    entries: readonly T[],
-    cap: number | null,
-): BoundedAnswerEntries<T> {
-    if (cap === null || entries.length <= cap + 1) {
-        return { entries: [...entries], hidden: 0 };
-    }
-    return { entries: entries.slice(0, cap), hidden: entries.length - cap };
 }
 
 /** The recency bands the session rail groups by, in display order. */

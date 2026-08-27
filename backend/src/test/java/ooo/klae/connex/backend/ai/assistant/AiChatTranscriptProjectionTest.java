@@ -58,12 +58,10 @@ class AiChatTranscriptProjectionTest {
                 List.of(),
                 List.of("Review recent activity"),
                 null,
-                null,
                 true);
 
         assertTrue(projected.isContentWithheld());
         assertEquals("", projected.getContent());
-        assertNull(projected.getAnswerDocument());
         assertEquals(List.of(), projected.getCitations());
         assertEquals(List.of(), projected.getSuggestions());
     }

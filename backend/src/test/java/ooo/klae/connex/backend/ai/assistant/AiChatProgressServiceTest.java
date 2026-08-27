@@ -106,22 +106,6 @@ class AiChatProgressServiceTest {
                 service.project(3, 5, 7, "resolved").get(1));
     }
 
-    @Test
-    void durableTruncationDowngradesACompleteCoverageClaim() {
-        var claimed = new AiAssistantStep.Coverage(
-                "complete", "2026-08-21", null, null,
-                List.of("records"), List.of(), false);
-
-        var reconciled = AiChatProgressService.reconcileCoverage(
-                claimed,
-                List.of(new AiChatProgressItemDto(
-                        1, "records", "complete", 10, true)),
-                new AiAssistantPromptAssembler.ToolBudgetAudit(1, 0, 10, 20));
-
-        assertEquals("partial", reconciled.status());
-        assertEquals(List.of("bounded_results"), reconciled.exclusions());
-        assertEquals(true, reconciled.truncated());
-    }
 
     private static AiChatToolCall toolCall(
             int step, String name, String status, String resultJson) {

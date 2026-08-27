@@ -57,35 +57,16 @@ public class AiAssistantPromptAssembler {
     private static final Pattern HANDLE_REFERENCE = Pattern.compile(
             "(?<![\\p{L}\\p{N}_])r[1-9][0-9]*(?![\\p{L}\\p{N}_])");
     private static final String ANSWER_DOCUMENT_CONTRACT = """
-            blocks is the primary answer document: one to twenty-four flat ordered blocks. kind is one of answer, fact, inference, recommendation, metric, list, comparison, timeline, draft, extraction, diff, or limitation; use fact only for retrieved evidence, inference only for an explicitly qualified interpretation, and recommendation only for advice. Each block has title and body as strings or null, bounded items and rows arrays, and citations naming that block's evidence; at least one of body, items, or rows must be present. Every block and row citation must also appear in final citations. text is a complete plain-text fallback for the same document.
-
-            rows carries data a sentence would flatten and must be empty for every kind except metric, comparison, timeline, diff, and extraction. label is a short non-empty string; value, detail, and at are strings or null. For metric, label names the measure, value is its computed figure, and detail carries a delta or qualifier. For comparison, label names the subject and value and detail are the two sides compared. For timeline, at is the exact known time, label is the event, and rows run newest first. For diff, value is the before state and detail the after state. For extraction, label and value are the extracted field and its value. Use items for plain bullets.
-
-            coverage reports what the answer actually covers. status is complete only when the requested scope was checked without truncation or exclusions; otherwise use partial or insufficient, and set truncated truthfully. asOf, periodStart, and periodEnd are exact ISO-8601 values such as 2026-08-21 or 2026-08-21T09:00:00Z, or null; never prose. sources may contain only records, deals, activities, tasks, notes, files, metrics, schedule, actions, or, as a last resort, other. exclusions may contain only private_data, restricted_records, unavailable_sources, unsupported_context, bounded_results, or tool_failure.""";
+            text is the answer itself, written in GitHub-flavored Markdown, in the direct voice of a knowledgeable colleague. Choose your own structure: plain paragraphs for simple answers; bold labels, short headings, bullet or task lists, and tables when they genuinely help. Callouts are available as blockquotes starting with [!info], [!success], [!warn], or [!danger]. Link a record inline as [its name](record:rN) using a handle you hold; every handle used anywhere in text must also appear in citations. Never fabricate structure for its own sake and never wrap the whole answer in a single label.""";
     private static final String FIRST_FINAL_EXAMPLE =
-            "{\"text\":\"One renewal is open at 120,000 JPY.\",\"citations\":[\"r1\"],"
+            "{\"text\":\"One renewal is open at 120,000 JPY \u2014 [the renewal deal](record:r1), "
+                    + "up from 111,000 JPY last quarter.\","
+                    + "\"citations\":[\"r1\"],"
                     + "\"suggestions\":[\"Show its recent activity\"],"
-                    + "\"title\":\"Open renewal\","
-                    + "\"blocks\":[{\"kind\":\"fact\",\"title\":null,"
-                    + "\"body\":\"One renewal is open.\",\"items\":[],\"rows\":[],"
-                    + "\"citations\":[\"r1\"]},"
-                    + "{\"kind\":\"metric\",\"title\":null,\"body\":null,"
-                    + "\"items\":[],\"rows\":[{\"label\":\"Open renewal value\","
-                    + "\"value\":\"120,000 JPY\",\"detail\":\"up from 111,000 JPY\","
-                    + "\"at\":null,\"citations\":[\"r1\"]}],\"citations\":[\"r1\"]}],"
-                    + "\"coverage\":{\"status\":\"complete\",\"asOf\":null,"
-                    + "\"periodStart\":null,\"periodEnd\":null,"
-                    + "\"sources\":[\"deals\"],\"exclusions\":[],\"truncated\":false}}";
+                    + "\"title\":\"Open renewal\"}";
     private static final String ENDING_FINAL_EXAMPLE =
             "{\"text\":\"No matching activity was found for that period.\","
-                    + "\"citations\":[],\"suggestions\":[],\"title\":null,"
-                    + "\"blocks\":[{\"kind\":\"answer\",\"title\":null,"
-                    + "\"body\":\"No matching activity was found for that period.\","
-                    + "\"items\":[],\"rows\":[],\"citations\":[]}],"
-                    + "\"coverage\":{\"status\":\"complete\",\"asOf\":null,"
-                    + "\"periodStart\":null,\"periodEnd\":null,"
-                    + "\"sources\":[\"activities\"],\"exclusions\":[],"
-                    + "\"truncated\":false}}";
+                    + "\"citations\":[],\"suggestions\":[],\"title\":null}";
 
     private final ObjectMapper objectMapper;
     private final AiAssistantToolCatalog toolCatalog;
@@ -1101,32 +1082,8 @@ public class AiAssistantPromptAssembler {
                 suggestions,
                 resources,
                 Map.of(),
-                List.of(),
-                null,
-                List.of(),
-                ToolBudgetAudit.NONE);
-    }
-
-    /**
-     * Serializes final viewer metadata with a typed answer and additive server audit counters.
-     *
-     * <p>Each cited handle carries the freshness and subtitle the record showed while this turn ran,
-     * so a later read renders the evidence the answer was written against instead of relabelling it
-     * with whatever the record says today. Authorization, visibility, and identity stay live reads.
-     */
-    public String finalMetadata(
-            int turnId,
-            List<String> citations,
-            List<String> suggestions,
-            Map<String, AiChatResourceRegistry.ResourceRef> resources,
-            Map<String, AiChatRecordObservation> observations,
-            List<AiAssistantStep.AnswerBlock> blocks,
-            AiAssistantStep.Coverage coverage,
-            List<AiChatProgressItemDto> progress,
-            ToolBudgetAudit toolBudgetAudit) {
-        return finalMetadata(
-                turnId, citations, suggestions, resources, observations, blocks,
-                coverage, progress, toolBudgetAudit, null);
+                ToolBudgetAudit.NONE,
+                null);
     }
 
     /**
@@ -1141,9 +1098,6 @@ public class AiAssistantPromptAssembler {
      * @param suggestions validated follow-up suggestions
      * @param resources per-turn handle-to-record snapshot
      * @param observations record freshness observed while the turn ran
-     * @param blocks screened answer-document blocks
-     * @param coverage reconciled coverage disclosure
-     * @param progress viewer-safe milestone trail
      * @param toolBudgetAudit exact model-visible replay degradation counters
      * @param skill declared skill that produced the answer, or null for the generic loop
      * @return serialized durable metadata
@@ -1154,9 +1108,6 @@ public class AiAssistantPromptAssembler {
             List<String> suggestions,
             Map<String, AiChatResourceRegistry.ResourceRef> resources,
             Map<String, AiChatRecordObservation> observations,
-            List<AiAssistantStep.AnswerBlock> blocks,
-            AiAssistantStep.Coverage coverage,
-            List<AiChatProgressItemDto> progress,
             ToolBudgetAudit toolBudgetAudit,
             SkillReference skill) {
         java.util.Objects.requireNonNull(toolBudgetAudit, "toolBudgetAudit");
@@ -1188,13 +1139,6 @@ public class AiAssistantPromptAssembler {
             metadata.put("citations", resolved);
             metadata.put("suggestions", suggestions);
             metadata.put("resources", replayResources);
-            if (blocks != null && !blocks.isEmpty() && coverage != null) {
-                metadata.put("blocks", List.copyOf(blocks));
-                metadata.put("coverage", coverage);
-            }
-            if (progress != null && !progress.isEmpty()) {
-                metadata.put("progress", List.copyOf(progress));
-            }
             if (toolBudgetAudit.degraded()) {
                 metadata.put("toolResultBudget", toolBudgetAuditData(toolBudgetAudit));
             }
@@ -1461,7 +1405,8 @@ public class AiAssistantPromptAssembler {
             if (replay == null) {
                 return;
             }
-            String masked = MaskingEngine.maskConversationalFreeText(replay.content(), context);
+            String masked = MaskingEngine.maskConversationalFreeText(
+                    AiChatRecordLinkRewriter.stripDurableLinks(replay.content()), context);
             prompt.assistantTurn(serialize(Map.of(
                     "content", masked,
                     "citations", replay.citations())));
@@ -1471,7 +1416,8 @@ public class AiAssistantPromptAssembler {
         if (content == null) {
             return;
         }
-        String masked = MaskingEngine.maskConversationalFreeText(content, context);
+        String masked = MaskingEngine.maskConversationalFreeText(
+                AiChatRecordLinkRewriter.stripDurableLinks(content), context);
         String serialized = serialize(Map.of("content", masked));
         prompt.userTurn(USER_REQUEST_BEGIN + "\n" + serialized + "\n" + USER_REQUEST_END);
     }
