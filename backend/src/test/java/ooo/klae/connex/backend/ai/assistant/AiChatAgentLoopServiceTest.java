@@ -1982,6 +1982,78 @@ class AiChatAgentLoopServiceTest {
     }
 
     /**
+     * A model that narrates alongside its tool call turns a silent pause into visible work: the
+     * prose streams live as a narration frame and is persisted with the answer so a reloaded
+     * transcript still shows how the answer was reached.
+     */
+    @Test
+    void narrationBesideAToolCallStreamsLiveAndPersistsWithTheAnswer() throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(narratingTool(
+                        "call_1", "search_records",
+                        "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}",
+                        "Let me check the open pipeline."))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
+                        "Two deals need attention.", List.of())));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<AiChatStepFrameDto> frames =
+                ArgumentCaptor.forClass(AiChatStepFrameDto.class);
+        verify(realtimeDispatcher, atLeastOnce()).sessionNow(
+                anyInt(), anyInt(), frames.capture());
+        AiChatStepFrameDto narration = frames.getAllValues().stream()
+                .filter(frame -> "narration".equals(frame.kind()))
+                .findFirst().orElseThrow();
+        assertEquals("Let me check the open pipeline.", narration.text());
+        ArgumentCaptor<String> metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(
+                eq(TURN), eq("Two deals need attention."), metadata.capture(), anyInt(), anyInt());
+        JsonNode stored = objectMapper.readTree(metadata.getValue());
+        assertEquals("Let me check the open pipeline.",
+                stored.path("narration").path(0).path("text").asString());
+        assertEquals(1, stored.path("narration").path(0).path("seq").asInt());
+    }
+
+    /** A turn whose answer was withheld by policy persists no narration either. */
+    @Test
+    void anOmittedAnswerPersistsNoNarration() throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(narratingTool(
+                        "call_1", "search_records",
+                        "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}",
+                        "Let me check the open pipeline."))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
+                        "The contact discussed a diagnosis.", List.of())));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<String> metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(
+                eq(TURN), eq("[omitted by policy]"), metadata.capture(),
+                anyInt(), anyInt());
+        assertFalse(objectMapper.readTree(metadata.getValue()).has("narration"));
+    }
+
+    /**
      * Each step's normalized reasoning streams to the requester as an ephemeral thinking frame:
      * already screened, leak-scanned, and demasked, never persisted, requester-queue only.
      */
@@ -2611,6 +2683,19 @@ class AiChatAgentLoopServiceTest {
                 5,
                 "tool_calls",
                 Optional.empty());
+    }
+
+    private AiNativeToolCompletion<AiAssistantStep.FinalAnswer> narratingTool(
+            String id, String name, String arguments, String narration) throws JacksonException {
+        return new AiNativeToolCompletion.Tool<>(
+                new AiToolCall(id, name, arguments, null),
+                objectMapper.readTree(arguments),
+                0,
+                3,
+                5,
+                "tool_calls",
+                Optional.empty(),
+                Optional.of(narration));
     }
 
     private static AiNativeToolCompletion<AiAssistantStep.FinalAnswer> nativeFinal(

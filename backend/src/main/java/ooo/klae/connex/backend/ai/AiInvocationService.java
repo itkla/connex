@@ -537,11 +537,17 @@ public class AiInvocationService {
                     raw, invocation, result, reasoning, "native_multiple_calls");
         }
         if (captured.ambiguous()
-                || !captured.answer().isBlank()
                 || CompletionNormalizer.containsReasoningTag(captured.answer())) {
             return malformedNativeTool(
                     raw, invocation, result, reasoning, "native_call_content");
         }
+        // Content beside a tool call is the model narrating what it is about to do. It travels the
+        // same normalization pipeline as reasoning — bounded, screened, strictly leak-scanned, then
+        // demasked and screened again — and a rejected narration is simply dropped: narration is
+        // decoration around a tool call, never a reason to fail the step it accompanies.
+        ReasoningNormalization narration = captured.answer().isBlank()
+                ? new ReasoningNormalization(Optional.empty(), null)
+                : normalizeReasoning(captured.answer(), invocation);
         AiToolCall call = result.toolCalls().getFirst();
         if (nativeTools.exchanges().stream()
                 .anyMatch(exchange -> exchange.call().id().equals(call.id()))) {
@@ -586,7 +592,8 @@ public class AiInvocationService {
                 result.inputTokens(),
                 result.outputTokens(),
                 result.stopReason(),
-                reasoning.rejectionReason() == null ? reasoning.content() : Optional.empty());
+                reasoning.rejectionReason() == null ? reasoning.content() : Optional.empty(),
+                narration.rejectionReason() == null ? narration.content() : Optional.empty());
     }
 
     private <T> AiNativeToolCompletion<T> malformedNativeTool(

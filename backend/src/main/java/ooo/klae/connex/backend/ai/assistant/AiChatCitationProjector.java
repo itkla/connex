@@ -41,6 +41,8 @@ public class AiChatCitationProjector {
     private static final java.util.regex.Pattern SKILL_VERSION =
             java.util.regex.Pattern.compile("\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}");
     private static final int MAX_STORED_INSTANT_CHARS = 64;
+    private static final int MAX_NARRATION_SEGMENTS = 64;
+    private static final int MAX_NARRATION_CHARS = 16_000;
 
     private final ObjectMapper objectMapper;
     private final PersonMapper personMapper;
@@ -118,6 +120,44 @@ public class AiChatCitationProjector {
                         ? AiAssistantStepGuard.filterSuggestions(stored.values())
                         : List.of()));
         return Map.copyOf(projected);
+    }
+
+    /**
+     * Reads the durable narration segments of one assistant message.
+     *
+     * <p>Narration is model prose that already passed screening, the strict leak scan, and
+     * demasking before it was stored, so projection only revalidates its shape and bounds — the
+     * same defensive posture the citation projection takes toward stored metadata. Any malformed
+     * entry drops the whole list rather than rendering a partial trail.
+     *
+     * @param message persisted assistant message
+     * @return ordered narration segments, empty when the message carries none
+     */
+    public List<AiChatNarration> narration(AiChatMessage message) {
+        if (!"assistant".equals(message.getAuthorKind()) || message.getStructuredJson() == null) {
+            return List.of();
+        }
+        try {
+            JsonNode values = objectMapper.readTree(message.getStructuredJson()).get("narration");
+            if (values == null || !values.isArray() || values.isEmpty()
+                    || values.size() > MAX_NARRATION_SEGMENTS) {
+                return List.of();
+            }
+            List<AiChatNarration> segments = new ArrayList<>();
+            for (JsonNode value : values) {
+                JsonNode seq = value.path("seq");
+                JsonNode text = value.path("text");
+                if (!value.isObject() || value.size() != 2
+                        || !seq.isIntegralNumber() || !seq.canConvertToInt() || seq.asInt() < 0
+                        || !text(text, MAX_NARRATION_CHARS)) {
+                    return List.of();
+                }
+                segments.add(new AiChatNarration(seq.asInt(), text.asString()));
+            }
+            return List.copyOf(segments);
+        } catch (JacksonException exception) {
+            return List.of();
+        }
     }
 
     private static boolean text(JsonNode value, int maxLength) {

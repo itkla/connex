@@ -209,7 +209,8 @@ public class AiAssistantService {
                         message.getAuthorUserId() == null
                                 ? null
                                 : authorNames.get(message.getAuthorUserId()),
-                        contentWithheld);
+                        contentWithheld,
+                        citationProjector.narration(message));
             })
             .toList();
         var activeTurn = chatMapper.getLatestActiveTurnBySession(workspaceId, id);

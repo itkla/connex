@@ -21,7 +21,21 @@ public sealed interface AiNativeToolCompletion<T> {
             int inputTokens,
             int outputTokens,
             String stopReason,
-            Optional<String> reasoning) implements AiNativeToolCompletion<T> {
+            Optional<String> reasoning,
+            Optional<String> narration) implements AiNativeToolCompletion<T> {
+
+        /** Creates a tool completion whose provider emitted no narration alongside the call. */
+        public Tool(
+                AiToolCall providerCall,
+                JsonNode arguments,
+                int demaskWarnings,
+                int inputTokens,
+                int outputTokens,
+                String stopReason,
+                Optional<String> reasoning) {
+            this(providerCall, arguments, demaskWarnings, inputTokens, outputTokens,
+                    stopReason, reasoning, Optional.empty());
+        }
 
         public Tool {
             Objects.requireNonNull(providerCall, "providerCall");
@@ -32,6 +46,7 @@ public sealed interface AiNativeToolCompletion<T> {
             arguments = source.deepCopy();
             Objects.requireNonNull(stopReason, "stopReason");
             reasoning = Objects.requireNonNull(reasoning, "reasoning");
+            narration = Objects.requireNonNull(narration, "narration");
         }
 
         @Override
@@ -47,7 +62,8 @@ public sealed interface AiNativeToolCompletion<T> {
                     + ", inputTokens=" + inputTokens
                     + ", outputTokens=" + outputTokens
                     + ", stopReason=" + stopReason
-                    + ", reasoning=<redacted>]";
+                    + ", reasoning=<redacted>"
+                    + ", narration=<redacted>]";
         }
     }
 

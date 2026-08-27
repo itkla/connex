@@ -2928,6 +2928,12 @@ export type AiChatProgressItem = {
     truncated: boolean;
 };
 
+/** One persisted narration segment, keyed by the model step that produced it. */
+export type AiChatNarrationSegment = {
+    seq: number;
+    text: string;
+};
+
 /** API representation of one ordered assistant chat message. */
 export type AiChatMessage = {
     id: number;
@@ -2942,6 +2948,12 @@ export type AiChatMessage = {
     createdAt: string;
     citations?: AiChatCitation[] | null;
     suggestions?: string[] | null;
+    /**
+     * The narration the assistant wrote between tool calls while producing this answer, in step
+     * order. Persisted alongside the answer so a reloaded transcript shows the same trail of work
+     * the requester watched live.
+     */
+    narration?: AiChatNarrationSegment[] | null;
 };
 
 /** Viewer-safe membership state for one shared assistant session participant. */
@@ -2990,8 +3002,29 @@ export type AiChatThinkingFrame = {
     text: string;
 };
 
+/**
+ * One narration segment for the requester's in-flight turn: the prose the assistant writes between
+ * tool calls to say what it is doing and what it just found. `seq` is the model step number and
+ * `text` is screened, demasked prose.
+ *
+ * Unlike {@link AiChatThinkingFrame} this is public-facing writing rather than private reasoning,
+ * so the same segments are persisted with the answer and replayed from `AiChatMessage.narration`
+ * after a reload.
+ */
+export type AiChatNarrationFrame = {
+    workspaceId: number;
+    sessionId: number;
+    turnId: number;
+    seq: number;
+    kind: 'narration';
+    text: string;
+};
+
 /** Every frame the assistant session's metadata path can deliver. */
-export type AiChatRealtimeFrame = AiChatMetadataFrame | AiChatThinkingFrame;
+export type AiChatRealtimeFrame =
+    | AiChatMetadataFrame
+    | AiChatThinkingFrame
+    | AiChatNarrationFrame;
 
 /**
  * One live streamed answer fragment for an unmasked-organization assistant turn. `seq` is the

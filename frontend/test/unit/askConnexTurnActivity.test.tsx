@@ -63,6 +63,7 @@ const labels: AskConnexTurnLabels = {
     turnStreaming: "Writing…",
     turnWorking: "Thinking…",
     thinkingToggle: "Show thinking",
+    narrationTrail: "Work in progress",
 };
 
 const THINKING = [

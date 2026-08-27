@@ -183,6 +183,7 @@ public class AiChatAgentLoopService {
             ToolBudgetAudit toolBudgetAudit = ToolBudgetAudit.NONE;
             int nativeProviderAttempts = 0;
             int noProgressSteps = 0;
+            List<AiChatNarration> narration = new ArrayList<>();
             int inputTokens = addTokens(memory.inputTokens(), attachmentContext.inputTokens());
             int outputTokens = addTokens(memory.outputTokens(), attachmentContext.outputTokens());
             AiSkillRouter.Routing routing = skillRouter.route(
@@ -332,6 +333,7 @@ public class AiChatAgentLoopService {
                             && toolTurns.isEmpty()
                             && nativeCalls.isEmpty();
                     boolean nativeMalformed = false;
+                    Optional<String> stepNarration = Optional.empty();
                     try (AiInvocationAdmissionService.DirectAdmission admission =
                             invocationAdmissionService.acquireDirect()) {
                         Runnable providerGuard = () -> {
@@ -361,6 +363,7 @@ public class AiChatAgentLoopService {
                             attempt = nativeAttempt.attempt();
                             nativeProviderCall = nativeAttempt.providerCall();
                             nativeMalformed = nativeAttempt.malformed();
+                            stepNarration = nativeAttempt.narration();
                         } else {
                             attempt = invocationService.completeStructuredRepairable(
                                     invocation,
@@ -389,6 +392,12 @@ public class AiChatAgentLoopService {
                     persistenceService.requireRunning(turn);
                     requireCurrentAccess(turn);
                     publishThinking(turn, stepNumber, attempt.reasoning());
+                    stepNarration.filter(text -> !text.isBlank()).ifPresent(text -> {
+                        narration.add(new AiChatNarration(stepNumber, text));
+                        publish(turn, new AiChatStepFrameDto(
+                                turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                                stepNumber, "narration", null, null, null, null, text));
+                    });
                     inputTokens = addTokens(inputTokens, inputTokens(outcome));
                     outputTokens = addTokens(outputTokens, outputTokens(outcome));
                     if (deadlineReached(deadline)) {
@@ -838,7 +847,8 @@ public class AiChatAgentLoopService {
                         citationProjector.observe(
                                 turn.workspaceId(), citations, citedResources),
                         toolBudgetAudit,
-                        skillReference);
+                        skillReference,
+                        omitted ? List.of() : List.copyOf(narration));
                 requireCurrentAccess(turn);
                 persistenceService.resolve(
                         turn, persistedText, metadata, inputTokens, outputTokens);
@@ -1199,7 +1209,8 @@ public class AiChatAgentLoopService {
                         new AiStructuredRepairAttempt<>(
                                 outcome, Optional.empty(), tool.reasoning()),
                         Optional.of(tool.providerCall()),
-                        false);
+                        false,
+                        tool.narration());
             }
             case AiNativeToolCompletion.Content<AiAssistantStep.FinalAnswer> content -> {
                 AiStructuredRepairAttempt<AiAssistantStep.FinalAnswer> source = content.attempt();
@@ -1246,7 +1257,15 @@ public class AiChatAgentLoopService {
     private record NativeStepAttempt(
             AiStructuredRepairAttempt<AiAssistantStep> attempt,
             Optional<AiToolCall> providerCall,
-            boolean malformed) {
+            boolean malformed,
+            Optional<String> narration) {
+
+        private NativeStepAttempt(
+                AiStructuredRepairAttempt<AiAssistantStep> attempt,
+                Optional<AiToolCall> providerCall,
+                boolean malformed) {
+            this(attempt, providerCall, malformed, Optional.empty());
+        }
 
         private NativeStepAttempt {
             java.util.Objects.requireNonNull(attempt, "attempt");

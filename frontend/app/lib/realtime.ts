@@ -4,6 +4,7 @@ import { csrfHeader } from "@/app/lib/api";
 import { isAskConnexProgressSource } from "@/app/lib/askConnex";
 import {
     type AiChatDeltaFrame,
+    type AiChatNarrationFrame,
     type AiChatRealtimeFrame,
     type AiChatThinkingFrame,
     type Notification,
@@ -118,9 +119,16 @@ function parseAiChatDeltaFrame(parsed: unknown): AiChatDeltaFrame | null {
     return { workspaceId, sessionId, turnId, seq, kind: "delta", text };
 }
 
-function parseAiChatThinkingFrame(parsed: unknown): AiChatThinkingFrame | null {
+/**
+ * Reads one per-step text frame — the private reasoning trail or the public narration — which share
+ * a shape and differ only in the kind that says how the client may show them.
+ */
+function parseAiChatStepTextFrame<K extends "thinking" | "narration">(
+    parsed: unknown,
+    kind: K,
+): { workspaceId: number; sessionId: number; turnId: number; seq: number; kind: K; text: string } | null {
     if (typeof parsed !== "object" || parsed === null) return null;
-    if (Reflect.get(parsed, "kind") !== "thinking") return null;
+    if (Reflect.get(parsed, "kind") !== kind) return null;
     const workspaceId = Reflect.get(parsed, "workspaceId");
     const sessionId = Reflect.get(parsed, "sessionId");
     const turnId = Reflect.get(parsed, "turnId");
@@ -131,13 +139,23 @@ function parseAiChatThinkingFrame(parsed: unknown): AiChatThinkingFrame | null {
             || !Number.isSafeInteger(value) || value <= 0)) return null;
     if (typeof seq !== "number" || !Number.isSafeInteger(seq) || seq < 0) return null;
     if (typeof text !== "string") return null;
-    return { workspaceId, sessionId, turnId, seq, kind: "thinking", text };
+    return { workspaceId, sessionId, turnId, seq, kind, text };
+}
+
+function parseAiChatThinkingFrame(parsed: unknown): AiChatThinkingFrame | null {
+    return parseAiChatStepTextFrame(parsed, "thinking");
+}
+
+function parseAiChatNarrationFrame(parsed: unknown): AiChatNarrationFrame | null {
+    return parseAiChatStepTextFrame(parsed, "narration");
 }
 
 function parseAiChatFrame(parsed: unknown): AiChatRealtimeFrame | null {
     if (typeof parsed !== "object" || parsed === null) return null;
     const thinking = parseAiChatThinkingFrame(parsed);
     if (thinking) return thinking;
+    const narration = parseAiChatNarrationFrame(parsed);
+    if (narration) return narration;
     const workspaceId = Reflect.get(parsed, "workspaceId");
     const sessionId = Reflect.get(parsed, "sessionId");
     const turnId = Reflect.get(parsed, "turnId");

@@ -78,9 +78,9 @@ import type {
     AskConnexFileAttachment,
     AskConnexRequestScope,
     AskConnexSelectionContext,
-    AskConnexThinkingEntry,
     AskConnexToolAction,
     AskConnexToolCardState,
+    AskConnexTurnSegment,
     AskConnexTurnState,
 } from '@/app/lib/askConnex';
 import {
@@ -90,6 +90,7 @@ import {
     askConnexCitationHref,
     askConnexCitations,
     askConnexGroupedToolCallIds,
+    askConnexMessageNarration,
     askConnexPromptFocusPending,
     askConnexProposalGroups,
     askConnexTranscript,
@@ -201,7 +202,7 @@ type UnavailableState = {
 
 const noopRecovery = () => {};
 
-const EMPTY_THINKING: readonly AskConnexThinkingEntry[] = [];
+const EMPTY_TURN_SEGMENTS: readonly AskConnexTurnSegment[] = [];
 
 /** A settled answer with no route out: the member stopped it themselves. */
 const NO_RECOVERY: AskConnexRecovery = {
@@ -232,6 +233,8 @@ export type AskConnexTurnLabels = {
     turnWorking: string;
     /** Accessible name for the disclosure that expands the in-flight reasoning panel. */
     thinkingToggle: string;
+    /** Accessible name for the list of narration segments leading up to an answer. */
+    narrationTrail: string;
 };
 
 /**
@@ -408,7 +411,9 @@ type AskConnexDrawerProps = {
     working: boolean;
     turn: AskConnexTurnState;
     /** The active turn's ephemeral reasoning steps, in step order; empty for everyone but the requester. */
-    thinking: readonly AskConnexThinkingEntry[];
+    thinking: readonly AskConnexTurnSegment[];
+    /** The active turn's narration so far, in step order; empty for everyone but the requester. */
+    narration: readonly AskConnexTurnSegment[];
     streamStore: AskConnexStreamStore;
     streaming: boolean;
     cancelling: boolean;
@@ -677,6 +682,44 @@ function SenderAvatar({ user, label }: { user: boolean; label: string }) {
     );
 }
 
+/**
+ * The work the assistant narrated on its way to an answer, one quiet line per step.
+ *
+ * Narration is public-facing prose — what it is about to do, and what it just found — so it sits in
+ * the transcript above the answer rather than inside the private reasoning panel. The treatment is
+ * deliberately lighter than an answer bubble: this is the trail that leads to the reply, not the
+ * reply, and a reader skimming for the answer has to be able to tell the two apart at a glance.
+ *
+ * Segments render as Markdown for the same reason the answer does — the model writes prose, and
+ * emphasis or a short list should read the way it reads in the reply. Record references are gated
+ * by `allowedRecords`, so a live segment written before the server rewrote its references shows
+ * inert text, and a settled one shows chips only for the citations the answer was authorized to
+ * carry.
+ */
+export function NarrationTrail({
+    segments,
+    allowedRecords,
+    label,
+}: {
+    segments: readonly AskConnexTurnSegment[];
+    allowedRecords: ReadonlySet<string>;
+    label: string;
+}) {
+    if (segments.length === 0) return null;
+    return (
+        <ul aria-label={label} className="space-y-1">
+            {segments.map((segment) => (
+                <li
+                    key={segment.seq}
+                    className="rounded-xl border border-border/60 bg-muted/40 px-3 py-1.5 text-xs leading-relaxed text-muted-foreground"
+                >
+                    <AskConnexMarkdown content={segment.text} allowedRecords={allowedRecords} />
+                </li>
+            ))}
+        </ul>
+    );
+}
+
 function TranscriptMessage({
     message,
     fresh,
@@ -715,6 +758,7 @@ function TranscriptMessage({
         ),
         [message.citations],
     );
+    const narration = useMemo(() => askConnexMessageNarration(message), [message]);
     const animateEntrance = fresh && !user;
     const createdAt = new Date(message.createdAt);
     const timestamp = Number.isNaN(createdAt.getTime())
@@ -731,6 +775,13 @@ function TranscriptMessage({
                     <MessageHeader className={user ? 'justify-end' : undefined}>
                         {author}
                     </MessageHeader>
+                ) : null}
+                {!user && message.contentWithheld !== true && narration.length > 0 ? (
+                    <NarrationTrail
+                        segments={narration}
+                        allowedRecords={allowedRecords}
+                        label={labels.narrationTrail}
+                    />
                 ) : null}
                 <motion.div
                     initial={animateEntrance ? (reduceMotion ? { opacity: 0 } : { opacity: 0, transform: 'translateY(0.375rem)' }) : false}
@@ -971,7 +1022,7 @@ export function TurnActivity({
     cancelling,
     canRetry,
     hasPartial = false,
-    thinking = EMPTY_THINKING,
+    thinking = EMPTY_TURN_SEGMENTS,
     labels,
     onCancel,
     onRetry,
@@ -985,7 +1036,7 @@ export function TurnActivity({
     /** Whether words were retained from this answer before it stopped. */
     hasPartial?: boolean;
     /** The active turn's ephemeral reasoning steps, in step order; only the requester has any. */
-    thinking?: readonly AskConnexThinkingEntry[];
+    thinking?: readonly AskConnexTurnSegment[];
     labels: AskConnexTurnLabels;
     onCancel: () => void;
     onRetry: () => void;
@@ -1497,6 +1548,7 @@ function ConversationSurface({
     working,
     turn,
     thinking,
+    narration,
     streamStore,
     streaming,
     cancelling,
@@ -1617,6 +1669,16 @@ function ConversationSurface({
      * withdrawing this member's authority to read what it wrote.
      */
     const hasPartialAnswer = streaming;
+    /**
+     * The narration to show above the pending answer, which is only ever the running turn's.
+     *
+     * Once a turn settles its narration belongs to the message it produced, which carries the same
+     * segments durably — so the live trail stands down at exactly the moment the settled one takes
+     * over, and the reader never sees the same work narrated twice.
+     */
+    const liveNarration = turn.phase === 'accepted' || turn.phase === 'running'
+        ? narration
+        : EMPTY_TURN_SEGMENTS;
     const suggestions = useMemo(
         () => latestAskConnexSuggestions(messages, busy),
         [busy, messages],
@@ -1957,6 +2019,20 @@ function ConversationSurface({
                                         );
                                     })}
                                 </>
+                            ) : null}
+                            {loadState === 'ready' && liveNarration.length > 0 ? (
+                                <MessageScrollerItem
+                                    messageId={`narration:${turn.turnId ?? 'pending'}`}
+                                    className="px-4 pt-5 last:pb-5"
+                                >
+                                    <div className="pl-10">
+                                        <NarrationTrail
+                                            segments={liveNarration}
+                                            allowedRecords={EMPTY_ASK_CONNEX_ALLOWED_RECORDS}
+                                            label={labels.narrationTrail}
+                                        />
+                                    </div>
+                                </MessageScrollerItem>
                             ) : null}
                             {loadState === 'ready' ? (
                                 <StreamingTail store={streamStore} turn={turn} labels={labels} />
@@ -2479,6 +2555,7 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         working: props.working,
         turn: props.turn,
         thinking: props.thinking,
+        narration: props.narration,
         streamStore: props.streamStore,
         streaming: props.streaming,
         cancelling: props.cancelling,

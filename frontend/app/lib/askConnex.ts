@@ -11,6 +11,7 @@ import type {
     AiChatPageContextKind,
     AiChatProgressItem,
     AiChatProgressSource,
+    AiChatNarrationFrame,
     AiChatThinkingFrame,
     Page,
 } from '@/app/lib/types';
@@ -1340,38 +1341,40 @@ export function reduceAskConnexTurn(
     };
 }
 
-/** One reasoning step the assistant published for a turn, keyed by its model step number. */
-export type AskConnexThinkingEntry = { seq: number; text: string };
+/** One per-step text segment the assistant published for a turn, keyed by its model step number. */
+export type AskConnexTurnSegment = { seq: number; text: string };
 
 /**
- * The ephemeral reasoning shown for one turn: one entry per model step, in step order.
+ * One turn's accumulated per-step text: the private reasoning trail or the public narration, one
+ * entry per model step, in step order.
  *
- * This exists only while its turn runs. The frames behind it are never persisted, so the state is
+ * Live state exists only while its turn runs. Thinking frames are never persisted, so that trail is
  * rebuilt from nothing for every turn and simply forgotten on refresh — by design, not by accident.
+ * Narration is persisted with the answer, so its live state is a preview of what the settled
+ * message will carry rather than the only copy.
  */
-export type AskConnexThinkingState = {
+export type AskConnexTurnSegments = {
     turnId: number;
-    entries: AskConnexThinkingEntry[];
+    entries: AskConnexTurnSegment[];
 };
 
 /**
- * The most reasoning one turn keeps on screen, as combined entry text length.
+ * The most per-step text one turn keeps on screen, as combined entry text length.
  *
  * Governance allows up to 48 steps (64 at the hard limit) of 16k characters each — three quarters
- * of a megabyte of DOM if every step ran long — so the panel keeps the newest whole entries that
- * fit within this budget and
- * lets the oldest fall off. The newest entry is always kept, even in the impossible case of a
- * single step exceeding the budget on its own, because a panel that dropped the step it just
- * received would read as broken rather than bounded.
+ * of a megabyte of DOM if every step ran long — so a trail keeps the newest whole entries that fit
+ * within this budget and lets the oldest fall off. The newest entry is always kept, even in the
+ * impossible case of a single step exceeding the budget on its own, because a surface that dropped
+ * the step it just received would read as broken rather than bounded.
  */
-export const ASK_CONNEX_THINKING_CHAR_CAP = 64_000;
+export const ASK_CONNEX_SEGMENT_CHAR_CAP = 64_000;
 
-function boundAskConnexThinkingEntries(
-    entries: AskConnexThinkingEntry[],
-): AskConnexThinkingEntry[] {
+function boundAskConnexTurnSegments(
+    entries: AskConnexTurnSegment[],
+): AskConnexTurnSegment[] {
     let start = entries.length - 1;
     let total = entries.length > 0 ? entries[entries.length - 1].text.length : 0;
-    while (start > 0 && total + entries[start - 1].text.length <= ASK_CONNEX_THINKING_CHAR_CAP) {
+    while (start > 0 && total + entries[start - 1].text.length <= ASK_CONNEX_SEGMENT_CHAR_CAP) {
         start -= 1;
         total += entries[start].text.length;
     }
@@ -1379,25 +1382,25 @@ function boundAskConnexThinkingEntries(
 }
 
 /**
- * Folds one ephemeral thinking frame into the reasoning shown for its turn.
+ * Folds one per-step text frame — thinking or narration — into the trail shown for its turn.
  *
  * Steps are keyed by `seq`, and a frame that repeats a step replaces that step's text: the native
  * schema-repair path re-publishes the same step number after a malformed attempt, so the last
  * writer is the one that succeeded, while a broker redelivery carries identical text and leaves the
  * state untouched by the same rule. Entries stay sorted by step so the rare out-of-order delivery
- * still reads in the order the model reasoned, the combined text is bounded by
- * {@link ASK_CONNEX_THINKING_CHAR_CAP} with the oldest whole entries evicted first, and a frame for
- * a different turn replaces the state outright — a new turn's reasoning never mingles with the
- * last one's.
+ * still reads in the order the model worked, the combined text is bounded by
+ * {@link ASK_CONNEX_SEGMENT_CHAR_CAP} with the oldest whole entries evicted first, and a frame for
+ * a different turn replaces the state outright — a new turn's trail never mingles with the last
+ * one's.
  */
-export function appendAskConnexThinking(
-    current: AskConnexThinkingState | null,
-    frame: AiChatThinkingFrame,
-): AskConnexThinkingState {
+export function appendAskConnexTurnSegment(
+    current: AskConnexTurnSegments | null,
+    frame: AiChatThinkingFrame | AiChatNarrationFrame,
+): AskConnexTurnSegments {
     if (current === null || current.turnId !== frame.turnId) {
         return {
             turnId: frame.turnId,
-            entries: boundAskConnexThinkingEntries([{ seq: frame.seq, text: frame.text }]),
+            entries: boundAskConnexTurnSegments([{ seq: frame.seq, text: frame.text }]),
         };
     }
     const existing = current.entries.find((entry) => entry.seq === frame.seq);
@@ -1406,12 +1409,31 @@ export function appendAskConnexThinking(
         const entries = current.entries.map((entry) => (entry.seq === frame.seq
             ? { seq: entry.seq, text: frame.text }
             : entry));
-        return { turnId: current.turnId, entries: boundAskConnexThinkingEntries(entries) };
+        return { turnId: current.turnId, entries: boundAskConnexTurnSegments(entries) };
     }
     const entries = [...current.entries, { seq: frame.seq, text: frame.text }]
         .sort((a, b) => a.seq - b.seq);
-    return { turnId: current.turnId, entries: boundAskConnexThinkingEntries(entries) };
+    return { turnId: current.turnId, entries: boundAskConnexTurnSegments(entries) };
 }
+
+/**
+ * The narration persisted with one answer, in the order the assistant wrote it.
+ *
+ * Ordered here rather than trusted to arrive ordered: the trail is a record of work the requester
+ * watched happen, so a payload that lost its order must not replay those steps in a sequence that
+ * never occurred. A message carrying none — every message before this feature, and every answer
+ * that went straight to its reply — yields the shared empty trail.
+ */
+export function askConnexMessageNarration(
+    message: Pick<AiChatMessage, 'narration'>,
+): readonly AskConnexTurnSegment[] {
+    const narration = message.narration;
+    if (!narration?.length) return EMPTY_ASK_CONNEX_TURN_SEGMENTS;
+    return narration.toSorted((a, b) => a.seq - b.seq);
+}
+
+/** The shared empty trail, so a message without narration renders nothing without new identity. */
+export const EMPTY_ASK_CONNEX_TURN_SEGMENTS: readonly AskConnexTurnSegment[] = [];
 
 /** The placeholder shown where the server established no value for a structured field. */
 export const ANSWER_ROW_PLACEHOLDER = '—';
