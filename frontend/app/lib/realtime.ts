@@ -2,7 +2,12 @@ import { Client, type IMessage } from "@stomp/stompjs";
 
 import { csrfHeader } from "@/app/lib/api";
 import { isAskConnexProgressSource } from "@/app/lib/askConnex";
-import { type AiChatDeltaFrame, type AiChatRealtimeFrame, type Notification } from "@/app/lib/types";
+import {
+    type AiChatDeltaFrame,
+    type AiChatRealtimeFrame,
+    type AiChatThinkingFrame,
+    type Notification,
+} from "@/app/lib/types";
 
 const NOTIFICATIONS_QUEUE = "/user/queue/notifications";
 const AI_CHAT_QUEUE = "/user/queue/ai-chat";
@@ -113,8 +118,26 @@ function parseAiChatDeltaFrame(parsed: unknown): AiChatDeltaFrame | null {
     return { workspaceId, sessionId, turnId, seq, kind: "delta", text };
 }
 
+function parseAiChatThinkingFrame(parsed: unknown): AiChatThinkingFrame | null {
+    if (typeof parsed !== "object" || parsed === null) return null;
+    if (Reflect.get(parsed, "kind") !== "thinking") return null;
+    const workspaceId = Reflect.get(parsed, "workspaceId");
+    const sessionId = Reflect.get(parsed, "sessionId");
+    const turnId = Reflect.get(parsed, "turnId");
+    const seq = Reflect.get(parsed, "seq");
+    const text = Reflect.get(parsed, "text");
+    const identities = [workspaceId, sessionId, turnId];
+    if (identities.some((value) => typeof value !== "number"
+            || !Number.isSafeInteger(value) || value <= 0)) return null;
+    if (typeof seq !== "number" || !Number.isSafeInteger(seq) || seq < 0) return null;
+    if (typeof text !== "string") return null;
+    return { workspaceId, sessionId, turnId, seq, kind: "thinking", text };
+}
+
 function parseAiChatFrame(parsed: unknown): AiChatRealtimeFrame | null {
     if (typeof parsed !== "object" || parsed === null) return null;
+    const thinking = parseAiChatThinkingFrame(parsed);
+    if (thinking) return thinking;
     const workspaceId = Reflect.get(parsed, "workspaceId");
     const sessionId = Reflect.get(parsed, "sessionId");
     const turnId = Reflect.get(parsed, "turnId");

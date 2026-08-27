@@ -11,7 +11,9 @@ import {
     AskConnexFileRemovalError,
     actionableAskConnexToolCallIds,
     activeSelectionAskConnexContext,
+    ASK_CONNEX_THINKING_CHAR_CAP,
     anchorAskConnexToolCards,
+    appendAskConnexThinking,
     askConnexCitationHref,
     askConnexCitations,
     askConnexLatestMessagePages,
@@ -48,7 +50,7 @@ import {
     type AskConnexFileAttachment,
 } from '@/app/lib/askConnex';
 import { AI_CHAT_PROGRESS_SOURCES, AI_CHAT_SOURCES } from '@/app/lib/types';
-import type { AiAssistantToolCall } from '@/app/lib/types';
+import type { AiAssistantToolCall, AiChatThinkingFrame } from '@/app/lib/types';
 
 const TOOL_SUMMARY_LABELS = {
     createActivity: '活動を作成',
@@ -1247,5 +1249,75 @@ describe('answer timestamps read the same way twice', () => {
 
     it('falls back to the placeholder rather than echoing something it cannot read', () => {
         expect(formatAnswerInstant('the day of the review', 'en-US')).toBe(ANSWER_ROW_PLACEHOLDER);
+    });
+});
+
+describe('ephemeral thinking accumulation', () => {
+    function thinkingFrame(overrides: Partial<AiChatThinkingFrame> = {}): AiChatThinkingFrame {
+        return {
+            workspaceId: 1,
+            sessionId: 4,
+            turnId: 9,
+            seq: 1,
+            kind: 'thinking',
+            text: 'Reading the cooling deals.',
+            ...overrides,
+        };
+    }
+
+    it('starts the reasoning from nothing on the first step', () => {
+        expect(appendAskConnexThinking(null, thinkingFrame())).toEqual({
+            turnId: 9,
+            entries: [{ seq: 1, text: 'Reading the cooling deals.' }],
+        });
+    });
+
+    it('appends later steps in step order', () => {
+        const first = appendAskConnexThinking(null, thinkingFrame());
+        const second = appendAskConnexThinking(
+            first, thinkingFrame({ seq: 2, text: 'Comparing last touches.' }),
+        );
+        expect(second.entries.map((entry) => entry.seq)).toEqual([1, 2]);
+    });
+
+    it('reorders a step that arrived late back into model order', () => {
+        const late = appendAskConnexThinking(
+            appendAskConnexThinking(null, thinkingFrame({ seq: 3, text: 'Concluding.' })),
+            thinkingFrame({ seq: 1 }),
+        );
+        expect(late.entries.map((entry) => entry.seq)).toEqual([1, 3]);
+    });
+
+    it('leaves the state untouched when a broker redelivery repeats a step verbatim', () => {
+        const once = appendAskConnexThinking(null, thinkingFrame());
+        const twice = appendAskConnexThinking(once, thinkingFrame());
+        expect(twice).toBe(once);
+    });
+
+    it('replaces a repeated step\'s text, keeping the schema-repair retry over the failed attempt', () => {
+        const malformed = appendAskConnexThinking(null, thinkingFrame({ text: 'Malformed attempt.' }));
+        const repaired = appendAskConnexThinking(malformed, thinkingFrame({ text: 'Repaired step.' }));
+        expect(repaired.entries).toEqual([{ seq: 1, text: 'Repaired step.' }]);
+    });
+
+    it('evicts the oldest whole entries once the combined text exceeds the cap', () => {
+        const step = (seq: number, letter: string) =>
+            thinkingFrame({ seq, text: letter.repeat(30_000) });
+        const bounded = [step(1, 'a'), step(2, 'b'), step(3, 'c')].reduce(
+            appendAskConnexThinking,
+            null as ReturnType<typeof appendAskConnexThinking> | null,
+        );
+        if (!bounded) throw new Error('the reducer returned nothing');
+        expect(bounded.entries.map((entry) => entry.seq)).toEqual([2, 3]);
+        const total = bounded.entries.reduce((sum, entry) => sum + entry.text.length, 0);
+        expect(total).toBeLessThanOrEqual(ASK_CONNEX_THINKING_CHAR_CAP);
+    });
+
+    it('never mingles one turn\'s reasoning with another\'s', () => {
+        const previous = appendAskConnexThinking(null, thinkingFrame());
+        const next = appendAskConnexThinking(
+            previous, thinkingFrame({ turnId: 10, seq: 1, text: 'A new question.' }),
+        );
+        expect(next).toEqual({ turnId: 10, entries: [{ seq: 1, text: 'A new question.' }] });
     });
 });

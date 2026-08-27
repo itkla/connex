@@ -2962,7 +2962,7 @@ export type AiChatPresence = {
 };
 
 /** Metadata-only realtime invalidation or turn-progress frame for an assistant session. */
-export type AiChatRealtimeFrame = {
+export type AiChatMetadataFrame = {
     workspaceId: number;
     sessionId: number;
     turnId: number;
@@ -2974,6 +2974,24 @@ export type AiChatRealtimeFrame = {
     toolCallId?: number | null;
     text?: null;
 };
+
+/**
+ * One ephemeral reasoning step for the requester's in-flight turn. `seq` is the model step number
+ * and `text` is that step's normalized reasoning, already screened and demasked server-side. These
+ * frames are never persisted — a refresh forgets them by design — so they carry no durable
+ * identity beyond the turn they narrate.
+ */
+export type AiChatThinkingFrame = {
+    workspaceId: number;
+    sessionId: number;
+    turnId: number;
+    seq: number;
+    kind: 'thinking';
+    text: string;
+};
+
+/** Every frame the assistant session's metadata path can deliver. */
+export type AiChatRealtimeFrame = AiChatMetadataFrame | AiChatThinkingFrame;
 
 /**
  * One live streamed answer fragment for an unmasked-organization assistant turn. `seq` is the

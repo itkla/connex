@@ -432,6 +432,7 @@
     "stopping": "停止中…",
     "turnAccepted": "リクエストを受け付けました",
     "turnWorking": "思考中…",
+    "thinkingToggle": "思考内容を表示",
     "turnStreaming": "回答を作成中…",
     "turnResolved": "回答の準備ができました",
     "turnCancelled": "応答を停止しました",

@@ -432,6 +432,7 @@
     "stopping": "Stopping…",
     "turnAccepted": "Request accepted",
     "turnWorking": "Thinking…",
+    "thinkingToggle": "Show thinking",
     "turnStreaming": "Writing…",
     "turnResolved": "Answer ready",
     "turnCancelled": "Response stopped",

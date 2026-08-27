@@ -11,6 +11,7 @@ import type {
     AiChatPageContextKind,
     AiChatProgressItem,
     AiChatProgressSource,
+    AiChatThinkingFrame,
     Page,
 } from '@/app/lib/types';
 import { parseMysqlDateTime } from '@/app/lib/utils';
@@ -1337,6 +1338,79 @@ export function reduceAskConnexTurn(
         reason: event.reason ?? null,
         progress: event.progress ?? state.progress,
     };
+}
+
+/** One reasoning step the assistant published for a turn, keyed by its model step number. */
+export type AskConnexThinkingEntry = { seq: number; text: string };
+
+/**
+ * The ephemeral reasoning shown for one turn: one entry per model step, in step order.
+ *
+ * This exists only while its turn runs. The frames behind it are never persisted, so the state is
+ * rebuilt from nothing for every turn and simply forgotten on refresh — by design, not by accident.
+ */
+export type AskConnexThinkingState = {
+    turnId: number;
+    entries: AskConnexThinkingEntry[];
+};
+
+/**
+ * The most reasoning one turn keeps on screen, as combined entry text length.
+ *
+ * Governance allows up to 48 steps (64 at the hard limit) of 16k characters each — three quarters
+ * of a megabyte of DOM if every step ran long — so the panel keeps the newest whole entries that
+ * fit within this budget and
+ * lets the oldest fall off. The newest entry is always kept, even in the impossible case of a
+ * single step exceeding the budget on its own, because a panel that dropped the step it just
+ * received would read as broken rather than bounded.
+ */
+export const ASK_CONNEX_THINKING_CHAR_CAP = 64_000;
+
+function boundAskConnexThinkingEntries(
+    entries: AskConnexThinkingEntry[],
+): AskConnexThinkingEntry[] {
+    let start = entries.length - 1;
+    let total = entries.length > 0 ? entries[entries.length - 1].text.length : 0;
+    while (start > 0 && total + entries[start - 1].text.length <= ASK_CONNEX_THINKING_CHAR_CAP) {
+        start -= 1;
+        total += entries[start].text.length;
+    }
+    return start <= 0 ? entries : entries.slice(start);
+}
+
+/**
+ * Folds one ephemeral thinking frame into the reasoning shown for its turn.
+ *
+ * Steps are keyed by `seq`, and a frame that repeats a step replaces that step's text: the native
+ * schema-repair path re-publishes the same step number after a malformed attempt, so the last
+ * writer is the one that succeeded, while a broker redelivery carries identical text and leaves the
+ * state untouched by the same rule. Entries stay sorted by step so the rare out-of-order delivery
+ * still reads in the order the model reasoned, the combined text is bounded by
+ * {@link ASK_CONNEX_THINKING_CHAR_CAP} with the oldest whole entries evicted first, and a frame for
+ * a different turn replaces the state outright — a new turn's reasoning never mingles with the
+ * last one's.
+ */
+export function appendAskConnexThinking(
+    current: AskConnexThinkingState | null,
+    frame: AiChatThinkingFrame,
+): AskConnexThinkingState {
+    if (current === null || current.turnId !== frame.turnId) {
+        return {
+            turnId: frame.turnId,
+            entries: boundAskConnexThinkingEntries([{ seq: frame.seq, text: frame.text }]),
+        };
+    }
+    const existing = current.entries.find((entry) => entry.seq === frame.seq);
+    if (existing) {
+        if (existing.text === frame.text) return current;
+        const entries = current.entries.map((entry) => (entry.seq === frame.seq
+            ? { seq: entry.seq, text: frame.text }
+            : entry));
+        return { turnId: current.turnId, entries: boundAskConnexThinkingEntries(entries) };
+    }
+    const entries = [...current.entries, { seq: frame.seq, text: frame.text }]
+        .sort((a, b) => a.seq - b.seq);
+    return { turnId: current.turnId, entries: boundAskConnexThinkingEntries(entries) };
 }
 
 /** The placeholder shown where the server established no value for a structured field. */
