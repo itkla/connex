@@ -228,7 +228,7 @@ class AiChatAgentLoopServiceTest {
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class)))
                 .thenReturn(parsed(toolStep));
         when(governanceService.isEnabled(TURN.workspaceId()))
-                .thenReturn(true, true, true, true, true, false);
+                .thenReturn(true, true, true, true, true, true, false);
 
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
 

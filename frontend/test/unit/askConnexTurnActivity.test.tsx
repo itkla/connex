@@ -65,7 +65,10 @@ const labels: AskConnexTurnLabels = {
     thinkingToggle: "Show thinking",
 };
 
-const THINKING = ["Reading the two cooling deals.", "Comparing their last touches."];
+const THINKING = [
+    { seq: 1, text: "Reading the two cooling deals." },
+    { seq: 2, text: "Comparing their last touches." },
+];
 
 /** The Markdown vocabulary the streamed tail's renderer reads from `next-intl`. */
 const MARKDOWN_MESSAGES = {
@@ -453,7 +456,7 @@ describe("the in-flight reasoning disclosure", () => {
         expect(markup).toContain(labels.turnWorking);
         expect(markup).toContain(labels.thinkingToggle);
         expect(markup).toContain('aria-expanded="false"');
-        for (const entry of THINKING) expect(markup).not.toContain(entry);
+        for (const entry of THINKING) expect(markup).not.toContain(entry.text);
     });
 
     it("shows every accumulated step when the line is expanded", async () => {
@@ -489,8 +492,46 @@ describe("the in-flight reasoning disclosure", () => {
 
         expect(toggle.getAttribute("aria-expanded")).toBe("true");
         for (const entry of THINKING) {
-            expect(interactive.container.textContent).toContain(entry);
+            expect(interactive.container.textContent).toContain(entry.text);
         }
+
+        await act(async () => {
+            root.unmount();
+        });
+    });
+
+    it("starts the next turn collapsed even when the surface never unmounted", async () => {
+        const interactive = installInteractiveDocument();
+        const { createRoot } = await import("react-dom/client");
+        const root = createRoot(interactive.container);
+        const render = (turnId: number) => act(async () => {
+            root.render(
+                <TurnActivity
+                    turn={turn({ phase: "running", turnId, progress: PROGRESS })}
+                    streaming={false}
+                    cancelling={false}
+                    canRetry={false}
+                    thinking={THINKING}
+                    labels={labels}
+                    onCancel={() => {}}
+                    onRetry={() => {}}
+                />,
+            );
+        });
+
+        await render(9);
+        const toggle = interactive.elements.find(
+            (element: InteractiveElement) => element.tagName === "BUTTON"
+                && element.textContent.includes(labels.thinkingToggle),
+        );
+        if (!toggle) throw new Error("the thinking disclosure was not rendered");
+        await act(async () => {
+            interactive.dispatch("click", toggle);
+        });
+        expect(toggle.getAttribute("aria-expanded")).toBe("true");
+
+        await render(10);
+        expect(toggle.getAttribute("aria-expanded")).toBe("false");
 
         await act(async () => {
             root.unmount();
@@ -504,7 +545,7 @@ describe("the in-flight reasoning disclosure", () => {
                 thinking: THINKING,
             });
             expect(markup).not.toContain(labels.thinkingToggle);
-            for (const entry of THINKING) expect(markup).not.toContain(entry);
+            for (const entry of THINKING) expect(markup).not.toContain(entry.text);
         }
     });
 });

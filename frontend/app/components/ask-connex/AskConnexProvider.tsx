@@ -104,6 +104,7 @@ import {
     type AskConnexScopePreview,
     type AskConnexSelectionContext,
     type AskConnexSourceContext,
+    type AskConnexThinkingEntry,
     type AskConnexThinkingState,
     type AskConnexToolAction,
     type AskConnexToolCardFailure,
@@ -191,7 +192,7 @@ const ASK_CONNEX_ACTIVITY_TYPES: readonly string[] = [
 const ASK_CONNEX_NOTE_VISIBILITIES: readonly string[] = ['private', 'workspace'];
 const EMPTY_ASK_CONNEX_TOOL_CALL_IDS: ReadonlySet<number> = new Set();
 const EMPTY_ASK_CONNEX_PINS: readonly AskConnexAttachment[] = [];
-const EMPTY_THINKING_ENTRIES: readonly string[] = [];
+const EMPTY_THINKING_ENTRIES: readonly AskConnexThinkingEntry[] = [];
 const noopCleanup = () => {};
 
 /**
@@ -906,12 +907,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         });
     }, [turn.phase, turn.turnId]);
 
-    const thinkingEntries = useMemo<readonly string[]>(
-        () => (thinking !== null && thinking.turnId === turn.turnId
-            ? thinking.entries.map((entry) => entry.text)
-            : EMPTY_THINKING_ENTRIES),
-        [thinking, turn.turnId],
-    );
+    const thinkingEntries = thinking !== null && thinking.turnId === turn.turnId
+        ? thinking.entries
+        : EMPTY_THINKING_ENTRIES;
 
     /**
      * Adopts the durable partial the server retains for this answer, including after it stopped —

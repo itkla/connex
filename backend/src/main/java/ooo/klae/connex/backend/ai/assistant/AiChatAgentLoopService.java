@@ -385,9 +385,10 @@ public class AiChatAgentLoopService {
                         continue;
                     }
                     outcome = java.util.Objects.requireNonNull(attempt, "attempt").outcome();
-                    publishThinking(turn, stepNumber, attempt.reasoning());
                     requireWorkspaceEnabled(turn);
                     persistenceService.requireRunning(turn);
+                    requireCurrentAccess(turn);
+                    publishThinking(turn, stepNumber, attempt.reasoning());
                     inputTokens = addTokens(inputTokens, inputTokens(outcome));
                     outputTokens = addTokens(outputTokens, outputTokens(outcome));
                     if (deadlineReached(deadline)) {
