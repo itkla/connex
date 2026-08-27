@@ -12,7 +12,6 @@ import {
     askConnexTimedOutMessage,
     askConnexWidthLength,
     askConnexWidthStorageKey,
-    boundedAnswerEntries,
     filterAskConnexSessions,
     groupAskConnexSessions,
     isAskConnexAuthorizationWithdrawal,
@@ -82,33 +81,6 @@ describe("drawer width", () => {
         expect(parseStoredAskConnexWidth("")).toBeNull();
         expect(parseStoredAskConnexWidth(null)).toBeNull();
         expect(ASK_CONNEX_DEFAULT_WIDTH).toBe("compact");
-    });
-});
-
-describe("bounded answer lists", () => {
-    it("withholds nothing when the surface has no cap", () => {
-        const entries = ["a", "b", "c", "d", "e", "f", "g"];
-        expect(boundedAnswerEntries(entries, null)).toEqual({ entries, hidden: 0 });
-    });
-
-    it("keeps a list that only exceeds the cap by one intact", () => {
-        const entries = ["a", "b", "c", "d", "e", "f"];
-        expect(boundedAnswerEntries(entries, 5)).toEqual({ entries, hidden: 0 });
-    });
-
-    it("stops at the cap and reports exactly what it withheld", () => {
-        const entries = ["a", "b", "c", "d", "e", "f", "g"];
-        expect(boundedAnswerEntries(entries, 5)).toEqual({
-            entries: ["a", "b", "c", "d", "e"],
-            hidden: 2,
-        });
-    });
-
-    it("copies rather than aliasing the caller's list", () => {
-        const entries = ["a"];
-        const result = boundedAnswerEntries(entries, null);
-        expect(result.entries).not.toBe(entries);
-        expect(result.entries).toEqual(entries);
     });
 });
 

@@ -156,58 +156,7 @@ class AiChatCitationProjectorTest {
                 projector.suggestions(3, 5, 11, List.of(message)).get(23));
     }
 
-    @Test
-    void historicalReasoningMetadataDoesNotCreateAnAnswerDocument() {
-        AiChatMessage message = new AiChatMessage();
-        message.setId(23);
-        message.setAuthorKind("assistant");
-        message.setStructuredJson(
-                "{\"turnId\":7,\"reasoning\":\"Compared the authorized relationship signals.\"}");
 
-        assertNull(projector.answerDocument(message, List.of()));
-    }
-
-    @Test
-    void projectsTypedAnswerDocumentWithAuthorizedEvidenceAndSafeProgress() {
-        AiChatMessage message = new AiChatMessage();
-        message.setAuthorKind("assistant");
-        message.setStructuredJson("""
-                {"turnId":7,
-                "blocks":[{"kind":"fact","title":"Renewal","body":"Atlas is active.",
-                "items":[],"rows":[],"citations":["r1"]},
-                {"kind":"timeline","title":null,"body":null,"items":[],
-                "rows":[{"label":"Renewal call","value":"Held","detail":null,
-                "at":"2026-08-21T10:00:00Z","citations":["r1"]}],"citations":[]}],
-                "coverage":{"status":"partial","asOf":"2026-08-21","periodStart":null,
-                "periodEnd":null,"sources":["records"],
-                "exclusions":["bounded_results"],"truncated":true},
-                "progress":[{"seq":0,"source":"scope","status":"complete","count":null,
-                "truncated":false},{"seq":1,"source":"records","status":"complete","count":1,
-                "truncated":true},{"seq":65,"source":"answer","status":"complete","count":null,
-                "truncated":false}]}
-                """);
-        AiChatCitationDto citation = new AiChatCitationDto("r1", "deal", 19, "Atlas");
-
-        var document = projector.answerDocument(message, List.of(citation));
-
-        assertEquals(7, document.turnId());
-        assertEquals("fact", document.blocks().getFirst().kind());
-        assertEquals(List.of(citation), document.blocks().getFirst().evidence());
-        assertEquals(List.of(), document.blocks().getFirst().rows());
-        var row = document.blocks().get(1).rows().getFirst();
-        assertEquals("Renewal call", row.label());
-        assertEquals("Held", row.value());
-        assertNull(row.detail());
-        assertEquals("2026-08-21T10:00:00Z", row.at());
-        assertEquals(List.of(citation), row.evidence());
-        assertEquals("partial", document.coverage().status());
-        assertEquals("records", document.progress().get(1).source());
-
-        var sharedDocument = projector.answerDocument(message, List.of(citation), false);
-
-        assertNull(sharedDocument.progress().get(1).count());
-        assertEquals(false, sharedDocument.progress().get(1).truncated());
-    }
 
     @Test
     void identifiesOnlyMessagesFromTheCurrentViewersTurns() {
@@ -227,73 +176,7 @@ class AiChatCitationProjectorTest {
                 projector.requestedMessageIds(3, 5, 11, List.of(own, shared)));
     }
 
-    @Test
-    void rejectsTypedAnswerDocumentWhoseEvidenceIsNoLongerAuthorized() {
-        AiChatMessage message = new AiChatMessage();
-        message.setAuthorKind("assistant");
-        message.setStructuredJson("""
-                {"turnId":7,
-                "blocks":[{"kind":"fact","title":null,"body":"Atlas is active.",
-                "items":[],"rows":[],"citations":["r1"]}],
-                "coverage":{"status":"complete","asOf":null,"periodStart":null,
-                "periodEnd":null,"sources":["records"],"exclusions":[],"truncated":false},
-                "progress":[]}
-                """);
 
-        assertNull(projector.answerDocument(message, List.of()));
-    }
-
-    @Test
-    void rejectsRowEvidenceThatIsNoLongerAuthorizedAndRowsOnAProseKind() {
-        AiChatMessage rowEvidence = new AiChatMessage();
-        rowEvidence.setAuthorKind("assistant");
-        rowEvidence.setStructuredJson("""
-                {"turnId":7,
-                "blocks":[{"kind":"metric","title":null,"body":null,"items":[],
-                "rows":[{"label":"Open pipeline","value":"12","detail":null,"at":null,
-                "citations":["r9"]}],"citations":[]}],
-                "coverage":{"status":"complete","asOf":null,"periodStart":null,
-                "periodEnd":null,"sources":["records"],"exclusions":[],"truncated":false},
-                "progress":[{"seq":0,"source":"scope","status":"complete","count":null,
-                "truncated":false}]}
-                """);
-
-        assertNull(projector.answerDocument(
-                rowEvidence, List.of(new AiChatCitationDto("r1", "deal", 19, "Atlas"))));
-
-        AiChatMessage proseKind = new AiChatMessage();
-        proseKind.setAuthorKind("assistant");
-        proseKind.setStructuredJson("""
-                {"turnId":7,
-                "blocks":[{"kind":"fact","title":null,"body":"Atlas is active.","items":[],
-                "rows":[{"label":"Open pipeline","value":"12","detail":null,"at":null,
-                "citations":[]}],"citations":[]}],
-                "coverage":{"status":"complete","asOf":null,"periodStart":null,
-                "periodEnd":null,"sources":["records"],"exclusions":[],"truncated":false},
-                "progress":[{"seq":0,"source":"scope","status":"complete","count":null,
-                "truncated":false}]}
-                """);
-
-        assertNull(projector.answerDocument(proseKind, List.of()));
-    }
-
-    @Test
-    void rejectsStoredCoverageWhoseTimestampIsModelProseRatherThanAnInstant() {
-        AiChatMessage message = new AiChatMessage();
-        message.setAuthorKind("assistant");
-        message.setStructuredJson("""
-                {"turnId":7,
-                "blocks":[{"kind":"fact","title":null,"body":"Atlas is active.","items":[],
-                "rows":[],"citations":[]}],
-                "coverage":{"status":"partial","asOf":"as of the last hospital visit",
-                "periodStart":null,"periodEnd":null,"sources":["records"],
-                "exclusions":[],"truncated":false},
-                "progress":[{"seq":0,"source":"scope","status":"complete","count":null,
-                "truncated":false}]}
-                """);
-
-        assertNull(projector.answerDocument(message, List.of()));
-    }
 
     @Test
     void truncatesCitationDetailWithoutSplittingASurrogatePair() {

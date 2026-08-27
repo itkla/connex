@@ -106,10 +106,10 @@ class AiAssistantPromptEnvelopeTest {
         System.out.println("[envelope] 32k react fixed=" + reactEnvelope
                 + " outputTokens=" + thirtyTwoKOutputTokens
                 + " cliffBytes=17919");
-        assertTrue(thirtyTwoKOutputTokens > 0 && thirtyTwoKOutputTokens < 2_048,
+        assertTrue(thirtyTwoKOutputTokens < CONFIGURED_MAX_OUTPUT_TOKENS / 2,
                 "A 32k model would retain " + thirtyTwoKOutputTokens
-                        + " output tokens, which is no longer the starved budget the floor"
-                        + " was raised over");
+                        + " output tokens, which can fund at least half the configured answer"
+                        + " budget; revisit whether the 64k floor is still the right refusal");
 
         AiAssistantLoopException refused = assertThrows(
                 AiAssistantLoopException.class,

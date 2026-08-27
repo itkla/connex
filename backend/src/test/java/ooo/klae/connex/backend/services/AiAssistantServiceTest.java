@@ -739,7 +739,6 @@ class AiAssistantServiceTest extends AbstractServiceTest {
 
         assertTrue(answer.isContentWithheld());
         assertEquals("", answer.getContent());
-        assertNull(answer.getAnswerDocument());
         assertEquals(List.of(), answer.getCitations());
         assertEquals(List.of(), answer.getSuggestions());
         assertEquals(

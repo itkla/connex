@@ -55,10 +55,7 @@ import SectionBoundary from '@/app/components/SectionBoundary';
 import MentionEditor, {
     type MentionEditorHandle,
 } from '@/app/components/activity/notes/MentionEditor';
-import AskConnexAnswerDocument, {
-    AskConnexCheckedTrail,
-    type AskConnexAnswerDocumentLabels,
-} from '@/app/components/ask-connex/AskConnexAnswerDocument';
+import AskConnexMarkdown from '@/app/components/ask-connex/AskConnexMarkdown';
 import {
     AskConnexContextStrip,
     AskConnexScopeNotice,
@@ -103,7 +100,6 @@ import type {
     AskConnexScopePreviewState,
 } from '@/app/lib/askConnexScope';
 import {
-    ASK_CONNEX_DRAWER_ROW_CAP,
     ASK_CONNEX_WIDTHS,
     askConnexRecovery,
     askConnexSessionActivity,
@@ -119,7 +115,6 @@ import {
     type AskConnexSessionGroupKey,
     type AskConnexWidth,
 } from '@/app/lib/askConnexSurface';
-import type { AskConnexAnswerBounds } from '@/app/components/ask-connex/answerDocument';
 import type { AskConnexStreamStore } from '@/app/lib/askConnexStream';
 import { durationMicro, easeOut, instant, springSmooth } from '@/app/lib/motion';
 import type {
@@ -128,7 +123,6 @@ import type {
     AiChatMessage,
     AiChatParticipant,
     AiChatPresence,
-    AiChatProgressItem,
     AiChatSession,
     WorkspaceMember,
 } from '@/app/lib/types';
@@ -212,10 +206,9 @@ const NO_RECOVERY: AskConnexRecovery = {
 
 /**
  * The vocabulary the live and settled answer surfaces need: the streamed tail, its partial-answer
- * disclosure, the status line, and the milestone trail beneath it.
+ * disclosure, and the status line.
  */
 export type AskConnexTurnLabels = {
-    answerDocument: AskConnexAnswerDocumentLabels;
     assistantAuthor: string;
     continueFromPartial: string;
     narrowScope: string;
@@ -665,7 +658,6 @@ function TranscriptMessage({
     suggestions,
     toolCalls,
     actionableToolCallIds,
-    bounds,
     labels,
     review,
     onSend,
@@ -678,7 +670,6 @@ function TranscriptMessage({
     suggestions: string[];
     toolCalls: AskConnexToolCardState[];
     actionableToolCallIds: ReadonlySet<number>;
-    bounds: AskConnexAnswerBounds;
     labels: AskConnexDrawerLabels;
     review: AskConnexToolReview;
     onSend: (content?: string) => void;
@@ -702,10 +693,7 @@ function TranscriptMessage({
             {lastInGroup
                 ? <SenderAvatar user={user} label={author} />
                 : <MessageAvatar aria-hidden className="bg-transparent" />}
-            <MessageContent className={cn(
-                'w-auto gap-1.5',
-                !user && message.answerDocument ? 'max-w-full' : 'max-w-[85%]',
-            )}>
+            <MessageContent className="w-auto max-w-[85%] gap-1.5">
                 {firstInGroup ? (
                     <MessageHeader className={user ? 'justify-end' : undefined}>
                         {author}
@@ -716,31 +704,21 @@ function TranscriptMessage({
                     animate={{ opacity: 1, transform: 'translateY(0rem)' }}
                     transition={reduceMotion ? instant : { duration: 0.2, ease: easeOut }}
                     className={cn(
-                        message.answerDocument
-                            ? 'w-full'
-                            : 'whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed',
+                        'break-words rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed',
                         message.contentWithheld === true
                             ? 'bg-muted text-muted-foreground italic'
                             : user
-                            ? 'bg-primary text-primary-foreground'
-                            : message.answerDocument
-                                ? null
-                                : 'bg-muted text-foreground',
+                            ? 'whitespace-pre-wrap bg-primary text-primary-foreground'
+                            : 'bg-muted text-foreground',
                     )}
                 >
                     {message.contentWithheld === true
                         ? labels.contentWithheld
-                        : !user && message.answerDocument
-                            ? (
-                                <AskConnexAnswerDocument
-                                    document={message.answerDocument}
-                                    bounds={bounds}
-                                    labels={labels.answerDocument}
-                                />
-                            )
-                            : message.content}
+                        : user
+                            ? message.content
+                            : <AskConnexMarkdown content={message.content} />}
                 </motion.div>
-                {!user && message.contentWithheld !== true && !message.answerDocument
+                {!user && message.contentWithheld !== true
                     ? <MessageCitations citations={message.citations} labels={labels} />
                     : null}
                 {!user && message.contentWithheld !== true ? (
@@ -866,19 +844,16 @@ function PresenceStrip({ presence, labels }: { presence: AiChatPresence; labels:
 }
 
 /**
- * A settled answer that produced no transcript message: what happened, what it covered before it
- * stopped, and the one action worth offering next.
+ * A settled answer that produced no transcript message: what happened, and the one action worth
+ * offering next.
  *
- * The milestone trail is repeated here because it otherwise exists only while the answer is still
- * running — a reader who arrives after it stopped would have no way to learn what was covered. The
- * announcement is deliberately kept to the one-line outcome: the trail and the retry control sit
- * outside it so settling does not read a whole list aloud.
+ * The announcement is deliberately kept to the one-line outcome: the retry control sits outside it
+ * so settling does not read a whole list aloud.
  */
 function SettledTurnActivity({
     icon,
     message,
     destructive,
-    progress,
     labels,
     recovery,
     onRetry,
@@ -888,7 +863,6 @@ function SettledTurnActivity({
     icon: ReactNode;
     message: string;
     destructive?: boolean;
-    progress: AiChatProgressItem[];
     labels: AskConnexTurnLabels;
     recovery: AskConnexRecovery;
     onRetry: () => void;
@@ -933,7 +907,6 @@ function SettledTurnActivity({
                 <span className="mt-px shrink-0">{icon}</span>
                 <span className="leading-relaxed">{message}</span>
             </div>
-            <AskConnexCheckedTrail progress={progress} labels={labels.answerDocument} />
             {offered.length > 0 ? (
                 <div className="flex flex-wrap items-center gap-1.5">{offered}</div>
             ) : null}
@@ -944,8 +917,8 @@ function SettledTurnActivity({
 /**
  * The live and settled state of the answer in progress.
  *
- * While the answer runs, the whole region is the announced status so each new milestone is spoken
- * as it lands rather than only the overall phase; the streamed words themselves are never announced.
+ * While the answer runs, the whole region is the announced status so a phase change is spoken as it
+ * lands; the streamed words themselves are never announced.
  *
  * The stop control appears only for the member who asked. A participant who opened a shared session
  * mid-turn adopts that turn into the same state, and the cancellation endpoint rejects anyone but
@@ -991,7 +964,6 @@ export function TurnActivity({
                 icon={<ExclamationCircleIcon className="size-3.5" />}
                 destructive
                 message={labels.terminalMessage[askConnexTerminalKind(turn.reason).message]}
-                progress={turn.progress}
                 labels={labels}
                 recovery={recovery}
                 onRetry={onRetry}
@@ -1005,7 +977,6 @@ export function TurnActivity({
             <SettledTurnActivity
                 icon={<ClockIcon className="size-3.5" />}
                 message={labels.terminalMessage[askConnexTimedOutMessage(turn.reason)]}
-                progress={turn.progress}
                 labels={labels}
                 recovery={recovery}
                 onRetry={onRetry}
@@ -1019,7 +990,6 @@ export function TurnActivity({
             <SettledTurnActivity
                 icon={<StopCircleIcon className="size-3.5" />}
                 message={labels.turnCancelled}
-                progress={turn.progress}
                 labels={labels}
                 recovery={NO_RECOVERY}
                 onRetry={onRetry}
@@ -1029,34 +999,27 @@ export function TurnActivity({
         );
     }
     return (
-        <div role="status" className="space-y-2 px-4 py-2 text-xs text-muted-foreground">
-            <div className="flex items-center gap-2">
-                <SparklesIcon className="size-3.5" />
-                <span>{cancelling
-                    ? labels.stopping
-                    : turn.phase === 'accepted'
-                        ? labels.turnAccepted
-                        : streaming
-                            ? labels.turnStreaming
-                            : labels.turnWorking}</span>
-                {turn.cancellable ? (
-                    <IconButton
-                        type="button"
-                        variant="ghost"
-                        size="icon-toolbar"
-                        label={labels.stop}
-                        disabled={cancelling}
-                        onClick={onCancel}
-                    >
-                        <StopIcon className="size-3.5" />
-                    </IconButton>
-                ) : null}
-            </div>
-            <AskConnexCheckedTrail
-                progress={turn.progress}
-                labels={labels.answerDocument}
-                expanded
-            />
+        <div role="status" className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground">
+            <SparklesIcon className="size-3.5" />
+            <span>{cancelling
+                ? labels.stopping
+                : turn.phase === 'accepted'
+                    ? labels.turnAccepted
+                    : streaming
+                        ? labels.turnStreaming
+                        : labels.turnWorking}</span>
+            {turn.cancellable ? (
+                <IconButton
+                    type="button"
+                    variant="ghost"
+                    size="icon-toolbar"
+                    label={labels.stop}
+                    disabled={cancelling}
+                    onClick={onCancel}
+                >
+                    <StopIcon className="size-3.5" />
+                </IconButton>
+            ) : null}
         </div>
     );
 }
@@ -1091,8 +1054,8 @@ export function StreamingTail({
                     <SenderAvatar user={false} label={labels.assistantAuthor} />
                     <MessageContent className="w-auto max-w-[85%] gap-1.5">
                         <MessageHeader>{labels.assistantAuthor}</MessageHeader>
-                        <div className="whitespace-pre-wrap break-words rounded-2xl bg-muted px-3.5 py-2.5 text-sm leading-relaxed text-foreground">
-                            {snapshot.text}
+                        <div className="break-words rounded-2xl bg-muted px-3.5 py-2.5 text-sm leading-relaxed text-foreground">
+                            <AskConnexMarkdown content={snapshot.text} />
                             {live ? (
                                 <span
                                     aria-hidden
@@ -1514,17 +1477,6 @@ function ConversationSurface({
     const fileOperationPending = hasPendingAskConnexFileOperation(fileAttachments);
     const busy = working || fileOperationPending;
     /**
-     * The workspace renders every row of an answer; the drawer bounds long lists and offers the
-     * workspace for the rest, so a forty-row timeline is never squeezed into the panel or turned
-     * into a sideways scroll.
-     */
-    const bounds = useMemo<AskConnexAnswerBounds>(
-        () => workspace
-            ? { cap: null, onOpenFullView: null }
-            : { cap: ASK_CONNEX_DRAWER_ROW_CAP, onOpenFullView: onOpenWorkspace },
-        [onOpenWorkspace, workspace],
-    );
-    /**
      * Proposals the member has taken out of a grouped review.
      *
      * Held here, beside the transcript, rather than inside the review: the cards are re-read
@@ -1887,7 +1839,6 @@ function ConversationSurface({
                                                                 suggestions={message.id === latestMessageId ? suggestions : []}
                                                                 toolCalls={toolCardAnchors.byMessageId.get(message.id) ?? []}
                                                                 actionableToolCallIds={actionableToolCallIds}
-                                                                bounds={bounds}
                                                                 labels={labels}
                                                                 review={toolReview}
                                                                 onSend={requestSend}

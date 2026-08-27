@@ -211,12 +211,6 @@ public class AiAssistantService {
                         message.getAuthorUserId() == null
                                 ? null
                                 : authorNames.get(message.getAuthorUserId()),
-                        contentWithheld
-                                ? null
-                                : citationProjector.answerDocument(
-                                        message,
-                                        citations,
-                                        requestedMessageIds.contains(message.getId())),
                         contentWithheld);
             })
             .toList();

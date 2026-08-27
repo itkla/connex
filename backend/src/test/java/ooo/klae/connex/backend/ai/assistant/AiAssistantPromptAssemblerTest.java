@@ -78,9 +78,9 @@ class AiAssistantPromptAssemblerTest {
     void assemblyRegistersServerTextSoEnvelopeWordIdentifiersDoNotPoisonTheScan() {
         AiChatMessage request = new AiChatMessage();
         request.setAuthorKind("user");
-        request.setContent("Which deals need attention, and what is each one waiting on?");
+        request.setContent("Which deals need attention, and answer for each one.");
         MaskingContext context = new MaskingContext();
-        MaskingEngine.maskField(EntityKind.COMPANY, "what", context);
+        MaskingEngine.maskField(EntityKind.COMPANY, "answer", context);
 
         MaskedPrompt prompt = assembler.assemble(
                 List.of(request),
@@ -89,10 +89,10 @@ class AiAssistantPromptAssemblerTest {
                 context,
                 new AiChatResourceRegistry());
 
-        assertTrue(context.isTrustedTextCollision("what"));
+        assertTrue(context.isTrustedTextCollision("answer"));
         assertFalse(context.isTrustedTextCollision("Cyberdyne Systems"));
         assertTrue(prompt.getMessages().getFirst().getContent()
-                .contains("and what is each one waiting on?"));
+                .contains("and answer for each one."));
         String serialized = prompt.getSystemPrompt() + "\n" + prompt.getMessages().stream()
                 .map(message -> message.getContent())
                 .reduce("", (left, right) -> left + "\n" + right);

@@ -123,39 +123,6 @@ public class AiChatProgressService {
         };
     }
 
-    /** Downgrades model coverage claims when durable execution proves failure or truncation. */
-    public static AiAssistantStep.Coverage reconcileCoverage(
-            AiAssistantStep.Coverage claimed,
-            List<AiChatProgressItemDto> progress,
-            AiAssistantPromptAssembler.ToolBudgetAudit toolBudgetAudit) {
-        Objects.requireNonNull(claimed, "claimed");
-        Objects.requireNonNull(progress, "progress");
-        Objects.requireNonNull(toolBudgetAudit, "toolBudgetAudit");
-        boolean failed = progress.stream().anyMatch(item -> "failed".equals(item.status()));
-        boolean truncated = claimed.truncated()
-                || toolBudgetAudit.degraded()
-                || progress.stream().anyMatch(AiChatProgressItemDto::truncated);
-        LinkedHashSet<String> exclusions = new LinkedHashSet<>(claimed.exclusions());
-        if (failed) {
-            exclusions.add("tool_failure");
-        }
-        if (truncated) {
-            exclusions.add("bounded_results");
-        }
-        String status = claimed.status();
-        if ("complete".equals(status) && (failed || truncated || !exclusions.isEmpty())) {
-            status = "partial";
-        }
-        return new AiAssistantStep.Coverage(
-                status,
-                claimed.asOf(),
-                claimed.periodStart(),
-                claimed.periodEnd(),
-                claimed.sources(),
-                List.copyOf(exclusions),
-                truncated);
-    }
-
     private ProgressResult result(AiChatToolCall toolCall) {
         if (!"executed".equals(toolCall.getStatus()) || toolCall.getResultJson() == null) {
             return ProgressResult.EMPTY;

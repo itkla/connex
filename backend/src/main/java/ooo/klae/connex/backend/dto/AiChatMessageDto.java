@@ -22,7 +22,6 @@ public class AiChatMessageDto {
     private String createdAt;
     private List<AiChatCitationDto> citations = List.of();
     private List<String> suggestions = List.of();
-    private AiChatAnswerDocumentDto answerDocument;
 
     /** Maps a persisted message to its API representation. */
     public static AiChatMessageDto from(AiChatMessage message) {
@@ -58,7 +57,7 @@ public class AiChatMessageDto {
             List<String> suggestions,
             String authorDisplayName) {
         return from(
-                message, citations, suggestions, authorDisplayName, null, false);
+                message, citations, suggestions, authorDisplayName, false);
     }
 
     /** Maps a persisted message while withholding content whose live resources are inaccessible. */
@@ -67,7 +66,6 @@ public class AiChatMessageDto {
             List<AiChatCitationDto> citations,
             List<String> suggestions,
             String authorDisplayName,
-            AiChatAnswerDocumentDto answerDocument,
             boolean contentWithheld) {
         AiChatMessageDto dto = new AiChatMessageDto();
         dto.setId(message.getId());
@@ -83,7 +81,6 @@ public class AiChatMessageDto {
         dto.setCreatedAt(message.getCreatedAt());
         dto.setCitations(contentWithheld ? List.of() : List.copyOf(citations));
         dto.setSuggestions(contentWithheld ? List.of() : List.copyOf(suggestions));
-        dto.setAnswerDocument(contentWithheld ? null : answerDocument);
         return dto;
     }
 }

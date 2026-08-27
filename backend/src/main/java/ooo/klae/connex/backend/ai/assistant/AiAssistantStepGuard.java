@@ -1,7 +1,5 @@
 package ooo.klae.connex.backend.ai.assistant;
 
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
 import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -21,19 +19,7 @@ public class AiAssistantStepGuard implements AiRawOutputGuard {
     private static final Set<String> TOP_LEVEL_FIELDS = Set.of("tool", "final");
     private static final Set<String> TOOL_FIELDS = Set.of("name", "args");
     private static final Set<String> FINAL_FIELDS = Set.of(
-            "text", "citations", "suggestions", "title", "blocks", "coverage");
-    private static final Set<String> BLOCK_FIELDS = Set.of(
-            "kind", "title", "body", "items", "rows", "citations");
-    private static final Set<String> ROW_FIELDS = Set.of(
-            "label", "value", "detail", "at", "citations");
-    private static final Set<String> COVERAGE_FIELDS = Set.of(
-            "status", "asOf", "periodStart", "periodEnd", "sources", "exclusions", "truncated");
-    static final Set<String> BLOCK_KINDS = Set.of(
-            "answer", "fact", "inference", "recommendation", "metric", "list",
-            "comparison", "timeline", "draft", "extraction", "diff", "limitation");
-    static final Set<String> ROW_BLOCK_KINDS = Set.of(
-            "metric", "comparison", "timeline", "diff", "extraction");
-    static final Set<String> COVERAGE_STATUSES = Set.of("complete", "partial", "insufficient");
+            "text", "citations", "suggestions", "title");
     /**
      * The single source vocabulary shared by declared answer coverage and by the grounded
      * "What I checked" progress trail, so both surfaces name the same category the same way.
@@ -42,9 +28,6 @@ public class AiAssistantStepGuard implements AiRawOutputGuard {
     static final Set<String> COVERAGE_SOURCES = Set.of(
             "records", "deals", "activities", "tasks", "notes",
             "files", "metrics", "schedule", "actions", "other");
-    static final Set<String> COVERAGE_EXCLUSIONS = Set.of(
-            "private_data", "restricted_records", "unavailable_sources", "unsupported_context",
-            "bounded_results", "tool_failure");
     private static final Pattern HANDLE = Pattern.compile("r[1-9][0-9]*");
     private static final Pattern HANDLE_REFERENCE = Pattern.compile(
             "(?<![\\p{L}\\p{N}_])r[1-9][0-9]*(?![\\p{L}\\p{N}_])");
@@ -54,26 +37,8 @@ public class AiAssistantStepGuard implements AiRawOutputGuard {
                     + "|tool\\s+(?:call|command)|crm_data|model_output|step\\s+schema",
             Pattern.CASE_INSENSITIVE);
     private static final Pattern PLACEHOLDER = Pattern.compile("\\{\\{([A-Z][1-9][0-9]*)}}");
-    /**
-     * The calendar shapes a model-declared coverage timestamp may take. Coverage timestamps are
-     * echoed verbatim to viewers, including shared-session viewers, so they are constrained to a
-     * machine-readable instant rather than accepted as bounded prose.
-     */
-    private static final List<DateTimeFormatter> COVERAGE_INSTANT_FORMATS = List.of(
-            DateTimeFormatter.ISO_OFFSET_DATE_TIME,
-            DateTimeFormatter.ISO_LOCAL_DATE_TIME,
-            DateTimeFormatter.ISO_LOCAL_DATE);
-    static final int MAX_COVERAGE_INSTANT_CHARS = 64;
     private static final int MAX_FINAL_CHARS = 16_000;
     private static final int MAX_CITATIONS = 50;
-    static final int MAX_BLOCKS = 24;
-    static final int MAX_BLOCK_CHARS = 8_000;
-    static final int MAX_BLOCK_ITEMS = 20;
-    static final int MAX_BLOCK_ITEM_CHARS = 1_000;
-    static final int MAX_BLOCK_CITATIONS = 20;
-    static final int MAX_ROW_LABEL_CHARS = 120;
-    static final int MAX_ROW_VALUE_CHARS = 200;
-    static final int MAX_ROW_AT_CHARS = 64;
     static final int MAX_SUGGESTIONS = 3;
     static final int MAX_SUGGESTION_CHARS = 160;
 
@@ -217,174 +182,7 @@ public class AiAssistantStepGuard implements AiRawOutputGuard {
                 return "final_suggestions";
             }
         }
-        String blockRejection = blockRejection(finalAnswer.get("blocks"), citedHandles);
-        if (blockRejection != null) {
-            return blockRejection;
-        }
-        if (AiAssistantAnswerText.render(finalAnswer.get("blocks")).length() > MAX_FINAL_CHARS) {
-            return "final_blocks";
-        }
-        return coverageRejection(finalAnswer.get("coverage"), citedHandles);
-    }
-
-    private static String blockRejection(JsonNode blocks, Set<String> citedHandles) {
-        if (blocks == null || !blocks.isArray()
-                || blocks.isEmpty() || blocks.size() > MAX_BLOCKS) {
-            return "final_blocks";
-        }
-        for (JsonNode block : blocks) {
-            if (!block.isObject() || !exactFields(block, BLOCK_FIELDS)) {
-                return "final_blocks";
-            }
-            JsonNode kind = block.get("kind");
-            JsonNode title = block.get("title");
-            JsonNode body = block.get("body");
-            JsonNode items = block.get("items");
-            JsonNode rows = block.get("rows");
-            JsonNode citations = block.get("citations");
-            if (kind == null || !kind.isString() || !BLOCK_KINDS.contains(kind.asString())
-                    || !isNullableText(title, 200)
-                    || !isNullableText(body, MAX_BLOCK_CHARS)
-                    || items == null || !items.isArray() || items.size() > MAX_BLOCK_ITEMS
-                    || rows == null || !rows.isArray() || rows.size() > MAX_BLOCK_ITEMS
-                    || citations == null || !citations.isArray()
-                    || citations.size() > MAX_BLOCK_CITATIONS) {
-                return "final_blocks";
-            }
-            if (!rows.isEmpty() && !ROW_BLOCK_KINDS.contains(kind.asString())) {
-                return "final_blocks";
-            }
-            if ((body == null || body.isNull()) && items.isEmpty() && rows.isEmpty()) {
-                return "final_blocks";
-            }
-            for (JsonNode item : items) {
-                if (!isText(item, MAX_BLOCK_ITEM_CHARS)) {
-                    return "final_blocks";
-                }
-            }
-            Set<String> blockHandles = new LinkedHashSet<>();
-            for (JsonNode citation : citations) {
-                if (!citation.isString() || !HANDLE.matcher(citation.asString()).matches()
-                        || !citedHandles.contains(citation.asString())
-                        || !blockHandles.add(citation.asString())) {
-                    return "final_blocks";
-                }
-            }
-            Set<String> referencedHandles = new LinkedHashSet<>();
-            addReferencedHandles(referencedHandles, title);
-            addReferencedHandles(referencedHandles, body);
-            for (JsonNode item : items) {
-                addReferencedHandles(referencedHandles, item);
-            }
-            String rowRejection = rowRejection(rows, citedHandles, blockHandles, referencedHandles);
-            if (rowRejection != null) {
-                return rowRejection;
-            }
-            if (!blockHandles.containsAll(referencedHandles)) {
-                return "final_blocks";
-            }
-        }
         return null;
-    }
-
-    private static String rowRejection(
-            JsonNode rows,
-            Set<String> citedHandles,
-            Set<String> blockHandles,
-            Set<String> referencedHandles) {
-        for (JsonNode row : rows) {
-            if (!row.isObject() || !exactFields(row, ROW_FIELDS)) {
-                return "final_rows";
-            }
-            JsonNode label = row.get("label");
-            JsonNode value = row.get("value");
-            JsonNode detail = row.get("detail");
-            JsonNode at = row.get("at");
-            JsonNode citations = row.get("citations");
-            if (!isText(label, MAX_ROW_LABEL_CHARS)
-                    || !isNullableText(value, MAX_ROW_VALUE_CHARS)
-                    || !isNullableText(detail, MAX_ROW_VALUE_CHARS)
-                    || !isNullableText(at, MAX_ROW_AT_CHARS)
-                    || citations == null || !citations.isArray()
-                    || citations.size() > MAX_BLOCK_CITATIONS) {
-                return "final_rows";
-            }
-            Set<String> rowHandles = new LinkedHashSet<>();
-            for (JsonNode citation : citations) {
-                if (!citation.isString() || !HANDLE.matcher(citation.asString()).matches()
-                        || !citedHandles.contains(citation.asString())
-                        || !rowHandles.add(citation.asString())) {
-                    return "final_rows";
-                }
-            }
-            blockHandles.addAll(rowHandles);
-            addReferencedHandles(referencedHandles, label);
-            addReferencedHandles(referencedHandles, value);
-            addReferencedHandles(referencedHandles, detail);
-            addReferencedHandles(referencedHandles, at);
-        }
-        return null;
-    }
-
-    private static String coverageRejection(JsonNode coverage, Set<String> citedHandles) {
-        if (coverage == null || !coverage.isObject() || !exactFields(coverage, COVERAGE_FIELDS)) {
-            return "final_coverage";
-        }
-        JsonNode status = coverage.get("status");
-        JsonNode sources = coverage.get("sources");
-        JsonNode exclusions = coverage.get("exclusions");
-        JsonNode truncated = coverage.get("truncated");
-        if (status == null || !status.isString() || !COVERAGE_STATUSES.contains(status.asString())
-                || !isNullableCoverageInstant(coverage.get("asOf"))
-                || !isNullableCoverageInstant(coverage.get("periodStart"))
-                || !isNullableCoverageInstant(coverage.get("periodEnd"))
-                || sources == null || !sources.isArray()
-                || exclusions == null || !exclusions.isArray()
-                || truncated == null || !truncated.isBoolean()
-                || !isUniqueEnumArray(sources, COVERAGE_SOURCES)
-                || !isUniqueEnumArray(exclusions, COVERAGE_EXCLUSIONS)) {
-            return "final_coverage";
-        }
-        if ("complete".equals(status.asString())
-                && (truncated.asBoolean() || !exclusions.isEmpty())) {
-            return "final_coverage";
-        }
-        Set<String> referencedHandles = new LinkedHashSet<>();
-        addReferencedHandles(referencedHandles, coverage.get("asOf"));
-        addReferencedHandles(referencedHandles, coverage.get("periodStart"));
-        addReferencedHandles(referencedHandles, coverage.get("periodEnd"));
-        return citedHandles.containsAll(referencedHandles) ? null : "final_coverage";
-    }
-
-    private static boolean isNullableCoverageInstant(JsonNode value) {
-        if (value == null) {
-            return false;
-        }
-        return value.isNull()
-                || (value.isString() && isCoverageInstant(value.asString()));
-    }
-
-    /**
-     * Whether a coverage timestamp is a bounded ISO-8601 calendar value rather than model prose.
-     *
-     * <p>Shared with {@link AiChatCitationProjector}, which revalidates stored documents on read
-     * and must reach the same verdict without depending on this guard having run.
-     * @param value candidate coverage timestamp
-     * @return whether the value is an ISO-8601 date, local date-time, or offset date-time
-     */
-    static boolean isCoverageInstant(String value) {
-        if (value == null || value.isBlank() || value.length() > MAX_COVERAGE_INSTANT_CHARS) {
-            return false;
-        }
-        for (DateTimeFormatter format : COVERAGE_INSTANT_FORMATS) {
-            try {
-                format.parse(value);
-                return true;
-            } catch (DateTimeParseException exception) {
-                continue;
-            }
-        }
-        return false;
     }
 
     private static boolean isNullableText(JsonNode value, int maxLength) {

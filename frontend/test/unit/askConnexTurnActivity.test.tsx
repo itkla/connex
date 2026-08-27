@@ -1,5 +1,6 @@
 import { act, type PropsWithChildren, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { NextIntlClientProvider } from "next-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -30,42 +31,6 @@ vi.mock("@/components/ui/message-scroller", async () => {
 });
 
 const labels: AskConnexTurnLabels = {
-    answerDocument: {
-        absoluteTime: (instant) => `abs(${instant})`,
-        blockKind: (kind) => `kind:${kind}`,
-        boundedRows: (shown, total) => `showing ${shown} of ${total}`,
-        viewAll: "Open in full view",
-        citationKind: (kind) => `citationKind:${kind}`,
-        comparisonAgainst: "Compared with",
-        comparisonValue: "Value",
-        copyDraft: "Copy",
-        copyDraftDone: "Copied",
-        coverage: "Coverage",
-        coverageStatus: (status) => `coverageStatus:${status}`,
-        diffAfter: "After",
-        diffBefore: "Before",
-        dismiss: "Close",
-        evidence: "Evidence",
-        evidenceDetail: "Excerpt",
-        exclusions: "Not included",
-        exclusion: (exclusion) => `exclusion:${exclusion}`,
-        freshness: "Freshness",
-        freshnessCurrent: "Record updated",
-        moreDetail: "More detail",
-        openRecord: "Open record",
-        period: (start, end) => `period ${start} to ${end}`,
-        progressCount: (count) => `(${count} items)`,
-        progressSource: (source) => `progressSource:${source}`,
-        progressStatus: (status) => `progressStatus:${status}`,
-        relativeTime: (instant) => `rel(${instant})`,
-        sourceLimits: "Source limits",
-        sources: "Sources checked",
-        source: (source) => `source:${source}`,
-        truncated: "Results were bounded",
-        unsupported: "No source for this — read it as unconfirmed.",
-        whatChecked: "What I checked",
-        withheldEvidence: "Sources for the rows not shown",
-    },
     assistantAuthor: "Connex",
     partialAnswer: "Unfinished answer — this is as far as the assistant got before it stopped.",
     continueFromPartial: "Continue from here",
@@ -96,7 +61,19 @@ const labels: AskConnexTurnLabels = {
     turnCancelled: "Response stopped",
     turnResolved: "Answer ready",
     turnStreaming: "Writing…",
-    turnWorking: "Checking trusted sources…",
+    turnWorking: "Thinking…",
+};
+
+/** The Markdown vocabulary the streamed tail's renderer reads from `next-intl`. */
+const MARKDOWN_MESSAGES = {
+    ActivityNotesEditor: {
+        taskChecked: "Completed checklist item",
+        taskUnchecked: "Incomplete checklist item",
+        calloutInfo: "Information callout",
+        calloutSuccess: "Success callout",
+        calloutWarning: "Warning callout",
+        calloutDanger: "Danger callout",
+    },
 };
 
 const PROGRESS: AiChatProgressItem[] = [
@@ -138,10 +115,20 @@ async function renderClient(node: ReactNode): Promise<Rendered> {
     return rendered;
 }
 
+function withIntl(node: ReactNode): ReactNode {
+    return (
+        <NextIntlClientProvider locale="en" messages={MARKDOWN_MESSAGES}>
+            {node}
+        </NextIntlClientProvider>
+    );
+}
+
 function tail(phase: AskConnexTurnState["phase"], text = PARTIAL_TEXT): Promise<Rendered> {
     const store = createAskConnexStreamStore();
     store.publish({ turnId: 9, text });
-    return renderClient(<StreamingTail store={store} turn={turn({ phase })} labels={labels} />);
+    return renderClient(
+        withIntl(<StreamingTail store={store} turn={turn({ phase })} labels={labels} />),
+    );
 }
 
 function activity(overrides: Partial<Parameters<typeof TurnActivity>[0]> = {}): string {
@@ -191,7 +178,7 @@ describe("partial answers that stopped", () => {
         const store = createAskConnexStreamStore();
         store.publish(null);
         const rendered = await renderClient(
-            <StreamingTail store={store} turn={turn({ phase: "resolved" })} labels={labels} />,
+            withIntl(<StreamingTail store={store} turn={turn({ phase: "resolved" })} labels={labels} />),
         );
         expect(rendered.text).toBe("");
     });
@@ -200,23 +187,13 @@ describe("partial answers that stopped", () => {
         const store = createAskConnexStreamStore();
         store.publish({ turnId: 8, text: "Stale" });
         const rendered = await renderClient(
-            <StreamingTail store={store} turn={turn({ phase: "running" })} labels={labels} />,
+            withIntl(<StreamingTail store={store} turn={turn({ phase: "running" })} labels={labels} />),
         );
         expect(rendered.text).toBe("");
     });
 });
 
 describe("what a stopped answer offers next", () => {
-    it("keeps what was checked readable after the answer stopped", () => {
-        for (const phase of SETTLED_WITHOUT_ANSWER) {
-            const markup = activity({ turn: turn({ phase, progress: PROGRESS }) });
-            expect(markup).toContain("What I checked");
-            expect(markup).toContain("progressSource:deals");
-            expect(markup).toContain("(12 items)");
-            expect(markup).toContain("progressStatus:failed");
-        }
-    });
-
     it("offers to send the same question again after a failure or a timeout", () => {
         for (const phase of ["failed", "timed_out"] as const) {
             expect(activity({ turn: turn({ phase, progress: PROGRESS }) })).toContain("Try again");
@@ -258,26 +235,32 @@ describe("what a stopped answer offers next", () => {
         expect(rendered).toContain(labels.retry);
     });
 
-    it("announces the outcome without reading the whole trail aloud", () => {
+    it("announces the outcome without reading the offered routes aloud", () => {
         const markup = activity();
         const status = markup.slice(markup.indexOf('role="status"'));
         const announced = status.slice(0, status.indexOf("</div>"));
         expect(announced.length).toBeGreaterThan(0);
         expect(announced).toContain(labels.terminalMessage.generic);
-        expect(announced).not.toContain("What I checked");
         expect(announced).not.toContain("Try again");
     });
 
-    it("announces each milestone while the answer is still being produced", () => {
+    it("announces the status line while the answer is still being produced", () => {
         const markup = activity({
             turn: turn({ phase: "running", progress: PROGRESS, cancellable: true }),
             streaming: true,
         });
         const status = markup.indexOf('role="status"');
         expect(status).toBeGreaterThanOrEqual(0);
-        expect(markup.indexOf("What I checked")).toBeGreaterThan(status);
         expect(markup).toContain("Writing…");
         expect(markup).toContain("Stop generating");
+    });
+
+    it("says it is thinking before any words have streamed", () => {
+        const markup = activity({
+            turn: turn({ phase: "running", progress: PROGRESS }),
+            streaming: false,
+        });
+        expect(markup).toContain(labels.turnWorking);
     });
 
     it("offers the stop control only to the member whose turn it is", () => {

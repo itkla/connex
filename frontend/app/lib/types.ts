@@ -2886,58 +2886,9 @@ export type AiChatCitation = {
     observed?: boolean;
 };
 
-/** Closed presentation vocabulary for one native Ask Connex answer block. */
-export type AiChatAnswerBlockKind =
-    | 'answer'
-    | 'fact'
-    | 'inference'
-    | 'recommendation'
-    | 'metric'
-    | 'list'
-    | 'comparison'
-    | 'timeline'
-    | 'draft'
-    | 'extraction'
-    | 'diff'
-    | 'limitation';
-
 /**
- * One structured line inside a block whose kind carries tabular meaning. The four fields are read
- * differently per kind and the block kind is the only thing that says how: `metric` reads
- * label/value as a tile with `detail` as its delta or qualifier, `comparison` reads `value` and
- * `detail` as the two compared sides, `timeline` reads `at` as the entry's instant, `diff` reads
- * `value` as the before and `detail` as the after, and `extraction` reads label/value as a field
- * pair. Every string field is nullable because the server projects only what it could establish.
- */
-export interface AiChatAnswerRow {
-    label: string;
-    value: string | null;
-    detail: string | null;
-    /** ISO-8601 instant this row happened, or null for rows that are not events. */
-    at: string | null;
-    /** Citations already authorized for the current viewer, supporting this row alone. */
-    evidence: AiChatCitation[];
-}
-
-/**
- * One answer-document block with evidence already authorized for the current viewer.
- *
- * `rows` is only ever populated for the structured kinds (`metric`, `comparison`, `timeline`,
- * `diff`, `extraction`); every other kind carries an empty array and renders from `body`/`items`.
- */
-export type AiChatAnswerBlock = {
-    kind: AiChatAnswerBlockKind;
-    title: string | null;
-    body: string | null;
-    items: string[];
-    rows: AiChatAnswerRow[];
-    evidence: AiChatCitation[];
-};
-
-/**
- * The one canonical source vocabulary shared by coverage disclosure and the checked trail, so
- * "Sources checked" and "What I checked" can never describe the same turn differently. It mirrors
- * the backend's `AiAssistantStepGuard.COVERAGE_SOURCES` exactly.
+ * The one canonical source vocabulary for the assistant's declared coverage. It mirrors the
+ * backend's `AiAssistantStepGuard.COVERAGE_SOURCES` exactly.
  *
  * This is a runtime tuple rather than a bare union because the realtime frame parser has to reject
  * unknown sources at runtime: deriving both the type and the allowlist from one value makes it
@@ -2968,24 +2919,6 @@ export const AI_CHAT_PROGRESS_SOURCES = [...AI_CHAT_SOURCES, 'scope', 'answer'] 
 /** One milestone category in the assistant's live and durable checked-source trail. */
 export type AiChatProgressSource = (typeof AI_CHAT_PROGRESS_SOURCES)[number];
 
-/** Bounded coverage, freshness, and exclusion disclosure for one answer. */
-export type AiChatCoverage = {
-    status: 'complete' | 'partial' | 'insufficient';
-    asOf: string | null;
-    periodStart: string | null;
-    periodEnd: string | null;
-    sources: AiChatSource[];
-    exclusions: (
-        | 'private_data'
-        | 'restricted_records'
-        | 'unavailable_sources'
-        | 'unsupported_context'
-        | 'bounded_results'
-        | 'tool_failure'
-    )[];
-    truncated: boolean;
-};
-
 /** One durable, viewer-safe milestone in the assistant's checked-source trail. */
 export type AiChatProgressItem = {
     seq: number;
@@ -2993,14 +2926,6 @@ export type AiChatProgressItem = {
     status: 'running' | 'proposed' | 'complete' | 'failed' | 'skipped' | 'timed_out' | 'cancelled';
     count: number | null;
     truncated: boolean;
-};
-
-/** Native answer document projected from validated durable metadata. */
-export type AiChatAnswerDocument = {
-    turnId: number;
-    blocks: AiChatAnswerBlock[];
-    coverage: AiChatCoverage;
-    progress: AiChatProgressItem[];
 };
 
 /** API representation of one ordered assistant chat message. */
@@ -3017,7 +2942,6 @@ export type AiChatMessage = {
     createdAt: string;
     citations?: AiChatCitation[] | null;
     suggestions?: string[] | null;
-    answerDocument?: AiChatAnswerDocument | null;
 };
 
 /** Viewer-safe membership state for one shared assistant session participant. */
