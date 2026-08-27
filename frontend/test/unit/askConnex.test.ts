@@ -12,6 +12,7 @@ import {
     actionableAskConnexToolCallIds,
     activeSelectionAskConnexContext,
     anchorAskConnexToolCards,
+    appendAskConnexThinking,
     askConnexCitationHref,
     askConnexCitations,
     askConnexLatestMessagePages,
@@ -48,7 +49,7 @@ import {
     type AskConnexFileAttachment,
 } from '@/app/lib/askConnex';
 import { AI_CHAT_PROGRESS_SOURCES, AI_CHAT_SOURCES } from '@/app/lib/types';
-import type { AiAssistantToolCall } from '@/app/lib/types';
+import type { AiAssistantToolCall, AiChatThinkingFrame } from '@/app/lib/types';
 
 const TOOL_SUMMARY_LABELS = {
     createActivity: '活動を作成',
@@ -1247,5 +1248,56 @@ describe('answer timestamps read the same way twice', () => {
 
     it('falls back to the placeholder rather than echoing something it cannot read', () => {
         expect(formatAnswerInstant('the day of the review', 'en-US')).toBe(ANSWER_ROW_PLACEHOLDER);
+    });
+});
+
+describe('ephemeral thinking accumulation', () => {
+    function thinkingFrame(overrides: Partial<AiChatThinkingFrame> = {}): AiChatThinkingFrame {
+        return {
+            workspaceId: 1,
+            sessionId: 4,
+            turnId: 9,
+            seq: 1,
+            kind: 'thinking',
+            text: 'Reading the cooling deals.',
+            ...overrides,
+        };
+    }
+
+    it('starts the reasoning from nothing on the first step', () => {
+        expect(appendAskConnexThinking(null, thinkingFrame())).toEqual({
+            turnId: 9,
+            entries: [{ seq: 1, text: 'Reading the cooling deals.' }],
+        });
+    });
+
+    it('appends later steps in step order', () => {
+        const first = appendAskConnexThinking(null, thinkingFrame());
+        const second = appendAskConnexThinking(
+            first, thinkingFrame({ seq: 2, text: 'Comparing last touches.' }),
+        );
+        expect(second.entries.map((entry) => entry.seq)).toEqual([1, 2]);
+    });
+
+    it('reorders a step that arrived late back into model order', () => {
+        const late = appendAskConnexThinking(
+            appendAskConnexThinking(null, thinkingFrame({ seq: 3, text: 'Concluding.' })),
+            thinkingFrame({ seq: 1 }),
+        );
+        expect(late.entries.map((entry) => entry.seq)).toEqual([1, 3]);
+    });
+
+    it('drops a redelivered step rather than repeating it', () => {
+        const once = appendAskConnexThinking(null, thinkingFrame());
+        const twice = appendAskConnexThinking(once, thinkingFrame({ text: 'Redelivered.' }));
+        expect(twice).toBe(once);
+    });
+
+    it('never mingles one turn\'s reasoning with another\'s', () => {
+        const previous = appendAskConnexThinking(null, thinkingFrame());
+        const next = appendAskConnexThinking(
+            previous, thinkingFrame({ turnId: 10, seq: 1, text: 'A new question.' }),
+        );
+        expect(next).toEqual({ turnId: 10, entries: [{ seq: 1, text: 'A new question.' }] });
     });
 });

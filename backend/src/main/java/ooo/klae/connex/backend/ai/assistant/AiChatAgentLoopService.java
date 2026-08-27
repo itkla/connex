@@ -385,6 +385,7 @@ public class AiChatAgentLoopService {
                         continue;
                     }
                     outcome = java.util.Objects.requireNonNull(attempt, "attempt").outcome();
+                    publishThinking(turn, stepNumber, attempt.reasoning());
                     requireWorkspaceEnabled(turn);
                     persistenceService.requireRunning(turn);
                     inputTokens = addTokens(inputTokens, inputTokens(outcome));
@@ -1058,6 +1059,23 @@ public class AiChatAgentLoopService {
 
     private void publish(int userId, AiChatStepFrameDto frame) {
         realtimeDispatcher.userAfterCommit(userId, AiChatProgressService.viewerFrame(frame));
+    }
+
+    /**
+     * Streams one step's normalized reasoning to the requester as an ephemeral thinking frame.
+     *
+     * <p>The reasoning here already survived the full normalization pipeline — special-care
+     * screening, bounded length, the strict outbound leak scan, and demasking — so it is safe to
+     * show the member who asked. It is deliberately never persisted (the V186 purge precedent):
+     * thinking is a live view of the current turn, gone on refresh, and shared-session viewers
+     * never receive it because the frame goes to the requester's queue only.
+     */
+    private void publishThinking(
+            AiChatQueuedTurn turn, int stepNumber, Optional<String> reasoning) {
+        reasoning.filter(text -> !text.isBlank()).ifPresent(text ->
+                realtimeDispatcher.userAfterCommit(turn.userId(), new AiChatStepFrameDto(
+                        turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                        stepNumber, "thinking", null, null, null, null, text)));
     }
 
     private void failTool(AiChatQueuedTurn turn, int toolCallId, String reason) {

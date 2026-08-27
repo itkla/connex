@@ -22,6 +22,7 @@ import {
     CheckIcon,
     ChevronDoubleLeftIcon,
     ChevronDoubleRightIcon,
+    ChevronDownIcon,
     ClockIcon,
     EllipsisHorizontalIcon,
     ExclamationCircleIcon,
@@ -198,6 +199,8 @@ type UnavailableState = {
 
 const noopRecovery = () => {};
 
+const EMPTY_THINKING: readonly string[] = [];
+
 /** A settled answer with no route out: the member stopped it themselves. */
 const NO_RECOVERY: AskConnexRecovery = {
     retry: false,
@@ -225,6 +228,8 @@ export type AskConnexTurnLabels = {
     turnResolved: string;
     turnStreaming: string;
     turnWorking: string;
+    /** Accessible name for the disclosure that expands the in-flight reasoning panel. */
+    thinkingToggle: string;
 };
 
 /**
@@ -400,6 +405,8 @@ type AskConnexDrawerProps = {
     contentTooLong: boolean;
     working: boolean;
     turn: AskConnexTurnState;
+    /** The active turn's ephemeral reasoning steps, in step order; empty for everyone but the requester. */
+    thinking: readonly string[];
     streamStore: AskConnexStreamStore;
     streaming: boolean;
     cancelling: boolean;
@@ -944,6 +951,11 @@ function SettledTurnActivity({
  * While the answer runs, the whole region is the announced status so a phase change is spoken as it
  * lands; the streamed words themselves are never announced.
  *
+ * The status line doubles as a disclosure once the first ephemeral reasoning step arrives: until
+ * then there is nothing to show, so the line stays a plain line rather than offering an empty
+ * panel. Reasoning is plain text — it is not Markdown and is never parsed as such — and it settles
+ * with the turn: a terminal phase renders the settled surface, which carries no reasoning at all.
+ *
  * The stop control appears only for the member who asked. A participant who opened a shared session
  * mid-turn adopts that turn into the same state, and the cancellation endpoint rejects anyone but
  * its requester, so offering the control to them would be a button that can only fail.
@@ -954,6 +966,7 @@ export function TurnActivity({
     cancelling,
     canRetry,
     hasPartial = false,
+    thinking = EMPTY_THINKING,
     labels,
     onCancel,
     onRetry,
@@ -966,12 +979,15 @@ export function TurnActivity({
     canRetry: boolean;
     /** Whether words were retained from this answer before it stopped. */
     hasPartial?: boolean;
+    /** The active turn's ephemeral reasoning steps, in step order; only the requester has any. */
+    thinking?: readonly string[];
     labels: AskConnexTurnLabels;
     onCancel: () => void;
     onRetry: () => void;
     onContinueFromPartial?: () => void;
     onNarrowScope?: () => void;
 }) {
+    const [thinkingOpen, setThinkingOpen] = useState(false);
     const recovery = askConnexRecovery(turn.phase, turn.reason, canRetry, hasPartial);
     if (turn.phase === 'idle') return null;
     if (turn.phase === 'resolved') {
@@ -1022,27 +1038,59 @@ export function TurnActivity({
             />
         );
     }
+    const statusText = cancelling
+        ? labels.stopping
+        : turn.phase === 'accepted'
+            ? labels.turnAccepted
+            : streaming
+                ? labels.turnStreaming
+                : labels.turnWorking;
     return (
-        <div role="status" className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground">
-            <SparklesIcon className="size-3.5" />
-            <span>{cancelling
-                ? labels.stopping
-                : turn.phase === 'accepted'
-                    ? labels.turnAccepted
-                    : streaming
-                        ? labels.turnStreaming
-                        : labels.turnWorking}</span>
-            {turn.cancellable ? (
-                <IconButton
-                    type="button"
-                    variant="ghost"
-                    size="icon-toolbar"
-                    label={labels.stop}
-                    disabled={cancelling}
-                    onClick={onCancel}
-                >
-                    <StopIcon className="size-3.5" />
-                </IconButton>
+        <div role="status" className="space-y-2 px-4 py-2 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2">
+                {thinking.length > 0 ? (
+                    <button
+                        type="button"
+                        aria-expanded={thinkingOpen}
+                        onClick={() => setThinkingOpen((open) => !open)}
+                        className="flex items-center gap-2 rounded-md text-left transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                    >
+                        <SparklesIcon className="size-3.5" />
+                        <span>{statusText}</span>
+                        <span className="sr-only">{labels.thinkingToggle}</span>
+                        <ChevronDownIcon
+                            aria-hidden
+                            className={cn(
+                                'size-3 shrink-0 transition-transform',
+                                thinkingOpen && 'rotate-180',
+                            )}
+                        />
+                    </button>
+                ) : (
+                    <>
+                        <SparklesIcon className="size-3.5" />
+                        <span>{statusText}</span>
+                    </>
+                )}
+                {turn.cancellable ? (
+                    <IconButton
+                        type="button"
+                        variant="ghost"
+                        size="icon-toolbar"
+                        label={labels.stop}
+                        disabled={cancelling}
+                        onClick={onCancel}
+                    >
+                        <StopIcon className="size-3.5" />
+                    </IconButton>
+                ) : null}
+            </div>
+            {thinkingOpen && thinking.length > 0 ? (
+                <div className="max-h-48 divide-y divide-border/60 overflow-y-auto rounded-lg bg-muted/60 px-3 py-1 text-xs leading-relaxed break-words whitespace-pre-wrap text-muted-foreground">
+                    {thinking.map((entry, index) => (
+                        <p key={index} className="py-1.5">{entry}</p>
+                    ))}
+                </div>
             ) : null}
         </div>
     );
@@ -1435,6 +1483,7 @@ function ConversationSurface({
     contentTooLong,
     working,
     turn,
+    thinking,
     streamStore,
     streaming,
     cancelling,
@@ -1907,6 +1956,7 @@ function ConversationSurface({
                                         cancelling={cancelling}
                                         canRetry={canRetryTurn}
                                         hasPartial={hasPartialAnswer}
+                                        thinking={thinking}
                                         labels={labels}
                                         onCancel={onCancelTurn}
                                         onRetry={onRetryTurn}
@@ -2415,6 +2465,7 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         contentTooLong: props.contentTooLong,
         working: props.working,
         turn: props.turn,
+        thinking: props.thinking,
         streamStore: props.streamStore,
         streaming: props.streaming,
         cancelling: props.cancelling,

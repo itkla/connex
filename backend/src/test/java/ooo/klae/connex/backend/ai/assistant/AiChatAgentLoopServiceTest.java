@@ -63,6 +63,7 @@ import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import ooo.klae.connex.backend.ai.provider.AiToolCall;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.dto.AiChatProgressItemDto;
+import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
 import ooo.klae.connex.backend.exceptions.AiBudgetExhaustedException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
@@ -1978,6 +1979,66 @@ class AiChatAgentLoopServiceTest {
                 any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class));
         assertEquals(7777, invocation.getValue().maxTokens());
         assertTrue(invocation.getValue().outputTokensClamped());
+    }
+
+    /**
+     * Each step's normalized reasoning streams to the requester as an ephemeral thinking frame:
+     * already screened, leak-scanned, and demasked, never persisted, requester-queue only.
+     */
+    @Test
+    void aStepsNormalizedReasoningStreamsToTheRequesterAsAThinkingFrame() throws Exception {
+        AiAssistantStep finalStep = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer("Pipeline is healthy.", List.of()));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(new AiStructuredRepairAttempt<>(
+                        new AiStructuredOutcome.Parsed<>(finalStep, 0, 13, 21, "stop"),
+                        Optional.empty(),
+                        Optional.of("Compared the authorized pipeline signals.")));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<AiChatStepFrameDto> frames =
+                ArgumentCaptor.forClass(AiChatStepFrameDto.class);
+        verify(realtimeDispatcher, atLeastOnce())
+                .userAfterCommit(eq(TURN.userId()), frames.capture());
+        AiChatStepFrameDto thinking = frames.getAllValues().stream()
+                .filter(frame -> "thinking".equals(frame.kind()))
+                .findFirst().orElseThrow();
+        assertEquals("Compared the authorized pipeline signals.", thinking.text());
+        assertEquals(TURN.turnId(), thinking.turnId());
+    }
+
+    /**
+     * A step whose reasoning was rejected by normalization streams nothing: absent reasoning must
+     * not produce an empty thinking frame.
+     */
+    @Test
+    void aStepWithoutSurvivingReasoningPublishesNoThinkingFrame() throws Exception {
+        AiAssistantStep finalStep = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer("Pipeline is healthy.", List.of()));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(finalStep));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<AiChatStepFrameDto> frames =
+                ArgumentCaptor.forClass(AiChatStepFrameDto.class);
+        verify(realtimeDispatcher, org.mockito.Mockito.atLeast(0))
+                .userAfterCommit(anyInt(), frames.capture());
+        assertTrue(frames.getAllValues().stream()
+                .noneMatch(frame -> "thinking".equals(frame.kind())));
     }
 
     @Test

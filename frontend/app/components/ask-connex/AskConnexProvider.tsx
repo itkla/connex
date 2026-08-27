@@ -68,6 +68,7 @@ import {
     activeRecordAskConnexContext,
     activeSelectionAskConnexContext,
     appendAskConnexPrompt,
+    appendAskConnexThinking,
     askConnexContextCorrected,
     askConnexMessageContent,
     askConnexPinnedStorageKey,
@@ -103,6 +104,7 @@ import {
     type AskConnexScopePreview,
     type AskConnexSelectionContext,
     type AskConnexSourceContext,
+    type AskConnexThinkingState,
     type AskConnexToolAction,
     type AskConnexToolCardFailure,
     type StoredAskConnexTurn,
@@ -163,6 +165,7 @@ import type {
     AiChatAttachment,
     AiChatDeltaFrame,
     AiChatMessage,
+    AiChatThinkingFrame,
     AiChatPageContext,
     AiChatParticipant,
     AiChatPresence,
@@ -188,6 +191,7 @@ const ASK_CONNEX_ACTIVITY_TYPES: readonly string[] = [
 const ASK_CONNEX_NOTE_VISIBILITIES: readonly string[] = ['private', 'workspace'];
 const EMPTY_ASK_CONNEX_TOOL_CALL_IDS: ReadonlySet<number> = new Set();
 const EMPTY_ASK_CONNEX_PINS: readonly AskConnexAttachment[] = [];
+const EMPTY_THINKING_ENTRIES: readonly string[] = [];
 const noopCleanup = () => {};
 
 /**
@@ -507,6 +511,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const [cancelling, setCancelling] = useState(false);
     const [streamStore] = useState(createAskConnexStreamStore);
     const [turn, dispatchTurn] = useReducer(reduceAskConnexTurn, EMPTY_ASK_CONNEX_TURN);
+    const [thinking, setThinking] = useState<AskConnexThinkingState | null>(null);
     const [toolCalls, dispatchToolCalls] = useReducer(
         reduceAskConnexToolCards,
         EMPTY_ASK_CONNEX_TOOL_CARDS,
@@ -871,6 +876,42 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         invalidateStream();
         if (transition.hydrate) void hydrateStream(active.sessionId, frame.turnId);
     }, [activeWorkspaceId, hydrateStream, invalidateStream]);
+
+    /**
+     * Folds one ephemeral reasoning step into the active turn's thinking. Frames for anything but
+     * the turn this member is watching are dropped — a stale frame from an earlier turn must not
+     * resurrect reasoning the surface already cleared.
+     */
+    const handleThinkingFrame = useCallback((frame: AiChatThinkingFrame) => {
+        const active = activeTurnRef.current;
+        if (active === null
+                || frame.sessionId !== active.sessionId
+                || frame.turnId !== active.turnId) return;
+        setThinking((current) => appendAskConnexThinking(current, frame));
+    }, []);
+
+    /**
+     * Forgets the reasoning the moment its turn stops being the one on screen — a settled, reset,
+     * or replaced turn takes its thinking with it, exactly like the activity line it sat under.
+     * The frames are never persisted, so there is nothing to restore later by design.
+     */
+    useEffect(() => {
+        setThinking((current) => {
+            if (current === null) return current;
+            if (current.turnId === turn.turnId
+                    && (turn.phase === 'accepted' || turn.phase === 'running')) {
+                return current;
+            }
+            return null;
+        });
+    }, [turn.phase, turn.turnId]);
+
+    const thinkingEntries = useMemo<readonly string[]>(
+        () => (thinking !== null && thinking.turnId === turn.turnId
+            ? thinking.entries.map((entry) => entry.text)
+            : EMPTY_THINKING_ENTRIES),
+        [thinking, turn.turnId],
+    );
 
     /**
      * Adopts the durable partial the server retains for this answer, including after it stopped —
@@ -1534,6 +1575,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         const socket = createAiChatSocket({
             onFrame: (frame) => {
                 if (frame.workspaceId !== activeWorkspaceId) return;
+                if (frame.kind === 'thinking') {
+                    handleThinkingFrame(frame);
+                    return;
+                }
                 const signal = identityControllerRef.current?.signal;
                 if (!signal || signal.aborted) return;
                 if (activeSessionRef.current?.id === frame.sessionId
@@ -1573,7 +1618,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         });
         socket.activate();
         return () => socket.deactivate();
-    }, [activeWorkspaceId, clearActiveSession, enqueueRealtimeRefresh, handleStreamDelta, refreshSessions, resetStream, switching, userId]);
+    }, [activeWorkspaceId, clearActiveSession, enqueueRealtimeRefresh, handleStreamDelta, handleThinkingFrame, refreshSessions, resetStream, switching, userId]);
 
     useEffect(() => {
         if (!surfaceVisible || presenceSessionId === null || loadState !== 'ready') {
@@ -2424,6 +2469,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         turnResolved: t('turnResolved'),
         turnStreaming: t('turnStreaming'),
         turnWorking: t('turnWorking'),
+        thinkingToggle: t('thinkingToggle'),
         partialAnswer: t('partialAnswer'),
         continueFromPartial: t('continueFromPartial'),
         narrowScope: t('narrowScope'),
@@ -2633,6 +2679,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 contentTooLong={scoped && contentTooLong}
                 working={scoped && working}
                 turn={scoped ? turn : EMPTY_ASK_CONNEX_TURN}
+                thinking={scoped ? thinkingEntries : EMPTY_THINKING_ENTRIES}
                 streamStore={streamStore}
                 streaming={scoped && streaming}
                 cancelling={scoped && cancelling}

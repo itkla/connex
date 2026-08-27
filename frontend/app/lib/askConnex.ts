@@ -11,6 +11,7 @@ import type {
     AiChatPageContextKind,
     AiChatProgressItem,
     AiChatProgressSource,
+    AiChatThinkingFrame,
     Page,
 } from '@/app/lib/types';
 import { parseMysqlDateTime } from '@/app/lib/utils';
@@ -1337,6 +1338,37 @@ export function reduceAskConnexTurn(
         reason: event.reason ?? null,
         progress: event.progress ?? state.progress,
     };
+}
+
+/**
+ * The ephemeral reasoning shown for one turn: one entry per model step, in step order.
+ *
+ * This exists only while its turn runs. The frames behind it are never persisted, so the state is
+ * rebuilt from nothing for every turn and simply forgotten on refresh — by design, not by accident.
+ */
+export type AskConnexThinkingState = {
+    turnId: number;
+    entries: { seq: number; text: string }[];
+};
+
+/**
+ * Folds one ephemeral thinking frame into the reasoning shown for its turn.
+ *
+ * Steps are keyed by `seq`: a repeated step is dropped, and entries stay sorted by step so the rare
+ * out-of-order delivery still reads in the order the model reasoned. A frame for a different turn
+ * replaces the state outright — a new turn's reasoning never mingles with the last one's.
+ */
+export function appendAskConnexThinking(
+    current: AskConnexThinkingState | null,
+    frame: AiChatThinkingFrame,
+): AskConnexThinkingState {
+    if (current === null || current.turnId !== frame.turnId) {
+        return { turnId: frame.turnId, entries: [{ seq: frame.seq, text: frame.text }] };
+    }
+    if (current.entries.some((entry) => entry.seq === frame.seq)) return current;
+    const entries = [...current.entries, { seq: frame.seq, text: frame.text }]
+        .sort((a, b) => a.seq - b.seq);
+    return { turnId: current.turnId, entries };
 }
 
 /** The placeholder shown where the server established no value for a structured field. */
