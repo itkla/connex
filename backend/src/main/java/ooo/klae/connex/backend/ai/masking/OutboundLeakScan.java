@@ -15,6 +15,11 @@ import tools.jackson.databind.ObjectMapper;
  * Runtime final gate for serialized AI provider payloads. It scans the exact outbound string for
  * request-local raw identifiers and throws without echoing the matched value, turning masking into
  * a per-request invariant immediately before send.
+ *
+ * <p>An identifier whose raw value the request's registered server-authored text provably contains
+ * is skipped: the server emits that word in every prompt regardless of tenant data, so its presence
+ * carries no tenant signal, and refusing it would make a record named a common envelope word poison
+ * every request that seeds it. Tenant occurrences of the value are still tokenized by the replacer.
  */
 public final class OutboundLeakScan {
     /**
@@ -35,6 +40,31 @@ public final class OutboundLeakScan {
      * @throws MaskingLeakException when a raw identifier is present
      */
     public static void assertNoLeak(String serializedOutboundPayload, MaskingContext ctx, ObjectMapper objectMapper) {
+        assertNoLeak(serializedOutboundPayload, ctx, objectMapper, true);
+    }
+
+    /**
+     * Strict variant that ignores trusted-text collisions.
+     *
+     * <p>Provider-authored output — reasoning being normalized for return — is not the server's
+     * own prompt: a raw identifier there is a leak regardless of which words the request envelope
+     * happens to contain, so the trusted-text exemption must not apply.
+     *
+     * @param serializedOutboundPayload provider-authored text under validation
+     * @param ctx request-local masking context
+     * @param objectMapper payload JSON decoder
+     * @throws MaskingLeakException when a raw identifier is present
+     */
+    public static void assertNoLeakStrict(
+            String serializedOutboundPayload, MaskingContext ctx, ObjectMapper objectMapper) {
+        assertNoLeak(serializedOutboundPayload, ctx, objectMapper, false);
+    }
+
+    private static void assertNoLeak(
+            String serializedOutboundPayload,
+            MaskingContext ctx,
+            ObjectMapper objectMapper,
+            boolean honorTrustedText) {
         Objects.requireNonNull(serializedOutboundPayload, "serializedOutboundPayload");
         Objects.requireNonNull(ctx, "ctx");
         Objects.requireNonNull(objectMapper, "objectMapper");
@@ -45,7 +75,8 @@ public final class OutboundLeakScan {
         for (MaskingContext.IdentifierEntry entry : ctx.identifierEntriesByLongestRawValue()) {
             String normalizedIdentifier = normalizeForScan(entry.rawValue());
             if (normalizedIdentifier.length() >= MIN_IDENTIFIER_LENGTH
-                    && (rawPayload.contains(normalizedIdentifier) || decodedPayload.contains(normalizedIdentifier))) {
+                    && (rawPayload.contains(normalizedIdentifier) || decodedPayload.contains(normalizedIdentifier))
+                    && !(honorTrustedText && ctx.isTrustedTextCollision(entry.rawValue()))) {
                 leakedTokens.add(entry.token());
                 leakedKinds.add(entry.kind());
             }

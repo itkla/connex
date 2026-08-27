@@ -347,6 +347,46 @@ class MaskingEngineTest {
         assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx, objectMapper));
     }
 
+    /**
+     * Temporal preservation must never disclose a record whose display name is a valid ISO value:
+     * the system prompt's own date examples would exempt it from the leak scan, so passing it
+     * through unchanged would egress a tenant name under a name field. Reproduced from review —
+     * the identifier check forces such a value through ordinary masking instead.
+     */
+    @Test
+    void maskTemporalRefusesToPreserveAnIsoValueThatIsASeededIdentifier() {
+        MaskingContext ctx = new MaskingContext();
+        MaskingEngine.maskField(EntityKind.COMPANY, "2026-08-21", ctx);
+        ctx.addTrustedStaticText("asOf values look like 2026-08-21 or 2026-08-21T09:00:00Z.");
+
+        String masked = MaskingEngine.maskTemporal("2026-08-21", ctx);
+        assertFalse(masked.contains("2026-08-21"));
+
+        assertEquals("2026-08-22", MaskingEngine.maskTemporal("2026-08-22", ctx));
+    }
+
+    /**
+     * A record named a common envelope word must not poison the request: once the server-authored
+     * text is registered as trusted, the scan skips the colliding identifier — the server emits
+     * that word regardless of tenant data — while every other identifier keeps failing closed.
+     */
+    @Test
+    void leakScanSkipsIdentifiersTheRegisteredServerTextProvablyContains() {
+        MaskingContext ctx = new MaskingContext();
+        MaskingEngine.maskField(EntityKind.COMPANY, "what", ctx);
+        MaskingEngine.maskField(EntityKind.COMPANY, "Acme Corp", ctx);
+        String payload = "{\"prompt\":\"and what is each one waiting on?\"}";
+
+        assertThrows(MaskingLeakException.class,
+                () -> OutboundLeakScan.assertNoLeak(payload, ctx, objectMapper));
+
+        ctx.addTrustedStaticText("State plainly what is missing before answering.");
+
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(payload, ctx, objectMapper));
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeak(
+                "{\"prompt\":\"met Acme Corp about what\"}", ctx, objectMapper));
+    }
+
     @Test
     void unmaskedModeKeepsIdentifiersWhileUniversalScreensStillApply() {
         MaskingContext context = new MaskingContext(AiPrivacyMode.UNMASKED);

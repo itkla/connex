@@ -73,7 +73,40 @@ public final class MaskingEngine {
         if (ctx.privacyMode() == ooo.klae.connex.backend.ai.AiPrivacyMode.UNMASKED) {
             return redactContactData(sanitizedText);
         }
-        return maskSanitizedFreeText(sanitizedText, ctx);
+        return maskSanitizedFreeText(sanitizedText, ctx, false);
+    }
+
+    /**
+     * Masks conversational text — the member's own words and prior answers replayed as history —
+     * while leaving common words intact when a record shares their name.
+     *
+     * <p>A company named "what" must not turn the question "what is each one waiting on?" into
+     * token soup: when the registered server text provably contains the identifier's value, the
+     * word carries no tenant signal (the server emits it in every prompt and the leak scan already
+     * exempts it), so conversational occurrences keep their ordinary meaning. Structured CRM
+     * fields never take this path — a record's own name field always tokenizes.
+     *
+     * @param text conversational free-text value
+     * @param ctx request-local masking context with registered trusted server text
+     * @return masked text with collision-exempt common words preserved
+     */
+    public static String maskConversationalFreeText(String text, MaskingContext ctx) {
+        Objects.requireNonNull(ctx, "ctx");
+        if (text == null || text.isBlank()) {
+            return "";
+        }
+        String normalizedText = Normalizer.normalize(text, Normalizer.Form.NFKC);
+        String sanitizedText = stripInjectedTokenDelimiters(normalizeSeparators(normalizedText));
+        String specialCareScreeningText = WHITESPACE.matcher(sanitizedText).replaceAll(" ");
+        SpecialCareTextScreen.ScreenVerdict verdict =
+                SpecialCareTextScreen.screen(specialCareScreeningText);
+        if (verdict.excluded()) {
+            return OMITTED_BY_POLICY;
+        }
+        if (ctx.privacyMode() == ooo.klae.connex.backend.ai.AiPrivacyMode.UNMASKED) {
+            return redactContactData(sanitizedText);
+        }
+        return maskSanitizedFreeText(sanitizedText, ctx, true);
     }
 
     /**
@@ -186,18 +219,22 @@ public final class MaskingEngine {
             }
             masked.append(maskSanitizedFreeText(
                     stripInjectedTokenDelimiters(normalizedText.substring(maskedEnd, placeholderMatcher.start())),
-                    ctx));
+                    ctx, false));
             masked.append(token);
             maskedEnd = placeholderMatcher.end();
         }
         masked.append(maskSanitizedFreeText(
-                stripInjectedTokenDelimiters(normalizedText.substring(maskedEnd)), ctx));
+                stripInjectedTokenDelimiters(normalizedText.substring(maskedEnd)), ctx, false));
         return masked.toString();
     }
 
-    private static String maskSanitizedFreeText(String sanitizedText, MaskingContext ctx) {
+    private static String maskSanitizedFreeText(
+            String sanitizedText, MaskingContext ctx, boolean preserveTrustedCollisions) {
         String masked = redactContactData(sanitizedText);
         for (MaskingContext.IdentifierEntry entry : ctx.identifierEntriesByLongestRawValue()) {
+            if (preserveTrustedCollisions && ctx.isTrustedTextCollision(entry.rawValue())) {
+                continue;
+            }
             masked = replaceIdentifierEverywhere(masked, entry, entry.token());
         }
         return masked;
@@ -267,7 +304,8 @@ public final class MaskingEngine {
             return "";
         }
         String normalized = normalizeSeparators(Normalizer.normalize(value, Normalizer.Form.NFKC)).strip();
-        if (ISO_TEMPORAL.matcher(normalized).matches() && isValidIsoTemporal(normalized)) {
+        if (ISO_TEMPORAL.matcher(normalized).matches() && isValidIsoTemporal(normalized)
+                && !ctx.isSeededIdentifierValue(normalized)) {
             return normalized;
         }
         return maskFreeText(normalized, ctx);

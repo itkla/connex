@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -14,6 +15,8 @@ import org.junit.jupiter.api.Test;
 import ooo.klae.connex.backend.ai.AiStructuredRepair;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler.ToolTurn;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolResult.Identifier;
+import ooo.klae.connex.backend.ai.masking.EntityKind;
+import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.OutboundLeakScan;
@@ -64,6 +67,37 @@ class AiAssistantPromptAssemblerTest {
         assertFalse(prompt.getMessages().getLast().getContent().contains("ada@example.com"));
         assertFalse(prompt.getMessages().getLast().getContent().contains("415"));
         assertTrue(prompt.getMessages().getLast().getContent().contains("[redacted]"));
+    }
+
+    /**
+     * Assembly registers the server-authored envelope as trusted static text, so a record named a
+     * common envelope word (staging turn 94: a company literally named "what") no longer makes the
+     * outbound leak scan refuse the request the server's own words would always trip.
+     */
+    @Test
+    void assemblyRegistersServerTextSoEnvelopeWordIdentifiersDoNotPoisonTheScan() {
+        AiChatMessage request = new AiChatMessage();
+        request.setAuthorKind("user");
+        request.setContent("Which deals need attention, and what is each one waiting on?");
+        MaskingContext context = new MaskingContext();
+        MaskingEngine.maskField(EntityKind.COMPANY, "what", context);
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(request),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(),
+                context,
+                new AiChatResourceRegistry());
+
+        assertTrue(context.isTrustedTextCollision("what"));
+        assertFalse(context.isTrustedTextCollision("Cyberdyne Systems"));
+        assertTrue(prompt.getMessages().getFirst().getContent()
+                .contains("and what is each one waiting on?"));
+        String serialized = prompt.getSystemPrompt() + "\n" + prompt.getMessages().stream()
+                .map(message -> message.getContent())
+                .reduce("", (left, right) -> left + "\n" + right);
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(
+                serialized, context, new tools.jackson.databind.ObjectMapper()));
     }
 
     @Test

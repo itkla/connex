@@ -952,7 +952,7 @@ public class AiInvocationService {
             return new ReasoningNormalization(Optional.empty(), maskedRejection);
         }
         try {
-            OutboundLeakScan.assertNoLeak(maskedReasoning, invocation.context(), objectMapper);
+            OutboundLeakScan.assertNoLeakStrict(maskedReasoning, invocation.context(), objectMapper);
         } catch (MaskingLeakException exception) {
             return new ReasoningNormalization(Optional.empty(), "reasoning_identifier_leak");
         }
