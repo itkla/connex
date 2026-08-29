@@ -148,10 +148,7 @@ final class AiChatStreamingProgress {
 
         String finish(String expectedText) {
             // Compared in the demasked domain, because that is the domain the batches were
-            // streamed in and the domain the answer is persisted in. The equality is what proves
-            // the member read exactly the answer that was stored — and it doubles as a check that
-            // no placeholder was split across a batch, since a split one would demask differently
-            // here than it did chunk by chunk.
+            // streamed in and the domain the answer is persisted in.
             String projected = projector.finish();
             String comparable = demasking
                     ? Demasker.demask(projected, maskingContext).text()
@@ -162,6 +159,13 @@ final class AiChatStreamingProgress {
             if (excluded || SpecialCareTextScreen.screen(expectedText).excluded()) {
                 pending.setLength(0);
                 return MaskingEngine.OMITTED_BY_POLICY;
+            }
+            // What was actually emitted, batch by batch, must equal what is about to be stored.
+            // The check above compares the whole projection; only this one compares the stream the
+            // member read, so a placeholder that demasked differently in pieces than as a whole is
+            // caught here rather than silently leaving the transcript disagreeing with the screen.
+            if (!(durable.toString() + pending).equals(expectedText)) {
+                throw new AiAssistantLoopException("malformed_output", "malformed_output");
             }
             flush();
             return expectedText;

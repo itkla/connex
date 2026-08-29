@@ -48,6 +48,29 @@ class AiAssistantTextDeltaProjectorTest {
     }
 
     /**
+     * A placeholder may carry any run of inner whitespace, so a fixed hold-back window would
+     * release its opening braces and then demask the pieces differently than the whole answer
+     * demasks. Reported by review with this exact three-chunk shape.
+     */
+    @Test
+    void aPlaceholderPaddedWithWhitespaceIsWithheldHoweverFarItsBracesFallBehind() {
+        List<String> deltas = new ArrayList<>();
+        AiAssistantTextDeltaProjector projector = new AiAssistantTextDeltaProjector(
+                AiAssistantTextDeltaProjector.Shape.JSON_REACT, deltas::add);
+
+        projector.accept("{\"tool\":null,\"final\":{\"text\":\"Call {{        ");
+        assertEquals("Call ", String.join("", deltas));
+
+        projector.accept("        P");
+        assertEquals("Call ", String.join("", deltas));
+
+        projector.accept("1}} now\",\"citations\":[]}}");
+
+        assertEquals("Call {{                P1}} now", projector.finish());
+        assertEquals("Call {{                P1}} now", String.join("", deltas));
+    }
+
+    /**
      * A brace pair the model wrote as ordinary prose must not stall the stream: past the longest
      * fragment that could still become a placeholder it is released as the literal text it is.
      */
