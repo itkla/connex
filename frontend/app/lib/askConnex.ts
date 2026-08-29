@@ -1417,19 +1417,19 @@ export function appendAskConnexTurnSegment(
 }
 
 /**
- * The narration persisted with one answer, in the order the assistant wrote it.
+ * The narration trail of a settled answer, in the order the assistant wrote it.
  *
- * Ordered here rather than trusted to arrive ordered: the trail is a record of work the requester
- * watched happen, so a payload that lost its order must not replay those steps in a sequence that
- * never occurred. A message carrying none — every message before this feature, and every answer
- * that went straight to its reply — yields the shared empty trail.
+ * <p>The same character bound the live trail uses applies here too. The server bounds what it
+ * persists, so a well-behaved answer is already far inside the cap; applying it again means a
+ * transcript page can never be made to parse an unbounded amount of Markdown by a message whose
+ * metadata was written before those bounds existed.
  */
 export function askConnexMessageNarration(
     message: Pick<AiChatMessage, 'narration'>,
 ): readonly AskConnexTurnSegment[] {
     const narration = message.narration;
     if (!narration?.length) return EMPTY_ASK_CONNEX_TURN_SEGMENTS;
-    return narration.toSorted((a, b) => a.seq - b.seq);
+    return boundAskConnexTurnSegments(narration.toSorted((a, b) => a.seq - b.seq));
 }
 
 /** The shared empty trail, so a message without narration renders nothing without new identity. */
