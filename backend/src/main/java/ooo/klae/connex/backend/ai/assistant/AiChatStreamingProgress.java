@@ -1,5 +1,8 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import ooo.klae.connex.backend.ai.AiPrivacyMode;
+import ooo.klae.connex.backend.ai.masking.Demasker;
+import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
@@ -12,15 +15,29 @@ final class AiChatStreamingProgress {
 
     private final AiChatQueuedTurn turn;
     private final AiChatTurnPersistenceService persistenceService;
+    private final MaskingContext maskingContext;
+    private final boolean demasking;
     private final StringBuilder durable = new StringBuilder();
     private final StringBuilder pending = new StringBuilder();
     private long lastCheckNanos = System.nanoTime();
     private boolean excluded;
 
+    /**
+     * Creates the streaming batcher for one turn.
+     *
+     * <p>A masked turn demasks each batch here, at the choke point, because the requester is
+     * entitled to the same demasked answer they would receive when the turn settles — masking
+     * governs what leaves for the provider, not what returns to the member who asked. An unmasked
+     * turn deliberately skips demasking: its context holds no bindings, and running the demasker
+     * anyway would rewrite a literal brace pair the model typed into an unknown-reference marker.
+     */
     AiChatStreamingProgress(
             AiChatQueuedTurn turn,
-            AiChatTurnPersistenceService persistenceService) {
+            AiChatTurnPersistenceService persistenceService,
+            MaskingContext maskingContext) {
         this.turn = java.util.Objects.requireNonNull(turn, "turn");
+        this.maskingContext = java.util.Objects.requireNonNull(maskingContext, "maskingContext");
+        this.demasking = maskingContext.privacyMode() != AiPrivacyMode.UNMASKED;
         this.persistenceService = java.util.Objects.requireNonNull(
                 persistenceService, "persistenceService");
     }
@@ -35,7 +52,10 @@ final class AiChatStreamingProgress {
         if (excluded) {
             return;
         }
-        pending.append(text);
+        pending.append(demasking ? Demasker.demask(text, maskingContext).text() : text);
+        // Screening runs on the demasked text for a masked turn, which is the text the member
+        // actually sees. Screening the masked form would be close to vacuous: every value that
+        // could carry special-care content has already become a placeholder by then.
         if (SpecialCareTextScreen.screen(durable.toString() + pending).excluded()) {
             excluded = true;
             pending.setLength(0);
@@ -127,8 +147,16 @@ final class AiChatStreamingProgress {
         }
 
         String finish(String expectedText) {
+            // Compared in the demasked domain, because that is the domain the batches were
+            // streamed in and the domain the answer is persisted in. The equality is what proves
+            // the member read exactly the answer that was stored — and it doubles as a check that
+            // no placeholder was split across a batch, since a split one would demask differently
+            // here than it did chunk by chunk.
             String projected = projector.finish();
-            if (!projected.equals(expectedText)) {
+            String comparable = demasking
+                    ? Demasker.demask(projected, maskingContext).text()
+                    : projected;
+            if (!comparable.equals(expectedText)) {
                 throw new AiAssistantLoopException("malformed_output", "malformed_output");
             }
             if (excluded || SpecialCareTextScreen.screen(expectedText).excluded()) {

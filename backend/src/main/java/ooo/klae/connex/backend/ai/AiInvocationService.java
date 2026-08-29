@@ -730,8 +730,11 @@ public class AiInvocationService {
 
         AiProvider adapter = aiProviderRouter.adapterFor(resolved.provider());
         boolean streamed = invocation.streamObserver() != null;
-        if (streamed && (invocation.context().privacyMode() != AiPrivacyMode.UNMASKED
-                || !adapter.supportsStreaming(resolved.target()))) {
+        // Streaming is a provider capability question, not a privacy-mode one. A masked
+        // organization's requester already receives the fully demasked answer once the turn
+        // settles, so streaming it is the same bytes sooner on the same requester-only channel;
+        // what masking governs is what leaves for the provider, which is unchanged here.
+        if (streamed && !adapter.supportsStreaming(resolved.target())) {
             emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
                     null, null, null, null, "provider_capability", structured, null);
             throw new AiProviderException("AI provider streaming is not available");

@@ -12,6 +12,13 @@ import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 
 /** Incrementally decodes only the canonical root terminal-answer text JSON path. */
 final class AiAssistantTextDeltaProjector {
+    /**
+     * The longest fragment that can still be completed into a masking placeholder, matching
+     * {@code Demasker}'s token grammar with room for its optional inner whitespace.
+     */
+    private static final int MAX_PLACEHOLDER_CHARS = 16;
+    private static final java.util.regex.Pattern PLACEHOLDER_PREFIX =
+            java.util.regex.Pattern.compile("\\{\\{?\\s*+[A-Z]?[0-9]*+\\s*+}?");
     private static final List<String> REASONING_OPENINGS = List.of(
             "<think", "<thinking", "<thought", "<thoughts");
 
@@ -82,6 +89,9 @@ final class AiAssistantTextDeltaProjector {
                 && Character.isHighSurrogate(projection.text().charAt(safeLength - 1))) {
             safeLength--;
         }
+        if (!projection.textClosed()) {
+            safeLength = withheldPlaceholderStart(projection.text(), safeLength);
+        }
         if (safeLength < projected.length()
                 || !projection.text().startsWith(projected)) {
             throw malformedOutput();
@@ -95,6 +105,30 @@ final class AiAssistantTextDeltaProjector {
                 && projection.terminalConfirmed()
                 && projection.textClosed()
                 && safeLength == projection.text().length();
+    }
+
+    /**
+     * Withholds a trailing fragment that may still become a masking placeholder.
+     *
+     * <p>Held back for the same reason as the trailing high surrogate above: a batch boundary can
+     * fall anywhere, and half a placeholder demasks to nothing, so the member would briefly read
+     * the masked form of a name that is about to resolve. The scan runs over the accumulated text
+     * rather than a private buffer, so the fragment releases on its own once the next chunk
+     * completes it, and the length bound keeps a literal brace run in ordinary prose from stalling
+     * the stream: past that point it can no longer become a placeholder.
+     */
+    private static int withheldPlaceholderStart(String text, int safeLength) {
+        int floor = Math.max(0, safeLength - MAX_PLACEHOLDER_CHARS);
+        for (int index = safeLength - 1; index >= floor; index--) {
+            if (text.charAt(index) != '{') {
+                continue;
+            }
+            int start = index > 0 && text.charAt(index - 1) == '{' ? index - 1 : index;
+            return PLACEHOLDER_PREFIX.matcher(text.substring(start, safeLength)).matches()
+                    ? start
+                    : safeLength;
+        }
+        return safeLength;
     }
 
     private CharSequence normalizedInput() {

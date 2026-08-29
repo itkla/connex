@@ -115,7 +115,6 @@ public class AiAssistantTurnService {
             privacyMode = AiPrivacyMode.MASKED;
         }
         boolean streamed = invocationService != null
-                && privacyMode == AiPrivacyMode.UNMASKED
                 && invocationService.currentProviderCapabilities(
                         AiFeature.ASSISTANT_CHAT).streaming();
         int workspaceId = workspaceService.getCurrentWorkspaceId();

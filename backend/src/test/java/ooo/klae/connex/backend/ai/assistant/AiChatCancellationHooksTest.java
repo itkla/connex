@@ -12,6 +12,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.ai.masking.MaskingContext;
+
 class AiChatCancellationHooksTest {
     @Test
     void cancellationRunsOnlyTheExactActiveTurnHookOnce() {
@@ -43,7 +45,7 @@ class AiChatCancellationHooksTest {
         doThrow(cancelled).when(persistenceService).requireRunning(turn);
         AtomicInteger cancellations = new AtomicInteger();
         AiChatStreamingProgress.Observer observer = new AiChatStreamingProgress(
-                turn, persistenceService).observer(false);
+                turn, persistenceService, new MaskingContext()).observer(false);
 
         AiAssistantLoopException thrown = assertThrows(
                 AiAssistantLoopException.class,
