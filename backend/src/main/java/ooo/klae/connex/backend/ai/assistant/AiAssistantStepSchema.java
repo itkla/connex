@@ -149,12 +149,15 @@ public class AiAssistantStepSchema {
             }
             case STRING_LIST -> {
                 value.put("type", "array");
+                value.put("minItems", argument.minimum());
+                value.put("maxItems", argument.maximum());
                 ObjectNode items = value.putObject("items");
                 items.put("type", "string");
                 addEnum(items, argument);
             }
             case TEXT_LIST -> {
                 value.put("type", "array");
+                value.put("minItems", argument.minimum());
                 value.put("maxItems", argument.maximum());
                 ObjectNode items = value.putObject("items");
                 items.put("type", "string");

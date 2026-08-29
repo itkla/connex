@@ -172,9 +172,12 @@ function parseAiChatTodosFrame(parsed: unknown): AiChatTodosFrame | null {
     const todos: AiChatTodo[] = [];
     for (const entry of decoded) {
         if (typeof entry !== "object" || entry === null) return null;
+        const keys = Object.keys(entry);
+        if (keys.length !== 2 || !keys.includes("label") || !keys.includes("status")) return null;
         const label = Reflect.get(entry, "label");
         const status = Reflect.get(entry, "status");
-        if (typeof label !== "string" || label.length === 0 || label.length > TODO_LABEL_LIMIT) {
+        if (typeof label !== "string" || label.trim().length === 0
+                || label.length > TODO_LABEL_LIMIT) {
             return null;
         }
         if (status !== "pending" && status !== "active" && status !== "done") return null;

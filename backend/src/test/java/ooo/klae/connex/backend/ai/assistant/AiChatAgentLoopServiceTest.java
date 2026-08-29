@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.atMost;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
@@ -2009,11 +2010,14 @@ class AiChatAgentLoopServiceTest {
         assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
         ArgumentCaptor<AiChatStepFrameDto> frames =
                 ArgumentCaptor.forClass(AiChatStepFrameDto.class);
-        verify(realtimeDispatcher, atLeastOnce()).sessionNow(
-                anyInt(), anyInt(), frames.capture());
+        verify(realtimeDispatcher, atLeastOnce()).userAfterCommit(
+                eq(TURN.userId()), frames.capture());
         AiChatStepFrameDto plan = frames.getAllValues().stream()
                 .filter(frame -> "todos".equals(frame.kind()))
                 .findFirst().orElseThrow();
+        verify(realtimeDispatcher, never()).sessionNow(
+                anyInt(), anyInt(), org.mockito.ArgumentMatchers.argThat(
+                        frame -> frame != null && "todos".equals(frame.kind())));
         assertTrue(plan.text().contains("Check the contact"));
         assertTrue(plan.text().contains("active"));
         ArgumentCaptor<String> metadata = ArgumentCaptor.forClass(String.class);
@@ -2022,6 +2026,34 @@ class AiChatAgentLoopServiceTest {
         JsonNode stored = objectMapper.readTree(metadata.getValue());
         assertEquals("Check the contact", stored.path("todos").path(0).path("label").asString());
         assertEquals("pending", stored.path("todos").path(1).path("status").asString());
+    }
+
+    /**
+     * A plan is bookkeeping, not evidence: republishing one neither counts as progress nor ends
+     * the turn early, and a model that only ever rewrites its plan is eventually told to stop
+     * rather than being allowed to spend the turn on it.
+     */
+    @Test
+    void planPublicationIsNeitherProgressNorGroundsForAnEarlyClose() throws Exception {
+        when(governanceService.assistantMaxSteps(TURN.workspaceId())).thenReturn(24);
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class), any()))
+                .thenReturn(new AiAssistantToolResult(Map.of("todos", List.of()), List.of()));
+        java.util.concurrent.atomic.AtomicInteger step =
+                new java.util.concurrent.atomic.AtomicInteger();
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenAnswer(invocation -> parsed(toolStep(
+                        "set_todos",
+                        "{\"items\":[\"Step " + step.incrementAndGet() + "\"],"
+                                + "\"statuses\":[\"active\"]}")));
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        verify(persistenceService, atMost(8)).proposeTool(
+                eq(TURN), anyInt(), eq("set_todos"), any());
     }
 
     /**
