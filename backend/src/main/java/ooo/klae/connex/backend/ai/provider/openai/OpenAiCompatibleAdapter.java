@@ -118,7 +118,8 @@ public class OpenAiCompatibleAdapter implements AiProvider {
      */
     @Override
     public boolean supportsStreaming(AiProviderTarget target) {
-        return AiModelCatalog.streamingDeclared(target, aiProperties.getModelOverrides());
+        return AiModelCatalog.streamingDeclared(
+                AiModelCatalog.Family.OPENAI_COMPATIBLE, target, aiProperties.getModelOverrides());
     }
 
     @Override

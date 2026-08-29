@@ -173,35 +173,75 @@ class OpenAiCompatibleAdapterTest {
      * streamed request fails the turn outright rather than falling back — which is exactly how
      * assuming this capability took every Ask Connex turn down. It is now declared, not assumed.
      */
+    private static AiProperties.ModelOverride streamingOverride(
+            String modelId, String endpoint, Boolean streaming) {
+        AiProperties.ModelOverride override = new AiProperties.ModelOverride();
+        override.setProvider("openai_compatible");
+        override.setModelId(modelId);
+        override.setEndpoint(endpoint);
+        override.setStreaming(streaming);
+        return override;
+    }
+
+    /**
+     * An OpenAI-compatible endpoint serves any model under any name, and one that rejects the
+     * streamed request fails the turn outright rather than falling back — which is exactly how
+     * assuming this capability took every Ask Connex turn down. It is now declared, not assumed.
+     */
     @Test
     void streamingIsDeclaredByAnOperatorRatherThanAssumed() {
-        AiProviderTarget target = target(
-                "https://api.example.test/v1", false, "gemini-3.6-flash");
+        String endpoint = "https://api.example.test/v1";
+        AiProviderTarget target = target(endpoint, false, "gemini-3.6-flash");
 
         assertFalse(adapter.supportsStreaming(target));
 
-        AiProperties.ModelOverride override = new AiProperties.ModelOverride();
-        override.setProvider("openai_compatible");
-        override.setModelId("gemini-3.6-flash");
-        override.setStreaming(true);
-        aiProperties.setModelOverrides(List.of(override));
+        aiProperties.setModelOverrides(List.of(
+                streamingOverride("gemini-3.6-flash", endpoint, true)));
 
         assertTrue(adapter.supportsStreaming(target));
         assertFalse(adapter.supportsStreaming(
-                target("https://api.example.test/v1", false, "some-other-model")));
+                target(endpoint, false, "some-other-model")));
     }
 
-    /** A declaration that streaming does not work is honoured as readily as one that it does. */
+    /**
+     * The same model id behind two gateways is two different answers to whether streaming works,
+     * so verifying one endpoint must never speak for the other.
+     */
     @Test
-    void anOperatorMayDeclareThatAnEndpointDoesNotStream() {
-        AiProperties.ModelOverride override = new AiProperties.ModelOverride();
-        override.setProvider("openai_compatible");
-        override.setModelId("llama3.3:70b");
-        override.setStreaming(false);
-        aiProperties.setModelOverrides(List.of(override));
+    void aStreamingDeclarationNeverEscapesTheEndpointItNames() {
+        aiProperties.setModelOverrides(List.of(
+                streamingOverride("gemini-3.6-flash", "https://verified.example.test/v1", true)));
 
+        assertTrue(adapter.supportsStreaming(
+                target("https://verified.example.test/v1", false, "gemini-3.6-flash")));
         assertFalse(adapter.supportsStreaming(
-                target("https://api.example.test/v1", false, "llama3.3:70b")));
+                target("https://other.example.test/v1", false, "gemini-3.6-flash")));
+    }
+
+    /** Declarations resolve exactly as every other override does: nulls skipped, last one wins. */
+    @Test
+    void streamingDeclarationsResolveLikeEveryOtherOverride() {
+        String endpoint = "https://api.example.test/v1";
+        AiProviderTarget target = target(endpoint, false, "gemini-3.6-flash");
+
+        List<AiProperties.ModelOverride> overrides = new java.util.ArrayList<>();
+        overrides.add(null);
+        overrides.add(streamingOverride("gemini-3.6-flash", endpoint, true));
+        overrides.add(streamingOverride("gemini-3.6-flash", endpoint, false));
+        aiProperties.setModelOverrides(overrides);
+
+        assertFalse(adapter.supportsStreaming(target));
+    }
+
+    /** A vendor-prefixed model id is normalized before matching, as the token overrides are. */
+    @Test
+    void aVendorPrefixedModelIdStillMatchesItsDeclaration() {
+        String endpoint = "https://api.example.test/v1";
+        aiProperties.setModelOverrides(List.of(
+                streamingOverride("gemini-3.6-flash", endpoint, true)));
+
+        assertTrue(adapter.supportsStreaming(
+                target(endpoint, false, "google/gemini-3.6-flash")));
     }
 
     @Test

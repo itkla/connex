@@ -208,8 +208,21 @@ public class AiProperties {
          * one that does not accept the streamed request this client builds. There is no way to
          * discover that without asking the endpoint, so an operator declares it here after
          * verifying it; an undeclared endpoint is not streamed.
+         *
+         * <p>Only honoured together with {@link #endpoint}: the same model id served by two
+         * gateways is two different answers to this question, and a deployment-wide declaration
+         * would enable streaming for an endpoint nobody verified.
          */
         private Boolean streaming;
+
+        /**
+         * Exact provider endpoint this override's {@link #streaming} declaration applies to.
+         *
+         * <p>Scopes an endpoint-specific capability to the endpoint that was actually verified.
+         * The token, modality, and pricing fields are properties of the model itself and ignore
+         * it.
+         */
+        private String endpoint;
 
         /** Replacement PDF-document-input modality declaration. */
         private Boolean pdfInput;
@@ -233,6 +246,25 @@ public class AiProperties {
          * @param normalizedModelId model id normalized by the owning provider family
          * @return true when both the provider and the model id match exactly
          */
+        /**
+         * Whether this override declares streaming for one exact configured endpoint.
+         *
+         * @param candidateProvider configured provider id
+         * @param normalizedModelId family-normalized configured model id
+         * @param candidateEndpoint configured provider endpoint
+         * @return whether the declaration applies, or {@code null} when it says nothing
+         */
+        public Boolean streamingFor(
+                String candidateProvider, String normalizedModelId, String candidateEndpoint) {
+            if (streaming == null || endpoint == null || candidateEndpoint == null
+                    || !matches(candidateProvider, normalizedModelId)) {
+                return null;
+            }
+            return endpoint.trim().equalsIgnoreCase(candidateEndpoint.trim())
+                    ? streaming
+                    : null;
+        }
+
         public boolean matches(String candidateProvider, String normalizedModelId) {
             if (provider == null || modelId == null
                     || candidateProvider == null || normalizedModelId == null) {
