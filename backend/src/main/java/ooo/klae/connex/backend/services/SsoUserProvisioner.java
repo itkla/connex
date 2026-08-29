@@ -37,7 +37,7 @@ public class SsoUserProvisioner {
         user.setTimezone("UTC");
         user.setPasswordHash(null);
         userMapper.insert(user);
-        return user;
+        return userMapper.getUserById(user.getId());
     }
 
     private String deriveUsername(String email) {

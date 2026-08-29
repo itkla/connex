@@ -71,6 +71,8 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
 import ooo.klae.connex.backend.observability.ErrorReporter;
+import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.notifications.WebSocketSessionRegistry;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.AuditService;
@@ -99,11 +101,9 @@ import ooo.klae.connex.backend.webauthn.WebAuthnService;
         "connex.request-limits.workflow-max-body-bytes=512"
     }
 )
-@Import({
-    SecurityConfig.class,
+@Import({SecurityConfig.class,
     RequestBodySizeProperties.class,
-    WorkflowControllerTest.MapperTestConfig.class
-})
+    WorkflowControllerTest.MapperTestConfig.class})
 class WorkflowControllerTest {
 
     @Autowired private MockMvc mockMvc;
@@ -119,6 +119,8 @@ class WorkflowControllerTest {
     @MockitoBean private DbRelyingPartyRegistrationRepository relyingPartyRegistrationRepository;
     @MockitoBean private SsoAuthenticationSuccessHandler ssoAuthenticationSuccessHandler;
     @MockitoBean private SessionSecurityService sessionSecurityService;
+    @MockitoBean private UserMapper userMapper;
+    @MockitoBean private WebSocketSessionRegistry webSocketSessions;
     @MockitoBean private PrivilegedMfaProperties privilegedMfaProperties;
     @MockitoBean private PrivilegedAccountService privilegedAccountService;
     @MockitoBean private WebAuthnService webAuthnService;

@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.config;
 
 import java.io.IOException;
 
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -53,8 +54,12 @@ public class SessionEpochFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
             FilterChain filterChain) throws ServletException, IOException {
-        User user = currentUser();
-        if (user == null) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (!isApplicationAuthenticated(authentication)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+        if (!(authentication.getPrincipal() instanceof User user)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -62,20 +67,33 @@ public class SessionEpochFilter extends OncePerRequestFilter {
         Integer stamped = sessionSecurityService.sessionEpoch(session);
         Integer current = userMapper.currentSessionEpoch(user.getId());
         if (stamped == null || current == null || !stamped.equals(current)) {
-            if (session != null) {
-                webSocketSessions.closeByHttpSession(session.getId());
-            }
-            SecurityContextHolder.clearContext();
+            refuse(session);
         }
         filterChain.doFilter(request, response);
     }
 
-    private static User currentUser() {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (authentication != null && authentication.isAuthenticated()
-                && authentication.getPrincipal() instanceof User user) {
-            return user;
+    private void refuse(HttpSession session) {
+        if (session != null) {
+            webSocketSessions.closeByHttpSession(session.getId());
         }
-        return null;
+        SecurityContextHolder.clearContext();
+    }
+
+    /**
+     * Whether the request carries an authentication this application issued.
+     *
+     * <p>Anonymous authentication is excluded deliberately — it is the unauthenticated state, and
+     * clearing it would strip what the authorization filter expects a public request to carry.
+     *
+     * <p>A principal of some other type is left alone here rather than refused. Those exist — an
+     * identity-provider filter can persist one when the login ceremony never completed — but they
+     * predate this filter, are tracked at their source in #1478, and belong to a threat model this
+     * change does not address. Refusing them here would also be the wrong place: the session stays
+     * live and unenumerable either way, so it has to be invalidated where it is created.
+     */
+    private static boolean isApplicationAuthenticated(Authentication authentication) {
+        return authentication != null
+                && authentication.isAuthenticated()
+                && !(authentication instanceof AnonymousAuthenticationToken);
     }
 }

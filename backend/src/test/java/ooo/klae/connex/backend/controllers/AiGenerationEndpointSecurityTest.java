@@ -35,6 +35,8 @@ import ooo.klae.connex.backend.dto.BusinessCardAvailabilityResponse;
 import ooo.klae.connex.backend.dto.AiGenerationStatusDto;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
 import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
+import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.notifications.WebSocketSessionRegistry;
 import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.BusinessCardService;
@@ -74,7 +76,7 @@ import ooo.klae.connex.backend.webauthn.WebAuthnService;
         "connex.security.csrf-enabled=false"
     }
 )
-@Import({ SecurityConfig.class, AiGenerationEndpointSecurityTest.MapperTestConfig.class })
+@Import({SecurityConfig.class, AiGenerationEndpointSecurityTest.MapperTestConfig.class})
 @WithMockUser
 class AiGenerationEndpointSecurityTest {
     @Autowired private MockMvc mockMvc;
@@ -95,6 +97,8 @@ class AiGenerationEndpointSecurityTest {
     @MockitoBean private SsoAuthenticationSuccessHandler ssoAuthenticationSuccessHandler;
     @MockitoBean private RequestBodySizeProperties requestBodySizeProperties;
     @MockitoBean private SessionSecurityService sessionSecurityService;
+    @MockitoBean private UserMapper userMapper;
+    @MockitoBean private WebSocketSessionRegistry webSocketSessions;
     @MockitoBean private PrivilegedMfaProperties privilegedMfaProperties;
     @MockitoBean private PrivilegedAccountService privilegedAccountService;
     @MockitoBean private WebAuthnService webAuthnService;

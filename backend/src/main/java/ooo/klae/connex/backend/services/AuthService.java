@@ -223,25 +223,6 @@ public class AuthService {
         return epoch;
     }
 
-    /**
-     * Re-stamps the calling session with the account's current epoch after a ceremony that advanced
-     * it deliberately kept that session alive.
-     *
-     * <p>Must be called after the advancing transaction has committed. Session attributes are not
-     * transactional and are written when the request completes, so re-stamping inside the
-     * transaction would leave a session stamped ahead of the account if it then rolled back — which
-     * the epoch check refuses permanently.
-     *
-     * @param userId the account whose epoch was advanced
-     * @param httpRequest the request whose session is being kept
-     */
-    public void restampCurrentSessionEpoch(int userId, HttpServletRequest httpRequest) {
-        Integer epoch = userMapper.currentSessionEpoch(userId);
-        if (epoch != null) {
-            sessionSecurityService.stampSessionEpoch(httpRequest, epoch);
-        }
-    }
-
     public User establishAuthenticatedSession(User user, HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
         userMapper.updateLastLoginAt(user.getId());
         User refreshedUser = userMapper.getUserById(user.getId());

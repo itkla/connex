@@ -36,7 +36,6 @@ class SessionEpochArchTest {
         assertEquals(
                 List.of(
                         Path.of("ooo/klae/connex/backend/mappers/UserMapper.java"),
-                        Path.of("ooo/klae/connex/backend/services/MfaRecoveryService.java"),
                         Path.of("ooo/klae/connex/backend/services/PasswordResetService.java")),
                 sourcesContaining("bumpSessionEpoch("));
     }

@@ -14,6 +14,7 @@ import jakarta.servlet.Filter;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockHttpSession;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -23,6 +24,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
+import ooo.klae.connex.backend.services.SessionSecurityService;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountMode;
 import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountProperties;
@@ -32,6 +35,7 @@ class NativeConnectSecurityIntegrationTest {
     @Autowired private WebApplicationContext context;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
     @Autowired private ConnectedAccountProperties properties;
+    @Autowired private UserMapper userMapper;
 
     private MockMvc mockMvc;
 
@@ -91,13 +95,22 @@ class NativeConnectSecurityIntegrationTest {
         properties.getGoogle().setEnabled(true);
         properties.getGoogle().setMode(ConnectedAccountMode.MANAGED);
         properties.getManaged().getGoogle().setClientId("");
+        String unique = java.util.UUID.randomUUID().toString().substring(0, 8);
         User user = new User();
-        user.setId(7);
-        user.setUsername("native-connect-security-test");
+        user.setUsername("native-connect-security-" + unique);
+        user.setDisplayName("Native Connect Security Test");
+        user.setEmail("native-connect-security-" + unique + "@example.com");
+        user.setTimezone("UTC");
+        userMapper.insert(user);
+        User principal = userMapper.getUserById(user.getId());
         UsernamePasswordAuthenticationToken authenticated =
-            new UsernamePasswordAuthenticationToken(user, null, List.of());
+            new UsernamePasswordAuthenticationToken(principal, null, List.of());
+        MockHttpSession session = new MockHttpSession();
+        session.setAttribute(
+            SessionSecurityService.SESSION_EPOCH_ATTR, principal.getSessionEpoch());
 
         mockMvc.perform(post("/api/account/connections/native/google/pairing")
+                .session(session)
                 .with(authentication(authenticated))
                 .with(csrf().asHeader()))
             .andExpect(status().isBadRequest())
