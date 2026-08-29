@@ -1471,8 +1471,15 @@ function askConnexTurnRunning(moment: AskConnexTurnMoment): boolean {
  * its phase. Identity alone would therefore keep a resolved turn's reasoning and re-display it —
  * already expanded, since expansion is remembered per turn — underneath a failure banner that
  * belongs to a different question. Requiring the turn to have been running immediately before it
- * settled rejects exactly that transition: real completion always arrives from a running turn,
- * whereas one settled phase replacing another marks a turn whose id has been borrowed.
+ * settled rejects that transition, because one settled phase replacing another is the signature of
+ * a turn whose id has been borrowed.
+ *
+ * A settled turn whose own follow-up work then fails — reconciling its transcript, say — produces
+ * the identical pair of moments, and this deliberately drops its reasoning too. The two are not
+ * distinguishable from turn state alone, so the ambiguity is resolved toward forgetting: losing a
+ * finished turn's reasoning after a transient error costs the reader something they were free to
+ * read a moment ago, while keeping it would attach one question's private reasoning to the visible
+ * failure of another.
  */
 export function askConnexReasoningSurvives(
     previous: AskConnexTurnMoment | null,

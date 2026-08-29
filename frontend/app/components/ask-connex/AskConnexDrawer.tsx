@@ -236,8 +236,9 @@ export type AskConnexTurnLabels = {
     turnResolved: string;
     turnStreaming: string;
     turnWorking: string;
-    /** Accessible name for the disclosure that expands the in-flight reasoning panel. */
+    /** Accessible name for the disclosure that expands the reasoning panel. */
     thinkingToggle: string;
+    /** Accessible name for the same disclosure once the reasoning panel is open. */
     thinkingToggleHide: string;
     /** Accessible name for the list of narration segments leading up to an answer. */
     narrationTrail: string;
@@ -1263,7 +1264,9 @@ export function TurnActivity({
                     >
                         <SparklesIcon className="size-3.5" />
                         <span>{statusText}</span>
-                        <span className="sr-only">{labels.thinkingToggle}</span>
+                        <span className="sr-only">
+                            {thinkingOpen ? labels.thinkingToggleHide : labels.thinkingToggle}
+                        </span>
                         <ChevronDownIcon
                             aria-hidden
                             className={cn(
