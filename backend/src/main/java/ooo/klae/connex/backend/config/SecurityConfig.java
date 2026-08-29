@@ -57,6 +57,8 @@ import ooo.klae.connex.backend.observability.CorrelationIdFilter;
 import ooo.klae.connex.backend.observability.MetricsScrapeTokenFilter;
 import ooo.klae.connex.backend.sso.DbRelyingPartyRegistrationRepository;
 import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
+import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.notifications.WebSocketSessionRegistry;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
@@ -179,6 +181,8 @@ public class SecurityConfig {
             DbRelyingPartyRegistrationRepository dbRelyingPartyRegistrationRepository,
             SsoAuthenticationSuccessHandler ssoAuthenticationSuccessHandler,
             SessionSecurityService sessionSecurityService,
+            UserMapper userMapper,
+            WebSocketSessionRegistry webSocketSessions,
             PrivilegedMfaProperties privilegedMfaProperties,
             PrivilegedAccountService privilegedAccountService,
             WebAuthnService webAuthnService,
@@ -207,6 +211,9 @@ public class SecurityConfig {
             new OneTimeLinkExchangeAdmissionFilter(loginRateLimiter, clientIpResolver),
             CsrfFilter.class);
         http.addFilterBefore(new MetricsScrapeTokenFilter(metricsScrapeToken), AuthorizationFilter.class);
+        http.addFilterBefore(
+            new SessionEpochFilter(userMapper, sessionSecurityService, webSocketSessions),
+            AuthorizationFilter.class);
         http.addFilterAfter(
             new PrivilegedMfaEnforcementFilter(
                 privilegedMfaProperties,

@@ -331,6 +331,7 @@ public class WebAuthnController {
                     "proof_rejected");
             throw exception;
         }
+        authService.restampCurrentSessionEpoch(user.getId(), httpRequest);
         return Map.of("message", "Passkeys removed; enroll a replacement passkey to continue");
     }
 

@@ -32,6 +32,7 @@ public class SessionSecurityService {
     static final String REQUEST_IDENTITY_ATTR = "connex.requestIdentity";
     static final String REQUEST_IDENTITY_SESSION_ATTR = "connex.requestIdentitySessionId";
     static final String REQUEST_IDENTITY_USER_ATTR = "connex.requestIdentityUserId";
+    public static final String SESSION_EPOCH_ATTR = "connex.sessionEpoch";
     public static final String FIRST_PASSKEY_BOOTSTRAP_AT_ATTR = "connex.firstPasskeyBootstrapAt";
     public static final String FIRST_PASSKEY_BOOTSTRAP_USER_ATTR = "connex.firstPasskeyBootstrapUserId";
 
@@ -47,6 +48,31 @@ public class SessionSecurityService {
         replaceRequestIdentity(session, userId);
     }
 
+    /**
+     * Records the account session epoch this session authenticated against.
+     *
+     * <p>The value must come from the same row read that supplied the verified credential, never
+     * from a later re-read: a re-read can observe a revocation that committed after the credential
+     * check, which would stamp the post-revocation epoch onto the very session the revocation was
+     * meant to catch.
+     *
+     * @param request the request completing the authentication ceremony
+     * @param epoch the epoch read alongside the verified credential
+     */
+    public void stampSessionEpoch(HttpServletRequest request, int epoch) {
+        request.getSession().setAttribute(SESSION_EPOCH_ATTR, epoch);
+    }
+
+    /**
+     * The epoch this session was stamped with, or null when it carries no stamp.
+     *
+     * @param session the session to read, or null
+     * @return the stamped epoch, or null when absent — which is refused, never defaulted
+     */
+    public Integer sessionEpoch(HttpSession session) {
+        return session == null ? null : integerAttribute(session, SESSION_EPOCH_ATTR);
+    }
+
     /** Clears all account-bound session stamps while preserving unrelated anonymous flow state. */
     public void clearAuthenticationState(HttpServletRequest request) {
         HttpSession session = request.getSession(false);
@@ -60,6 +86,7 @@ public class SessionSecurityService {
         session.removeAttribute(REQUEST_IDENTITY_ATTR);
         session.removeAttribute(REQUEST_IDENTITY_SESSION_ATTR);
         session.removeAttribute(REQUEST_IDENTITY_USER_ATTR);
+        session.removeAttribute(SESSION_EPOCH_ATTR);
         session.removeAttribute(FIRST_PASSKEY_BOOTSTRAP_AT_ATTR);
         session.removeAttribute(FIRST_PASSKEY_BOOTSTRAP_USER_ATTR);
     }

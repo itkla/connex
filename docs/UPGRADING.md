@@ -133,6 +133,28 @@ WHERE status = 'pending' AND exchanged_at IS NOT NULL AND expires_at > UTC_TIMES
 Re-issue those invitations after the upgrade, and ask anyone mid-way through an email change to
 start it again. Both are administrator actions; neither recipient can recover the link themselves.
 
+### V192 session epoch cutover
+
+`V192__session_epoch.sql` adds `app_user.session_epoch` and makes session revocation fail closed.
+
+Revocation was enumerate-and-expire, which fails open: a login whose session row is written after a
+revocation has already enumerated is never seen and stays live. The session write happens after the
+request completes and outside every application transaction, so no lock can prevent it. An attacker
+holding a password could therefore sign in as the owner reset it and keep the session.
+
+A login now records the epoch it authenticated against, revocation advances the account's epoch, and
+every request compares the two — so a session established during that race is refused on its next
+request instead of surviving silently.
+
+Treat the release containing V192 as a coordinated restart, for the same reason as V191: an old
+replica neither stamps nor checks, so a session it serves is invisible to the new behaviour. Close
+ingress, stop every old backend replica, then start the new backend.
+
+**No additional forced logout beyond V191's.** Sessions carrying no epoch stamp are refused rather
+than grandfathered, and V192 repeats V191's sweep so none remain to refuse. Any database upgrading
+across both migrations has already run V191's sweep; the repeat covers only databases sitting at
+exactly V191 — staging and developer clones. Anonymous sessions are spared, as in V191.
+
 ## On-prem upgrade runbook
 
 1. **Preflight legacy media before any recreate** — if the installed version predates private object

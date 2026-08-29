@@ -74,6 +74,7 @@ public class MfaRecoveryService {
      * @param httpRequest the request completing the ceremony
      */
     private void expireOtherSessions(User user, HttpServletRequest httpRequest) {
+        userMapper.bumpSessionEpoch(user.getId());
         HttpSession current = httpRequest.getSession(false);
         accountSessionRevocationService.expireAllExcept(
                 user.getId(), current == null ? null : current.getId());

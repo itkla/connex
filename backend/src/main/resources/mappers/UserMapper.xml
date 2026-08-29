@@ -4,7 +4,7 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.UserMapper">
 
   <sql id="userColumns">
-    id, username, display_name, email, email_verified, password_hash, timezone, locale, last_login_at, profile_picture_url, created_at, updated_at
+    id, username, display_name, email, email_verified, password_hash, session_epoch, timezone, locale, last_login_at, profile_picture_url, created_at, updated_at
   </sql>
 
   <select id="getAllUsers" resultType="User">
@@ -238,6 +238,14 @@
     UPDATE app_user
     SET last_login_at = CURRENT_TIMESTAMP
     WHERE id = #{id}
+  </update>
+
+  <select id="currentSessionEpoch" resultType="java.lang.Integer">
+    SELECT session_epoch FROM app_user WHERE id = #{id}
+  </select>
+
+  <update id="bumpSessionEpoch">
+    UPDATE app_user SET session_epoch = session_epoch + 1 WHERE id = #{id}
   </update>
 
   <update id="updatePasswordHash">
