@@ -12,6 +12,15 @@ import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 
 /** Incrementally decodes only the canonical root terminal-answer text JSON path. */
 final class AiAssistantTextDeltaProjector {
+    /**
+     * Every fragment that could still be completed into a masking placeholder.
+     *
+     * <p>Mirrors {@code Demasker}'s token grammar exactly, including its unbounded inner
+     * whitespace: a shorter window would release {@code "{{        "} as literal text and then
+     * demask the completed placeholder differently in pieces than the whole answer demasks.
+     */
+    private static final java.util.regex.Pattern PLACEHOLDER_PREFIX =
+            java.util.regex.Pattern.compile("\\{\\{?\\s*+[A-Z]?[0-9]*+\\s*+}?");
     private static final List<String> REASONING_OPENINGS = List.of(
             "<think", "<thinking", "<thought", "<thoughts");
 
@@ -82,6 +91,9 @@ final class AiAssistantTextDeltaProjector {
                 && Character.isHighSurrogate(projection.text().charAt(safeLength - 1))) {
             safeLength--;
         }
+        if (!projection.textClosed()) {
+            safeLength = withheldPlaceholderStart(projection.text(), safeLength);
+        }
         if (safeLength < projected.length()
                 || !projection.text().startsWith(projected)) {
             throw malformedOutput();
@@ -95,6 +107,33 @@ final class AiAssistantTextDeltaProjector {
                 && projection.terminalConfirmed()
                 && projection.textClosed()
                 && safeLength == projection.text().length();
+    }
+
+    /**
+     * Withholds a trailing fragment that may still become a masking placeholder.
+     *
+     * <p>Held back for the same reason as the trailing high surrogate above: a batch boundary can
+     * fall anywhere, and half a placeholder demasks to nothing, so the member would briefly read
+     * the masked form of a name that is about to resolve — and worse, the pieces would then demask
+     * differently than the whole answer does. The scan runs over the accumulated text rather than
+     * a private buffer, so the fragment releases on its own once the next chunk completes it.
+     *
+     * <p>The grammar itself, not a length window, decides: a literal brace run in prose such as
+     * {@code "{{ this"} stops matching at the first character no placeholder body can contain and
+     * is released immediately, while {@code "{{"} followed by any run of whitespace is withheld
+     * because it can still become one.
+     */
+    private static int withheldPlaceholderStart(String text, int safeLength) {
+        int start = text.lastIndexOf('{', safeLength - 1);
+        if (start < 0) {
+            return safeLength;
+        }
+        if (start > 0 && text.charAt(start - 1) == '{') {
+            start--;
+        }
+        return PLACEHOLDER_PREFIX.matcher(text.substring(start, safeLength)).matches()
+                ? start
+                : safeLength;
     }
 
     private CharSequence normalizedInput() {
