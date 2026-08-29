@@ -406,6 +406,35 @@ public final class AiModelCatalog {
      * @param overrides deployment overrides, may be {@code null}
      * @return context window in tokens, never below the conservative fallback
      */
+    /**
+     * Whether an operator has declared that a configured target accepts streamed requests.
+     *
+     * <p>Answered from declaration alone, never from optimism. A capability an endpoint may not
+     * have must not be assumed on its behalf: an OpenAI-compatible endpoint serves any model under
+     * any name, and one that rejects the streamed request fails every turn rather than merely
+     * declining to stream.
+     *
+     * @param target configured provider target, may be {@code null}
+     * @param overrides deployment overrides, may be {@code null}
+     * @return whether streaming was declared for this exact model id
+     */
+    public static boolean streamingDeclared(
+            AiProviderTarget target, List<AiProperties.ModelOverride> overrides) {
+        if (overrides == null) {
+            return false;
+        }
+        String modelId = modelIdOf(target);
+        if (modelId == null || modelId.isBlank()) {
+            return false;
+        }
+        return overrides.stream()
+                .filter(override -> override.getStreaming() != null)
+                .filter(override -> modelId.equalsIgnoreCase(override.getModelId()))
+                .map(AiProperties.ModelOverride::getStreaming)
+                .findFirst()
+                .orElse(false);
+    }
+
     public static int contextWindowTokens(
             Family family, AiProviderTarget target, List<AiProperties.ModelOverride> overrides) {
         return resolve(family, modelIdOf(target), overrides).contextWindowTokens();

@@ -168,6 +168,42 @@ class OpenAiCompatibleAdapterTest {
         assertTokenLimits("mistral-large-latest", 4_096, 4_096);
     }
 
+    /**
+     * An OpenAI-compatible endpoint serves any model under any name, and one that rejects the
+     * streamed request fails the turn outright rather than falling back — which is exactly how
+     * assuming this capability took every Ask Connex turn down. It is now declared, not assumed.
+     */
+    @Test
+    void streamingIsDeclaredByAnOperatorRatherThanAssumed() {
+        AiProviderTarget target = target(
+                "https://api.example.test/v1", false, "gemini-3.6-flash");
+
+        assertFalse(adapter.supportsStreaming(target));
+
+        AiProperties.ModelOverride override = new AiProperties.ModelOverride();
+        override.setProvider("openai_compatible");
+        override.setModelId("gemini-3.6-flash");
+        override.setStreaming(true);
+        aiProperties.setModelOverrides(List.of(override));
+
+        assertTrue(adapter.supportsStreaming(target));
+        assertFalse(adapter.supportsStreaming(
+                target("https://api.example.test/v1", false, "some-other-model")));
+    }
+
+    /** A declaration that streaming does not work is honoured as readily as one that it does. */
+    @Test
+    void anOperatorMayDeclareThatAnEndpointDoesNotStream() {
+        AiProperties.ModelOverride override = new AiProperties.ModelOverride();
+        override.setProvider("openai_compatible");
+        override.setModelId("llama3.3:70b");
+        override.setStreaming(false);
+        aiProperties.setModelOverrides(List.of(override));
+
+        assertFalse(adapter.supportsStreaming(
+                target("https://api.example.test/v1", false, "llama3.3:70b")));
+    }
+
     @Test
     void openWeightAndUnknownFamiliesRetainConservativeFallback() {
         for (String modelId : List.of(

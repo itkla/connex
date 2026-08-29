@@ -201,6 +201,16 @@ public class AiProperties {
         /** Replacement image-input modality declaration. */
         private Boolean imageInput;
 
+        /**
+         * Whether this endpoint accepts a streamed completion request.
+         *
+         * <p>An OpenAI-compatible endpoint may serve any model under any name, and several serve
+         * one that does not accept the streamed request this client builds. There is no way to
+         * discover that without asking the endpoint, so an operator declares it here after
+         * verifying it; an undeclared endpoint is not streamed.
+         */
+        private Boolean streaming;
+
         /** Replacement PDF-document-input modality declaration. */
         private Boolean pdfInput;
 

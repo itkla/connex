@@ -84,6 +84,15 @@ public class OpenAiCompatibleAdapter implements AiProvider {
     }
 
     /**
+     * Whether this configured endpoint accepts a streamed request.
+     *
+     * <p>Declared by an operator per model rather than assumed: this adapter serves any
+     * OpenAI-compatible endpoint, and one that rejects the streamed request fails the turn outright
+     * instead of falling back, so an unverified endpoint is not streamed.
+     *
+     * @see AiModelCatalog#streamingDeclared
+     */
+    /**
      * Resolves the declared output ceiling for the configured OpenAI-compatible model.
      * @see AiModelCatalog
      */
@@ -98,9 +107,18 @@ public class OpenAiCompatibleAdapter implements AiProvider {
         return AiToolCallingMode.NATIVE_FUNCTIONS;
     }
 
+    /**
+     * Whether this configured endpoint accepts a streamed request.
+     *
+     * <p>Declared by an operator per model rather than assumed: this adapter serves any
+     * OpenAI-compatible endpoint, and one that rejects the streamed request fails the turn outright
+     * rather than falling back to a whole response, so an unverified endpoint is not streamed.
+     *
+     * @see AiModelCatalog#streamingDeclared
+     */
     @Override
     public boolean supportsStreaming(AiProviderTarget target) {
-        return true;
+        return AiModelCatalog.streamingDeclared(target, aiProperties.getModelOverrides());
     }
 
     @Override
