@@ -74,6 +74,11 @@ public class WebAuthnService {
 
     /**
      * Verifies an attestation response and persists the new credential.
+     *
+     * <p>Takes the account root before writing so enrollment serializes against
+     * {@link #recover(int)} and {@link #delete(int, String)} rather than interleaving with their
+     * credential reads and deletes.
+     *
      * @param expectedUserId the authenticated account completing the ceremony
      * @param options the options issued in {@link #createRegistrationOptions}
      * @param credential the client's attestation response
@@ -83,6 +88,9 @@ public class WebAuthnService {
     @Transactional
     public CredentialRecord finishRegistration(int expectedUserId, PublicKeyCredentialCreationOptions options,
             PublicKeyCredential<AuthenticatorAttestationResponse> credential, String label) {
+        if (userMapper.lockById(expectedUserId) == null) {
+            throw new BadCredentialsException("Passkey registration is not bound to the current account");
+        }
         PublicKeyCredentialUserEntity optionUser = options.getUser();
         Integer optionUserId = optionUser == null
             ? null

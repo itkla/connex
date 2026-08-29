@@ -39,6 +39,8 @@ class MfaRecoveryServiceTest {
     private final SessionSecurityService sessionSecurityService = mock(SessionSecurityService.class);
     private final AuditService auditService = mock(AuditService.class);
     private final SessionRegistry sessionRegistry = mock(SessionRegistry.class);
+    private final AccountSessionRevocationService accountSessionRevocationService =
+            new AccountSessionRevocationService(sessionRegistry);
     private final PrivilegedMfaProperties properties = properties();
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
     private final MfaRecoveryService service = new MfaRecoveryService(
@@ -48,7 +50,7 @@ class MfaRecoveryServiceTest {
             sessionSecurityService,
             properties,
             auditService,
-            sessionRegistry,
+            accountSessionRevocationService,
             clock);
 
     @BeforeEach

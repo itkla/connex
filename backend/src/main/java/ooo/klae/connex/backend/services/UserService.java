@@ -57,6 +57,7 @@ public class UserService implements UserDetailsService {
     private final ProviderAccountOffboardingService providerAccountOffboardingService;
     private final UserAccountCatalogOffboardingService catalogOffboardingService;
     private final UserDeletionTransaction userDeletionTransaction;
+    private final AccountSessionRevocationService accountSessionRevocationService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("username", "displayName", "email", "department", "title",
@@ -130,6 +131,14 @@ public class UserService implements UserDetailsService {
      * intentionally immutable here: because email is a trust anchor (email-bound
      * invites rely on it), it can only change through the verified, ownership-proving
      * flow in {@code EmailChangeService}, so any email in the request body is ignored.
+     *
+     * <p>The username is editable, and changing it re-authenticates the account everywhere. That is
+     * the honest behaviour for changing a login identifier, and it is also load-bearing: the shared
+     * session store indexes sessions by principal name and never rewrites that index, so a session
+     * outliving a rename would be filed under a name nothing looks up again — silently surviving
+     * every later password reset and MFA recovery. Revoking under the pre-update principal keeps
+     * every live session filed under its account's current username.
+     *
      * @param id the user being updated (must be the caller)
      * @param user the submitted profile fields
      * @return the updated user
@@ -155,6 +164,9 @@ public class UserService implements UserDetailsService {
         auditService.record("user.update", "user", id, after.getUsername(),
             "Updated user " + after.getUsername(),
             auditService.diff(before, after, AUDIT_FIELDS));
+        if (!before.getUsername().equals(after.getUsername())) {
+            accountSessionRevocationService.expireAll(before);
+        }
         return after;
     }
 

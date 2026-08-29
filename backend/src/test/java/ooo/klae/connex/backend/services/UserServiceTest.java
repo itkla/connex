@@ -10,8 +10,12 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -20,6 +24,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -42,6 +47,7 @@ class UserServiceTest extends AbstractServiceTest {
     @Autowired AuthenticationManager authenticationManager;
     @Autowired ObjectMapper objectMapper;
     @Autowired PasswordEncoder passwordEncoder;
+    @MockitoSpyBean AccountSessionRevocationService accountSessionRevocationService;
 
     @Test
     void getActiveWorkspaceMemberReferencesPreservesRequestedOrderAndOmitsUnknownIds() {
@@ -319,6 +325,35 @@ class UserServiceTest extends AbstractServiceTest {
     private void authenticateAs(User user) {
         SecurityContextHolder.getContext().setAuthentication(
             new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities()));
+    }
+
+    @Test
+    void renamingAnAccountRevokesItsSessionsUnderThePreRenamePrincipal() {
+        User member = newUser();
+        authenticateAs(member);
+        String previousUsername = member.getUsername();
+
+        userService.update(member.getId(), renameUpdate(member, previousUsername + "renamed"));
+
+        ArgumentCaptor<User> principal = ArgumentCaptor.forClass(User.class);
+        verify(accountSessionRevocationService).expireAll(principal.capture());
+        assertEquals(previousUsername, principal.getValue().getUsername());
+    }
+
+    @Test
+    void aProfileUpdateThatKeepsTheUsernameRevokesNothing() {
+        User member = newUser();
+        authenticateAs(member);
+
+        userService.update(member.getId(), profileUpdate(member, "My New Name"));
+
+        verify(accountSessionRevocationService, never()).expireAll(any());
+    }
+
+    private User renameUpdate(User base, String newUsername) {
+        User update = profileUpdate(base, base.getDisplayName());
+        update.setUsername(newUsername);
+        return update;
     }
 
     private User profileUpdate(User base, String newDisplayName) {

@@ -49,7 +49,7 @@ class PasswordResetServiceLockingTest {
                 mock(PasswordResetEmailService.class),
                 mock(PasswordResetRateLimiter.class),
                 auditService,
-                mock(SessionRegistry.class),
+                new AccountSessionRevocationService(mock(SessionRegistry.class)),
                 mock(SsoConnectionService.class));
         PasswordResetToken token = new PasswordResetToken();
         token.setUserId(41);

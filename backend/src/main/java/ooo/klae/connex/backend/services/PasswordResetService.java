@@ -3,8 +3,6 @@ package ooo.klae.connex.backend.services;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.security.core.session.SessionInformation;
-import org.springframework.security.core.session.SessionRegistry;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,7 +36,7 @@ public class PasswordResetService {
     private final PasswordResetEmailService passwordResetEmailService;
     private final PasswordResetRateLimiter rateLimiter;
     private final AuditService auditService;
-    private final SessionRegistry sessionRegistry;
+    private final AccountSessionRevocationService accountSessionRevocationService;
     private final SsoConnectionService ssoConnectionService;
 
     @Value("${connex.password-reset.token-expiry-minutes:30}")
@@ -218,9 +216,7 @@ public class PasswordResetService {
      * @param user the user whose sessions should be invalidated
      */
     private void expireSessions(User user) {
-        for (SessionInformation session : sessionRegistry.getAllSessions(user, false)) {
-            session.expireNow();
-        }
+        accountSessionRevocationService.expireAll(user);
     }
 
     private static BadRequestException invalidLink() {
