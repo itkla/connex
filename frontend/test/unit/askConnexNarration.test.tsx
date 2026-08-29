@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 
 import { NarrationTrail } from "@/app/components/ask-connex/AskConnexDrawer";
 import {
-    EMPTY_ASK_CONNEX_ALLOWED_RECORDS,
     askConnexMessageNarration,
     type AskConnexTurnSegment,
 } from "@/app/lib/askConnex";
@@ -16,10 +15,7 @@ const TRAIL: AskConnexTurnSegment[] = [
     { seq: 2, text: "Got it — **Aiko Tanaka** at Acme. Now their open deals." },
 ];
 
-function render(
-    segments: readonly AskConnexTurnSegment[],
-    allowedRecords: ReadonlySet<string> = EMPTY_ASK_CONNEX_ALLOWED_RECORDS,
-): string {
+function render(segments: readonly AskConnexTurnSegment[]): string {
     return renderToStaticMarkup(
         <NextIntlClientProvider
             locale="en"
@@ -34,7 +30,7 @@ function render(
                 },
             }}
         >
-            <NarrationTrail segments={segments} allowedRecords={allowedRecords} label={LABEL} />
+            <NarrationTrail segments={segments} label={LABEL} />
         </NextIntlClientProvider>,
     );
 }
@@ -60,19 +56,26 @@ describe("the narration trail", () => {
         expect(render([])).toBe("");
     });
 
-    it("keeps a live segment's record references inert before the server rewrote them", () => {
-        const html = render([{ seq: 1, text: "Checking [Aiko Tanaka](person:123)." }]);
-        expect(html).toContain("Aiko Tanaka");
-        expect(html).not.toContain("<a");
-        expect(html).not.toContain("/records/contacts/123");
-    });
-
-    it("chips a settled segment's reference once the answer is authorized to cite it", () => {
-        const html = render(
-            [{ seq: 1, text: "Checking [Aiko Tanaka](person:123)." }],
-            new Set(["person:123"]),
-        );
-        expect(html).toContain('href="/records/contacts/123"');
+    it("never renders a record chip, live or settled, whatever the text looks like", () => {
+        const linkShaped = [
+            "Checking [Aiko Tanaka](person:123).",
+            "Reading [Acme](company:45) and [Renewal](deal:9).",
+            "Pulling [the first result](record:r1).",
+        ];
+        for (const text of linkShaped) {
+            const live = render([{ seq: 1, text }]);
+            const settled = render(askConnexMessageNarration({ narration: [{ seq: 1, text }] }));
+            for (const html of [live, settled]) {
+                expect(html).not.toContain("<a");
+                expect(html).not.toContain("/records/");
+                expect(html).not.toContain("person:123");
+                expect(html).not.toContain("company:45");
+                expect(html).not.toContain("record:r1");
+            }
+            expect(live).toBe(settled);
+        }
+        expect(render([{ seq: 1, text: "Checking [Aiko Tanaka](person:123)." }]))
+            .toContain("Aiko Tanaka");
     });
 
     it("replays a settled answer's persisted narration through the same trail", () => {

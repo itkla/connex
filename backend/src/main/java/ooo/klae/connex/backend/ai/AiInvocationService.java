@@ -83,6 +83,7 @@ public class AiInvocationService {
     private static final String PARSE_OUTCOME_PARSED = "parsed";
     private static final Set<String> TRUNCATION_STOP_REASONS = Set.of("length", "max_tokens");
     private static final int MAX_REASONING_CHARS = 16_000;
+    private static final int MAX_NARRATION_CHARS = 600;
     /** Server-controlled instruction appended for providers that expose tagged reasoning. */
     public static final String TAGGED_REASONING_INSTRUCTION = """
             Before the final response, reason inside exactly one <thinking>...</thinking> block. \
@@ -541,13 +542,7 @@ public class AiInvocationService {
             return malformedNativeTool(
                     raw, invocation, result, reasoning, "native_call_content");
         }
-        // Content beside a tool call is the model narrating what it is about to do. It travels the
-        // same normalization pipeline as reasoning — bounded, screened, strictly leak-scanned, then
-        // demasked and screened again — and a rejected narration is simply dropped: narration is
-        // decoration around a tool call, never a reason to fail the step it accompanies.
-        ReasoningNormalization narration = captured.answer().isBlank()
-                ? new ReasoningNormalization(Optional.empty(), null)
-                : normalizeReasoning(captured.answer(), invocation);
+        ReasoningNormalization narration = normalizeNarration(captured.answer(), invocation);
         AiToolCall call = result.toolCalls().getFirst();
         if (nativeTools.exchanges().stream()
                 .anyMatch(exchange -> exchange.call().id().equals(call.id()))) {
@@ -972,6 +967,41 @@ public class AiInvocationService {
         return demaskedRejection == null
                 ? new ReasoningNormalization(Optional.of(demasked.text()), null)
                 : new ReasoningNormalization(Optional.empty(), demaskedRejection);
+    }
+
+    /**
+     * Normalizes model content that accompanied a tool call into viewer-safe narration.
+     *
+     * <p>Narration travels the same pipeline as reasoning — bounded, screened, strictly
+     * leak-scanned, demasked, screened again — and then answers a narrower question than reasoning
+     * does, because narration is public output rather than a private trace. The exclusive
+     * tool-or-content protocol boundary is preserved by shape rather than by rejection: narration
+     * must read as a short status sentence, so an over-long passage or a JSON-shaped payload — a
+     * final answer or tool envelope smuggled into ordinary content — is refused. A refused
+     * narration is dropped rather than failing the step it accompanies.
+     *
+     * @param content ordinary model content emitted beside a tool call
+     * @param invocation the in-flight invocation whose masking context governs demasking
+     * @return the narration to publish, or an empty normalization when nothing survives
+     */
+    private ReasoningNormalization normalizeNarration(String content, AiInvocation invocation) {
+        if (content == null || content.isBlank()) {
+            return new ReasoningNormalization(Optional.empty(), null);
+        }
+        String candidate = content.strip();
+        if (candidate.length() > MAX_NARRATION_CHARS
+                || candidate.startsWith("{") || candidate.startsWith("[")) {
+            return new ReasoningNormalization(Optional.empty(), "narration_shape");
+        }
+        ReasoningNormalization normalized = normalizeReasoning(candidate, invocation);
+        return normalized.content()
+                .filter(text -> text.strip().length() <= MAX_NARRATION_CHARS)
+                .map(text -> new ReasoningNormalization(Optional.of(text.strip()), null))
+                .orElseGet(() -> new ReasoningNormalization(
+                        Optional.empty(),
+                        normalized.rejectionReason() == null
+                                ? "narration_shape"
+                                : normalized.rejectionReason()));
     }
 
     private String serializeProviderInput(

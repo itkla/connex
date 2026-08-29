@@ -896,6 +896,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     /**
      * Folds one narration segment into the active turn's trail, on the same terms as thinking.
      *
+     * Narration is published to the member who asked rather than to the session, so a participant
+     * watching a shared chat receives none and their live trail stays empty — which is the point:
+     * a viewer whose record access is narrower must not learn from a live segment something the
+     * settled transcript would withhold from them. Nothing here assumes session-wide delivery; the
+     * turn match only narrows what already arrived on this member's own queue.
+     *
      * Dropping the live trail when the turn settles is safe here in a way it is not for reasoning:
      * the same segments are persisted on the answer, so the settled transcript replays them from
      * the message rather than from this state.

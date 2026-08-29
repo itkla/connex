@@ -2009,11 +2009,14 @@ class AiChatAgentLoopServiceTest {
         assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
         ArgumentCaptor<AiChatStepFrameDto> frames =
                 ArgumentCaptor.forClass(AiChatStepFrameDto.class);
-        verify(realtimeDispatcher, atLeastOnce()).sessionNow(
-                anyInt(), anyInt(), frames.capture());
+        verify(realtimeDispatcher, atLeastOnce()).userAfterCommit(
+                eq(TURN.userId()), frames.capture());
         AiChatStepFrameDto narration = frames.getAllValues().stream()
                 .filter(frame -> "narration".equals(frame.kind()))
                 .findFirst().orElseThrow();
+        verify(realtimeDispatcher, never()).sessionNow(
+                anyInt(), anyInt(), org.mockito.ArgumentMatchers.argThat(
+                        frame -> frame != null && "narration".equals(frame.kind())));
         assertEquals("Let me check the open pipeline.", narration.text());
         ArgumentCaptor<String> metadata = ArgumentCaptor.forClass(String.class);
         verify(persistenceService).resolve(
@@ -2022,6 +2025,73 @@ class AiChatAgentLoopServiceTest {
         assertEquals("Let me check the open pipeline.",
                 stored.path("narration").path(0).path("text").asString());
         assertEquals(1, stored.path("narration").path(0).path("seq").asInt());
+    }
+
+    /**
+     * Narration is a status sentence, not a channel: an over-long passage or a JSON-shaped payload
+     * (a final answer smuggled into ordinary content) is refused, and the tool step it accompanied
+     * still runs — the model loses its narration, not its work.
+     */
+    @Test
+    void anOverlongOrJsonShapedNarrationIsDroppedWithoutFailingTheStep() throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(narratingTool(
+                        "call_1", "search_records",
+                        "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}",
+                        "x".repeat(9_000)))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
+                        "Two deals need attention.", List.of())));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<String> metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(
+                eq(TURN), eq("Two deals need attention."), metadata.capture(), anyInt(), anyInt());
+        assertFalse(objectMapper.readTree(metadata.getValue()).has("narration"));
+        verify(toolExecutor).execute(
+                eq("search_records"), any(JsonNode.class), any(), eq(true), any());
+    }
+
+    /**
+     * Narration is a status line, not an evidence surface: a record link the model writes there is
+     * reduced to its label, so narration can never mint a chip the answer's citations never
+     * declared.
+     */
+    @Test
+    void narrationRecordLinksAreReducedToTheirLabels() throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(narratingTool(
+                        "call_1", "search_records",
+                        "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}",
+                        "Checking [the renewal](record:r1) now."))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
+                        "Two deals need attention.", List.of())));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<String> metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(
+                eq(TURN), any(), metadata.capture(), anyInt(), anyInt());
+        assertEquals("Checking the renewal now.", objectMapper.readTree(metadata.getValue())
+                .path("narration").path(0).path("text").asString());
     }
 
     /** A turn whose answer was withheld by policy persists no narration either. */

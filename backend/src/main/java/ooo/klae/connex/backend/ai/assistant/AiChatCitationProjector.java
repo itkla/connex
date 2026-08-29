@@ -41,8 +41,9 @@ public class AiChatCitationProjector {
     private static final java.util.regex.Pattern SKILL_VERSION =
             java.util.regex.Pattern.compile("\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}");
     private static final int MAX_STORED_INSTANT_CHARS = 64;
-    private static final int MAX_NARRATION_SEGMENTS = 64;
-    private static final int MAX_NARRATION_CHARS = 16_000;
+    private static final int MAX_NARRATION_SEGMENTS = 24;
+    private static final int MAX_NARRATION_CHARS = 600;
+    private static final int MAX_NARRATION_TOTAL_CHARS = 8_000;
 
     private final ObjectMapper objectMapper;
     private final PersonMapper personMapper;
@@ -144,12 +145,17 @@ public class AiChatCitationProjector {
                 return List.of();
             }
             List<AiChatNarration> segments = new ArrayList<>();
+            int total = 0;
             for (JsonNode value : values) {
                 JsonNode seq = value.path("seq");
                 JsonNode text = value.path("text");
                 if (!value.isObject() || value.size() != 2
                         || !seq.isIntegralNumber() || !seq.canConvertToInt() || seq.asInt() < 0
                         || !text(text, MAX_NARRATION_CHARS)) {
+                    return List.of();
+                }
+                total += text.asString().length();
+                if (total > MAX_NARRATION_TOTAL_CHARS) {
                     return List.of();
                 }
                 segments.add(new AiChatNarration(seq.asInt(), text.asString()));

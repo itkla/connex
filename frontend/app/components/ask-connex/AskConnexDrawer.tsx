@@ -685,24 +685,25 @@ function SenderAvatar({ user, label }: { user: boolean; label: string }) {
 /**
  * The work the assistant narrated on its way to an answer, one quiet line per step.
  *
- * Narration is public-facing prose — what it is about to do, and what it just found — so it sits in
- * the transcript above the answer rather than inside the private reasoning panel. The treatment is
- * deliberately lighter than an answer bubble: this is the trail that leads to the reply, not the
- * reply, and a reader skimming for the answer has to be able to tell the two apart at a glance.
+ * Narration is prose the assistant writes for the member who asked — what it is about to do, and
+ * what it just found — so it sits in the transcript above the answer rather than inside the private
+ * reasoning panel. The treatment is deliberately lighter than an answer bubble: this is the trail
+ * that leads to the reply, not the reply, and a reader skimming for the answer has to be able to
+ * tell the two apart at a glance.
  *
  * Segments render as Markdown for the same reason the answer does — the model writes prose, and
- * emphasis or a short list should read the way it reads in the reply. Record references are gated
- * by `allowedRecords`, so a live segment written before the server rewrote its references shows
- * inert text, and a settled one shows chips only for the citations the answer was authorized to
- * carry.
+ * emphasis or a short list should read the way it reads in the reply. No segment ever renders a
+ * record chip: narration is a status line rather than an evidence surface, and the server strips
+ * record links to their labels before persisting a segment, so link syntax reaching this component
+ * is by definition not an authorized citation. The allowlist is therefore fixed empty here rather
+ * than passed in, which makes a caller that means well but supplies the answer's citations unable
+ * to turn a status line into evidence.
  */
 export function NarrationTrail({
     segments,
-    allowedRecords,
     label,
 }: {
     segments: readonly AskConnexTurnSegment[];
-    allowedRecords: ReadonlySet<string>;
     label: string;
 }) {
     if (segments.length === 0) return null;
@@ -713,7 +714,10 @@ export function NarrationTrail({
                     key={segment.seq}
                     className="rounded-xl border border-border/60 bg-muted/40 px-3 py-1.5 text-xs leading-relaxed text-muted-foreground"
                 >
-                    <AskConnexMarkdown content={segment.text} allowedRecords={allowedRecords} />
+                    <AskConnexMarkdown
+                        content={segment.text}
+                        allowedRecords={EMPTY_ASK_CONNEX_ALLOWED_RECORDS}
+                    />
                 </li>
             ))}
         </ul>
@@ -777,11 +781,7 @@ function TranscriptMessage({
                     </MessageHeader>
                 ) : null}
                 {!user && message.contentWithheld !== true && narration.length > 0 ? (
-                    <NarrationTrail
-                        segments={narration}
-                        allowedRecords={allowedRecords}
-                        label={labels.narrationTrail}
-                    />
+                    <NarrationTrail segments={narration} label={labels.narrationTrail} />
                 ) : null}
                 <motion.div
                     initial={animateEntrance ? (reduceMotion ? { opacity: 0 } : { opacity: 0, transform: 'translateY(0.375rem)' }) : false}
@@ -2028,7 +2028,6 @@ function ConversationSurface({
                                     <div className="pl-10">
                                         <NarrationTrail
                                             segments={liveNarration}
-                                            allowedRecords={EMPTY_ASK_CONNEX_ALLOWED_RECORDS}
                                             label={labels.narrationTrail}
                                         />
                                     </div>
