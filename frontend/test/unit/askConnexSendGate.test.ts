@@ -1,6 +1,13 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { askConnexSendable } from "@/app/lib/askConnex";
+
+const PROVIDER = readFileSync(
+    path.resolve(process.cwd(), "app/components/ask-connex/AskConnexProvider.tsx"),
+    "utf8",
+);
 
 const READY = { available: true, composer: "", composerTooLong: false };
 
@@ -34,6 +41,11 @@ describe("what Ask Connex accepts as a sendable question", () => {
             suggestion: "Draft the follow-up",
             composerTooLong: false,
         })).toBe(false);
+    });
+
+    it("empties the composer only for a question the composer supplied", () => {
+        expect(PROVIDER).toContain("if (contentOverride === undefined) setComposer('');");
+        expect(PROVIDER).not.toContain("setFreshMessageIds(new Set([optimistic.id]));\n            setComposer('');");
     });
 
     it("keeps the composer's length ceiling off the assistant's own phrase", () => {

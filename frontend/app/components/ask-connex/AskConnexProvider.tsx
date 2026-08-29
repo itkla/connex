@@ -2086,6 +2086,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
      * shedding its filters on the way out: the request body a blocked draft produces is no body at
      * all, so sending it would ask a question covering everything the member was in the middle of
      * narrowing away from — a wider question than the one they wrote, not a narrower one.
+     *
+     * Only a question the composer supplied empties it afterwards. A suggested follow-up and a
+     * retried prompt bring their own words, so the draft standing in the composer was never part of
+     * what went out; clearing it there would throw away writing the member never sent and cannot
+     * recover.
      */
     const send = useCallback(async (contentOverride?: string) => {
         const requestContent = contentOverride ?? composer;
@@ -2185,7 +2190,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             messagesRef.current = [...messagesRef.current, optimistic];
             setMessages(messagesRef.current);
             setFreshMessageIds(new Set([optimistic.id]));
-            setComposer('');
+            if (contentOverride === undefined) setComposer('');
             setSubmissionBlocked(false);
             await followTurn(stored, activeSignal);
         } catch (error) {
