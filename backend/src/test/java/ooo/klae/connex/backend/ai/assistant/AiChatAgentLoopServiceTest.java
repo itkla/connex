@@ -1982,6 +1982,84 @@ class AiChatAgentLoopServiceTest {
     }
 
     /**
+     * The plan a model publishes is the surface that makes a long turn legible: it streams live so
+     * the member can watch the work advance, and persists with the answer so a reloaded transcript
+     * still shows what the assistant set out to do.
+     */
+    @Test
+    void aPublishedPlanStreamsLiveAndPersistsWithTheAnswer() throws Exception {
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class), any()))
+                .thenReturn(new AiAssistantToolResult(Map.of("todos", List.of()), List.of()));
+        AiAssistantStep finalStep = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer("Both steps are done.", List.of()));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(toolStep(
+                        "set_todos",
+                        "{\"items\":[\"Check the contact\",\"Read their deals\"],"
+                                + "\"statuses\":[\"active\",\"pending\"]}")),
+                        parsed(finalStep));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<AiChatStepFrameDto> frames =
+                ArgumentCaptor.forClass(AiChatStepFrameDto.class);
+        verify(realtimeDispatcher, atLeastOnce()).sessionNow(
+                anyInt(), anyInt(), frames.capture());
+        AiChatStepFrameDto plan = frames.getAllValues().stream()
+                .filter(frame -> "todos".equals(frame.kind()))
+                .findFirst().orElseThrow();
+        assertTrue(plan.text().contains("Check the contact"));
+        assertTrue(plan.text().contains("active"));
+        ArgumentCaptor<String> metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(
+                eq(TURN), eq("Both steps are done."), metadata.capture(), anyInt(), anyInt());
+        JsonNode stored = objectMapper.readTree(metadata.getValue());
+        assertEquals("Check the contact", stored.path("todos").path(0).path("label").asString());
+        assertEquals("pending", stored.path("todos").path(1).path("status").asString());
+    }
+
+    /**
+     * A later plan replaces the earlier one rather than accumulating: the member sees the current
+     * plan, not every draft of it.
+     */
+    @Test
+    void republishingThePlanReplacesTheStoredOne() throws Exception {
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class), any()))
+                .thenReturn(new AiAssistantToolResult(Map.of("todos", List.of()), List.of()));
+        AiAssistantStep finalStep = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer("Done.", List.of()));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(toolStep(
+                        "set_todos",
+                        "{\"items\":[\"Check the contact\"],\"statuses\":[\"active\"]}")),
+                        parsed(toolStep(
+                                "set_todos",
+                                "{\"items\":[\"Check the contact\"],\"statuses\":[\"done\"]}")),
+                        parsed(finalStep));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<String> metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(
+                eq(TURN), any(), metadata.capture(), anyInt(), anyInt());
+        JsonNode stored = objectMapper.readTree(metadata.getValue());
+        assertEquals(1, stored.path("todos").size());
+        assertEquals("done", stored.path("todos").path(0).path("status").asString());
+    }
+
+    /**
      * A model that narrates alongside its tool call turns a silent pause into visible work: the
      * prose streams live as a narration frame and is persisted with the answer so a reloaded
      * transcript still shows how the answer was reached.

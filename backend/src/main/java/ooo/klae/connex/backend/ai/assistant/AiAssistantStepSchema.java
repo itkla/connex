@@ -153,6 +153,14 @@ public class AiAssistantStepSchema {
                 items.put("type", "string");
                 addEnum(items, argument);
             }
+            case TEXT_LIST -> {
+                value.put("type", "array");
+                value.put("maxItems", argument.maximum());
+                ObjectNode items = value.putObject("items");
+                items.put("type", "string");
+                items.put("minLength", 1);
+                items.put("maxLength", AiAssistantToolCatalog.MAX_TEXT_LIST_ITEM_CHARS);
+            }
         }
         return value;
     }

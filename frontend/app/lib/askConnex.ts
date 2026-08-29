@@ -7,6 +7,7 @@ import type {
     AiAssistantToolCallMutation,
     AiChatCitation,
     AiChatMessage,
+    AiChatTodo,
     AiChatPageContext,
     AiChatPageContextKind,
     AiChatProgressItem,
@@ -1431,6 +1432,27 @@ export function askConnexMessageNarration(
     if (!narration?.length) return EMPTY_ASK_CONNEX_TURN_SEGMENTS;
     return boundAskConnexTurnSegments(narration.toSorted((a, b) => a.seq - b.seq));
 }
+
+/**
+ * The plan a settled answer published, as stored.
+ *
+ * Bounded on read like narration: the server bounds what it persists, and applying the same limit
+ * here means a transcript page cannot be made to render an unbounded checklist by metadata written
+ * before those bounds existed.
+ */
+export function askConnexMessageTodos(
+    message: Pick<AiChatMessage, 'todos'>,
+): readonly AiChatTodo[] {
+    const todos = message.todos;
+    if (!todos?.length) return EMPTY_ASK_CONNEX_TODOS;
+    return todos.slice(0, ASK_CONNEX_TODO_LIMIT);
+}
+
+/** The most plan steps a transcript will render for one answer. */
+export const ASK_CONNEX_TODO_LIMIT = 12;
+
+/** The shared empty plan, so a message without one renders nothing without new identity. */
+export const EMPTY_ASK_CONNEX_TODOS: readonly AiChatTodo[] = [];
 
 /** The shared empty trail, so a message without narration renders nothing without new identity. */
 export const EMPTY_ASK_CONNEX_TURN_SEGMENTS: readonly AskConnexTurnSegment[] = [];

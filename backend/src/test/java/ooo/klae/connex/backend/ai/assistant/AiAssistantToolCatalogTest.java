@@ -18,13 +18,13 @@ class AiAssistantToolCatalogTest {
     void catalogKeepsReadAndWriteSafetyTiersExplicit() throws Exception {
         assertEquals(
                 List.of(
-                        "search_records", "get_record", "get_records", "list_activities", "list_tasks",
+                        "search_records", "get_record", "get_records", "set_todos", "list_activities", "list_tasks",
                         "list_scope_activities",
                         "aggregate_metric", "find_schedule_conflicts", "get_deal_brief",
                         "create_activity", "create_task", "create_note", "add_tag",
                         "change_deal_stage", "assign_owner"),
                 catalog.tools().stream().map(AiAssistantToolCatalog.ToolSpec::name).toList());
-        assertEquals(14, catalog.tools().stream()
+        assertEquals(15, catalog.tools().stream()
                 .filter(AiAssistantToolCatalog.ToolSpec::executable)
                 .count());
         assertTrue(catalog.isExecutable("find_schedule_conflicts"));
@@ -88,7 +88,7 @@ class AiAssistantToolCatalogTest {
     void nativeDefinitionsMirrorExecutableCatalogSchemasWithoutReservedTools() {
         var definitions = catalog.nativeDefinitions(objectMapper);
 
-        assertEquals(14, definitions.size());
+        assertEquals(15, definitions.size());
         assertEquals(
                 catalog.tools().stream()
                         .filter(AiAssistantToolCatalog.ToolSpec::executable)

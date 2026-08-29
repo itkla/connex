@@ -190,6 +190,7 @@ public class AiChatAgentLoopService {
             int nativeProviderAttempts = 0;
             int noProgressSteps = 0;
             List<AiChatNarration> narration = new ArrayList<>();
+            List<AiChatTodo> todos = new ArrayList<>();
             java.util.concurrent.atomic.AtomicInteger narrationBytes =
                     new java.util.concurrent.atomic.AtomicInteger();
             int inputTokens = addTokens(memory.inputTokens(), attachmentContext.inputTokens());
@@ -748,6 +749,16 @@ public class AiChatAgentLoopService {
                                 turn.workspaceId(), turn.sessionId(), turn.turnId(),
                                 stepNumber, "step", step.tool().name(),
                                 "executed", null));
+                        if ("set_todos".equals(step.tool().name())) {
+                            todos.clear();
+                            todos.addAll(AiChatTodo.from(
+                                    step.tool().args().get("items"),
+                                    step.tool().args().get("statuses")));
+                            publish(turn, new AiChatStepFrameDto(
+                                    turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                                    stepNumber, "todos", null, null, null, null,
+                                    serialize(objectMapper.valueToTree(todos))));
+                        }
                         toolResultCache.put(toolCallKey, toolResult);
                         if (seenToolResults.add(progressResultJson)) {
                             noProgressSteps = 0;
@@ -866,7 +877,8 @@ public class AiChatAgentLoopService {
                                 turn.workspaceId(), citations, citedResources),
                         toolBudgetAudit,
                         skillReference,
-                        omitted ? List.of() : List.copyOf(narration));
+                        omitted ? List.of() : List.copyOf(narration),
+                        omitted ? List.of() : List.copyOf(todos));
                 requireCurrentAccess(turn);
                 persistenceService.resolve(
                         turn, persistedText, metadata, inputTokens, outputTokens);

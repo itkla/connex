@@ -5,6 +5,8 @@ import { isAskConnexProgressSource } from "@/app/lib/askConnex";
 import {
     type AiChatDeltaFrame,
     type AiChatNarrationFrame,
+    type AiChatTodo,
+    type AiChatTodosFrame,
     type AiChatRealtimeFrame,
     type AiChatThinkingFrame,
     type Notification,
@@ -123,7 +125,10 @@ function parseAiChatDeltaFrame(parsed: unknown): AiChatDeltaFrame | null {
  * Reads one per-step text frame — the private reasoning trail or the public narration — which share
  * a shape and differ only in the kind that says how the client may show them.
  */
-function parseAiChatStepTextFrame<K extends "thinking" | "narration">(
+const TODO_LIMIT = 12;
+const TODO_LABEL_LIMIT = 120;
+
+function parseAiChatStepTextFrame<K extends "thinking" | "narration" | "todos">(
     parsed: unknown,
     kind: K,
 ): { workspaceId: number; sessionId: number; turnId: number; seq: number; kind: K; text: string } | null {
@@ -150,12 +155,49 @@ function parseAiChatNarrationFrame(parsed: unknown): AiChatNarrationFrame | null
     return parseAiChatStepTextFrame(parsed, "narration");
 }
 
+/**
+ * Reads one plan update. The frame's `text` carries the whole current plan as JSON, so a decode
+ * failure or a malformed entry drops the frame rather than rendering half a plan.
+ */
+function parseAiChatTodosFrame(parsed: unknown): AiChatTodosFrame | null {
+    const frame = parseAiChatStepTextFrame(parsed as Record<string, unknown>, "todos");
+    if (!frame) return null;
+    let decoded: unknown;
+    try {
+        decoded = JSON.parse(frame.text);
+    } catch {
+        return null;
+    }
+    if (!Array.isArray(decoded) || decoded.length === 0 || decoded.length > TODO_LIMIT) return null;
+    const todos: AiChatTodo[] = [];
+    for (const entry of decoded) {
+        if (typeof entry !== "object" || entry === null) return null;
+        const label = Reflect.get(entry, "label");
+        const status = Reflect.get(entry, "status");
+        if (typeof label !== "string" || label.length === 0 || label.length > TODO_LABEL_LIMIT) {
+            return null;
+        }
+        if (status !== "pending" && status !== "active" && status !== "done") return null;
+        todos.push({ label, status });
+    }
+    return {
+        workspaceId: frame.workspaceId,
+        sessionId: frame.sessionId,
+        turnId: frame.turnId,
+        seq: frame.seq,
+        kind: "todos",
+        todos,
+    };
+}
+
 function parseAiChatFrame(parsed: unknown): AiChatRealtimeFrame | null {
     if (typeof parsed !== "object" || parsed === null) return null;
     const thinking = parseAiChatThinkingFrame(parsed);
     if (thinking) return thinking;
     const narration = parseAiChatNarrationFrame(parsed);
     if (narration) return narration;
+    const todos = parseAiChatTodosFrame(parsed);
+    if (todos) return todos;
     const workspaceId = Reflect.get(parsed, "workspaceId");
     const sessionId = Reflect.get(parsed, "sessionId");
     const turnId = Reflect.get(parsed, "turnId");

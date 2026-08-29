@@ -1084,6 +1084,7 @@ public class AiAssistantPromptAssembler {
                 Map.of(),
                 ToolBudgetAudit.NONE,
                 null,
+                List.of(),
                 List.of());
     }
 
@@ -1102,6 +1103,7 @@ public class AiAssistantPromptAssembler {
      * @param toolBudgetAudit exact model-visible replay degradation counters
      * @param skill declared skill that produced the answer, or null for the generic loop
      * @param narration ordered narration segments the model wrote between tool calls
+     * @param todos the plan the model published for the turn, in its final state
      * @return serialized durable metadata
      */
     public String finalMetadata(
@@ -1112,7 +1114,8 @@ public class AiAssistantPromptAssembler {
             Map<String, AiChatRecordObservation> observations,
             ToolBudgetAudit toolBudgetAudit,
             SkillReference skill,
-            List<AiChatNarration> narration) {
+            List<AiChatNarration> narration,
+            List<AiChatTodo> todos) {
         java.util.Objects.requireNonNull(toolBudgetAudit, "toolBudgetAudit");
         List<Map<String, Object>> resolved = new ArrayList<>();
         for (String handle : citations) {
@@ -1147,6 +1150,9 @@ public class AiAssistantPromptAssembler {
             }
             if (narration != null && !narration.isEmpty()) {
                 metadata.put("narration", List.copyOf(narration));
+            }
+            if (todos != null && !todos.isEmpty()) {
+                metadata.put("todos", List.copyOf(todos));
             }
             if (skill != null) {
                 // A LinkedHashMap, not Map.of: this object is written into the durable answer
@@ -1264,6 +1270,8 @@ public class AiAssistantPromptAssembler {
                     case INTEGER -> "integer " + argument.minimum() + "-" + argument.maximum();
                     case STRING_LIST -> "string list " + argument.minimum() + "-"
                             + argument.maximum() + " items";
+                    case TEXT_LIST -> "short text list " + argument.minimum() + "-"
+                            + argument.maximum() + " items";
                 });
         if (!argument.values().isEmpty()) {
             declared.append(" of ").append(argument.values().stream()
@@ -1288,7 +1296,7 @@ public class AiAssistantPromptAssembler {
 
                 Use only catalog tools. Finish with the fewest tool steps that retrieve enough evidence to answer well. Reuse CRM data already present in this turn, never repeat the same tool arguments, and batch record kinds in one search_records call and several record reads in one get_records call when possible. Answer directly when no CRM read is needed. Tool-call efficiency must never make the final answer brief or incomplete.
 
-                List-style tool results are capped. Prefer targeted top-N and filtered queries over broad fan-out. When a result contains a [truncated: ...] marker, narrow the next call instead of repeating the same broad call. A tool result of {"error": reason} means that call was refused and nothing was read; correct the arguments or use a different tool, and never repeat a refused call unchanged.
+                List-style tool results are capped. Prefer targeted top-N and filtered queries over broad fan-out. When a result contains a [truncated: ...] marker, narrow the next call instead of repeating the same broad call. A tool result of {"error": reason} means that call was refused and nothing was read; correct the arguments or use a different tool, and never repeat a refused call unchanged. For work that takes several steps, publish a plan with set_todos and update it as you go, so the member can see what you are doing.
 
                 AUTO write tools execute immediately and are undoable. CONFIRM write tools only create a proposal and never execute until a human explicitly approves the card.
 
@@ -1322,7 +1330,7 @@ public class AiAssistantPromptAssembler {
 
                 Finish with the fewest tool steps that retrieve enough evidence to answer well. Reuse CRM data already present in this turn, never repeat the same tool arguments, and batch record kinds in one search_records call and several record reads in one get_records call when possible. Answer directly when no CRM read is needed. Tool-call efficiency must never make the final answer brief or incomplete.
 
-                List-style tool results are capped. Prefer targeted top-N and filtered queries over broad fan-out. When a result contains a [truncated: ...] marker, narrow the next call instead of repeating the same broad call. A tool result of {"error": reason} means that call was refused and nothing was read; correct the arguments or use a different tool, and never repeat a refused call unchanged.
+                List-style tool results are capped. Prefer targeted top-N and filtered queries over broad fan-out. When a result contains a [truncated: ...] marker, narrow the next call instead of repeating the same broad call. A tool result of {"error": reason} means that call was refused and nothing was read; correct the arguments or use a different tool, and never repeat a refused call unchanged. For work that takes several steps, publish a plan with set_todos and update it as you go, so the member can see what you are doing.
 
                 AUTO write tools execute immediately and are undoable. CONFIRM write tools only create a proposal and never execute until a human explicitly approves the card.
 

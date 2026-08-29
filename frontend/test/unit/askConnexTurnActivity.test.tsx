@@ -64,6 +64,7 @@ const labels: AskConnexTurnLabels = {
     turnWorking: "Thinking…",
     thinkingToggle: "Show thinking",
     narrationTrail: "Work in progress",
+    todoPlan: "Plan",
 };
 
 const THINKING = [
