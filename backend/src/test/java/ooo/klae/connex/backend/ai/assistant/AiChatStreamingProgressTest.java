@@ -54,6 +54,32 @@ class AiChatStreamingProgressTest {
     }
 
     /**
+     * Providers commonly deliver a space or a newline as its own delta. The demasker answers a
+     * blank input with the empty string, so demasking one would silently run the words together.
+     */
+    @Test
+    void aWhitespaceOnlyDeltaSurvivesDemasking() {
+        AiChatTurnPersistenceService persistenceService =
+                mock(AiChatTurnPersistenceService.class);
+        when(persistenceService.appendPartialBatch(any(), anyInt(), any()))
+                .thenAnswer(call -> ((Integer) call.getArgument(1))
+                        + ((String) call.getArgument(2)).length());
+        MaskingContext context = new MaskingContext();
+        AiChatStreamingProgress progress = new AiChatStreamingProgress(
+                turn(AiPrivacyMode.MASKED), persistenceService, context);
+
+        AiChatStreamingProgress.Observer observer = progress.observer(true);
+        observer.onContentDelta("{\"text\":\"Two");
+        observer.onContentDelta(" ");
+        observer.onContentDelta("words\"}");
+        observer.finish("Two words");
+
+        ArgumentCaptor<String> batches = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).appendPartialBatch(any(), anyInt(), batches.capture());
+        assertEquals("Two words", batches.getValue());
+    }
+
+    /**
      * An unmasked turn's context holds no bindings, so demasking it would only rewrite a literal
      * brace pair the model typed into an unknown-reference marker. Its stream stays untouched.
      */

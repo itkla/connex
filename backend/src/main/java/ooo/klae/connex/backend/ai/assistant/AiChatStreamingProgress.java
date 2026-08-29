@@ -11,6 +11,8 @@ import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
 /** Batches decoded terminal text into durable UTF-16-sequenced realtime frames. */
 final class AiChatStreamingProgress {
     private static final int BATCH_CHARACTERS = 256;
+    /** The durable partial-content bound this batcher must never hand to persistence. */
+    private static final int MAX_STREAM_CHARACTERS = 16_000;
     private static final long CHECK_NANOS = java.time.Duration.ofMillis(250).toNanos();
 
     private final AiChatQueuedTurn turn;
@@ -21,6 +23,7 @@ final class AiChatStreamingProgress {
     private final StringBuilder pending = new StringBuilder();
     private long lastCheckNanos = System.nanoTime();
     private boolean excluded;
+    private boolean streamTruncated;
 
     /**
      * Creates the streaming batcher for one turn.
@@ -49,10 +52,24 @@ final class AiChatStreamingProgress {
     }
 
     private void acceptDecoded(String text) {
-        if (excluded) {
+        if (excluded || streamTruncated) {
             return;
         }
-        pending.append(demasking ? Demasker.demask(text, maskingContext).text() : text);
+        // Blank text passes through untouched: it can hold no placeholder, and the demasker
+        // answers a blank input with the empty string — which would swallow the space or newline
+        // a provider commonly delivers as its own delta and run the words together.
+        String decoded = demasking && !text.isBlank()
+                ? Demasker.demask(text, maskingContext).text()
+                : text;
+        // Demasking expands: an answer that fits the durable bound while masked can exceed it
+        // once names replace placeholders. Stopping the stream is the honest response — the
+        // settled answer still carries the whole text — where appending would throw inside a
+        // provider callback and end the turn as a provider error over a display concern.
+        if (durable.length() + pending.length() + decoded.length() > MAX_STREAM_CHARACTERS) {
+            streamTruncated = true;
+            return;
+        }
+        pending.append(decoded);
         // Screening runs on the demasked text for a masked turn, which is the text the member
         // actually sees. Screening the masked form would be close to vacuous: every value that
         // could carry special-care content has already become a placeholder by then.
@@ -164,7 +181,8 @@ final class AiChatStreamingProgress {
             // The check above compares the whole projection; only this one compares the stream the
             // member read, so a placeholder that demasked differently in pieces than as a whole is
             // caught here rather than silently leaving the transcript disagreeing with the screen.
-            if (!(durable.toString() + pending).equals(expectedText)) {
+            // A stream stopped at the durable bound is a known prefix, not a mismatch.
+            if (!streamTruncated && !(durable.toString() + pending).equals(expectedText)) {
                 throw new AiAssistantLoopException("malformed_output", "malformed_output");
             }
             flush();
