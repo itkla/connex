@@ -72,6 +72,20 @@ class AccountSessionIndexIntegrationTest {
     }
 
     @Test
+    void aSessionLeftByAnOlderBuildIsRefiledOnItsNextSave() {
+        User account = newUser();
+        String sessionId = saveAuthenticatedSession(account);
+        jdbcTemplate.update(
+                "UPDATE SPRING_SESSION SET PRINCIPAL_NAME = ? WHERE SESSION_ID = ?",
+                account.getUsername(), sessionId);
+        assertEquals(account.getUsername(), storedPrincipalName(sessionId));
+
+        touch(sessionStore, sessionId);
+
+        assertEquals("uid:" + account.getId(), storedPrincipalName(sessionId));
+    }
+
+    @Test
     void aSessionWithoutAConnexPrincipalIsNotIndexed() {
         String sessionId = save(sessionStore,
                 HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY,
@@ -106,6 +120,13 @@ class AccountSessionIndexIntegrationTest {
                 new UsernamePasswordAuthenticationToken(account, null, account.getAuthorities()));
         return save(sessionStore,
                 HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY, context);
+    }
+
+    private static <S extends Session> void touch(
+            SessionRepository<S> repository, String sessionId) {
+        S session = repository.findById(sessionId);
+        session.setLastAccessedTime(session.getLastAccessedTime().plusSeconds(1));
+        repository.save(session);
     }
 
     private static <S extends Session> String save(
