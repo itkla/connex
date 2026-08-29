@@ -14,6 +14,7 @@ import jakarta.servlet.Filter;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockHttpSession;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -23,6 +24,8 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
+import ooo.klae.connex.backend.support.AuthenticatedSessions;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.beans.User;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -30,6 +33,7 @@ import tools.jackson.databind.json.JsonMapper;
 @SpringBootTest
 class CsrfBootstrapIntegrationTest {
     @Autowired private WebApplicationContext context;
+    @Autowired private UserMapper userMapper;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
 
     private MockMvc mockMvc;
@@ -43,13 +47,13 @@ class CsrfBootstrapIntegrationTest {
 
     @Test
     void authenticatedBootstrapReturnsOpaquePrincipalAndSessionGeneration() throws Exception {
-        User user = new User();
-        user.setId(481516);
-        user.setUsername("identity-test");
+        User user = AuthenticatedSessions.account(userMapper, "identity-test");
         UsernamePasswordAuthenticationToken authenticated = new UsernamePasswordAuthenticationToken(
                 user, null, List.of());
 
-        MvcResult result = mockMvc.perform(get("/api/auth/csrf").with(authentication(authenticated)))
+        MvcResult result = mockMvc.perform(get("/api/auth/csrf")
+                        .session(AuthenticatedSessions.stampedSession(user))
+                        .with(authentication(authenticated)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.token").isString())
                 .andExpect(jsonPath("$.headerName").isString())

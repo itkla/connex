@@ -209,13 +209,21 @@ public class PasswordResetService {
     }
 
     /**
-     * Expires every session the user holds across the shared session store, forcing
-     * re-authentication everywhere after a password reset. The Spring Session-backed
-     * registry enumerates by the immutable account id, which
-     * {@code AccountSessionIndexResolver} writes into the session index on every save.
-     * @param user the user whose sessions should be invalidated
+     * Revokes every session the user holds, by both available mechanisms.
+     *
+     * <p>The epoch bump is the fail-closed half: it refuses any session stamped before it on that
+     * session's next request, including one written after the enumeration below has already run.
+     * The enumeration is the immediate half: it marks the rows expired now, which is what stops
+     * inbound WebSocket frames on a client that makes no further HTTP request. Neither replaces the
+     * other.
+     *
+     * <p>The bump runs inside the reset transaction, under the account lock the caller already
+     * holds, so it commits with the new password or not at all.
+     *
+     * @param user the user whose sessions should be revoked
      */
     private void expireSessions(User user) {
+        userMapper.bumpSessionEpoch(user.getId());
         accountSessionRevocationService.expireAll(user.getId());
     }
 

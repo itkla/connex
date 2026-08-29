@@ -202,6 +202,6 @@ class AuthServiceTest extends AbstractServiceTest {
         user.setTimezone("UTC");
         user.setPasswordHash(null);
         userMapper.insert(user);
-        return user;
+        return userMapper.getUserById(user.getId());
     }
 }

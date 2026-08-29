@@ -65,6 +65,14 @@ public class MfaRecoveryService {
     /**
      * Expires every session the account holds apart from the one completing the ceremony.
      *
+     * <p>This deliberately does not advance the account session epoch, unlike password reset. For a
+     * passwordless account the retained session is the only way to enroll the replacement passkey —
+     * the credentials are already gone — so it would have to be re-stamped after the transaction
+     * commits. Session attributes are written when the request completes, so a failure in that
+     * window would leave the sole usable session stamped behind an advanced epoch, permanently
+     * refused, with no credential left to sign in and fix it. Recovery therefore keeps enumeration
+     * alone and carries its fail-open residual, rather than trading it for a fail-shut one.
+     *
      * <p>A passwordless account proves bootstrap with a fresh authenticated session rather than a
      * password, so a session that predates recovery would otherwise be able to enroll the
      * replacement passkey through the confinement-allowed registration endpoints. Only the session

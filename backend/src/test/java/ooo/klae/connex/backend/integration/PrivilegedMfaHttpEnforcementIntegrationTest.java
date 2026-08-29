@@ -21,10 +21,13 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.mock.web.MockHttpSession;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
@@ -43,6 +46,7 @@ class PrivilegedMfaHttpEnforcementIntegrationTest {
     @MockitoBean private WebAuthnService webAuthnService;
     @MockitoBean private AuthService authService;
     @MockitoBean private AuditService auditService;
+    @MockitoBean private UserMapper userMapper;
 
     private MockMvc mockMvc;
     private User privilegedUser;
@@ -62,22 +66,34 @@ class PrivilegedMfaHttpEnforcementIntegrationTest {
         when(webAuthnService.hasPasskey(USER_ID)).thenReturn(false);
         when(authService.getCurrentUser()).thenReturn(privilegedUser);
         when(authService.hasPasswordCredential(USER_ID)).thenReturn(true);
+        when(userMapper.currentSessionEpoch(USER_ID)).thenReturn(0);
+    }
+
+    /**
+     * A session as a real authenticated request carries it: stamped with the epoch the credential
+     * was verified against. Without the stamp {@code SessionEpochFilter} de-authenticates first and
+     * every assertion here would see 401 instead of the confinement it is testing.
+     */
+    private MockHttpSession stampedSession() {
+        MockHttpSession session = new MockHttpSession();
+        session.setAttribute(SessionSecurityService.SESSION_EPOCH_ATTR, 0);
+        return session;
     }
 
     @Test
     void testProfileDefaultsToEnforcedAndConfinesUnenrolledPrivilegedAccount() throws Exception {
         assertTrue(privilegedMfaProperties.isEnforced());
 
-        mockMvc.perform(get("/api/audit/export").with(authentication(authentication)))
+        mockMvc.perform(get("/api/audit/export").session(stampedSession()).with(authentication(authentication)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("PRIVILEGED_MFA_ENROLLMENT_REQUIRED"));
 
-        mockMvc.perform(get("/api/companies").with(authentication(authentication)))
+        mockMvc.perform(get("/api/companies").session(stampedSession()).with(authentication(authentication)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("PRIVILEGED_MFA_ENROLLMENT_REQUIRED"));
 
         mockMvc.perform(get("/api/auth/webauthn/register/requirements")
-                        .with(authentication(authentication)))
+                        .session(stampedSession()).with(authentication(authentication)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.currentPasswordRequired").value(true));
 

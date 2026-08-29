@@ -70,6 +70,10 @@ public interface UserMapper {
     int updateDisplayName(@Param("id") int id, @Param("displayName") String displayName);
     int updateEmail(@Param("id") int id, @Param("email") String email);
     int markEmailVerified(int id);
+    /** The account's current session epoch; sessions stamped with an older value are refused. */
+    Integer currentSessionEpoch(int id);
+    /** Advances the account's session epoch, refusing every session stamped before the bump. */
+    int bumpSessionEpoch(int id);
     int updatePasswordHash(@Param("id") int id, @Param("passwordHash") String passwordHash);
     int updateTimezone(@Param("id") int id, @Param("timezone") String timezone);
     int updateLocale(@Param("id") int id, @Param("locale") String locale);

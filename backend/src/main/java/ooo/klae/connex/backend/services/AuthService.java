@@ -201,6 +201,28 @@ public class AuthService {
      * @param httpResponse the current response
      * @return the principal reloaded after the login timestamp update
      */
+    /**
+     * The session epoch the presented credential was verified against.
+     *
+     * <p>Read from {@code user} — the principal the caller authenticated — and deliberately not from
+     * the refreshed row below it. The refresh runs in its own transaction after the credential check,
+     * so it can observe a revocation that committed in between; stamping that value would mark the
+     * raced session as current and defeat the whole mechanism.
+     *
+     * <p>A null epoch means the principal came from a read that does not select the column, which is
+     * a wiring mistake rather than a runtime condition. It fails loudly here instead of silently
+     * stamping a session that could never be revoked.
+     */
+    private static int verifiedSessionEpoch(User user) {
+        Integer epoch = user.getSessionEpoch();
+        if (epoch == null) {
+            throw new IllegalStateException(
+                "Authenticated principal carries no session epoch; it was not loaded through the "
+                    + "credential-bearing read");
+        }
+        return epoch;
+    }
+
     public User establishAuthenticatedSession(User user, HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
         userMapper.updateLastLoginAt(user.getId());
         User refreshedUser = userMapper.getUserById(user.getId());
@@ -225,6 +247,7 @@ public class AuthService {
         SecurityContextHolder.setContext(context);
         securityContextRepository.saveContext(context, httpRequest, httpResponse);
         sessionSecurityService.markAuthenticated(httpRequest, refreshedUser.getId());
+        sessionSecurityService.stampSessionEpoch(httpRequest, verifiedSessionEpoch(user));
 
         Integer activeWorkspaceId = workspaceService.defaultWorkspaceIdFor(refreshedUser.getId());
         if (activeWorkspaceId != null) {

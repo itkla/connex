@@ -28,6 +28,17 @@ import jakarta.annotation.Nullable;
 @EqualsAndHashCode(of = "id")
 @NoArgsConstructor
 public class User implements org.springframework.security.core.userdetails.UserDetails {
+    /**
+     * Pinned because this principal is serialized into {@code SPRING_SESSION_ATTRIBUTES}: an
+     * implicit id is derived from the class shape, so adding a field — or a Lombok accessor for one
+     * — moves it and makes every stored principal unreadable. Pinning keeps live sessions readable
+     * across that change.
+     *
+     * <p>The value is the one the current shape computes, so declaring it changes nothing today.
+     * {@code UserSerializationTest} pins it, so a change to this constant has to be deliberate.
+     */
+    private static final long serialVersionUID = -5201556527847944016L;
+
     private int id;
     private String username;
     private String displayName;
@@ -37,6 +48,14 @@ public class User implements org.springframework.security.core.userdetails.UserD
     private String locale = "en";
     @JsonIgnore
     private String passwordHash; // can be null
+    /**
+     * The account's session epoch as read alongside the credential this principal was verified
+     * against. Carried from that row read to the session stamp and nowhere else, which is why it is
+     * transient: the stamp in the session is the persisted source of truth, and a boxed null is the
+     * fail-closed value that a primitive zero would silently make indistinguishable from epoch 0.
+     */
+    @JsonIgnore
+    private transient Integer sessionEpoch;
     private String createdAt;
     private String updatedAt;
     private String lastLoginAt;

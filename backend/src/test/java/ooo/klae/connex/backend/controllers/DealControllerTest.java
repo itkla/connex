@@ -48,6 +48,8 @@ import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
 import ooo.klae.connex.backend.observability.ErrorReporter;
+import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.notifications.WebSocketSessionRegistry;
 import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.DealRiskService;
@@ -74,11 +76,9 @@ import ooo.klae.connex.backend.webauthn.WebAuthnService;
         "connex.sso.enabled=false"
     }
 )
-@Import({
-    SecurityConfig.class,
+@Import({SecurityConfig.class,
     RequestBodySizeProperties.class,
-    DealControllerTest.MapperTestConfig.class
-})
+    DealControllerTest.MapperTestConfig.class})
 @WithMockUser
 class DealControllerTest {
     @Autowired private MockMvc mockMvc;
@@ -95,6 +95,8 @@ class DealControllerTest {
     @MockitoBean private DbRelyingPartyRegistrationRepository relyingPartyRegistrationRepository;
     @MockitoBean private SsoAuthenticationSuccessHandler ssoAuthenticationSuccessHandler;
     @MockitoBean private SessionSecurityService sessionSecurityService;
+    @MockitoBean private UserMapper userMapper;
+    @MockitoBean private WebSocketSessionRegistry webSocketSessions;
     @MockitoBean private PrivilegedMfaProperties privilegedMfaProperties;
     @MockitoBean private PrivilegedAccountService privilegedAccountService;
     @MockitoBean private WebAuthnService webAuthnService;
