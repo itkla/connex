@@ -236,8 +236,10 @@ export type AskConnexTurnLabels = {
     turnResolved: string;
     turnStreaming: string;
     turnWorking: string;
-    /** Accessible name for the disclosure that expands the in-flight reasoning panel. */
+    /** Accessible name for the disclosure that expands the reasoning panel. */
     thinkingToggle: string;
+    /** Accessible name for the same disclosure once the reasoning panel is open. */
+    thinkingToggleHide: string;
     /** Accessible name for the list of narration segments leading up to an answer. */
     narrationTrail: string;
     /** Accessible name for the plan the assistant published for a turn. */
@@ -1036,6 +1038,8 @@ function SettledTurnActivity({
     destructive,
     labels,
     recovery,
+    thinkingToggle = null,
+    thinkingPanel = null,
     onRetry,
     onContinueFromPartial,
     onNarrowScope,
@@ -1045,6 +1049,9 @@ function SettledTurnActivity({
     destructive?: boolean;
     labels: AskConnexTurnLabels;
     recovery: AskConnexRecovery;
+    /** Opens the reasoning this turn produced before it stopped, when it produced any. */
+    thinkingToggle?: ReactNode;
+    thinkingPanel?: ReactNode;
     onRetry: () => void;
     onContinueFromPartial: () => void;
     onNarrowScope: () => void;
@@ -1090,6 +1097,8 @@ function SettledTurnActivity({
             {offered.length > 0 ? (
                 <div className="flex flex-wrap items-center gap-1.5">{offered}</div>
             ) : null}
+            {thinkingToggle}
+            {thinkingPanel}
         </div>
     );
 }
@@ -1102,11 +1111,13 @@ function SettledTurnActivity({
  *
  * The status line doubles as a disclosure once the first ephemeral reasoning step arrives: until
  * then there is nothing to show, so the line stays a plain line rather than offering an empty
- * panel. Reasoning is plain text — it is not Markdown and is never parsed as such — and it settles
- * with the turn: a terminal phase renders the settled surface, which carries no reasoning at all.
- * Expansion is remembered per turn rather than per mount, so a new question always starts
- * collapsed, and the expanded panel sits outside the announced status region — a live region that
- * re-read the whole accumulated reasoning on every step would drown out the status it exists for.
+ * panel. Reasoning is plain text — it is not Markdown and is never parsed as such — and it outlives
+ * the turn that produced it: a settled phase offers the same disclosure, because a reader watching
+ * an answer arrive is not simultaneously reading the reasoning behind it, and this client's memory
+ * holds the only copy there will ever be. Expansion is remembered per turn rather than per mount,
+ * so a new question always starts collapsed, and the expanded panel sits outside the announced
+ * status region — a live region that re-read the whole accumulated reasoning on every step would
+ * drown out the status it exists for.
  *
  * The stop control appears only for the member who asked. A participant who opened a shared session
  * mid-turn adopts that turn into the same state, and the cancellation endpoint rejects anyone but
@@ -1143,12 +1154,47 @@ export function TurnActivity({
     const thinkingPanelId = useId();
     const thinkingOpen = turn.turnId !== null && openForTurn === turn.turnId;
     const recovery = askConnexRecovery(turn.phase, turn.reason, canRetry, hasPartial);
+    const toggleThinking = () => setOpenForTurn(thinkingOpen ? null : turn.turnId);
+    const thinkingPanel = thinkingOpen && thinking.length > 0 ? (
+        <div
+            id={thinkingPanelId}
+            role="region"
+            aria-label={labels.thinkingToggle}
+            className="max-h-48 divide-y divide-border/60 overflow-y-auto rounded-lg bg-muted/60 px-3 py-1 text-xs leading-relaxed break-words whitespace-pre-wrap text-muted-foreground"
+        >
+            {thinking.map((entry) => (
+                <p key={entry.seq} className="py-1.5">{entry.text}</p>
+            ))}
+        </div>
+    ) : null;
+    const settledThinkingToggle = thinking.length > 0 ? (
+        <button
+            type="button"
+            aria-expanded={thinkingOpen}
+            aria-controls={thinkingPanelId}
+            onClick={toggleThinking}
+            className="flex items-center gap-1.5 rounded-md text-left transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        >
+            <span>{thinkingOpen ? labels.thinkingToggleHide : labels.thinkingToggle}</span>
+            <ChevronDownIcon
+                aria-hidden
+                className={cn(
+                    'size-3 shrink-0 transition-transform motion-reduce:transition-none',
+                    thinkingOpen && 'rotate-180',
+                )}
+            />
+        </button>
+    ) : null;
     if (turn.phase === 'idle') return null;
     if (turn.phase === 'resolved') {
         return (
-            <div role="status" className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground">
-                <CheckIcon className="size-3.5 text-primary" />
-                <span>{labels.turnResolved}</span>
+            <div className="space-y-2 px-4 py-2 text-xs text-muted-foreground">
+                <div role="status" className="flex items-center gap-2">
+                    <CheckIcon className="size-3.5 text-primary" />
+                    <span>{labels.turnResolved}</span>
+                </div>
+                {settledThinkingToggle}
+                {thinkingPanel}
             </div>
         );
     }
@@ -1160,6 +1206,8 @@ export function TurnActivity({
                 message={labels.terminalMessage[askConnexTerminalKind(turn.reason).message]}
                 labels={labels}
                 recovery={recovery}
+                thinkingToggle={settledThinkingToggle}
+                thinkingPanel={thinkingPanel}
                 onRetry={onRetry}
                 onContinueFromPartial={onContinueFromPartial}
                 onNarrowScope={onNarrowScope}
@@ -1173,6 +1221,8 @@ export function TurnActivity({
                 message={labels.terminalMessage[askConnexTimedOutMessage(turn.reason)]}
                 labels={labels}
                 recovery={recovery}
+                thinkingToggle={settledThinkingToggle}
+                thinkingPanel={thinkingPanel}
                 onRetry={onRetry}
                 onContinueFromPartial={onContinueFromPartial}
                 onNarrowScope={onNarrowScope}
@@ -1186,6 +1236,8 @@ export function TurnActivity({
                 message={labels.turnCancelled}
                 labels={labels}
                 recovery={NO_RECOVERY}
+                thinkingToggle={settledThinkingToggle}
+                thinkingPanel={thinkingPanel}
                 onRetry={onRetry}
                 onContinueFromPartial={onContinueFromPartial}
                 onNarrowScope={onNarrowScope}
@@ -1207,12 +1259,14 @@ export function TurnActivity({
                         type="button"
                         aria-expanded={thinkingOpen}
                         aria-controls={thinkingPanelId}
-                        onClick={() => setOpenForTurn(thinkingOpen ? null : turn.turnId)}
+                        onClick={toggleThinking}
                         className="flex items-center gap-2 rounded-md text-left transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                     >
                         <SparklesIcon className="size-3.5" />
                         <span>{statusText}</span>
-                        <span className="sr-only">{labels.thinkingToggle}</span>
+                        <span className="sr-only">
+                            {thinkingOpen ? labels.thinkingToggleHide : labels.thinkingToggle}
+                        </span>
                         <ChevronDownIcon
                             aria-hidden
                             className={cn(
@@ -1240,18 +1294,7 @@ export function TurnActivity({
                     </IconButton>
                 ) : null}
             </div>
-            {thinkingOpen && thinking.length > 0 ? (
-                <div
-                    id={thinkingPanelId}
-                    role="region"
-                    aria-label={labels.thinkingToggle}
-                    className="max-h-48 divide-y divide-border/60 overflow-y-auto rounded-lg bg-muted/60 px-3 py-1 text-xs leading-relaxed break-words whitespace-pre-wrap text-muted-foreground"
-                >
-                    {thinking.map((entry) => (
-                        <p key={entry.seq} className="py-1.5">{entry.text}</p>
-                    ))}
-                </div>
-            ) : null}
+            {thinkingPanel}
         </div>
     );
 }

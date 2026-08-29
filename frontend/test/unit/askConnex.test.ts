@@ -14,6 +14,7 @@ import {
     ASK_CONNEX_SEGMENT_CHAR_CAP,
     anchorAskConnexToolCards,
     appendAskConnexTurnSegment,
+    askConnexReasoningSurvives,
     askConnexMessageNarration,
     askConnexCitationHref,
     askConnexCitations,
@@ -443,6 +444,66 @@ describe('Ask Connex turn state reduction', () => {
             .toMatchObject({ phase: 'timed_out', reason: 'generation_timeout' });
         expect(reduceAskConnexTurn(running, { type: 'status', status: 'cancelled' }))
             .toMatchObject({ phase: 'cancelled', reason: null });
+    });
+
+    it('leaves a settled turn\'s id in place when the next question never reaches the server', () => {
+        const resolved = reduceAskConnexTurn(
+            reduceAskConnexTurn(EMPTY_ASK_CONNEX_TURN, {
+                type: 'accepted',
+                sessionId: 4,
+                turnId: 9,
+                generationHandle: 'opaque-handle',
+                status: 'running',
+            }),
+            { type: 'status', status: 'resolved' },
+        );
+
+        expect(reduceAskConnexTurn(resolved, {
+            type: 'status', status: 'failed', reason: 'request_failed',
+        })).toMatchObject({ phase: 'failed', reason: 'request_failed', turnId: 9 });
+    });
+});
+
+describe('Ask Connex reasoning retention', () => {
+    const RUNNING = { phase: 'running', turnId: 9 } as const;
+    const ACCEPTED = { phase: 'accepted', turnId: 9 } as const;
+    const RESOLVED = { phase: 'resolved', turnId: 9 } as const;
+
+    it('keeps the trail while its own turn is still working', () => {
+        expect(askConnexReasoningSurvives(ACCEPTED, RUNNING, 9)).toBe(true);
+        expect(askConnexReasoningSurvives(null, RUNNING, 9)).toBe(true);
+    });
+
+    it('keeps the trail through the turn that produced it finishing', () => {
+        for (const phase of ['resolved', 'failed', 'timed_out', 'cancelled'] as const) {
+            expect(askConnexReasoningSurvives(RUNNING, { phase, turnId: 9 }, 9)).toBe(true);
+            expect(askConnexReasoningSurvives(ACCEPTED, { phase, turnId: 9 }, 9)).toBe(true);
+        }
+    });
+
+    it('drops the trail when a settled turn\'s id is borrowed by a later failure', () => {
+        for (const phase of ['failed', 'timed_out', 'cancelled'] as const) {
+            expect(askConnexReasoningSurvives(RESOLVED, { phase, turnId: 9 }, 9)).toBe(false);
+        }
+        expect(askConnexReasoningSurvives(
+            { phase: 'cancelled', turnId: 9 },
+            { phase: 'failed', turnId: 9 },
+            9,
+        )).toBe(false);
+    });
+
+    it('drops the trail for any turn but the one that produced it', () => {
+        expect(askConnexReasoningSurvives(RUNNING, { phase: 'running', turnId: 10 }, 9)).toBe(false);
+        expect(askConnexReasoningSurvives(RUNNING, { phase: 'resolved', turnId: 10 }, 9)).toBe(false);
+        expect(askConnexReasoningSurvives(
+            RUNNING,
+            { phase: EMPTY_ASK_CONNEX_TURN.phase, turnId: EMPTY_ASK_CONNEX_TURN.turnId },
+            9,
+        )).toBe(false);
+    });
+
+    it('drops a trail restored beside a turn nobody watched run', () => {
+        expect(askConnexReasoningSurvives(null, RESOLVED, 9)).toBe(false);
     });
 });
 

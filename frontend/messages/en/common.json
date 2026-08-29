@@ -433,6 +433,7 @@
     "turnAccepted": "Request accepted",
     "turnWorking": "Thinking…",
     "thinkingToggle": "Show thinking",
+    "thinkingToggleHide": "Hide thinking",
     "narrationTrail": "Work in progress",
     "todoPlan": "Plan",
     "todoStatus": {
