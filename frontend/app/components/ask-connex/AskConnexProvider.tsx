@@ -68,7 +68,7 @@ import {
     activeRecordAskConnexContext,
     activeSelectionAskConnexContext,
     appendAskConnexPrompt,
-    appendAskConnexThinking,
+    appendAskConnexTurnSegment,
     askConnexContextCorrected,
     askConnexMessageContent,
     askConnexPinnedStorageKey,
@@ -104,8 +104,8 @@ import {
     type AskConnexScopePreview,
     type AskConnexSelectionContext,
     type AskConnexSourceContext,
-    type AskConnexThinkingEntry,
-    type AskConnexThinkingState,
+    type AskConnexTurnSegment,
+    type AskConnexTurnSegments,
     type AskConnexToolAction,
     type AskConnexToolCardFailure,
     type StoredAskConnexTurn,
@@ -166,6 +166,7 @@ import type {
     AiChatAttachment,
     AiChatDeltaFrame,
     AiChatMessage,
+    AiChatNarrationFrame,
     AiChatThinkingFrame,
     AiChatPageContext,
     AiChatParticipant,
@@ -192,7 +193,7 @@ const ASK_CONNEX_ACTIVITY_TYPES: readonly string[] = [
 const ASK_CONNEX_NOTE_VISIBILITIES: readonly string[] = ['private', 'workspace'];
 const EMPTY_ASK_CONNEX_TOOL_CALL_IDS: ReadonlySet<number> = new Set();
 const EMPTY_ASK_CONNEX_PINS: readonly AskConnexAttachment[] = [];
-const EMPTY_THINKING_ENTRIES: readonly AskConnexThinkingEntry[] = [];
+const EMPTY_TURN_SEGMENTS: readonly AskConnexTurnSegment[] = [];
 const noopCleanup = () => {};
 
 /**
@@ -512,7 +513,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const [cancelling, setCancelling] = useState(false);
     const [streamStore] = useState(createAskConnexStreamStore);
     const [turn, dispatchTurn] = useReducer(reduceAskConnexTurn, EMPTY_ASK_CONNEX_TURN);
-    const [thinking, setThinking] = useState<AskConnexThinkingState | null>(null);
+    const [thinking, setThinking] = useState<AskConnexTurnSegments | null>(null);
+    const [narration, setNarration] = useState<AskConnexTurnSegments | null>(null);
     const [toolCalls, dispatchToolCalls] = useReducer(
         reduceAskConnexToolCards,
         EMPTY_ASK_CONNEX_TOOL_CARDS,
@@ -888,28 +890,55 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         if (active === null
                 || frame.sessionId !== active.sessionId
                 || frame.turnId !== active.turnId) return;
-        setThinking((current) => appendAskConnexThinking(current, frame));
+        setThinking((current) => appendAskConnexTurnSegment(current, frame));
     }, []);
 
     /**
-     * Forgets the reasoning the moment its turn stops being the one on screen — a settled, reset,
-     * or replaced turn takes its thinking with it, exactly like the activity line it sat under.
-     * The frames are never persisted, so there is nothing to restore later by design.
+     * Folds one narration segment into the active turn's trail, on the same terms as thinking.
+     *
+     * Narration is published to the member who asked rather than to the session, so a participant
+     * watching a shared chat receives none and their live trail stays empty — which is the point:
+     * a viewer whose record access is narrower must not learn from a live segment something the
+     * settled transcript would withhold from them. Nothing here assumes session-wide delivery; the
+     * turn match only narrows what already arrived on this member's own queue.
+     *
+     * Dropping the live trail when the turn settles is safe here in a way it is not for reasoning:
+     * the same segments are persisted on the answer, so the settled transcript replays them from
+     * the message rather than from this state.
+     */
+    const handleNarrationFrame = useCallback((frame: AiChatNarrationFrame) => {
+        const active = activeTurnRef.current;
+        if (active === null
+                || frame.sessionId !== active.sessionId
+                || frame.turnId !== active.turnId) return;
+        setNarration((current) => appendAskConnexTurnSegment(current, frame));
+    }, []);
+
+    /**
+     * Forgets both live trails the moment their turn stops being the one on screen — a settled,
+     * reset, or replaced turn takes its reasoning and its narration with it, exactly like the
+     * activity line they sat under. Reasoning is never persisted, so there is nothing to restore
+     * later by design; narration comes back with the settled message instead.
      */
     useEffect(() => {
-        setThinking((current) => {
+        const forgetSettled = (current: AskConnexTurnSegments | null) => {
             if (current === null) return current;
             if (current.turnId === turn.turnId
                     && (turn.phase === 'accepted' || turn.phase === 'running')) {
                 return current;
             }
             return null;
-        });
+        };
+        setThinking(forgetSettled);
+        setNarration(forgetSettled);
     }, [turn.phase, turn.turnId]);
 
     const thinkingEntries = thinking !== null && thinking.turnId === turn.turnId
         ? thinking.entries
-        : EMPTY_THINKING_ENTRIES;
+        : EMPTY_TURN_SEGMENTS;
+    const narrationEntries = narration !== null && narration.turnId === turn.turnId
+        ? narration.entries
+        : EMPTY_TURN_SEGMENTS;
 
     /**
      * Adopts the durable partial the server retains for this answer, including after it stopped —
@@ -1577,6 +1606,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     handleThinkingFrame(frame);
                     return;
                 }
+                if (frame.kind === 'narration') {
+                    handleNarrationFrame(frame);
+                    return;
+                }
                 const signal = identityControllerRef.current?.signal;
                 if (!signal || signal.aborted) return;
                 if (activeSessionRef.current?.id === frame.sessionId
@@ -1616,7 +1649,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         });
         socket.activate();
         return () => socket.deactivate();
-    }, [activeWorkspaceId, clearActiveSession, enqueueRealtimeRefresh, handleStreamDelta, handleThinkingFrame, refreshSessions, resetStream, switching, userId]);
+    }, [activeWorkspaceId, clearActiveSession, enqueueRealtimeRefresh, handleNarrationFrame, handleStreamDelta, handleThinkingFrame, refreshSessions, resetStream, switching, userId]);
 
     useEffect(() => {
         if (!surfaceVisible || presenceSessionId === null || loadState !== 'ready') {
@@ -2468,6 +2501,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         turnStreaming: t('turnStreaming'),
         turnWorking: t('turnWorking'),
         thinkingToggle: t('thinkingToggle'),
+        narrationTrail: t('narrationTrail'),
         partialAnswer: t('partialAnswer'),
         continueFromPartial: t('continueFromPartial'),
         narrowScope: t('narrowScope'),
@@ -2677,7 +2711,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 contentTooLong={scoped && contentTooLong}
                 working={scoped && working}
                 turn={scoped ? turn : EMPTY_ASK_CONNEX_TURN}
-                thinking={scoped ? thinkingEntries : EMPTY_THINKING_ENTRIES}
+                thinking={scoped ? thinkingEntries : EMPTY_TURN_SEGMENTS}
+                narration={scoped ? narrationEntries : EMPTY_TURN_SEGMENTS}
                 streamStore={streamStore}
                 streaming={scoped && streaming}
                 cancelling={scoped && cancelling}

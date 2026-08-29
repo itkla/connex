@@ -70,6 +70,12 @@ import tools.jackson.databind.node.ObjectNode;
 public class AiChatAgentLoopService {
     static final int HARD_MAX_STEPS = 64;
     private static final int MAX_CONSECUTIVE_NO_PROGRESS_STEPS = 2;
+    /**
+     * The whole-turn narration budget. Each segment is already bounded to a status sentence; this
+     * bounds their sum so a long agentic turn cannot grow the durable answer metadata without
+     * limit, which no database constraint would catch on the JSON column.
+     */
+    private static final int MAX_TURN_NARRATION_CHARS = 8_000;
     private static final String INTERNAL_ERROR = "internal_error";
     private static final String TOOL_OUTSIDE_SKILL_AUTHORITY = "tool_outside_skill_authority";
     /**
@@ -183,6 +189,9 @@ public class AiChatAgentLoopService {
             ToolBudgetAudit toolBudgetAudit = ToolBudgetAudit.NONE;
             int nativeProviderAttempts = 0;
             int noProgressSteps = 0;
+            List<AiChatNarration> narration = new ArrayList<>();
+            java.util.concurrent.atomic.AtomicInteger narrationBytes =
+                    new java.util.concurrent.atomic.AtomicInteger();
             int inputTokens = addTokens(memory.inputTokens(), attachmentContext.inputTokens());
             int outputTokens = addTokens(memory.outputTokens(), attachmentContext.outputTokens());
             AiSkillRouter.Routing routing = skillRouter.route(
@@ -332,6 +341,7 @@ public class AiChatAgentLoopService {
                             && toolTurns.isEmpty()
                             && nativeCalls.isEmpty();
                     boolean nativeMalformed = false;
+                    Optional<String> stepNarration = Optional.empty();
                     try (AiInvocationAdmissionService.DirectAdmission admission =
                             invocationAdmissionService.acquireDirect()) {
                         Runnable providerGuard = () -> {
@@ -361,6 +371,7 @@ public class AiChatAgentLoopService {
                             attempt = nativeAttempt.attempt();
                             nativeProviderCall = nativeAttempt.providerCall();
                             nativeMalformed = nativeAttempt.malformed();
+                            stepNarration = nativeAttempt.narration();
                         } else {
                             attempt = invocationService.completeStructuredRepairable(
                                     invocation,
@@ -389,6 +400,22 @@ public class AiChatAgentLoopService {
                     persistenceService.requireRunning(turn);
                     requireCurrentAccess(turn);
                     publishThinking(turn, stepNumber, attempt.reasoning());
+                    stepNarration
+                            .map(AiChatRecordLinkRewriter::stripDurableLinks)
+                            .filter(text -> !text.isBlank())
+                            .filter(text -> narrationBytes.get() + text.length()
+                                    <= MAX_TURN_NARRATION_CHARS)
+                            .ifPresent(text -> {
+                                narrationBytes.addAndGet(text.length());
+                                narration.add(new AiChatNarration(stepNumber, text));
+                                // Requester-only, exactly like thinking: narration names records
+                                // this member's own tool results reached, and a shared viewer whose
+                                // access is narrower must not learn a label live that the settled
+                                // transcript would withhold from them.
+                                publish(turn.userId(), new AiChatStepFrameDto(
+                                        turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                                        stepNumber, "narration", null, null, null, null, text));
+                            });
                     inputTokens = addTokens(inputTokens, inputTokens(outcome));
                     outputTokens = addTokens(outputTokens, outputTokens(outcome));
                     if (deadlineReached(deadline)) {
@@ -838,7 +865,8 @@ public class AiChatAgentLoopService {
                         citationProjector.observe(
                                 turn.workspaceId(), citations, citedResources),
                         toolBudgetAudit,
-                        skillReference);
+                        skillReference,
+                        omitted ? List.of() : List.copyOf(narration));
                 requireCurrentAccess(turn);
                 persistenceService.resolve(
                         turn, persistedText, metadata, inputTokens, outputTokens);
@@ -1199,7 +1227,8 @@ public class AiChatAgentLoopService {
                         new AiStructuredRepairAttempt<>(
                                 outcome, Optional.empty(), tool.reasoning()),
                         Optional.of(tool.providerCall()),
-                        false);
+                        false,
+                        tool.narration());
             }
             case AiNativeToolCompletion.Content<AiAssistantStep.FinalAnswer> content -> {
                 AiStructuredRepairAttempt<AiAssistantStep.FinalAnswer> source = content.attempt();
@@ -1246,7 +1275,15 @@ public class AiChatAgentLoopService {
     private record NativeStepAttempt(
             AiStructuredRepairAttempt<AiAssistantStep> attempt,
             Optional<AiToolCall> providerCall,
-            boolean malformed) {
+            boolean malformed,
+            Optional<String> narration) {
+
+        private NativeStepAttempt(
+                AiStructuredRepairAttempt<AiAssistantStep> attempt,
+                Optional<AiToolCall> providerCall,
+                boolean malformed) {
+            this(attempt, providerCall, malformed, Optional.empty());
+        }
 
         private NativeStepAttempt {
             java.util.Objects.requireNonNull(attempt, "attempt");

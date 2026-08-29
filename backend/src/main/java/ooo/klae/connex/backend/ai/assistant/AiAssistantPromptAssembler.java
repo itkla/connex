@@ -1083,7 +1083,8 @@ public class AiAssistantPromptAssembler {
                 resources,
                 Map.of(),
                 ToolBudgetAudit.NONE,
-                null);
+                null,
+                List.of());
     }
 
     /**
@@ -1100,6 +1101,7 @@ public class AiAssistantPromptAssembler {
      * @param observations record freshness observed while the turn ran
      * @param toolBudgetAudit exact model-visible replay degradation counters
      * @param skill declared skill that produced the answer, or null for the generic loop
+     * @param narration ordered narration segments the model wrote between tool calls
      * @return serialized durable metadata
      */
     public String finalMetadata(
@@ -1109,7 +1111,8 @@ public class AiAssistantPromptAssembler {
             Map<String, AiChatResourceRegistry.ResourceRef> resources,
             Map<String, AiChatRecordObservation> observations,
             ToolBudgetAudit toolBudgetAudit,
-            SkillReference skill) {
+            SkillReference skill,
+            List<AiChatNarration> narration) {
         java.util.Objects.requireNonNull(toolBudgetAudit, "toolBudgetAudit");
         List<Map<String, Object>> resolved = new ArrayList<>();
         for (String handle : citations) {
@@ -1141,6 +1144,9 @@ public class AiAssistantPromptAssembler {
             metadata.put("resources", replayResources);
             if (toolBudgetAudit.degraded()) {
                 metadata.put("toolResultBudget", toolBudgetAuditData(toolBudgetAudit));
+            }
+            if (narration != null && !narration.isEmpty()) {
+                metadata.put("narration", List.copyOf(narration));
             }
             if (skill != null) {
                 // A LinkedHashMap, not Map.of: this object is written into the durable answer

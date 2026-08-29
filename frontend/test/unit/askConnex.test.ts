@@ -11,9 +11,10 @@ import {
     AskConnexFileRemovalError,
     actionableAskConnexToolCallIds,
     activeSelectionAskConnexContext,
-    ASK_CONNEX_THINKING_CHAR_CAP,
+    ASK_CONNEX_SEGMENT_CHAR_CAP,
     anchorAskConnexToolCards,
-    appendAskConnexThinking,
+    appendAskConnexTurnSegment,
+    askConnexMessageNarration,
     askConnexCitationHref,
     askConnexCitations,
     askConnexLatestMessagePages,
@@ -50,7 +51,11 @@ import {
     type AskConnexFileAttachment,
 } from '@/app/lib/askConnex';
 import { AI_CHAT_PROGRESS_SOURCES, AI_CHAT_SOURCES } from '@/app/lib/types';
-import type { AiAssistantToolCall, AiChatThinkingFrame } from '@/app/lib/types';
+import type {
+    AiAssistantToolCall,
+    AiChatNarrationFrame,
+    AiChatThinkingFrame,
+} from '@/app/lib/types';
 
 const TOOL_SUMMARY_LABELS = {
     createActivity: '活動を作成',
@@ -1252,7 +1257,7 @@ describe('answer timestamps read the same way twice', () => {
     });
 });
 
-describe('ephemeral thinking accumulation', () => {
+describe('per-step turn segment accumulation', () => {
     function thinkingFrame(overrides: Partial<AiChatThinkingFrame> = {}): AiChatThinkingFrame {
         return {
             workspaceId: 1,
@@ -1266,37 +1271,37 @@ describe('ephemeral thinking accumulation', () => {
     }
 
     it('starts the reasoning from nothing on the first step', () => {
-        expect(appendAskConnexThinking(null, thinkingFrame())).toEqual({
+        expect(appendAskConnexTurnSegment(null, thinkingFrame())).toEqual({
             turnId: 9,
             entries: [{ seq: 1, text: 'Reading the cooling deals.' }],
         });
     });
 
     it('appends later steps in step order', () => {
-        const first = appendAskConnexThinking(null, thinkingFrame());
-        const second = appendAskConnexThinking(
+        const first = appendAskConnexTurnSegment(null, thinkingFrame());
+        const second = appendAskConnexTurnSegment(
             first, thinkingFrame({ seq: 2, text: 'Comparing last touches.' }),
         );
         expect(second.entries.map((entry) => entry.seq)).toEqual([1, 2]);
     });
 
     it('reorders a step that arrived late back into model order', () => {
-        const late = appendAskConnexThinking(
-            appendAskConnexThinking(null, thinkingFrame({ seq: 3, text: 'Concluding.' })),
+        const late = appendAskConnexTurnSegment(
+            appendAskConnexTurnSegment(null, thinkingFrame({ seq: 3, text: 'Concluding.' })),
             thinkingFrame({ seq: 1 }),
         );
         expect(late.entries.map((entry) => entry.seq)).toEqual([1, 3]);
     });
 
     it('leaves the state untouched when a broker redelivery repeats a step verbatim', () => {
-        const once = appendAskConnexThinking(null, thinkingFrame());
-        const twice = appendAskConnexThinking(once, thinkingFrame());
+        const once = appendAskConnexTurnSegment(null, thinkingFrame());
+        const twice = appendAskConnexTurnSegment(once, thinkingFrame());
         expect(twice).toBe(once);
     });
 
     it('replaces a repeated step\'s text, keeping the schema-repair retry over the failed attempt', () => {
-        const malformed = appendAskConnexThinking(null, thinkingFrame({ text: 'Malformed attempt.' }));
-        const repaired = appendAskConnexThinking(malformed, thinkingFrame({ text: 'Repaired step.' }));
+        const malformed = appendAskConnexTurnSegment(null, thinkingFrame({ text: 'Malformed attempt.' }));
+        const repaired = appendAskConnexTurnSegment(malformed, thinkingFrame({ text: 'Repaired step.' }));
         expect(repaired.entries).toEqual([{ seq: 1, text: 'Repaired step.' }]);
     });
 
@@ -1304,20 +1309,83 @@ describe('ephemeral thinking accumulation', () => {
         const step = (seq: number, letter: string) =>
             thinkingFrame({ seq, text: letter.repeat(30_000) });
         const bounded = [step(1, 'a'), step(2, 'b'), step(3, 'c')].reduce(
-            appendAskConnexThinking,
-            null as ReturnType<typeof appendAskConnexThinking> | null,
+            appendAskConnexTurnSegment,
+            null as ReturnType<typeof appendAskConnexTurnSegment> | null,
         );
         if (!bounded) throw new Error('the reducer returned nothing');
         expect(bounded.entries.map((entry) => entry.seq)).toEqual([2, 3]);
         const total = bounded.entries.reduce((sum, entry) => sum + entry.text.length, 0);
-        expect(total).toBeLessThanOrEqual(ASK_CONNEX_THINKING_CHAR_CAP);
+        expect(total).toBeLessThanOrEqual(ASK_CONNEX_SEGMENT_CHAR_CAP);
     });
 
     it('never mingles one turn\'s reasoning with another\'s', () => {
-        const previous = appendAskConnexThinking(null, thinkingFrame());
-        const next = appendAskConnexThinking(
+        const previous = appendAskConnexTurnSegment(null, thinkingFrame());
+        const next = appendAskConnexTurnSegment(
             previous, thinkingFrame({ turnId: 10, seq: 1, text: 'A new question.' }),
         );
         expect(next).toEqual({ turnId: 10, entries: [{ seq: 1, text: 'A new question.' }] });
+    });
+});
+
+describe('narration accumulation and replay', () => {
+    function narrationFrame(overrides: Partial<AiChatNarrationFrame> = {}): AiChatNarrationFrame {
+        return {
+            workspaceId: 1,
+            sessionId: 4,
+            turnId: 9,
+            seq: 1,
+            kind: 'narration',
+            text: 'Let me check this contact.',
+            ...overrides,
+        };
+    }
+
+    it('accumulates narration steps in the order the assistant worked', () => {
+        const trail = [
+            narrationFrame(),
+            narrationFrame({ seq: 3, text: 'Now their open deals.' }),
+            narrationFrame({ seq: 2, text: 'Got it — Aiko Tanaka at Acme.' }),
+        ].reduce(
+            appendAskConnexTurnSegment,
+            null as ReturnType<typeof appendAskConnexTurnSegment> | null,
+        );
+        if (!trail) throw new Error('the reducer returned nothing');
+        expect(trail.entries.map((entry) => entry.text)).toEqual([
+            'Let me check this contact.',
+            'Got it — Aiko Tanaka at Acme.',
+            'Now their open deals.',
+        ]);
+    });
+
+    it('keeps the repaired narration when a step is republished', () => {
+        const malformed = appendAskConnexTurnSegment(null, narrationFrame({ text: 'Half a sen' }));
+        const repaired = appendAskConnexTurnSegment(malformed, narrationFrame({ text: 'A whole sentence.' }));
+        expect(repaired.entries).toEqual([{ seq: 1, text: 'A whole sentence.' }]);
+        expect(appendAskConnexTurnSegment(repaired, narrationFrame({ text: 'A whole sentence.' })))
+            .toBe(repaired);
+    });
+
+    it('drops the previous turn\'s narration when a new turn starts narrating', () => {
+        const previous = appendAskConnexTurnSegment(null, narrationFrame());
+        const next = appendAskConnexTurnSegment(
+            previous, narrationFrame({ turnId: 10, seq: 1, text: 'A new question.' }),
+        );
+        expect(next).toEqual({ turnId: 10, entries: [{ seq: 1, text: 'A new question.' }] });
+    });
+
+    it('replays a settled answer\'s narration in step order', () => {
+        expect(askConnexMessageNarration({
+            narration: [
+                { seq: 2, text: 'Then the deals.' },
+                { seq: 1, text: 'First the contact.' },
+            ],
+        }).map((segment) => segment.text)).toEqual(['First the contact.', 'Then the deals.']);
+    });
+
+    it('yields nothing for an answer that carries no narration', () => {
+        expect(askConnexMessageNarration({})).toEqual([]);
+        expect(askConnexMessageNarration({ narration: null })).toEqual([]);
+        expect(askConnexMessageNarration({ narration: [] })).toEqual([]);
+        expect(askConnexMessageNarration({})).toBe(askConnexMessageNarration({ narration: [] }));
     });
 });

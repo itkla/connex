@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.dto;
 
+import ooo.klae.connex.backend.ai.assistant.AiChatNarration;
+
 import java.util.List;
 
 import lombok.Data;
@@ -22,6 +24,7 @@ public class AiChatMessageDto {
     private String createdAt;
     private List<AiChatCitationDto> citations = List.of();
     private List<String> suggestions = List.of();
+    private List<AiChatNarration> narration = List.of();
 
     /** Maps a persisted message to its API representation. */
     public static AiChatMessageDto from(AiChatMessage message) {
@@ -67,6 +70,17 @@ public class AiChatMessageDto {
             List<String> suggestions,
             String authorDisplayName,
             boolean contentWithheld) {
+        return from(message, citations, suggestions, authorDisplayName, contentWithheld, List.of());
+    }
+
+    /** Maps a persisted message including the narration segments of an agentic turn. */
+    public static AiChatMessageDto from(
+            AiChatMessage message,
+            List<AiChatCitationDto> citations,
+            List<String> suggestions,
+            String authorDisplayName,
+            boolean contentWithheld,
+            List<AiChatNarration> narration) {
         AiChatMessageDto dto = new AiChatMessageDto();
         dto.setId(message.getId());
         dto.setSessionId(message.getSessionId());
@@ -81,6 +95,7 @@ public class AiChatMessageDto {
         dto.setCreatedAt(message.getCreatedAt());
         dto.setCitations(contentWithheld ? List.of() : List.copyOf(citations));
         dto.setSuggestions(contentWithheld ? List.of() : List.copyOf(suggestions));
+        dto.setNarration(contentWithheld ? List.of() : List.copyOf(narration));
         return dto;
     }
 }
