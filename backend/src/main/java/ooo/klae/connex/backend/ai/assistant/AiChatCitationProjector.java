@@ -44,6 +44,9 @@ public class AiChatCitationProjector {
     private static final int MAX_NARRATION_SEGMENTS = 24;
     private static final int MAX_NARRATION_CHARS = 600;
     private static final int MAX_NARRATION_TOTAL_CHARS = 8_000;
+    private static final int MAX_TODO_ITEMS = 12;
+    private static final int MAX_TODO_LABEL_CHARS = 120;
+    private static final Set<String> TODO_STATUSES = Set.of("pending", "active", "done");
 
     private final ObjectMapper objectMapper;
     private final PersonMapper personMapper;
@@ -161,6 +164,44 @@ public class AiChatCitationProjector {
                 segments.add(new AiChatNarration(seq.asInt(), text.asString()));
             }
             return List.copyOf(segments);
+        } catch (JacksonException exception) {
+            return List.of();
+        }
+    }
+
+    /**
+     * Reads the durable plan of one assistant message.
+     *
+     * <p>The plan is the model's own working list rather than tenant data, so projection is a
+     * shape and bounds check like narration's: any malformed entry drops the whole plan instead of
+     * rendering a partial one.
+     *
+     * @param message persisted assistant message
+     * @return the plan in the order the model published it, empty when the message carries none
+     */
+    public List<AiChatTodo> todos(AiChatMessage message) {
+        if (!"assistant".equals(message.getAuthorKind()) || message.getStructuredJson() == null) {
+            return List.of();
+        }
+        try {
+            JsonNode values = objectMapper.readTree(message.getStructuredJson()).get("todos");
+            if (values == null || !values.isArray() || values.isEmpty()
+                    || values.size() > MAX_TODO_ITEMS) {
+                return List.of();
+            }
+            List<AiChatTodo> todos = new ArrayList<>();
+            for (JsonNode value : values) {
+                JsonNode label = value.path("label");
+                JsonNode status = value.path("status");
+                if (!value.isObject() || value.size() != 2
+                        || !text(label, MAX_TODO_LABEL_CHARS)
+                        || !status.isString()
+                        || !TODO_STATUSES.contains(status.asString())) {
+                    return List.of();
+                }
+                todos.add(new AiChatTodo(label.asString(), status.asString()));
+            }
+            return List.copyOf(todos);
         } catch (JacksonException exception) {
             return List.of();
         }

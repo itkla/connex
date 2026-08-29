@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.atMost;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
@@ -1979,6 +1980,115 @@ class AiChatAgentLoopServiceTest {
                 any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class));
         assertEquals(7777, invocation.getValue().maxTokens());
         assertTrue(invocation.getValue().outputTokensClamped());
+    }
+
+    /**
+     * The plan a model publishes is the surface that makes a long turn legible: it streams live so
+     * the member can watch the work advance, and persists with the answer so a reloaded transcript
+     * still shows what the assistant set out to do.
+     */
+    @Test
+    void aPublishedPlanStreamsLiveAndPersistsWithTheAnswer() throws Exception {
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class), any()))
+                .thenReturn(new AiAssistantToolResult(Map.of("todos", List.of()), List.of()));
+        AiAssistantStep finalStep = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer("Both steps are done.", List.of()));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(toolStep(
+                        "set_todos",
+                        "{\"items\":[\"Check the contact\",\"Read their deals\"],"
+                                + "\"statuses\":[\"active\",\"pending\"]}")),
+                        parsed(finalStep));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<AiChatStepFrameDto> frames =
+                ArgumentCaptor.forClass(AiChatStepFrameDto.class);
+        verify(realtimeDispatcher, atLeastOnce()).userAfterCommit(
+                eq(TURN.userId()), frames.capture());
+        AiChatStepFrameDto plan = frames.getAllValues().stream()
+                .filter(frame -> "todos".equals(frame.kind()))
+                .findFirst().orElseThrow();
+        verify(realtimeDispatcher, never()).sessionNow(
+                anyInt(), anyInt(), org.mockito.ArgumentMatchers.argThat(
+                        frame -> frame != null && "todos".equals(frame.kind())));
+        assertTrue(plan.text().contains("Check the contact"));
+        assertTrue(plan.text().contains("active"));
+        ArgumentCaptor<String> metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(
+                eq(TURN), eq("Both steps are done."), metadata.capture(), anyInt(), anyInt());
+        JsonNode stored = objectMapper.readTree(metadata.getValue());
+        assertEquals("Check the contact", stored.path("todos").path(0).path("label").asString());
+        assertEquals("pending", stored.path("todos").path(1).path("status").asString());
+    }
+
+    /**
+     * A plan is bookkeeping, not evidence: republishing one neither counts as progress nor ends
+     * the turn early, and a model that only ever rewrites its plan is eventually told to stop
+     * rather than being allowed to spend the turn on it.
+     */
+    @Test
+    void planPublicationIsNeitherProgressNorGroundsForAnEarlyClose() throws Exception {
+        when(governanceService.assistantMaxSteps(TURN.workspaceId())).thenReturn(24);
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class), any()))
+                .thenReturn(new AiAssistantToolResult(Map.of("todos", List.of()), List.of()));
+        java.util.concurrent.atomic.AtomicInteger step =
+                new java.util.concurrent.atomic.AtomicInteger();
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenAnswer(invocation -> parsed(toolStep(
+                        "set_todos",
+                        "{\"items\":[\"Step " + step.incrementAndGet() + "\"],"
+                                + "\"statuses\":[\"active\"]}")));
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        verify(persistenceService, atMost(8)).proposeTool(
+                eq(TURN), anyInt(), eq("set_todos"), any());
+    }
+
+    /**
+     * A later plan replaces the earlier one rather than accumulating: the member sees the current
+     * plan, not every draft of it.
+     */
+    @Test
+    void republishingThePlanReplacesTheStoredOne() throws Exception {
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class), any()))
+                .thenReturn(new AiAssistantToolResult(Map.of("todos", List.of()), List.of()));
+        AiAssistantStep finalStep = new AiAssistantStep(
+                null, new AiAssistantStep.FinalAnswer("Done.", List.of()));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(toolStep(
+                        "set_todos",
+                        "{\"items\":[\"Check the contact\"],\"statuses\":[\"active\"]}")),
+                        parsed(toolStep(
+                                "set_todos",
+                                "{\"items\":[\"Check the contact\"],\"statuses\":[\"done\"]}")),
+                        parsed(finalStep));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<String> metadata = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).resolve(
+                eq(TURN), any(), metadata.capture(), anyInt(), anyInt());
+        JsonNode stored = objectMapper.readTree(metadata.getValue());
+        assertEquals(1, stored.path("todos").size());
+        assertEquals("done", stored.path("todos").path(0).path("status").asString());
     }
 
     /**

@@ -76,6 +76,12 @@ public class AiChatAgentLoopService {
      * limit, which no database constraint would catch on the JSON column.
      */
     private static final int MAX_TURN_NARRATION_CHARS = 8_000;
+    /**
+     * How many times one turn may publish its plan. A plan that keeps being rewritten is a model
+     * talking to itself rather than working, and the refusal is recoverable, so the model is told
+     * to get on with it rather than having its turn ended.
+     */
+    private static final int MAX_TURN_PLAN_PUBLICATIONS = 8;
     private static final String INTERNAL_ERROR = "internal_error";
     private static final String TOOL_OUTSIDE_SKILL_AUTHORITY = "tool_outside_skill_authority";
     /**
@@ -190,6 +196,8 @@ public class AiChatAgentLoopService {
             int nativeProviderAttempts = 0;
             int noProgressSteps = 0;
             List<AiChatNarration> narration = new ArrayList<>();
+            List<AiChatTodo> todos = new ArrayList<>();
+            int planPublications = 0;
             java.util.concurrent.atomic.AtomicInteger narrationBytes =
                     new java.util.concurrent.atomic.AtomicInteger();
             int inputTokens = addTokens(memory.inputTokens(), attachmentContext.inputTokens());
@@ -568,6 +576,13 @@ public class AiChatAgentLoopService {
                         toolTurns.add(cachedTurn);
                         continue;
                     }
+                    if ("set_todos".equals(step.tool().name())
+                            && planPublications >= MAX_TURN_PLAN_PUBLICATIONS) {
+                        throw AiAssistantLoopException.refusedArguments("plan_updates_exhausted");
+                    }
+                    if ("set_todos".equals(step.tool().name())) {
+                        planPublications++;
+                    }
                     if (toolCatalog.isWrite(step.tool().name())) {
                         AiAssistantPreparedWrite write = writeToolService.prepare(
                                 step.tool().name(), step.tool().args(), resources,
@@ -748,11 +763,32 @@ public class AiChatAgentLoopService {
                                 turn.workspaceId(), turn.sessionId(), turn.turnId(),
                                 stepNumber, "step", step.tool().name(),
                                 "executed", null));
+                        boolean publishedPlan = "set_todos".equals(step.tool().name());
+                        if (publishedPlan) {
+                            todos.clear();
+                            todos.addAll(AiChatTodo.from(
+                                    step.tool().args().get("items"),
+                                    step.tool().args().get("statuses")));
+                            // Requester-only, like narration: a plan step is model prose that can
+                            // name a record this member's own tool results reached, and a viewer
+                            // whose access is narrower must not learn it live from a frame the
+                            // settled transcript would withhold.
+                            publish(turn.userId(), new AiChatStepFrameDto(
+                                    turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                                    stepNumber, "todos", null, null, null, null,
+                                    serialize(objectMapper.valueToTree(todos))));
+                        }
                         toolResultCache.put(toolCallKey, toolResult);
-                        if (seenToolResults.add(progressResultJson)) {
-                            noProgressSteps = 0;
-                        } else {
-                            noProgressSteps++;
+                        boolean freshResult = seenToolResults.add(progressResultJson);
+                        // Publishing a plan is bookkeeping, not evidence. Letting it reset the
+                        // no-progress guard would let a model keep a turn alive on cosmetically
+                        // different plans alone, so a plan leaves the guard exactly as it found it.
+                        if (!publishedPlan) {
+                            if (freshResult) {
+                                noProgressSteps = 0;
+                            } else {
+                                noProgressSteps++;
+                            }
                         }
                         toolTurns.add(admittedTurn);
                         if (noProgressSteps >= MAX_CONSECUTIVE_NO_PROGRESS_STEPS) {
@@ -866,7 +902,8 @@ public class AiChatAgentLoopService {
                                 turn.workspaceId(), citations, citedResources),
                         toolBudgetAudit,
                         skillReference,
-                        omitted ? List.of() : List.copyOf(narration));
+                        omitted ? List.of() : List.copyOf(narration),
+                        omitted ? List.of() : List.copyOf(todos));
                 requireCurrentAccess(turn);
                 persistenceService.resolve(
                         turn, persistedText, metadata, inputTokens, outputTokens);

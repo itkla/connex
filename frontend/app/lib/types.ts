@@ -2928,10 +2928,31 @@ export type AiChatProgressItem = {
     truncated: boolean;
 };
 
+/**
+ * A live plan update: the whole current plan, serialized, as the model republishes it.
+ *
+ * The frame carries the entire list rather than a delta because the model rewrites its plan each
+ * time — a client that missed a frame is still correct after the next one.
+ */
+export type AiChatTodosFrame = {
+    workspaceId: number;
+    sessionId: number;
+    turnId: number;
+    seq: number;
+    kind: 'todos';
+    todos: AiChatTodo[];
+};
+
 /** One persisted narration segment, keyed by the model step that produced it. */
 export type AiChatNarrationSegment = {
     seq: number;
     text: string;
+};
+
+/** One step of the plan the assistant published for a turn. */
+export type AiChatTodo = {
+    label: string;
+    status: 'pending' | 'active' | 'done';
 };
 
 /** API representation of one ordered assistant chat message. */
@@ -2954,6 +2975,11 @@ export type AiChatMessage = {
      * the requester watched live.
      */
     narration?: AiChatNarrationSegment[] | null;
+    /**
+     * The plan the assistant published for this turn, in its final state. Persisted so a reloaded
+     * transcript shows the work the answer was built from rather than only its conclusion.
+     */
+    todos?: AiChatTodo[] | null;
 };
 
 /** Viewer-safe membership state for one shared assistant session participant. */
@@ -3024,7 +3050,8 @@ export type AiChatNarrationFrame = {
 export type AiChatRealtimeFrame =
     | AiChatMetadataFrame
     | AiChatThinkingFrame
-    | AiChatNarrationFrame;
+    | AiChatNarrationFrame
+    | AiChatTodosFrame;
 
 /**
  * One live streamed answer fragment for an unmasked-organization assistant turn. `seq` is the

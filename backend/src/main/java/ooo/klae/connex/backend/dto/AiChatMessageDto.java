@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.dto;
 
 import ooo.klae.connex.backend.ai.assistant.AiChatNarration;
+import ooo.klae.connex.backend.ai.assistant.AiChatTodo;
 
 import java.util.List;
 
@@ -25,6 +26,7 @@ public class AiChatMessageDto {
     private List<AiChatCitationDto> citations = List.of();
     private List<String> suggestions = List.of();
     private List<AiChatNarration> narration = List.of();
+    private List<AiChatTodo> todos = List.of();
 
     /** Maps a persisted message to its API representation. */
     public static AiChatMessageDto from(AiChatMessage message) {
@@ -81,6 +83,19 @@ public class AiChatMessageDto {
             String authorDisplayName,
             boolean contentWithheld,
             List<AiChatNarration> narration) {
+        return from(message, citations, suggestions, authorDisplayName, contentWithheld,
+                narration, List.of());
+    }
+
+    /** Maps a persisted message including the plan the assistant published for its turn. */
+    public static AiChatMessageDto from(
+            AiChatMessage message,
+            List<AiChatCitationDto> citations,
+            List<String> suggestions,
+            String authorDisplayName,
+            boolean contentWithheld,
+            List<AiChatNarration> narration,
+            List<AiChatTodo> todos) {
         AiChatMessageDto dto = new AiChatMessageDto();
         dto.setId(message.getId());
         dto.setSessionId(message.getSessionId());
@@ -96,6 +111,7 @@ public class AiChatMessageDto {
         dto.setCitations(contentWithheld ? List.of() : List.copyOf(citations));
         dto.setSuggestions(contentWithheld ? List.of() : List.copyOf(suggestions));
         dto.setNarration(contentWithheld ? List.of() : List.copyOf(narration));
+        dto.setTodos(contentWithheld ? List.of() : List.copyOf(todos));
         return dto;
     }
 }

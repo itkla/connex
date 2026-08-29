@@ -168,6 +168,8 @@ import type {
     AiChatMessage,
     AiChatNarrationFrame,
     AiChatThinkingFrame,
+    AiChatTodo,
+    AiChatTodosFrame,
     AiChatPageContext,
     AiChatParticipant,
     AiChatPresence,
@@ -194,6 +196,7 @@ const ASK_CONNEX_NOTE_VISIBILITIES: readonly string[] = ['private', 'workspace']
 const EMPTY_ASK_CONNEX_TOOL_CALL_IDS: ReadonlySet<number> = new Set();
 const EMPTY_ASK_CONNEX_PINS: readonly AskConnexAttachment[] = [];
 const EMPTY_TURN_SEGMENTS: readonly AskConnexTurnSegment[] = [];
+const EMPTY_TODOS: AiChatTodo[] = [];
 const noopCleanup = () => {};
 
 /**
@@ -515,6 +518,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const [turn, dispatchTurn] = useReducer(reduceAskConnexTurn, EMPTY_ASK_CONNEX_TURN);
     const [thinking, setThinking] = useState<AskConnexTurnSegments | null>(null);
     const [narration, setNarration] = useState<AskConnexTurnSegments | null>(null);
+    const [todos, setTodos] = useState<{ turnId: number; items: AiChatTodo[] } | null>(null);
     const [toolCalls, dispatchToolCalls] = useReducer(
         reduceAskConnexToolCards,
         EMPTY_ASK_CONNEX_TOOL_CARDS,
@@ -915,6 +919,21 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }, []);
 
     /**
+     * Adopts the plan the assistant just published for the active turn.
+     *
+     * Each frame carries the whole plan rather than a change to it, so adoption is replacement:
+     * a client that missed a frame is correct again after the next one, and a plan republished
+     * with a step newly done never has to be reconciled against a stale copy.
+     */
+    const handleTodosFrame = useCallback((frame: AiChatTodosFrame) => {
+        const active = activeTurnRef.current;
+        if (active === null
+                || frame.sessionId !== active.sessionId
+                || frame.turnId !== active.turnId) return;
+        setTodos({ turnId: frame.turnId, items: frame.todos });
+    }, []);
+
+    /**
      * Forgets both live trails the moment their turn stops being the one on screen — a settled,
      * reset, or replaced turn takes its reasoning and its narration with it, exactly like the
      * activity line they sat under. Reasoning is never persisted, so there is nothing to restore
@@ -931,6 +950,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         };
         setThinking(forgetSettled);
         setNarration(forgetSettled);
+        setTodos((current) => (current !== null
+                && current.turnId === turn.turnId
+                && (turn.phase === 'accepted' || turn.phase === 'running')
+                ? current
+                : null));
     }, [turn.phase, turn.turnId]);
 
     const thinkingEntries = thinking !== null && thinking.turnId === turn.turnId
@@ -939,6 +963,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const narrationEntries = narration !== null && narration.turnId === turn.turnId
         ? narration.entries
         : EMPTY_TURN_SEGMENTS;
+    const todoItems = todos !== null && todos.turnId === turn.turnId
+        ? todos.items
+        : EMPTY_TODOS;
 
     /**
      * Adopts the durable partial the server retains for this answer, including after it stopped —
@@ -1610,6 +1637,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                     handleNarrationFrame(frame);
                     return;
                 }
+                if (frame.kind === 'todos') {
+                    handleTodosFrame(frame);
+                    return;
+                }
                 const signal = identityControllerRef.current?.signal;
                 if (!signal || signal.aborted) return;
                 if (activeSessionRef.current?.id === frame.sessionId
@@ -1649,7 +1680,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         });
         socket.activate();
         return () => socket.deactivate();
-    }, [activeWorkspaceId, clearActiveSession, enqueueRealtimeRefresh, handleNarrationFrame, handleStreamDelta, handleThinkingFrame, refreshSessions, resetStream, switching, userId]);
+    }, [activeWorkspaceId, clearActiveSession, enqueueRealtimeRefresh, handleNarrationFrame, handleStreamDelta, handleThinkingFrame, handleTodosFrame, refreshSessions, resetStream, switching, userId]);
 
     useEffect(() => {
         if (!surfaceVisible || presenceSessionId === null || loadState !== 'ready') {
@@ -2502,6 +2533,12 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         turnWorking: t('turnWorking'),
         thinkingToggle: t('thinkingToggle'),
         narrationTrail: t('narrationTrail'),
+        todoPlan: t('todoPlan'),
+        todoStatus: {
+            pending: t('todoStatus.pending'),
+            active: t('todoStatus.active'),
+            done: t('todoStatus.done'),
+        },
         partialAnswer: t('partialAnswer'),
         continueFromPartial: t('continueFromPartial'),
         narrowScope: t('narrowScope'),
@@ -2713,6 +2750,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 turn={scoped ? turn : EMPTY_ASK_CONNEX_TURN}
                 thinking={scoped ? thinkingEntries : EMPTY_TURN_SEGMENTS}
                 narration={scoped ? narrationEntries : EMPTY_TURN_SEGMENTS}
+                todos={scoped ? todoItems : EMPTY_TODOS}
                 streamStore={streamStore}
                 streaming={scoped && streaming}
                 cancelling={scoped && cancelling}

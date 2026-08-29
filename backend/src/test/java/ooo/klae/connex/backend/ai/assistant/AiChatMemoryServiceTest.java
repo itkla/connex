@@ -266,7 +266,7 @@ class AiChatMemoryServiceTest {
                 same(stepSchema.finalResponseSchema()),
                 eq(AiReasoningMode.NATIVE),
                 nativeTools.capture());
-        assertEquals(14, nativeTools.getValue().definitions().size());
+        assertEquals(15, nativeTools.getValue().definitions().size());
         verify(invocationService, never()).serializedPromptBytes(
                 any(MaskedPrompt.class), same(stepSchema.responseSchema()),
                 eq(AiReasoningMode.TAGGED));

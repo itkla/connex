@@ -19,9 +19,11 @@ import tools.jackson.databind.node.ObjectNode;
 @Component
 public class AiAssistantToolCatalog {
     private static final Pattern HANDLE = Pattern.compile("r[1-9][0-9]*");
+    /** Longest single free-text list entry, sized for one plan step rather than prose. */
+    static final int MAX_TEXT_LIST_ITEM_CHARS = 120;
 
     /** Supported JSON argument kinds. */
-    public enum ArgumentKind { STRING, INTEGER, STRING_LIST }
+    public enum ArgumentKind { STRING, INTEGER, STRING_LIST, TEXT_LIST }
 
     /** Safety tier controlling whether a declared tool may execute without human approval. */
     public enum ToolTier { READ, AUTO, CONFIRM }
@@ -137,6 +139,7 @@ public class AiAssistantToolCatalog {
                     && (argument.values().isEmpty()
                             || argument.values().contains(Integer.toString(value.asInt())));
             case STRING_LIST -> permitsStringList(argument, value);
+            case TEXT_LIST -> permitsTextList(argument, value);
         };
     }
 
@@ -152,6 +155,20 @@ public class AiAssistantToolCatalog {
             return false;
         }
         return argument.values().isEmpty() || argument.values().contains(text);
+    }
+
+    private static boolean permitsTextList(ArgumentSpec argument, JsonNode value) {
+        if (!value.isArray()
+                || value.size() < argument.minimum() || value.size() > argument.maximum()) {
+            return false;
+        }
+        for (JsonNode item : value) {
+            if (!item.isString() || item.asString().isBlank()
+                    || item.asString().length() > MAX_TEXT_LIST_ITEM_CHARS) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static boolean permitsStringList(ArgumentSpec argument, JsonNode value) {
@@ -184,6 +201,10 @@ public class AiAssistantToolCatalog {
         add(tools, executable("get_record", handle()));
         add(tools, executable("get_records",
                 stringList("handles", true, 1, 12, Set.of())));
+        add(tools, executable("set_todos",
+                textList("items", true, 1, 12),
+                stringList("statuses", false, 1, 12,
+                        Set.of("pending", "active", "done"))));
         add(tools, executable("list_activities", handle(), integer("limit", false, 1, 20)));
         add(tools, executable("list_tasks", handle(), integer("limit", false, 1, 20)));
         add(tools, executable("list_scope_activities",
@@ -236,6 +257,9 @@ public class AiAssistantToolCatalog {
             case "get_record" -> "Load the visible details for one record handle.";
             case "get_records" -> "Load the visible details for up to twelve record handles "
                     + "in one step.";
+            case "set_todos" -> "Publish or update the plan for this turn: items lists the steps "
+                    + "in order, statuses gives each one pending, active, or done. Call it again "
+                    + "with the whole updated list as you work.";
             case "list_activities" -> "List recent visible activities for one record handle.";
             case "list_tasks" -> "List visible tasks for one record handle.";
             case "list_scope_activities" -> "List recent activity across a bounded set of records "
@@ -311,6 +335,15 @@ public class AiAssistantToolCatalog {
                 items.put("type", "string");
                 addEnum(items, argument);
             }
+            case TEXT_LIST -> {
+                value.put("type", "array");
+                value.put("minItems", argument.minimum());
+                value.put("maxItems", argument.maximum());
+                ObjectNode items = value.putObject("items");
+                items.put("type", "string");
+                items.put("minLength", 1);
+                items.put("maxLength", MAX_TEXT_LIST_ITEM_CHARS);
+            }
         }
         return value;
     }
@@ -376,5 +409,17 @@ public class AiAssistantToolCatalog {
     private static ArgumentSpec stringList(
             String name, boolean required, int minimum, int maximum, Set<String> values) {
         return new ArgumentSpec(name, ArgumentKind.STRING_LIST, required, minimum, maximum, values);
+    }
+
+    /**
+     * Declares a bounded list of short free-text entries.
+     *
+     * <p>Unlike {@link #stringList}, the entries are the model's own words rather than a closed
+     * vocabulary, so each is bounded to {@link #MAX_TEXT_LIST_ITEM_CHARS} — long enough for a plan
+     * step, short enough that the list cannot become a channel.
+     */
+    private static ArgumentSpec textList(
+            String name, boolean required, int minimum, int maximum) {
+        return new ArgumentSpec(name, ArgumentKind.TEXT_LIST, required, minimum, maximum, Set.of());
     }
 }

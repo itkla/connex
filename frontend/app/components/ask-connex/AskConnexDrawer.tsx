@@ -15,6 +15,7 @@ import {
     ArchiveBoxIcon,
     ArrowLeftIcon,
     ArrowPathIcon,
+    CheckCircleIcon,
     ArrowRightStartOnRectangleIcon,
     ArrowDownIcon,
     ArrowUpIcon,
@@ -91,6 +92,7 @@ import {
     askConnexCitations,
     askConnexGroupedToolCallIds,
     askConnexMessageNarration,
+    askConnexMessageTodos,
     askConnexPromptFocusPending,
     askConnexProposalGroups,
     askConnexTranscript,
@@ -126,6 +128,7 @@ import type {
     AiAssistantSkill,
     AiChatCitation,
     AiChatMessage,
+    AiChatTodo,
     AiChatParticipant,
     AiChatPresence,
     AiChatSession,
@@ -203,6 +206,7 @@ type UnavailableState = {
 const noopRecovery = () => {};
 
 const EMPTY_TURN_SEGMENTS: readonly AskConnexTurnSegment[] = [];
+const EMPTY_TODO_PLAN: readonly AiChatTodo[] = [];
 
 /** A settled answer with no route out: the member stopped it themselves. */
 const NO_RECOVERY: AskConnexRecovery = {
@@ -235,6 +239,10 @@ export type AskConnexTurnLabels = {
     thinkingToggle: string;
     /** Accessible name for the list of narration segments leading up to an answer. */
     narrationTrail: string;
+    /** Accessible name for the plan the assistant published for a turn. */
+    todoPlan: string;
+    /** How each plan step's state is named for readers who never see its glyph. */
+    todoStatus: Record<AiChatTodo['status'], string>;
 };
 
 /**
@@ -414,6 +422,8 @@ type AskConnexDrawerProps = {
     thinking: readonly AskConnexTurnSegment[];
     /** The active turn's narration so far, in step order; empty for everyone but the requester. */
     narration: readonly AskConnexTurnSegment[];
+    /** The plan the active turn published, in its current state. */
+    todos: readonly AiChatTodo[];
     streamStore: AskConnexStreamStore;
     streaming: boolean;
     cancelling: boolean;
@@ -724,6 +734,77 @@ export function NarrationTrail({
     );
 }
 
+/**
+ * The plan the assistant published for a turn, one line per step.
+ *
+ * A checklist rather than prose: a reader scanning a long turn should be able to see what is done,
+ * what is running, and what is left without reading a word of narration. The list is the model's
+ * own working plan, so it renders as plain text — a step is a label, never a link or a claim about
+ * a record.
+ *
+ * Only a live plan animates its running step. A settled answer keeps whatever status the model
+ * last published — that is what it said, and rewriting it would be inventing an outcome — but a
+ * finished turn must not keep spinning as though work were still under way. Each step also carries
+ * its status as text for readers who never see the glyph.
+ */
+export function TodoPlan({
+    todos,
+    label,
+    statusLabels,
+    live = false,
+}: {
+    todos: readonly AiChatTodo[];
+    label: string;
+    statusLabels: Record<AiChatTodo['status'], string>;
+    live?: boolean;
+}) {
+    if (todos.length === 0) return null;
+    const seen = new Map<string, number>();
+    return (
+        <ul aria-label={label} className="grid gap-1 rounded-xl border border-border/60 bg-muted/30 px-3 py-2">
+            {todos.map((todo) => {
+                const occurrence = seen.get(todo.label) ?? 0;
+                seen.set(todo.label, occurrence + 1);
+                return (
+                    <li
+                        key={`${todo.label}#${occurrence}`}
+                        className="flex items-start gap-2 text-xs leading-relaxed"
+                    >
+                        {todo.status === 'done' ? (
+                            <CheckCircleIcon className="mt-0.5 size-3.5 shrink-0 text-brand" aria-hidden />
+                        ) : todo.status === 'active' ? (
+                            <ArrowPathIcon
+                                className={cn(
+                                    'mt-0.5 size-3.5 shrink-0 text-foreground',
+                                    live && 'animate-spin motion-reduce:animate-none',
+                                )}
+                                aria-hidden
+                            />
+                        ) : (
+                            <span
+                                className="mt-1 size-2 shrink-0 rounded-full border border-muted-foreground/50"
+                                aria-hidden
+                            />
+                        )}
+                        <span
+                            className={cn(
+                                todo.status === 'done'
+                                    ? 'text-muted-foreground line-through decoration-muted-foreground/40'
+                                    : todo.status === 'active'
+                                        ? 'font-medium text-foreground'
+                                        : 'text-muted-foreground',
+                            )}
+                        >
+                            <span className="sr-only">{statusLabels[todo.status]}: </span>
+                            {todo.label}
+                        </span>
+                    </li>
+                );
+            })}
+        </ul>
+    );
+}
+
 function TranscriptMessage({
     message,
     fresh,
@@ -763,6 +844,7 @@ function TranscriptMessage({
         [message.citations],
     );
     const narration = useMemo(() => askConnexMessageNarration(message), [message]);
+    const todos = useMemo(() => askConnexMessageTodos(message), [message]);
     const animateEntrance = fresh && !user;
     const createdAt = new Date(message.createdAt);
     const timestamp = Number.isNaN(createdAt.getTime())
@@ -779,6 +861,13 @@ function TranscriptMessage({
                     <MessageHeader className={user ? 'justify-end' : undefined}>
                         {author}
                     </MessageHeader>
+                ) : null}
+                {!user && message.contentWithheld !== true && todos.length > 0 ? (
+                    <TodoPlan
+                        todos={todos}
+                        label={labels.todoPlan}
+                        statusLabels={labels.todoStatus}
+                    />
                 ) : null}
                 {!user && message.contentWithheld !== true && narration.length > 0 ? (
                     <NarrationTrail segments={narration} label={labels.narrationTrail} />
@@ -1549,6 +1638,7 @@ function ConversationSurface({
     turn,
     thinking,
     narration,
+    todos: liveTodos,
     streamStore,
     streaming,
     cancelling,
@@ -1679,6 +1769,13 @@ function ConversationSurface({
     const liveNarration = turn.phase === 'accepted' || turn.phase === 'running'
         ? narration
         : EMPTY_TURN_SEGMENTS;
+    /**
+     * The plan to show above the pending answer, which is only ever the running turn's: a settled
+     * turn's plan belongs to the message it produced, which carries the same list durably.
+     */
+    const liveTodoPlan = turn.phase === 'accepted' || turn.phase === 'running'
+        ? liveTodos
+        : EMPTY_TODO_PLAN;
     const suggestions = useMemo(
         () => latestAskConnexSuggestions(messages, busy),
         [busy, messages],
@@ -2019,6 +2116,20 @@ function ConversationSurface({
                                         );
                                     })}
                                 </>
+                            ) : null}
+                            {loadState === 'ready' && liveTodoPlan.length > 0 ? (
+                                <MessageScrollerItem
+                                    messageId={`todos:${turn.turnId ?? 'pending'}`}
+                                >
+                                    <div className="pl-10">
+                                        <TodoPlan
+                                            todos={liveTodoPlan}
+                                            label={labels.todoPlan}
+                                            statusLabels={labels.todoStatus}
+                                            live
+                                        />
+                                    </div>
+                                </MessageScrollerItem>
                             ) : null}
                             {loadState === 'ready' && liveNarration.length > 0 ? (
                                 <MessageScrollerItem
@@ -2555,6 +2666,7 @@ export default function AskConnexDrawer(props: AskConnexDrawerProps) {
         turn: props.turn,
         thinking: props.thinking,
         narration: props.narration,
+        todos: props.todos,
         streamStore: props.streamStore,
         streaming: props.streaming,
         cancelling: props.cancelling,

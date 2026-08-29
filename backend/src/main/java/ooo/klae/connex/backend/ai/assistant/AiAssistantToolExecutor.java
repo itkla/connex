@@ -117,6 +117,7 @@ public class AiAssistantToolExecutor {
                 case "search_records" -> search(args, resources);
                 case "get_record" -> getRecord(args, resources, includePrivateNotes);
                 case "get_records" -> getRecords(args, resources, includePrivateNotes);
+                case "set_todos" -> setTodos(args);
                 case "list_activities" -> listActivities(args, resources, scope);
                 case "list_tasks" -> listTasks(args, resources);
                 case "list_scope_activities" -> listScopeActivities(args, resources, scope);
@@ -263,6 +264,22 @@ public class AiAssistantToolExecutor {
         RecordResult record = readRecord(
                 resource.kind(), resource.id(), resources, true, includePrivateNotes);
         return result(record.data(), record.identifiers());
+    }
+
+    /**
+     * Publishes the model's plan for this turn.
+     *
+     * <p>The only tool that reads no tenant data at all: it takes the model's own working list and
+     * echoes it back so the loop can stream and persist it. Echoing rather than returning a bare
+     * acknowledgement is deliberate — the replayed result is what keeps the model's next step
+     * anchored to the plan it just published.
+     */
+    private AiAssistantToolResult setTodos(JsonNode args) {
+        List<AiChatTodo> todos = AiChatTodo.from(args.get("items"), args.get("statuses"));
+        if (todos.isEmpty()) {
+            throw AiAssistantLoopException.refusedArguments("empty_plan");
+        }
+        return result(Map.of("todos", todos), List.of());
     }
 
     /**
