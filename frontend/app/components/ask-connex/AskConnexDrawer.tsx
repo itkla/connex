@@ -241,6 +241,8 @@ export type AskConnexTurnLabels = {
     narrationTrail: string;
     /** Accessible name for the plan the assistant published for a turn. */
     todoPlan: string;
+    /** How each plan step's state is named for readers who never see its glyph. */
+    todoStatus: Record<AiChatTodo['status'], string>;
 };
 
 /**
@@ -739,48 +741,66 @@ export function NarrationTrail({
  * what is running, and what is left without reading a word of narration. The list is the model's
  * own working plan, so it renders as plain text — a step is a label, never a link or a claim about
  * a record.
+ *
+ * Only a live plan animates its running step. A settled answer keeps whatever status the model
+ * last published — that is what it said, and rewriting it would be inventing an outcome — but a
+ * finished turn must not keep spinning as though work were still under way. Each step also carries
+ * its status as text for readers who never see the glyph.
  */
 export function TodoPlan({
     todos,
     label,
+    statusLabels,
+    live = false,
 }: {
     todos: readonly AiChatTodo[];
     label: string;
+    statusLabels: Record<AiChatTodo['status'], string>;
+    live?: boolean;
 }) {
     if (todos.length === 0) return null;
+    const seen = new Map<string, number>();
     return (
         <ul aria-label={label} className="grid gap-1 rounded-xl border border-border/60 bg-muted/30 px-3 py-2">
-            {todos.map((todo, index) => (
-                <li
-                    key={`${index}:${todo.label}`}
-                    className="flex items-start gap-2 text-xs leading-relaxed"
-                >
-                    {todo.status === 'done' ? (
-                        <CheckCircleIcon className="mt-0.5 size-3.5 shrink-0 text-brand" aria-hidden />
-                    ) : todo.status === 'active' ? (
-                        <ArrowPathIcon
-                            className="mt-0.5 size-3.5 shrink-0 animate-spin text-foreground motion-reduce:animate-none"
-                            aria-hidden
-                        />
-                    ) : (
-                        <span
-                            className="mt-1 size-2 shrink-0 rounded-full border border-muted-foreground/50"
-                            aria-hidden
-                        />
-                    )}
-                    <span
-                        className={cn(
-                            todo.status === 'done'
-                                ? 'text-muted-foreground line-through decoration-muted-foreground/40'
-                                : todo.status === 'active'
-                                    ? 'font-medium text-foreground'
-                                    : 'text-muted-foreground',
-                        )}
+            {todos.map((todo) => {
+                const occurrence = seen.get(todo.label) ?? 0;
+                seen.set(todo.label, occurrence + 1);
+                return (
+                    <li
+                        key={`${todo.label}#${occurrence}`}
+                        className="flex items-start gap-2 text-xs leading-relaxed"
                     >
-                        {todo.label}
-                    </span>
-                </li>
-            ))}
+                        {todo.status === 'done' ? (
+                            <CheckCircleIcon className="mt-0.5 size-3.5 shrink-0 text-brand" aria-hidden />
+                        ) : todo.status === 'active' ? (
+                            <ArrowPathIcon
+                                className={cn(
+                                    'mt-0.5 size-3.5 shrink-0 text-foreground',
+                                    live && 'animate-spin motion-reduce:animate-none',
+                                )}
+                                aria-hidden
+                            />
+                        ) : (
+                            <span
+                                className="mt-1 size-2 shrink-0 rounded-full border border-muted-foreground/50"
+                                aria-hidden
+                            />
+                        )}
+                        <span
+                            className={cn(
+                                todo.status === 'done'
+                                    ? 'text-muted-foreground line-through decoration-muted-foreground/40'
+                                    : todo.status === 'active'
+                                        ? 'font-medium text-foreground'
+                                        : 'text-muted-foreground',
+                            )}
+                        >
+                            <span className="sr-only">{statusLabels[todo.status]}: </span>
+                            {todo.label}
+                        </span>
+                    </li>
+                );
+            })}
         </ul>
     );
 }
@@ -843,7 +863,11 @@ function TranscriptMessage({
                     </MessageHeader>
                 ) : null}
                 {!user && message.contentWithheld !== true && todos.length > 0 ? (
-                    <TodoPlan todos={todos} label={labels.todoPlan} />
+                    <TodoPlan
+                        todos={todos}
+                        label={labels.todoPlan}
+                        statusLabels={labels.todoStatus}
+                    />
                 ) : null}
                 {!user && message.contentWithheld !== true && narration.length > 0 ? (
                     <NarrationTrail segments={narration} label={labels.narrationTrail} />
@@ -2098,7 +2122,12 @@ function ConversationSurface({
                                     messageId={`todos:${turn.turnId ?? 'pending'}`}
                                 >
                                     <div className="pl-10">
-                                        <TodoPlan todos={liveTodoPlan} label={labels.todoPlan} />
+                                        <TodoPlan
+                                            todos={liveTodoPlan}
+                                            label={labels.todoPlan}
+                                            statusLabels={labels.todoStatus}
+                                            live
+                                        />
                                     </div>
                                 </MessageScrollerItem>
                             ) : null}

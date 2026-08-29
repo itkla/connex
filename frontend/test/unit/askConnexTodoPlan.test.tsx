@@ -14,10 +14,12 @@ const PLAN: AiChatTodo[] = [
     { label: "Summarize what needs attention", status: "pending" },
 ];
 
-function render(todos: readonly AiChatTodo[]): string {
+const STATUS_LABELS = { pending: "To do", active: "In progress", done: "Done" } as const;
+
+function render(todos: readonly AiChatTodo[], live = false): string {
     return renderToStaticMarkup(
         <NextIntlClientProvider locale="en" messages={{}}>
-            <TodoPlan todos={todos} label={LABEL} />
+            <TodoPlan todos={todos} label={LABEL} statusLabels={STATUS_LABELS} live={live} />
         </NextIntlClientProvider>,
     );
 }
@@ -33,11 +35,34 @@ describe("the assistant's published plan", () => {
     });
 
     it("distinguishes finished work from the step running now", () => {
-        const html = render(PLAN);
+        const html = render(PLAN, true);
 
         expect(html).toContain("line-through");
         expect(html).toContain("animate-spin");
         expect(html).toContain("motion-reduce:animate-none");
+    });
+
+    it("stops animating once the turn it belonged to has settled", () => {
+        expect(render(PLAN)).not.toContain("animate-spin");
+        expect(render(PLAN, true)).toContain("animate-spin");
+    });
+
+    it("names each step's state for readers who never see its glyph", () => {
+        const html = render(PLAN);
+
+        for (const status of ["Done", "In progress", "To do"]) {
+            expect(html).toContain(status);
+        }
+    });
+
+    it("keys repeated step labels apart without leaning on their position", () => {
+        const repeated: AiChatTodo[] = [
+            { label: "Review", status: "done" },
+            { label: "Review", status: "pending" },
+        ];
+
+        expect(() => render(repeated)).not.toThrow();
+        expect(render(repeated).match(/Review/g)).toHaveLength(2);
     });
 
     it("renders a step as its own text, never as a link", () => {

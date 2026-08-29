@@ -65,6 +65,7 @@ const labels: AskConnexTurnLabels = {
     thinkingToggle: "Show thinking",
     narrationTrail: "Work in progress",
     todoPlan: "Plan",
+    todoStatus: { pending: "To do", active: "In progress", done: "Done" },
 };
 
 const THINKING = [

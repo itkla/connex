@@ -2534,6 +2534,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         thinkingToggle: t('thinkingToggle'),
         narrationTrail: t('narrationTrail'),
         todoPlan: t('todoPlan'),
+        todoStatus: {
+            pending: t('todoStatus.pending'),
+            active: t('todoStatus.active'),
+            done: t('todoStatus.done'),
+        },
         partialAnswer: t('partialAnswer'),
         continueFromPartial: t('continueFromPartial'),
         narrowScope: t('narrowScope'),

@@ -435,6 +435,11 @@
     "thinkingToggle": "Show thinking",
     "narrationTrail": "Work in progress",
     "todoPlan": "Plan",
+    "todoStatus": {
+        "pending": "To do",
+        "active": "In progress",
+        "done": "Done"
+    },
     "turnStreaming": "Writing…",
     "turnResolved": "Answer ready",
     "turnCancelled": "Response stopped",
