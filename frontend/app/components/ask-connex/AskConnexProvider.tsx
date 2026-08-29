@@ -715,9 +715,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
      * Called where a member has stopped typing and started deciding — opening the filter form, and
      * pressing Send — so the rate-limited cohort evaluation follows a settled question instead of
      * every keystroke on the way to one, while still describing the request that is about to go out.
+     *
+     * A send that brings its own words passes them here. The composer is not the question then, and
+     * evaluating it instead would describe one request in the confirmation while running another.
+     * @param content the question about to be sent, when it is not the composer's
      */
-    const settleScopeRouting = useCallback(() => {
-        setScopeRoutingContent(composerRef.current);
+    const settleScopeRouting = useCallback((content?: string) => {
+        setScopeRoutingContent(content ?? composerRef.current);
     }, []);
 
     useEffect(() => {
@@ -2086,6 +2090,11 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
      * shedding its filters on the way out: the request body a blocked draft produces is no body at
      * all, so sending it would ask a question covering everything the member was in the middle of
      * narrowing away from — a wider question than the one they wrote, not a narrower one.
+     *
+     * Only a question the composer supplied empties it afterwards. A suggested follow-up and a
+     * retried prompt bring their own words, so the draft standing in the composer was never part of
+     * what went out; clearing it there would throw away writing the member never sent and cannot
+     * recover.
      */
     const send = useCallback(async (contentOverride?: string) => {
         const requestContent = contentOverride ?? composer;
@@ -2185,7 +2194,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             messagesRef.current = [...messagesRef.current, optimistic];
             setMessages(messagesRef.current);
             setFreshMessageIds(new Set([optimistic.id]));
-            setComposer('');
+            if (contentOverride === undefined) setComposer('');
             setSubmissionBlocked(false);
             await followTurn(stored, activeSignal);
         } catch (error) {
