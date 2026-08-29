@@ -92,8 +92,21 @@ class FlywayUpgradeIntegrationTest {
         migrateTo("116");
         assertWorkflowSchemaAtV116();
 
+        seedLegacySessions();
+
         Flyway latest = flyway(null);
         latest.migrate();
+
+        try (Connection connection = connection()) {
+            assertEquals(0, scalar(connection,
+                "SELECT COUNT(*) FROM SPRING_SESSION WHERE SESSION_ID = 'legacy-named-session'"));
+            assertEquals(0, scalar(connection, """
+                SELECT COUNT(*) FROM SPRING_SESSION_ATTRIBUTES
+                WHERE SESSION_PRIMARY_ID = 'legacy-named-primary'
+                """));
+            assertEquals(1, scalar(connection,
+                "SELECT COUNT(*) FROM SPRING_SESSION WHERE SESSION_ID = 'legacy-anon-session'"));
+        }
 
         assertEquals(0, latest.info().pending().length);
         assertNotNull(latest.info().current());
@@ -294,6 +307,25 @@ class FlywayUpgradeIntegrationTest {
                     CONCAT('{"schemaVersion":1,"padding":"', REPEAT('a', 65536), '"}'),
                     '{}')
                 """));
+        }
+    }
+
+    private static void seedLegacySessions() throws SQLException {
+        try (Connection connection = connection()) {
+            execute(connection, """
+                INSERT INTO SPRING_SESSION (
+                    PRIMARY_ID, SESSION_ID, CREATION_TIME, LAST_ACCESS_TIME,
+                    MAX_INACTIVE_INTERVAL, EXPIRY_TIME, PRINCIPAL_NAME)
+                VALUES
+                    ('legacy-named-primary', 'legacy-named-session', 0, 0, 1800, 99999999999,
+                     'upgrade-user'),
+                    ('legacy-anon-primary', 'legacy-anon-session', 0, 0, 1800, 99999999999, NULL)
+                """);
+            execute(connection, """
+                INSERT INTO SPRING_SESSION_ATTRIBUTES (
+                    SESSION_PRIMARY_ID, ATTRIBUTE_NAME, ATTRIBUTE_BYTES)
+                VALUES ('legacy-named-primary', 'SPRING_SECURITY_CONTEXT', X'00')
+                """);
         }
     }
 

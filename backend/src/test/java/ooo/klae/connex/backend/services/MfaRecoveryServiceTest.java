@@ -29,6 +29,7 @@ import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.dto.PasskeyRecoveryRequest;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.session.AccountSessionIndex;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
 class MfaRecoveryServiceTest {
@@ -67,7 +68,7 @@ class MfaRecoveryServiceTest {
         SessionInformation other = new SessionInformation(user, "another-session", java.util.Date.from(NOW));
         when(authService.getCurrentUser()).thenReturn(user);
         when(webAuthnService.recover(7)).thenReturn(1);
-        when(sessionRegistry.getAllSessions(user, false)).thenReturn(java.util.List.of(current, other));
+        when(sessionRegistry.getAllSessions(new AccountSessionIndex(7), false)).thenReturn(java.util.List.of(current, other));
 
         service.recover(request("operator-proof"), httpRequest);
 

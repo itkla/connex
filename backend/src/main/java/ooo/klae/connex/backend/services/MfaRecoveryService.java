@@ -76,6 +76,6 @@ public class MfaRecoveryService {
     private void expireOtherSessions(User user, HttpServletRequest httpRequest) {
         HttpSession current = httpRequest.getSession(false);
         accountSessionRevocationService.expireAllExcept(
-                user, current == null ? null : current.getId());
+                user.getId(), current == null ? null : current.getId());
     }
 }

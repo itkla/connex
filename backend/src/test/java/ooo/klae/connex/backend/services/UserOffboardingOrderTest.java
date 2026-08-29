@@ -325,8 +325,7 @@ class UserOffboardingOrderTest {
             tenantWorkScope,
             providerOffboardingService,
             catalogOffboardingService,
-            deletionTransaction,
-            mock(AccountSessionRevocationService.class)
+            deletionTransaction
         );
 
         userService.delete(9);

@@ -211,12 +211,12 @@ public class PasswordResetService {
     /**
      * Expires every session the user holds across the shared session store, forcing
      * re-authentication everywhere after a password reset. The Spring Session-backed
-     * registry resolves sessions by principal name (the username), so the {@code User}
-     * (a {@code UserDetails}) is looked up directly rather than by scanning all principals.
+     * registry enumerates by the immutable account id, which
+     * {@code AccountSessionIndexResolver} writes into the session index on every save.
      * @param user the user whose sessions should be invalidated
      */
     private void expireSessions(User user) {
-        accountSessionRevocationService.expireAll(user);
+        accountSessionRevocationService.expireAll(user.getId());
     }
 
     private static BadRequestException invalidLink() {
