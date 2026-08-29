@@ -38,6 +38,17 @@ class AccountSessionIndexArchTest {
                 sourcesContaining("getAllSessions("));
     }
 
+    /**
+     * {@code FindByIndexNameSessionRepository} is an injectable bean here, so the index can also be
+     * queried below the registry. A call to it spelled with a username would revoke nothing and would
+     * pass the guard above, which is the regression this file exists to prevent.
+     */
+    @Test
+    void theIndexIsNeverQueriedBelowTheRegistry() throws IOException {
+        assertEquals(List.of(), sourcesContaining("findByPrincipalName("));
+        assertEquals(List.of(), sourcesContaining("findByIndexNameAndIndexValue("));
+    }
+
     private static List<Path> sourcesContaining(String needle) throws IOException {
         try (Stream<Path> files = Files.walk(SOURCE_ROOT)) {
             return files

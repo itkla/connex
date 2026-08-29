@@ -17,9 +17,11 @@ import ooo.klae.connex.backend.beans.User;
  * session outliving a rename stayed filed under a name no later lookup could reconstruct, and
  * password reset and MFA recovery silently revoked nothing for that account.
  *
- * <p>Spring Session re-derives this value on <em>every</em> save
- * ({@code JdbcIndexedSessionRepository.UPDATE_SESSION_QUERY} writes {@code PRINCIPAL_NAME}), so a
- * session saved by an earlier build is re-filed under its account id the next time it is written.
+ * <p>Spring Session re-derives this value on every save that writes the session row
+ * ({@code JdbcIndexedSessionRepository.UPDATE_SESSION_QUERY} writes {@code PRINCIPAL_NAME}, and a
+ * request that touches the session marks it changed), so a session saved by an earlier build is
+ * re-filed under its account id the next time it is used. A save carrying only an attribute delta
+ * does not rewrite the row, and so does not re-file it.
  * That self-healing is not sufficient on its own — a session that stays idle across the upgrade is
  * still filed under its old username at the moment a revocation enumerates — which is why the
  * cutover migration clears the authenticated rows once.

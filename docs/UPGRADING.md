@@ -112,8 +112,26 @@ multi-replica deployments must enforce the same all-replicas-down boundary.
 **This cutover has a user-visible effect the earlier ones did not.** The migration deletes every
 authenticated session row, because a historical username cannot be mapped back to an account — no
 username history is kept. Every signed-in user is signed out once and must sign in again, and open
-step-up windows end with their sessions. Anonymous sessions are preserved, so in-flight password
-reset, email verification and invite exchanges are not interrupted.
+step-up windows end with their sessions.
+
+Anonymous sessions are preserved, so an in-flight **password reset** or **email verification** —
+both of which are completed without signing in — survives the cutover.
+
+**In-flight workspace invitations and email changes do not, and cannot be resumed.** Both pin their
+one-time link to the session that first opened it, and both are completed from a signed-in session,
+so the lineage lives in a row this migration deletes. The pin is written once and never rewritten
+(`exchange_owner_hash = COALESCE(exchange_owner_hash, …)`), so re-opening the emailed link after the
+cutover fails rather than re-binding to the new session.
+
+Before upgrading, check for invitations that have been opened but not yet accepted:
+
+```sql
+SELECT id, workspace_id, email FROM workspace_invite
+WHERE status = 'pending' AND exchanged_at IS NOT NULL AND expires_at > UTC_TIMESTAMP();
+```
+
+Re-issue those invitations after the upgrade, and ask anyone mid-way through an email change to
+start it again. Both are administrator actions; neither recipient can recover the link themselves.
 
 ## On-prem upgrade runbook
 

@@ -12,9 +12,9 @@ import ooo.klae.connex.backend.session.AccountSessionIndex;
  *
  * <p>The enumeration key is the account id, never the username.
  * {@code AccountSessionIndexResolver} writes it into {@code SPRING_SESSION.PRINCIPAL_NAME} on every
- * save, and Spring Session re-derives that column on every save from the session's own serialized
- * security context — so the key cannot drift from the account, and a login identifier that changes
- * cannot strand a session under a name nothing looks up again. Taking an {@code int} rather than a
+ * save, and Spring Session re-derives that column from the session's own serialized security
+ * context whenever it writes the row — so the key cannot drift from the account, and a login
+ * identifier that changes cannot strand a session under a name nothing looks up again. Taking an {@code int} rather than a
  * {@code User} is part of that: a caller cannot pass a stale-or-fresh principal and get a silently
  * different answer.
  *
