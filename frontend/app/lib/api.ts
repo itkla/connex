@@ -884,19 +884,17 @@ async function safeReadWithCookie<T>(
 /**
  * A server-side read's outcome. The failure arm carries {@code unauthenticated} so a caller can
  * tell "the session is gone" from "the read failed", which are different recoveries: signing in
- * again versus retrying. Every backend 401 means an absent or rejected session — the entry point,
- * the absolute-timeout filter, the concurrent-session strategy, and a failed authentication all
- * answer with it — so no other reading has to be inferred from the status.
+ * again versus retrying.
+ *
+ * Only {@link resultWithCookie} sets the flag, and only for a forwarded-cookie read. On that path a
+ * 401 has one meaning — the entry point, the absolute-timeout filter and the concurrent-session
+ * strategy all answer with it, and a genuine refusal answers 403 with a coded body. An
+ * authentication ceremony is a different matter: a rejected passkey or SSO-link password is also a
+ * 401, and must never be read as a lost session, which is why {@link toResult} leaves the flag unset.
  */
 export type CookieResult<T> =
     | { ok: true; data: T }
     | { ok: false; unauthenticated?: boolean };
-
-function unauthenticatedFailure(error: unknown): { ok: false; unauthenticated?: boolean } {
-    return error instanceof ApiError && error.status === 401
-        ? { ok: false, unauthenticated: true }
-        : { ok: false };
-}
 
 /**
  * As {@link safeReadWithCookie}, but reports a fetch failure distinctly from an empty result so the
@@ -911,7 +909,9 @@ async function resultWithCookie<T>(
     try {
         return { ok: true, data: await fetcher({ headers: { cookie }, cache: "no-store" }) };
     } catch (error) {
-        return unauthenticatedFailure(error);
+        return error instanceof ApiError && error.status === 401
+            ? { ok: false, unauthenticated: true }
+            : { ok: false };
     }
 }
 
@@ -925,8 +925,8 @@ async function resultWithCookie<T>(
 export async function toResult<T>(request: Promise<T>): Promise<CookieResult<T>> {
     try {
         return { ok: true, data: await request };
-    } catch (error) {
-        return unauthenticatedFailure(error);
+    } catch {
+        return { ok: false };
     }
 }
 

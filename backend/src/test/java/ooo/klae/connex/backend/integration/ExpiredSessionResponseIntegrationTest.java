@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.integration;
 
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -58,5 +59,14 @@ class ExpiredSessionResponseIntegrationTest {
     void csrfBootstrapStaysReachableWithoutSession() throws Exception {
         mockMvc.perform(get("/api/auth/csrf"))
             .andExpect(status().isOk());
+    }
+
+    @Test
+    void rejectingAnAnonymousReadCreatesNoSession() throws Exception {
+        mockMvc.perform(get("/api/auth/me"))
+            .andExpect(status().isUnauthorized())
+            .andExpect(result -> assertNull(
+                result.getRequest().getSession(false),
+                "a rejected anonymous read must not open a session"));
     }
 }
