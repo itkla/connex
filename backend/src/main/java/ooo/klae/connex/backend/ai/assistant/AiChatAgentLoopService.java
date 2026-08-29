@@ -165,7 +165,7 @@ public class AiChatAgentLoopService {
             MaskingContext maskingContext = new MaskingContext(turn.privacyMode());
             AiChatResourceRegistry resources = new AiChatResourceRegistry(maskingContext);
             AiChatStreamingProgress streamingProgress = turn.streamed()
-                    ? new AiChatStreamingProgress(turn, persistenceService, maskingContext)
+                    ? new AiChatStreamingProgress(turn, persistenceService)
                     : null;
             AiChatMemory memory = memoryService.prepare(turn, maskingContext, deadline);
             List<AiChatMessage> history = memory.history();
