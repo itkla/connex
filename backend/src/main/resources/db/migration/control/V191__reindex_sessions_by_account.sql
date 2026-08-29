@@ -1,0 +1,34 @@
+-- ============================================================================
+-- Session revocation moves from a mutable key (PRINCIPAL_NAME = username) to an
+-- immutable one (PRINCIPAL_NAME = 'uid:<app_user.id>'), written by
+-- AccountSessionIndexResolver on every session save.
+--
+-- Rows written by an earlier build carry a username -- possibly a historical one
+-- for an account renamed before this release, which no lookup can reconstruct
+-- because app_user keeps no username history. Those rows are invisible to
+-- password reset and MFA recovery until they expire, which is the defect this
+-- release closes, so they are removed rather than migrated. There is no in-place
+-- rewrite available: app_user keeps no username history, so a historical username
+-- has no path back to the account that owns it.
+--
+-- The predicate is a NULL check on one column, deliberately not a join against
+-- app_user.username: SPRING_SESSION declares no charset and app_user declares
+-- utf8mb4, so a cross-table string comparison can raise an illegal mix of
+-- collations on an operator-provisioned schema and fail the deploy.
+-- A NULL index value means no authenticated security context was ever saved into
+-- the session, so this spares anonymous sessions -- which carry the CSRF token and
+-- the OneTimeLinkFlowService lineage that in-flight password-reset and email
+-- verification depend on, both of which complete without signing in.
+--
+-- Invitation and email-change flows are NOT spared: both are completed from a
+-- signed-in session, so their lineage lives in a row deleted here, and both pin
+-- their one-time link to that lineage with a COALESCE that is never rewritten.
+-- Those links cannot be resumed and must be re-issued; docs/UPGRADING.md carries
+-- the operator query and the runbook step.
+--
+-- Cutover note: this signs every signed-in user out once, like V38 did. DELETE
+-- rather than TRUNCATE because SPRING_SESSION_ATTRIBUTES holds an inbound FK; the
+-- ON DELETE CASCADE from V38 removes the attribute rows.
+-- ============================================================================
+
+DELETE FROM SPRING_SESSION WHERE PRINCIPAL_NAME IS NOT NULL;

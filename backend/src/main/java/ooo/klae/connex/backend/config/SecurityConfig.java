@@ -134,9 +134,14 @@ public class SecurityConfig {
 
     /**
      * Tracks live sessions per principal against the shared Spring Session store, so a
-     * password reset can expire every session a user holds across all instances. Backed
+     * password reset can expire the sessions a user holds across all instances. Backed
      * by the JDBC session repository (V38); {@code registerNewSession} is a no-op here
      * because Spring Session owns session lifecycle.
+     *
+     * <p>This is the read half of the session index. The write half is
+     * {@code AccountSessionIndexResolver}, which files each session under its immutable account id
+     * rather than the login username Spring Session would use by default; the two must agree on the
+     * key, which is why both go through {@code AccountSessionIndex}.
      */
     @Bean
     public <S extends Session> SessionRegistry sessionRegistry(

@@ -3,8 +3,6 @@ package ooo.klae.connex.backend.services;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.security.core.session.SessionInformation;
-import org.springframework.security.core.session.SessionRegistry;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,7 +36,7 @@ public class PasswordResetService {
     private final PasswordResetEmailService passwordResetEmailService;
     private final PasswordResetRateLimiter rateLimiter;
     private final AuditService auditService;
-    private final SessionRegistry sessionRegistry;
+    private final AccountSessionRevocationService accountSessionRevocationService;
     private final SsoConnectionService ssoConnectionService;
 
     @Value("${connex.password-reset.token-expiry-minutes:30}")
@@ -213,14 +211,12 @@ public class PasswordResetService {
     /**
      * Expires every session the user holds across the shared session store, forcing
      * re-authentication everywhere after a password reset. The Spring Session-backed
-     * registry resolves sessions by principal name (the username), so the {@code User}
-     * (a {@code UserDetails}) is looked up directly rather than by scanning all principals.
+     * registry enumerates by the immutable account id, which
+     * {@code AccountSessionIndexResolver} writes into the session index on every save.
      * @param user the user whose sessions should be invalidated
      */
     private void expireSessions(User user) {
-        for (SessionInformation session : sessionRegistry.getAllSessions(user, false)) {
-            session.expireNow();
-        }
+        accountSessionRevocationService.expireAll(user.getId());
     }
 
     private static BadRequestException invalidLink() {

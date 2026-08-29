@@ -3,8 +3,6 @@ package ooo.klae.connex.backend.services;
 import java.time.Clock;
 import java.util.Map;
 
-import org.springframework.security.core.session.SessionInformation;
-import org.springframework.security.core.session.SessionRegistry;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,7 +28,7 @@ public class MfaRecoveryService {
     private final SessionSecurityService sessionSecurityService;
     private final PrivilegedMfaProperties privilegedMfaProperties;
     private final AuditService auditService;
-    private final SessionRegistry sessionRegistry;
+    private final AccountSessionRevocationService accountSessionRevocationService;
     private final Clock clock;
 
     /**
@@ -77,11 +75,7 @@ public class MfaRecoveryService {
      */
     private void expireOtherSessions(User user, HttpServletRequest httpRequest) {
         HttpSession current = httpRequest.getSession(false);
-        String currentId = current == null ? null : current.getId();
-        for (SessionInformation session : sessionRegistry.getAllSessions(user, false)) {
-            if (!session.getSessionId().equals(currentId)) {
-                session.expireNow();
-            }
-        }
+        accountSessionRevocationService.expireAllExcept(
+                user.getId(), current == null ? null : current.getId());
     }
 }

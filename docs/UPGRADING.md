@@ -92,6 +92,47 @@ runbook below already quiesces all writers, and the staging deploy stops its sin
 before the replacement applies migrations; custom multi-replica deployments must enforce the same
 all-replicas-down boundary.
 
+### V191 session index cutover
+
+`V191__reindex_sessions_by_account.sql` re-keys the session index. Sessions were filed in
+`SPRING_SESSION.PRINCIPAL_NAME` under the signed-in username; they are now filed under the immutable
+account id (`uid:<app_user.id>`). A username is self-service editable, so a session that outlived a
+rename stayed filed under a name no later lookup could reconstruct, and password reset and MFA
+recovery silently revoked nothing for that account. Spring Session rewrites that column on every
+session save, so a backend that predates this cutover re-files any session it serves back under the
+username.
+
+Treat the release containing V191 as a coordinated restart: close ingress, stop every old backend
+replica, then start the new backend so Flyway can apply V191 with no old binary still serving. Do
+not run old and new backend versions concurrently across this migration — a session last touched by
+an old replica is filed under a username the new replica does not look up, which is the defect this
+release closes. The standard Compose runbook below already quiesces all writers; custom
+multi-replica deployments must enforce the same all-replicas-down boundary.
+
+**This cutover has a user-visible effect the earlier ones did not.** The migration deletes every
+authenticated session row, because a historical username cannot be mapped back to an account — no
+username history is kept. Every signed-in user is signed out once and must sign in again, and open
+step-up windows end with their sessions.
+
+Anonymous sessions are preserved, so an in-flight **password reset** or **email verification** —
+both of which are completed without signing in — survives the cutover.
+
+**In-flight workspace invitations and email changes do not, and cannot be resumed.** Both pin their
+one-time link to the session that first opened it, and both are completed from a signed-in session,
+so the lineage lives in a row this migration deletes. The pin is written once and never rewritten
+(`exchange_owner_hash = COALESCE(exchange_owner_hash, …)`), so re-opening the emailed link after the
+cutover fails rather than re-binding to the new session.
+
+Before upgrading, check for invitations that have been opened but not yet accepted:
+
+```sql
+SELECT id, workspace_id, email FROM workspace_invite
+WHERE status = 'pending' AND exchanged_at IS NOT NULL AND expires_at > UTC_TIMESTAMP();
+```
+
+Re-issue those invitations after the upgrade, and ask anyone mid-way through an email change to
+start it again. Both are administrator actions; neither recipient can recover the link themselves.
+
 ## On-prem upgrade runbook
 
 1. **Preflight legacy media before any recreate** — if the installed version predates private object

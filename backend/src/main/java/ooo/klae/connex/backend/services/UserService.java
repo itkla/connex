@@ -130,6 +130,7 @@ public class UserService implements UserDetailsService {
      * intentionally immutable here: because email is a trust anchor (email-bound
      * invites rely on it), it can only change through the verified, ownership-proving
      * flow in {@code EmailChangeService}, so any email in the request body is ignored.
+     *
      * @param id the user being updated (must be the caller)
      * @param user the submitted profile fields
      * @return the updated user
@@ -162,7 +163,9 @@ public class UserService implements UserDetailsService {
      * Deletes the caller's own account. Org-data references are guarded and
      * erased in the service layer ({@link UserOffboardingService}) rather than
      * by cross-plane foreign keys (#440 increment 3); control-plane rows
-     * (memberships, credentials, sessions) still cascade from {@code app_user}.
+     * (memberships, credentials) still cascade from {@code app_user}. Sessions do
+     * not: {@code SPRING_SESSION} carries no foreign key to {@code app_user}, so a
+     * deleted account's sessions stay live until they expire (#1473 follow-up).
      * The audit record is written while the actor row still exists — recording
      * after the delete violated the actor foreign key inside the transaction
      * and the event was silently swallowed, leaving account erasure unaudited.
