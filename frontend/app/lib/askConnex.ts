@@ -1451,6 +1451,41 @@ export function appendAskConnexTurnSegment(
     return { turnId: current.turnId, entries: boundAskConnexTurnSegments(entries) };
 }
 
+/** One turn's identity and phase, as the reasoning trail sees it across a transition. */
+export type AskConnexTurnMoment = Pick<AskConnexTurnState, 'phase' | 'turnId'>;
+
+function askConnexTurnRunning(moment: AskConnexTurnMoment): boolean {
+    return moment.phase === 'accepted' || moment.phase === 'running';
+}
+
+/**
+ * Whether a turn's ephemeral reasoning survives one phase transition.
+ *
+ * Reasoning is persisted nowhere, so this client's memory holds the only copy and dropping it when
+ * the turn settles would destroy it at the moment the reader is finally free to read it. It is kept
+ * past the finish line for that reason — but only for the turn that actually produced it, which is
+ * narrower than it sounds, because a settled turn's id outlives the turn itself.
+ *
+ * A failure raised while submitting the *next* question never reaches the server, so it has no turn
+ * of its own and {@link reduceAskConnexTurn} leaves the previous turn's id in place while replacing
+ * its phase. Identity alone would therefore keep a resolved turn's reasoning and re-display it —
+ * already expanded, since expansion is remembered per turn — underneath a failure banner that
+ * belongs to a different question. Requiring the turn to have been running immediately before it
+ * settled rejects exactly that transition: real completion always arrives from a running turn,
+ * whereas one settled phase replacing another marks a turn whose id has been borrowed.
+ */
+export function askConnexReasoningSurvives(
+    previous: AskConnexTurnMoment | null,
+    next: AskConnexTurnMoment,
+    trailTurnId: number,
+): boolean {
+    if (next.turnId === null || next.turnId !== trailTurnId) return false;
+    if (askConnexTurnRunning(next)) return true;
+    return previous !== null
+        && previous.turnId === next.turnId
+        && askConnexTurnRunning(previous);
+}
+
 /**
  * The narration trail of a settled answer, in the order the assistant wrote it.
  *

@@ -238,6 +238,7 @@ export type AskConnexTurnLabels = {
     turnWorking: string;
     /** Accessible name for the disclosure that expands the in-flight reasoning panel. */
     thinkingToggle: string;
+    thinkingToggleHide: string;
     /** Accessible name for the list of narration segments leading up to an answer. */
     narrationTrail: string;
     /** Accessible name for the plan the assistant published for a turn. */
@@ -1173,7 +1174,7 @@ export function TurnActivity({
             onClick={toggleThinking}
             className="flex items-center gap-1.5 rounded-md text-left transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         >
-            <span>{labels.thinkingToggle}</span>
+            <span>{thinkingOpen ? labels.thinkingToggleHide : labels.thinkingToggle}</span>
             <ChevronDownIcon
                 aria-hidden
                 className={cn(
@@ -1190,8 +1191,8 @@ export function TurnActivity({
                 <div role="status" className="flex items-center gap-2">
                     <CheckIcon className="size-3.5 text-primary" />
                     <span>{labels.turnResolved}</span>
-                    {settledThinkingToggle}
                 </div>
+                {settledThinkingToggle}
                 {thinkingPanel}
             </div>
         );

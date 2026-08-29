@@ -69,6 +69,7 @@ import {
     activeSelectionAskConnexContext,
     appendAskConnexPrompt,
     appendAskConnexTurnSegment,
+    askConnexReasoningSurvives,
     askConnexContextCorrected,
     askConnexMessageContent,
     askConnexPinnedStorageKey,
@@ -105,6 +106,7 @@ import {
     type AskConnexSelectionContext,
     type AskConnexSourceContext,
     type AskConnexTurnSegment,
+    type AskConnexTurnMoment,
     type AskConnexTurnSegments,
     type AskConnexToolAction,
     type AskConnexToolCardFailure,
@@ -517,6 +519,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     const [streamStore] = useState(createAskConnexStreamStore);
     const [turn, dispatchTurn] = useReducer(reduceAskConnexTurn, EMPTY_ASK_CONNEX_TURN);
     const [thinking, setThinking] = useState<AskConnexTurnSegments | null>(null);
+    const previousTurnMoment = useRef<AskConnexTurnMoment | null>(null);
     const [narration, setNarration] = useState<AskConnexTurnSegments | null>(null);
     const [todos, setTodos] = useState<{ turnId: number; items: AiChatTodo[] } | null>(null);
     const [toolCalls, dispatchToolCalls] = useReducer(
@@ -938,17 +941,29 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }, []);
 
     /**
-     * Forgets each live trail once it has nothing left to say, on terms that differ because their
-     * durable copies do.
+     * Forgets each live trail once it has nothing left to say, on terms that differ because only
+     * one of them has a durable copy to come back from.
      *
-     * Narration is persisted on the answer, so the settled transcript replays it from the message
-     * and keeping the live copy past the turn would only render it twice. Reasoning is persisted
-     * nowhere: this state is the single copy in existence, so dropping it when the turn settles
-     * would destroy it at the exact moment the reader is finally free to read it — the answer they
-     * were watching arrive is now complete. It is kept until its turn is replaced or reset instead,
-     * which is what lets a settled turn still offer to show its own thinking.
+     * A resolved answer carries its narration in the settled message, so keeping the live copy past
+     * the turn would render it twice. Reasoning is persisted nowhere at all: this state is the only
+     * copy in existence, so dropping it when the turn settles destroys it at the moment the reader
+     * is finally free to read it, having just watched the answer it explains arrive. It is kept for
+     * the turn that produced it instead — see {@link askConnexReasoningSurvives} for why that is
+     * narrower than matching the turn's id.
+     *
+     * A turn that stops without resolving leaves no message behind, so its narration has no durable
+     * copy either and is still dropped here; the live trail is separately gated to a running turn at
+     * the surface, so retaining it would change nothing without that gate moving too.
      */
     useEffect(() => {
+        const previous = previousTurnMoment.current;
+        const next: AskConnexTurnMoment = { phase: turn.phase, turnId: turn.turnId };
+        if (previous !== null
+                && previous.phase === next.phase
+                && previous.turnId === next.turnId) {
+            return;
+        }
+        previousTurnMoment.current = next;
         const forgetSettled = (current: AskConnexTurnSegments | null) => {
             if (current === null) return current;
             if (current.turnId === turn.turnId
@@ -957,7 +972,8 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             }
             return null;
         };
-        setThinking((current) => (current !== null && current.turnId === turn.turnId
+        setThinking((current) => (current !== null
+                && askConnexReasoningSurvives(previous, next, current.turnId)
                 ? current
                 : null));
         setNarration(forgetSettled);
@@ -2548,6 +2564,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         turnStreaming: t('turnStreaming'),
         turnWorking: t('turnWorking'),
         thinkingToggle: t('thinkingToggle'),
+        thinkingToggleHide: t('thinkingToggleHide'),
         narrationTrail: t('narrationTrail'),
         todoPlan: t('todoPlan'),
         todoStatus: {

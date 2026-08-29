@@ -433,6 +433,7 @@
     "turnAccepted": "リクエストを受け付けました",
     "turnWorking": "思考中…",
     "thinkingToggle": "思考内容を表示",
+    "thinkingToggleHide": "思考内容を隠す",
     "narrationTrail": "作業の経過",
     "todoPlan": "進め方",
     "todoStatus": {

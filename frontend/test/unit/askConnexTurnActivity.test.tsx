@@ -63,6 +63,7 @@ const labels: AskConnexTurnLabels = {
     turnStreaming: "Writing…",
     turnWorking: "Thinking…",
     thinkingToggle: "Show thinking",
+    thinkingToggleHide: "Hide thinking",
     narrationTrail: "Work in progress",
     todoPlan: "Plan",
     todoStatus: { pending: "To do", active: "In progress", done: "Done" },
@@ -561,14 +562,29 @@ describe("the in-flight reasoning disclosure", () => {
     });
 
     it("keeps a settled turn's own message beside the reasoning it offers", () => {
-        expect(activity({
+        const resolved = activity({
             turn: turn({ phase: "resolved", progress: PROGRESS }),
             thinking: THINKING,
-        })).toContain(labels.turnResolved);
-        expect(activity({
+        });
+        expect(resolved).toContain(labels.turnResolved);
+        expect(resolved).toContain(labels.thinkingToggle);
+        const cancelled = activity({
             turn: turn({ phase: "cancelled", progress: PROGRESS }),
             thinking: THINKING,
-        })).toContain(labels.turnCancelled);
+        });
+        expect(cancelled).toContain(labels.turnCancelled);
+        expect(cancelled).toContain(labels.thinkingToggle);
+    });
+
+    it("keeps a resolved turn's outcome the whole of what is announced", () => {
+        const markup = activity({
+            turn: turn({ phase: "resolved", progress: PROGRESS }),
+            thinking: THINKING,
+        });
+        const status = /<div role="status"[^>]*>([\s\S]*?)<\/div>/.exec(markup);
+        if (status === null) throw new Error("the resolved status region was not rendered");
+        expect(status[1]).toContain(labels.turnResolved);
+        expect(status[1]).not.toContain(labels.thinkingToggle);
     });
 
     it("reads a settled turn's reasoning when the disclosure is opened", async () => {
