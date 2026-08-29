@@ -24,7 +24,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
-import ooo.klae.connex.backend.services.SessionSecurityService;
+import ooo.klae.connex.backend.support.AuthenticatedSessions;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountMode;
@@ -95,19 +95,10 @@ class NativeConnectSecurityIntegrationTest {
         properties.getGoogle().setEnabled(true);
         properties.getGoogle().setMode(ConnectedAccountMode.MANAGED);
         properties.getManaged().getGoogle().setClientId("");
-        String unique = java.util.UUID.randomUUID().toString().substring(0, 8);
-        User user = new User();
-        user.setUsername("native-connect-security-" + unique);
-        user.setDisplayName("Native Connect Security Test");
-        user.setEmail("native-connect-security-" + unique + "@example.com");
-        user.setTimezone("UTC");
-        userMapper.insert(user);
-        User principal = userMapper.getUserById(user.getId());
+        User principal = AuthenticatedSessions.account(userMapper, "native-connect-security");
         UsernamePasswordAuthenticationToken authenticated =
             new UsernamePasswordAuthenticationToken(principal, null, List.of());
-        MockHttpSession session = new MockHttpSession();
-        session.setAttribute(
-            SessionSecurityService.SESSION_EPOCH_ATTR, principal.getSessionEpoch());
+        MockHttpSession session = AuthenticatedSessions.stampedSession(principal);
 
         mockMvc.perform(post("/api/account/connections/native/google/pairing")
                 .session(session)

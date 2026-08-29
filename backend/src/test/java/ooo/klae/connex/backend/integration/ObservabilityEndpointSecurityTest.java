@@ -21,6 +21,7 @@ import jakarta.servlet.Filter;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockHttpSession;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -32,6 +33,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
+import ooo.klae.connex.backend.support.AuthenticatedSessions;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.controllers.MetricsController;
 import ooo.klae.connex.backend.services.HealthService;
@@ -43,11 +46,13 @@ class ObservabilityEndpointSecurityTest {
     private static final String SCRAPE_TOKEN = "operator-metrics-token-123456";
 
     @Autowired private WebApplicationContext context;
+    @Autowired private UserMapper userMapper;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
     @MockitoBean private HealthService healthService;
 
     private MockMvc mockMvc;
     private UsernamePasswordAuthenticationToken authenticated;
+    private MockHttpSession authenticatedSession;
 
     @BeforeEach
     void setUp() {
@@ -56,9 +61,8 @@ class ObservabilityEndpointSecurityTest {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(springSecurityFilterChain)
                 .build();
-        User user = new User();
-        user.setId(Integer.MAX_VALUE - 1);
-        user.setUsername("observability-security-test");
+        User user = AuthenticatedSessions.account(userMapper, "observability");
+        authenticatedSession = AuthenticatedSessions.stampedSession(user);
         authenticated = new UsernamePasswordAuthenticationToken(user, null, List.of());
     }
 
@@ -107,12 +111,12 @@ class ObservabilityEndpointSecurityTest {
     void sessionAuthenticationAloneCannotReadMetricsOnAnyMethod() throws Exception {
         mockMvc.perform(get("/api/metrics")
                         .header("X-Workspace-Id", Integer.MAX_VALUE)
-                        .with(authentication(authenticated)))
+                        .session(authenticatedSession).with(authentication(authenticated)))
                 .andExpect(status().isForbidden())
                 .andExpect(content().string(not(containsString("jvm_memory_used_bytes"))));
 
         mockMvc.perform(head("/api/metrics")
-                        .with(authentication(authenticated)))
+                        .session(authenticatedSession).with(authentication(authenticated)))
                 .andExpect(status().isForbidden())
                 .andExpect(content().string(not(containsString("jvm_memory_used_bytes"))));
     }
@@ -135,14 +139,14 @@ class ObservabilityEndpointSecurityTest {
                 .andExpect(status().isUnauthorized());
 
         mockMvc.perform(post("/api/client-errors")
-                        .with(authentication(authenticated))
+                        .session(authenticatedSession).with(authentication(authenticated))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isForbidden())
                 .andExpect(content().string(not(containsString("workspace membership"))));
 
         mockMvc.perform(post("/api/client-errors")
-                        .with(authentication(authenticated))
+                        .session(authenticatedSession).with(authentication(authenticated))
                         .with(csrf().asHeader())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
@@ -153,7 +157,7 @@ class ObservabilityEndpointSecurityTest {
     @Test
     void actuatorHttpEndpointsAreUnavailable() throws Exception {
         for (String path : List.of("/actuator", "/actuator/health", "/actuator/metrics")) {
-            mockMvc.perform(get(path).with(authentication(authenticated)))
+            mockMvc.perform(get(path).session(authenticatedSession).with(authentication(authenticated)))
                     .andExpect(result -> assertTrue(result.getResponse().getStatus() >= 400))
                     .andExpect(content().string(not(containsString("\"_links\""))));
         }
