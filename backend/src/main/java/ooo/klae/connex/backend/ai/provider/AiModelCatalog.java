@@ -406,6 +406,46 @@ public final class AiModelCatalog {
      * @param overrides deployment overrides, may be {@code null}
      * @return context window in tokens, never below the conservative fallback
      */
+    /**
+     * Whether an operator has declared that a configured target accepts streamed requests.
+     *
+     * <p>Answered from declaration alone, never from optimism. A capability an endpoint may not
+     * have must not be assumed on its behalf: an OpenAI-compatible endpoint serves any model under
+     * any name, and one that rejects the streamed request fails every turn rather than merely
+     * declining to stream.
+     *
+     * <p>Resolved exactly as every other override is — null entries skipped, the model id
+     * family-normalized, and a later entry superseding an earlier one — with the addition that the
+     * declaration must name the endpoint it was verified against.
+     *
+     * @param family provider family owning the target
+     * @param target configured provider target, may be {@code null}
+     * @param overrides deployment overrides, may be {@code null}
+     * @return whether streaming was declared for this exact endpoint and model
+     */
+    public static boolean streamingDeclared(
+            Family family, AiProviderTarget target, List<AiProperties.ModelOverride> overrides) {
+        if (overrides == null || overrides.isEmpty() || target == null) {
+            return false;
+        }
+        String normalizedModelId = family.normalize(modelIdOf(target));
+        if (normalizedModelId == null || normalizedModelId.isBlank()) {
+            return false;
+        }
+        boolean declared = false;
+        for (AiProperties.ModelOverride override : overrides) {
+            if (override == null) {
+                continue;
+            }
+            Boolean value = override.streamingFor(
+                    family.providerId(), normalizedModelId, target.endpoint());
+            if (value != null) {
+                declared = value;
+            }
+        }
+        return declared;
+    }
+
     public static int contextWindowTokens(
             Family family, AiProviderTarget target, List<AiProperties.ModelOverride> overrides) {
         return resolve(family, modelIdOf(target), overrides).contextWindowTokens();

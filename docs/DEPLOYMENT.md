@@ -179,7 +179,21 @@ connex:
         output-price-per-m-tok: 0.60
         currency: USD
         pricing-as-of: 2026-08-25
+      - provider: openai_compatible
+        model-id: gemini-3.6-flash
+        endpoint: https://generativelanguage.googleapis.com/v1beta/openai/
+        streaming: true                 # only after verifying this exact endpoint streams
 ```
+
+`streaming` declares that one OpenAI-compatible endpoint accepts the streamed completion request
+Connex builds, and it is the only way Ask Connex will stream an answer. It is unlike the other
+fields in two ways, both deliberate. It defaults to **off**: this adapter serves any endpoint under
+any name, several of which reject a streamed request outright, and an adapter that cannot stream
+fails the turn rather than falling back to a whole response — an unverified endpoint therefore
+streams nothing rather than risking every turn. And it applies **only together with `endpoint`**:
+the same model id behind two gateways is two different answers to whether streaming works, so a
+declaration names the endpoint it was verified against and never speaks for another. Verify with a
+real streamed request — including the `tools` array Ask Connex sends — before setting it.
 
 Declare a context window the provider will actually honor. The value is not a request the provider
 validates — it is the number every Ask Connex budget is derived from, so overstating it produces
