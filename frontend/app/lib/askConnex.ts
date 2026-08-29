@@ -101,6 +101,40 @@ export type AskConnexFileAttachment = {
     durableEchoPending?: boolean;
 };
 
+/**
+ * Whether a question may be sent, given where its words come from.
+ *
+ * The composer and a suggested follow-up carry their text differently: the composer holds it, while
+ * a suggestion carries its own in the click. Gating both on the composer's contents would leave
+ * every suggestion inert exactly when a member reaches for one — with nothing typed — so the
+ * emptiness check applies to whichever text this send actually carries.
+ *
+ * The composer's length ceiling stays a composer concern. A suggestion is the assistant's own short
+ * phrase rather than member input, and measuring it against what stands in the composer would
+ * refuse it for a reason that has nothing to do with it.
+ * @param available whether the conversation can accept a question at all, ignoring its text
+ * @param composer the composer's current contents
+ * @param suggestion a suggested follow-up's words, when the send came from one
+ * @param composerTooLong whether the composer's contents exceed the message ceiling
+ */
+export function askConnexSendable({
+    available,
+    composer,
+    suggestion,
+    composerTooLong,
+}: {
+    available: boolean;
+    composer: string;
+    suggestion?: string;
+    composerTooLong: boolean;
+}): boolean {
+    if (!available) return false;
+    if (suggestion === undefined) {
+        return !composerTooLong && composer.trim().length > 0;
+    }
+    return suggestion.trim().length > 0;
+}
+
 /** Returns whether an upload or removal must settle before the conversation can advance. */
 export function hasPendingAskConnexFileOperation(
     attachments: readonly AskConnexFileAttachment[],

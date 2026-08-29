@@ -95,6 +95,7 @@ import {
     askConnexMessageTodos,
     askConnexPromptFocusPending,
     askConnexProposalGroups,
+    askConnexSendable,
     askConnexTranscript,
     groupAskConnexMessages,
     hasPendingAskConnexFileOperation,
@@ -640,10 +641,12 @@ function JobSuggestions({
 function MessageSuggestions({
     suggestions,
     label,
+    disabled,
     onSend,
 }: {
     suggestions: string[];
     label: string;
+    disabled: boolean;
     onSend: (content?: string) => void;
 }) {
     if (suggestions.length === 0) return null;
@@ -656,6 +659,7 @@ function MessageSuggestions({
                         type="button"
                         variant="outline"
                         size="inline"
+                        disabled={disabled}
                         className="h-auto max-w-72 justify-start whitespace-normal py-1.5 text-left leading-4"
                         onClick={() => onSend(suggestion)}
                     >
@@ -815,6 +819,7 @@ function TranscriptMessage({
     actionableToolCallIds,
     labels,
     review,
+    suggestionsDisabled,
     onSend,
     onToolAction,
 }: {
@@ -827,6 +832,7 @@ function TranscriptMessage({
     actionableToolCallIds: ReadonlySet<number>;
     labels: AskConnexDrawerLabels;
     review: AskConnexToolReview;
+    suggestionsDisabled: boolean;
     onSend: (content?: string) => void;
     onToolAction: (toolCallId: number, action: AskConnexToolAction) => void;
 }) {
@@ -908,6 +914,7 @@ function TranscriptMessage({
                     <MessageSuggestions
                         suggestions={suggestions}
                         label={labels.suggestedFollowUps}
+                        disabled={suggestionsDisabled}
                         onSend={onSend}
                     />
                 ) : null}
@@ -1800,14 +1807,17 @@ function ConversationSurface({
         && unavailable === null
         && !working
         && dismissedJobsKey !== jobsKey;
-    const canSend = composer.trim().length > 0
-        && loadState === 'ready'
+    const sendAvailable = loadState === 'ready'
         && !contextOverflow
-        && !contentTooLong
         && !fileOperationPending
         && !scope.blocked
         && !busy
         && unavailable === null;
+    const canSend = askConnexSendable({
+        available: sendAvailable,
+        composer,
+        composerTooLong: contentTooLong,
+    });
     const contextGroupRef = useRef<HTMLDivElement>(null);
     const [pendingScope, setPendingScope] = useState<{ content?: string } | null>(null);
     const scopeKey = requestScope.identity;
@@ -1862,7 +1872,12 @@ function ConversationSurface({
      * against the question actually about to go out rather than an earlier one.
      */
     const requestSend = (content?: string) => {
-        if (!canSend) return;
+        if (!askConnexSendable({
+            available: sendAvailable,
+            composer,
+            suggestion: content,
+            composerTooLong: contentTooLong,
+        })) return;
         scope.onSettle();
         if (scopeKey !== null) {
             setPendingScope({ content });
@@ -2089,6 +2104,7 @@ function ConversationSurface({
                                                                 actionableToolCallIds={actionableToolCallIds}
                                                                 labels={labels}
                                                                 review={toolReview}
+                                                                suggestionsDisabled={!sendAvailable}
                                                                 onSend={requestSend}
                                                                 onToolAction={onToolAction}
                                                             />
