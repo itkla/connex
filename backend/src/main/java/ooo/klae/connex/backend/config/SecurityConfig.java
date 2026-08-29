@@ -234,6 +234,7 @@ public class SecurityConfig {
                     .requestMatchers("/api/document-signature/webhooks/**").permitAll()
                     .requestMatchers("/api/auth/webauthn/authenticate/**").permitAll()
                     .requestMatchers("/api/auth/webauthn/**").authenticated()
+                    .requestMatchers(HttpMethod.GET, "/api/auth/me").authenticated()
                     .requestMatchers(HttpMethod.POST, "/api/invites/exchange").permitAll()
                     .requestMatchers(HttpMethod.POST, "/api/invite-links/exchange").permitAll()
                     .requestMatchers(

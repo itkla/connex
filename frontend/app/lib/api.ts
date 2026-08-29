@@ -881,7 +881,22 @@ async function safeReadWithCookie<T>(
     }
 }
 
-export type CookieResult<T> = { ok: true; data: T } | { ok: false };
+/**
+ * A server-side read's outcome. The failure arm carries {@code unauthenticated} so a caller can
+ * tell "the session is gone" from "the read failed", which are different recoveries: signing in
+ * again versus retrying. Every backend 401 means an absent or rejected session — the entry point,
+ * the absolute-timeout filter, the concurrent-session strategy, and a failed authentication all
+ * answer with it — so no other reading has to be inferred from the status.
+ */
+export type CookieResult<T> =
+    | { ok: true; data: T }
+    | { ok: false; unauthenticated?: boolean };
+
+function unauthenticatedFailure(error: unknown): { ok: false; unauthenticated?: boolean } {
+    return error instanceof ApiError && error.status === 401
+        ? { ok: false, unauthenticated: true }
+        : { ok: false };
+}
 
 /**
  * As {@link safeReadWithCookie}, but reports a fetch failure distinctly from an empty result so the
@@ -895,8 +910,8 @@ async function resultWithCookie<T>(
     if (!cookie) return { ok: false };
     try {
         return { ok: true, data: await fetcher({ headers: { cookie }, cache: "no-store" }) };
-    } catch {
-        return { ok: false };
+    } catch (error) {
+        return unauthenticatedFailure(error);
     }
 }
 
@@ -910,8 +925,8 @@ async function resultWithCookie<T>(
 export async function toResult<T>(request: Promise<T>): Promise<CookieResult<T>> {
     try {
         return { ok: true, data: await request };
-    } catch {
-        return { ok: false };
+    } catch (error) {
+        return unauthenticatedFailure(error);
     }
 }
 

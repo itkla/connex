@@ -48,6 +48,7 @@ export default async function AppLayout({
 
     const headerList = await headers();
     const cookie = headerList.get('cookie');
+    const signInPath = `/auth/login?redirect=${encodeURIComponent(headerList.get('x-pathname') ?? '/dashboard')}`;
     const userResult = await getCurrentUserResultFromCookie(cookie);
 
     if (!userResult.ok) {
@@ -55,12 +56,14 @@ export default async function AppLayout({
     }
     const user = userResult.data;
     if (!user) {
-        const pathname = headerList.get('x-pathname') ?? '/dashboard';
-        redirect(`/auth/login?redirect=${encodeURIComponent(pathname)}`);
+        redirect(signInPath);
     }
 
     const workspacesResult = await getMyWorkspacesResultFromCookie(cookie);
     if (!workspacesResult.ok) {
+        if (workspacesResult.unauthenticated) {
+            redirect(signInPath);
+        }
         return <WorkspaceUnavailablePage />;
     }
     const { workspaces, activeWorkspaceId } = workspacesResult.data;
