@@ -715,9 +715,13 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
      * Called where a member has stopped typing and started deciding — opening the filter form, and
      * pressing Send — so the rate-limited cohort evaluation follows a settled question instead of
      * every keystroke on the way to one, while still describing the request that is about to go out.
+     *
+     * A send that brings its own words passes them here. The composer is not the question then, and
+     * evaluating it instead would describe one request in the confirmation while running another.
+     * @param content the question about to be sent, when it is not the composer's
      */
-    const settleScopeRouting = useCallback(() => {
-        setScopeRoutingContent(composerRef.current);
+    const settleScopeRouting = useCallback((content?: string) => {
+        setScopeRoutingContent(content ?? composerRef.current);
     }, []);
 
     useEffect(() => {

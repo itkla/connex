@@ -8,6 +8,10 @@ const PROVIDER = readFileSync(
     path.resolve(process.cwd(), "app/components/ask-connex/AskConnexProvider.tsx"),
     "utf8",
 );
+const DRAWER = readFileSync(
+    path.resolve(process.cwd(), "app/components/ask-connex/AskConnexDrawer.tsx"),
+    "utf8",
+);
 
 const READY = { available: true, composer: "", composerTooLong: false };
 
@@ -41,6 +45,12 @@ describe("what Ask Connex accepts as a sendable question", () => {
             suggestion: "Draft the follow-up",
             composerTooLong: false,
         })).toBe(false);
+    });
+
+    it("measures the scope confirmation against the question actually being sent", () => {
+        expect(PROVIDER).toContain("setScopeRoutingContent(content ?? composerRef.current);");
+        expect(PROVIDER).not.toContain("setScopeRoutingContent(composerRef.current);");
+        expect(DRAWER).toContain("scope.onSettle(content);");
     });
 
     it("empties the composer only for a question the composer supplied", () => {

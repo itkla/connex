@@ -276,7 +276,7 @@ export type AskConnexScopeSurface = {
     onDraftChange: (draft: AskConnexScopeDraft) => void;
     onEditorOpenChange: (open: boolean) => void;
     /** Takes the question the breadth check should be about, at the moment one is being decided. */
-    onSettle: () => void;
+    onSettle: (content?: string) => void;
 };
 
 type AskConnexDrawerLabels = AskConnexContextLabels & AskConnexTurnLabels & {
@@ -1878,7 +1878,7 @@ function ConversationSurface({
             suggestion: content,
             composerTooLong: contentTooLong,
         })) return;
-        scope.onSettle();
+        scope.onSettle(content);
         if (scopeKey !== null) {
             setPendingScope({ content });
             return;
