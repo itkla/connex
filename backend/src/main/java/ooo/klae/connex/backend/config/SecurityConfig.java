@@ -26,6 +26,7 @@ import ooo.klae.connex.backend.sso.CompositeClientRegistrationRepository;
 import ooo.klae.connex.backend.sso.SocialLoginClientRegistrations;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.web.configurers.RequestCacheConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpMethod;
@@ -156,6 +157,13 @@ public class SecurityConfig {
      * handoff, the token-authenticated delivery routes and, when SSO is enabled, the SAML
      * assertion consumer are exempt.
      *
+     * <p>The request cache is disabled. Nothing here replays a saved request — every
+     * post-authentication redirect targets a trusted frontend URL — but the default
+     * {@code HttpSessionRequestCache} creates a session for each rejected anonymous request just to
+     * store it. Those sessions are unreachable: the entry point answers 401 rather than redirecting
+     * to a login page, and a server-rendered caller discards the {@code Set-Cookie}. Left enabled,
+     * every anonymous read of an authenticated endpoint would persist a session row nobody can use.
+     *
      * @return the configured filter chain
      */
     @Bean
@@ -234,6 +242,7 @@ public class SecurityConfig {
                     .requestMatchers("/api/document-signature/webhooks/**").permitAll()
                     .requestMatchers("/api/auth/webauthn/authenticate/**").permitAll()
                     .requestMatchers("/api/auth/webauthn/**").authenticated()
+                    .requestMatchers(HttpMethod.GET, "/api/auth/me").authenticated()
                     .requestMatchers(HttpMethod.POST, "/api/invites/exchange").permitAll()
                     .requestMatchers(HttpMethod.POST, "/api/invite-links/exchange").permitAll()
                     .requestMatchers(
@@ -285,7 +294,8 @@ public class SecurityConfig {
             )
             .exceptionHandling(ex -> ex
                 .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
-            );
+            )
+            .requestCache(RequestCacheConfigurer::disable);
         if (oauthEnabled) {
             http
                 .oauth2Login(o -> o

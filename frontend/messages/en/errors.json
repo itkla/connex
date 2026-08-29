@@ -70,7 +70,8 @@
     "title": "We couldn't check your workspaces",
     "body": "Your workspace access couldn't be confirmed. The issue is usually temporary — try again in a moment.",
     "retry": "Try again",
-    "retrying": "Retrying"
+    "retrying": "Retrying",
+    "signOut": "Sign out"
   },
   "CapabilityUnavailable": {
     "title": "We couldn't check feature availability",
