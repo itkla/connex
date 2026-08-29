@@ -29,9 +29,13 @@ import jakarta.annotation.Nullable;
 @NoArgsConstructor
 public class User implements org.springframework.security.core.userdetails.UserDetails {
     /**
-     * Pinned so a later field addition fails a test rather than production: this principal is
-     * serialized into {@code SPRING_SESSION_ATTRIBUTES}, and an implicit id changes with the class.
-     * The value is the one the current shape computes, so pinning it changes nothing today.
+     * Pinned because this principal is serialized into {@code SPRING_SESSION_ATTRIBUTES}: an
+     * implicit id is derived from the class shape, so adding a field — or a Lombok accessor for one
+     * — moves it and makes every stored principal unreadable. Pinning keeps live sessions readable
+     * across that change.
+     *
+     * <p>The value is the one the current shape computes, so declaring it changes nothing today.
+     * {@code UserSerializationTest} pins it, so a change to this constant has to be deliberate.
      */
     private static final long serialVersionUID = -5201556527847944016L;
 

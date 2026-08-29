@@ -19,12 +19,15 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
+import ooo.klae.connex.backend.support.AuthenticatedSessions;
+import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.beans.User;
 
 @SpringBootTest(properties = "connex.mail.managed=true")
 class MailManagedEndpointIntegrationTest {
 
     @Autowired private WebApplicationContext context;
+    @Autowired private UserMapper userMapper;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
 
     private MockMvc mockMvc;
@@ -38,14 +41,13 @@ class MailManagedEndpointIntegrationTest {
 
     @Test
     void authenticatedUserReadsManagedFlagWithoutWorkspaceContext() throws Exception {
-        User user = new User();
-        user.setId(7);
-        user.setUsername("mail-managed-test");
+        User user = AuthenticatedSessions.account(userMapper, "mail-managed-test");
         UsernamePasswordAuthenticationToken authenticated = new UsernamePasswordAuthenticationToken(
                 user, null, List.of());
 
         mockMvc.perform(get("/api/mail/managed")
                         .header("X-Workspace-Id", Integer.MAX_VALUE)
+                        .session(AuthenticatedSessions.stampedSession(user))
                         .with(authentication(authenticated)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.managed").value(true));
