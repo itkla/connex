@@ -938,10 +938,15 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }, []);
 
     /**
-     * Forgets both live trails the moment their turn stops being the one on screen — a settled,
-     * reset, or replaced turn takes its reasoning and its narration with it, exactly like the
-     * activity line they sat under. Reasoning is never persisted, so there is nothing to restore
-     * later by design; narration comes back with the settled message instead.
+     * Forgets each live trail once it has nothing left to say, on terms that differ because their
+     * durable copies do.
+     *
+     * Narration is persisted on the answer, so the settled transcript replays it from the message
+     * and keeping the live copy past the turn would only render it twice. Reasoning is persisted
+     * nowhere: this state is the single copy in existence, so dropping it when the turn settles
+     * would destroy it at the exact moment the reader is finally free to read it — the answer they
+     * were watching arrive is now complete. It is kept until its turn is replaced or reset instead,
+     * which is what lets a settled turn still offer to show its own thinking.
      */
     useEffect(() => {
         const forgetSettled = (current: AskConnexTurnSegments | null) => {
@@ -952,7 +957,9 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             }
             return null;
         };
-        setThinking(forgetSettled);
+        setThinking((current) => (current !== null && current.turnId === turn.turnId
+                ? current
+                : null));
         setNarration(forgetSettled);
         setTodos((current) => (current !== null
                 && current.turnId === turn.turnId

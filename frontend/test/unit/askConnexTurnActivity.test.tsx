@@ -541,14 +541,73 @@ describe("the in-flight reasoning disclosure", () => {
         });
     });
 
-    it("drops the reasoning with the activity line once the turn settles", () => {
-        for (const phase of SETTLED_WITHOUT_ANSWER) {
+    it("still offers the reasoning after the turn settles", () => {
+        for (const phase of [...SETTLED_WITHOUT_ANSWER, "resolved"] as const) {
             const markup = activity({
                 turn: turn({ phase, progress: PROGRESS }),
                 thinking: THINKING,
             });
-            expect(markup).not.toContain(labels.thinkingToggle);
+            expect(markup).toContain(labels.thinkingToggle);
+            expect(markup).toContain('aria-expanded="false"');
             for (const entry of THINKING) expect(markup).not.toContain(entry.text);
         }
+    });
+
+    it("offers nothing on a settled turn that produced no reasoning", () => {
+        for (const phase of [...SETTLED_WITHOUT_ANSWER, "resolved"] as const) {
+            const markup = activity({ turn: turn({ phase, progress: PROGRESS }) });
+            expect(markup).not.toContain(labels.thinkingToggle);
+        }
+    });
+
+    it("keeps a settled turn's own message beside the reasoning it offers", () => {
+        expect(activity({
+            turn: turn({ phase: "resolved", progress: PROGRESS }),
+            thinking: THINKING,
+        })).toContain(labels.turnResolved);
+        expect(activity({
+            turn: turn({ phase: "cancelled", progress: PROGRESS }),
+            thinking: THINKING,
+        })).toContain(labels.turnCancelled);
+    });
+
+    it("reads a settled turn's reasoning when the disclosure is opened", async () => {
+        const interactive = installInteractiveDocument();
+        const { createRoot } = await import("react-dom/client");
+        const root = createRoot(interactive.container);
+
+        await act(async () => {
+            root.render(
+                <TurnActivity
+                    turn={turn({ phase: "resolved", progress: PROGRESS })}
+                    streaming={false}
+                    cancelling={false}
+                    canRetry={false}
+                    thinking={THINKING}
+                    labels={labels}
+                    onCancel={() => {}}
+                    onRetry={() => {}}
+                />,
+            );
+        });
+
+        const toggle = interactive.elements.find(
+            (element: InteractiveElement) => element.tagName === "BUTTON"
+                && element.textContent.includes(labels.thinkingToggle),
+        );
+        if (!toggle) throw new Error("the settled thinking disclosure was not rendered");
+
+        await act(async () => {
+            interactive.dispatch("click", toggle);
+        });
+
+        expect(toggle.getAttribute("aria-expanded")).toBe("true");
+        for (const entry of THINKING) {
+            expect(interactive.container.textContent).toContain(entry.text);
+        }
+
+        await act(async () => {
+            root.unmount();
+        });
     });
 });
