@@ -259,8 +259,21 @@ public class AuthService {
         return refreshedUser;
     }
 
-    /** Replaces upstream or existing principal state while retaining only active link flows. */
-    public void prepareUnauthenticatedLinkFlow(
+        /**
+     * Ends an authenticated ceremony without leaving its principal signed in.
+     *
+     * <p>Used by every SSO exit that is not a completed login. The upstream authentication filter
+     * saves the security context into the session before any success handler runs, so clearing the
+     * holder alone would leave the identity provider's token in the session row — and because that
+     * principal is not a Connex user, nothing downstream can enumerate or epoch-refuse it.
+     *
+     * <p>The session is replaced rather than merely emptied, preserving only one-time-link lineage
+     * so an in-flight invite or reset survives the failure.
+     *
+     * @param httpRequest the request ending the ceremony
+     * @param httpResponse the response, whose workspace cookie is cleared
+     */
+public void downgradeToUnauthenticatedSession(
             HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
         oneTimeLinkFlowService.replaceSessionPreservingFlows(httpRequest);
         SecurityContext context = SecurityContextHolder.createEmptyContext();

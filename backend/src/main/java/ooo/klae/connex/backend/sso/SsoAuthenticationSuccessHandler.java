@@ -17,6 +17,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import ooo.klae.connex.backend.beans.SsoConnection;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.mail.MailProperties;
@@ -44,6 +45,7 @@ import ooo.klae.connex.backend.util.OneTimeTokenDigest;
  * receives a purpose-bound, unauthenticated flow session before reaching the token-free linking
  * screen. Every redirect targets the trusted frontend origin, never a request-supplied URL.
  */
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHandler {
@@ -76,16 +78,42 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
     public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
             Authentication authentication) throws IOException {
         String frontendBase = mailProperties.getAppBaseUrl();
-        if (authentication instanceof OAuth2AuthenticationToken token
-                && token.getPrincipal() instanceof OidcUser user) {
-            handleOidc(token, user, request, response, frontendBase);
-            return;
+        try {
+            if (authentication instanceof OAuth2AuthenticationToken token
+                    && token.getPrincipal() instanceof OidcUser user) {
+                handleOidc(token, user, request, response, frontendBase);
+                return;
+            }
+            if (authentication instanceof Saml2AssertionAuthentication saml
+                    && saml.getCredentials() != null) {
+                handleSaml(saml, request, response, frontendBase);
+                return;
+            }
+            failLogin(request, response, frontendBase);
+        } catch (RuntimeException exception) {
+            log.warn("SSO login could not be completed: {}", exception.toString());
+            failLogin(request, response, frontendBase);
         }
-        if (authentication instanceof Saml2AssertionAuthentication saml && saml.getCredentials() != null) {
-            handleSaml(saml, request, response, frontendBase);
-            return;
+    }
+
+    /**
+     * Ends a failed SSO ceremony without leaving the identity provider's principal authenticated.
+     *
+     * <p>The upstream filter saves the security context into the session before this handler runs,
+     * so redirecting alone leaves the token in the session row. That session satisfies
+     * {@code authenticated()}, and because its principal is not a Connex user it is skipped by the
+     * session-epoch check and filed under no revocation key — nothing can enumerate or refuse it
+     * afterwards. It reaches the STOMP queues, which resolve user destinations by principal name.
+     *
+     * <p>The downgrade must precede the redirect: {@code sendRedirect} commits the response, and
+     * Spring Session flushes its cookie on commit.
+     */
+    private void failLogin(HttpServletRequest request, HttpServletResponse response,
+            String frontendBase) throws IOException {
+        authService.downgradeToUnauthenticatedSession(request, response);
+        if (!response.isCommitted()) {
+            response.sendRedirect(frontendBase + "/auth/login?sso_error=1");
         }
-        response.sendRedirect(frontendBase + "/auth/login?sso_error=1");
     }
 
     private void handleOidc(OAuth2AuthenticationToken token, OidcUser user, HttpServletRequest request,
@@ -98,7 +126,7 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
         }
         Integer orgId = parseOrgId(registrationId);
         if (orgId == null) {
-            response.sendRedirect(frontendBase + "/auth/login?sso_error=1");
+            failLogin(request, response, frontendBase);
             return;
         }
         boolean emailVerified = Boolean.TRUE.equals(user.getEmailVerified());
@@ -112,7 +140,7 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
             HttpServletResponse response, String frontendBase) throws IOException {
         String email = socialEmail(user);
         if (email == null) {
-            response.sendRedirect(frontendBase + "/auth/login?sso_error=1");
+            failLogin(request, response, frontendBase);
             return;
         }
         boolean emailVerified = SocialLoginClientRegistrations.MICROSOFT.equals(provider)
@@ -154,18 +182,18 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
             HttpServletResponse response, String frontendBase) throws IOException {
         Integer orgId = parseOrgId(saml.getRelyingPartyRegistrationId());
         if (orgId == null) {
-            response.sendRedirect(frontendBase + "/auth/login?sso_error=1");
+            failLogin(request, response, frontendBase);
             return;
         }
         Saml2ResponseAssertionAccessor assertion = saml.getCredentials();
         String email = firstNonBlankAttribute(assertion, EMAIL_ATTRIBUTES);
         if (email == null) {
-            response.sendRedirect(frontendBase + "/auth/login?sso_error=1");
+            failLogin(request, response, frontendBase);
             return;
         }
         SsoConnection connection = ssoConnectionMapper.findByOrg(orgId);
         if (connection == null || connection.getSamlIdpEntityId() == null) {
-            response.sendRedirect(frontendBase + "/auth/login?sso_error=1");
+            failLogin(request, response, frontendBase);
             return;
         }
         String displayName = resolveSamlDisplayName(assertion, email);
@@ -187,7 +215,7 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
                 response.sendRedirect(frontendBase + (hasWorkspace ? "/dashboard" : "/onboarding"));
             }
             case SsoLoginResult.LinkRequired linkRequired -> {
-                authService.prepareUnauthenticatedLinkFlow(request, response);
+                authService.downgradeToUnauthenticatedSession(request, response);
                 String linkToken = ssoLinkService.createChallenge(linkRequired);
                 String browserBinding = oneTimeLinkFlowCookie.ensureBrowserBinding(request, response);
                 oneTimeLinkFlowService.establishBrowserBinding(request, browserBinding);

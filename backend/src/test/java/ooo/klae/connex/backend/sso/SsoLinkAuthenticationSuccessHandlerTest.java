@@ -75,7 +75,7 @@ class SsoLinkAuthenticationSuccessHandlerTest {
 
         handler.onAuthenticationSuccess(request, response, authentication);
 
-        verify(authService).prepareUnauthenticatedLinkFlow(request, response);
+        verify(authService).downgradeToUnauthenticatedSession(request, response);
         verify(oneTimeLinkFlowService).establishBrowserBinding(request, "browser-binding");
         verify(oneTimeLinkFlowCookie).set(
             response, Purpose.SSO_LINK, "browser-grant", java.time.Duration.ofMinutes(10));
