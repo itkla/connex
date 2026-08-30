@@ -117,11 +117,21 @@ final class AiChatStreamingProgress {
         lastCheckNanos = System.nanoTime();
     }
 
+    /**
+     * Forgets one attempt's stream so the repaired attempt streams from nothing.
+     *
+     * <p>Everything the attempt established is per-attempt state — the retained batches, the
+     * staged text, a screening exclusion, and a stream stopped at the durable bound. A truncation
+     * left standing here would silently swallow the whole repaired attempt: every delta would hit
+     * the truncated early-return, and settling would skip the emitted-stream comparison that
+     * exists to catch exactly that disagreement.
+     */
     void reset() {
         persistenceService.resetPartialContent(turn, durable.length());
         durable.setLength(0);
         pending.setLength(0);
         excluded = false;
+        streamTruncated = false;
         lastCheckNanos = System.nanoTime();
     }
 

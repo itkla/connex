@@ -80,6 +80,37 @@ class AiChatStreamingProgressTest {
     }
 
     /**
+     * A stream stopped at the durable bound is one attempt's state, not the turn's. A malformed
+     * attempt whose demasked text crossed the bound is reset and retried, and the repaired
+     * attempt must stream — a truncation left standing would swallow every delta it produces and
+     * skip the settle-time comparison built to notice exactly that.
+     */
+    @Test
+    void aResetClearsTheTruncationTheFailedAttemptReached() {
+        AiChatTurnPersistenceService persistenceService =
+                mock(AiChatTurnPersistenceService.class);
+        when(persistenceService.appendPartialBatch(any(), anyInt(), any()))
+                .thenAnswer(call -> ((Integer) call.getArgument(1))
+                        + ((String) call.getArgument(2)).length());
+        AiChatStreamingProgress progress = new AiChatStreamingProgress(
+                turn(AiPrivacyMode.UNMASKED),
+                persistenceService,
+                new MaskingContext(AiPrivacyMode.UNMASKED));
+
+        AiChatStreamingProgress.Observer first = progress.observer(true);
+        first.onContentDelta("{\"text\":\"" + "x".repeat(17_000));
+        progress.reset();
+
+        AiChatStreamingProgress.Observer second = progress.observer(true);
+        second.onContentDelta("{\"text\":\"Recovered answer.\"}");
+        second.finish("Recovered answer.");
+
+        ArgumentCaptor<String> batches = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).appendPartialBatch(any(), anyInt(), batches.capture());
+        assertEquals("Recovered answer.", batches.getValue());
+    }
+
+    /**
      * An unmasked turn's context holds no bindings, so demasking it would only rewrite a literal
      * brace pair the model typed into an unknown-reference marker. Its stream stays untouched.
      */
