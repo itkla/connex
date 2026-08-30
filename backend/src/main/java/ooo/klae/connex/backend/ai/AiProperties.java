@@ -290,7 +290,7 @@ public class AiProperties {
                     || !matches(candidateProvider, normalizedModelId)) {
                 return null;
             }
-            return endpoint.trim().equalsIgnoreCase(candidateEndpoint.trim())
+            return endpoint.trim().equals(candidateEndpoint.trim())
                     ? declared
                     : null;
         }

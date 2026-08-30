@@ -193,7 +193,9 @@ any name, several of which reject a streamed request outright, and an adapter th
 fails the turn rather than falling back to a whole response — an unverified endpoint therefore
 streams nothing rather than risking every turn. And it applies **only together with `endpoint`**:
 the same model id behind two gateways is two different answers to whether streaming works, so a
-declaration names the endpoint it was verified against and never speaks for another. Verify with a
+declaration names the endpoint it was verified against — matched character-for-character against
+the configured value, because URI paths are case-sensitive and a near-match is a different route —
+and never speaks for another. Verify with a
 real streamed request — including the `tools` array Ask Connex sends — before setting it.
 
 `thoughts` declares that the endpoint returns Gemini-style thought summaries when asked, and it is

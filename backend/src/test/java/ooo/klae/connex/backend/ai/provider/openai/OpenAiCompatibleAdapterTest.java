@@ -233,6 +233,20 @@ class OpenAiCompatibleAdapterTest {
         assertFalse(adapter.supportsStreaming(target));
     }
 
+    /**
+     * URI paths are case-sensitive, so an endpoint differing only in path case is a different
+     * route nobody verified. The declaration stays with the exact string it names.
+     */
+    @Test
+    void aDeclarationDoesNotCoverAnEndpointDifferingOnlyInCase() {
+        aiProperties.setModelOverrides(List.of(
+                streamingOverride(
+                        "gemini-3.6-flash", "https://api.example.test/v1beta/openai", true)));
+
+        assertFalse(adapter.supportsStreaming(
+                target("https://api.example.test/v1beta/OPENAI", false, "gemini-3.6-flash")));
+    }
+
     /** A vendor-prefixed model id is normalized before matching, as the token overrides are. */
     @Test
     void aVendorPrefixedModelIdStillMatchesItsDeclaration() {
