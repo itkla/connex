@@ -33,6 +33,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Business logic for {@code User} management.
@@ -40,6 +41,7 @@ import lombok.RequiredArgsConstructor;
  * Delegates persistence to {@code UserMapper}.
  */
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class UserService implements UserDetailsService {
@@ -57,6 +59,7 @@ public class UserService implements UserDetailsService {
     private final ProviderAccountOffboardingService providerAccountOffboardingService;
     private final UserAccountCatalogOffboardingService catalogOffboardingService;
     private final UserDeletionTransaction userDeletionTransaction;
+    private final AccountSessionRevocationService accountSessionRevocationService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("username", "displayName", "email", "department", "title",
@@ -163,9 +166,9 @@ public class UserService implements UserDetailsService {
      * Deletes the caller's own account. Org-data references are guarded and
      * erased in the service layer ({@link UserOffboardingService}) rather than
      * by cross-plane foreign keys (#440 increment 3); control-plane rows
-     * (memberships, credentials) still cascade from {@code app_user}. Sessions do
-     * not: {@code SPRING_SESSION} carries no foreign key to {@code app_user}, so a
-     * deleted account's sessions stay live until they expire (#1473 follow-up).
+     * (memberships, credentials) still cascade from {@code app_user}. Sessions do not:
+     * {@code SPRING_SESSION} carries no foreign key to {@code app_user}, so they are expired
+     * explicitly after the row is gone. Their rows leave the store on the session's next request.
      * The audit record is written while the actor row still exists — recording
      * after the delete violated the actor foreign key inside the transaction
      * and the event was silently swallowed, leaving account erasure unaudited.
@@ -201,6 +204,37 @@ public class UserService implements UserDetailsService {
                 return null;
             });
             throw exception;
+        }
+        revokeSessionsAfterDeletion(id);
+    }
+
+    /**
+     * Expires the deleted account's sessions once its row is gone.
+     *
+     * <p>Runs after {@code userDeletionTransaction.delete} has committed — it is a proxied
+     * transactional call from a {@code NOT_SUPPORTED} caller, so it commits when the call returns —
+     * and therefore cannot revoke a session that could still be re-established.
+     *
+     * <p>Deliberately outside the {@code try} above. A throw inside it would run {@code release}
+     * against a row that no longer exists, which updates nothing and reports no error, and would
+     * then surface a completed deletion to the caller as a 500 they would retry into a 404.
+     *
+     * <p>Unrouted because the session store runs on the primary datasource, which is the
+     * tenant-routed pool; enumerating with a workspace pinned would look for control-plane rows in a
+     * tenant catalog and find none.
+     *
+     * <p>Best effort by design, and that is sufficient: the account is already refused on every
+     * request by the session epoch filter, because the row its epoch came from is gone. This exists
+     * to retire the session rows and close the sockets promptly, not to authorize anything.
+     */
+    private void revokeSessionsAfterDeletion(int id) {
+        try {
+            tenantWorkScope.unrouted(() -> {
+                accountSessionRevocationService.expireAll(id);
+                return null;
+            });
+        } catch (RuntimeException exception) {
+            log.warn("Could not expire sessions for deleted account {}: {}", id, exception.toString());
         }
     }
 

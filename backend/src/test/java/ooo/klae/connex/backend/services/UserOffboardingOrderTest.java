@@ -311,6 +311,8 @@ class UserOffboardingOrderTest {
                 org.mockito.ArgumentMatchers.<java.util.function.Supplier<Object>>any()))
             .thenAnswer(invocation -> invocation
                 .<java.util.function.Supplier<Object>>getArgument(0).get());
+        AccountSessionRevocationService accountSessionRevocationService =
+            mock(AccountSessionRevocationService.class);
         UserService userService = new UserService(
             userMapper,
             activityMapper,
@@ -325,7 +327,8 @@ class UserOffboardingOrderTest {
             tenantWorkScope,
             providerOffboardingService,
             catalogOffboardingService,
-            deletionTransaction
+            deletionTransaction,
+            accountSessionRevocationService
         );
 
         userService.delete(9);
@@ -348,5 +351,9 @@ class UserOffboardingOrderTest {
         order.verify(workspaceService).assertNotSoleOwnerOfWorkspaces(List.of(7));
         order.verify(orgMemberService).assertNotSoleOwnerOfAnyOrg(9);
         order.verify(userMapper).delete(9);
+
+        InOrder revocationOrder = inOrder(userMapper, accountSessionRevocationService);
+        revocationOrder.verify(userMapper).delete(9);
+        revocationOrder.verify(accountSessionRevocationService).expireAll(9);
     }
 }
