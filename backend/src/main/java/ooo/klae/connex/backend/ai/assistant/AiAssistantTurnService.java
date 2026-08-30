@@ -279,6 +279,11 @@ public class AiAssistantTurnService {
     /**
      * Whether this turn can stream, answering only what the provider supports.
      *
+     * <p>Only that — privacy mode deliberately plays no part. A masked organization's requester
+     * already receives the fully demasked answer once the turn settles, so streaming it is the
+     * same bytes sooner on the same requester-only channel; what masking governs is what leaves
+     * for the provider, and that is identical streamed or buffered.
+     *
      * <p>Deliberately fail-soft: streaming is an enhancement, and asking whether we can stream
      * must never change what a caller is told about a session they may not reach. The probe
      * resolves the organization's provider, which can refuse for reasons of its own, and it runs

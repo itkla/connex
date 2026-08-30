@@ -51,28 +51,34 @@ final class AiChatStreamingProgress {
                 : AiAssistantTextDeltaProjector.Shape.JSON_REACT);
     }
 
+    /**
+     * Demasks, bounds, screens, and stages one projected answer fragment.
+     *
+     * <p>Blank text passes through undemasked: it can hold no placeholder, and the demasker
+     * answers a blank input with the empty string — which would swallow the space or newline a
+     * provider commonly delivers as its own delta and run the words together.
+     *
+     * <p>Demasking expands, so an answer that fits the durable bound while masked can exceed it
+     * once names replace placeholders. Reaching the bound stops the stream rather than appending:
+     * the settled answer still carries the whole text, whereas throwing here — inside a provider
+     * callback — would end the turn as a provider error over a display concern.
+     *
+     * <p>Screening runs on the demasked text for a masked turn, which is the text the member
+     * actually sees. Screening the masked form would be close to vacuous: every value that could
+     * carry special-care content has already become a placeholder by then.
+     */
     private void acceptDecoded(String text) {
         if (excluded || streamTruncated) {
             return;
         }
-        // Blank text passes through untouched: it can hold no placeholder, and the demasker
-        // answers a blank input with the empty string — which would swallow the space or newline
-        // a provider commonly delivers as its own delta and run the words together.
         String decoded = demasking && !text.isBlank()
                 ? Demasker.demask(text, maskingContext).text()
                 : text;
-        // Demasking expands: an answer that fits the durable bound while masked can exceed it
-        // once names replace placeholders. Stopping the stream is the honest response — the
-        // settled answer still carries the whole text — where appending would throw inside a
-        // provider callback and end the turn as a provider error over a display concern.
         if (durable.length() + pending.length() + decoded.length() > MAX_STREAM_CHARACTERS) {
             streamTruncated = true;
             return;
         }
         pending.append(decoded);
-        // Screening runs on the demasked text for a masked turn, which is the text the member
-        // actually sees. Screening the masked form would be close to vacuous: every value that
-        // could carry special-care content has already become a placeholder by then.
         if (SpecialCareTextScreen.screen(durable.toString() + pending).excluded()) {
             excluded = true;
             pending.setLength(0);
@@ -163,9 +169,17 @@ final class AiChatStreamingProgress {
             projector.accept(text);
         }
 
+        /**
+         * Settles the stream against the answer the turn is about to persist.
+         *
+         * <p>Both comparisons run in the demasked domain, because that is the domain the batches
+         * were streamed in and the domain the answer is persisted in. The first compares the whole
+         * projection; the second compares the stream the member actually read, batch by batch, so
+         * a placeholder that demasked differently in pieces than as a whole is caught here rather
+         * than silently leaving the transcript disagreeing with the screen. A stream stopped at
+         * the durable bound is a known prefix, not a mismatch.
+         */
         String finish(String expectedText) {
-            // Compared in the demasked domain, because that is the domain the batches were
-            // streamed in and the domain the answer is persisted in.
             String projected = projector.finish();
             String comparable = demasking
                     ? Demasker.demask(projected, maskingContext).text()
@@ -177,11 +191,6 @@ final class AiChatStreamingProgress {
                 pending.setLength(0);
                 return MaskingEngine.OMITTED_BY_POLICY;
             }
-            // What was actually emitted, batch by batch, must equal what is about to be stored.
-            // The check above compares the whole projection; only this one compares the stream the
-            // member read, so a placeholder that demasked differently in pieces than as a whole is
-            // caught here rather than silently leaving the transcript disagreeing with the screen.
-            // A stream stopped at the durable bound is a known prefix, not a mismatch.
             if (!streamTruncated && !(durable.toString() + pending).equals(expectedText)) {
                 throw new AiAssistantLoopException("malformed_output", "malformed_output");
             }
