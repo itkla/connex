@@ -425,6 +425,32 @@ public final class AiModelCatalog {
      */
     public static boolean streamingDeclared(
             Family family, AiProviderTarget target, List<AiProperties.ModelOverride> overrides) {
+        return endpointDeclared(family, target, overrides, AiProperties.ModelOverride::streamingFor);
+    }
+
+    /**
+     * Whether an operator has declared that this endpoint returns thought summaries.
+     *
+     * <p>Answered from declaration alone, on the same terms as {@link #streamingDeclared}: the
+     * request parameter that asks for thoughts is rejected outright by an endpoint that does not
+     * know it, so asking an unverified endpoint fails the turn rather than merely going without
+     * the thoughts.
+     *
+     * @param family provider family owning the target
+     * @param target configured provider target, may be {@code null}
+     * @param overrides deployment overrides, may be {@code null}
+     * @return whether thought summaries were declared for this exact endpoint and model
+     */
+    public static boolean thoughtsDeclared(
+            Family family, AiProviderTarget target, List<AiProperties.ModelOverride> overrides) {
+        return endpointDeclared(family, target, overrides, AiProperties.ModelOverride::thoughtsFor);
+    }
+
+    private static boolean endpointDeclared(
+            Family family,
+            AiProviderTarget target,
+            List<AiProperties.ModelOverride> overrides,
+            EndpointDeclaration declaration) {
         if (overrides == null || overrides.isEmpty() || target == null) {
             return false;
         }
@@ -437,13 +463,23 @@ public final class AiModelCatalog {
             if (override == null) {
                 continue;
             }
-            Boolean value = override.streamingFor(
-                    family.providerId(), normalizedModelId, target.endpoint());
+            Boolean value = declaration.resolve(
+                    override, family.providerId(), normalizedModelId, target.endpoint());
             if (value != null) {
                 declared = value;
             }
         }
         return declared;
+    }
+
+    /** One override's answer to an endpoint-scoped capability question. */
+    @FunctionalInterface
+    private interface EndpointDeclaration {
+        Boolean resolve(
+                AiProperties.ModelOverride override,
+                String providerId,
+                String normalizedModelId,
+                String endpoint);
     }
 
     public static int contextWindowTokens(

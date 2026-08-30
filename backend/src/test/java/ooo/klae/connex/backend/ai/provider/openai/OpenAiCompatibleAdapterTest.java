@@ -77,7 +77,7 @@ class OpenAiCompatibleAdapterTest {
     void providerId_registersOpenAiCompatibleAdapter() {
         assertEquals("openai_compatible", adapter.providerId());
         assertEquals(AiReasoningMode.TAGGED, adapter.reasoningCapability(null));
-        assertEquals(AiReasoningMode.NATIVE,
+        assertEquals(AiReasoningMode.NONE,
                 adapter.nativeToolReasoningCapability(null));
         assertEquals(AiToolCallingMode.NATIVE_FUNCTIONS,
                 adapter.toolCallingCapability(null));
@@ -242,6 +242,162 @@ class OpenAiCompatibleAdapterTest {
 
         assertTrue(adapter.supportsStreaming(
                 target(endpoint, false, "google/gemini-3.6-flash")));
+    }
+
+    private static AiProperties.ModelOverride thoughtsOverride(
+            String modelId, String endpoint, Boolean thoughts) {
+        AiProperties.ModelOverride override = new AiProperties.ModelOverride();
+        override.setProvider("openai_compatible");
+        override.setModelId(modelId);
+        override.setEndpoint(endpoint);
+        override.setThoughts(thoughts);
+        return override;
+    }
+
+    /**
+     * The request parameter that asks for thoughts is rejected outright by an endpoint that does
+     * not know it, so an unverified endpoint must be asked for nothing — declared, not assumed.
+     */
+    @Test
+    void thoughtSummariesAreDeclaredByAnOperatorRatherThanAssumed() {
+        String endpoint = "https://api.example.test/v1";
+        AiProviderTarget target = target(endpoint, false, "gemini-3.6-flash");
+
+        assertEquals(AiReasoningMode.NONE, adapter.nativeToolReasoningCapability(target));
+
+        aiProperties.setModelOverrides(List.of(
+                thoughtsOverride("gemini-3.6-flash", endpoint, true)));
+
+        assertEquals(AiReasoningMode.NATIVE, adapter.nativeToolReasoningCapability(target));
+        assertEquals(AiReasoningMode.NONE, adapter.nativeToolReasoningCapability(
+                target("https://other.example.test/v1", false, "gemini-3.6-flash")));
+    }
+
+    /** A native reasoning request carries the one verified parameter, and no other request does. */
+    @Test
+    void onlyANativeReasoningRequestAsksForThoughts() throws Exception {
+        when(openAiCompatibleClient.complete(
+                any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
+                any(AiRequestDeadline.class)))
+                .thenReturn(validResponse());
+        adapter.complete(withReasoningMode(schemaRequest(), AiReasoningMode.NATIVE));
+        adapter.complete(withReasoningMode(schemaRequest(), AiReasoningMode.NONE));
+
+        ArgumentCaptor<String> bodies = ArgumentCaptor.forClass(String.class);
+        verify(openAiCompatibleClient, org.mockito.Mockito.times(2)).complete(
+                any(URI.class), anyBoolean(), any(AiCredentials.class), bodies.capture(),
+                any(AiRequestDeadline.class));
+        assertTrue(objectMapper.readTree(bodies.getAllValues().get(0))
+                .path("extra_body").path("google").path("thinking_config")
+                .path("include_thoughts").asBoolean(false));
+        assertFalse(objectMapper.readTree(bodies.getAllValues().get(1)).has("extra_body"));
+    }
+
+    /**
+     * Thought summaries arrive inline in the content field, and everything left in the text
+     * reaches the answer — so the thought leaves the text at this boundary or not at all.
+     */
+    @Test
+    void aThoughtSummaryLeavesTheAnswerBeforeAnyChannelReadsIt() throws Exception {
+        when(openAiCompatibleClient.complete(
+                any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
+                any(AiRequestDeadline.class)))
+                .thenReturn("""
+                        {
+                          "choices": [{
+                            "message": {"content": "<thought>Compare the two deals. </thought>{\\"text\\":\\"Done\\"}"},
+                            "finish_reason": "stop"
+                          }],
+                          "usage": {"prompt_tokens": 1, "completion_tokens": 1}
+                        }
+                        """);
+
+        AiCompletionResult result = adapter.complete(
+                withReasoningMode(schemaRequest(), AiReasoningMode.NATIVE));
+
+        assertEquals("{\"text\":\"Done\"}", result.text());
+        assertEquals("Compare the two deals. ", result.reasoning());
+    }
+
+    /**
+     * Beside a native tool call the content field is read as narration, which is durable —
+     * whereas reasoning is deliberately ephemeral. A tool-call turn whose whole content is the
+     * thought block must therefore leave the text empty, or the model's private reasoning would
+     * be persisted into the wrong channel.
+     */
+    @Test
+    void aToolCallTurnWhoseContentIsOnlyThoughtLeavesNarrationEmpty() throws Exception {
+        when(openAiCompatibleClient.complete(
+                any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
+                any(AiRequestDeadline.class)))
+                .thenReturn("""
+                        {
+                          "choices": [{
+                            "message": {
+                              "content": "<thought>Fetch the weather first.</thought>",
+                              "extra_content": {"google": {"thought": true}},
+                              "tool_calls": [{"id": "call_1", "type": "function",
+                                "function": {"name": "get_weather", "arguments": "{}"}}]
+                            },
+                            "finish_reason": "tool_calls"
+                          }],
+                          "usage": {"prompt_tokens": 1, "completion_tokens": 1}
+                        }
+                        """);
+
+        AiCompletionResult result = adapter.complete(
+                withReasoningMode(schemaRequest(), AiReasoningMode.NATIVE));
+
+        assertEquals("", result.text());
+        assertEquals("Fetch the weather first.", result.reasoning());
+        assertEquals("get_weather", result.toolCalls().getFirst().name());
+    }
+
+    /**
+     * A thought that opens and never closes yields no answer rather than passing the thought
+     * through: failing the step as malformed is recoverable, thought text persisted into the
+     * answer is not.
+     */
+    @Test
+    void anUnclosedThoughtYieldsNoAnswerRatherThanLeakingIt() throws Exception {
+        when(openAiCompatibleClient.complete(
+                any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
+                any(AiRequestDeadline.class)))
+                .thenReturn("""
+                        {
+                          "choices": [{
+                            "message": {
+                              "content": "<thought>Unfinished",
+                              "tool_calls": [{"id": "call_1", "type": "function",
+                                "function": {"name": "get_weather", "arguments": "{}"}}]
+                            },
+                            "finish_reason": "tool_calls"
+                          }],
+                          "usage": {"prompt_tokens": 1, "completion_tokens": 1}
+                        }
+                        """);
+
+        AiCompletionResult result = adapter.complete(
+                withReasoningMode(schemaRequest(), AiReasoningMode.NATIVE));
+
+        assertEquals("", result.text());
+        assertEquals("Unfinished", result.reasoning());
+    }
+
+    private AiCompletionRequest withReasoningMode(
+            AiCompletionRequest base, AiReasoningMode reasoningMode) {
+        return new AiCompletionRequest(
+                base.target(),
+                base.credentials(),
+                base.systemPrompt(),
+                base.messages(),
+                base.images(),
+                base.outputMode(),
+                base.responseSchema(),
+                reasoningMode,
+                base.providerAttemptExecutor(),
+                base.maxTokens(),
+                base.temperature());
     }
 
     @Test

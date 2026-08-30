@@ -216,7 +216,21 @@ public class AiProperties {
         private Boolean streaming;
 
         /**
-         * Exact provider endpoint this override's {@link #streaming} declaration applies to.
+         * Whether this endpoint returns thought summaries when the request asks for them.
+         *
+         * <p>Verified by probe, never assumed: the Gemini OpenAI-compatibility layer rejects an
+         * unknown request parameter outright, and an endpoint that accepts the parameter may still
+         * return the thoughts somewhere this adapter does not read. An undeclared endpoint is
+         * asked for nothing and parsed for nothing.
+         *
+         * <p>Only honoured together with {@link #endpoint}, on the same reasoning as
+         * {@link #streaming}.
+         */
+        private Boolean thoughts;
+
+        /**
+         * Exact provider endpoint the {@link #streaming} and {@link #thoughts} declarations apply
+         * to.
          *
          * <p>Scopes an endpoint-specific capability to the endpoint that was actually verified.
          * The token, modality, and pricing fields are properties of the model itself and ignore
@@ -240,13 +254,6 @@ public class AiProperties {
         private LocalDate pricingAsOf;
 
         /**
-         * Returns whether this override applies to a normalized model id on a provider.
-         *
-         * @param candidateProvider configured provider id
-         * @param normalizedModelId model id normalized by the owning provider family
-         * @return true when both the provider and the model id match exactly
-         */
-        /**
          * Whether this override declares streaming for one exact configured endpoint.
          *
          * @param candidateProvider configured provider id
@@ -256,15 +263,45 @@ public class AiProperties {
          */
         public Boolean streamingFor(
                 String candidateProvider, String normalizedModelId, String candidateEndpoint) {
-            if (streaming == null || endpoint == null || candidateEndpoint == null
+            return endpointScoped(streaming, candidateProvider, normalizedModelId,
+                    candidateEndpoint);
+        }
+
+        /**
+         * Whether this override declares thought summaries for one exact configured endpoint.
+         *
+         * @param candidateProvider configured provider id
+         * @param normalizedModelId family-normalized configured model id
+         * @param candidateEndpoint configured provider endpoint
+         * @return whether the declaration applies, or {@code null} when it says nothing
+         */
+        public Boolean thoughtsFor(
+                String candidateProvider, String normalizedModelId, String candidateEndpoint) {
+            return endpointScoped(thoughts, candidateProvider, normalizedModelId,
+                    candidateEndpoint);
+        }
+
+        private Boolean endpointScoped(
+                Boolean declared,
+                String candidateProvider,
+                String normalizedModelId,
+                String candidateEndpoint) {
+            if (declared == null || endpoint == null || candidateEndpoint == null
                     || !matches(candidateProvider, normalizedModelId)) {
                 return null;
             }
             return endpoint.trim().equalsIgnoreCase(candidateEndpoint.trim())
-                    ? streaming
+                    ? declared
                     : null;
         }
 
+        /**
+         * Returns whether this override applies to a normalized model id on a provider.
+         *
+         * @param candidateProvider configured provider id
+         * @param normalizedModelId model id normalized by the owning provider family
+         * @return true when both the provider and the model id match exactly
+         */
         public boolean matches(String candidateProvider, String normalizedModelId) {
             if (provider == null || modelId == null
                     || candidateProvider == null || normalizedModelId == null) {

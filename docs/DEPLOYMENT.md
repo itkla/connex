@@ -183,6 +183,7 @@ connex:
         model-id: gemini-3.6-flash
         endpoint: https://generativelanguage.googleapis.com/v1beta/openai/
         streaming: true                 # only after verifying this exact endpoint streams
+        thoughts: true                  # only after verifying this exact endpoint returns thought summaries
 ```
 
 `streaming` declares that one OpenAI-compatible endpoint accepts the streamed completion request
@@ -194,6 +195,15 @@ streams nothing rather than risking every turn. And it applies **only together w
 the same model id behind two gateways is two different answers to whether streaming works, so a
 declaration names the endpoint it was verified against and never speaks for another. Verify with a
 real streamed request — including the `tools` array Ask Connex sends — before setting it.
+
+`thoughts` declares that the endpoint returns model thought summaries, and it is the only way Ask
+Connex will show its thinking. It follows the same two rules as `streaming`, for a sharper reason:
+the request parameter that asks for thoughts (`extra_body.google.thinking_config.include_thoughts`)
+is **rejected with a 400** by any endpoint that does not know it, so declaring it for an unverified
+endpoint fails every assistant turn outright. Verify with a real request before setting it, and
+confirm the thoughts come back inline in `content` wrapped in `<thought>` tags with the
+`extra_content.google.thought` marker — that is the shape Connex parses; an endpoint that answers
+in another shape will show nothing.
 
 Declare a context window the provider will actually honor. The value is not a request the provider
 validates — it is the number every Ask Connex budget is derived from, so overstating it produces
