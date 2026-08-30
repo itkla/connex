@@ -33,10 +33,26 @@ permissions:
   issues: write
 
 concurrency:
-  # Keyed by conclusion, not shared. GitHub keeps only one *pending* run per group and a newly
-  # queued run evicts it even with cancel-in-progress false, so a shared group would let a later
-  # success discard a still-pending failure before its job condition was ever evaluated.
-  group: main-red-alert-${{ github.event.workflow_run.conclusion }}
+  # Every reportable event shares one group; everything else gets a unique one.
+  #
+  # Both halves are load-bearing, and each fixes a different failure. GitHub keeps one pending run
+  # per group and a newly queued run evicts it even with cancel-in-progress false -- so anything
+  # that is NOT going to report must not share a group with something that is, or it silently
+  # discards a real alert. The job-level condition is far too late to prevent that: scheduling
+  # happens first, so a skipped run still occupies the group.
+  #
+  # Conversely, all reportable events must share ONE group, because the job reads then writes the
+  # tracking issue and `gh` has no atomic upsert. Two reportable runs in parallel -- a failure and a
+  # timed_out, say -- would both see no issue and both create one.
+  #
+  # Serialising them means a second alert can be evicted while the first is still running. That is
+  # the right way round to lose: the issue is already open, so main is already flagged.
+  group: >-
+    main-red-alert-${{
+      (github.event.workflow_run.event == 'push'
+        && contains(fromJSON('["failure", "timed_out"]'), github.event.workflow_run.conclusion))
+      && 'reportable'
+      || format('ignored-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:

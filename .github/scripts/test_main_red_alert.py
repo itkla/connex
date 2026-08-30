@@ -29,7 +29,9 @@ class MainRedAlertCoverage(unittest.TestCase):
     def test_every_workflow_that_runs_on_a_main_push_is_watched(self):
         watched = set(_triggers(yaml.safe_load(ALERT.read_text()))["workflow_run"]["workflows"])
         expected = set()
-        for path in sorted(WORKFLOWS.glob("*.yml")):
+        # Both extensions are valid workflow files; the repository's own action-pin scanner
+        # treats them alike, and a .yaml workflow slipping past this loop would defeat the check.
+        for path in sorted([*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml")]):
             if path == ALERT:
                 continue
             document = yaml.safe_load(path.read_text())
@@ -42,6 +44,17 @@ class MainRedAlertCoverage(unittest.TestCase):
             "every workflow that runs on a push to main must be watched by the red-main alert; "
             "an unwatched one fails without reporting",
         )
+
+    def test_non_reportable_events_cannot_evict_a_pending_alert(self):
+        group = yaml.safe_load(ALERT.read_text())["concurrency"]["group"]
+        self.assertIn("workflow_run.event == 'push'", group)
+        self.assertIn("github.run_id", group)
+
+    def test_every_reportable_event_shares_one_group(self):
+        group = yaml.safe_load(ALERT.read_text())["concurrency"]["group"]
+        for conclusion in ("failure", "timed_out"):
+            self.assertIn(conclusion, group)
+        self.assertIn("'reportable'", group)
 
     def test_the_alert_only_reports_pushes(self):
         condition = _triggers(yaml.safe_load(ALERT.read_text()))
