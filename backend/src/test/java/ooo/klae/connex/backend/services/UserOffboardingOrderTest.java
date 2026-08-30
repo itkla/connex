@@ -9,6 +9,10 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -311,6 +315,8 @@ class UserOffboardingOrderTest {
                 org.mockito.ArgumentMatchers.<java.util.function.Supplier<Object>>any()))
             .thenAnswer(invocation -> invocation
                 .<java.util.function.Supplier<Object>>getArgument(0).get());
+        AccountSessionRevocationService accountSessionRevocationService =
+            mock(AccountSessionRevocationService.class);
         UserService userService = new UserService(
             userMapper,
             activityMapper,
@@ -325,7 +331,8 @@ class UserOffboardingOrderTest {
             tenantWorkScope,
             providerOffboardingService,
             catalogOffboardingService,
-            deletionTransaction
+            deletionTransaction,
+            accountSessionRevocationService
         );
 
         userService.delete(9);
@@ -348,5 +355,83 @@ class UserOffboardingOrderTest {
         order.verify(workspaceService).assertNotSoleOwnerOfWorkspaces(List.of(7));
         order.verify(orgMemberService).assertNotSoleOwnerOfAnyOrg(9);
         order.verify(userMapper).delete(9);
+
+        InOrder revocationOrder = inOrder(userMapper, accountSessionRevocationService);
+        revocationOrder.verify(userMapper).delete(9);
+        revocationOrder.verify(accountSessionRevocationService).expireAll(9);
     }
+
+    private static UserService deletionOnlyUserService(
+            UserMapper userMapper,
+            TenantWorkScope tenantWorkScope,
+            UserDeletionTransaction deletionTransaction,
+            AccountSessionRevocationService accountSessionRevocationService) {
+        return new UserService(
+            userMapper,
+            mock(ActivityMapper.class),
+            mock(NoteMapper.class),
+            mock(TaskMapper.class),
+            mock(AuditService.class),
+            mock(WorkspaceService.class),
+            mock(NotificationChangePublisher.class),
+            mock(ReferenceService.class),
+            mock(ooo.klae.connex.backend.storage.ManagedObjectService.class),
+            mock(UserProfilePictureTransaction.class),
+            tenantWorkScope,
+            mock(ProviderAccountOffboardingService.class),
+            mock(UserAccountCatalogOffboardingService.class),
+            deletionTransaction,
+            accountSessionRevocationService);
+    }
+
+    /**
+     * A deletion whose commit succeeded but whose acknowledgement did not.
+     *
+     * <p>The failure path cannot distinguish this from a rollback, and the difference decides
+     * whether an already-open WebSocket is ever closed — no servlet filter sees one. Reading the row
+     * settles it.
+     */
+    @Test
+    void aDeletionThatCommittedButFailedToReportStillRevokes() {
+        UserMapper userMapper = mock(UserMapper.class);
+        TenantWorkScope tenantWorkScope = mock(TenantWorkScope.class);
+        UserDeletionTransaction deletionTransaction = mock(UserDeletionTransaction.class);
+        AccountSessionRevocationService revocation = mock(AccountSessionRevocationService.class);
+        when(tenantWorkScope.unrouted(
+                org.mockito.ArgumentMatchers.<java.util.function.Supplier<Object>>any()))
+            .thenAnswer(invocation -> invocation
+                .<java.util.function.Supplier<Object>>getArgument(0).get());
+        doThrow(new IllegalStateException("acknowledgement lost"))
+            .when(deletionTransaction).delete(eq(11), anyString());
+        when(userMapper.getUserById(11)).thenReturn(null);
+
+        assertThrows(IllegalStateException.class,
+            () -> deletionOnlyUserService(userMapper, tenantWorkScope, deletionTransaction, revocation)
+                .delete(11));
+
+        verify(revocation).expireAll(11);
+    }
+
+    /** A deletion that genuinely rolled back must leave the surviving account's sessions alone. */
+    @Test
+    void aDeletionThatRolledBackDoesNotRevoke() {
+        UserMapper userMapper = mock(UserMapper.class);
+        TenantWorkScope tenantWorkScope = mock(TenantWorkScope.class);
+        UserDeletionTransaction deletionTransaction = mock(UserDeletionTransaction.class);
+        AccountSessionRevocationService revocation = mock(AccountSessionRevocationService.class);
+        when(tenantWorkScope.unrouted(
+                org.mockito.ArgumentMatchers.<java.util.function.Supplier<Object>>any()))
+            .thenAnswer(invocation -> invocation
+                .<java.util.function.Supplier<Object>>getArgument(0).get());
+        doThrow(new IllegalStateException("rolled back"))
+            .when(deletionTransaction).delete(eq(12), anyString());
+        when(userMapper.getUserById(12)).thenReturn(new ooo.klae.connex.backend.beans.User());
+
+        assertThrows(IllegalStateException.class,
+            () -> deletionOnlyUserService(userMapper, tenantWorkScope, deletionTransaction, revocation)
+                .delete(12));
+
+        verify(revocation, never()).expireAll(12);
+    }
+
 }

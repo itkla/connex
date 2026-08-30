@@ -33,6 +33,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Business logic for {@code User} management.
@@ -40,6 +41,7 @@ import lombok.RequiredArgsConstructor;
  * Delegates persistence to {@code UserMapper}.
  */
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class UserService implements UserDetailsService {
@@ -57,6 +59,7 @@ public class UserService implements UserDetailsService {
     private final ProviderAccountOffboardingService providerAccountOffboardingService;
     private final UserAccountCatalogOffboardingService catalogOffboardingService;
     private final UserDeletionTransaction userDeletionTransaction;
+    private final AccountSessionRevocationService accountSessionRevocationService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("username", "displayName", "email", "department", "title",
@@ -163,9 +166,9 @@ public class UserService implements UserDetailsService {
      * Deletes the caller's own account. Org-data references are guarded and
      * erased in the service layer ({@link UserOffboardingService}) rather than
      * by cross-plane foreign keys (#440 increment 3); control-plane rows
-     * (memberships, credentials) still cascade from {@code app_user}. Sessions do
-     * not: {@code SPRING_SESSION} carries no foreign key to {@code app_user}, so a
-     * deleted account's sessions stay live until they expire (#1473 follow-up).
+     * (memberships, credentials) still cascade from {@code app_user}. Sessions do not:
+     * {@code SPRING_SESSION} carries no foreign key to {@code app_user}, so they are expired
+     * explicitly after the row is gone. Their rows leave the store on the session's next request.
      * The audit record is written while the actor row still exists — recording
      * after the delete violated the actor foreign key inside the transaction
      * and the event was silently swallowed, leaving account erasure unaudited.
@@ -200,7 +203,67 @@ public class UserService implements UserDetailsService {
                 userDeletionTransaction.release(id, reservationOwner);
                 return null;
             });
+            revokeSessionsIfAccountIsGone(id);
             throw exception;
+        }
+        revokeSessionsAfterDeletion(id);
+    }
+
+    /**
+     * Covers the ambiguous commit: the delete succeeded but its acknowledgement did not arrive.
+     *
+     * <p>The failure path cannot tell a rolled-back deletion from a committed one whose reply was
+     * lost, and the difference matters — in the second case the account is gone and its sessions
+     * would otherwise be left holding an open socket that no later request will refuse. Reading the
+     * row settles it, and reading is safe either way: if the account survives, nothing is revoked.
+     */
+    private void revokeSessionsIfAccountIsGone(int id) {
+        try {
+            boolean deleted = Boolean.TRUE.equals(tenantWorkScope.unrouted(
+                () -> userMapper.getUserById(id) == null));
+            if (deleted) {
+                revokeSessionsAfterDeletion(id);
+            }
+        } catch (RuntimeException exception) {
+            log.warn("Could not determine whether account {} survived a failed deletion: {}",
+                id, exception.getClass().getSimpleName());
+        }
+    }
+
+    /**
+     * Expires the deleted account's sessions once its row is gone.
+     *
+     * <p>Runs after {@code userDeletionTransaction.delete} has committed — it is a proxied
+     * transactional call from a {@code NOT_SUPPORTED} caller, so it commits when the call returns —
+     * and therefore cannot revoke a session that could still be re-established.
+     *
+     * <p>Deliberately outside the {@code try} above. A throw inside it would run {@code release}
+     * against a row that no longer exists, which updates nothing and reports no error, and would
+     * then surface a completed deletion to the caller as a 500 they would retry into a 404.
+     *
+     * <p>Unrouted because the session store runs on the primary datasource, which is the
+     * tenant-routed pool; enumerating with a workspace pinned would look for control-plane rows in a
+     * tenant catalog and find none.
+     *
+     * <p>Best effort for the HTTP plane, where the session epoch filter already refuses every
+     * request once the account row is gone. It is <strong>not</strong> best effort for WebSockets: a
+     * socket established before the deletion passes through no servlet filter, so the expiry marker
+     * this writes is the only thing that closes it. A transient failure here therefore leaves that
+     * socket subscribed until its own timeout, which is why the failure is logged at error rather
+     * than swallowed quietly, and why the residual is stated in the pull request.
+     *
+     * <p>Logs the exception type only. A failure enumerating sessions surfaces driver messages that
+     * can carry row content, and these rows hold a serialized principal.
+     */
+    private void revokeSessionsAfterDeletion(int id) {
+        try {
+            tenantWorkScope.unrouted(() -> {
+                accountSessionRevocationService.expireAll(id);
+                return null;
+            });
+        } catch (RuntimeException exception) {
+            log.error("Could not expire sessions for deleted account {}; an open WebSocket may "
+                + "survive until it times out: {}", id, exception.getClass().getSimpleName());
         }
     }
 
