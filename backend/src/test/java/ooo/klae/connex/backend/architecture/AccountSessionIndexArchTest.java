@@ -49,6 +49,18 @@ class AccountSessionIndexArchTest {
         assertEquals(List.of(), sourcesContaining("findByIndexNameAndIndexValue("));
     }
 
+    /**
+     * The in-memory registry revokes nothing, so a second unguarded fallback must not appear.
+     * {@code SessionRegistryStartupValidator} asserts the one in {@code SecurityConfig} is never the
+     * branch a servlet instance actually takes.
+     */
+    @Test
+    void theInMemoryRegistryIsNeverTheProductionBranch() throws IOException {
+        assertEquals(
+                List.of(Path.of("ooo/klae/connex/backend/config/SecurityConfig.java")),
+                sourcesContaining("new SessionRegistryImpl()"));
+    }
+
     private static List<Path> sourcesContaining(String needle) throws IOException {
         try (Stream<Path> files = Files.walk(SOURCE_ROOT)) {
             return files
