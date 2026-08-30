@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 import org.springframework.security.saml2.provider.service.authentication.Saml2AssertionAuthentication;
@@ -91,9 +92,31 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
             }
             failLogin(request, response, frontendBase);
         } catch (RuntimeException exception) {
+            if (applicationSessionEstablished()) {
+                throw exception;
+            }
             log.warn("SSO login could not be completed: {}", exception.toString());
-            failLogin(request, response, frontendBase);
+            try {
+                failLogin(request, response, frontendBase);
+            } catch (RuntimeException | IOException secondary) {
+                log.warn("Downgrade after a failed SSO login also failed: {}", secondary.toString());
+                throw exception;
+            }
         }
+    }
+
+    /**
+     * Whether the ceremony already replaced the identity provider's principal with this
+     * application's.
+     *
+     * <p>Guards the catch above from reversing a login that actually completed. Once
+     * {@code establishAuthenticatedSession} has run, the success audit is durable; a later failure —
+     * the workspace lookup, say — must surface as the server error it is, not be turned into an
+     * authentication rejection that silently contradicts the audit record.
+     */
+    private static boolean applicationSessionEstablished() {
+        Authentication current = SecurityContextHolder.getContext().getAuthentication();
+        return current != null && current.getPrincipal() instanceof User;
     }
 
     /**
