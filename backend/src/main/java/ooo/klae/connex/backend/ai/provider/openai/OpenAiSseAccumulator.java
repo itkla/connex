@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.provider.openai;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -23,6 +24,8 @@ public final class OpenAiSseAccumulator {
     private final StringBuilder text = new StringBuilder();
     private final StringBuilder reasoning = new StringBuilder();
     private final Map<Integer, ToolFragments> tools = new TreeMap<>();
+    private final Map<String, Integer> impliedPositions = new LinkedHashMap<>();
+    private Boolean toolCallsImplied;
     private int inputTokens;
     private int outputTokens;
     private String stopReason;
@@ -68,7 +71,15 @@ public final class OpenAiSseAccumulator {
         }
     }
 
-    /** Returns the complete result after the terminal SSE marker. */
+    /**
+     * Returns the complete result after the terminal SSE marker.
+     *
+     * <p>Deliberately does not require the stop reason to agree with whether tool calls were
+     * collected, though the whole-response parser does. An endpoint that reports {@code tool_calls}
+     * when it answers in one piece can still report {@code stop} while streaming the same answer,
+     * and refusing that costs the entire turn. Consumers decide a tool was called by looking for
+     * one, so the disagreement is inert — harmonizing the two parsers would not be a tidy-up.
+     */
     public AiCompletionResult finish() {
         if (!done || stopReason == null || text.isEmpty() && tools.isEmpty()) {
             throw invalidResponse();
@@ -137,9 +148,13 @@ public final class OpenAiSseAccumulator {
             throw invalidResponse();
         }
         for (JsonNode call : calls) {
+            if (!call.isObject()) {
+                throw invalidResponse();
+            }
             JsonNode indexNode = call.path("index");
-            if (!call.isObject() || !indexNode.isIntegralNumber() || !indexNode.canConvertToInt()
-                    || indexNode.intValue() < 0 || indexNode.intValue() > 63) {
+            if (!impliedIndex(indexNode)
+                    && (!indexNode.isIntegralNumber() || !indexNode.canConvertToInt()
+                            || indexNode.intValue() < 0 || indexNode.intValue() > 63)) {
                 throw invalidResponse();
             }
             validateOptionalText(call.get("id"));
@@ -156,6 +171,20 @@ public final class OpenAiSseAccumulator {
         }
     }
 
+    /**
+     * Whether a streamed tool call leaves its position to be inferred from arrival order.
+     *
+     * <p>OpenAI numbers every streamed tool call so that argument fragments can be routed back to
+     * the call they belong to. Not every OpenAI-compatible endpoint sends that number, and one that
+     * omits it is not malformed — the call still identifies itself, so the number is a convenience
+     * rather than the only way to tell one call from another.
+     *
+     * @see #positionOfIdentifiedCall
+     */
+    private static boolean impliedIndex(JsonNode indexNode) {
+        return indexNode == null || indexNode.isMissingNode() || indexNode.isNull();
+    }
+
     private static void validateOptionalText(JsonNode node) {
         if (node != null && !node.isNull() && !node.isString()) {
             throw invalidResponse();
@@ -170,6 +199,7 @@ public final class OpenAiSseAccumulator {
         if (!delta.isObject()) {
             throw invalidResponse();
         }
+        readToolDeltas(delta.get("tool_calls"));
         appendOptionalText(delta.get("content"), text, true);
         JsonNode reasoningContent = delta.get("reasoning_content");
         appendOptionalText(
@@ -178,7 +208,6 @@ public final class OpenAiSseAccumulator {
                         : reasoningContent,
                 reasoning,
                 false);
-        readToolDeltas(delta.get("tool_calls"));
         JsonNode finish = choice.get("finish_reason");
         if (finish != null && !finish.isNull()) {
             if (!finish.isString()) {
@@ -213,16 +242,70 @@ public final class OpenAiSseAccumulator {
             throw invalidResponse();
         }
         for (JsonNode call : calls) {
-            JsonNode indexNode = call.path("index");
-            if (!call.isObject() || !indexNode.isIntegralNumber() || !indexNode.canConvertToInt()) {
+            if (!call.isObject()) {
                 throw invalidResponse();
             }
-            int index = indexNode.intValue();
+            JsonNode indexNode = call.path("index");
+            boolean implied = impliedIndex(indexNode);
+            requireConsistentNumbering(implied);
+            int index;
+            if (implied) {
+                index = positionOfIdentifiedCall(call);
+            } else {
+                if (!indexNode.isIntegralNumber() || !indexNode.canConvertToInt()) {
+                    throw invalidResponse();
+                }
+                index = indexNode.intValue();
+            }
             if (index < 0 || index > 63) {
                 throw invalidResponse();
             }
             ToolFragments fragments = tools.computeIfAbsent(index, ignored -> new ToolFragments());
             fragments.append(call);
+        }
+    }
+
+    /**
+     * Places an unnumbered tool call by the identifier it carries.
+     *
+     * <p>An unnumbered call still has to be told apart from its siblings and rejoined to its own
+     * earlier fragments, and {@code id} is the only field that can do both: a call keeps one
+     * identifier for its whole life, and parallel calls carry different ones. Position then follows
+     * first appearance, so calls stay in the order they arrived.
+     *
+     * <p>Arrival order alone would not do. Counting each unnumbered delta as a new call splits any
+     * provider that fragments arguments, and gives back two calls holding half a JSON document
+     * each; nothing downstream can detect that, because the arguments are merely wrong rather than
+     * malformed. An unnumbered call with no identifier is refused for the same reason — there would
+     * be no way to know which call it belonged to.
+     */
+    private int positionOfIdentifiedCall(JsonNode call) {
+        JsonNode id = call.path("id");
+        if (!id.isString() || id.asString().isBlank()) {
+            throw invalidResponse();
+        }
+        Integer existing = impliedPositions.get(id.asString());
+        if (existing != null) {
+            return existing;
+        }
+        int index = impliedPositions.size();
+        impliedPositions.put(id.asString(), index);
+        return index;
+    }
+
+    /**
+     * Holds one response to a single convention for numbering its tool calls.
+     *
+     * <p>A response that numbers some of its calls and not others gives one position two meanings,
+     * with no way to tell which was intended. Merging or splitting a tool call cannot be detected
+     * downstream — the arguments are simply wrong — so a response that changes convention mid-stream
+     * is refused rather than guessed at.
+     */
+    private void requireConsistentNumbering(boolean implied) {
+        if (toolCallsImplied == null) {
+            toolCallsImplied = implied;
+        } else if (toolCallsImplied != implied) {
+            throw invalidResponse();
         }
     }
 
