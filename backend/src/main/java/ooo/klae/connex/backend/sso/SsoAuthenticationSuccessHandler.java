@@ -95,11 +95,12 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
             if (applicationSessionEstablished()) {
                 throw exception;
             }
-            log.warn("SSO login could not be completed: {}", exception.toString());
+            log.warn("SSO login could not be completed: {}", exception.getClass().getSimpleName());
             try {
                 failLogin(request, response, frontendBase);
             } catch (RuntimeException | IOException secondary) {
-                log.warn("Downgrade after a failed SSO login also failed: {}", secondary.toString());
+                log.warn("Downgrade after a failed SSO login also failed: {}",
+                    secondary.getClass().getSimpleName());
                 throw exception;
             }
         }
@@ -130,6 +131,10 @@ public class SsoAuthenticationSuccessHandler implements AuthenticationSuccessHan
      *
      * <p>The downgrade must precede the redirect: {@code sendRedirect} commits the response, and
      * Spring Session flushes its cookie on commit.
+     *
+     * <p>Callers log the exception type only, never its message. A persistence failure on this path
+     * — two first-time logins racing the unique email or federated-identity constraint — carries the
+     * rejected provider email in the driver's message, and that is identity-provider PII.
      */
     private void failLogin(HttpServletRequest request, HttpServletResponse response,
             String frontendBase) throws IOException {
