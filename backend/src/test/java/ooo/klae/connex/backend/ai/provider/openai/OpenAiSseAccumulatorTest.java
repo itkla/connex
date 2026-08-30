@@ -190,6 +190,23 @@ class OpenAiSseAccumulatorTest {
     }
 
     @Test
+    void publishesNoPartOfAnEventRefusedForChangingItsNumbering() {
+        List<String> deltas = new ArrayList<>();
+        OpenAiSseAccumulator accumulator = accumulator(deltas);
+        accumulator.accept("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,"
+                + "\"id\":\"numbered\",\"function\":{\"name\":\"a\",\"arguments\":\"{}\"}}]},"
+                + "\"finish_reason\":null}]}");
+
+        assertThrows(AiProviderException.class, () -> accumulator.accept(
+                "{\"choices\":[{\"delta\":{\"content\":\"words the reader must never see\","
+                        + "\"tool_calls\":[{\"id\":\"implied\",\"function\":"
+                        + "{\"name\":\"b\",\"arguments\":\"{}\"}}]},"
+                        + "\"finish_reason\":null}]}"));
+
+        assertEquals(List.of(), deltas);
+    }
+
+    @Test
     void publishesNoPartOfAnEventWhoseToolCallsAreRefused() {
         List<String> deltas = new ArrayList<>();
         OpenAiSseAccumulator accumulator = accumulator(deltas);
