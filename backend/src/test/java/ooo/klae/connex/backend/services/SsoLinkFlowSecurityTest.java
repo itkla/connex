@@ -75,7 +75,7 @@ class SsoLinkFlowSecurityTest {
             return null;
         }).when(oneTimeLinkFlowService).replaceSessionPreservingFlows(request);
 
-        authService.prepareUnauthenticatedLinkFlow(request, response);
+        authService.downgradeToUnauthenticatedSession(request, response);
 
         assertNull(SecurityContextHolder.getContext().getAuthentication());
         assertNotSame(session, request.getSession(false));
