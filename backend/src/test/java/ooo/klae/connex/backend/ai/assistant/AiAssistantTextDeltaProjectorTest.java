@@ -27,6 +27,77 @@ class AiAssistantTextDeltaProjectorTest {
         assertEquals(11, String.join("", deltas).length());
     }
 
+    /**
+     * A batch boundary can fall anywhere, including inside a masking placeholder. Releasing the
+     * half of it that has arrived would show the member the masked form of a name that is about to
+     * resolve, so the fragment is withheld until the placeholder completes.
+     */
+    @Test
+    void aPlaceholderSplitAcrossChunksIsWithheldUntilItCompletes() {
+        List<String> deltas = new ArrayList<>();
+        AiAssistantTextDeltaProjector projector = new AiAssistantTextDeltaProjector(
+                AiAssistantTextDeltaProjector.Shape.JSON_REACT, deltas::add);
+
+        projector.accept("{\"tool\":null,\"final\":{\"text\":\"Call {{P");
+        assertEquals("Call ", String.join("", deltas));
+
+        projector.accept("1}} today\",\"citations\":[]}}");
+
+        assertEquals("Call {{P1}} today", projector.finish());
+        assertEquals("Call {{P1}} today", String.join("", deltas));
+    }
+
+    /**
+     * A placeholder may carry any run of inner whitespace, so a fixed hold-back window would
+     * release its opening braces and then demask the pieces differently than the whole answer
+     * demasks. Reported by review with this exact three-chunk shape.
+     */
+    @Test
+    void aPlaceholderPaddedWithWhitespaceIsWithheldHoweverFarItsBracesFallBehind() {
+        List<String> deltas = new ArrayList<>();
+        AiAssistantTextDeltaProjector projector = new AiAssistantTextDeltaProjector(
+                AiAssistantTextDeltaProjector.Shape.JSON_REACT, deltas::add);
+
+        projector.accept("{\"tool\":null,\"final\":{\"text\":\"Call {{        ");
+        assertEquals("Call ", String.join("", deltas));
+
+        projector.accept("        P");
+        assertEquals("Call ", String.join("", deltas));
+
+        projector.accept("1}} now\",\"citations\":[]}}");
+
+        assertEquals("Call {{                P1}} now", projector.finish());
+        assertEquals("Call {{                P1}} now", String.join("", deltas));
+    }
+
+    /**
+     * A brace pair the model wrote as ordinary prose must not stall the stream: past the longest
+     * fragment that could still become a placeholder it is released as the literal text it is.
+     */
+    @Test
+    void aBraceInOrdinaryProseIsReleasedRatherThanStallingTheStream() {
+        List<String> deltas = new ArrayList<>();
+        AiAssistantTextDeltaProjector projector = new AiAssistantTextDeltaProjector(
+                AiAssistantTextDeltaProjector.Shape.JSON_REACT, deltas::add);
+
+        projector.accept("{\"tool\":null,\"final\":{\"text\":\"Use {{ this literal brace run");
+
+        assertEquals("Use {{ this literal brace run", String.join("", deltas));
+    }
+
+    /** A closing brace pair still streams once the terminal text is closed. */
+    @Test
+    void aTrailingFragmentIsReleasedWhenTheTerminalTextCloses() {
+        List<String> deltas = new ArrayList<>();
+        AiAssistantTextDeltaProjector projector = new AiAssistantTextDeltaProjector(
+                AiAssistantTextDeltaProjector.Shape.JSON_REACT, deltas::add);
+
+        projector.accept("{\"tool\":null,\"final\":{\"text\":\"Ends with {\",\"citations\":[]}}");
+
+        assertEquals("Ends with {", projector.finish());
+        assertEquals("Ends with {", String.join("", deltas));
+    }
+
     @Test
     void toolStepNeverProjectsNestedArgumentText() {
         List<String> deltas = new ArrayList<>();
