@@ -183,6 +183,7 @@ connex:
         model-id: gemini-3.6-flash
         endpoint: https://generativelanguage.googleapis.com/v1beta/openai/
         streaming: true                 # only after verifying this exact endpoint streams
+        thoughts: true                  # only after verifying this exact endpoint returns thought summaries
 ```
 
 `streaming` declares that one OpenAI-compatible endpoint accepts the streamed completion request
@@ -192,8 +193,23 @@ any name, several of which reject a streamed request outright, and an adapter th
 fails the turn rather than falling back to a whole response — an unverified endpoint therefore
 streams nothing rather than risking every turn. And it applies **only together with `endpoint`**:
 the same model id behind two gateways is two different answers to whether streaming works, so a
-declaration names the endpoint it was verified against and never speaks for another. Verify with a
+declaration names the endpoint it was verified against — matched character-for-character against
+the configured value, because URI paths are case-sensitive and a near-match is a different route —
+and never speaks for another. Verify with a
 real streamed request — including the `tools` array Ask Connex sends — before setting it.
+
+`thoughts` declares that the endpoint returns Gemini-style thought summaries when asked, and it is
+the only way Ask Connex will *ask* for thinking. (An endpoint that volunteers reasoning in the
+separate `reasoning_content` field — some vLLM and DeepSeek deployments — is read without any
+declaration; this flag governs the inline-tagged Gemini shape alone.) It follows the same two
+rules as `streaming`, for a sharper reason: the Gemini compatibility layer **rejects the request
+parameter with a 400** when it does not know it (`extra_body.google.thinking_config
+.include_thoughts`), so declaring it for an unverified endpoint can fail every assistant turn
+outright rather than merely going without thoughts. Verify with a real request before setting it,
+and confirm the thoughts come back inline in `content` wrapped in `<thought>` tags with the
+`extra_content.google.thought` marker — that is the shape Connex parses. Content the marker calls
+thought is kept out of the answer even when the tags are missing, so an endpoint answering in a
+drifted shape degrades toward showing less, never toward leaking reasoning into the answer.
 
 Declare a context window the provider will actually honor. The value is not a request the provider
 validates — it is the number every Ask Connex budget is derived from, so overstating it produces

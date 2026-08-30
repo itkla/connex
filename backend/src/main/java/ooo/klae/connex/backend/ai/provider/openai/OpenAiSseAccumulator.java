@@ -26,6 +26,7 @@ public final class OpenAiSseAccumulator {
     private final Map<Integer, ToolFragments> tools = new TreeMap<>();
     private final Map<String, Integer> impliedPositions = new LinkedHashMap<>();
     private Boolean toolCallsImplied;
+    private boolean thoughtsOpen;
     private int inputTokens;
     private int outputTokens;
     private String stopReason;
@@ -120,6 +121,10 @@ public final class OpenAiSseAccumulator {
             throw invalidResponse();
         }
         validateOptionalText(delta.get("content"));
+        JsonNode thought = delta.path("extra_content").path("google").path("thought");
+        if (!thought.isMissingNode() && !thought.isNull() && !thought.isBoolean()) {
+            throw invalidResponse();
+        }
         JsonNode reasoningContent = delta.get("reasoning_content");
         validateOptionalText(
                 reasoningContent == null || reasoningContent.isNull()
@@ -200,7 +205,7 @@ public final class OpenAiSseAccumulator {
             throw invalidResponse();
         }
         readToolDeltas(delta.get("tool_calls"));
-        appendOptionalText(delta.get("content"), text, true);
+        readContentDelta(delta);
         JsonNode reasoningContent = delta.get("reasoning_content");
         appendOptionalText(
                 reasoningContent == null || reasoningContent.isNull()
@@ -215,6 +220,49 @@ public final class OpenAiSseAccumulator {
             }
             stopReason = finish.asString();
         }
+    }
+
+    /**
+     * Routes one delta's content to the channel its thought marker names.
+     *
+     * <p>A delta flagged {@code extra_content.google.thought} carries the model's private
+     * reasoning inside the ordinary content field, so it goes to the reasoning accumulator and is
+     * never published: everything published reaches the requester's answer stream and, on a
+     * failed turn, the retained partial — a channel reasoning must not enter. The wrapping tags
+     * are shed at the two places the wire puts them: an opening tag leads the first flagged
+     * delta, and the closing tag leads the first unflagged content after one.
+     */
+    private void readContentDelta(JsonNode delta) {
+        JsonNode content = delta.get("content");
+        if (delta.path("extra_content").path("google").path("thought").asBoolean(false)) {
+            if (content == null || content.isNull()) {
+                return;
+            }
+            if (!content.isString()) {
+                throw invalidResponse();
+            }
+            String value = content.asString();
+            if (!thoughtsOpen && value.startsWith(OpenAiThoughtTags.OPEN)) {
+                value = value.substring(OpenAiThoughtTags.OPEN.length());
+            }
+            thoughtsOpen = true;
+            reasoning.append(value);
+            return;
+        }
+        if (thoughtsOpen && content != null && content.isString()
+                && !content.asString().isEmpty()) {
+            thoughtsOpen = false;
+            String value = content.asString();
+            if (value.startsWith(OpenAiThoughtTags.CLOSE)) {
+                value = value.substring(OpenAiThoughtTags.CLOSE.length());
+            }
+            if (!value.isEmpty()) {
+                text.append(value);
+                observer.onContentDelta(value);
+            }
+            return;
+        }
+        appendOptionalText(content, text, true);
     }
 
     private void appendOptionalText(JsonNode node, StringBuilder target, boolean publish) {

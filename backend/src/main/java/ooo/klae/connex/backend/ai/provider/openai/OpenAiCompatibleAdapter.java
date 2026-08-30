@@ -63,9 +63,23 @@ public class OpenAiCompatibleAdapter implements AiProvider {
         return AiReasoningMode.TAGGED;
     }
 
+    /**
+     * How this endpoint surfaces model reasoning on a native-tools completion.
+     *
+     * <p>Declared by an operator per endpoint rather than assumed, for two probed reasons: the
+     * request parameter that asks for thoughts is rejected outright by an endpoint that does not
+     * know it, and an endpoint that answers puts the thoughts inline in {@code content} wrapped
+     * in thought tags — not in the {@code reasoning_content} field this adapter also reads. An
+     * undeclared endpoint is asked for nothing, parsed for nothing, and shows nothing.
+     *
+     * @see AiModelCatalog#thoughtsDeclared
+     */
     @Override
     public AiReasoningMode nativeToolReasoningCapability(AiProviderTarget target) {
-        return AiReasoningMode.NATIVE;
+        return AiModelCatalog.thoughtsDeclared(
+                AiModelCatalog.Family.OPENAI_COMPATIBLE, target, aiProperties.getModelOverrides())
+                ? AiReasoningMode.NATIVE
+                : AiReasoningMode.NONE;
     }
 
     /**
@@ -289,6 +303,12 @@ public class OpenAiCompatibleAdapter implements AiProvider {
         }
         addResponseFormat(root, request, enforcement);
         addNativeTools(root, request.nativeTools());
+        if (request.reasoningMode() == AiReasoningMode.NATIVE) {
+            root.putObject("extra_body")
+                    .putObject("google")
+                    .putObject("thinking_config")
+                    .put("include_thoughts", true);
+        }
         if (streamed) {
             root.put("stream", true);
             root.putObject("stream_options").put("include_usage", true);
@@ -410,6 +430,17 @@ public class OpenAiCompatibleAdapter implements AiProvider {
             }
             List<AiToolCall> toolCalls = readToolCalls(message.get("tool_calls"));
             String text = readContent(message.get("content"), !toolCalls.isEmpty());
+            String reasoning = readReasoning(message);
+            if (reasoningMode == AiReasoningMode.NATIVE) {
+                OpenAiThoughtTags.Split split = OpenAiThoughtTags.split(text);
+                if (split.reasoning().isEmpty() && messageFlaggedAsThought(message)) {
+                    split = new OpenAiThoughtTags.Split(text, "");
+                }
+                text = split.text();
+                if (reasoning.isEmpty()) {
+                    reasoning = split.reasoning();
+                }
+            }
             int inputTokens = 0;
             int outputTokens = 0;
             JsonNode usage = root.path("usage");
@@ -431,7 +462,7 @@ public class OpenAiCompatibleAdapter implements AiProvider {
             }
             return new AiCompletionResult(
                     text, inputTokens, outputTokens, stopReason, enforcement,
-                    readReasoning(message), reasoningMode, toolCalls);
+                    reasoning, reasoningMode, toolCalls);
         } catch (AiProviderException exception) {
             throw exception;
         } catch (Exception exception) {
@@ -498,6 +529,19 @@ public class OpenAiCompatibleAdapter implements AiProvider {
             throw invalidResponse();
         }
         return content;
+    }
+
+    /**
+     * Whether the provider marked this whole message as thought content.
+     *
+     * <p>The wire carries two signals — the inline thought tags and this machine-readable flag —
+     * and the probe shows them agreeing. Content the flag calls thought but the tags do not is a
+     * shape this adapter has never seen, and it is resolved toward the ephemeral channel: text
+     * beside a tool call becomes durable narration, so guessing wrong the other way would persist
+     * the model's private reasoning.
+     */
+    private static boolean messageFlaggedAsThought(JsonNode message) {
+        return message.path("extra_content").path("google").path("thought").asBoolean(false);
     }
 
     private static String readReasoning(JsonNode message) {

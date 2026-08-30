@@ -226,6 +226,72 @@ class OpenAiSseAccumulatorTest {
                 + "\\\"}\"}}]},\"finish_reason\":null}]}";
     }
 
+    /**
+     * The captured Gemini thought stream: flagged deltas carry the reasoning with an opening tag
+     * on the first, and the closing tag arrives glued to the front of the first answer chunk.
+     * The reasoning must come out whole and untagged, the text must hold only the answer, and the
+     * requester's stream must never have seen a word of the thought.
+     */
+    @Test
+    void routesFlaggedThoughtDeltasToReasoningAndPublishesNoneOfThem() {
+        List<String> deltas = new ArrayList<>();
+        OpenAiSseAccumulator accumulator = accumulator(deltas);
+
+        accumulator.accept("{\"choices\":[{\"delta\":{\"role\":\"assistant\","
+                + "\"content\":\"<thought>Compare the \","
+                + "\"extra_content\":{\"google\":{\"thought\":true}}},\"finish_reason\":null}]}");
+        accumulator.accept("{\"choices\":[{\"delta\":{\"role\":\"assistant\","
+                + "\"content\":\"two deals.\","
+                + "\"extra_content\":{\"google\":{\"thought\":true}}},\"finish_reason\":null}]}");
+        accumulator.accept("{\"choices\":[{\"delta\":{\"role\":\"assistant\","
+                + "\"content\":\"</thought>The first deal\"},\"finish_reason\":null}]}");
+        accumulator.accept("{\"choices\":[{\"delta\":{\"role\":\"assistant\","
+                + "\"content\":\" is colder.\"},\"finish_reason\":\"stop\"}]}");
+        accumulator.accept("[DONE]");
+
+        AiCompletionResult result = accumulator.finish();
+
+        assertEquals("The first deal is colder.", result.text());
+        assertEquals("Compare the two deals.", result.reasoning());
+        assertEquals(List.of("The first deal", " is colder."), deltas);
+    }
+
+    /**
+     * A thought flag that is not a boolean must refuse the event before anything publishes: read
+     * as false it would route the model's private reasoning into the requester's answer stream.
+     */
+    @Test
+    void refusesANonBooleanThoughtFlagBeforePublishingAnything() {
+        List<String> deltas = new ArrayList<>();
+        OpenAiSseAccumulator accumulator = accumulator(deltas);
+
+        assertThrows(AiProviderException.class, () -> accumulator.accept(
+                "{\"choices\":[{\"delta\":{\"content\":\"private thought text\","
+                        + "\"extra_content\":{\"google\":{\"thought\":\"true\"}}},"
+                        + "\"finish_reason\":null}]}"));
+
+        assertEquals(List.of(), deltas);
+    }
+
+    /** A stream with no thought flags anywhere behaves exactly as it always did. */
+    @Test
+    void anUnflaggedStreamIsUntouchedByThoughtRouting() {
+        List<String> deltas = new ArrayList<>();
+        OpenAiSseAccumulator accumulator = accumulator(deltas);
+
+        accumulator.accept("{\"choices\":[{\"delta\":{\"content\":\"Plain \"},"
+                + "\"finish_reason\":null}]}");
+        accumulator.accept("{\"choices\":[{\"delta\":{\"content\":\"answer.\"},"
+                + "\"finish_reason\":\"stop\"}]}");
+        accumulator.accept("[DONE]");
+
+        AiCompletionResult result = accumulator.finish();
+
+        assertEquals("Plain answer.", result.text());
+        assertEquals("", result.reasoning());
+        assertEquals(List.of("Plain ", "answer."), deltas);
+    }
+
     private static OpenAiSseAccumulator accumulator(List<String> deltas) {
         return new OpenAiSseAccumulator(
                 JsonMapper.builder().build(),
