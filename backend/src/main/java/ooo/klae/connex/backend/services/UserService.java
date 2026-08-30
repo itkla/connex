@@ -203,9 +203,31 @@ public class UserService implements UserDetailsService {
                 userDeletionTransaction.release(id, reservationOwner);
                 return null;
             });
+            revokeSessionsIfAccountIsGone(id);
             throw exception;
         }
         revokeSessionsAfterDeletion(id);
+    }
+
+    /**
+     * Covers the ambiguous commit: the delete succeeded but its acknowledgement did not arrive.
+     *
+     * <p>The failure path cannot tell a rolled-back deletion from a committed one whose reply was
+     * lost, and the difference matters — in the second case the account is gone and its sessions
+     * would otherwise be left holding an open socket that no later request will refuse. Reading the
+     * row settles it, and reading is safe either way: if the account survives, nothing is revoked.
+     */
+    private void revokeSessionsIfAccountIsGone(int id) {
+        try {
+            boolean deleted = Boolean.TRUE.equals(tenantWorkScope.unrouted(
+                () -> userMapper.getUserById(id) == null));
+            if (deleted) {
+                revokeSessionsAfterDeletion(id);
+            }
+        } catch (RuntimeException exception) {
+            log.warn("Could not determine whether account {} survived a failed deletion: {}",
+                id, exception.toString());
+        }
     }
 
     /**
@@ -223,9 +245,12 @@ public class UserService implements UserDetailsService {
      * tenant-routed pool; enumerating with a workspace pinned would look for control-plane rows in a
      * tenant catalog and find none.
      *
-     * <p>Best effort by design, and that is sufficient: the account is already refused on every
-     * request by the session epoch filter, because the row its epoch came from is gone. This exists
-     * to retire the session rows and close the sockets promptly, not to authorize anything.
+     * <p>Best effort for the HTTP plane, where the session epoch filter already refuses every
+     * request once the account row is gone. It is <strong>not</strong> best effort for WebSockets: a
+     * socket established before the deletion passes through no servlet filter, so the expiry marker
+     * this writes is the only thing that closes it. A transient failure here therefore leaves that
+     * socket subscribed until its own timeout, which is why the failure is logged at error rather
+     * than swallowed quietly, and why the residual is stated in the pull request.
      */
     private void revokeSessionsAfterDeletion(int id) {
         try {
@@ -234,7 +259,8 @@ public class UserService implements UserDetailsService {
                 return null;
             });
         } catch (RuntimeException exception) {
-            log.warn("Could not expire sessions for deleted account {}: {}", id, exception.toString());
+            log.error("Could not expire sessions for deleted account {}; an open WebSocket may "
+                + "survive until it times out: {}", id, exception.toString());
         }
     }
 
