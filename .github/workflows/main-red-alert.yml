@@ -17,7 +17,14 @@ name: Alert on a red main
 
 on:
   workflow_run:
-    workflows: [CI, Security, Deploy smoke]
+    # Every workflow that runs on a push to main. A gap here is a workflow whose failure goes
+    # unreported, which is the whole defect this exists to close, so it is checked by a test.
+    workflows:
+      - Agent guide context budget
+      - CI
+      - Deploy smoke
+      - React Doctor
+      - Security
     types: [completed]
     branches: [main]
 
@@ -26,13 +33,24 @@ permissions:
   issues: write
 
 concurrency:
-  group: main-red-alert
+  # Keyed by conclusion, not shared. GitHub keeps only one *pending* run per group and a newly
+  # queued run evicts it even with cancel-in-progress false, so a shared group would let a later
+  # success discard a still-pending failure before its job condition was ever evaluated.
+  group: main-red-alert-${{ github.event.workflow_run.conclusion }}
   cancel-in-progress: false
 
 jobs:
   alert:
     name: Open or update the red-main report
-    if: github.event.workflow_run.conclusion == 'failure'
+    # workflow_run branch filters match the *triggering* workflow's branch, and the monitored
+    # workflows also run on pull_request -- so a fork branch merely named "main" would otherwise
+    # report the repository's main as red. Requiring a push settles it.
+    #
+    # timed_out is terminal and distinct from failure: these workflows carry explicit time limits,
+    # and a run that exhausts one leaves main just as non-green.
+    if: >-
+      github.event.workflow_run.event == 'push'
+      && contains(fromJSON('["failure", "timed_out"]'), github.event.workflow_run.conclusion)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -43,6 +61,7 @@ jobs:
           RUN_URL: ${{ github.event.workflow_run.html_url }}
           RUN_NAME: ${{ github.event.workflow_run.name }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
         run: |
           set -euo pipefail
 
@@ -53,7 +72,7 @@ jobs:
             --json number --jq '.[0].number // empty')"
 
           body="$(printf '%s\n' \
-            "\`$RUN_NAME\` failed on \`main\` at \`${HEAD_SHA:0:9}\`." \
+            "\`$RUN_NAME\` concluded \`$CONCLUSION\` on \`main\` at \`${HEAD_SHA:0:9}\`." \
             "" \
             "$RUN_URL" \
             "" \
