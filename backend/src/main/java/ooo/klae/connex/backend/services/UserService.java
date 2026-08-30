@@ -226,7 +226,7 @@ public class UserService implements UserDetailsService {
             }
         } catch (RuntimeException exception) {
             log.warn("Could not determine whether account {} survived a failed deletion: {}",
-                id, exception.toString());
+                id, exception.getClass().getSimpleName());
         }
     }
 
@@ -251,6 +251,9 @@ public class UserService implements UserDetailsService {
      * this writes is the only thing that closes it. A transient failure here therefore leaves that
      * socket subscribed until its own timeout, which is why the failure is logged at error rather
      * than swallowed quietly, and why the residual is stated in the pull request.
+     *
+     * <p>Logs the exception type only. A failure enumerating sessions surfaces driver messages that
+     * can carry row content, and these rows hold a serialized principal.
      */
     private void revokeSessionsAfterDeletion(int id) {
         try {
@@ -260,7 +263,7 @@ public class UserService implements UserDetailsService {
             });
         } catch (RuntimeException exception) {
             log.error("Could not expire sessions for deleted account {}; an open WebSocket may "
-                + "survive until it times out: {}", id, exception.toString());
+                + "survive until it times out: {}", id, exception.getClass().getSimpleName());
         }
     }
 
