@@ -116,25 +116,90 @@ class OpenAiSseAccumulatorTest {
     }
 
     @Test
-    void refusesAnUnnumberedToolCallThatIsOnlyAFragment() {
+    void rejoinsUnnumberedFragmentsThatShareOneCallIdentifier() {
+        OpenAiSseAccumulator accumulator = accumulator(new ArrayList<>());
+
+        accumulator.accept("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call_1\","
+                + "\"type\":\"function\",\"function\":{\"name\":\"get_weather\","
+                + "\"arguments\":\"{\\\"city\\\":\"}}]},\"finish_reason\":null}]}");
+        accumulator.accept("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call_1\","
+                + "\"function\":{\"arguments\":\"\\\"Osaka\\\"}\"}}]},"
+                + "\"finish_reason\":\"stop\"}]}");
+        accumulator.accept("[DONE]");
+
+        AiCompletionResult result = accumulator.finish();
+
+        assertEquals(1, result.toolCalls().size());
+        assertEquals("{\"city\":\"Osaka\"}", result.toolCalls().getFirst().arguments());
+    }
+
+    @Test
+    void takesALateThoughtSignatureOntoTheCallItIdentifies() {
+        OpenAiSseAccumulator accumulator = accumulator(new ArrayList<>());
+
+        accumulator.accept(unnumberedCall("call_1", "Osaka"));
+        accumulator.accept("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call_1\","
+                + "\"extra_content\":{\"google\":{\"thought_signature\":\"sig\"}}}]},"
+                + "\"finish_reason\":\"stop\"}]}");
+        accumulator.accept("[DONE]");
+
+        AiCompletionResult result = accumulator.finish();
+
+        assertEquals(1, result.toolCalls().size());
+        assertEquals("sig", result.toolCalls().getFirst().thoughtSignature());
+    }
+
+    @Test
+    void refusesAnUnnumberedToolCallThatIdentifiesNothing() {
         OpenAiSseAccumulator accumulator = accumulator(new ArrayList<>());
 
         assertThrows(AiProviderException.class, () -> accumulator.accept(
-                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"id\":\"call_1\","
-                        + "\"function\":{\"arguments\":\"{\\\"city\\\":\"}}]},"
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"type\":\"function\","
+                        + "\"function\":{\"name\":\"get_weather\",\"arguments\":\"{}\"}}]},"
                         + "\"finish_reason\":null}]}"));
     }
 
     @Test
     void refusesAResponseThatChangesItsToolNumberingMidStream() {
-        OpenAiSseAccumulator accumulator = accumulator(new ArrayList<>());
-
-        accumulator.accept("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,"
+        OpenAiSseAccumulator numberedFirst = accumulator(new ArrayList<>());
+        numberedFirst.accept("{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,"
                 + "\"id\":\"numbered\",\"function\":{\"name\":\"a\",\"arguments\":\"{}\"}}]},"
                 + "\"finish_reason\":null}]}");
 
         assertThrows(AiProviderException.class,
-                () -> accumulator.accept(unnumberedCall("implied", "Osaka")));
+                () -> numberedFirst.accept(unnumberedCall("implied", "Osaka")));
+
+        OpenAiSseAccumulator impliedFirst = accumulator(new ArrayList<>());
+        impliedFirst.accept(unnumberedCall("implied", "Osaka"));
+
+        assertThrows(AiProviderException.class, () -> impliedFirst.accept(
+                "{\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"numbered\","
+                        + "\"function\":{\"name\":\"a\",\"arguments\":\"{}\"}}]},"
+                        + "\"finish_reason\":null}]}"));
+    }
+
+    @Test
+    void refusesMoreUnnumberedCallsThanAPositionExistsFor() {
+        OpenAiSseAccumulator accumulator = accumulator(new ArrayList<>());
+        for (int call = 0; call < 64; call++) {
+            accumulator.accept(unnumberedCall("call_" + call, "Osaka"));
+        }
+
+        assertThrows(AiProviderException.class,
+                () -> accumulator.accept(unnumberedCall("call_64", "Osaka")));
+    }
+
+    @Test
+    void publishesNoPartOfAnEventWhoseToolCallsAreRefused() {
+        List<String> deltas = new ArrayList<>();
+        OpenAiSseAccumulator accumulator = accumulator(deltas);
+
+        assertThrows(AiProviderException.class, () -> accumulator.accept(
+                "{\"choices\":[{\"delta\":{\"content\":\"words the reader must never see\","
+                        + "\"tool_calls\":[{\"function\":{\"name\":\"a\",\"arguments\":\"{}\"}}]},"
+                        + "\"finish_reason\":null}]}"));
+
+        assertEquals(List.of(), deltas);
     }
 
     private static String unnumberedCall(String id, String city) {
