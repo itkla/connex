@@ -23,6 +23,8 @@ public final class OpenAiSseAccumulator {
     private final StringBuilder text = new StringBuilder();
     private final StringBuilder reasoning = new StringBuilder();
     private final Map<Integer, ToolFragments> tools = new TreeMap<>();
+    private int impliedToolCalls;
+    private Boolean toolCallsImplied;
     private int inputTokens;
     private int outputTokens;
     private String stopReason;
@@ -137,8 +139,13 @@ public final class OpenAiSseAccumulator {
             throw invalidResponse();
         }
         for (JsonNode call : calls) {
+            if (!call.isObject()) {
+                throw invalidResponse();
+            }
             JsonNode indexNode = call.path("index");
-            if (!call.isObject() || !indexNode.isIntegralNumber() || !indexNode.canConvertToInt()
+            if (impliedIndex(indexNode)) {
+                requireWholeCall(call);
+            } else if (!indexNode.isIntegralNumber() || !indexNode.canConvertToInt()
                     || indexNode.intValue() < 0 || indexNode.intValue() > 63) {
                 throw invalidResponse();
             }
@@ -153,6 +160,35 @@ public final class OpenAiSseAccumulator {
             }
             validateOptionalText(
                     call.path("extra_content").path("google").get("thought_signature"));
+        }
+    }
+
+    /**
+     * Whether a streamed tool call leaves its position to be inferred from arrival order.
+     *
+     * <p>OpenAI numbers every streamed tool call so that argument fragments can be routed back to
+     * the call they belong to. Not every OpenAI-compatible endpoint sends that number, and one that
+     * omits it is not malformed — it is describing calls that arrive whole and therefore need no
+     * reassembly.
+     */
+    private static boolean impliedIndex(JsonNode indexNode) {
+        return indexNode == null || indexNode.isMissingNode() || indexNode.isNull();
+    }
+
+    /**
+     * Rejects an unnumbered tool call that is not complete on its own.
+     *
+     * <p>Arrival order can only stand in for an explicit position while each delta carries a whole
+     * call. An unnumbered fragment names neither a call to continue nor a call to start, so taking it
+     * would mean guessing — either splitting one call across two, or merging two into one. Neither
+     * is recoverable afterwards, so it stays refused.
+     */
+    private static void requireWholeCall(JsonNode call) {
+        JsonNode function = call.path("function");
+        if (!function.isObject()
+                || !function.path("name").isString()
+                || !function.path("arguments").isString()) {
+            throw invalidResponse();
         }
     }
 
@@ -213,16 +249,44 @@ public final class OpenAiSseAccumulator {
             throw invalidResponse();
         }
         for (JsonNode call : calls) {
-            JsonNode indexNode = call.path("index");
-            if (!call.isObject() || !indexNode.isIntegralNumber() || !indexNode.canConvertToInt()) {
+            if (!call.isObject()) {
                 throw invalidResponse();
             }
-            int index = indexNode.intValue();
+            JsonNode indexNode = call.path("index");
+            boolean implied = impliedIndex(indexNode);
+            requireConsistentNumbering(implied);
+            int index;
+            if (implied) {
+                requireWholeCall(call);
+                index = impliedToolCalls++;
+            } else {
+                if (!indexNode.isIntegralNumber() || !indexNode.canConvertToInt()) {
+                    throw invalidResponse();
+                }
+                index = indexNode.intValue();
+            }
             if (index < 0 || index > 63) {
                 throw invalidResponse();
             }
             ToolFragments fragments = tools.computeIfAbsent(index, ignored -> new ToolFragments());
             fragments.append(call);
+        }
+    }
+
+    /**
+     * Holds one response to a single convention for numbering its tool calls.
+     *
+     * <p>Unnumbered calls take their position from arrival order, so a response that numbers some
+     * of its calls and not others gives two positions the same meaning and no way to tell which was
+     * intended. Merging or splitting a tool call cannot be detected downstream — the arguments are
+     * simply wrong — so a response that changes convention mid-stream is refused rather than
+     * guessed at.
+     */
+    private void requireConsistentNumbering(boolean implied) {
+        if (toolCallsImplied == null) {
+            toolCallsImplied = implied;
+        } else if (toolCallsImplied != implied) {
+            throw invalidResponse();
         }
     }
 
