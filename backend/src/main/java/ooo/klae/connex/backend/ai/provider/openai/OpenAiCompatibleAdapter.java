@@ -433,6 +433,9 @@ public class OpenAiCompatibleAdapter implements AiProvider {
             String reasoning = readReasoning(message);
             if (reasoningMode == AiReasoningMode.NATIVE) {
                 OpenAiThoughtTags.Split split = OpenAiThoughtTags.split(text);
+                if (split.reasoning().isEmpty() && messageFlaggedAsThought(message)) {
+                    split = new OpenAiThoughtTags.Split(text, "");
+                }
                 text = split.text();
                 if (reasoning.isEmpty()) {
                     reasoning = split.reasoning();
@@ -526,6 +529,19 @@ public class OpenAiCompatibleAdapter implements AiProvider {
             throw invalidResponse();
         }
         return content;
+    }
+
+    /**
+     * Whether the provider marked this whole message as thought content.
+     *
+     * <p>The wire carries two signals — the inline thought tags and this machine-readable flag —
+     * and the probe shows them agreeing. Content the flag calls thought but the tags do not is a
+     * shape this adapter has never seen, and it is resolved toward the ephemeral channel: text
+     * beside a tool call becomes durable narration, so guessing wrong the other way would persist
+     * the model's private reasoning.
+     */
+    private static boolean messageFlaggedAsThought(JsonNode message) {
+        return message.path("extra_content").path("google").path("thought").asBoolean(false);
     }
 
     private static String readReasoning(JsonNode message) {

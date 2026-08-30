@@ -384,6 +384,71 @@ class OpenAiCompatibleAdapterTest {
         assertEquals("Unfinished", result.reasoning());
     }
 
+    /**
+     * The wire's two thought signals agree today; a message the flag calls thought but the tags
+     * do not is resolved toward the ephemeral channel, because text beside a tool call becomes
+     * durable narration and guessing the other way would persist private reasoning.
+     */
+    @Test
+    void aFlaggedMessageWithoutTagsIsStillKeptOutOfTheAnswer() throws Exception {
+        when(openAiCompatibleClient.complete(
+                any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
+                any(AiRequestDeadline.class)))
+                .thenReturn("""
+                        {
+                          "choices": [{
+                            "message": {
+                              "content": "Untagged private reasoning.",
+                              "extra_content": {"google": {"thought": true}},
+                              "tool_calls": [{"id": "call_1", "type": "function",
+                                "function": {"name": "get_weather", "arguments": "{}"}}]
+                            },
+                            "finish_reason": "tool_calls"
+                          }],
+                          "usage": {"prompt_tokens": 1, "completion_tokens": 1}
+                        }
+                        """);
+
+        AiCompletionResult result = adapter.complete(
+                withReasoningMode(schemaRequest(), AiReasoningMode.NATIVE));
+
+        assertEquals("", result.text());
+        assertEquals("Untagged private reasoning.", result.reasoning());
+    }
+
+    /** One override may verify both endpoint capabilities at once; each resolves on its own. */
+    @Test
+    void oneOverrideCanDeclareStreamingAndThoughtsTogether() {
+        String endpoint = "https://api.example.test/v1";
+        AiProviderTarget target = target(endpoint, false, "gemini-3.6-flash");
+        AiProperties.ModelOverride override = thoughtsOverride("gemini-3.6-flash", endpoint, true);
+        override.setStreaming(true);
+        aiProperties.setModelOverrides(List.of(override));
+
+        assertTrue(adapter.supportsStreaming(target));
+        assertEquals(AiReasoningMode.NATIVE, adapter.nativeToolReasoningCapability(target));
+    }
+
+    /** The streamed request builder shares the reasoning gate, so streamed turns ask too. */
+    @Test
+    void aStreamedNativeReasoningRequestAlsoAsksForThoughts() throws Exception {
+        when(openAiCompatibleClient.stream(
+                any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
+                any(AiRequestDeadline.class), any(OpenAiSseAccumulator.class)))
+                .thenReturn(new AiCompletionResult("Done", 4, 1, "stop"));
+
+        adapter.completeStreaming(
+                withReasoningMode(schemaRequest(), AiReasoningMode.NATIVE), text -> {});
+
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(openAiCompatibleClient).stream(
+                any(URI.class), anyBoolean(), any(AiCredentials.class), body.capture(),
+                any(AiRequestDeadline.class), any(OpenAiSseAccumulator.class));
+        assertTrue(objectMapper.readTree(body.getValue())
+                .path("extra_body").path("google").path("thinking_config")
+                .path("include_thoughts").asBoolean(false));
+    }
+
     private AiCompletionRequest withReasoningMode(
             AiCompletionRequest base, AiReasoningMode reasoningMode) {
         return new AiCompletionRequest(

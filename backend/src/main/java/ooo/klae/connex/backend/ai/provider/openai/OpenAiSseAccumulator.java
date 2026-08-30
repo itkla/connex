@@ -249,7 +249,8 @@ public final class OpenAiSseAccumulator {
             reasoning.append(value);
             return;
         }
-        if (thoughtsOpen && content != null && content.isString()) {
+        if (thoughtsOpen && content != null && content.isString()
+                && !content.asString().isEmpty()) {
             thoughtsOpen = false;
             String value = content.asString();
             if (value.startsWith(OpenAiThoughtTags.CLOSE)) {
