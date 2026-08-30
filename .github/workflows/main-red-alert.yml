@@ -1,0 +1,71 @@
+name: Alert on a red main
+
+# Why this exists rather than a merge queue.
+#
+# main sat red on "OCR — contract tests" for five consecutive merges and nobody noticed (#1481).
+# That is a DETECTION failure, not a prevention one: every contributing pull request was green,
+# because pull requests path-filter jobs the merge does not (classify-ci-changes.py runs the
+# complete suite only for non-pull_request events).
+#
+# A merge queue would also close the gap, and the workflows already declare merge_group triggers so
+# it can be switched on. It was not, deliberately: the backend suite runs ~33 minutes and every
+# merge would serialise behind it, and a break caused by external toolchain drift on an unchanged
+# tree — which is exactly what #1481 was — would convert "main is red and unnoticed" into "nobody
+# can merge anything". For a repository merging a handful of times a day, detection is the
+# proportionate half of that trade. Revisit if the team grows or if a red main starts costing more
+# than a stalled queue would.
+
+on:
+  workflow_run:
+    workflows: [CI, Security, Deploy smoke]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: main-red-alert
+  cancel-in-progress: false
+
+jobs:
+  alert:
+    name: Open or update the red-main report
+    if: github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Report the failure on a tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          RUN_NAME: ${{ github.event.workflow_run.name }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          # One rolling issue rather than one per failure: a red main usually produces several
+          # failing workflows for the same commit, and a burst of issues is its own kind of noise.
+          title='main is red'
+          existing="$(gh issue list --repo "$REPO" --state open --label ci-main-red \
+            --json number --jq '.[0].number // empty')"
+
+          body="$(printf '%s\n' \
+            "\`$RUN_NAME\` failed on \`main\` at \`${HEAD_SHA:0:9}\`." \
+            "" \
+            "$RUN_URL" \
+            "" \
+            "Pull requests path-filter jobs that a merge does not, so a green pull request does not" \
+            "imply a green merge. Check the merge commit's own checks, not the pull request's." \
+            "" \
+            "Close this issue once \`main\` is green again.")"
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body "$body"
+          else
+            gh label create ci-main-red --repo "$REPO" --color B60205 \
+              --description "main is failing" 2>/dev/null || true
+            gh issue create --repo "$REPO" --title "$title" --label ci-main-red --body "$body"
+          fi
