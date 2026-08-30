@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.ai.AiFeature;
+import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.ai.AiFeatureGate;
 import ooo.klae.connex.backend.ai.AiGenerationService;
 import ooo.klae.connex.backend.ai.AiGenerationTaskResult;
@@ -114,10 +115,7 @@ public class AiAssistantTurnService {
         if (privacyMode == null) {
             privacyMode = AiPrivacyMode.MASKED;
         }
-        boolean streamed = invocationService != null
-                && privacyMode == AiPrivacyMode.UNMASKED
-                && invocationService.currentProviderCapabilities(
-                        AiFeature.ASSISTANT_CHAT).streaming();
+        boolean streamed = streamingAvailable();
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         long expectedRestrictionEpoch = restrictionEpoch.current(workspaceId);
         AiChatQueryScopeResolver.Resolution resolution = scopeResolver == null
@@ -278,4 +276,31 @@ public class AiAssistantTurnService {
 
     private record TurnIdentity(int turnId) {
     }
+    /**
+     * Whether this turn can stream, answering only what the provider supports.
+     *
+     * <p>Only that — privacy mode deliberately plays no part. A masked organization's requester
+     * already receives the fully demasked answer once the turn settles, so streaming it is the
+     * same bytes sooner on the same requester-only channel; what masking governs is what leaves
+     * for the provider, and that is identical streamed or buffered.
+     *
+     * <p>Deliberately fail-soft: streaming is an enhancement, and asking whether we can stream
+     * must never change what a caller is told about a session they may not reach. The probe
+     * resolves the organization's provider, which can refuse for reasons of its own, and it runs
+     * before the session authorization that owes the caller a generic not-found — so a refusal
+     * here means "do not stream", never "fail the turn with a different error".
+     */
+    private boolean streamingAvailable() {
+        if (invocationService == null) {
+            return false;
+        }
+        try {
+            AiProviderCapabilities capabilities =
+                    invocationService.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT);
+            return capabilities != null && capabilities.streaming();
+        } catch (RuntimeException exception) {
+            return false;
+        }
+    }
+
 }

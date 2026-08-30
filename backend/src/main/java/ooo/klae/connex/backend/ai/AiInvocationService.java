@@ -730,8 +730,7 @@ public class AiInvocationService {
 
         AiProvider adapter = aiProviderRouter.adapterFor(resolved.provider());
         boolean streamed = invocation.streamObserver() != null;
-        if (streamed && (invocation.context().privacyMode() != AiPrivacyMode.UNMASKED
-                || !adapter.supportsStreaming(resolved.target()))) {
+        if (streamed && !adapter.supportsStreaming(resolved.target())) {
             emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
                     null, null, null, null, "provider_capability", structured, null);
             throw new AiProviderException("AI provider streaming is not available");

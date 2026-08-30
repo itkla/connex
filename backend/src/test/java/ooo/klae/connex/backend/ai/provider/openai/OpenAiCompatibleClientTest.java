@@ -43,6 +43,11 @@ import ooo.klae.connex.backend.ai.egress.AiEndpointAddressValidator;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
+import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
+import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
+import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
+import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
+import tools.jackson.databind.json.JsonMapper;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
 
@@ -494,4 +499,73 @@ class OpenAiCompatibleClientTest {
         });
         return new OpenAiCompatibleClient(restClient, maxResponseBytes, endpointAddressValidator);
     }
+    /**
+     * The exact server-sent bytes the 2026-08-29 outage arrived on, replayed end to end.
+     *
+     * <p>The captured Gemini stream answers a tool-calling request with one unnumbered tool call
+     * and a {@code stop} finish reason — both departures from the OpenAI shape — so this pins the
+     * whole transport, SSE decoding, and accumulation chain against the real bytes rather than a
+     * shape a mock imagined. Every layer below the agent loop runs for real here.
+     */
+    @Test
+    void streamsTheCapturedGeminiToolCallShapeEndToEnd() throws Exception {
+        String sse = "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"tool_calls\":"
+                + "[{\"id\":\"call_446465\",\"type\":\"function\",\"function\":"
+                + "{\"name\":\"get_weather\",\"arguments\":\"{\\\"city\\\":\\\"Osaka\\\"}\"},"
+                + "\"extra_content\":{\"google\":{\"thought_signature\":\"sig\"}}}]},"
+                + "\"finish_reason\":null}],\"usage\":{\"prompt_tokens\":55,\"completion_tokens\":16}}\n\n"
+                + "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"},\"finish_reason\":\"stop\"}]}\n\n"
+                + "data: [DONE]\n\n";
+        HttpServer server = HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        ExecutorService serverExecutor = Executors.newSingleThreadExecutor(
+                Thread.ofPlatform().daemon().name("openai-compatible-sse-server-", 0).factory());
+        server.setExecutor(serverExecutor);
+        server.createContext("/v1beta/openai/chat/completions", exchange -> {
+            try {
+                exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+                byte[] bytes = sse.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(200, bytes.length);
+                try (OutputStream output = exchange.getResponseBody()) {
+                    output.write(bytes);
+                }
+            } finally {
+                exchange.close();
+            }
+        });
+        server.start();
+        when(endpointAddressValidator.resolveFetchable("127.0.0.1", true))
+                .thenReturn(InetAddress.getByName("127.0.0.1"));
+        OpenAiCompatibleClient client = new OpenAiCompatibleClient(
+                new AiProperties(), endpointAddressValidator);
+        URI endpoint = URI.create("http://127.0.0.1:" + server.getAddress().getPort()
+                + "/v1beta/openai/chat/completions");
+        try {
+            AiCompletionResult result = client.stream(
+                    endpoint, true, emptyCredentials(), REQUEST_BODY,
+                    AiRequestDeadline.afterNanos(java.time.Duration.ofSeconds(30).toNanos()),
+                    new OpenAiSseAccumulator(
+                            JsonMapper.builder().build(),
+                            new AiProviderStreamObserver() {
+                                @Override
+                                public void onContentDelta(String text) {
+                                }
+                            },
+                            AiStructuredOutputEnforcement.JSON_SCHEMA,
+                            AiReasoningMode.NONE));
+
+            assertEquals("stop", result.stopReason());
+            assertEquals(1, result.toolCalls().size());
+            assertEquals("call_446465", result.toolCalls().getFirst().id());
+            assertEquals("get_weather", result.toolCalls().getFirst().name());
+            assertEquals("{\"city\":\"Osaka\"}", result.toolCalls().getFirst().arguments());
+            assertEquals("sig", result.toolCalls().getFirst().thoughtSignature());
+            assertEquals(55, result.inputTokens());
+            assertEquals(16, result.outputTokens());
+        } finally {
+            client.shutdown();
+            server.stop(0);
+            serverExecutor.shutdownNow();
+        }
+    }
+
 }
