@@ -192,6 +192,19 @@ class AuthServiceTest extends AbstractServiceTest {
                 SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR));
     }
 
+    /**
+     * A login racing a deletion would otherwise write its session row after the deletion's sweep has
+     * run, leaving a deleted account's serialized principal in the store until it expired.
+     */
+    @Test
+    void anAccountReservedForDeletionCannotEstablishASession() {
+        User member = passwordlessUser();
+        userMapper.reserveAccountDeletion(member.getId(), java.util.UUID.randomUUID().toString());
+
+        assertThrows(BadCredentialsException.class, () -> authService.establishAuthenticatedSession(
+            member, new MockHttpServletRequest(), new MockHttpServletResponse()));
+    }
+
     private User passwordlessUser() {
         String value = unique();
         User user = new User();

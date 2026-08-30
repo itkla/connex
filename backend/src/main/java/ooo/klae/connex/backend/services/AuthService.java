@@ -223,7 +223,29 @@ public class AuthService {
         return epoch;
     }
 
+    /**
+     * Establishes the authenticated session for a verified principal.
+     *
+     * <p>Refuses while an account-deletion reservation is held. Deletion revokes by enumeration,
+     * which cannot see a session whose row Spring Session writes after the sweep has already run —
+     * and that row would then hold a deleted account's serialized principal until it expired,
+     * defeating the erasure the deletion exists to perform. Refusing here removes the race instead
+     * of trying to catch its result, and matches how the rest of the codebase treats a reserved
+     * account.
+     *
+     * <p>The refusal is indistinguishable from bad credentials on purpose. It is also self-healing:
+     * the reservation is released when a deletion fails, and expires on its own if the process dies
+     * mid-ceremony.
+     *
+     * @param user the principal whose credential was verified
+     * @param httpRequest the request completing the ceremony
+     * @param httpResponse the response the session cookie is written to
+     * @return the account as reloaded after the session is established
+     */
     public User establishAuthenticatedSession(User user, HttpServletRequest httpRequest, HttpServletResponse httpResponse) {
+        if (userMapper.isAccountDeletionReserved(user.getId())) {
+            throw new BadCredentialsException("Invalid credentials");
+        }
         userMapper.updateLastLoginAt(user.getId());
         User refreshedUser = userMapper.getUserById(user.getId());
 
