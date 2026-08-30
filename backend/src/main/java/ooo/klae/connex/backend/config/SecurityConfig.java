@@ -144,6 +144,10 @@ public class SecurityConfig {
      * {@code AccountSessionIndexResolver}, which files each session under its immutable account id
      * rather than the login username Spring Session would use by default; the two must agree on the
      * key, which is why both go through {@code AccountSessionIndex}.
+     *
+     * <p>The in-memory fallback exists only for non-servlet contexts, which have no session
+     * repository. A servlet instance that took it would revoke nothing while reporting success, so
+     * {@link SessionRegistryStartupValidator} asserts against it at startup.
      */
     @Bean
     public <S extends Session> SessionRegistry sessionRegistry(
