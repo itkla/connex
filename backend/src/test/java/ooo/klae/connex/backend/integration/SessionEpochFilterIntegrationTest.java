@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.integration;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -78,6 +80,49 @@ class SessionEpochFilterIntegrationTest {
     }
 
     @Test
+    void aMatchingRecoveryGrantRepairsAMismatchedStamp() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        session.setAttribute(SessionSecurityService.SESSION_EPOCH_ATTR, -1);
+        int currentEpoch = currentEpoch();
+        assertEquals(1, userMapper.grantEpochRestamp(
+                account.getId(), session.getId(), currentEpoch));
+
+        mockMvc.perform(get("/api/auth/me")
+                        .session(session)
+                        .with(authentication(authenticated)))
+                .andExpect(status().isOk());
+
+        assertEquals(currentEpoch,
+                session.getAttribute(SessionSecurityService.SESSION_EPOCH_ATTR));
+    }
+
+    @Test
+    void aRecoveryGrantForAnotherSessionCannotRepairTheRequest() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        int currentEpoch = currentEpoch();
+        assertEquals(1, userMapper.grantEpochRestamp(
+                account.getId(), "another-logical-session", currentEpoch));
+
+        mockMvc.perform(get("/api/auth/me")
+                        .session(session)
+                        .with(authentication(authenticated)))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void aRecoveryGrantForAnotherEpochCannotRepairTheRequest() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        int currentEpoch = currentEpoch();
+        assertEquals(1, userMapper.grantEpochRestamp(
+                account.getId(), session.getId(), currentEpoch + 1));
+
+        mockMvc.perform(get("/api/auth/me")
+                        .session(session)
+                        .with(authentication(authenticated)))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void aSessionCarryingNoStampIsRefusedRatherThanDefaulted() throws Exception {
         mockMvc.perform(get("/api/auth/me")
                         .session(new MockHttpSession())
@@ -98,5 +143,11 @@ class SessionEpochFilterIntegrationTest {
                         .with(authentication(
                                 new UsernamePasswordAuthenticationToken(deleted, null, List.of()))))
                 .andExpect(status().isUnauthorized());
+    }
+
+    private int currentEpoch() {
+        Integer currentEpoch = userMapper.currentSessionEpoch(account.getId());
+        assertNotNull(currentEpoch);
+        return currentEpoch;
     }
 }

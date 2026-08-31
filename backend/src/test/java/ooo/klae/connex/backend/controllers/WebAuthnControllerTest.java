@@ -28,6 +28,9 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.webauthn.api.AuthenticatorAssertionResponse;
+import org.springframework.security.web.webauthn.api.AuthenticatorAttestationResponse;
+import org.springframework.security.web.webauthn.api.Bytes;
+import org.springframework.security.web.webauthn.api.CredentialRecord;
 import org.springframework.security.web.webauthn.api.PublicKeyCredential;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialCreationOptions;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialRequestOptions;
@@ -207,7 +210,35 @@ class WebAuthnControllerTest {
         assertThrows(BadRequestException.class,
             () -> controller.registerVerify("work key", "{}", request, response));
 
-        verify(webAuthnService, never()).finishRegistration(anyInt(), any(), any(), any());
+        verify(webAuthnService, never()).finishRegistration(anyInt(), any(), any(), any(), any());
+    }
+
+    @Test
+    void registerVerifyPassesTheRequestSessionsEpochFence() {
+        User user = user(7);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.getSession();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        PublicKeyCredentialCreationOptions options = mock(PublicKeyCredentialCreationOptions.class);
+        PublicKeyCredential<AuthenticatorAttestationResponse> credential = mock();
+        CredentialRecord record = mock(CredentialRecord.class);
+        WebAuthnJsonMapper mapper = mock(WebAuthnJsonMapper.class);
+        WebAuthnController registrationController = controller(mapper);
+        when(creationOptions.load(request)).thenReturn(options);
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(webAuthnService.hasPasskey(7)).thenReturn(true);
+        when(mapper.read(eq("{}"), org.mockito.ArgumentMatchers
+                .<TypeReference<PublicKeyCredential<AuthenticatorAttestationResponse>>>any()))
+                .thenReturn(credential);
+        when(sessionSecurityService.sessionEpoch(request.getSession(false))).thenReturn(6);
+        when(webAuthnService.finishRegistration(7, 6, options, credential, "work key"))
+                .thenReturn(record);
+        when(record.getCredentialId()).thenReturn(Bytes.random());
+
+        registrationController.registerVerify("work key", "{}", request, response);
+
+        verify(sessionSecurityService).sessionEpoch(request.getSession(false));
+        verify(webAuthnService).finishRegistration(7, 6, options, credential, "work key");
     }
 
     @Test
@@ -417,6 +448,21 @@ class WebAuthnControllerTest {
                 eq("Passkey recovery denied"), eq("proof_rejected"));
         assertFalse(recovery.toString().contains("sensitive-current-password"));
         assertFalse(recovery.toString().contains("sensitive-operator-token"));
+    }
+
+    @Test
+    void recoveryStampsTheCeremonySessionAfterTheTransactionalServiceReturns() {
+        User user = user(7);
+        PasskeyRecoveryRequest recovery = new PasskeyRecoveryRequest();
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(mfaRecoveryService.recover(recovery, request)).thenReturn(5);
+
+        controller.recoverCredentials(recovery, request);
+
+        InOrder completionOrder = inOrder(mfaRecoveryService, sessionSecurityService);
+        completionOrder.verify(mfaRecoveryService).recover(recovery, request);
+        completionOrder.verify(sessionSecurityService).completeRecoveryStamp(request, 5);
     }
 
     @Test

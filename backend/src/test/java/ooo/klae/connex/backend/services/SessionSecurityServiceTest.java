@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.config.SessionSecurityProperties;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
+import ooo.klae.connex.backend.mappers.UserMapper;
 
 class SessionSecurityServiceTest {
     private MutableClock clock;
@@ -40,7 +41,8 @@ class SessionSecurityServiceTest {
         properties = new SessionSecurityProperties();
         properties.setAbsoluteTimeout(Duration.ofHours(12));
         properties.setRecentAuthenticationWindow(Duration.ofMinutes(10));
-        service = new SessionSecurityService(properties, clock);
+        service = new SessionSecurityService(
+                properties, clock, org.mockito.Mockito.mock(UserMapper.class));
     }
 
     @AfterEach

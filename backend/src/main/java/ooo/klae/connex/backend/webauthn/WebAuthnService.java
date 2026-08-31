@@ -27,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.PasskeyDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.LastPasskeyRemovalForbiddenException;
 import ooo.klae.connex.backend.exceptions.PasskeyEnrollmentRequiredException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -77,19 +78,34 @@ public class WebAuthnService {
      *
      * <p>Takes the account root before writing so enrollment serializes against
      * {@link #recover(int)} and {@link #delete(int, String)} rather than interleaving with their
-     * credential reads and deletes.
+     * credential reads and deletes. After taking that lock, the method compares the request
+     * session's expected epoch with the current account epoch before verifying or saving anything.
+     * This under-lock fence refuses a registration request admitted before recovery committed but
+     * waiting behind recovery's account lock. Saving the replacement credential clears the durable
+     * recovery handoff in the same transaction, so neither can commit without the other.
      *
      * @param expectedUserId the authenticated account completing the ceremony
+     * @param expectedSessionEpoch the epoch stamped into the request's authenticated session
      * @param options the options issued in {@link #createRegistrationOptions}
      * @param credential the client's attestation response
      * @param label the user-supplied nickname
      * @return the stored credential record
      */
     @Transactional
-    public CredentialRecord finishRegistration(int expectedUserId, PublicKeyCredentialCreationOptions options,
-            PublicKeyCredential<AuthenticatorAttestationResponse> credential, String label) {
+    public CredentialRecord finishRegistration(
+            int expectedUserId,
+            Integer expectedSessionEpoch,
+            PublicKeyCredentialCreationOptions options,
+            PublicKeyCredential<AuthenticatorAttestationResponse> credential,
+            String label) {
         if (userMapper.lockById(expectedUserId) == null) {
             throw new BadCredentialsException("Passkey registration is not bound to the current account");
+        }
+        Integer currentSessionEpoch = userMapper.currentSessionEpoch(expectedUserId);
+        if (expectedSessionEpoch == null
+                || currentSessionEpoch == null
+                || !expectedSessionEpoch.equals(currentSessionEpoch)) {
+            throw new ForbiddenException("Authenticated session is no longer current");
         }
         PublicKeyCredentialUserEntity optionUser = options.getUser();
         Integer optionUserId = optionUser == null
@@ -101,6 +117,7 @@ public class WebAuthnService {
         CredentialRecord record = rpOperations.registerCredential(
             new ImmutableRelyingPartyRegistrationRequest(options, new RelyingPartyPublicKey(credential, label)));
         userCredentials.save(record);
+        userMapper.clearEpochRestampGrant(expectedUserId);
         User user = userMapper.getUserById(expectedUserId);
         if (user == null) {
             throw new BadCredentialsException("Passkey registration is not bound to the current account");

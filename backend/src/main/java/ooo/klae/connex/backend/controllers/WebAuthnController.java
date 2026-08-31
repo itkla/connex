@@ -132,7 +132,9 @@ public class WebAuthnController {
         try {
             authorizePasskeyRegistrationVerify(user, req);
             PublicKeyCredential<AuthenticatorAttestationResponse> credential = json.read(body, ATTESTATION_TYPE);
-            CredentialRecord record = webAuthnService.finishRegistration(user.getId(), options, credential, label);
+            Integer expectedSessionEpoch = sessionSecurityService.sessionEpoch(req.getSession(false));
+            CredentialRecord record = webAuthnService.finishRegistration(
+                    user.getId(), expectedSessionEpoch, options, credential, label);
             sessionSecurityService.markStepUp(req, user.getId());
             return Map.of("credentialId", record.getCredentialId().toBase64UrlString());
         } catch (RequestBodyTooLargeException ex) {
@@ -317,8 +319,9 @@ public class WebAuthnController {
             @Valid @RequestBody PasskeyRecoveryRequest request,
             HttpServletRequest httpRequest) {
         User user = authService.getCurrentUser();
+        int epoch;
         try {
-            mfaRecoveryService.recover(request, httpRequest);
+            epoch = mfaRecoveryService.recover(request, httpRequest);
         } catch (RuntimeException exception) {
             auditService.recordStrictFailureIndependentScoped(
                     "auth.mfa.recovery.denied",
@@ -331,6 +334,7 @@ public class WebAuthnController {
                     "proof_rejected");
             throw exception;
         }
+        sessionSecurityService.completeRecoveryStamp(httpRequest, epoch);
         return Map.of("message", "Passkeys removed; enroll a replacement passkey to continue");
     }
 

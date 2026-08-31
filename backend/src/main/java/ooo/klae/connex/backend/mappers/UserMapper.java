@@ -8,6 +8,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AiChatRealtimeRecipientDto;
 import ooo.klae.connex.backend.dto.UserDisplayNameDto;
 import ooo.klae.connex.backend.dto.UserReferenceDto;
+import ooo.klae.connex.backend.session.SessionEpochRestampGrant;
 
 /**
  * Mpper interface for {@code User} persistence.
@@ -72,8 +73,17 @@ public interface UserMapper {
     int markEmailVerified(int id);
     /** The account's current session epoch; sessions stamped with an older value are refused. */
     Integer currentSessionEpoch(int id);
-    /** Advances the account's session epoch, refusing every session stamped before the bump. */
+    /**
+     * Advances the account's session epoch and clears any previous recovery restamp grant in the
+     * same update, refusing every session stamped before the bump.
+     */
     int bumpSessionEpoch(int id);
+    int grantEpochRestamp(
+        @Param("id") int id,
+        @Param("sessionId") String sessionId,
+        @Param("epoch") int epoch);
+    SessionEpochRestampGrant epochRestampGrant(int id);
+    int clearEpochRestampGrant(int id);
     int updatePasswordHash(@Param("id") int id, @Param("passwordHash") String passwordHash);
     int updateTimezone(@Param("id") int id, @Param("timezone") String timezone);
     int updateLocale(@Param("id") int id, @Param("locale") String locale);
