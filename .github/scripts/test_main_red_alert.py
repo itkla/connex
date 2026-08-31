@@ -89,9 +89,20 @@ class MainRedAlertCoverage(unittest.TestCase):
         self.assertIn("workflow_run.event == 'push'", job)
 
     def test_every_terminal_non_success_conclusion_is_reportable(self):
+        """Pins the reportable set against GitHub's full conclusion enum.
+
+        Every documented conclusion is either reportable or has a stated reason not to be, so a new
+        "you forgot X" has to argue with a decision rather than find an omission: success and
+        neutral are green, skipped ran nothing, action_required is a pending approval rather than a
+        result, and stale is a superseded run whose replacement reports for itself.
+        """
         job = yaml.safe_load(ALERT.read_text())["jobs"]["alert"]["if"]
-        for conclusion in ("failure", "timed_out", "cancelled"):
+        reportable = ("failure", "timed_out", "cancelled", "startup_failure")
+        excluded = ("success", "neutral", "skipped", "action_required", "stale")
+        for conclusion in reportable:
             self.assertIn(conclusion, job)
+        for conclusion in excluded:
+            self.assertNotIn(f'"{conclusion}"', job)
 
     def test_reporting_is_gated_on_the_run_reflecting_current_main(self):
         step = yaml.safe_load(ALERT.read_text())["jobs"]["alert"]["steps"][0]["run"]

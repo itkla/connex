@@ -129,6 +129,22 @@ class RedMainAlertBehavior(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual([], actions, "a superseded run must not report")
 
+    def test_a_startup_failure_on_current_main_opens_an_issue(self):
+        # A workflow-file error concludes startup_failure without running a job; main is just as
+        # non-green as on a failure.
+        result, actions = run_step(
+            {"CONCLUSION": "startup_failure"},
+            {"GH_RUN_CONCLUSION": '"startup_failure"'})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("create", actions)
+
+    def test_a_startup_failure_on_current_main_is_reported(self):
+        result, actions = run_step(
+            {"CONCLUSION": "startup_failure"},
+            {"GH_RUN_STATUS": "completed", "GH_RUN_CONCLUSION": '"startup_failure"'})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("create", actions)
+
     def test_a_run_rerun_to_success_is_not_reported(self):
         # The failed completion fires, but the run has since been re-run green (same id, next
         # attempt). The live status must gate reporting, not the run id.
