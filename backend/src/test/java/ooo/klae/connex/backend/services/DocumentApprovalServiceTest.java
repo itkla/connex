@@ -40,6 +40,7 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DocumentTemplate;
 import ooo.klae.connex.backend.beans.DocumentApproval;
+import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Product;
 import ooo.klae.connex.backend.beans.Stage;
@@ -51,6 +52,7 @@ import ooo.klae.connex.backend.dto.DealLineItemRequest;
 import ooo.klae.connex.backend.dto.DocumentApprovalDto;
 import ooo.klae.connex.backend.dto.DocumentApprovalStepDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DocumentApprovalMapper;
@@ -160,6 +162,23 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
 
     private DocumentApprovalStepDto stepOf(DocumentApprovalDto approval, int order) {
         return approval.steps().stream().filter(s -> s.stepOrder() == order).findFirst().orElseThrow();
+    }
+
+    private Notification approvalRequestNotification(
+            DocumentApprovalDto approval, int stepOrder, User recipient) {
+        DocumentApprovalStepDto step = stepOf(approval, stepOrder);
+        return notificationMapper.findByDedupe(
+            workspace.getId(),
+            recipient.getId(),
+            "document.approval_request:" + approval.id() + ":" + step.id()
+                + ":requested:" + recipient.getId());
+    }
+
+    private void assertApprovalRequestResolved(
+            DocumentApprovalDto approval, int stepOrder, User recipient) {
+        Notification notification = approvalRequestNotification(approval, stepOrder, recipient);
+        assertNotNull(notification);
+        assertNotNull(notification.getResolvedAt());
     }
 
     private ApprovalPolicy jpyTotalPolicy(String minTotal) {
@@ -509,6 +528,33 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void cancelAndSupersedeResolveEveryApprovalRequestRecipient() {
+        User first = approver();
+        User second = approver();
+        chainPolicy("parallel", step(1, "Legal", first), step(1, "Finance", second));
+        Deal cancelledDeal = jpyDeal();
+        DealDocumentDto cancelledDocument = generate(cancelledDeal);
+        DocumentApprovalDto cancelledApproval = approvalService.requestApproval(
+            cancelledDeal.getId(), cancelledDocument.id(), null);
+
+        approvalService.cancel(cancelledDeal.getId(), cancelledDocument.id());
+
+        assertApprovalRequestResolved(cancelledApproval, 1, first);
+        assertApprovalRequestResolved(cancelledApproval, 2, second);
+
+        Deal supersededDeal = jpyDeal();
+        DealDocumentDto supersededDocument = generate(supersededDeal);
+        DocumentApprovalDto supersededApproval = approvalService.requestApproval(
+            supersededDeal.getId(), supersededDocument.id(), null);
+
+        documentService.updateStatus(
+            supersededDeal.getId(), supersededDocument.id(), "superseded");
+
+        assertApprovalRequestResolved(supersededApproval, 1, first);
+        assertApprovalRequestResolved(supersededApproval, 2, second);
+    }
+
+    @Test
     void decisionRequiresApprovePermission() {
         jpyTotalPolicy("100");
         Deal deal = jpyDeal();
@@ -614,11 +660,17 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         assertEquals("approved", stepOf(afterFirst, 1).status());
         assertEquals("active", stepOf(afterFirst, 2).status());
         assertEquals("pending_approval", documentService.getOne(deal.getId(), doc.id()).status());
+        assertApprovalRequestResolved(requested, 1, first);
+        assertNull(approvalRequestNotification(requested, 2, second).getResolvedAt());
 
         authenticateAs(second, workspace.getId());
+        assertTrue(approvalService.inbox().stream().anyMatch(item ->
+            item.approvalId() == requested.id()
+                && item.stepId() == stepOf(requested, 2).id()));
         DocumentApprovalDto afterSecond = approvalService.decide(deal.getId(), doc.id(), "approved", null, null);
         assertEquals("approved", afterSecond.status());
         assertEquals("approved", documentService.getOne(deal.getId(), doc.id()).status());
+        assertApprovalRequestResolved(requested, 2, second);
     }
 
     @Test
@@ -2129,6 +2181,67 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         verify(documentMapper).getByIds(workspace.getId(), List.of(document.id()));
         verify(documentMapper, times(0)).getById(anyInt(), anyInt());
         verify(documentMapper, times(0)).lockById(anyInt(), anyInt());
+    }
+
+    @Test
+    void boundedInboxKeepsParallelActionableStepsAsSeparateWorkItems() {
+        User caller = approver();
+        chainPolicy("parallel", step(1, "Legal", caller), step(1, "Finance", caller));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        authenticateAs(caller, workspace.getId());
+
+        List<ApprovalInboxItemDto> all = approvalService.inbox(10).stream()
+            .filter(item -> item.approvalId() == requested.id()).toList();
+
+        assertEquals(2, all.size());
+        assertEquals(List.of(1, 2), all.stream().map(ApprovalInboxItemDto::stepOrder).toList());
+        assertEquals(1, approvalService.inbox(1).size());
+        assertTrue(all.stream().allMatch(item -> item.currentVersion().length() == 64));
+    }
+
+    @Test
+    void staleStepIdConflictsInsteadOfDecidingAnotherActionableStep() {
+        User caller = approver();
+        chainPolicy("parallel", step(1, "Legal", caller), step(1, "Finance", caller));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        authenticateAs(caller, workspace.getId());
+        List<ApprovalInboxItemDto> items = approvalService.inbox(10).stream()
+            .filter(item -> item.approvalId() == requested.id()).toList();
+
+        assertThrows(ConflictException.class, () -> approvalService.decideWorkItem(
+            requested.id(), items.get(1).stepId(), "approved", null,
+            items.getFirst().currentVersion()));
+        assertEquals("pending", approvalService.getForDocument(
+            deal.getId(), document.id()).getFirst().status());
+    }
+
+    @Test
+    void anotherApproversDecisionInvalidatesTheProjectedStepVersion() {
+        User first = approver();
+        User second = approver();
+        chainPolicy("sequential", step(2, "Two of us", first, second));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        authenticateAs(first, workspace.getId());
+        ApprovalInboxItemDto stale = approvalService.inbox(10).stream()
+            .filter(item -> item.approvalId() == requested.id()).findFirst().orElseThrow();
+        authenticateAs(second, workspace.getId());
+        ApprovalInboxItemDto current = approvalService.inbox(10).stream()
+            .filter(item -> item.approvalId() == requested.id()).findFirst().orElseThrow();
+        approvalService.decideWorkItem(
+            requested.id(), current.stepId(), "approved", null, current.currentVersion());
+        authenticateAs(first, workspace.getId());
+
+        assertThrows(ConflictException.class, () -> approvalService.decideWorkItem(
+            requested.id(), stale.stepId(), "approved", null, stale.currentVersion()));
     }
 
     private List<String> approvalDomainSnapshot() {

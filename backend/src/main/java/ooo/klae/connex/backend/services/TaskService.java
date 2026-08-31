@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.sql.Connection;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -24,6 +25,9 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.BoardPositionUpdate;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.TaskSummaryDto;
+import ooo.klae.connex.backend.dto.TaskWorkItem;
+import ooo.klae.connex.backend.dto.TaskWorkPage;
+import ooo.klae.connex.backend.dto.WorkItemUrgency;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
@@ -32,6 +36,7 @@ import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.work.WorkItemStateHash;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -103,6 +108,41 @@ public class TaskService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         return referenceService.hydrateTasks(
             workspaceId, taskMapper.getUpcomingOpenTasks(workspaceId, limit));
+    }
+
+    /** Returns a bounded snapshot of the current actor's open assigned work. */
+    @Transactional(readOnly = true)
+    public TaskWorkPage findOpenAssignedWork(Instant asOf, int limit) {
+        return findOpenAssignedWork(asOf, userCalendarService.today(), Set.of(), limit);
+    }
+
+    /** Returns a bounded urgency-filtered snapshot evaluated against one actor calendar date. */
+    @Transactional(readOnly = true)
+    public TaskWorkPage findOpenAssignedWork(
+            Instant asOf,
+            LocalDate actorToday,
+            Set<WorkItemUrgency> urgencies,
+            int limit) {
+        if (asOf == null || actorToday == null || urgencies == null || limit < 1 || limit > 1000) {
+            throw new BadRequestException("Invalid assigned-work query");
+        }
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = workspaceService.getCurrentUserId();
+        Set<String> urgencyNames = urgencies.stream().map(Enum::name).collect(java.util.stream.Collectors.toSet());
+        List<Task> tasks = taskMapper.findOpenAssignedWork(
+            workspaceId, actorId, actorToday, urgencyNames, limit);
+        List<String> versions = tasks.stream().map(TaskService::workItemVersion).toList();
+        List<Task> hydrated = referenceService.hydrateTasks(workspaceId, tasks);
+        List<TaskWorkItem> items = new ArrayList<>(hydrated.size());
+        for (int index = 0; index < hydrated.size(); index++) {
+            items.add(new TaskWorkItem(hydrated.get(index), versions.get(index)));
+        }
+        long matchingTotal = taskMapper.countOpenAssignedWork(
+            workspaceId, actorId, actorToday, urgencyNames);
+        long overallTotal = urgencies.isEmpty()
+            ? matchingTotal
+            : taskMapper.countOpenAssignedWork(workspaceId, actorId, actorToday, Set.of());
+        return new TaskWorkPage(List.copyOf(items), matchingTotal, overallTotal, asOf);
     }
 
     public List<Task> getTasksByAssignedToId(int assignedToId) {
@@ -250,12 +290,41 @@ public class TaskService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_UPDATE)
     public Task complete(int id) {
+        return completeLocked(id, null);
+    }
+
+    /** Completes assigned open work only when its board-locked canonical state still matches. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.TASK_UPDATE)
+    public Task complete(int id, String expectedStateHash) {
+        if (expectedStateHash == null || expectedStateHash.isBlank()) {
+            throw new BadRequestException("Expected task state is required");
+        }
+        return completeLocked(id, expectedStateHash);
+    }
+
+    private Task completeLocked(int id, String expectedStateHash) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User currentUser = authService.getCurrentUser();
         List<Task> lockedTasks = lockTaskBoardTasks(workspaceId, id);
         Task task = requireLockedTask(lockedTasks, id);
+        if (expectedStateHash != null
+                && (task.getAssignedTo() == null
+                    || task.getAssignedTo().getId() != currentUser.getId())) {
+            throw new ResourceNotFoundException("Task not found with id: " + id);
+        }
         if (task.getAssignedTo() == null || task.getAssignedTo().getId() != currentUser.getId()) {
             throw new ForbiddenException("Only the task assignee may complete this task");
+        }
+        if (expectedStateHash != null) {
+            if (task.isCompleted()
+                    || !(STATUS_TODO.equals(task.getStatus())
+                        || STATUS_IN_PROGRESS.equals(task.getStatus()))) {
+                throw new ResourceNotFoundException("Task not found with id: " + id);
+            }
+            if (!workItemVersion(task).equals(expectedStateHash)) {
+                throw new ConflictException("Task changed; refresh and try again");
+            }
         }
         if (task.isCompleted()) {
             return hydrate(workspaceId, task);
@@ -277,6 +346,19 @@ public class TaskService {
         notificationChanges.publish(workspaceId, "task", id);
         ruleTriggers.publish(workspaceId, "task", id, "task.completed");
         return hydrate(workspaceId, completed);
+    }
+
+    private static String workItemVersion(Task task) {
+        return WorkItemStateHash.sha256(
+            task.getId(),
+            task.getDescription(),
+            task.isCompleted(),
+            task.getStatus(),
+            task.getDueDate(),
+            task.getAssignedTo() == null ? null : task.getAssignedTo().getId(),
+            task.getPerson() == null ? null : task.getPerson().getId(),
+            task.getDeal() == null ? null : task.getDeal().getId(),
+            task.getUpdatedAt());
     }
 
     /**

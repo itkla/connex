@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -43,6 +45,7 @@ import ooo.klae.connex.backend.dto.DocumentApprovalStepDto;
 import ooo.klae.connex.backend.dto.DocumentContent;
 import ooo.klae.connex.backend.services.ApprovalStepEligibility.EffectiveApprovers;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DealDocumentMapper;
@@ -52,6 +55,7 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.work.WorkItemStateHash;
 
 /**
  * Runs the approval lifecycle on generated deal documents: request, decide, cancel. The document
@@ -87,6 +91,7 @@ public class DocumentApprovalService {
     private final NotificationDelivery notificationDelivery;
     private final RuleTriggerPublisher ruleTriggers;
     private final ObjectMapper objectMapper;
+    private final NotificationSourceResolutionService notificationSourceResolutionService;
     private final ApprovalStepEligibility eligibility = new ApprovalStepEligibility();
 
     private static final String REQUEST_TYPE = "document.approval_request";
@@ -113,6 +118,7 @@ public class DocumentApprovalService {
     private static final int MAX_STEP_APPROVERS = 20;
     private static final int CANDIDATE_LIMIT = 200;
     private static final int INBOX_LIMIT = 50;
+    private static final int MAX_WORK_LIMIT = 1000;
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     /** Approval history for one document, newest first. */
@@ -296,6 +302,41 @@ public class DocumentApprovalService {
     @RequirePermission(Permission.DOCUMENT_APPROVE)
     public DocumentApprovalDto decide(int dealId, int documentId, String decision, String comment,
             Integer stepId) {
+        return decideLocked(dealId, documentId, decision, comment, stepId, null, null);
+    }
+
+    /** Decides one exact actionable approval step when its chain-aware version still matches. */
+    @Transactional
+    @RequirePermission(Permission.DOCUMENT_APPROVE)
+    public DocumentApprovalDto decideWorkItem(
+            int approvalId,
+            int stepId,
+            String decision,
+            String comment,
+            String expectedStateHash) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        DocumentApproval approval = approvalMapper.getById(workspaceId, approvalId);
+        if (approval == null || !PENDING.equals(approval.getStatus())) {
+            throw new ResourceNotFoundException("Approval not found with id: " + approvalId);
+        }
+        return decideLocked(
+            approval.getDealId(),
+            approval.getDocumentId(),
+            decision,
+            comment,
+            stepId,
+            approvalId,
+            expectedStateHash);
+    }
+
+    private DocumentApprovalDto decideLocked(
+            int dealId,
+            int documentId,
+            String decision,
+            String comment,
+            Integer stepId,
+            Integer expectedApprovalId,
+            String expectedStateHash) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = requireDeal(workspaceId, dealId);
         User actor = userMapper.getUserById(workspaceService.getCurrentUserId());
@@ -308,7 +349,11 @@ public class DocumentApprovalService {
         }
         DealDocument document = lockDocument(workspaceId, dealId, documentId);
         DocumentApproval approval = approvalMapper.findPendingForUpdate(workspaceId, documentId);
-        if (approval == null || !"pending_approval".equals(document.getStatus())) {
+        if (approval == null || !"pending_approval".equals(document.getStatus())
+                || (expectedApprovalId != null && approval.getId() != expectedApprovalId)) {
+            if (expectedApprovalId != null) {
+                throw new ConflictException("Approval changed; refresh and try again");
+            }
             throw new BadRequestException("No pending approval on this document");
         }
         List<DocumentApprovalStep> steps = chainOfForUpdate(workspaceId, approval);
@@ -316,11 +361,33 @@ public class DocumentApprovalService {
         while (reconcileExpiry(workspaceId, document, approval, pool)) {
             approval = requireApprovalForUpdate(workspaceId, approval.getId());
             if (!PENDING.equals(approval.getStatus())) {
+                if (expectedApprovalId != null) {
+                    throw new ConflictException("Approval changed; refresh and try again");
+                }
                 return toDto(approval, document, pool);
             }
             steps = approval.getSteps();
         }
-        requireSeparationOfDuties(approval, document, actor);
+        if (expectedApprovalId == null) {
+            requireSeparationOfDuties(approval, document, actor);
+        } else {
+            DocumentApprovalStep expectedStep = steps.stream()
+                .filter(candidate -> candidate.getId() == stepId)
+                .findFirst()
+                .orElseThrow(() -> new ConflictException(
+                    "Approval step changed; refresh and try again"));
+            if (attributionFailure(approval, document) != null
+                    || !ACTIVE.equals(expectedStep.getStatus())
+                    || !isApprover(approval, document, expectedStep, actor, pool)
+                    || hasDecided(expectedStep, actor.getId())) {
+                throw new ConflictException("Approval step changed; refresh and try again");
+            }
+            if (expectedStateHash == null
+                    || !approvalWorkItemVersion(approval, expectedStep, document)
+                        .equals(expectedStateHash)) {
+                throw new ConflictException("Approval changed; refresh and try again");
+            }
+        }
         DocumentApprovalStep step = resolveStep(approval, document, steps, stepId, actor, pool);
 
         DocumentApprovalDecision recorded = new DocumentApprovalDecision();
@@ -358,6 +425,8 @@ public class DocumentApprovalService {
         } else if (REJECTED.equals(outcome)) {
             ruleTriggers.publish(workspaceId, "document", documentId, "document.rejected");
         }
+        notificationSourceResolutionService.resolveApprovalRequests(
+            workspaceId, documentId, Instant.now());
         return toDto(requireApprovalForUpdate(workspaceId, approval.getId()), document, pool);
     }
 
@@ -548,6 +617,8 @@ public class DocumentApprovalService {
             "Cancelled approval request for " + document.getType() + " v" + document.getVersion()
                 + " by superseding the document", null);
         notifyDecided(workspaceId, document, pending, CANCELLED, actor);
+        notificationSourceResolutionService.resolveApprovalRequests(
+            workspaceId, document.getId(), Instant.now());
     }
 
     /** Withdraws the requester's own pending approval request, returning the document to draft. */
@@ -579,6 +650,8 @@ public class DocumentApprovalService {
         documentMapper.updateStatus(workspaceId, documentId, "draft");
         auditService.record("document_approval.cancel", "deal", dealId, deal.getName(),
             "Cancelled approval request for " + document.getType() + " v" + document.getVersion(), null);
+        notificationSourceResolutionService.resolveApprovalRequests(
+            workspaceId, documentId, Instant.now());
         return toDto(workspaceId, requireApproval(workspaceId, approval.getId()), document);
     }
 
@@ -617,6 +690,8 @@ public class DocumentApprovalService {
             .filter(step -> ACTIVE.equals(step.getStatus())).toList();
         notifyTerminated(workspaceId, document, current, activeSteps, actor,
             "policy_invalidated", detail, true);
+        notificationSourceResolutionService.resolveApprovalRequests(
+            workspaceId, document.getId(), Instant.now());
     }
 
     /**
@@ -677,6 +752,8 @@ public class DocumentApprovalService {
         User actor = userMapper.getUserById(workspaceService.getCurrentUserId());
         notifyTerminated(workspaceId, document, current, List.of(), actor,
             UNSATISFIABLE, detail, false, pool);
+        notificationSourceResolutionService.resolveApprovalRequests(
+            workspaceId, document.getId(), Instant.now());
         return true;
     }
 
@@ -896,18 +973,28 @@ public class DocumentApprovalService {
     @Transactional(readOnly = true)
     @RequirePermission(Permission.DOCUMENT_APPROVE)
     public List<ApprovalInboxItemDto> inbox() {
+        return inbox(INBOX_LIMIT);
+    }
+
+    /** Returns a caller-actionable approval-step queue bounded for a projection consumer. */
+    @Transactional(readOnly = true)
+    @RequirePermission(Permission.DOCUMENT_APPROVE)
+    public List<ApprovalInboxItemDto> inbox(int limit) {
+        if (limit < 1 || limit > MAX_WORK_LIMIT) {
+            throw new BadRequestException("Approval inbox limit must be between 1 and 1000");
+        }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int callerId = workspaceService.getCurrentUserId();
         ApproverPool pool = approverPool(workspaceId);
         List<ApprovalInboxItemDto> items = new ArrayList<>();
         int offset = 0;
-        while (items.size() < INBOX_LIMIT) {
+        while (items.size() < limit) {
             List<ApprovalInboxRow> candidates = approvalMapper.findActionableSteps(
                 workspaceId, callerId, offset, CANDIDATE_LIMIT);
             if (candidates.isEmpty()) {
                 break;
             }
-            appendInboxItems(workspaceId, callerId, candidates, pool, items);
+            appendInboxItems(workspaceId, callerId, candidates, pool, items, limit);
             if (candidates.size() < CANDIDATE_LIMIT) {
                 break;
             }
@@ -918,7 +1005,7 @@ public class DocumentApprovalService {
 
     private void appendInboxItems(int workspaceId, int callerId,
             List<ApprovalInboxRow> candidates, ApproverPool pool,
-            List<ApprovalInboxItemDto> items) {
+            List<ApprovalInboxItemDto> items, int limit) {
         List<Integer> approvalIds = candidates.stream()
             .map(ApprovalInboxRow::approvalId)
             .distinct()
@@ -935,7 +1022,7 @@ public class DocumentApprovalService {
             .collect(Collectors.toMap(DealDocument::getId, document -> document,
                 (first, second) -> first, LinkedHashMap::new));
         for (ApprovalInboxRow row : candidates) {
-            if (items.size() >= INBOX_LIMIT) {
+            if (items.size() >= limit) {
                 break;
             }
             DocumentApproval approval = approvalsById.get(row.approvalId());
@@ -955,11 +1042,116 @@ public class DocumentApprovalService {
                     .undecided().contains(callerId)) {
                 continue;
             }
+            String requesterLabel = approval.getRequestedBy() == null ? null : pool.members().stream()
+                .filter(member -> member.getId() == approval.getRequestedBy())
+                .findFirst()
+                .map(this::displayLabel)
+                .orElse(null);
             items.add(new ApprovalInboxItemDto(row.approvalId(), row.dealId(), row.dealName(),
                 row.documentId(), row.documentTitle(), row.documentType(), row.version(),
                 row.stepId(), row.stepOrder(), row.stepName(), row.requiredCount(), row.dueAt(),
-                row.escalatedAt() != null, row.requestedBy(), row.requestedAt()));
+                row.escalatedAt() != null, row.requestedBy(), requesterLabel, row.requestedAt(),
+                approvalFreshness(approval, step, document),
+                approvalWorkItemVersion(approval, step, document)));
         }
+    }
+
+    /** Resolves which candidate recipients can still decide an active step for one document. */
+    public Set<Integer> actionableRecipientIdsForDocument(
+            int workspaceId,
+            int documentId,
+            Set<Integer> candidateRecipientIds) {
+        if (workspaceId != workspaceService.getCurrentWorkspaceId()
+                || candidateRecipientIds == null || candidateRecipientIds.isEmpty()) {
+            return Set.of();
+        }
+        DocumentApproval approval = approvalMapper.findPending(workspaceId, documentId);
+        DealDocument document = documentMapper.getById(workspaceId, documentId);
+        if (approval == null || document == null
+                || attributionFailure(approval, document) != null) {
+            return Set.of();
+        }
+        approval = withChain(workspaceId, List.of(approval)).getFirst();
+        ApproverPool pool = approverPool(workspaceId);
+        Set<Integer> actionable = new LinkedHashSet<>();
+        for (DocumentApprovalStep step : approval.getSteps()) {
+            if (!ACTIVE.equals(step.getStatus())) {
+                continue;
+            }
+            eligibility.resolve(step, pool, separationExclusions(approval, document))
+                .undecided().stream()
+                .filter(candidateRecipientIds::contains)
+                .forEach(actionable::add);
+        }
+        return Set.copyOf(actionable);
+    }
+
+    private static Instant approvalFreshness(
+            DocumentApproval approval,
+            DocumentApprovalStep step,
+            DealDocument document) {
+        List<String> timestamps = new ArrayList<>();
+        timestamps.add(approval.getCreatedAt());
+        timestamps.add(approval.getUpdatedAt());
+        timestamps.add(step.getCreatedAt());
+        timestamps.add(step.getUpdatedAt());
+        timestamps.add(document.getUpdatedAt());
+        step.getDecisions().forEach(decision -> timestamps.add(decision.getDecidedAt()));
+        step.getAssignments().forEach(assignment -> timestamps.add(assignment.getCreatedAt()));
+        return timestamps.stream()
+            .filter(value -> value != null && !value.isBlank())
+            .map(DocumentApprovalService::databaseInstant)
+            .max(Instant::compareTo)
+            .orElse(Instant.EPOCH);
+    }
+
+    private static String approvalWorkItemVersion(
+            DocumentApproval approval,
+            DocumentApprovalStep step,
+            DealDocument document) {
+        List<String> decisions = step.getDecisions().stream()
+            .sorted(Comparator.comparingInt(DocumentApprovalDecision::getId))
+            .map(decision -> String.join("|",
+                Integer.toString(decision.getId()),
+                decision.getDecision(),
+                Integer.toString(decision.getDecidedBy()),
+                String.valueOf(decision.getDecidedAt())))
+            .toList();
+        List<String> assignments = step.getAssignments().stream()
+            .sorted(Comparator.comparingInt(DocumentApprovalStepAssignment::getId))
+            .map(assignment -> String.join("|",
+                Integer.toString(assignment.getId()),
+                assignment.getAssignmentKind(),
+                Integer.toString(assignment.getAssignmentRound()),
+                assignment.getApproverKind(),
+                String.valueOf(assignment.getUserId()),
+                String.valueOf(assignment.getDelegatedByUserId()),
+                String.valueOf(assignment.getCreatedAt())))
+            .toList();
+        return WorkItemStateHash.sha256(
+            approval.getId(),
+            approval.getStatus(),
+            step.getId(),
+            step.getStepOrder(),
+            approval.getMode(),
+            step.getRequiredCount(),
+            step.getStatus(),
+            decisions,
+            assignments,
+            step.getDueAt(),
+            step.getEscalatedAt(),
+            approval.getDealId(),
+            approval.getDocumentId(),
+            approval.getUpdatedAt(),
+            step.getUpdatedAt(),
+            document.getUpdatedAt());
+    }
+
+    private static Instant databaseInstant(String value) {
+        if (value.contains("T")) {
+            return Instant.parse(value);
+        }
+        return Timestamp.valueOf(value).toLocalDateTime().toInstant(ZoneOffset.UTC);
     }
 
     /**
@@ -1062,6 +1254,8 @@ public class DocumentApprovalService {
             auditService.singleChange("status", PENDING, EXPIRED));
         notifyTerminated(workspaceId, document, current, activeSteps, null,
             EXPIRED, detail, true, pool);
+        notificationSourceResolutionService.resolveApprovalRequests(
+            workspaceId, document.getId(), Instant.now());
         return true;
     }
 

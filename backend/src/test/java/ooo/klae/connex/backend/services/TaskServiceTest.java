@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.time.Instant;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -129,6 +130,46 @@ class TaskServiceTest extends AbstractServiceTest {
         assertEquals(0, taskService.getTaskById(first.getId()).getPosition());
         assertEquals(1, taskService.getTaskById(last.getId()).getPosition());
         assertEquals(0, taskService.getTaskById(completing.getId()).getPosition());
+    }
+
+    @Test
+    void versionAwareCompleteUsesTheProjectedCanonicalState() {
+        Task task = newTask(currentUser, null, null);
+        String version = taskService.findOpenAssignedWork(
+            Instant.parse("2026-08-30T12:00:00Z"), 10).items().stream()
+            .filter(item -> item.task().getId() == task.getId())
+            .findFirst().orElseThrow().currentVersion();
+
+        Task completed = taskService.complete(task.getId(), version);
+
+        assertTrue(completed.isCompleted());
+        assertEquals("done", completed.getStatus());
+    }
+
+    @Test
+    void versionAwareCompleteRejectsAConcurrentSourceChange() {
+        Task task = newTask(currentUser, null, null);
+        String version = taskService.findOpenAssignedWork(
+            Instant.parse("2026-08-30T12:00:00Z"), 10).items().stream()
+            .filter(item -> item.task().getId() == task.getId())
+            .findFirst().orElseThrow().currentVersion();
+        jdbcTemplate.update(
+            "UPDATE task SET description = ?, updated_at = CURRENT_TIMESTAMP(6) "
+                + "WHERE workspace_id = ? AND id = ?",
+            "changed", workspace.getId(), task.getId());
+
+        assertThrows(ConflictException.class, () -> taskService.complete(task.getId(), version));
+        assertFalse(taskService.getTaskById(task.getId()).isCompleted());
+    }
+
+    @Test
+    void versionAwareCompleteConcealsAnotherAssigneesTask() {
+        User other = newUser();
+        Task task = newTask(other, null, null);
+
+        assertThrows(
+            ResourceNotFoundException.class,
+            () -> taskService.complete(task.getId(), "a".repeat(64)));
     }
 
     @Test

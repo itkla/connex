@@ -13,6 +13,7 @@ import ooo.klae.connex.backend.dto.TaskSummaryDto;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Mapper interface for {@code Task} persistence.
@@ -30,6 +31,19 @@ public interface TaskMapper {
         @Param("memberScope") MemberScope memberScope
     );
     List<Task> getUpcomingOpenTasks(@Param("workspaceId") int workspaceId, @Param("limit") int limit);
+    List<Task> findOpenAssignedWork(
+        @Param("workspaceId") int workspaceId,
+        @Param("assignedToId") int assignedToId,
+        @Param("today") LocalDate today,
+        @Param("urgencies") Set<String> urgencies,
+        @Param("limit") int limit
+    );
+    long countOpenAssignedWork(
+        @Param("workspaceId") int workspaceId,
+        @Param("assignedToId") int assignedToId,
+        @Param("today") LocalDate today,
+        @Param("urgencies") Set<String> urgencies
+    );
 
     /**
      * Reads one member's open commitments that are already overdue or fall due inside the brief's

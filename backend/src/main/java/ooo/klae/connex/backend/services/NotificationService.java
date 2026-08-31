@@ -1,10 +1,13 @@
 package ooo.klae.connex.backend.services;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -19,13 +22,20 @@ import ooo.klae.connex.backend.dto.NotificationCountsDto;
 import ooo.klae.connex.backend.dto.NotificationDto;
 import ooo.klae.connex.backend.dto.NotificationFacets;
 import ooo.klae.connex.backend.dto.NotificationPageDto;
+import ooo.klae.connex.backend.dto.NotificationWorkItem;
+import ooo.klae.connex.backend.dto.NotificationWorkPage;
 import ooo.klae.connex.backend.dto.SnoozeRequest;
+import ooo.klae.connex.backend.dto.WorkItemUrgency;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.notifications.NotificationProperties;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
+import ooo.klae.connex.backend.work.InvalidWorkItemSourceRowsException;
+import ooo.klae.connex.backend.work.WorkItemStateHash;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Authenticated notification inbox operations.
@@ -44,6 +54,8 @@ public class NotificationService {
     private final NotificationSnoozeResolver snoozeResolver;
     private final NotificationQuietHoursService quietHoursService;
     private final WorkspaceService workspaceService;
+    private final ObjectMapper objectMapper;
+    private final Clock clock;
 
     @Transactional(readOnly = true)
     public NotificationPageDto getPage(
@@ -146,6 +158,48 @@ public class NotificationService {
         );
     }
 
+    /** Returns bounded active-workspace deal-close work for the current recipient. */
+    @Transactional(readOnly = true)
+    public NotificationWorkPage findActiveDealCloseWork(
+            int workspaceId,
+            Instant asOf,
+            int limit) {
+        return findActiveDealCloseWork(workspaceId, asOf, Set.of(), limit);
+    }
+
+    /** Returns bounded urgency-filtered deal-close work for the current recipient. */
+    @Transactional(readOnly = true)
+    public NotificationWorkPage findActiveDealCloseWork(
+            int workspaceId,
+            Instant asOf,
+            Set<WorkItemUrgency> urgencies,
+            int limit) {
+        if (workspaceId != workspaceService.getCurrentWorkspaceId()
+                || asOf == null || urgencies == null || limit < 1 || limit > 1000) {
+            throw new BadRequestException("Invalid notification-work query");
+        }
+        int recipientId = currentRecipientId();
+        List<String> severities = workSeverities(urgencies);
+        String snapshot = utcTimestamp(asOf);
+        List<Notification> rows = !urgencies.isEmpty() && severities.isEmpty()
+            ? List.of()
+            : notificationMapper.findActiveDealCloseWork(
+                workspaceId, recipientId, snapshot, severities, limit);
+        List<NotificationWorkItem> items = new ArrayList<>(rows.size());
+        for (Notification row : rows) {
+            items.add(toWorkItem(row));
+        }
+        long matchingTotal = !urgencies.isEmpty() && severities.isEmpty()
+            ? 0
+            : notificationMapper.countActiveDealCloseWork(
+                workspaceId, recipientId, snapshot, severities);
+        long overallTotal = urgencies.isEmpty()
+            ? matchingTotal
+            : notificationMapper.countActiveDealCloseWork(
+                workspaceId, recipientId, snapshot, List.of());
+        return new NotificationWorkPage(List.copyOf(items), matchingTotal, overallTotal, asOf);
+    }
+
     @Transactional
     public NotificationDto markRead(int id) {
         int recipientId = currentRecipientId();
@@ -175,6 +229,19 @@ public class NotificationService {
         if (current.getDismissedAt() != null || current.getResolvedAt() != null) {
             return response(recipientId, current);
         }
+        requireMutation(notificationMapper.dismiss(recipientId, id), id);
+        return mutationResponse(recipientId, requireNotification(recipientId, id));
+    }
+
+    /** Dismisses active deal-close work only when its locked canonical state still matches. */
+    @Transactional
+    public NotificationDto dismiss(int id, String expectedStateHash) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int recipientId = currentRecipientId();
+        Notification current = notificationMapper.findActiveDealCloseByIdForUpdate(
+            workspaceId, recipientId, id, utcTimestamp(clock.instant()),
+            List.of("critical", "warning"));
+        requireExpectedWorkState(current, id, expectedStateHash);
         requireMutation(notificationMapper.dismiss(recipientId, id), id);
         return mutationResponse(recipientId, requireNotification(recipientId, id));
     }
@@ -213,6 +280,27 @@ public class NotificationService {
                     && resolution.timezone().equals(latest.getSnoozeTimezone())) {
                 return response(recipientId, latest);
             }
+            throw notFound(id);
+        }
+        return mutationResponse(recipientId, requireNotification(recipientId, id));
+    }
+
+    /** Snoozes active deal-close work only when its locked canonical state still matches. */
+    @Transactional
+    public NotificationDto snooze(
+            int id,
+            SnoozeRequest request,
+            String expectedStateHash) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int recipientId = currentRecipientId();
+        Notification current = notificationMapper.findActiveDealCloseByIdForUpdate(
+            workspaceId, recipientId, id, utcTimestamp(clock.instant()),
+            List.of("critical", "warning"));
+        requireExpectedWorkState(current, id, expectedStateHash);
+        NotificationSnoozeResolver.Resolution resolution = snoozeResolver.resolve(request);
+        int rows = notificationMapper.snooze(
+            recipientId, id, resolution.databaseTimestamp(), resolution.timezone());
+        if (rows == 0) {
             throw notFound(id);
         }
         return mutationResponse(recipientId, requireNotification(recipientId, id));
@@ -296,6 +384,76 @@ public class NotificationService {
             throw notFound(id);
         }
         return notification;
+    }
+
+    private void requireExpectedWorkState(
+            Notification current,
+            int id,
+            String expectedStateHash) {
+        if (current == null) {
+            throw notFound(id);
+        }
+        if (expectedStateHash == null || expectedStateHash.isBlank()) {
+            throw new BadRequestException("Expected notification state is required");
+        }
+        if (!workItemVersion(current).equals(expectedStateHash)) {
+            throw new ConflictException("Notification changed; refresh and try again");
+        }
+    }
+
+    private NotificationWorkItem toWorkItem(Notification notification) {
+        try {
+            if (!("critical".equals(notification.getSeverity())
+                    || "warning".equals(notification.getSeverity()))
+                    || notification.getData() == null) {
+                throw new InvalidWorkItemSourceRowsException();
+            }
+            JsonNode data = objectMapper.readTree(notification.getData());
+            JsonNode dateNode = data.get("expectedCloseDate");
+            JsonNode dealIdNode = data.get("dealId");
+            if (dateNode == null || !dateNode.isTextual()
+                    || dealIdNode == null || !dealIdNode.canConvertToInt()
+                    || notification.getSourceId() == null
+                    || dealIdNode.intValue() != notification.getSourceId()) {
+                throw new InvalidWorkItemSourceRowsException();
+            }
+            return new NotificationWorkItem(
+                notification,
+                LocalDate.parse(dateNode.textValue()),
+                workItemVersion(notification));
+        } catch (InvalidWorkItemSourceRowsException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            throw new InvalidWorkItemSourceRowsException(exception);
+        }
+    }
+
+    private static List<String> workSeverities(Set<WorkItemUrgency> urgencies) {
+        List<String> severities = new ArrayList<>(2);
+        if (urgencies.isEmpty() || urgencies.contains(WorkItemUrgency.critical)) {
+            severities.add("critical");
+        }
+        if (urgencies.isEmpty() || urgencies.contains(WorkItemUrgency.high)) {
+            severities.add("warning");
+        }
+        return List.copyOf(severities);
+    }
+
+    private static String workItemVersion(Notification notification) {
+        return WorkItemStateHash.sha256(
+            notification.getId(),
+            notification.getSeverity(),
+            notification.getData(),
+            notification.getReadAt(),
+            notification.getDismissedAt(),
+            notification.getResolvedAt(),
+            notification.getSnoozedUntil(),
+            notification.getSnoozeTimezone(),
+            notification.getUpdatedAt());
+    }
+
+    private static String utcTimestamp(Instant instant) {
+        return LocalDateTime.ofInstant(instant, ZoneOffset.UTC).format(UTC_DATETIME);
     }
 
     private static void requireMutation(int rows, int id) {

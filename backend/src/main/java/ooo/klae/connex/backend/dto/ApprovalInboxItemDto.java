@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.dto;
 
+import java.time.Instant;
+
 /**
  * One approval step the caller can still decide, for the workspace-scoped My Work projection.
  *
@@ -17,7 +19,10 @@ package ooo.klae.connex.backend.dto;
  * @param dueAt         absolute deadline, null when the step has none
  * @param escalated     whether the step widened to every approver after passing its deadline
  * @param requestedBy   requesting user id
+ * @param requestedByLabel current display label of the requester
  * @param requestedAt   when approval was requested
+ * @param freshnessAt   latest authoritative chain state change
+ * @param currentVersion canonical approval-and-step state hash
  */
 public record ApprovalInboxItemDto(
     int approvalId,
@@ -34,6 +39,9 @@ public record ApprovalInboxItemDto(
     String dueAt,
     boolean escalated,
     Integer requestedBy,
-    String requestedAt
+    String requestedByLabel,
+    String requestedAt,
+    Instant freshnessAt,
+    String currentVersion
 ) {
 }

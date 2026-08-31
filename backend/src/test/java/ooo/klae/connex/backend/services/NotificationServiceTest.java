@@ -13,6 +13,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,6 +28,7 @@ import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.NotificationCountsDto;
 import ooo.klae.connex.backend.dto.NotificationDto;
 import ooo.klae.connex.backend.dto.NotificationFacets;
+import ooo.klae.connex.backend.dto.WorkItemUrgency;
 import ooo.klae.connex.backend.dto.SnoozeRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
@@ -34,6 +36,9 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.notifications.NotificationProperties;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
+import ooo.klae.connex.backend.work.InvalidWorkItemSourceRowsException;
+import ooo.klae.connex.backend.work.WorkItemStateHash;
+import tools.jackson.databind.ObjectMapper;
 
 @ExtendWith(MockitoExtension.class)
 class NotificationServiceTest {
@@ -57,13 +62,118 @@ class NotificationServiceTest {
             new NotificationSnoozeResolver(Clock.fixed(
                 Instant.parse("2026-07-20T02:00:00Z"), ZoneOffset.UTC)),
             quietHoursService,
-            workspaceService
+            workspaceService,
+            new ObjectMapper(),
+            Clock.fixed(Instant.parse("2026-07-20T02:00:00Z"), ZoneOffset.UTC)
         );
         User user = new User();
         user.setId(42);
         when(authService.getCurrentUser()).thenReturn(user);
+        lenient().when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         lenient().when(quietHoursService.evaluateForUser(42, Instant.parse("2026-06-25T00:00:00Z")))
             .thenReturn(new NotificationQuietHoursEvaluator.Evaluation(false, null));
+    }
+
+    @Test
+    void dealCloseProjectionValidatesTypedDataAndReturnsCanonicalVersion() {
+        Notification row = dealCloseNotification();
+        when(notificationMapper.findActiveDealCloseWork(
+                7, 42, "2026-07-20 02:00:00", List.of("critical"), 25))
+            .thenReturn(List.of(row));
+        when(notificationMapper.countActiveDealCloseWork(
+                7, 42, "2026-07-20 02:00:00", List.of("critical")))
+            .thenReturn(1L);
+        when(notificationMapper.countActiveDealCloseWork(
+                7, 42, "2026-07-20 02:00:00", List.of()))
+            .thenReturn(2L);
+
+        var page = service.findActiveDealCloseWork(
+            7,
+            Instant.parse("2026-07-20T02:00:00Z"),
+            Set.of(WorkItemUrgency.critical),
+            25);
+
+        assertEquals(1, page.items().size());
+        assertEquals("2026-07-21", page.items().getFirst().expectedCloseDate().toString());
+        assertEquals(64, page.items().getFirst().currentVersion().length());
+        assertEquals(1, page.matchingTotal());
+        assertEquals(2, page.overallTotal());
+    }
+
+    @Test
+    void malformedDealCloseDataFailsTheProviderInsteadOfLookingEmpty() {
+        Notification row = dealCloseNotification();
+        row.setData("{}");
+        when(notificationMapper.findActiveDealCloseWork(
+                7, 42, "2026-07-20 02:00:00", List.of("critical", "warning"), 25))
+            .thenReturn(List.of(row));
+
+        assertThrows(InvalidWorkItemSourceRowsException.class, () ->
+            service.findActiveDealCloseWork(
+                7, Instant.parse("2026-07-20T02:00:00Z"), 25));
+    }
+
+    @Test
+    void versionAwareDismissComparesAfterTheScopedLock() {
+        Notification row = dealCloseNotification();
+        String expected = workVersion(row);
+        when(notificationMapper.findActiveDealCloseByIdForUpdate(
+                7, 42, row.getId(), "2026-07-20 02:00:00",
+                List.of("critical", "warning")))
+            .thenReturn(row);
+        when(notificationMapper.dismiss(42, row.getId())).thenReturn(1);
+        when(notificationMapper.findById(42, row.getId())).thenReturn(row);
+        when(stateVersionService.bumpNow(42)).thenReturn(18L);
+
+        NotificationDto response = service.dismiss(row.getId(), expected);
+
+        verify(notificationMapper).findActiveDealCloseByIdForUpdate(
+            7, 42, row.getId(), "2026-07-20 02:00:00",
+            List.of("critical", "warning"));
+        verify(notificationMapper).dismiss(42, row.getId());
+        assertEquals(18L, response.getStateVersion());
+    }
+
+    @Test
+    void staleDealCloseVersionConflictsWithoutMutation() {
+        Notification row = dealCloseNotification();
+        when(notificationMapper.findActiveDealCloseByIdForUpdate(
+                7, 42, row.getId(), "2026-07-20 02:00:00",
+                List.of("critical", "warning")))
+            .thenReturn(row);
+
+        assertThrows(ConflictException.class, () ->
+            service.dismiss(row.getId(), "f".repeat(64)));
+
+        verify(notificationMapper, never()).dismiss(42, row.getId());
+    }
+
+    private static Notification dealCloseNotification() {
+        Notification row = new Notification();
+        row.setId(11);
+        row.setWorkspaceId(7);
+        row.setRecipientId(42);
+        row.setType("deal.close");
+        row.setSeverity("critical");
+        row.setSourceType("deal");
+        row.setSourceId(5);
+        row.setData("{\"dealId\":5,\"expectedCloseDate\":\"2026-07-21\"}");
+        row.setTriggeredAt("2026-07-19 00:00:00");
+        row.setUpdatedAt("2026-07-19 00:00:00");
+        return row;
+    }
+
+    private static String workVersion(Notification row) {
+        return WorkItemStateHash.sha256(
+            row.getId(),
+            row.getSeverity(),
+            row.getData(),
+            row.getReadAt(),
+            row.getDismissedAt(),
+            row.getResolvedAt(),
+            row.getSnoozedUntil(),
+            row.getSnoozeTimezone(),
+            row.getUpdatedAt());
     }
 
     @Test
