@@ -24,6 +24,7 @@ import ooo.klae.connex.backend.mappers.WebauthnUserEntityMapper;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.beans.User;
 
 import java.util.List;
@@ -54,9 +55,10 @@ class WebAuthnServiceTest {
         WebAuthnRelyingPartyOperations relyingParty = mock(WebAuthnRelyingPartyOperations.class);
         UserCredentialRepository credentials = mock(UserCredentialRepository.class);
         WebauthnUserEntityMapper userEntities = mock(WebauthnUserEntityMapper.class);
+        UserMapper userMapper = mock(UserMapper.class);
         WebAuthnService service = new WebAuthnService(
             relyingParty, credentials, userEntities,
-            mock(WebauthnCredentialMapper.class), mock(UserMapper.class),
+            mock(WebauthnCredentialMapper.class), userMapper,
             mock(PrivilegedAccountService.class), mock(AuditService.class));
         PublicKeyCredentialCreationOptions options = mock(PublicKeyCredentialCreationOptions.class);
         PublicKeyCredentialUserEntity optionUser = mock(PublicKeyCredentialUserEntity.class);
@@ -64,9 +66,11 @@ class WebAuthnServiceTest {
         when(options.getUser()).thenReturn(optionUser);
         when(optionUser.getId()).thenReturn(handle);
         when(userEntities.findUserIdByHandle(handle.toBase64UrlString())).thenReturn(7);
+        when(userMapper.lockById(8)).thenReturn(8);
+        when(userMapper.currentSessionEpoch(8)).thenReturn(0);
 
         assertThrows(BadCredentialsException.class, () -> service.finishRegistration(
-            8, options, null, "work key"));
+            8, 0, options, null, "work key"));
 
         verify(relyingParty, never()).registerCredential(org.mockito.ArgumentMatchers.any());
         verify(credentials, never()).save(org.mockito.ArgumentMatchers.any());
@@ -94,11 +98,14 @@ class WebAuthnServiceTest {
         when(optionUser.getId()).thenReturn(handle);
         when(userEntities.findUserIdByHandle(handle.toBase64UrlString())).thenReturn(7);
         when(relyingParty.registerCredential(any())).thenReturn(record);
+        when(userMapper.lockById(7)).thenReturn(7);
+        when(userMapper.currentSessionEpoch(7)).thenReturn(3);
         when(userMapper.getUserById(7)).thenReturn(user);
 
-        service.finishRegistration(7, options, credential, "Work key");
+        service.finishRegistration(7, 3, options, credential, "Work key");
 
         verify(credentials).save(record);
+        verify(userMapper).clearEpochRestampGrant(7);
         verify(auditService).recordStrict(
                 org.mockito.ArgumentMatchers.eq("auth.passkey.register"),
                 org.mockito.ArgumentMatchers.eq("user"),
@@ -106,6 +113,30 @@ class WebAuthnServiceTest {
                 org.mockito.ArgumentMatchers.eq("Admin"),
                 org.mockito.ArgumentMatchers.eq("Passkey registered"),
                 any());
+    }
+
+    @Test
+    void finishRegistrationRefusesAnEpochThatChangedBeforeTheAccountLock() {
+        WebAuthnRelyingPartyOperations relyingParty = mock(WebAuthnRelyingPartyOperations.class);
+        UserCredentialRepository credentials = mock(UserCredentialRepository.class);
+        UserMapper userMapper = mock(UserMapper.class);
+        WebAuthnService service = new WebAuthnService(
+                relyingParty,
+                credentials,
+                mock(WebauthnUserEntityMapper.class),
+                mock(WebauthnCredentialMapper.class),
+                userMapper,
+                mock(PrivilegedAccountService.class),
+                mock(AuditService.class));
+        when(userMapper.lockById(7)).thenReturn(7);
+        when(userMapper.currentSessionEpoch(7)).thenReturn(4);
+
+        assertThrows(ForbiddenException.class, () -> service.finishRegistration(
+                7, 3, mock(PublicKeyCredentialCreationOptions.class), null, "Work key"));
+
+        verify(relyingParty, never()).registerCredential(any());
+        verify(credentials, never()).save(any());
+        verify(userMapper, never()).clearEpochRestampGrant(7);
     }
 
     @Test

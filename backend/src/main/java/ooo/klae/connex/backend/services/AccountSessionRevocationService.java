@@ -5,6 +5,7 @@ import org.springframework.security.core.session.SessionRegistry;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.mappers.SpringSessionMapper;
 import ooo.klae.connex.backend.session.AccountSessionIndex;
 
 /**
@@ -33,6 +34,7 @@ import ooo.klae.connex.backend.session.AccountSessionIndex;
 @RequiredArgsConstructor
 public class AccountSessionRevocationService {
     private final SessionRegistry sessionRegistry;
+    private final SpringSessionMapper springSessionMapper;
 
     /**
      * Expires every session the account holds, forcing re-authentication everywhere.
@@ -41,6 +43,32 @@ public class AccountSessionRevocationService {
      */
     public void expireAll(int userId) {
         expireAllExcept(userId, null);
+    }
+
+    /**
+     * Expires every session the account holds apart from the store row that must survive.
+     *
+     * <p>The exclusion is by {@code SPRING_SESSION.PRIMARY_ID} rather than by the logical session
+     * id. Spring Session commits a fixation rotation in its own transaction, outside the caller's,
+     * so a logical id the caller captured moments earlier can already name the retained row under a
+     * value the registry no longer reports — and excluding by that stale value would expire the one
+     * session the caller is trying to keep.
+     *
+     * <p>A session whose primary id no longer resolves is left alone rather than expired: it is
+     * mid-rotation, and the account session epoch refuses it on its next request regardless. The
+     * epoch is the fail-closed backstop; enumeration is only the immediate sweep.
+     *
+     * @param userId the immutable account id the sessions are filed under
+     * @param retainedSessionPrimaryId the store row to leave alive
+     */
+    public void expireAllExceptSessionRow(int userId, String retainedSessionPrimaryId) {
+        for (SessionInformation session
+                : sessionRegistry.getAllSessions(new AccountSessionIndex(userId), false)) {
+            String primaryId = springSessionMapper.primaryIdBySessionId(session.getSessionId());
+            if (primaryId != null && !primaryId.equals(retainedSessionPrimaryId)) {
+                session.expireNow();
+            }
+        }
     }
 
     /**

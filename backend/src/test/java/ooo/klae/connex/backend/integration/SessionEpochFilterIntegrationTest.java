@@ -1,10 +1,13 @@
 package ooo.klae.connex.backend.integration;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.List;
+import java.util.UUID;
 
 import jakarta.servlet.Filter;
 
@@ -14,12 +17,15 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.mock.web.MockHttpSession;
+import org.springframework.session.Session;
+import org.springframework.session.SessionRepository;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.mappers.SpringSessionMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.support.AuthenticatedSessions;
@@ -38,6 +44,8 @@ class SessionEpochFilterIntegrationTest {
     @Autowired private WebApplicationContext context;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
     @Autowired private UserMapper userMapper;
+    @Autowired private SessionRepository<? extends Session> sessionRepository;
+    @Autowired private SpringSessionMapper springSessionMapper;
 
     private MockMvc mockMvc;
     private User account;
@@ -78,6 +86,85 @@ class SessionEpochFilterIntegrationTest {
     }
 
     @Test
+    void aMatchingRecoveryGrantRepairsAMismatchedStamp() throws Exception {
+        MockHttpSession session = storeBackedSession();
+        session.setAttribute(SessionSecurityService.SESSION_EPOCH_ATTR, -1);
+        int currentEpoch = currentEpoch();
+        assertEquals(1, userMapper.grantEpochRestamp(
+                account.getId(), primaryIdOf(session), currentEpoch));
+
+        mockMvc.perform(get("/api/auth/me")
+                        .session(session)
+                        .with(authentication(authenticated)))
+                .andExpect(status().isOk());
+
+        assertEquals(currentEpoch,
+                session.getAttribute(SessionSecurityService.SESSION_EPOCH_ATTR));
+    }
+
+    @Test
+    void aRecoveryGrantForAnotherSessionCannotRepairTheRequest() throws Exception {
+        MockHttpSession session = storeBackedSession();
+        session.setAttribute(SessionSecurityService.SESSION_EPOCH_ATTR, -1);
+        int currentEpoch = currentEpoch();
+        assertEquals(1, userMapper.grantEpochRestamp(
+                account.getId(), UUID.randomUUID().toString(), currentEpoch));
+
+        mockMvc.perform(get("/api/auth/me")
+                        .session(session)
+                        .with(authentication(authenticated)))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void aRecoveryGrantForAnotherEpochCannotRepairTheRequest() throws Exception {
+        MockHttpSession session = storeBackedSession();
+        session.setAttribute(SessionSecurityService.SESSION_EPOCH_ATTR, -1);
+        int currentEpoch = currentEpoch();
+        assertEquals(1, userMapper.grantEpochRestamp(
+                account.getId(), primaryIdOf(session), currentEpoch + 1));
+
+        mockMvc.perform(get("/api/auth/me")
+                        .session(session)
+                        .with(authentication(authenticated)))
+                .andExpect(status().isUnauthorized());
+    }
+
+    /**
+     * A grant cannot be redeemed by a session the store no longer knows: the primary id it would
+     * have to match cannot be resolved, so the request is refused rather than repaired.
+     */
+    @Test
+    void aGrantCannotRepairASessionTheStoreNoLongerKnows() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        session.setAttribute(SessionSecurityService.SESSION_EPOCH_ATTR, -1);
+        int currentEpoch = currentEpoch();
+        assertEquals(1, userMapper.grantEpochRestamp(
+                account.getId(), UUID.randomUUID().toString(), currentEpoch));
+
+        mockMvc.perform(get("/api/auth/me")
+                        .session(session)
+                        .with(authentication(authenticated)))
+                .andExpect(status().isUnauthorized());
+    }
+
+    private MockHttpSession storeBackedSession() {
+        return new MockHttpSession(context.getServletContext(), createStored(sessionRepository));
+    }
+
+    private static <S extends Session> String createStored(SessionRepository<S> repository) {
+        S created = repository.createSession();
+        repository.save(created);
+        return created.getId();
+    }
+
+    private String primaryIdOf(MockHttpSession session) {
+        String primaryId = springSessionMapper.primaryIdBySessionId(session.getId());
+        assertNotNull(primaryId);
+        return primaryId;
+    }
+
+    @Test
     void aSessionCarryingNoStampIsRefusedRatherThanDefaulted() throws Exception {
         mockMvc.perform(get("/api/auth/me")
                         .session(new MockHttpSession())
@@ -98,5 +185,11 @@ class SessionEpochFilterIntegrationTest {
                         .with(authentication(
                                 new UsernamePasswordAuthenticationToken(deleted, null, List.of()))))
                 .andExpect(status().isUnauthorized());
+    }
+
+    private int currentEpoch() {
+        Integer currentEpoch = userMapper.currentSessionEpoch(account.getId());
+        assertNotNull(currentEpoch);
+        return currentEpoch;
     }
 }

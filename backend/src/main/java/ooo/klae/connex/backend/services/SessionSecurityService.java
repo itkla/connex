@@ -18,6 +18,9 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.config.SessionSecurityProperties;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
+import ooo.klae.connex.backend.mappers.SpringSessionMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.session.SessionEpochRestampGrant;
 
 /**
  * Tracks authenticated-session age and WebAuthn step-up stamps in the servlet session.
@@ -38,6 +41,8 @@ public class SessionSecurityService {
 
     private final SessionSecurityProperties properties;
     private final Clock clock;
+    private final UserMapper userMapper;
+    private final SpringSessionMapper springSessionMapper;
 
     public void markAuthenticated(HttpServletRequest request, int userId) {
         HttpSession session = request.getSession();
@@ -61,6 +66,52 @@ public class SessionSecurityService {
      */
     public void stampSessionEpoch(HttpServletRequest request, int epoch) {
         request.getSession().setAttribute(SESSION_EPOCH_ATTR, epoch);
+    }
+
+    /**
+     * Stamps the recovering ceremony session after its epoch transaction has committed.
+     *
+     * @param request the request that completed recovery
+     * @param epoch the committed recovery epoch
+     */
+    public void completeRecoveryStamp(HttpServletRequest request, int epoch) {
+        stampSessionEpoch(request, epoch);
+    }
+
+    /**
+     * Repairs a lost recovery stamp only for the logical session named by the durable handoff.
+     *
+     * <p>The grant names the session store's stable row identity, not the logical session id, so a
+     * session-fixation rotation between recovery and repair cannot strand it.
+     *
+     * <p>The grant is deliberately not consumed. If this request's own session write is lost, a
+     * later request from the same session must be able to repeat the repair. Replacement enrollment
+     * or a later epoch bump clears the grant transactionally.
+     *
+     * @param request the authenticated request carrying the session to inspect
+     * @param userId the authenticated account
+     * @param currentEpoch the account's current persisted epoch
+     * @return true when a matching durable grant repaired the session
+     */
+    public boolean repairSessionEpochFromGrant(
+            HttpServletRequest request, int userId, Integer currentEpoch) {
+        if (currentEpoch == null) {
+            return false;
+        }
+        HttpSession session = request.getSession(false);
+        if (session == null) {
+            return false;
+        }
+        SessionEpochRestampGrant grant = userMapper.epochRestampGrant(userId);
+        if (grant == null || grant.epoch() != currentEpoch) {
+            return false;
+        }
+        String primaryId = springSessionMapper.primaryIdBySessionId(session.getId());
+        if (primaryId == null || !primaryId.equals(grant.sessionPrimaryId())) {
+            return false;
+        }
+        stampSessionEpoch(request, currentEpoch);
+        return true;
     }
 
     /**

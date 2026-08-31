@@ -35,6 +35,13 @@ import ooo.klae.connex.backend.services.SessionSecurityService;
  * <p>An absent stamp is refused, never defaulted. Treating it as epoch zero would make "carries no
  * stamp" permanently acceptable for every account still at zero, which is the same fail-open class
  * this exists to close.
+ *
+ * <p>MFA recovery is the sole repair path. Its locked transaction durably grants one logical
+ * ceremony session the right to adopt the newly committed epoch, so a post-commit servlet-session
+ * write that is lost cannot lock a passwordless account out after its credentials were removed.
+ * Repair is consulted only after a mismatch and succeeds only when the current account epoch and
+ * this request's session id both match that grant. An absent stamp therefore remains refused when
+ * no recovery handoff matches; it is never accepted merely because the account is otherwise valid.
  */
 public class SessionEpochFilter extends OncePerRequestFilter {
 
@@ -66,7 +73,9 @@ public class SessionEpochFilter extends OncePerRequestFilter {
         HttpSession session = request.getSession(false);
         Integer stamped = sessionSecurityService.sessionEpoch(session);
         Integer current = userMapper.currentSessionEpoch(user.getId());
-        if (stamped == null || current == null || !stamped.equals(current)) {
+        if ((stamped == null || current == null || !stamped.equals(current))
+                && !sessionSecurityService.repairSessionEpochFromGrant(
+                        request, user.getId(), current)) {
             refuse(session);
         }
         filterChain.doFilter(request, response);
