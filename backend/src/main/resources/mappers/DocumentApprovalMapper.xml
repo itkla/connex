@@ -384,27 +384,74 @@
   </update>
 
   <select id="findActionableSteps" resultType="ooo.klae.connex.backend.dto.ApprovalInboxRow">
-    SELECT a.id AS approvalId, a.deal_id AS dealId, d.name AS dealName,
-           a.document_id AS documentId, dd.title AS documentTitle, dd.type AS documentType,
-           dd.version AS version, s.id AS stepId, s.step_order AS stepOrder, s.name AS stepName,
-           s.required_count AS requiredCount, s.due_at AS dueAt, s.escalated_at AS escalatedAt,
-           a.requested_by AS requestedBy, a.created_at AS requestedAt
-    FROM document_approval a
-    JOIN document_approval_step s
-      ON s.workspace_id = a.workspace_id AND s.approval_id = a.id
-    JOIN deal d
-      ON d.workspace_id = a.workspace_id AND d.id = a.deal_id
-    JOIN deal_document dd
-      ON dd.workspace_id = a.workspace_id AND dd.deal_id = a.deal_id AND dd.id = a.document_id
-    WHERE a.workspace_id = #{workspaceId}
-      AND a.status = 'pending' AND s.status = 'active'
-      AND (EXISTS (SELECT 1 FROM document_approval_step_approver fa
-                   WHERE fa.workspace_id = s.workspace_id AND fa.step_id = s.id
-                     AND (fa.approver_kind = 'any_approver' OR fa.user_id = #{userId}))
-        OR EXISTS (SELECT 1 FROM document_approval_step_assignment sa
-                   WHERE sa.workspace_id = s.workspace_id AND sa.step_id = s.id
-                     AND (sa.approver_kind = 'any_approver' OR sa.user_id = #{userId})))
-    ORDER BY s.due_at IS NULL, s.due_at, a.id, s.step_order, s.id
-    LIMIT #{limit} OFFSET #{offset}
+    SELECT work.approvalId, work.dealId, work.dealName,
+           work.documentId, work.documentTitle, work.documentType, work.version,
+           work.stepId, work.stepOrder, work.stepName, work.requiredCount,
+           work.dueAt, work.escalatedAt, work.requestedBy, work.requestedAt,
+           work.urgencyRank, work.dueDateKey, work.freshnessAt
+    FROM (
+      SELECT a.id AS approvalId, a.deal_id AS dealId, d.name AS dealName,
+             a.document_id AS documentId, dd.title AS documentTitle, dd.type AS documentType,
+             dd.version AS version, s.id AS stepId, s.step_order AS stepOrder, s.name AS stepName,
+             s.required_count AS requiredCount, s.due_at AS dueAt,
+             s.escalated_at AS escalatedAt, a.requested_by AS requestedBy,
+             a.created_at AS requestedAt,
+             CASE WHEN s.escalated_at IS NOT NULL OR s.due_at &lt; #{asOf}
+                  THEN 1 ELSE 2 END AS urgencyRank,
+             COALESCE(DATE(s.due_at), DATE('9999-12-31')) AS dueDateKey,
+             GREATEST(
+               COALESCE(a.created_at, CAST('1000-01-01 00:00:00' AS DATETIME)),
+               COALESCE(a.updated_at, CAST('1000-01-01 00:00:00' AS DATETIME)),
+               COALESCE(s.created_at, CAST('1000-01-01 00:00:00' AS DATETIME)),
+               COALESCE(s.updated_at, CAST('1000-01-01 00:00:00' AS DATETIME)),
+               COALESCE(dd.updated_at, CAST('1000-01-01 00:00:00' AS DATETIME)),
+               COALESCE((SELECT MAX(ad.decided_at)
+                         FROM document_approval_decision ad
+                         WHERE ad.workspace_id = s.workspace_id
+                           AND ad.step_id = s.id),
+                        CAST('1000-01-01 00:00:00' AS DATETIME)),
+               COALESCE((SELECT MAX(asa.created_at)
+                         FROM document_approval_step_assignment asa
+                         WHERE asa.workspace_id = s.workspace_id
+                           AND asa.step_id = s.id),
+                        CAST('1000-01-01 00:00:00' AS DATETIME))
+             ) AS freshnessAt
+      FROM document_approval a
+      JOIN document_approval_step s
+        ON s.workspace_id = a.workspace_id AND s.approval_id = a.id
+      JOIN deal d
+        ON d.workspace_id = a.workspace_id AND d.id = a.deal_id
+      JOIN deal_document dd
+        ON dd.workspace_id = a.workspace_id AND dd.deal_id = a.deal_id
+       AND dd.id = a.document_id
+      WHERE a.workspace_id = #{workspaceId}
+        AND a.status = 'pending' AND s.status = 'active'
+        AND (EXISTS (SELECT 1 FROM document_approval_step_approver fa
+                     WHERE fa.workspace_id = s.workspace_id AND fa.step_id = s.id
+                       AND (fa.approver_kind = 'any_approver' OR fa.user_id = #{userId}))
+          OR EXISTS (SELECT 1 FROM document_approval_step_assignment sa
+                     WHERE sa.workspace_id = s.workspace_id AND sa.step_id = s.id
+                       AND (sa.approver_kind = 'any_approver' OR sa.user_id = #{userId})))
+    ) work
+    <if test="after != null">
+      WHERE work.urgencyRank &gt; #{after.urgencyRank}
+         OR (work.urgencyRank = #{after.urgencyRank}
+             AND work.dueDateKey &gt; #{after.dueDateKey})
+         OR (work.urgencyRank = #{after.urgencyRank}
+             AND work.dueDateKey = #{after.dueDateKey}
+             AND work.freshnessAt &gt; #{after.freshnessAt})
+         OR (work.urgencyRank = #{after.urgencyRank}
+             AND work.dueDateKey = #{after.dueDateKey}
+             AND work.freshnessAt = #{after.freshnessAt}
+             AND work.approvalId &gt; #{after.approvalId})
+         OR (work.urgencyRank = #{after.urgencyRank}
+             AND work.dueDateKey = #{after.dueDateKey}
+             AND work.freshnessAt = #{after.freshnessAt}
+             AND work.approvalId = #{after.approvalId}
+             AND work.stepId &gt; #{after.stepId})
+    </if>
+    ORDER BY work.urgencyRank, work.dueDateKey, work.freshnessAt,
+             work.approvalId, work.stepId
+    LIMIT #{limit}
   </select>
 </mapper>

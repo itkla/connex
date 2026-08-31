@@ -5,12 +5,15 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.dto.ApprovalInboxCursor;
 import ooo.klae.connex.backend.dto.ApprovalInboxItemDto;
+import ooo.klae.connex.backend.dto.ApprovalInboxScanPage;
 import ooo.klae.connex.backend.dto.WorkItemAction;
 import ooo.klae.connex.backend.dto.WorkItemActionOutcome;
 import ooo.klae.connex.backend.dto.WorkItemActionResponse;
@@ -39,10 +42,30 @@ public class DocumentApprovalWorkItemProvider implements WorkItemProvider {
 
     @Override
     public WorkItemProviderResult load(WorkItemProviderQuery query) {
-        List<ApprovalInboxItemDto> sourceItems = approvalService.inbox(query.candidateLimit());
-        boolean truncated = sourceItems.size() == query.candidateLimit();
-        List<WorkItemDto> allItems = sourceItems.stream()
-            .map(item -> toDto(item, query))
+        List<WorkItemDto> scannedItems = new ArrayList<>();
+        ApprovalInboxCursor cursor = null;
+        int rawRows = 0;
+        boolean exhausted = false;
+        while (rawRows < DocumentApprovalService.MAX_WORK_RAW_ROWS) {
+            int rawLimit = Math.min(
+                DocumentApprovalService.WORK_RAW_PAGE_SIZE,
+                DocumentApprovalService.MAX_WORK_RAW_ROWS - rawRows);
+            ApprovalInboxScanPage page = approvalService.scanInbox(
+                query.asOf(), cursor, rawLimit);
+            page.items().stream()
+                .map(item -> toDto(item, query))
+                .forEach(scannedItems::add);
+            rawRows += page.rawRowCount();
+            if (page.exhausted()) {
+                exhausted = true;
+                break;
+            }
+            if (page.nextCursor() == null) {
+                throw new InvalidWorkItemSourceRowsException();
+            }
+            cursor = page.nextCursor();
+        }
+        List<WorkItemDto> allItems = scannedItems.stream()
             .sorted(WorkItemOrdering.comparator())
             .toList();
         List<WorkItemDto> matching = query.urgencies().isEmpty()
@@ -58,7 +81,7 @@ public class DocumentApprovalWorkItemProvider implements WorkItemProvider {
             matching.size(),
             allItems.size(),
             query.asOf(),
-            !truncated);
+            exhausted);
     }
 
     @Override

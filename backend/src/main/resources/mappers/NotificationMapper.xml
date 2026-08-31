@@ -580,24 +580,15 @@
     FOR UPDATE
   </select>
 
-  <select id="findActiveApprovalRequestRecipientIds" resultType="int">
+  <select id="findUnresolvedApprovalRequestRecipientIds" resultType="int">
     SELECT DISTINCT recipient_id
     FROM notification
     WHERE workspace_id = #{workspaceId}
       AND source_type = 'deal_document'
       AND source_id = #{documentId}
       AND type = 'document.approval_request'
-      AND dismissed_at IS NULL
       AND resolved_at IS NULL
     ORDER BY recipient_id
-  </select>
-
-  <select id="lockApprovalRequestRecipientMembership" resultType="int">
-    SELECT user_id
-    FROM workspace_member
-    WHERE workspace_id = #{workspaceId}
-      AND user_id = #{recipientId}
-    FOR UPDATE
   </select>
 
   <update id="resolveApprovalRequestsForRecipient">
@@ -610,7 +601,6 @@
       AND source_id = #{documentId}
       AND recipient_id = #{recipientId}
       AND type = 'document.approval_request'
-      AND dismissed_at IS NULL
       AND resolved_at IS NULL
   </update>
 
@@ -654,6 +644,34 @@
       AND <include refid="contextAccessible"/>
       AND n.id = #{id}
       AND (n.dismissed_at IS NOT NULL OR n.resolved_at IS NOT NULL)
+  </update>
+
+  <update id="restoreActionableApprovalRequest">
+    UPDATE notification n
+    SET dismissed_at = NULL, resolved_at = NULL, read_at = NULL,
+        snoozed_until = NULL, snooze_timezone = NULL
+    WHERE <include refid="inboxScope"/>
+      AND <include refid="contentAccessible"/>
+      AND <include refid="contextAccessible"/>
+      AND n.workspace_id = #{workspaceId}
+      AND n.id = #{id}
+      AND n.type = 'document.approval_request'
+      AND n.source_type = 'deal_document'
+      AND (n.dismissed_at IS NOT NULL OR n.resolved_at IS NOT NULL)
+  </update>
+
+  <update id="restoreResolvedApprovalRequest">
+    UPDATE notification n
+    SET dismissed_at = NULL, resolved_at = COALESCE(resolved_at, CURRENT_TIMESTAMP), read_at = NULL,
+        snoozed_until = NULL, snooze_timezone = NULL
+    WHERE <include refid="inboxScope"/>
+      AND <include refid="contentAccessible"/>
+      AND <include refid="contextAccessible"/>
+      AND n.workspace_id = #{workspaceId}
+      AND n.id = #{id}
+      AND n.type = 'document.approval_request'
+      AND n.source_type = 'deal_document'
+      AND (n.dismissed_at IS NOT NULL OR n.resolved_at IS NULL)
   </update>
 
   <update id="snooze">

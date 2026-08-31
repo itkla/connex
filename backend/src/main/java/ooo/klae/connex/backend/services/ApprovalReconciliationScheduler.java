@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -15,8 +14,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.TransactionDefinition;
-import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
 
@@ -35,10 +32,9 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
  *
  * <p>The tenant and system-actor scope is installed before any transaction opens, because
  * {@code TenantWorkScope} refuses to re-pin the catalog once a transaction holds a connection. Each
- * workspace batch runs in one {@link TransactionTemplate} transaction that holds the workspace
- * authorization root and one post-lock approver pool across every document. Each termination uses
- * a nested savepoint so one failed document can roll back without releasing the root or poisoning
- * successful siblings; the outer root remains held until the bounded batch finishes.
+ * workspace batch discovers its bounded candidates before each approval runs in an independent
+ * transaction. Each mutation discovers and locks its recipient memberships before its document,
+ * so one failed document rolls back without retaining roots needed by successful siblings.
  */
 @Component
 @RequiredArgsConstructor
@@ -58,7 +54,7 @@ public class ApprovalReconciliationScheduler {
     private final AutomationExecutor automationExecutor;
     private final SystemActor systemActor;
     private final JobRunRecorder jobRunRecorder;
-    private final TransactionTemplate transactionTemplate;
+    private final ApprovalMutationRetryService approvalMutationRetryService;
     private final Map<Integer, CursorState> cursors = new ConcurrentHashMap<>();
 
     @Value("${connex.approvals.reconciliation-batch-size:200}")
@@ -141,22 +137,13 @@ public class ApprovalReconciliationScheduler {
     }
 
     BatchResult reconcileBatch(int workspaceId) {
-        BatchResult result = transactionTemplate.execute(
-            status -> reconcileLockedBatch(workspaceId));
-        return Objects.requireNonNull(result, "Approval reconciliation transaction returned no result");
-    }
-
-    private BatchResult reconcileLockedBatch(int workspaceId) {
         int limit = Math.max(1, batchSize);
-        DocumentApprovalService.ApproverPool pool =
-            approvalService.reconciliationApproverPool(workspaceId);
         List<DocumentApproval> approvals = selectPendingBatch(workspaceId, limit);
-        TransactionTemplate terminationTransaction = terminationTransactionTemplate();
         int failedCount = 0;
         for (DocumentApproval approval : approvals) {
             try {
-                terminationTransaction.executeWithoutResult(status ->
-                    approvalService.reconcileApproval(workspaceId, approval, pool));
+                approvalMutationRetryService.executeWithoutResult(() ->
+                    approvalService.reconcileApproval(workspaceId, approval));
             } catch (RuntimeException exception) {
                 failedCount++;
                 log.warn("Approval reconciliation failed for workspace {} approval {}: {}",
@@ -191,14 +178,6 @@ public class ApprovalReconciliationScheduler {
             return new CursorState(0, 0, lastId);
         }
         return new CursorState(lastId, cursor.consecutiveFullBatches() + 1, null);
-    }
-
-    private TransactionTemplate terminationTransactionTemplate() {
-        TransactionTemplate termination = new TransactionTemplate(Objects.requireNonNull(
-            transactionTemplate.getTransactionManager(),
-            "Approval reconciliation requires a transaction manager"));
-        termination.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
-        return termination;
     }
 
     private void record(int workspaceId, JobRunStatus status, JobRunDetail detail) {

@@ -34,23 +34,33 @@ public class NotificationSourceResolutionService {
         this.approvalService = approvalService;
     }
 
-    /** Resolves request notifications only for recipients with no actionable step remaining. */
-    public void resolveApprovalRequests(int workspaceId, int documentId, Instant resolvedAt) {
+    /** Returns unresolved request-notification recipients in deterministic membership-lock order. */
+    public Set<Integer> approvalRequestRecipientIds(int workspaceId, int documentId) {
+        return Set.copyOf(new TreeSet<>(
+            notificationMapper.findUnresolvedApprovalRequestRecipientIds(workspaceId, documentId)));
+    }
+
+    /** Resolves request notifications only for prelocked recipients with no actionable step. */
+    public void resolveApprovalRequests(
+            int workspaceId,
+            int documentId,
+            Instant resolvedAt,
+            Set<Integer> lockedRecipientIds) {
         if (!TransactionSynchronizationManager.isActualTransactionActive()) {
             throw new IllegalStateException("Approval notification resolution requires a transaction");
         }
         Set<Integer> recipients = new TreeSet<>(
-            notificationMapper.findActiveApprovalRequestRecipientIds(workspaceId, documentId));
+            notificationMapper.findUnresolvedApprovalRequestRecipientIds(workspaceId, documentId));
         if (recipients.isEmpty()) {
             return;
+        }
+        if (lockedRecipientIds == null || !lockedRecipientIds.containsAll(recipients)) {
+            throw new ApprovalRecipientSetChangedException();
         }
         Set<Integer> actionable = approvalService.actionableRecipientIdsForDocument(
             workspaceId, documentId, recipients);
         TreeSet<Integer> resolvedRecipients = new TreeSet<>(recipients);
         resolvedRecipients.removeAll(actionable);
-        for (int recipientId : resolvedRecipients) {
-            notificationMapper.lockApprovalRequestRecipientMembership(workspaceId, recipientId);
-        }
         String timestamp = LocalDateTime.ofInstant(resolvedAt, ZoneOffset.UTC)
             .format(MYSQL_DATETIME);
         for (int recipientId : resolvedRecipients) {

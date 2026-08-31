@@ -2,6 +2,11 @@ package ooo.klae.connex.backend.work;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -11,13 +16,16 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.dto.ApprovalInboxCursor;
 import ooo.klae.connex.backend.dto.ApprovalInboxItemDto;
+import ooo.klae.connex.backend.dto.ApprovalInboxScanPage;
 import ooo.klae.connex.backend.dto.WorkItemAction;
 import ooo.klae.connex.backend.dto.WorkItemUrgency;
 import ooo.klae.connex.backend.services.DocumentApprovalService;
@@ -31,9 +39,13 @@ class DocumentApprovalWorkItemProviderTest {
 
     @Test
     void preservesParallelActionableStepsAndRanksOverdueHigh() {
-        when(approvalService.inbox(25)).thenReturn(List.of(
-            item(8, 22, null, false),
-            item(8, 21, "2026-08-29 12:00:00", true)));
+        when(approvalService.scanInbox(AS_OF, null, 200)).thenReturn(page(
+            List.of(
+                item(8, 21, "2026-08-29 12:00:00", true),
+                item(8, 22, null, false)),
+            null,
+            2,
+            true));
 
         var result = provider().load(new WorkItemProviderQuery(
             7, 42, TODAY, AS_OF, Set.of(), 25));
@@ -47,8 +59,41 @@ class DocumentApprovalWorkItemProviderTest {
     }
 
     @Test
-    void ceilingKeepsSourceAvailableButDeclaresTotalsTruncated() {
-        when(approvalService.inbox(1)).thenReturn(List.of(item(8, 21, null, false)));
+    void urgencyFilterContinuesPastNonmatchingRawPage() {
+        ApprovalInboxCursor cursor = cursor(1);
+        when(approvalService.scanInbox(AS_OF, null, 200)).thenReturn(page(
+            List.of(
+                item(8, 21, "2026-08-28 12:00:00", true),
+                item(9, 22, "2026-08-29 12:00:00", false)),
+            cursor,
+            200,
+            false));
+        when(approvalService.scanInbox(AS_OF, cursor, 200)).thenReturn(page(
+            List.of(item(10, 23, null, false)), null, 1, true));
+
+        var result = provider().load(new WorkItemProviderQuery(
+            7, 42, TODAY, AS_OF, Set.of(WorkItemUrgency.normal), 25));
+
+        assertEquals(List.of("document_approval:10:23"),
+            result.items().stream().map(row -> row.id()).toList());
+        assertEquals(1, result.matchingTotal());
+        assertEquals(3, result.overallTotal());
+        assertTrue(result.totalsComplete());
+    }
+
+    @Test
+    void rawCeilingKeepsSourceAvailableButDeclaresTotalsTruncated() {
+        AtomicInteger pageNumber = new AtomicInteger();
+        when(approvalService.scanInbox(
+                eq(AS_OF), nullable(ApprovalInboxCursor.class), anyInt()))
+            .thenAnswer(invocation -> {
+                int number = pageNumber.incrementAndGet();
+                return page(
+                    number == 1 ? List.of(item(8, 21, null, false)) : List.of(),
+                    cursor(number),
+                    DocumentApprovalService.WORK_RAW_PAGE_SIZE,
+                    false);
+            });
 
         var result = provider().load(new WorkItemProviderQuery(
             7, 42, TODAY, AS_OF, Set.of(), 1));
@@ -56,6 +101,10 @@ class DocumentApprovalWorkItemProviderTest {
         assertFalse(result.totalsComplete());
         assertEquals(1, result.matchingTotal());
         assertEquals(1, result.overallTotal());
+        assertEquals(
+            DocumentApprovalService.MAX_WORK_RAW_ROWS
+                / DocumentApprovalService.WORK_RAW_PAGE_SIZE,
+            pageNumber.get());
     }
 
     @Test
@@ -74,6 +123,19 @@ class DocumentApprovalWorkItemProviderTest {
     private DocumentApprovalWorkItemProvider provider() {
         return new DocumentApprovalWorkItemProvider(
             approvalService, Clock.fixed(AS_OF, ZoneOffset.UTC));
+    }
+
+    private static ApprovalInboxScanPage page(
+            List<ApprovalInboxItemDto> items,
+            ApprovalInboxCursor cursor,
+            int rawRows,
+            boolean exhausted) {
+        return new ApprovalInboxScanPage(items, cursor, rawRows, exhausted);
+    }
+
+    private static ApprovalInboxCursor cursor(int id) {
+        return new ApprovalInboxCursor(
+            2, "9999-12-31", "2026-08-21 00:00:00", id, id);
     }
 
     private static ApprovalInboxItemDto item(

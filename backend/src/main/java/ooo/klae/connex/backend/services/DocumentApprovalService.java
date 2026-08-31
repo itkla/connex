@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
@@ -37,8 +38,10 @@ import ooo.klae.connex.backend.beans.DocumentApprovalStepAssignment;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.ApprovalDelegateDto;
+import ooo.klae.connex.backend.dto.ApprovalInboxCursor;
 import ooo.klae.connex.backend.dto.ApprovalInboxItemDto;
 import ooo.klae.connex.backend.dto.ApprovalInboxRow;
+import ooo.klae.connex.backend.dto.ApprovalInboxScanPage;
 import ooo.klae.connex.backend.dto.ApprovalReminderRow;
 import ooo.klae.connex.backend.dto.DocumentApprovalDto;
 import ooo.klae.connex.backend.dto.DocumentApprovalStepDto;
@@ -92,6 +95,7 @@ public class DocumentApprovalService {
     private final RuleTriggerPublisher ruleTriggers;
     private final ObjectMapper objectMapper;
     private final NotificationSourceResolutionService notificationSourceResolutionService;
+    private final ApprovalMutationRetryService approvalMutationRetryService;
     private final ApprovalStepEligibility eligibility = new ApprovalStepEligibility();
 
     private static final String REQUEST_TYPE = "document.approval_request";
@@ -116,9 +120,12 @@ public class DocumentApprovalService {
     private static final String REASSIGNMENT = "reassignment";
     private static final int MAX_REMINDER_ROUNDS = 3;
     private static final int MAX_STEP_APPROVERS = 20;
-    private static final int CANDIDATE_LIMIT = 200;
     private static final int INBOX_LIMIT = 50;
     private static final int MAX_WORK_LIMIT = 1000;
+    /** Caps historical frozen-row inspection for one approval work projection request. */
+    public static final int MAX_WORK_RAW_ROWS = 5000;
+    /** Keeps each keyset read and its chain hydration bounded within the raw-row ceiling. */
+    public static final int WORK_RAW_PAGE_SIZE = 200;
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     /** Approval history for one document, newest first. */
@@ -243,16 +250,6 @@ public class DocumentApprovalService {
     }
 
     /**
-     * Locks the workspace authorization root before resolving the pool reused by one reconciliation
-     * sweep. The caller's transaction must retain this root through every document mutation.
-     */
-    ApproverPool reconciliationApproverPool(int workspaceId) {
-        requireActiveTransaction();
-        workspaceService.lockApprovalReconciliationAuthorizationRoot(workspaceId);
-        return approverPool(workspaceId);
-    }
-
-    /**
      * Refuses a request that this particular actor could never get past. Separation of duties
      * removes the requester and the document's author from the pool for this request only, so a step
      * whose remaining named approvers can no longer reach its quorum is a dead end the requester can
@@ -293,20 +290,97 @@ public class DocumentApprovalService {
     record ApproverPool(List<User> members, Set<Integer> approvers) {
     }
 
+    Set<Integer> discoverApprovalMutationRecipientIds(int workspaceId, int documentId) {
+        TreeSet<Integer> recipientIds = new TreeSet<>(
+            notificationSourceResolutionService.approvalRequestRecipientIds(
+                workspaceId, documentId));
+        DocumentApproval approval = approvalMapper.findPending(workspaceId, documentId);
+        if (approval != null) {
+            if (approval.getRequestedBy() != null) {
+                recipientIds.add(approval.getRequestedBy());
+            }
+            recipientIds.addAll(approverPool(workspaceId).approvers());
+        }
+        return Set.copyOf(recipientIds);
+    }
+
+    ApprovalMutationLocks lockApprovalMutationRecipients(
+            int workspaceId, int documentId, int actorId) {
+        return lockApprovalMutationRecipients(
+            workspaceId, List.of(documentId), actorId);
+    }
+
+    ApprovalMutationLocks lockApprovalMutationRecipients(
+            int workspaceId, List<Integer> documentIds, int actorId) {
+        Objects.requireNonNull(documentIds, "documentIds");
+        TreeSet<Integer> sortedDocumentIds = new TreeSet<>(documentIds);
+        Map<Integer, Set<Integer>> recipientsByDocument = new LinkedHashMap<>();
+        TreeSet<Integer> recipientIds = new TreeSet<>();
+        for (int documentId : sortedDocumentIds) {
+            Set<Integer> discovered = discoverApprovalMutationRecipientIds(
+                workspaceId, documentId);
+            recipientsByDocument.put(documentId, discovered);
+            recipientIds.addAll(discovered);
+        }
+        Set<Permission> permissions = workspaceService.lockApprovalMutationMemberships(
+            workspaceId, actorId, recipientIds);
+        return new ApprovalMutationLocks(
+            Set.copyOf(recipientIds), Map.copyOf(recipientsByDocument), Set.copyOf(permissions));
+    }
+
+    void requireApprovalMutationRecipientsUnchanged(
+            ApprovalMutationLocks locks, int workspaceId, int documentId) {
+        Set<Integer> expected = locks.recipientsByDocument().get(documentId);
+        if (expected == null || !expected.equals(
+                discoverApprovalMutationRecipientIds(workspaceId, documentId))) {
+            throw new ApprovalRecipientSetChangedException();
+        }
+    }
+
+    void lockAndValidateApprovalMutationDocuments(
+            int workspaceId,
+            List<DocumentApproval> approvals,
+            ApprovalMutationLocks locks) {
+        requireActiveTransaction();
+        Objects.requireNonNull(approvals, "approvals");
+        Objects.requireNonNull(locks, "locks");
+        List<DocumentApproval> ordered = approvals.stream()
+            .sorted(Comparator.comparingInt(DocumentApproval::getDocumentId)
+                .thenComparingInt(DocumentApproval::getId))
+            .toList();
+        for (DocumentApproval approval : ordered) {
+            lockDocument(workspaceId, approval.getDealId(), approval.getDocumentId());
+            DocumentApproval current = approvalMapper.getByIdForUpdate(
+                workspaceId, approval.getId());
+            if (current == null || current.getDocumentId() != approval.getDocumentId()
+                    || !PENDING.equals(current.getStatus())) {
+                throw new ApprovalRecipientSetChangedException();
+            }
+            withChainForUpdate(workspaceId, List.of(current));
+            requireApprovalMutationRecipientsUnchanged(
+                locks, workspaceId, approval.getDocumentId());
+        }
+    }
+
+    record ApprovalMutationLocks(
+            Set<Integer> recipientIds,
+            Map<Integer, Set<Integer>> recipientsByDocument,
+            Set<Permission> actorPermissions) {
+    }
+
     /**
      * Records the caller's decision on one step of the pending approval. Approving advances or
      * completes the chain — completion unlocks finalization — while rejecting terminates the whole
      * request and returns the document to draft.
      */
-    @Transactional
     @RequirePermission(Permission.DOCUMENT_APPROVE)
     public DocumentApprovalDto decide(int dealId, int documentId, String decision, String comment,
             Integer stepId) {
-        return decideLocked(dealId, documentId, decision, comment, stepId, null, null);
+        return approvalMutationRetryService.execute(() -> decideWithRecipientLocks(
+            dealId, documentId, decision, comment, stepId, null, null));
     }
 
     /** Decides one exact actionable approval step when its chain-aware version still matches. */
-    @Transactional
     @RequirePermission(Permission.DOCUMENT_APPROVE)
     public DocumentApprovalDto decideWorkItem(
             int approvalId,
@@ -319,14 +393,28 @@ public class DocumentApprovalService {
         if (approval == null || !PENDING.equals(approval.getStatus())) {
             throw new ResourceNotFoundException("Approval not found with id: " + approvalId);
         }
-        return decideLocked(
-            approval.getDealId(),
-            approval.getDocumentId(),
-            decision,
-            comment,
-            stepId,
-            approvalId,
-            expectedStateHash);
+        return approvalMutationRetryService.execute(() -> decideWithRecipientLocks(
+            approval.getDealId(), approval.getDocumentId(), decision, comment, stepId,
+            approvalId, expectedStateHash));
+    }
+
+    private DocumentApprovalDto decideWithRecipientLocks(
+            int dealId,
+            int documentId,
+            String decision,
+            String comment,
+            Integer stepId,
+            Integer expectedApprovalId,
+            String expectedStateHash) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = workspaceService.getCurrentUserId();
+        ApprovalMutationLocks locks = lockApprovalMutationRecipients(
+            workspaceId, documentId, actorId);
+        if (!locks.actorPermissions().contains(Permission.DOCUMENT_APPROVE)) {
+            throw new ForbiddenException("You cannot approve documents in this workspace");
+        }
+        return decideLocked(dealId, documentId, decision, comment, stepId,
+            expectedApprovalId, expectedStateHash, locks);
     }
 
     private DocumentApprovalDto decideLocked(
@@ -336,16 +424,13 @@ public class DocumentApprovalService {
             String comment,
             Integer stepId,
             Integer expectedApprovalId,
-            String expectedStateHash) {
+            String expectedStateHash,
+            ApprovalMutationLocks locks) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = requireDeal(workspaceId, dealId);
         User actor = userMapper.getUserById(workspaceService.getCurrentUserId());
         if (actor == null) {
             throw new ForbiddenException("Only a workspace member can decide an approval");
-        }
-        if (!workspaceService.lockedPermissionsFor(workspaceId, actor.getId())
-                .contains(Permission.DOCUMENT_APPROVE)) {
-            throw new ForbiddenException("You cannot approve documents in this workspace");
         }
         DealDocument document = lockDocument(workspaceId, dealId, documentId);
         DocumentApproval approval = approvalMapper.findPendingForUpdate(workspaceId, documentId);
@@ -357,8 +442,10 @@ public class DocumentApprovalService {
             throw new BadRequestException("No pending approval on this document");
         }
         List<DocumentApprovalStep> steps = chainOfForUpdate(workspaceId, approval);
+        requireApprovalMutationRecipientsUnchanged(locks, workspaceId, documentId);
         ApproverPool pool = approverPool(workspaceId);
-        while (reconcileExpiry(workspaceId, document, approval, pool)) {
+        while (reconcileExpiry(
+                workspaceId, document, approval, pool, locks.recipientIds())) {
             approval = requireApprovalForUpdate(workspaceId, approval.getId());
             if (!PENDING.equals(approval.getStatus())) {
                 if (expectedApprovalId != null) {
@@ -426,7 +513,7 @@ public class DocumentApprovalService {
             ruleTriggers.publish(workspaceId, "document", documentId, "document.rejected");
         }
         notificationSourceResolutionService.resolveApprovalRequests(
-            workspaceId, documentId, Instant.now());
+            workspaceId, documentId, Instant.now(), locks.recipientIds());
         return toDto(requireApprovalForUpdate(workspaceId, approval.getId()), document, pool);
     }
 
@@ -604,8 +691,13 @@ public class DocumentApprovalService {
      * {@link Permission#DEAL_UPDATE} but not requester identity, so the requester is notified that
      * their request was withdrawn on their behalf.
      */
-    void cancelPendingOnSupersede(int workspaceId, Deal deal, DealDocument document) {
+    void cancelPendingOnSupersede(
+            int workspaceId,
+            Deal deal,
+            DealDocument document,
+            ApprovalMutationLocks locks) {
         DocumentApproval pending = approvalMapper.findPendingForUpdate(workspaceId, document.getId());
+        requireApprovalMutationRecipientsUnchanged(locks, workspaceId, document.getId());
         if (pending == null) {
             return;
         }
@@ -618,17 +710,22 @@ public class DocumentApprovalService {
                 + " by superseding the document", null);
         notifyDecided(workspaceId, document, pending, CANCELLED, actor);
         notificationSourceResolutionService.resolveApprovalRequests(
-            workspaceId, document.getId(), Instant.now());
+            workspaceId, document.getId(), Instant.now(), locks.recipientIds());
     }
 
     /** Withdraws the requester's own pending approval request, returning the document to draft. */
-    @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public DocumentApprovalDto cancel(int dealId, int documentId) {
+        return approvalMutationRetryService.execute(() -> cancelWithRecipientLocks(
+            dealId, documentId));
+    }
+
+    private DocumentApprovalDto cancelWithRecipientLocks(int dealId, int documentId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int currentUserId = workspaceService.getCurrentUserId();
-        if (!workspaceService.lockedPermissionsFor(workspaceId, currentUserId)
-                .contains(Permission.DEAL_UPDATE)) {
+        ApprovalMutationLocks locks = lockApprovalMutationRecipients(
+            workspaceId, documentId, currentUserId);
+        if (!locks.actorPermissions().contains(Permission.DEAL_UPDATE)) {
             throw new ForbiddenException("You cannot update deals in this workspace");
         }
         Deal deal = requireDeal(workspaceId, dealId);
@@ -637,6 +734,8 @@ public class DocumentApprovalService {
         if (approval == null || !"pending_approval".equals(document.getStatus())) {
             throw new BadRequestException("No pending approval on this document");
         }
+        chainOfForUpdate(workspaceId, approval);
+        requireApprovalMutationRecipientsUnchanged(locks, workspaceId, documentId);
         if (approval.getRequestedBy() == null) {
             workspaceService.requireRole(WorkspaceService.Role.ADMIN);
         } else if (approval.getRequestedBy() != currentUserId) {
@@ -651,7 +750,7 @@ public class DocumentApprovalService {
         auditService.record("document_approval.cancel", "deal", dealId, deal.getName(),
             "Cancelled approval request for " + document.getType() + " v" + document.getVersion(), null);
         notificationSourceResolutionService.resolveApprovalRequests(
-            workspaceId, documentId, Instant.now());
+            workspaceId, documentId, Instant.now(), locks.recipientIds());
         return toDto(workspaceId, requireApproval(workspaceId, approval.getId()), document);
     }
 
@@ -663,7 +762,11 @@ public class DocumentApprovalService {
      * methods, so an annotation here would be silently ignored and the document row lock would not
      * survive the write.
      */
-    void invalidateForPolicyChange(int workspaceId, DocumentApproval approval, String detail) {
+    void invalidateForPolicyChange(
+            int workspaceId,
+            DocumentApproval approval,
+            String detail,
+            ApprovalMutationLocks locks) {
         requireActiveTransaction();
         DealDocument document = lockDocument(
             workspaceId, approval.getDealId(), approval.getDocumentId());
@@ -673,6 +776,7 @@ public class DocumentApprovalService {
             return;
         }
         current = withChainForUpdate(workspaceId, List.of(current)).getFirst();
+        requireApprovalMutationRecipientsUnchanged(locks, workspaceId, document.getId());
         int changed = approvalMapper.decide(workspaceId, current.getId(), INVALIDATED,
             null, null, "policy_invalidated", detail);
         if (changed == 0) {
@@ -691,7 +795,7 @@ public class DocumentApprovalService {
         notifyTerminated(workspaceId, document, current, activeSteps, actor,
             "policy_invalidated", detail, true);
         notificationSourceResolutionService.resolveApprovalRequests(
-            workspaceId, document.getId(), Instant.now());
+            workspaceId, document.getId(), Instant.now(), locks.recipientIds());
     }
 
     /**
@@ -701,12 +805,16 @@ public class DocumentApprovalService {
      * {@link #invalidateForPolicyChange}.
      */
     boolean terminateIfUnsatisfiable(int workspaceId, DocumentApproval approval) {
-        return terminateIfUnsatisfiable(
-            workspaceId, approval, reconciliationApproverPool(workspaceId));
+        int actorId = workspaceService.getCurrentUserId();
+        ApprovalMutationLocks locks = lockApprovalMutationRecipients(
+            workspaceId, approval.getDocumentId(), actorId);
+        return terminateIfUnsatisfiable(workspaceId, approval, locks);
     }
 
-    /** Terminates one pending request using the post-authorization-lock workspace pool. */
-    boolean terminateIfUnsatisfiable(int workspaceId, DocumentApproval approval, ApproverPool pool) {
+    private boolean terminateIfUnsatisfiable(
+            int workspaceId,
+            DocumentApproval approval,
+            ApprovalMutationLocks locks) {
         requireActiveTransaction();
         DealDocument document = lockDocument(
             workspaceId, approval.getDealId(), approval.getDocumentId());
@@ -716,12 +824,15 @@ public class DocumentApprovalService {
             return false;
         }
         current = withChainForUpdate(workspaceId, List.of(current)).getFirst();
-        return terminateIfUnsatisfiable(workspaceId, document, current, pool);
+        requireApprovalMutationRecipientsUnchanged(
+            locks, workspaceId, document.getId());
+        return terminateIfUnsatisfiable(
+            workspaceId, document, current, approverPool(workspaceId), locks.recipientIds());
     }
 
     /** Terminates one already-hydrated request while its document lock is held by the caller. */
     boolean terminateIfUnsatisfiable(int workspaceId, DealDocument document,
-            DocumentApproval current, ApproverPool pool) {
+            DocumentApproval current, ApproverPool pool, Set<Integer> lockedRecipientIds) {
         requireActiveTransaction();
         ApprovalProjection projection = projectAvailability(
             current, document, pool);
@@ -753,7 +864,7 @@ public class DocumentApprovalService {
         notifyTerminated(workspaceId, document, current, List.of(), actor,
             UNSATISFIABLE, detail, false, pool);
         notificationSourceResolutionService.resolveApprovalRequests(
-            workspaceId, document.getId(), Instant.now());
+            workspaceId, document.getId(), Instant.now(), lockedRecipientIds);
         return true;
     }
 
@@ -983,29 +1094,56 @@ public class DocumentApprovalService {
         if (limit < 1 || limit > MAX_WORK_LIMIT) {
             throw new BadRequestException("Approval inbox limit must be between 1 and 1000");
         }
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        int callerId = workspaceService.getCurrentUserId();
-        ApproverPool pool = approverPool(workspaceId);
         List<ApprovalInboxItemDto> items = new ArrayList<>();
-        int offset = 0;
-        while (items.size() < limit) {
-            List<ApprovalInboxRow> candidates = approvalMapper.findActionableSteps(
-                workspaceId, callerId, offset, CANDIDATE_LIMIT);
-            if (candidates.isEmpty()) {
+        ApprovalInboxCursor cursor = null;
+        int rawRows = 0;
+        Instant asOf = Instant.now();
+        while (items.size() < limit && rawRows < MAX_WORK_RAW_ROWS) {
+            int rawLimit = Math.min(WORK_RAW_PAGE_SIZE, MAX_WORK_RAW_ROWS - rawRows);
+            ApprovalInboxScanPage page = scanInbox(asOf, cursor, rawLimit);
+            items.addAll(page.items().stream()
+                .limit(limit - items.size())
+                .toList());
+            rawRows += page.rawRowCount();
+            if (page.exhausted() || page.nextCursor() == null) {
                 break;
             }
-            appendInboxItems(workspaceId, callerId, candidates, pool, items, limit);
-            if (candidates.size() < CANDIDATE_LIMIT) {
-                break;
-            }
-            offset += candidates.size();
+            cursor = page.nextCursor();
         }
-        return items;
+        return List.copyOf(items);
     }
 
-    private void appendInboxItems(int workspaceId, int callerId,
-            List<ApprovalInboxRow> candidates, ApproverPool pool,
-            List<ApprovalInboxItemDto> items, int limit) {
+    /** Reads one exact-order raw keyset page and filters it through authoritative eligibility. */
+    @Transactional(readOnly = true)
+    @RequirePermission(Permission.DOCUMENT_APPROVE)
+    public ApprovalInboxScanPage scanInbox(
+            Instant asOf, ApprovalInboxCursor after, int rawLimit) {
+        Objects.requireNonNull(asOf, "asOf");
+        if (rawLimit < 1 || rawLimit > WORK_RAW_PAGE_SIZE) {
+            throw new BadRequestException("Approval inbox raw limit must be between 1 and 200");
+        }
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int callerId = workspaceService.getCurrentUserId();
+        List<ApprovalInboxRow> candidates = approvalMapper.findActionableSteps(
+            workspaceId,
+            callerId,
+            LocalDateTime.ofInstant(asOf, ZoneOffset.UTC).format(TS),
+            after,
+            rawLimit);
+        List<ApprovalInboxItemDto> items = inboxItems(
+            workspaceId, callerId, candidates, approverPool(workspaceId));
+        ApprovalInboxCursor nextCursor = candidates.isEmpty()
+            ? null
+            : candidates.getLast().cursor();
+        return new ApprovalInboxScanPage(
+            items, nextCursor, candidates.size(), candidates.size() < rawLimit);
+    }
+
+    private List<ApprovalInboxItemDto> inboxItems(int workspaceId, int callerId,
+            List<ApprovalInboxRow> candidates, ApproverPool pool) {
+        if (candidates.isEmpty()) {
+            return List.of();
+        }
         List<Integer> approvalIds = candidates.stream()
             .map(ApprovalInboxRow::approvalId)
             .distinct()
@@ -1021,10 +1159,8 @@ public class DocumentApprovalService {
             .getByIds(workspaceId, documentIds).stream()
             .collect(Collectors.toMap(DealDocument::getId, document -> document,
                 (first, second) -> first, LinkedHashMap::new));
+        List<ApprovalInboxItemDto> items = new ArrayList<>();
         for (ApprovalInboxRow row : candidates) {
-            if (items.size() >= limit) {
-                break;
-            }
             DocumentApproval approval = approvalsById.get(row.approvalId());
             if (approval == null) {
                 continue;
@@ -1054,6 +1190,7 @@ public class DocumentApprovalService {
                 approvalFreshness(approval, step, document),
                 approvalWorkItemVersion(approval, step, document)));
         }
+        return List.copyOf(items);
     }
 
     /** Resolves which candidate recipients can still decide an active step for one document. */
@@ -1084,6 +1221,34 @@ public class DocumentApprovalService {
                 .forEach(actionable::add);
         }
         return Set.copyOf(actionable);
+    }
+
+    boolean approvalRequestActionableForRestore(
+            int workspaceId,
+            int dealId,
+            int documentId,
+            int recipientId,
+            ApprovalMutationLocks locks) {
+        DealDocument document = lockDocument(workspaceId, dealId, documentId);
+        DocumentApproval approval = approvalMapper.findPendingForUpdate(workspaceId, documentId);
+        if (approval == null) {
+            requireApprovalMutationRecipientsUnchanged(locks, workspaceId, documentId);
+            return false;
+        }
+        approval = withChainForUpdate(workspaceId, List.of(approval)).getFirst();
+        requireApprovalMutationRecipientsUnchanged(locks, workspaceId, documentId);
+        if (attributionFailure(approval, document) != null) {
+            return false;
+        }
+        ApproverPool pool = approverPool(workspaceId);
+        Set<Integer> exclusions = separationExclusions(approval, document);
+        for (DocumentApprovalStep step : approval.getSteps()) {
+            if (ACTIVE.equals(step.getStatus()) && eligibility.resolve(step, pool, exclusions)
+                    .undecided().contains(recipientId)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static Instant approvalFreshness(
@@ -1165,8 +1330,11 @@ public class DocumentApprovalService {
      * <p>The caller must already hold a transaction, for the reason given on
      * {@link #invalidateForPolicyChange}.
      */
-    void reconcileApproval(int workspaceId, DocumentApproval approval, ApproverPool pool) {
+    void reconcileApproval(int workspaceId, DocumentApproval approval) {
         requireActiveTransaction();
+        int actorId = workspaceService.getCurrentUserId();
+        ApprovalMutationLocks locks = lockApprovalMutationRecipients(
+            workspaceId, approval.getDocumentId(), actorId);
         DealDocument document = lockDocument(
             workspaceId, approval.getDealId(), approval.getDocumentId());
         DocumentApproval current = approvalMapper.getByIdForUpdate(workspaceId, approval.getId());
@@ -1175,10 +1343,15 @@ public class DocumentApprovalService {
             return;
         }
         current = withChainForUpdate(workspaceId, List.of(current)).getFirst();
-        if (reconcileExpiry(workspaceId, document, current, pool)) {
+        requireApprovalMutationRecipientsUnchanged(
+            locks, workspaceId, document.getId());
+        ApproverPool pool = approverPool(workspaceId);
+        if (reconcileExpiry(
+                workspaceId, document, current, pool, locks.recipientIds())) {
             return;
         }
-        if (terminateIfUnsatisfiable(workspaceId, document, current, pool)) {
+        if (terminateIfUnsatisfiable(
+                workspaceId, document, current, pool, locks.recipientIds())) {
             return;
         }
         remindOpenSteps(workspaceId, document, current, pool);
@@ -1190,7 +1363,7 @@ public class DocumentApprovalService {
      * next sweep to evaluate, so satisfiability and reminders never read a stale chain.
      */
     private boolean reconcileExpiry(int workspaceId, DealDocument document,
-            DocumentApproval current, ApproverPool pool) {
+            DocumentApproval current, ApproverPool pool, Set<Integer> lockedRecipientIds) {
         List<Integer> expired = approvalMapper.findExpiredActiveSteps(workspaceId, current.getId());
         if (expired.isEmpty()) {
             return false;
@@ -1203,7 +1376,8 @@ public class DocumentApprovalService {
         if (ESCALATE.equals(step.getOnExpiry()) && step.getEscalatedAt() == null) {
             return escalateExpiredStep(workspaceId, document, current, step, pool);
         }
-        return expireApproval(workspaceId, document, current, step, pool);
+        return expireApproval(
+            workspaceId, document, current, step, pool, lockedRecipientIds);
     }
 
     private boolean escalateExpiredStep(int workspaceId, DealDocument document,
@@ -1234,7 +1408,8 @@ public class DocumentApprovalService {
     }
 
     private boolean expireApproval(int workspaceId, DealDocument document,
-            DocumentApproval current, DocumentApprovalStep step, ApproverPool pool) {
+            DocumentApproval current, DocumentApprovalStep step, ApproverPool pool,
+            Set<Integer> lockedRecipientIds) {
         List<DocumentApprovalStep> activeSteps = current.getSteps().stream()
             .filter(candidate -> ACTIVE.equals(candidate.getStatus())).toList();
         String detail = expiryDetail(step);
@@ -1255,7 +1430,7 @@ public class DocumentApprovalService {
         notifyTerminated(workspaceId, document, current, activeSteps, null,
             EXPIRED, detail, true, pool);
         notificationSourceResolutionService.resolveApprovalRequests(
-            workspaceId, document.getId(), Instant.now());
+            workspaceId, document.getId(), Instant.now(), lockedRecipientIds);
         return true;
     }
 

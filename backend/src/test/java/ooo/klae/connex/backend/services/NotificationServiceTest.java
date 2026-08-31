@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.inOrder;
@@ -14,6 +15,8 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Set;
+import java.util.Map;
+import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,6 +24,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.User;
@@ -47,6 +51,7 @@ class NotificationServiceTest {
     @Mock private NotificationStateVersionService stateVersionService;
     @Mock private NotificationQuietHoursService quietHoursService;
     @Mock private WorkspaceService workspaceService;
+    @Mock private DocumentApprovalService documentApprovalService;
 
     private NotificationService service;
 
@@ -63,6 +68,8 @@ class NotificationServiceTest {
                 Instant.parse("2026-07-20T02:00:00Z"), ZoneOffset.UTC)),
             quietHoursService,
             workspaceService,
+            documentApprovalService,
+            new ImmediateApprovalMutationRetryService(),
             new ObjectMapper(),
             Clock.fixed(Instant.parse("2026-07-20T02:00:00Z"), ZoneOffset.UTC)
         );
@@ -72,6 +79,61 @@ class NotificationServiceTest {
         lenient().when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         lenient().when(quietHoursService.evaluateForUser(42, Instant.parse("2026-06-25T00:00:00Z")))
             .thenReturn(new NotificationQuietHoursEvaluator.Evaluation(false, null));
+    }
+
+    @Test
+    void restoreAfterTerminalApprovalKeepsSourceResolution() {
+        Notification terminal = approvalRequestNotification();
+        terminal.setResolvedAt("2026-08-30 12:00:00");
+        when(notificationMapper.findById(42, 99)).thenReturn(terminal);
+        when(notificationMapper.findByIdForUpdate(42, 99)).thenReturn(terminal);
+        when(notificationMapper.getStateVersion(42)).thenReturn(17L);
+        approvalRestoreLocks(false);
+
+        NotificationDto restored = service.restore(99);
+
+        assertEquals("2026-08-30 12:00:00", restored.getResolvedAt());
+        verify(notificationMapper, never()).restore(42, 99);
+        verify(notificationMapper, never()).restoreActionableApprovalRequest(7, 42, 99);
+        verify(notificationMapper, never()).restoreResolvedApprovalRequest(7, 42, 99);
+    }
+
+    @Test
+    void restoreDismissedTerminalApprovalClearsDismissalButRetainsResolution() {
+        Notification terminal = approvalRequestNotification();
+        terminal.setDismissedAt("2026-08-29 12:00:00");
+        terminal.setResolvedAt("2026-08-30 12:00:00");
+        Notification restored = approvalRequestNotification();
+        restored.setResolvedAt("2026-08-30 12:00:00");
+        when(notificationMapper.findById(42, 99)).thenReturn(terminal, restored);
+        when(notificationMapper.findByIdForUpdate(42, 99)).thenReturn(terminal);
+        when(notificationMapper.restoreResolvedApprovalRequest(7, 42, 99)).thenReturn(1);
+        when(stateVersionService.bumpNow(42)).thenReturn(18L);
+        approvalRestoreLocks(false);
+
+        NotificationDto result = service.restore(99);
+
+        assertEquals("2026-08-30 12:00:00", result.getResolvedAt());
+        verify(notificationMapper).restoreResolvedApprovalRequest(7, 42, 99);
+        verify(notificationMapper, never()).restoreActionableApprovalRequest(7, 42, 99);
+    }
+
+    @Test
+    void restoreActionableApprovalMayClearSourceResolution() {
+        Notification archived = approvalRequestNotification();
+        archived.setDismissedAt("2026-08-29 12:00:00");
+        archived.setResolvedAt("2026-08-30 12:00:00");
+        Notification restored = approvalRequestNotification();
+        when(notificationMapper.findById(42, 99)).thenReturn(archived, restored);
+        when(notificationMapper.findByIdForUpdate(42, 99)).thenReturn(archived);
+        when(notificationMapper.restoreActionableApprovalRequest(7, 42, 99)).thenReturn(1);
+        approvalRestoreLocks(true);
+
+        NotificationDto result = service.restore(99);
+
+        assertNull(result.getResolvedAt());
+        verify(notificationMapper).restoreActionableApprovalRequest(7, 42, 99);
+        verify(notificationMapper, never()).restoreResolvedApprovalRequest(7, 42, 99);
     }
 
     @Test
@@ -394,5 +456,41 @@ class NotificationServiceTest {
         request.setPreset(preset);
         request.setTimezone(timezone);
         return request;
+    }
+
+    private void approvalRestoreLocks(boolean actionable) {
+        DocumentApprovalService.ApprovalMutationLocks locks =
+            new DocumentApprovalService.ApprovalMutationLocks(
+                Set.of(42), Map.of(31, Set.of(42)), Set.of());
+        when(documentApprovalService.lockApprovalMutationRecipients(7, 31, 42))
+            .thenReturn(locks);
+        when(documentApprovalService.approvalRequestActionableForRestore(
+                7, 12, 31, 42, locks))
+            .thenReturn(actionable);
+    }
+
+    private static Notification approvalRequestNotification() {
+        Notification notification = new Notification();
+        notification.setId(99);
+        notification.setWorkspaceId(7);
+        notification.setRecipientId(42);
+        notification.setType("document.approval_request");
+        notification.setSourceType("deal_document");
+        notification.setSourceId(31);
+        notification.setContextType("deal");
+        notification.setContextId(12);
+        return notification;
+    }
+
+    private static final class ImmediateApprovalMutationRetryService
+            extends ApprovalMutationRetryService {
+        private ImmediateApprovalMutationRetryService() {
+            super(org.mockito.Mockito.mock(PlatformTransactionManager.class));
+        }
+
+        @Override
+        public <T> T execute(Supplier<T> mutation) {
+            return mutation.get();
+        }
     }
 }

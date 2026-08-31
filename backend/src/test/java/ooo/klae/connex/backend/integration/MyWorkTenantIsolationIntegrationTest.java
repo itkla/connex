@@ -30,6 +30,7 @@ import org.springframework.web.context.request.RequestContextHolder;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Notification;
+import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Task;
@@ -38,6 +39,7 @@ import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -55,6 +57,7 @@ class MyWorkTenantIsolationIntegrationTest {
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
     @Autowired private UserMapper userMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
+    @Autowired private OrganizationMapper organizationMapper;
     @Autowired private TaskMapper taskMapper;
     @Autowired private CompanyMapper companyMapper;
     @Autowired private PipelineMapper pipelineMapper;
@@ -72,10 +75,7 @@ class MyWorkTenantIsolationIntegrationTest {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
             .addFilters(springSecurityFilterChain)
             .build();
-        firstWorkspace = workspaceMapper.getDefaultWorkspace();
-        if (firstWorkspace == null) {
-            firstWorkspace = workspace("my-work-first", 0);
-        }
+        firstWorkspace = workspace("my-work-first", newOrganization().getId());
     }
 
     @Test
@@ -137,6 +137,15 @@ class MyWorkTenantIsolationIntegrationTest {
             .andReturn();
         JsonNode response = objectMapper.readTree(result.getResponse().getContentAsString());
         return response.get("items").get(0).get("currentVersion").asText();
+    }
+
+    private Organization newOrganization() {
+        Organization organization = new Organization();
+        String value = suffix();
+        organization.setName("My Work Org " + value);
+        organization.setSlug("my-work-org-" + value);
+        organizationMapper.insert(organization);
+        return organization;
     }
 
     private Workspace workspace(String prefix, int orgId) {

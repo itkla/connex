@@ -33,7 +33,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
-import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.beans.DocumentApproval;
 import ooo.klae.connex.backend.mappers.DocumentApprovalMapper;
@@ -73,7 +72,7 @@ class ApprovalReconciliationSchedulerTest {
         assertNull(ApprovalReconciliationScheduler.class.getAnnotation(Transactional.class));
         assertNull(reconcile.getAnnotation(Transactional.class));
         assertNotNull(ApprovalReconciliationScheduler.class
-            .getDeclaredField("transactionTemplate"));
+            .getDeclaredField("approvalMutationRetryService"));
     }
 
     /**
@@ -166,7 +165,7 @@ class ApprovalReconciliationSchedulerTest {
     }
 
     @Test
-    void workspaceBatchResolvesOnePostLockPoolForEveryTermination() throws Exception {
+    void workspaceBatchRunsEveryApprovalInAnIndependentFreshTransaction() throws Exception {
         DocumentApprovalMapper mapper = mock(DocumentApprovalMapper.class);
         DocumentApprovalService approvalService = mock(DocumentApprovalService.class);
         PlatformTransactionManager transactionManager = transactionManager();
@@ -175,26 +174,22 @@ class ApprovalReconciliationSchedulerTest {
         setBatchSize(scheduler, 2);
         List<DocumentApproval> approvals = approvals(1, 2);
         when(mapper.findPendingForWorkspace(7, 2)).thenReturn(approvals);
-        DocumentApprovalService.ApproverPool pool =
-            new DocumentApprovalService.ApproverPool(List.of(), Set.of());
-        when(approvalService.reconciliationApproverPool(7)).thenReturn(pool);
-
         ApprovalReconciliationScheduler.BatchResult result = scheduler.reconcileBatch(7);
 
         assertEquals(2, result.attemptedCount());
         assertEquals(0, result.failedCount());
-        verify(approvalService, times(1)).reconciliationApproverPool(7);
         for (DocumentApproval approval : approvals) {
-            verify(approvalService).reconcileApproval(7, approval, pool);
+            verify(approvalService).reconcileApproval(7, approval);
         }
         ArgumentCaptor<TransactionDefinition> definitions =
             ArgumentCaptor.forClass(TransactionDefinition.class);
-        verify(transactionManager, times(3)).getTransaction(definitions.capture());
-        assertEquals(TransactionDefinition.PROPAGATION_REQUIRED,
-            definitions.getAllValues().getFirst().getPropagationBehavior());
-        assertTrue(definitions.getAllValues().subList(1, 3).stream()
+        verify(transactionManager, times(2)).getTransaction(definitions.capture());
+        assertTrue(definitions.getAllValues().stream()
             .allMatch(definition -> definition.getPropagationBehavior()
-                == TransactionDefinition.PROPAGATION_NESTED));
+                == TransactionDefinition.PROPAGATION_REQUIRED));
+        assertTrue(definitions.getAllValues().stream()
+            .allMatch(definition -> definition.getIsolationLevel()
+                == TransactionDefinition.ISOLATION_READ_COMMITTED));
     }
 
     private static ApprovalReconciliationScheduler scheduler(
@@ -215,7 +210,7 @@ class ApprovalReconciliationSchedulerTest {
             mock(AutomationExecutor.class),
             mock(SystemActor.class),
             mock(JobRunRecorder.class),
-            new TransactionTemplate(transactionManager));
+            new ApprovalMutationRetryService(transactionManager));
     }
 
     private static PlatformTransactionManager transactionManager() {

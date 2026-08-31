@@ -18,6 +18,7 @@ import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,6 +39,7 @@ import ooo.klae.connex.backend.dto.NotificationCountsDto;
 
 class NotificationMapperTest extends AbstractMapperTest {
     @Autowired private NotificationMapper notificationMapper;
+    @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private TaskMapper taskMapper;
 
     @Test
@@ -700,16 +702,19 @@ class NotificationMapperTest extends AbstractMapperTest {
         notificationMapper.upsert(firstRequest);
         notificationMapper.upsert(secondRequest);
         notificationMapper.upsert(otherDocument);
+        jdbcTemplate.update(
+            "UPDATE notification SET dismissed_at = CURRENT_TIMESTAMP WHERE id = ?",
+            firstRequest.getId());
 
         assertEquals(List.of(first.getId(), second.getId()).stream().sorted().toList(),
-            notificationMapper.findActiveApprovalRequestRecipientIds(workspace.getId(), 701));
+            notificationMapper.findUnresolvedApprovalRequestRecipientIds(workspace.getId(), 701));
         assertEquals(1, notificationMapper.resolveApprovalRequestsForRecipient(
             workspace.getId(), 701, first.getId(), "2026-08-30 00:00:00"));
 
         assertEquals(List.of(first.getId()),
-            notificationMapper.findActiveApprovalRequestRecipientIds(workspace.getId(), 702));
+            notificationMapper.findUnresolvedApprovalRequestRecipientIds(workspace.getId(), 702));
         assertEquals(List.of(second.getId()),
-            notificationMapper.findActiveApprovalRequestRecipientIds(workspace.getId(), 701));
+            notificationMapper.findUnresolvedApprovalRequestRecipientIds(workspace.getId(), 701));
         assertEquals(0, notificationMapper.resolveApprovalRequestsForRecipient(
             workspace.getId() + 1, 701, second.getId(), "2026-08-30 00:00:00"));
     }

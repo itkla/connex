@@ -196,14 +196,9 @@ public interface NotificationMapper {
         @Param("severities") List<String> severities
     );
 
-    List<Integer> findActiveApprovalRequestRecipientIds(
+    List<Integer> findUnresolvedApprovalRequestRecipientIds(
         @Param("workspaceId") int workspaceId,
         @Param("documentId") int documentId
-    );
-
-    Integer lockApprovalRequestRecipientMembership(
-        @Param("workspaceId") int workspaceId,
-        @Param("recipientId") int recipientId
     );
 
     int resolveApprovalRequestsForRecipient(
@@ -229,6 +224,18 @@ public interface NotificationMapper {
     );
 
     int restore(
+        @Param("recipientId") int recipientId,
+        @Param("id") int id
+    );
+
+    int restoreActionableApprovalRequest(
+        @Param("workspaceId") int workspaceId,
+        @Param("recipientId") int recipientId,
+        @Param("id") int id
+    );
+
+    int restoreResolvedApprovalRequest(
+        @Param("workspaceId") int workspaceId,
         @Param("recipientId") int recipientId,
         @Param("id") int id
     );

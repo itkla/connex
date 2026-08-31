@@ -68,13 +68,18 @@ class DocumentApprovalMapperTest extends AbstractMapperTest {
         approvalMapper.insertStepApprover(assignment);
 
         List<ApprovalInboxRow> rows = approvalMapper.findActionableSteps(
-            workspace.getId(), approver.getId(), 0, 1);
+            workspace.getId(), approver.getId(), "2026-08-30 12:00:00", null, 1);
 
         assertEquals(List.of(approval.getId()),
             rows.stream().map(ApprovalInboxRow::approvalId).toList());
+        assertEquals(2, rows.getFirst().urgencyRank());
+        assertEquals("9999-12-31", rows.getFirst().dueDateKey());
         assertTrue(approvalMapper.findActionableSteps(
-            workspace.getId(), bystander.getId(), 0, 1).isEmpty());
+            workspace.getId(), approver.getId(), "2026-08-30 12:00:00",
+            rows.getFirst().cursor(), 1).isEmpty());
         assertTrue(approvalMapper.findActionableSteps(
-            workspace.getId() + 1, approver.getId(), 0, 1).isEmpty());
+            workspace.getId(), bystander.getId(), "2026-08-30 12:00:00", null, 1).isEmpty());
+        assertTrue(approvalMapper.findActionableSteps(
+            workspace.getId() + 1, approver.getId(), "2026-08-30 12:00:00", null, 1).isEmpty());
     }
 }

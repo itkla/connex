@@ -64,6 +64,7 @@ public class ApprovalPolicyService {
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
     private final ObjectProvider<DocumentApprovalService> documentApprovalService;
+    private final ApprovalMutationRetryService approvalMutationRetryService;
     private final ApprovalPolicyChangeClassifier changeClassifier = new ApprovalPolicyChangeClassifier();
 
     private static final Set<String> AUDIT_FIELDS = Set.of(
@@ -98,47 +99,75 @@ public class ApprovalPolicyService {
         return saved;
     }
 
-    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DOCUMENT_MANAGE)
     public ApprovalPolicy update(int id, ApprovalPolicy policy, boolean confirmInvalidation,
             String presentedImpactFingerprint) {
+        return approvalMutationRetryService.execute(() -> updateLocked(
+            id, policy, confirmInvalidation, presentedImpactFingerprint));
+    }
+
+    private ApprovalPolicy updateLocked(
+            int id,
+            ApprovalPolicy policy,
+            boolean confirmInvalidation,
+            String presentedImpactFingerprint) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
-        if (!workspaceService.lockedPermissionsFor(workspaceId, actorId)
-                .contains(Permission.DOCUMENT_MANAGE)) {
-            throw new ForbiddenException("You cannot manage document approval policies in this workspace");
+        ApprovalPolicy preliminary = require(workspaceId, id);
+        normalize(policy);
+        validate(policy);
+        validateStepIdentities(preliminary, policy);
+        policy.setId(id);
+        policy.setWorkspaceId(workspaceId);
+        List<DocumentApproval> preliminaryPending = classify(preliminary, policy)
+                == PolicyChangeClass.TIGHTEN
+            ? approvalMapper.findPendingByPolicyId(workspaceId, id)
+            : List.of();
+        if (!preliminaryPending.isEmpty() && !confirmInvalidation) {
+            throw new ApprovalImpactConfirmationRequiredException(preliminaryPending.size());
+        }
+        DocumentApprovalService approvalService = documentApprovalService.getObject();
+        DocumentApprovalService.ApprovalMutationLocks approvalLocks =
+            approvalService.lockApprovalMutationRecipients(
+                workspaceId,
+                preliminaryPending.stream().map(DocumentApproval::getDocumentId).toList(),
+                actorId);
+        if (!approvalLocks.actorPermissions().contains(Permission.DOCUMENT_MANAGE)) {
+            throw new ForbiddenException(
+                "You cannot manage document approval policies in this workspace");
         }
         ApprovalPolicy before = requireForUpdate(workspaceId, id);
         normalize(policy);
         validate(policy);
         validateStepIdentities(before, policy);
-        policy.setId(id);
-        policy.setWorkspaceId(workspaceId);
         PolicyChangeClass changeClass = classify(before, policy);
-        List<DocumentApproval> pendingApprovals = List.of();
-        if (changeClass == PolicyChangeClass.TIGHTEN) {
-            int pendingApprovalCount = approvalMapper.countPendingByPolicyId(workspaceId, id);
-            if (pendingApprovalCount > 0 && !confirmInvalidation) {
-                throw new ApprovalImpactConfirmationRequiredException(pendingApprovalCount);
-            }
-            if (pendingApprovalCount > 0) {
-                pendingApprovals = approvalMapper.findPendingByPolicyId(workspaceId, id);
-                String currentImpactFingerprint = impactFingerprint(before, policy, pendingApprovals.stream()
-                    .map(DocumentApproval::getId)
-                    .toList());
-                if (!Objects.equals(currentImpactFingerprint, presentedImpactFingerprint)) {
-                    throw ApprovalImpactConfirmationRequiredException.changed();
-                }
+        List<DocumentApproval> pendingApprovals = changeClass == PolicyChangeClass.TIGHTEN
+            ? approvalMapper.findPendingByPolicyId(workspaceId, id)
+            : List.of();
+        List<Integer> preliminaryIds = preliminaryPending.stream()
+            .map(DocumentApproval::getId).toList();
+        List<Integer> lockedIds = pendingApprovals.stream()
+            .map(DocumentApproval::getId).toList();
+        if (!preliminaryIds.equals(lockedIds)) {
+            throw new ApprovalRecipientSetChangedException();
+        }
+        if (!pendingApprovals.isEmpty()) {
+            String currentImpactFingerprint = impactFingerprint(
+                before, policy, lockedIds);
+            if (!Objects.equals(currentImpactFingerprint, presentedImpactFingerprint)) {
+                throw ApprovalImpactConfirmationRequiredException.changed();
             }
         }
+        approvalService.lockAndValidateApprovalMutationDocuments(
+            workspaceId, pendingApprovals, approvalLocks);
         policyMapper.update(policy);
         policyMapper.deleteStepsByPolicyId(workspaceId, id);
         insertSteps(workspaceId, id, policy.getSteps());
         if (!pendingApprovals.isEmpty()) {
             String detail = "Approval policy \"" + before.getName() + "\" was tightened";
             for (DocumentApproval approval : pendingApprovals) {
-                documentApprovalService.getObject()
-                    .invalidateForPolicyChange(workspaceId, approval, detail);
+                approvalService.invalidateForPolicyChange(
+                    workspaceId, approval, detail, approvalLocks);
             }
         }
         ApprovalPolicy after = require(workspaceId, id);

@@ -27,13 +27,13 @@ class NotificationSourceResolutionServiceTest {
     }
 
     @Test
-    void resolvesOnlyRecipientsWithoutRemainingActionableStepsInSortedLockOrder() {
+    void resolvesOnlyPrelockedRecipientsWithoutRemainingActionableStepsInSortedOrder() {
         NotificationMapper mapper = mock(NotificationMapper.class);
         NotificationStateVersionService stateVersions = mock(NotificationStateVersionService.class);
         DocumentApprovalService approvals = mock(DocumentApprovalService.class);
         NotificationSourceResolutionService service =
             new NotificationSourceResolutionService(mapper, stateVersions, approvals);
-        when(mapper.findActiveApprovalRequestRecipientIds(7, 31))
+        when(mapper.findUnresolvedApprovalRequestRecipientIds(7, 31))
             .thenReturn(List.of(9, 3, 6));
         when(approvals.actionableRecipientIdsForDocument(7, 31, Set.of(3, 6, 9)))
             .thenReturn(Set.of(6));
@@ -43,12 +43,14 @@ class NotificationSourceResolutionServiceTest {
             .thenReturn(1);
         TransactionSynchronizationManager.setActualTransactionActive(true);
 
-        service.resolveApprovalRequests(7, 31, Instant.parse("2026-08-30T18:15:00Z"));
+        service.resolveApprovalRequests(
+            7, 31, Instant.parse("2026-08-30T18:15:00Z"), Set.of(3, 6, 9));
 
-        InOrder locks = inOrder(mapper);
-        locks.verify(mapper).lockApprovalRequestRecipientMembership(7, 3);
-        locks.verify(mapper).lockApprovalRequestRecipientMembership(7, 9);
-        verify(mapper, never()).lockApprovalRequestRecipientMembership(7, 6);
+        InOrder updates = inOrder(mapper);
+        updates.verify(mapper).resolveApprovalRequestsForRecipient(
+            7, 31, 3, "2026-08-30 18:15:00");
+        updates.verify(mapper).resolveApprovalRequestsForRecipient(
+            7, 31, 9, "2026-08-30 18:15:00");
         verify(mapper, never()).resolveApprovalRequestsForRecipient(
             7, 31, 6, "2026-08-30 18:15:00");
         verify(stateVersions).markChanged(3);
@@ -63,7 +65,7 @@ class NotificationSourceResolutionServiceTest {
         DocumentApprovalService approvals = mock(DocumentApprovalService.class);
         NotificationSourceResolutionService service =
             new NotificationSourceResolutionService(mapper, stateVersions, approvals);
-        when(mapper.findActiveApprovalRequestRecipientIds(7, 31))
+        when(mapper.findUnresolvedApprovalRequestRecipientIds(7, 31))
             .thenReturn(List.of(8, 2));
         when(approvals.actionableRecipientIdsForDocument(7, 31, Set.of(2, 8)))
             .thenReturn(Set.of());
@@ -73,11 +75,9 @@ class NotificationSourceResolutionServiceTest {
             .thenReturn(0);
         TransactionSynchronizationManager.setActualTransactionActive(true);
 
-        service.resolveApprovalRequests(7, 31, Instant.parse("2026-08-30T18:15:00Z"));
+        service.resolveApprovalRequests(
+            7, 31, Instant.parse("2026-08-30T18:15:00Z"), Set.of(2, 8));
 
-        InOrder locks = inOrder(mapper);
-        locks.verify(mapper).lockApprovalRequestRecipientMembership(7, 2);
-        locks.verify(mapper).lockApprovalRequestRecipientMembership(7, 8);
         verify(stateVersions).markChanged(2);
         verify(stateVersions, never()).markChanged(8);
     }
@@ -92,7 +92,8 @@ class NotificationSourceResolutionServiceTest {
 
         assertThrows(
             IllegalStateException.class,
-            () -> service.resolveApprovalRequests(7, 31, Instant.parse("2026-08-30T18:15:00Z")));
-        verify(mapper, never()).findActiveApprovalRequestRecipientIds(7, 31);
+            () -> service.resolveApprovalRequests(
+                7, 31, Instant.parse("2026-08-30T18:15:00Z"), Set.of()));
+        verify(mapper, never()).findUnresolvedApprovalRequestRecipientIds(7, 31);
     }
 }

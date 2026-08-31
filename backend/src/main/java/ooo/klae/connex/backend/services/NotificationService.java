@@ -54,6 +54,8 @@ public class NotificationService {
     private final NotificationSnoozeResolver snoozeResolver;
     private final NotificationQuietHoursService quietHoursService;
     private final WorkspaceService workspaceService;
+    private final DocumentApprovalService documentApprovalService;
+    private final ApprovalMutationRetryService approvalMutationRetryService;
     private final ObjectMapper objectMapper;
     private final Clock clock;
 
@@ -246,14 +248,57 @@ public class NotificationService {
         return mutationResponse(recipientId, requireNotification(recipientId, id));
     }
 
-    @Transactional
     public NotificationDto restore(int id) {
         int recipientId = currentRecipientId();
+        return approvalMutationRetryService.execute(() -> restoreLocked(recipientId, id));
+    }
+
+    private NotificationDto restoreLocked(int recipientId, int id) {
         Notification current = requireNotification(recipientId, id);
+        if ("document.approval_request".equals(current.getType())
+                && "deal_document".equals(current.getSourceType())) {
+            return restoreApprovalRequest(recipientId, id, current);
+        }
         if (current.getDismissedAt() == null && current.getResolvedAt() == null) {
             return response(recipientId, current);
         }
         requireMutation(notificationMapper.restore(recipientId, id), id);
+        return mutationResponse(recipientId, requireNotification(recipientId, id));
+    }
+
+    private NotificationDto restoreApprovalRequest(
+            int recipientId, int id, Notification current) {
+        Integer documentId = current.getSourceId();
+        Integer dealId = current.getContextId();
+        if (documentId == null || dealId == null) {
+            throw new ConflictException("Approval request changed; refresh and try again");
+        }
+        int workspaceId = current.getWorkspaceId();
+        DocumentApprovalService.ApprovalMutationLocks locks =
+            documentApprovalService.lockApprovalMutationRecipients(
+                workspaceId, documentId, recipientId);
+        boolean actionable = documentApprovalService.approvalRequestActionableForRestore(
+            workspaceId, dealId, documentId, recipientId, locks);
+        Notification locked = requireLockedNotification(recipientId, id);
+        if (locked.getWorkspaceId() != workspaceId
+                || !documentId.equals(locked.getSourceId())
+                || !"document.approval_request".equals(locked.getType())
+                || !"deal_document".equals(locked.getSourceType())) {
+            throw new ApprovalRecipientSetChangedException();
+        }
+        if (actionable) {
+            if (locked.getDismissedAt() == null && locked.getResolvedAt() == null) {
+                return response(recipientId, locked);
+            }
+            requireMutation(notificationMapper.restoreActionableApprovalRequest(
+                workspaceId, recipientId, id), id);
+        } else {
+            if (locked.getDismissedAt() == null && locked.getResolvedAt() != null) {
+                return response(recipientId, locked);
+            }
+            requireMutation(notificationMapper.restoreResolvedApprovalRequest(
+                workspaceId, recipientId, id), id);
+        }
         return mutationResponse(recipientId, requireNotification(recipientId, id));
     }
 

@@ -37,6 +37,7 @@ import ooo.klae.connex.backend.beans.DealDocument;
 import ooo.klae.connex.backend.beans.DocumentApproval;
 import ooo.klae.connex.backend.beans.DocumentApprovalStep;
 import ooo.klae.connex.backend.beans.Notification;
+import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Task;
@@ -48,6 +49,7 @@ import ooo.klae.connex.backend.mappers.DealDocumentMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.DocumentApprovalMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
@@ -65,6 +67,7 @@ class MyWorkReconciliationIntegrationTest {
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
     @Autowired private UserMapper userMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
+    @Autowired private OrganizationMapper organizationMapper;
     @Autowired private TaskMapper taskMapper;
     @Autowired private CompanyMapper companyMapper;
     @Autowired private PipelineMapper pipelineMapper;
@@ -85,13 +88,16 @@ class MyWorkReconciliationIntegrationTest {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
             .addFilters(springSecurityFilterChain)
             .build();
-        workspace = workspaceMapper.getDefaultWorkspace();
-        if (workspace == null) {
-            workspace = new Workspace();
-            workspace.setName("My Work Reconciliation");
-            workspace.setSlug("my-work-reconcile-" + suffix());
-            workspaceMapper.insert(workspace);
-        }
+        Organization organization = new Organization();
+        String value = suffix();
+        organization.setName("My Work Reconciliation Org " + value);
+        organization.setSlug("my-work-reconcile-org-" + value);
+        organizationMapper.insert(organization);
+        workspace = new Workspace();
+        workspace.setName("My Work Reconciliation " + value);
+        workspace.setSlug("my-work-reconcile-" + value);
+        workspace.setOrgId(organization.getId());
+        workspaceMapper.insert(workspace);
     }
 
     @Test
@@ -161,6 +167,47 @@ class MyWorkReconciliationIntegrationTest {
                 .param("source", "document_approval"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.items.length()").value(0));
+
+        mockMvc.perform(post("/api/notifications/{id}/restore", approvalNotification.getId())
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.resolvedAt").isNotEmpty());
+
+        ApprovalFixture dismissedApproval = approval(actor, requester);
+        Notification dismissedNotification = approvalRequest(
+            actor, dismissedApproval.document());
+        notificationMapper.upsert(dismissedNotification);
+        mockMvc.perform(post("/api/notifications/{id}/dismiss", dismissedNotification.getId())
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk());
+        JsonNode dismissedItem = firstItem(session, "document_approval");
+        mockMvc.perform(post(
+                "/api/my-work/document-approvals/{id}/decision",
+                dismissedApproval.approval().getId())
+                .header("X-Workspace-Id", workspace.getId())
+                .header("If-Match", dismissedItem.get("etag").asText())
+                .session(session)
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of(
+                    "stepId", dismissedApproval.step().getId(), "decision", "approved"))))
+            .andExpect(status().isOk());
+        Notification convergedDismissed = notificationMapper.findById(
+            actor.getId(), dismissedNotification.getId());
+        assertNotNull(convergedDismissed.getDismissedAt());
+        assertNotNull(convergedDismissed.getResolvedAt());
+
+        mockMvc.perform(post("/api/notifications/{id}/restore", dismissedNotification.getId())
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.dismissedAt").doesNotExist())
+            .andExpect(jsonPath("$.resolvedAt").isNotEmpty());
     }
 
     private JsonNode firstItem(MockHttpSession session, String source) throws Exception {
@@ -276,6 +323,8 @@ class MyWorkReconciliationIntegrationTest {
             recipient, "document.approval_request", "document", "info");
         notification.setSourceType("deal_document");
         notification.setSourceId(document.getId());
+        notification.setContextType("deal");
+        notification.setContextId(document.getDealId());
         notification.setData("{\"documentId\":" + document.getId() + "}");
         notification.setDedupeKey("document.approval_request:" + suffix());
         return notification;
